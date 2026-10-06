@@ -547,13 +547,16 @@ mod tests {
             .apply_run_options(
                 &recorded,
                 RlmRunOptions(RlmTurnOptions {
-                    termination: Some(RlmTermination::Natural),
+                    termination: Some(RlmTermination::Natural { schema: None }),
                     final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
                     render: None,
                 }),
             )
             .expect("the run's termination applies");
-        assert_eq!(restated.termination, Some(RlmTermination::Natural));
+        assert_eq!(
+            restated.termination,
+            Some(RlmTermination::Natural { schema: None })
+        );
         assert_eq!(
             restated.final_answer_format,
             Some(RlmFinalAnswerFormat::RawFinalValue)
@@ -577,7 +580,7 @@ mod tests {
         let recorded = serde_json::to_value(created(
             Some(RlmCreateExtras {
                 render: Some(RlmRenderPatch::default()),
-                termination: Some(RlmTermination::Natural),
+                termination: Some(RlmTermination::Natural { schema: None }),
                 ..RlmCreateExtras::default()
             }),
             true,

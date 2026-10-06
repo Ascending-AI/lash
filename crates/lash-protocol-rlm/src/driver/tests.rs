@@ -971,7 +971,7 @@ fn rlm_prompt_renders_required_output_block_when_schema_present() {
 #[test]
 fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
     let custom = final_answer_format_prompt_test(&RlmTurnOptions {
-        termination: Some(RlmTermination::Natural),
+        termination: Some(RlmTermination::Natural { schema: None }),
         final_answer_format: Some(RlmFinalAnswerFormat::Custom {
             guidance: "  Finish concise release-note Markdown.  ".to_string(),
         }),
@@ -1004,6 +1004,30 @@ fn required_output_schema_suppresses_final_answer_format_guidance() {
     });
 
     assert!(guidance.is_none());
+}
+
+/// FIG-5104: on a Natural turn the Markdown preference still shapes prose, and
+/// it names a Markdown `finish` string only where the finish schema is text: a
+/// structured contract is not overruled by "use a Markdown string".
+#[test]
+fn natural_finish_schema_keeps_markdown_guidance_to_what_the_schema_allows() {
+    let guidance = |schema: serde_json::Value| {
+        final_answer_format_prompt_test(&RlmTurnOptions {
+            termination: Some(RlmTermination::Natural {
+                schema: Some(lash_sansio::JsonSchema::admit(schema).expect("valid finish schema")),
+            }),
+            final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
+            render: None,
+        })
+        .expect("Markdown guidance")
+    };
+    let text = guidance(serde_json::json!({ "type": "string" }));
+    assert!(text.contains("use a Markdown string"), "{text}");
+    let structured = guidance(serde_json::json!({ "type": "object" }));
+    assert_eq!(
+        structured,
+        "Write prose-only final answers as nicely formatted Markdown."
+    );
 }
 
 fn required_output_contract(schema: serde_json::Value) -> String {

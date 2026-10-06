@@ -389,11 +389,33 @@ async fn assembled_prompt_fragments_with_projection(
         "finalization (natural)",
         dialect
             .finalization_copy(
-                &lash_rlm_types::RlmTermination::Natural,
+                &lash_rlm_types::RlmTermination::Natural { schema: None },
                 crate::plugin::RlmChannel::Cell,
             )
             .to_string(),
     ));
+    for (name, schema) in [
+        (
+            "finalization (natural, text schema)",
+            serde_json::json!({"type": "string"}),
+        ),
+        (
+            "finalization (natural, schema)",
+            serde_json::json!({"type": "number"}),
+        ),
+    ] {
+        fragments.push((
+            name,
+            dialect.finalization_copy(
+                &lash_rlm_types::RlmTermination::Natural {
+                    schema: Some(
+                        lash_sansio::JsonSchema::admit(schema).expect("valid finish schema"),
+                    ),
+                },
+                crate::plugin::RlmChannel::Cell,
+            ),
+        ));
+    }
     fragments.push((
         "finalization (schema)",
         dialect.finalization_copy(

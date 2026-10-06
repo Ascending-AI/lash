@@ -17,8 +17,7 @@ use lash_core::{
     facade_support::normalized_response_parts,
 };
 use lash_rlm_types::{
-    CellOutcome, RlmDiagnosticEvent, RlmExecutedCall, RlmProtocolEvent, RlmTermination,
-    RlmTrajectoryEntry,
+    CellOutcome, RlmDiagnosticEvent, RlmExecutedCall, RlmProtocolEvent, RlmTrajectoryEntry,
 };
 use serde_json::Value;
 
@@ -237,14 +236,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 format!("execute_{}", self.dialect.language_id())
             }
             super::tool::NativeAction::Malformed { decision, .. } => decision.to_string(),
-            super::tool::NativeAction::ProseOnly => {
-                if matches!(termination, RlmTermination::Natural) {
-                    "prose_only"
-                } else {
-                    "request_finish"
-                }
-                .to_string()
+            super::tool::NativeAction::ProseOnly => if termination.prose_ends_turn() {
+                "prose_only"
+            } else {
+                "request_finish"
             }
+            .to_string(),
         };
         actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
             LLM_EXTRACTION_PHASE,
@@ -279,7 +276,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
             }
             super::tool::NativeAction::ProseOnly => {
-                if matches!(termination, RlmTermination::Natural) {
+                if termination.prose_ends_turn() {
                     if !reasoning.is_empty() {
                         actions.push(DriverAction::AppendEvents(vec![conversation_event(
                             internal_assistant_prose_message_for_turn(
@@ -301,9 +298,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         )),
                     }));
                 } else {
-                    let RlmTermination::FinishRequired { schema } = termination else {
-                        unreachable!()
-                    };
                     let events = vec![
                         conversation_event(internal_assistant_prose_message_for_turn(
                             ctx.turn_id(),
@@ -322,7 +316,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                                 ctx.protocol_iteration(),
                                 "finish_reminder",
                             ),
-                            schema.is_some(),
+                            termination.finish_schema().is_some(),
                         )),
                     ];
                     if let Err(error) = continue_or_stop_after_nonterminal(
@@ -471,17 +465,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         }
 
         if let Some(finish_value) = state.outcome.terminal_value() {
-            // Typed-RLM: validate against the declared schema. If it fails,
-            // surface the error to the model and loop; otherwise fall
-            // through to the shared terminate-with-value path below.
+            // Typed-RLM: validate against the declared schema, under either
+            // termination (FIG-5104). If it fails, surface the error to the
+            // model and loop; otherwise fall through to the shared
+            // terminate-with-value path below.
             let termination = match decode_rlm_termination_options(ctx.termination()) {
                 Ok(termination) => termination,
                 Err(err) => return invalid_turn_options_actions(err),
             };
-            if let RlmTermination::FinishRequired {
-                schema: Some(schema),
-            } = termination
-                && let Err(error_text) = validate_finish_value(finish_value, &schema)
+            if let Some(schema) = termination.finish_schema()
+                && let Err(error_text) = validate_finish_value(finish_value, schema)
             {
                 if let Err(err) = continue_or_stop_after_nonterminal(
                     &ctx,

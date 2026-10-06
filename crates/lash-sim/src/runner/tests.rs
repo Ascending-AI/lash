@@ -440,7 +440,7 @@ fn rlm_protocol_response_shape_mutation_guard() {
     let result = run_rlm_protocol_contract(
         "rlm.response_shape_mutation_guard",
         "answer naturally",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![

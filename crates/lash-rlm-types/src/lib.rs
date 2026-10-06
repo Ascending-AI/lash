@@ -861,14 +861,42 @@ pub struct RlmDiagnosticEvent {
     pub payload: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// How an RLM turn may end, and what an explicit finish value must match.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RlmTermination {
+    /// Prose alone never ends the turn: only `finish` does, with a value
+    /// matching `schema` when one is stated.
     FinishRequired {
         schema: Option<lash_sansio::JsonSchema>,
     },
-    #[default]
-    Natural,
+    /// Prose ends the turn as the answer, and so does `finish`. A finish value
+    /// must match `schema` when one is stated; a mismatch fails the program
+    /// and asks the model to finish again (FIG-5104).
+    Natural {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        schema: Option<lash_sansio::JsonSchema>,
+    },
+}
+
+impl Default for RlmTermination {
+    fn default() -> Self {
+        Self::Natural { schema: None }
+    }
+}
+
+impl RlmTermination {
+    /// Whether a prose-only reply ends the turn as its answer.
+    pub fn prose_ends_turn(&self) -> bool {
+        matches!(self, Self::Natural { .. })
+    }
+
+    /// The schema an explicit finish value must match, if any.
+    pub fn finish_schema(&self) -> Option<&lash_sansio::JsonSchema> {
+        match self {
+            Self::FinishRequired { schema } | Self::Natural { schema } => schema.as_ref(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -881,7 +909,8 @@ pub enum RlmFinalAnswerFormat {
 
 /// RLM protocol session config. Natural turns finish with prose-only model
 /// responses or the RLM language's explicit `finish` operation. Programmatic
-/// turns can require an explicit finish value, optionally validated against a schema.
+/// turns can require an explicit finish value. Either termination can validate
+/// a finish value against a schema.
 /// `final_answer_format` is a session presentation preference; schema-required
 /// turns ignore it.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]

@@ -157,7 +157,7 @@ impl RlmDriver {
         // being exactly what the user wanted. Correcting a fence there would
         // bury the answer under a lecture and spend the turn's attempts on a
         // reply that had nothing wrong with it.
-        if !matches!(termination, RlmTermination::Natural)
+        if !termination.prose_ends_turn()
             && malformed_cell_fence(reply.assistant_text, self.dialect.cell_tags())
         {
             return ReplyClass::Repair(Box::new(RepairPrompt {
@@ -170,12 +170,9 @@ impl RlmDriver {
                 ),
             }));
         }
-        if matches!(termination, RlmTermination::Natural) {
+        if termination.prose_ends_turn() {
             return ReplyClass::Finish;
         }
-        let RlmTermination::FinishRequired { schema } = termination else {
-            unreachable!("Natural returned above");
-        };
         let assistant_message = if !reply.visible_assistant_text.trim().is_empty() {
             Some((reply.visible_assistant_text, "assistant_prose"))
         } else if !reply.reasoning.is_empty() {
@@ -189,7 +186,7 @@ impl RlmDriver {
             correction: finish_required_reminder_message(
                 self.dialect.as_ref(),
                 attempt.message_id("finish_reminder"),
-                schema.is_some(),
+                termination.finish_schema().is_some(),
             ),
         }))
     }
@@ -601,17 +598,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         }
 
         if let Some(finish_value) = state.outcome.terminal_value() {
-            // Typed-RLM: validate against the declared schema. If it fails,
-            // surface the error to the model and loop; otherwise fall
-            // through to the shared terminate-with-value path below.
+            // Typed-RLM: validate against the declared schema, under either
+            // termination (FIG-5104). If it fails, surface the error to the
+            // model and loop; otherwise fall through to the shared
+            // terminate-with-value path below.
             let termination = match decode_rlm_termination_options(ctx.termination()) {
                 Ok(termination) => termination,
                 Err(err) => return invalid_turn_options_actions(err),
             };
-            if let RlmTermination::FinishRequired {
-                schema: Some(schema),
-            } = termination
-                && let Err(error_text) = validate_finish_value(finish_value, &schema)
+            if let Some(schema) = termination.finish_schema()
+                && let Err(error_text) = validate_finish_value(finish_value, schema)
             {
                 if let Err(err) = continue_or_stop_after_nonterminal(
                     &ctx,

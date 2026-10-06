@@ -1217,9 +1217,9 @@ fn drain_area_witnesses() {
         });
         // W0359: lash::rlm::RlmSessionConfig::final_answer_format [function]
         let _ = lash::rlm::RlmSessionConfig::final_answer_format;
-        // W0368: lash::rlm::RlmTermination::Natural [variant]
+        // W0368: lash::rlm::RlmTermination::Natural { schema: None } [variant]
         variant_witness(|value: &lash::rlm::RlmTermination| {
-            matches!(value, lash::rlm::RlmTermination::Natural)
+            matches!(value, lash::rlm::RlmTermination::Natural { .. })
         });
     }
     // W0369: lash::direct::ProviderReasoningReplay::encrypted_content [field]

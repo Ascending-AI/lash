@@ -190,16 +190,21 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
     }
 }
 
-fn required_output_block(dialect: &SessionDialect, termination: &RlmTermination) -> Option<String> {
-    match termination {
-        RlmTermination::FinishRequired {
-            schema: Some(schema),
-        } => Some(dialect.required_output_contract(schema.as_value())),
-        _ => None,
-    }
+/// The REQUIRED OUTPUT block: the contract a finish value must match, under
+/// either termination that states one.
+pub(crate) fn required_output_block(
+    dialect: &SessionDialect,
+    termination: &RlmTermination,
+) -> Option<String> {
+    termination
+        .finish_schema()
+        .map(|schema| dialect.required_output_contract(schema.as_value()))
 }
 
-fn final_answer_format_prompt(
+/// The FINAL ANSWER FORMAT guidance. A finish-required schema defines the
+/// whole answer, so it has none; a natural schema leaves prose to the format
+/// and keeps `finish` to its contract unless that contract is text.
+pub(crate) fn final_answer_format_prompt(
     options: &RlmTurnOptions,
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> Option<String> {
@@ -211,16 +216,20 @@ fn final_answer_format_prompt(
         return None;
     }
     match options.final_answer_format.as_ref()? {
-        RlmFinalAnswerFormat::Markdown => Some(match termination {
-            RlmTermination::FinishRequired { schema: None } => format!(
+        RlmFinalAnswerFormat::Markdown => Some(match &termination {
+            RlmTermination::FinishRequired { .. } => format!(
                 "When finishing, call `{}` with a nicely formatted Markdown string, not a raw record/list/tool-result value.",
                 vocabulary.finish_statement
             ),
-            RlmTermination::Natural => format!(
+            RlmTermination::Natural {
+                schema: Some(schema),
+            } if !crate::dialect::schema_is_text(schema) => {
+                "Write prose-only final answers as nicely formatted Markdown.".to_string()
+            }
+            RlmTermination::Natural { .. } => format!(
                 "Write prose-only final answers as nicely formatted Markdown. If you intentionally use `{}`, use a Markdown string for user-facing answers, not a raw record/list/tool-result value.",
                 vocabulary.finish_statement
             ),
-            RlmTermination::FinishRequired { schema: Some(_) } => unreachable!(),
         }),
         RlmFinalAnswerFormat::Custom { guidance } => {
             let guidance = guidance.trim();

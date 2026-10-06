@@ -12,6 +12,10 @@ pub trait RlmSendBuilderExt: Sized {
     fn require_finish_schema(self, schema: serde_json::Value) -> Result<Self>;
     /// Allows an RLM turn to return prose or invoke the finish tool.
     fn allow_prose_or_finish(self) -> Result<Self>;
+    /// Allows an RLM turn to return prose or invoke the finish tool, with a
+    /// finish value that must match the schema. A mismatch fails the program
+    /// and asks the model to finish again; prose still ends the turn.
+    fn allow_prose_or_finish_schema(self, schema: serde_json::Value) -> Result<Self>;
 }
 
 #[cfg(feature = "rlm")]
@@ -27,18 +31,35 @@ impl RlmSendBuilderExt for crate::SendBuilder {
         with_rlm_termination(
             self,
             lash_rlm_types::RlmTermination::FinishRequired {
-                schema: Some(lash_core::JsonSchema::admit(schema).map_err(|source| {
-                    crate::EmbedError::Plugin(lash_core::PluginError::UnusableSchema {
-                        source: Box::new(source),
-                    })
-                })?),
+                schema: Some(admit_finish_schema(schema)?),
             },
         )
     }
 
     fn allow_prose_or_finish(self) -> Result<Self> {
-        with_rlm_termination(self, lash_rlm_types::RlmTermination::Natural)
+        with_rlm_termination(
+            self,
+            lash_rlm_types::RlmTermination::Natural { schema: None },
+        )
     }
+
+    fn allow_prose_or_finish_schema(self, schema: serde_json::Value) -> Result<Self> {
+        with_rlm_termination(
+            self,
+            lash_rlm_types::RlmTermination::Natural {
+                schema: Some(admit_finish_schema(schema)?),
+            },
+        )
+    }
+}
+
+#[cfg(feature = "rlm")]
+fn admit_finish_schema(schema: serde_json::Value) -> Result<lash_core::JsonSchema> {
+    lash_core::JsonSchema::admit(schema).map_err(|source| {
+        crate::EmbedError::Plugin(lash_core::PluginError::UnusableSchema {
+            source: Box::new(source),
+        })
+    })
 }
 
 /// `builder` with `termination` recorded in its run spec's protocol turn

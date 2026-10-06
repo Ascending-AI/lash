@@ -43,6 +43,16 @@ error. Finish values, schema mismatch, and execution errors use the common cell
 adjudication contract. Completed code executions emit the shared cell-start and
 cell-end observations.
 
+2026-10-06 (FIG-5104): a Natural termination may state a finish schema
+(`RlmTermination::Natural { schema }`, per send through
+`allow_prose_or_finish_schema` or session-wide through the recorded
+termination). Prose still ends the turn; a `finish` value is validated on both
+channels like a FinishRequired one, and a mismatch takes the same path: a
+Program cell failure carrying the mismatch, the schema-mismatch copy, and the
+loop continues. A text schema is the chat shape: the finalization copy says
+`finish` takes only the user-facing answer text, never a raw tool result, and
+that prose is preferred.
+
 ## Alternatives considered
 
 Treating native exchanges as ordinary cell text loses provider-owned transport

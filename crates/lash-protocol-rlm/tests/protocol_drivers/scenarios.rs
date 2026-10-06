@@ -94,7 +94,7 @@ fn rlm_protocol_property_response_cell_classification_is_part_order_invariant() 
 #[test]
 fn rlm_protocol_unclosed_cell_retries_in_natural_mode_without_journaling_markup() {
     RlmProtocolScenario::new("natural unclosed cell retry")
-        .termination(RlmTermination::Natural)
+        .termination(RlmTermination::Natural { schema: None })
         .llm_response(vec![text_part(
             "Visible plan.\n<typescript>\nprint(\"unfinished\");",
         )])

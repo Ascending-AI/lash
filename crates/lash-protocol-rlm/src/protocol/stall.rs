@@ -298,7 +298,7 @@ impl Serialize for ExtractionCounts<'_> {
 fn termination_diagnostic_name(termination: &RlmTermination) -> &'static str {
     match termination {
         RlmTermination::FinishRequired { .. } => "finish_required",
-        RlmTermination::Natural => "natural",
+        RlmTermination::Natural { .. } => "natural",
     }
 }
 

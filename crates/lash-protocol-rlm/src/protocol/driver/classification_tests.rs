@@ -25,7 +25,7 @@ fn non_cell_reply_classification_table_is_byte_identical() {
         output_token_cap: Some(512),
     };
     let finish_required = RlmTermination::FinishRequired { schema: None };
-    let natural = RlmTermination::Natural;
+    let natural = RlmTermination::Natural { schema: None };
     let malformed = "<typescript >\nfinish(1)\n</typescript>";
     let reasoning = [RlmReasoningPart {
         text: "thinking".to_string(),

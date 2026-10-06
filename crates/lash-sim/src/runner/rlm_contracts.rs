@@ -135,7 +135,7 @@ fn rlm_natural_prose_finalizes_execution() -> Result<Value, FixedScriptRunnerErr
     run_rlm_protocol_contract(
         "rlm natural prose finalizes",
         "hello",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![
@@ -239,7 +239,7 @@ fn rlm_natural_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerE
     run_rlm_protocol_contract(
         "rlm natural diagnostic counts",
         "hello",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![RlmContractStep::Llm(vec![rlm_text_part("Hello there!")])],
@@ -250,7 +250,7 @@ fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerErro
     run_rlm_protocol_contract(
         "rlm cell diagnostic counts",
         "run some code",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![
@@ -269,7 +269,7 @@ fn rlm_retired_marker_plain_lashlang_text_execution() -> Result<Value, FixedScri
     run_rlm_protocol_contract(
         "rlm retired marker plain LashLang text",
         "run some code",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![RlmContractStep::Llm(vec![rlm_text_part(
@@ -282,7 +282,7 @@ fn rlm_lashlang_cell_exec_continues_execution() -> Result<Value, FixedScriptRunn
     run_rlm_protocol_contract(
         "rlm LashLang cell exec continues",
         "run some code",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![
@@ -301,7 +301,7 @@ fn rlm_streamed_lashlang_cell_exec_persists_trajectory_execution()
     run_rlm_protocol_contract(
         "rlm streamed LashLang cell exec persists trajectory",
         "stream and run some code",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![
@@ -319,7 +319,7 @@ fn rlm_empty_options_natural_default_execution() -> Result<Value, FixedScriptRun
     run_rlm_protocol_contract(
         "rlm empty options natural default",
         "finish",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         Some(lash_core::ProtocolTurnOptions::empty()),
         vec![
@@ -336,7 +336,7 @@ fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptR
     run_rlm_protocol_contract(
         "rlm exec result no tool-call replay",
         "run a tool",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![
@@ -370,7 +370,7 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
     run_rlm_protocol_contract(
         "rlm exec tool-control frame switch terminal",
         "run a custom frame-switch tool",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![
@@ -404,7 +404,7 @@ fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptR
     run_rlm_protocol_contract(
         "rlm exec tool-control fail terminal",
         "run a custom failure tool",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![
@@ -439,7 +439,7 @@ fn rlm_natural_allows_finish_value_execution() -> Result<Value, FixedScriptRunne
     run_rlm_protocol_contract(
         "rlm natural allows finish value",
         "return typed data",
-        RlmTermination::Natural,
+        RlmTermination::Natural { schema: None },
         None,
         None,
         vec![

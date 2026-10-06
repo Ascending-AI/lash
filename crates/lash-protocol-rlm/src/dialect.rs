@@ -225,6 +225,12 @@ pub(crate) fn cell_response_shape(tags: CellTags) -> String {
     )
 }
 
+/// Whether a finish schema asks for text: the user-facing answer a chat turn
+/// finishes with, rather than a structured value.
+pub(crate) fn schema_is_text(schema: &lash_sansio::JsonSchema) -> bool {
+    schema.as_value().get("type") == Some(&serde_json::Value::from("string"))
+}
+
 /// The session's selected dialect with the host resources it runs against:
 /// what every protocol adapter of one session carries. It holds the host's
 /// one selection; nothing here names a language.
@@ -417,7 +423,7 @@ impl SessionDialect {
         line
     }
 
-    /// The value a turn must finish with, as its type and the rows of the
+    /// The value a turn's `finish` must carry, as its type and the rows of the
     /// fields that carry notes.
     pub(crate) fn required_output_contract(&self, schema: &serde_json::Value) -> String {
         let shape = SchemaShape::from_json_schema(schema);
@@ -439,14 +445,29 @@ impl SessionDialect {
             lash_rlm_types::RlmTermination::FinishRequired { schema } => {
                 self.finish_required_finalization(schema.is_some(), channel)
             }
-            lash_rlm_types::RlmTermination::Natural => {
+            lash_rlm_types::RlmTermination::Natural { schema } => {
                 let step = match channel {
                     crate::plugin::RlmChannel::Cell => "in a block",
                     crate::plugin::RlmChannel::NativeTool => "in an `execute_code` call",
                 };
+                let finish = self.prompt_vocabulary().finish_statement;
+                // A model that reads "return a value" as "return what the
+                // tool gave back" ends a chat turn with a record nobody can
+                // read (FIG-5104), so every variant names prose as the answer
+                // and a tool result as the thing `finish` never passes on.
+                let finish_rule = match schema {
+                    None => format!(
+                        "Prefer prose for the final answer. Call `{finish}` inside the program only when the answer is a value the program built for this request, never to hand back a tool's raw result."
+                    ),
+                    Some(schema) if schema_is_text(schema) => format!(
+                        "Prefer prose for the final answer. `{finish}` takes only the user-facing answer text as a string, never a raw tool result; any other value is refused and you must finish again."
+                    ),
+                    Some(_) => format!(
+                        "Prefer prose for the final answer. `{finish}` takes only a value matching the REQUIRED OUTPUT contract, never a raw tool result; any other value is refused and you must finish again."
+                    ),
+                };
                 format!(
-                    "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step {step}, and call `{finish}` inside the program to return a computed value.",
-                    finish = self.prompt_vocabulary().finish_statement,
+                    "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step {step}. {finish_rule}"
                 )
             }
         }

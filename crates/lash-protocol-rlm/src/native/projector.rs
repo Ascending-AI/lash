@@ -1,13 +1,12 @@
 use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 use crate::dialect::SessionDialect;
-use crate::driver::RlmPreambleConfig;
+use crate::driver::{RlmPreambleConfig, final_answer_format_prompt, required_output_block};
 use crate::rlm_support::{decode_rlm_options, effective_budget_tokens};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
     LlmRequest, ProjectorContext, ProtocolBuildInput, TurnDriverConfig, TurnDriverPreamble,
 };
-use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
 use std::sync::Arc;
 pub(crate) fn build_rlm_preamble_with_dialect(
     input: ProtocolBuildInput,
@@ -119,45 +118,5 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             generation,
             provider_trace: None,
         }))
-    }
-}
-
-fn required_output_block(dialect: &SessionDialect, termination: &RlmTermination) -> Option<String> {
-    match termination {
-        RlmTermination::FinishRequired {
-            schema: Some(schema),
-        } => Some(dialect.required_output_contract(schema.as_value())),
-        _ => None,
-    }
-}
-
-fn final_answer_format_prompt(
-    options: &RlmTurnOptions,
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-) -> Option<String> {
-    let termination = options.effective_termination();
-    if matches!(
-        termination,
-        RlmTermination::FinishRequired { schema: Some(_) }
-    ) {
-        return None;
-    }
-    match options.final_answer_format.as_ref()? {
-        RlmFinalAnswerFormat::Markdown => Some(match termination {
-            RlmTermination::FinishRequired { schema: None } => format!(
-                "When finishing, call `{}` with a nicely formatted Markdown string, not a raw record/list/tool-result value.",
-                vocabulary.finish_statement
-            ),
-            RlmTermination::Natural => format!(
-                "Write prose-only final answers as nicely formatted Markdown. If you intentionally use `{}`, use a Markdown string for user-facing answers, not a raw record/list/tool-result value.",
-                vocabulary.finish_statement
-            ),
-            RlmTermination::FinishRequired { schema: Some(_) } => unreachable!(),
-        }),
-        RlmFinalAnswerFormat::Custom { guidance } => {
-            let guidance = guidance.trim();
-            (!guidance.is_empty()).then(|| guidance.to_string())
-        }
-        RlmFinalAnswerFormat::RawFinalValue => None,
     }
 }
