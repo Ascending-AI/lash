@@ -83,12 +83,16 @@ where
 
 /// The index of whichever of `waits` the journal completed first:
 /// [`first_of_gate_race`](super::first_of_gate_race) over any number of durable futures, with the same
-/// non-consuming semantics — every other future stays awaitable.
+/// non-consuming semantics — every other future stays awaitable. The owner's
+/// `issued` notifications take the branches from `at`.
 fn first_completed(
     waits: &[&dyn SealedDurableFuture],
+    at: usize,
+    issued: &[u32],
 ) -> impl Future<Output = Result<usize, TerminalError>> + Send + use<> {
     let inner = waits.first().map(|wait| wait.inner_context());
-    let handles = waits.iter().map(|wait| wait.handle()).collect::<Vec<_>>();
+    let mut handles = waits.iter().map(|wait| wait.handle()).collect::<Vec<_>>();
+    handles.splice(at..at, issued.iter().map(|key| Some((*key).into())));
     async move {
         let Some(inner) = inner else {
             return Err(TerminalError::new("a durable race needs at least one wait"));
@@ -121,6 +125,7 @@ pub(super) struct WaitControl<'run> {
 /// accepted cancel, the cancel wins, and a replay decides the same.
 pub(super) async fn race_segment_wait<'run, T>(
     mut events: Vec<GateWait<'run, T>>,
+    mut issued: Vec<(u32, T)>,
     mut cancel: Option<GateWait<'run, String>>,
     mut hand_over: Option<GateWait<'run, String>>,
     generation: Option<&lash_core::engine::BuildGeneration>,
@@ -128,6 +133,7 @@ pub(super) async fn race_segment_wait<'run, T>(
     if events.is_empty() {
         return Err(TerminalError::new("a segment race needs an event"));
     }
+    let keys: Vec<u32> = issued.iter().map(|(key, _)| *key).collect();
     loop {
         let leading = usize::from(cancel.is_some());
         let race = {
@@ -143,12 +149,18 @@ pub(super) async fn race_segment_wait<'run, T>(
             if let Some(hand_over) = &hand_over {
                 waits.push(&**hand_over);
             }
-            first_completed(&waits)
+            first_completed(&waits, leading + events.len(), &keys)
         };
         let winner = race.await?;
         if (leading..leading + events.len()).contains(&winner) {
             return Ok(super::TurnGateRace::Ended(
                 RestateTurnCancelRaceOutcome::Completed(events.remove(winner - leading).await?),
+            ));
+        }
+        let issued_at = leading + events.len();
+        if (issued_at..issued_at + keys.len()).contains(&winner) {
+            return Ok(super::TurnGateRace::Ended(
+                RestateTurnCancelRaceOutcome::Completed(issued.swap_remove(winner - issued_at).1),
             ));
         }
         if winner < leading {

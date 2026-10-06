@@ -663,6 +663,19 @@ impl SelectKey {
     }
 }
 
+/// What ended one wait of a Run's open sources.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RunSourceWake {
+    /// The subscription at `index` sealed first.
+    Sealed {
+        index: usize,
+        seal: crate::tool_run::SourceSeal,
+    },
+    /// The selectable key at this index completed first. No source was
+    /// taken: each stays open, or sealed, at its authority.
+    Selected(usize),
+}
+
 /// Resolves to a source's engine notification identity once its registration
 /// is durable.
 pub type RunSelectKey<'run> = std::pin::Pin<

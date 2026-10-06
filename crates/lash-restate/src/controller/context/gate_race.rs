@@ -89,9 +89,20 @@ where
         turn_cancel,
         hand_over,
         awakeable,
-        move || vec![guarded()],
+        move || Guarded {
+            waits: vec![guarded()],
+            issued: Vec::new(),
+        },
     )
     .await
+}
+
+/// What a gate race guards: the parked waits, then notifications the Run
+/// owner issued, each with the value its win answers. The owner awaits an
+/// issued notification's own value itself.
+pub(super) struct Guarded<'run, T> {
+    pub waits: Vec<GateWait<'run, T>>,
+    pub issued: Vec<(u32, T)>,
 }
 
 pub(super) async fn race_turn_gate_many<'run, 'ctx, C, T>(
@@ -101,7 +112,7 @@ pub(super) async fn race_turn_gate_many<'run, 'ctx, C, T>(
     turn_cancel: RestateDurableWaitAwaitRequest,
     hand_over: Option<lash_core::engine::BuildGeneration>,
     awakeable: impl Fn() -> (String, GateWait<'run, Json<RestateTurnCancelWake>>),
-    guarded: impl FnOnce() -> Vec<GateWait<'run, T>>,
+    guarded: impl FnOnce() -> Guarded<'run, T>,
 ) -> Result<TurnGateRace<T>, TerminalError>
 where
     C: ContextClient<'ctx>,
@@ -131,10 +142,20 @@ where
             ));
         }
     };
-    let mut guarded = guarded();
-    match first_of_many_gate_race(&guarded, &*awakeable_wait).await? {
-        winner if winner < guarded.len() => {
-            let value = guarded.remove(winner).await?;
+    let Guarded {
+        waits: mut guarded,
+        mut issued,
+    } = guarded();
+    let keys: Vec<u32> = issued.iter().map(|(key, _)| *key).collect();
+    match first_of_many_gate_race(&guarded, &keys, &*awakeable_wait).await? {
+        winner if winner < guarded.len() + keys.len() => {
+            // An issued notification is the owner's to await: winning
+            // answers only its value here.
+            let value = if winner < guarded.len() {
+                guarded.remove(winner).await?
+            } else {
+                issued.swap_remove(winner - guarded.len()).1
+            };
             retire_turn_cancel_gate(context, namespace, session_id, gate).await?;
             return Ok(TurnGateRace::Ended(
                 RestateTurnCancelRaceOutcome::Completed(value),
@@ -195,8 +216,8 @@ where
             ));
         }
     };
-    match first_of_many_gate_race(&guarded, &*escalation).await? {
-        winner if winner < guarded.len() => {
+    match first_of_many_gate_race(&guarded, &keys, &*escalation).await? {
+        winner if winner < guarded.len() + keys.len() => {
             // The escalation entry is retired whichever way the guarded wait
             // settles: it only ever exists on the deferred branch, so no
             // journal written before the mode existed can reach this
@@ -204,7 +225,11 @@ where
             // index holding an entry for a wait that is gone. The success path
             // keeps the deployed order — guarded value first, then the
             // retirement — byte for byte.
-            let value = guarded.remove(winner).await;
+            let value = if winner < guarded.len() {
+                guarded.remove(winner).await
+            } else {
+                Ok(issued.swap_remove(winner - guarded.len()).1)
+            };
             let retirement =
                 retire_turn_cancel_gate(context, namespace, session_id, escalation_gate).await;
             let value = value?;
@@ -233,8 +258,10 @@ where
     }
 }
 
+/// The guarded waits, then the owner's issued notifications, then the gate.
 fn first_of_many_gate_race<T, A>(
     guarded: &[GateWait<'_, T>],
+    issued: &[u32],
     gate: &A,
 ) -> impl std::future::Future<Output = Result<usize, TerminalError>> + Send + use<T, A>
 where
@@ -244,6 +271,7 @@ where
     let handles = guarded
         .iter()
         .map(|wait| wait.handle())
+        .chain(issued.iter().map(|key| Some((*key).into())))
         .chain(std::iter::once(gate.handle()))
         .collect();
     async move { inner.select(handles).await }

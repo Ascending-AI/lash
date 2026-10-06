@@ -109,6 +109,7 @@ pub(super) async fn wait<'run, C: ContextClient<'run>>(
         } else {
             segment_wait::race_segment_wait(
                 vec![awakeables.event.1],
+                Vec::new(),
                 process_cancel,
                 process_hand_over,
                 generation.as_ref(),

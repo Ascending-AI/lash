@@ -274,6 +274,12 @@ pub enum RunEvent {
         attempt: AttemptOrdinal,
         result: AttemptResult,
     },
+    /// The Run's schedule selected an open source's seal; the call's
+    /// decision follows from it.
+    SourceSealed {
+        call_id: ToolCallId,
+        seal: super::SourceSeal,
+    },
     /// X: a retained source's result passed through the admitted result transforms.
     SourceCaptured {
         call_id: ToolCallId,
@@ -531,6 +537,8 @@ struct CallState {
     outstanding: Option<AttemptOrdinal>,
     attempts: BTreeMap<AttemptOrdinal, AttemptResult>,
     retry_timer: Option<(AttemptOrdinal, AttemptOrdinal, u64)>,
+    /// The schedule selected the open source's seal.
+    source_sealed: bool,
     decision: Option<(u64, CallDecision)>,
     declarations_issued: bool,
     /// The declared start, admitted with the declarations.
@@ -878,6 +886,24 @@ impl RunLedger {
                 call.attempts.insert(*attempt, result.clone());
                 Ok(())
             }
+            RunEvent::SourceSealed { call_id, .. } => {
+                let call = self.call(call_id)?;
+                if call.decision.is_some()
+                    || call.source_sealed
+                    || !call.attempts.values().any(|result| {
+                        matches!(
+                            result,
+                            AttemptResult::Deferred { .. }
+                                | AttemptResult::DeferredStart { .. }
+                                | AttemptResult::Pending { .. }
+                        )
+                    })
+                {
+                    return Err(boundary(call_id));
+                }
+                call.source_sealed = true;
+                Ok(())
+            }
             RunEvent::SourceCaptured { call_id, output } => {
                 let call = self.calls.get(call_id).ok_or_else(|| boundary(call_id))?;
                 if output.role != super::MaterialRole::AttemptOutput
@@ -1084,6 +1110,7 @@ impl RunLedger {
                         .then_some(AttemptOrdinal::FIRST),
                     attempts: BTreeMap::new(),
                     retry_timer: None,
+                    source_sealed: false,
                     decision: None,
                     declarations_issued: false,
                     start: None,

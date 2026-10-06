@@ -606,6 +606,27 @@ impl<'a> RunCoordinator<'a> {
         self.journal.materials.decode(reference).map_err(Into::into)
     }
 
+    /// The realization receipt the schedule recorded for `call_id`.
+    fn realization_receipt(
+        &self,
+        call_id: &ToolCallId,
+    ) -> Result<Option<RealizationReceipt>, SingletonRunError> {
+        self.journal
+            .records
+            .iter()
+            .flat_map(|record| &record.events)
+            .find_map(|event| match event {
+                RunEvent::Realized {
+                    call_id: id,
+                    receipt,
+                } if id == call_id => Some(receipt),
+                _ => None,
+            })
+            .map(|receipt| self.journal.materials.decode(receipt))
+            .transpose()
+            .map_err(Into::into)
+    }
+
     pub(super) fn terminal(
         &self,
         call_id: &ToolCallId,
@@ -664,6 +685,10 @@ impl<'a> RunCoordinator<'a> {
     ) -> Result<(Selection, Vec<Option<Settlement>>), SingletonRunError> {
         let mut settlements: Vec<Option<Settlement>> =
             (0..plan.leaves.len()).map(|_| None).collect();
+        // A final that declares intents settles as its realization answers:
+        // a refused intent presents it as a failure. Until its receipt is
+        // recorded no consumer can be answered.
+        let mut unrealized = false;
         let admitted = self.journal.records.iter().flat_map(|record| record.events.iter().enumerate().map(move |(index, event)| (record.first.0 + index as u64, event)))
             .find_map(|(ordinal, event)| matches!(event, RunEvent::AggregateAdmitted { plan: recorded, .. } if recorded.key == plan.key).then_some(ordinal)).unwrap_or_default();
         for (index, leaf) in plan.leaves.iter().enumerate() {
@@ -711,10 +736,28 @@ impl<'a> RunCoordinator<'a> {
                             ));
                         }
                         let fulfilled = match decision {
-                            CallDecision::Final { source, .. } => matches!(
-                                self.call_capture(call_id, source)?,
-                                SingletonCapture::Done { .. } | SingletonCapture::Isolated { .. }
-                            ),
+                            CallDecision::Final { source, declares } => {
+                                let capture = self.call_capture(call_id, source)?;
+                                // Only a final whose declarations carry
+                                // intents is realized (see `drain`).
+                                let realized = if *declares && !capture.intents().is_empty() {
+                                    match self.realization_receipt(call_id)? {
+                                        Some(receipt) => !receipt.rejects(),
+                                        None => {
+                                            unrealized = true;
+                                            continue;
+                                        }
+                                    }
+                                } else {
+                                    true
+                                };
+                                realized
+                                    && matches!(
+                                        capture,
+                                        SingletonCapture::Done { .. }
+                                            | SingletonCapture::Isolated { .. }
+                                    )
+                            }
                             _ => false,
                         };
                         let immediate = ordinal < admitted
@@ -774,7 +817,9 @@ impl<'a> RunCoordinator<'a> {
                 decides(settled).then_some((settled.order, position))
             })
             .min();
-        let selection = if let Some((_, position)) = selected {
+        let selection = if unrealized {
+            Selection::Pending
+        } else if let Some((_, position)) = selected {
             Selection::Selected(position)
         } else if all {
             match consumer {

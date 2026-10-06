@@ -1803,6 +1803,7 @@ async fn l15_admission_owns_one_namespace_image_for_a_wide_round() {
 }
 pub(super) mod owner_park;
 mod process_continuation;
+mod source_selection;
 mod turn_handover;
 
 /// L03/L07, FIG-4924: a cancel arriving after a subscribed worker dies must

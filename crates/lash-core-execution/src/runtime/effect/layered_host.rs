@@ -799,11 +799,12 @@ impl RuntimeEffectController for LayeredController<'_> {
     async fn await_run_sources(
         &self,
         subscriptions: Vec<crate::tool_run::SourceSubscription>,
+        selectable: Vec<crate::tool_dispatch::SelectKey>,
         cancel: crate::TurnCancelWait,
-    ) -> Result<(usize, crate::tool_run::SourceSeal), RuntimeEffectControllerError> {
+    ) -> Result<crate::tool_dispatch::RunSourceWake, RuntimeEffectControllerError> {
         self.inner
             .as_ref()
-            .await_run_sources(subscriptions, cancel)
+            .await_run_sources(subscriptions, selectable, cancel)
             .await
     }
 

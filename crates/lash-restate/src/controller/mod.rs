@@ -818,8 +818,9 @@ where
     async fn await_run_sources(
         &self,
         subscriptions: Vec<lash_core::tool_run::SourceSubscription>,
+        selectable: Vec<lash_core::tool_dispatch::SelectKey>,
         cancel: lash_core::TurnCancelWait,
-    ) -> Result<(usize, lash_core::tool_run::SourceSeal), RuntimeEffectControllerError> {
+    ) -> Result<lash_core::tool_dispatch::RunSourceWake, RuntimeEffectControllerError> {
         if subscriptions.iter().any(|subscription| {
             !restate_await_event_key_is_valid_for_authority(
                 &self.authority_id,
@@ -843,6 +844,7 @@ where
             .await_run_sources(
                 &self.namespace,
                 subscriptions,
+                selectable.iter().map(|key| key.engine()).collect(),
                 turn_cancel,
                 generation,
                 self.options.process_cancel,

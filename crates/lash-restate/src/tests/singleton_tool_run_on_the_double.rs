@@ -1369,6 +1369,7 @@ fn events(records: &[RunRecord]) -> Vec<Vec<&'static str>> {
                     RunEvent::IsolationRefused { .. } => "isolation_refused",
                     RunEvent::Admitted { .. } => "admitted",
                     RunEvent::AttemptRecorded { .. } => "attempt",
+                    RunEvent::SourceSealed { .. } => "source_sealed",
                     RunEvent::SourceCaptured { .. } => "source_captured",
                     RunEvent::CheckContributions { .. } => "check_contributions",
                     RunEvent::RetryScheduled { .. } => "retry",

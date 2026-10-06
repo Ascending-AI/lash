@@ -4,6 +4,7 @@ use crate::durable_wait::{
     RestateSourceArmReply, RestateSourceArmRequest, RestateSourceSealReply,
     RestateSourceSealRequest, RestateSourceSubscribeReply, RestateSourceSubscribeRequest,
 };
+use lash_core::tool_dispatch::RunSourceWake;
 use lash_core::tool_run::{
     SealOutcome, SealWriter, SourceDescriptor, SourceSeal, SourceSubscription,
 };
@@ -93,7 +94,7 @@ pub(super) async fn attach_process_terminal<'ctx, C: ContextClient<'ctx>>(
 }
 
 type SourceAwakeable<'run> =
-    Box<dyn Fn(usize) -> (String, GateWait<'run, (usize, SourceSeal)>) + Send + Sync + 'run>;
+    Box<dyn Fn(usize) -> (String, GateWait<'run, RunSourceWake>) + Send + Sync + 'run>;
 
 pub(super) struct Awakeables<'run> {
     pub source: SourceAwakeable<'run>,
@@ -101,13 +102,17 @@ pub(super) struct Awakeables<'run> {
         Box<dyn Fn() -> (String, GateWait<'run, Json<RestateTurnCancelWake>>) + Send + Sync + 'run>,
 }
 
+/// Subscribe every source, then race their seals, the `selectable`
+/// notifications the Run owner already issued and the cancel gate in one
+/// first-completed await. A selectable that wins leaves every source open.
 pub(super) async fn wait<'run, C: ContextClient<'run>>(
     context: &'run C,
     namespace: &'run crate::RestateNamespace,
     subscriptions: Vec<SourceSubscription>,
+    selectable: Vec<u32>,
     control: segment_wait::WaitControl<'run>,
     awakeables: Awakeables<'run>,
-) -> Result<RestateTurnCancelRaceOutcome<(usize, SourceSeal)>, TerminalError> {
+) -> Result<RestateTurnCancelRaceOutcome<RunSourceWake>, TerminalError> {
     let segment_wait::WaitControl {
         turn_cancel,
         generation,
@@ -137,7 +142,10 @@ pub(super) async fn wait<'run, C: ContextClient<'run>>(
                     events.push(event);
                 }
                 RestateSourceSubscribeReply::Sealed { seal } => {
-                    sealed = Some((position, seal));
+                    sealed = Some(RunSourceWake::Sealed {
+                        index: position,
+                        seal,
+                    });
                     break;
                 }
                 RestateSourceSubscribeReply::Refused { refusal } => {
@@ -147,6 +155,11 @@ pub(super) async fn wait<'run, C: ContextClient<'run>>(
                 }
             }
         }
+        let issued = selectable
+            .into_iter()
+            .enumerate()
+            .map(|(index, key)| (key, RunSourceWake::Selected(index)))
+            .collect();
         if let Some(seal) = sealed {
             Ok(TurnGateRace::Ended(
                 RestateTurnCancelRaceOutcome::Completed(seal),
@@ -165,12 +178,16 @@ pub(super) async fn wait<'run, C: ContextClient<'run>>(
                 turn_cancel,
                 generation,
                 || (awakeables.gate)(),
-                move || events,
+                move || gate_race::Guarded {
+                    waits: events,
+                    issued,
+                },
             )
             .await
         } else {
             segment_wait::race_segment_wait(
                 events,
+                issued,
                 process_cancel,
                 process_hand_over,
                 generation.as_ref(),
@@ -222,10 +239,11 @@ macro_rules! run_source_methods {
                 fn await_run_sources<'run>(
                     &'run self, namespace: &'run crate::RestateNamespace,
                     subscriptions: Vec<lash_core::tool_run::SourceSubscription>,
+                    selectable: Vec<u32>,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
                     generation: Option<lash_core::engine::BuildGeneration>,
                     process_cancel: ProcessCancelRace,
-                ) -> TurnCancelRaceFuture<'run, (usize, lash_core::tool_run::SourceSeal)> where $ctx: 'run {
+                ) -> TurnCancelRaceFuture<'run, lash_core::tool_dispatch::RunSourceWake> where $ctx: 'run {
                     let context: &'run $context<'run> = self;
                     let promise = if turn_cancel.is_none() && process_cancel == ProcessCancelRace::Raced {
                         let Some(promise) = process_cancel_promise!($promises, $context, 'run, context) else {
@@ -237,10 +255,10 @@ macro_rules! run_source_methods {
                         process_hand_over_promise!($promises, $context, 'run, context)
                     } else { None };
                     use restate_sdk::context::DurableFuture;
-                    Box::pin(source_wait::wait(context, namespace, subscriptions, segment_wait::WaitControl { turn_cancel, generation, process_cancel: promise, process_hand_over: hand_over }, source_wait::Awakeables {
+                    Box::pin(source_wait::wait(context, namespace, subscriptions, selectable, segment_wait::WaitControl { turn_cancel, generation, process_cancel: promise, process_hand_over: hand_over }, source_wait::Awakeables {
                             source: Box::new(move |position| {
                                 let (id, wait) = context.awakeable::<Json<lash_core::tool_run::SourceSeal>>();
-                                (id, erase_gate_wait(wait.map_ok(move |Json(seal)| (position, seal))))
+                                (id, erase_gate_wait(wait.map_ok(move |Json(seal)| lash_core::tool_dispatch::RunSourceWake::Sealed { index: position, seal })))
                             }),
                             gate: Box::new(move || gate_awakeable(context)),
                         }))
@@ -277,10 +295,11 @@ macro_rules! run_source_defaults {
             &'run self,
             _namespace: &'run crate::RestateNamespace,
             _subscriptions: Vec<lash_core::tool_run::SourceSubscription>,
+            _selectable: Vec<u32>,
             _turn_cancel: Option<RestateDurableWaitAwaitRequest>,
             _generation: Option<lash_core::engine::BuildGeneration>,
             _process_cancel: ProcessCancelRace,
-        ) -> TurnCancelRaceFuture<'run, (usize, lash_core::tool_run::SourceSeal)>
+        ) -> TurnCancelRaceFuture<'run, lash_core::tool_dispatch::RunSourceWake>
         where
             $ctx: 'run,
         {

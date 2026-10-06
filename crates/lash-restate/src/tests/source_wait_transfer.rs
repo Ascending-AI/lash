@@ -54,15 +54,16 @@ impl SourceTransferProbe for SourceTransferProbeImpl {
                     owner: input.source.owner,
                     segment: SegmentOrdinal(input.segment),
                 }],
+                Vec::new(),
                 None,
                 Some(self.generation.clone()),
                 ProcessCancelRace::Raced,
             )
             .await;
         match result {
-            Ok(RestateTurnCancelRaceOutcome::Completed((0, seal))) => {
-                Ok(Json(WaitEnd::Sealed(seal)))
-            }
+            Ok(RestateTurnCancelRaceOutcome::Completed(
+                lash_core::tool_dispatch::RunSourceWake::Sealed { index: 0, seal },
+            )) => Ok(Json(WaitEnd::Sealed(seal))),
             Err(error)
                 if crate::wire::typed_terminal(error.message()).is_some_and(|error| {
                     error.code == lash_core::RuntimeErrorCode::TurnWaitHandedOver

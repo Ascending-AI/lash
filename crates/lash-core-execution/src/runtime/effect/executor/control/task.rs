@@ -84,9 +84,10 @@ pub enum EffectControllerTaskRequest {
     },
     AwaitRunSources {
         subscriptions: Vec<crate::tool_run::SourceSubscription>,
+        selectable: Vec<crate::tool_dispatch::SelectKey>,
         cancel: TurnCancelWait,
         response: oneshot::Sender<
-            Result<(usize, crate::tool_run::SourceSeal), RuntimeEffectControllerError>,
+            Result<crate::tool_dispatch::RunSourceWake, RuntimeEffectControllerError>,
         >,
     },
     CancelRunSource {
@@ -334,10 +335,15 @@ impl EffectControllerTaskRequest {
             }),
             Self::AwaitRunSources {
                 subscriptions,
+                selectable,
                 cancel,
                 response,
             } => Box::pin(async move {
-                let _ = response.send(controller.await_run_sources(subscriptions, cancel).await);
+                let _ = response.send(
+                    controller
+                        .await_run_sources(subscriptions, selectable, cancel)
+                        .await,
+                );
             }),
             Self::CancelRunSource {
                 descriptor,
@@ -987,12 +993,14 @@ impl RuntimeEffectController for EffectTaskController {
     async fn await_run_sources(
         &self,
         subscriptions: Vec<crate::tool_run::SourceSubscription>,
+        selectable: Vec<crate::tool_dispatch::SelectKey>,
         cancel: TurnCancelWait,
-    ) -> Result<(usize, crate::tool_run::SourceSeal), RuntimeEffectControllerError> {
+    ) -> Result<crate::tool_dispatch::RunSourceWake, RuntimeEffectControllerError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.requests
             .send(EffectControllerTaskRequest::AwaitRunSources {
                 subscriptions,
+                selectable,
                 cancel,
                 response: response_tx,
             })

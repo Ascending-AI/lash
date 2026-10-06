@@ -66,6 +66,15 @@ pub struct RealizationReceipt {
     pub outcomes: Vec<crate::ToolIntentExecutionOutcome>,
 }
 
+impl RealizationReceipt {
+    /// Whether an intent's execution refused, which presents the final as
+    /// a failure and so settles it as a rejection.
+    #[must_use]
+    pub fn rejects(&self) -> bool {
+        super::attempt_coordinator::superseding_refusal(&self.outcomes).is_some()
+    }
+}
+
 /// The realizer a realization invocation drives. The production one is the
 /// deployment's process worker; tests install their own. `realize` runs
 /// again on every replay of the realization invocation — its own journal

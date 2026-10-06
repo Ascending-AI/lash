@@ -279,7 +279,7 @@ impl<'a> RunCoordinator<'a> {
         self.journal
             .scoped
             .controller()
-            .await_run_sources(Vec::new(), cancel)
+            .await_run_sources(Vec::new(), Vec::new(), cancel)
             .await?;
         Err(crate::RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
@@ -288,60 +288,74 @@ impl<'a> RunCoordinator<'a> {
         .into())
     }
 
+    /// Wait for one recorded selection with every open source in it, through
+    /// its acceptance: a source's seal, or a sibling body, timer or receipt
+    /// that completed first.
+    ///
+    /// # Errors
+    /// Journal, source authority and typed retained-material refusals. A
+    /// handover leaves every call open for the successor's same source.
     pub async fn await_one_deferred(&mut self) -> Result<(), SingletonRunError> {
-        use crate::tool_run::SourceSubscription;
         self.drain_starts().await?;
-        while !self.waiting.is_empty() {
-            let ids: Vec<_> = self.waiting.keys().cloned().collect();
-            let selected = {
-                let subscriptions = ids
-                    .iter()
-                    .map(|id| SourceSubscription {
-                        source: self.sources[id].source.clone(),
-                        owner: self.sources[id].owner.clone(),
-                        segment: self.journal.segment,
-                    })
-                    .collect();
-                let cancel = self
-                    .journal
-                    .scoped
-                    .turn_cancel_wait(tokio_util::sync::CancellationToken::new());
-                match self
-                    .bodies
-                    .clone()
-                    .beside(
-                        self.journal
-                            .scoped
-                            .controller()
-                            .await_run_sources(subscriptions, cancel),
-                    )
-                    .await
-                {
-                    Ok(selected) => selected,
-                    Err(error)
-                        if error.code == crate::RuntimeErrorCode::RuntimeToolRunAwaitCancelled =>
-                    {
-                        // The gate is a request. Each source's reply decides
-                        // whether its real result already won.
-                        for id in &ids {
-                            let seal = self
-                                .journal
-                                .scoped
-                                .controller()
-                                .cancel_run_source(self.sources[id].clone())
-                                .await?;
-                            self.accept_source(id, seal).await?;
-                        }
-                        continue;
-                    }
-                    Err(error) => return Err(error.into()),
-                }
-            };
-            let id = ids.get(selected.0).ok_or_else(|| boundary(&ids[0]))?;
-            self.accept_source(id, selected.1).await?;
-            break;
+        if self.waiting.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        self.bodies
+            .clone()
+            .beside(self.schedule_window(&mut None, true))
+            .await
+            .map(|_| ())
+    }
+
+    /// Race every open source's seal and the turn's cancel gate beside the
+    /// schedule's `selectable` notifications, in one engine wait. A cancelled
+    /// wait is a request: each source's reply decides whether its real
+    /// result already won, and those seals are accepted here.
+    pub(super) async fn race_sources(
+        &mut self,
+        selectable: Vec<crate::tool_dispatch::SelectKey>,
+    ) -> Result<SourceRace, SingletonRunError> {
+        use crate::tool_dispatch::RunSourceWake;
+        use crate::tool_run::SourceSubscription;
+        let ids: Vec<_> = self.waiting.keys().cloned().collect();
+        let subscriptions = ids
+            .iter()
+            .map(|id| SourceSubscription {
+                source: self.sources[id].source.clone(),
+                owner: self.sources[id].owner.clone(),
+                segment: self.journal.segment,
+            })
+            .collect();
+        let cancel = self
+            .journal
+            .scoped
+            .turn_cancel_wait(tokio_util::sync::CancellationToken::new());
+        match self
+            .journal
+            .scoped
+            .controller()
+            .await_run_sources(subscriptions, selectable, cancel)
+            .await
+        {
+            Ok(RunSourceWake::Selected(index)) => Ok(SourceRace::Selected(index)),
+            Ok(RunSourceWake::Sealed { index, seal }) => {
+                let id = ids.get(index).ok_or_else(|| boundary(&ids[0]))?;
+                Ok(SourceRace::Sealed(id.clone(), seal))
+            }
+            Err(error) if error.code == crate::RuntimeErrorCode::RuntimeToolRunAwaitCancelled => {
+                for id in &ids {
+                    let seal = self
+                        .journal
+                        .scoped
+                        .controller()
+                        .cancel_run_source(self.sources[id].clone())
+                        .await?;
+                    self.accept_source(id, seal).await?;
+                }
+                Ok(SourceRace::Cancelled)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub(super) async fn accept_source(
@@ -510,6 +524,16 @@ impl<'a> RunCoordinator<'a> {
         }
         Ok(())
     }
+}
+
+/// How one race of the Run's open sources ended.
+pub(super) enum SourceRace {
+    /// The schedule's selectable at this index completed first.
+    Selected(usize),
+    /// This source sealed first; the schedule records it before acceptance.
+    Sealed(ToolCallId, crate::tool_run::SourceSeal),
+    /// The turn's cancellation decided every open source.
+    Cancelled,
 }
 
 /// Read a Resolved seal's retained result once, in a recorded step. Run

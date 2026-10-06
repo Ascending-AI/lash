@@ -342,9 +342,12 @@ where
     async fn await_run_sources(
         &self,
         subscriptions: Vec<lash_core::tool_run::SourceSubscription>,
+        selectable: Vec<lash_core::tool_dispatch::SelectKey>,
         cancel: lash_core::TurnCancelWait,
-    ) -> Result<(usize, lash_core::tool_run::SourceSeal), RuntimeEffectControllerError> {
-        self.inner.await_run_sources(subscriptions, cancel).await
+    ) -> Result<lash_core::tool_dispatch::RunSourceWake, RuntimeEffectControllerError> {
+        self.inner
+            .await_run_sources(subscriptions, selectable, cancel)
+            .await
     }
 
     async fn record_run_record(

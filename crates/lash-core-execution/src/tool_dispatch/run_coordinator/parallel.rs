@@ -17,6 +17,8 @@ pub(super) enum Ready {
     StartPrepared(std::sync::Arc<crate::tool_dispatch::RunStartPrepared>),
     /// A realization invocation answered its receipt.
     Realization(std::sync::Arc<RealizationReceipt>),
+    /// An open source's seal.
+    Sealed(crate::tool_run::SourceSeal),
 }
 
 /// A final's issued realization whose receipt a schedule window selects and
@@ -52,6 +54,10 @@ enum SelectedWork<'a> {
         leaf: u32,
     },
     Realization {
+        call_id: ToolCallId,
+    },
+    /// An open source's seal, which the source race answered directly.
+    Source {
         call_id: ToolCallId,
     },
 }
@@ -338,6 +344,28 @@ impl<'a> RunCoordinator<'a> {
         &mut self,
         presentation: &mut Option<drain::PendingPresentation<'a>>,
     ) -> Result<Option<(ToolCallId, DecidedCall)>, SingletonRunError> {
+        self.schedule_window(presentation, false).await
+    }
+
+    /// Whether this window races the Run's open sources: always when they
+    /// are all it waits for, and beside other work only while the Run is
+    /// live and no cut is requested, since Closing and a cut's quiesce
+    /// decide sources themselves.
+    fn races_sources(&self, sources_alone: bool) -> bool {
+        !self.waiting.is_empty()
+            && (sources_alone
+                || (self.cut.is_none()
+                    && self.journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Live))
+    }
+
+    /// One recorded selection over every issued body, timer, realization,
+    /// presentation and, per [`Self::races_sources`], open source.
+    pub(super) async fn schedule_window(
+        &mut self,
+        presentation: &mut Option<drain::PendingPresentation<'a>>,
+        sources_alone: bool,
+    ) -> Result<Option<(ToolCallId, DecidedCall)>, SingletonRunError> {
+        let sources = self.races_sources(sources_alone);
         if presentation.as_ref().is_some_and(|pending| {
             pending.handle.is_none() && !self.realizing.contains_key(&pending.call_id)
         }) {
@@ -349,6 +377,7 @@ impl<'a> RunCoordinator<'a> {
             && self.timers.is_empty()
             && self.realizing.is_empty()
             && presentation.is_none()
+            && !sources
         {
             return Ok(None);
         }
@@ -443,28 +472,59 @@ impl<'a> RunCoordinator<'a> {
                 keys.push(key.clone().await?);
             }
             self.journal.selection.retain(&keys);
-            let chosen_key = match self.journal.selection.acknowledged.pop_front() {
-                Some(key) => key,
-                None => {
-                    let chosen = self
-                        .journal
+            let index = |chosen: usize| {
+                keys.get(chosen)
+                    .copied()
+                    .ok_or_else(|| selection_boundary("selection index exceeds its sources"))
+            };
+            // A source that sealed first has no issued notification: its
+            // seal is the selection, and D records it before acceptance.
+            let won = match self.journal.selection.acknowledged.pop_front() {
+                Some(key) => Ok(key),
+                None if sources => match Box::pin(self.race_sources(keys.clone())).await? {
+                    deferred::SourceRace::Selected(chosen) => Ok(index(chosen)?),
+                    deferred::SourceRace::Sealed(call_id, seal) => Err((call_id, seal)),
+                    deferred::SourceRace::Cancelled => return Ok(None),
+                },
+                None => Ok(index(
+                    self.journal
                         .scoped
                         .controller()
                         .select_run_sources(keys.clone())
-                        .await?;
-                    *keys
-                        .get(chosen)
-                        .ok_or_else(|| selection_boundary("selection index exceeds its sources"))?
+                        .await?,
+                )?),
+            };
+            let (chosen, ready, selected_work) = match won {
+                Ok(chosen_key) => {
+                    let chosen = keys
+                        .iter()
+                        .position(|key| *key == chosen_key)
+                        .ok_or_else(|| selection_boundary("queued acknowledgment has no source"))?;
+                    (
+                        Some((chosen, chosen_key)),
+                        choices[chosen].1.clone().await?,
+                        choices[chosen].2.clone(),
+                    )
+                }
+                Err((call_id, seal)) => {
+                    (None, Ready::Sealed(seal), SelectedWork::Source { call_id })
                 }
             };
-            let chosen = keys
-                .iter()
-                .position(|key| *key == chosen_key)
-                .ok_or_else(|| selection_boundary("queued acknowledgment has no source"))?;
-            let ready = choices[chosen].1.clone().await?;
-            let selected_work = choices[chosen].2.clone();
             let step = Box::pin(async move {
                 let (work, ordinal, timer, delay) = match selected_work {
+                    SelectedWork::Source { call_id } => {
+                        let Ready::Sealed(seal) = ready else {
+                            return Err(format!("a source returned {}", describe(&ready)));
+                        };
+                        return Ok(RunJournalEntry {
+                            record: RunRecord {
+                                events: vec![RunEvent::SourceSealed { call_id, seal }],
+                                ..record
+                            },
+                            materials: Vec::new(),
+                            state: Vec::new(),
+                        });
+                    }
                     SelectedWork::StartPrepared { call_id } => {
                         let Ready::StartPrepared(parts) = ready else {
                             return Err("a preparation returned an X receipt".to_owned());
@@ -590,6 +650,7 @@ impl<'a> RunCoordinator<'a> {
                     }
                     Ready::StartPrepared(_) => Err("an X returned a preparation".to_owned()),
                     Ready::Realization(_) => Err("an X returned a realization receipt".to_owned()),
+                    Ready::Sealed(_) => Err("an X returned a source seal".to_owned()),
                     Ready::Timer => {
                         if !timer {
                             return Err("an X handle returned a timer wake".to_owned());
@@ -619,18 +680,29 @@ impl<'a> RunCoordinator<'a> {
                     }
                 }
             });
-            self.journal.selection.forget(chosen_key);
+            if let Some((_, chosen_key)) = chosen {
+                self.journal.selection.forget(chosen_key);
+            }
             let selected = self.journal.wait_record(name, step).await?;
             let event = selected
                 .record
                 .events
                 .first()
                 .ok_or(RunEventRefusal::EmptyRecord)?;
-            let recorded = choices
-                .iter()
-                .position(|(_, _, work)| work.recorded_by(event))
-                .ok_or_else(|| selection_boundary("recorded selection has no issued source"))?;
-            if recorded != chosen {
+            let recorded = match event {
+                RunEvent::SourceSealed { .. } => None,
+                event => Some(
+                    choices
+                        .iter()
+                        .position(|(_, _, work)| work.recorded_by(event))
+                        .ok_or_else(|| {
+                            selection_boundary("recorded selection has no issued source")
+                        })?,
+                ),
+            };
+            if let Some((chosen, chosen_key)) = chosen
+                && recorded != Some(chosen)
+            {
                 // A non-Run await can leave a fresh unrecorded choice. The
                 // served D is authoritative; retain that other popped source
                 // for its next window, ahead of pops made while waiting on D.
@@ -640,6 +712,19 @@ impl<'a> RunCoordinator<'a> {
                     .push(choices[chosen].0.clone());
                 self.journal.selection.acknowledged.push_front(chosen_key);
             }
+            // D recorded a source's seal: accept it in place, exactly as a
+            // terminal body. A seal the live race took that D did not
+            // record stays sealed at its authority for a later window.
+            let Some(recorded) = recorded else {
+                let Some(RunEvent::SourceSealed { call_id, seal }) =
+                    selected.record.events.first().cloned()
+                else {
+                    return Err(RunEventRefusal::EmptyRecord.into());
+                };
+                self.journal.accept(selected)?;
+                Box::pin(self.accept_source(&call_id, seal)).await?;
+                return Ok(None);
+            };
             self.journal.selection.forget(keys[recorded]);
             if let Some(pending) = presentation.as_mut()
                 && selected.record.events.iter().any(|event| matches!(event, RunEvent::StartLaunched { call_id, .. } if *call_id == pending.call_id))
@@ -1033,6 +1118,7 @@ fn describe(ready: &Ready) -> &'static str {
         Ready::Timer => "a timer wake",
         Ready::Realization(_) => "a realization receipt",
         Ready::StartPrepared(_) => "a preparation",
+        Ready::Sealed(_) => "a source seal",
     }
 }
 

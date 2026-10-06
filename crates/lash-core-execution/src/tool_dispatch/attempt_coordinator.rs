@@ -531,17 +531,14 @@ fn declares_at(
     outcome_kind == kind && index == intent_index
 }
 
-pub(super) fn project_recorded_intent_outcomes(
-    output: &mut crate::ToolCallOutput,
+/// The refusal that supersedes a final's optimistic output. Only a refusal
+/// produced while executing a declared intent can: batch-admission refusals
+/// describe the intent protocol itself and stay in the typed intent-outcome
+/// stream.
+pub(super) fn superseding_refusal(
     outcomes: &[crate::ToolIntentExecutionOutcome],
-) {
-    // Only a refusal produced while executing a declared intent can supersede
-    // the provider's optimistic output. Batch-admission refusals describe the
-    // intent protocol itself and stay in the typed intent-outcome stream.
-    if let Some(crate::ToolIntentExecutionOutcome::Refused {
-        refusal: crate::ToolIntentRefusalReason::CommandFailed { cause },
-        ..
-    }) = outcomes.iter().find(|outcome| {
+) -> Option<&crate::ToolIntentExecutionOutcome> {
+    outcomes.iter().find(|outcome| {
         matches!(
             outcome,
             crate::ToolIntentExecutionOutcome::Refused {
@@ -549,7 +546,18 @@ pub(super) fn project_recorded_intent_outcomes(
                 ..
             }
         )
-    }) {
+    })
+}
+
+pub(super) fn project_recorded_intent_outcomes(
+    output: &mut crate::ToolCallOutput,
+    outcomes: &[crate::ToolIntentExecutionOutcome],
+) {
+    if let Some(crate::ToolIntentExecutionOutcome::Refused {
+        refusal: crate::ToolIntentRefusalReason::CommandFailed { cause },
+        ..
+    }) = superseding_refusal(outcomes)
+    {
         // ADR 0042 deliberately seals the ToolAttempt terminal before draining
         // intents. Its optimistic provider value is therefore immutable; the
         // child process-command journal row is the authoritative refusal, and

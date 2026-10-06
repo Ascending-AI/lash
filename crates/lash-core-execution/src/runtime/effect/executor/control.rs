@@ -449,13 +449,17 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         Ok(None)
     }
 
-    /// Read the immutable seal selected by short segment subscriptions.
+    /// Race short segment subscriptions, the turn's cancel gate and the
+    /// `selectable` notifications in one engine wait: the first sealed
+    /// subscription's immutable seal, or the first completed selectable,
+    /// which leaves every source open.
     async fn await_run_sources(
         &self,
         subscriptions: Vec<crate::tool_run::SourceSubscription>,
+        selectable: Vec<crate::tool_dispatch::SelectKey>,
         cancel: TurnCancelWait,
-    ) -> Result<(usize, crate::tool_run::SourceSeal), RuntimeEffectControllerError> {
-        let _ = (subscriptions, cancel);
+    ) -> Result<crate::tool_dispatch::RunSourceWake, RuntimeEffectControllerError> {
+        let _ = (subscriptions, selectable, cancel);
         Err(RuntimeEffectControllerError::new(
             RuntimeErrorCode::EngineControlUnsupported,
             "this controller cannot await Run sources",

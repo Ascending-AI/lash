@@ -1248,8 +1248,8 @@ pub mod durability {
     };
     pub use lash_core::tool_dispatch::{
         RunAttemptBody, RunAttemptHandle, RunAttemptStep, RunRetryTimer, RunSelectKey,
-        RunSelectValue, RunSelectable, RunStartPrepareStep, RunStartPrepared, RunStepHandle,
-        SelectKey,
+        RunSelectValue, RunSelectable, RunSourceWake, RunStartPrepareStep, RunStartPrepared,
+        RunStepHandle, SelectKey,
     };
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,

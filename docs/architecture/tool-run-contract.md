@@ -107,6 +107,9 @@ the same recorded decisions and timer wakes. `all` reports the first terminal
 rejection; the list batch waits for every leaf and reports the first rejection
 in written order. Duplicate operands execute and consume one unique call.
 An empty race and a pending Deferred source carry no fabricated result.
+A final whose declarations carry intents settles as its recorded realization
+receipt answers: a refused intent presents it as a failure, so it settles as
+a rejection, and no consumer is answered before that receipt is recorded.
 
 `consume_aggregate` exposes only the values selected by that consumer. Losing
 calls remain Live under the Run. `RunBodies` polls issued X bodies beside every
@@ -331,10 +334,16 @@ decision. Every recorded D remains authoritative on replay.
 **Deferred completion (K4, FIG-4740).** The Run arms a source under the
 logical opener before starting a body admitted to defer. Its Deferred X
 retains the matching source key and leaves the call open without D, rank or
-V. `await_deferred` subscribes at the Run, reads a Resolved seal's canonical
-retained result under the source lease once, in a recorded
+V. Open sources join the Run's recorded selection (FIG-5135): while the Run
+is Live and no cut is requested, every schedule window subscribes them
+beside its issued bodies, timers and receipts in one engine wait, and
+`await_deferred` runs the same window when sources are all that remain. A
+seal that wins is recorded as the window's D (`SourceSealed`, carrying the
+seal), so a served D stays authoritative; the Run then reads a Resolved
+seal's canonical retained result under the source lease once, in a recorded
 `RestoreRunMaterial` step, and accepts its decision before `drain` presents
-it. Run close releases the source while the owning journal can still replay,
+it. A resolved Deferred leaf therefore settles an aggregate while sibling
+bodies still run. Run close releases the source while the owning journal can still replay,
 so a replay serves that payload from the step and never reads the store. The wait always subscribes; pending sources race the
 recorded cancel gate. Its journaled commands follow that gate's recorded
 outcome. A turn Run's gate is its turn-cancel gate; an operation Run's is
