@@ -382,39 +382,48 @@ fn provider_host() -> anyhow::Result<lashlang::LashlangHostEnvironment> {
             &lashlang::OperationContract::new(arguments, json!({"type": "object"})),
         )?;
     }
-    catalog.add_module_operation(
-        ["processes"],
-        "Processes",
-        "start",
-        "start",
-        lashlang::TypeExpr::Object(vec![
-            lashlang::TypeField {
-                name: "definition".into(),
-                ty: lashlang::TypeExpr::Process(lashlang::ProcessType::unknown()),
-                optional: false,
-            },
-            lashlang::TypeField {
-                name: "args".into(),
-                ty: lashlang::TypeExpr::Any,
-                optional: true,
-            },
-        ]),
-        lashlang::TypeExpr::Any,
-    )?;
-    for operation in ["await", "signal"] {
-        catalog.add_module_operation(
+    use lash_plugin_process_controls::{ProcessControlTool, process_tool_definition};
+    for (name, definition) in [
+        (
+            "create",
+            lash_lashlang_runtime::process_create_tool_definition(),
+        ),
+        ("start", process_tool_definition(ProcessControlTool::Start)),
+        ("await", process_tool_definition(ProcessControlTool::Await)),
+        (
+            "signal",
+            process_tool_definition(ProcessControlTool::Signal),
+        ),
+    ] {
+        let contract = definition.contract();
+        catalog.add_module_operation_contract(
             ["processes"],
             "Processes",
-            operation,
-            operation,
-            lashlang::TypeExpr::Any,
-            lashlang::TypeExpr::Any,
+            name,
+            name,
+            &lashlang::OperationContract::new(
+                contract.input_schema.canonical().clone(),
+                contract.output_schema.canonical().clone(),
+            ),
         )?;
     }
     Ok(lashlang::LashlangHostEnvironment::new(
         catalog,
         lashlang::LashlangAbilities::all(),
     ))
+}
+
+fn created_process_source(expr: &lashlang::Expr) -> Option<&str> {
+    if let lashlang::Expr::Record(fields) = expr {
+        for (name, value) in fields {
+            if name.as_str() == "source"
+                && let lashlang::Expr::String(source) = value
+            {
+                return Some(source.as_str());
+            }
+        }
+    }
+    expr.children().find_map(created_process_source)
 }
 
 #[test]
@@ -466,7 +475,11 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
                 for index in 0..plan.child_processes.len() {
                     assert!(code.contains(&format!("const h{index}=await processes.start(")));
                 }
-                let process = linked
+                let source = created_process_source(&linked.artifact.ir().main)
+                    .expect("the cell supplies the child definition's source");
+                let child = lash_typescript::link(source, &host)
+                    .unwrap_or_else(|error| panic!("{error:?}\n{source}"));
+                let process = child
                     .artifact
                     .ir()
                     .declarations

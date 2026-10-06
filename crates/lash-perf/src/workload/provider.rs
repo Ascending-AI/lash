@@ -312,7 +312,7 @@ fn cell_source(plan: &TurnPlan, word: &str) -> Result<String> {
     if !plan.child_processes.is_empty() {
         // One named handle per child: a cell keeps process handles in
         // variables, never in lists.
-        code.push_str("const child=async(parked,key)=>{if(parked){const resumed=await waitSignal(\"resume\");await tools.mark({key:key});return resumed;}await tools.mark({key:key});return {synthetic:true};};\n");
+        code.push_str("const child=await processes.create({dialect:\"typescript\",source:'const child=async(parked,key)=>{if(parked){const resumed=await waitSignal(\"resume\");await tools.mark({key:key});return resumed;}await tools.mark({key:key});return {synthetic:true};};'});\n");
         for (index, process) in plan.child_processes.iter().enumerate() {
             code.push_str(&format!(
                 "const h{index}=await processes.start({{definition:child,args:{{parked:{},key:op+\"/child/{index}\"}}}});\n",

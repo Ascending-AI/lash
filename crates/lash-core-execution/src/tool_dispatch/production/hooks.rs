@@ -142,7 +142,7 @@ impl ProductionToolHandlers<'_> {
             return Ok(vec![AttributedVerdict {
                 callback: prepared.input.binding.executable,
                 verdict: AfterCheckVerdict::Cancel {
-                    cause: cause("tool_cancel", cancel),
+                    cause: cause("tool_cancellation", cancel),
                 },
             }]);
         }

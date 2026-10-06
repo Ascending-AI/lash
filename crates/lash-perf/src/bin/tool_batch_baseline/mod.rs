@@ -332,7 +332,8 @@ pub(super) async fn measure(
                     Ok::<_, lash_core::llm::transport::LlmTransportError>(if matches!(branch, Branch::ProcessTransfer) && model_ordinal>0 {
                         response(vec![LlmOutputPart::Text{text:"consumed".into(),response_meta:None}])
                     } else if matches!(branch, Branch::ProcessTransfer) {
-                        let body = format!("const body=async()=>{{await tools.cost({{request:{request}}}); return await tools.cost({{request:{request}}});}};", request=json!("q".repeat(size)));
+                        let body_source = format!("const body=async()=>{{await tools.cost({{request:{request}}}); return await tools.cost({{request:{request}}});}};", request=json!("q".repeat(size)));
+                        let body = format!("const body=await processes.create({{dialect:\"typescript\",source:{}}});", json!(body_source));
                         let starts = (0..width).map(|index| format!("const handle{index}=await processes.start({{definition:body}});")).collect::<Vec<_>>().join("\n");
                         let answers = (0..width).map(|index| format!("await handle{index}")).collect::<Vec<_>>().join(",");
                         response(vec![LlmOutputPart::Text {text:format!("<typescript>\n{body}\n{starts}\nfinish([{answers}]);\n</typescript>"),response_meta:None}])

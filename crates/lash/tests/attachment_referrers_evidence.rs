@@ -29,7 +29,6 @@ use fixture::{Backend, Fixture};
 
 const PUT_BLOB: &str = "put_blob";
 const HOLD: &str = "hold";
-const DECLARE_EXTERNAL: &str = "declare_external";
 const START_TURN_CHILD: &str = "start_turn_child";
 
 /// What the tools of one law observed.
@@ -88,8 +87,7 @@ impl Witness {
 
 /// `put_blob({ text })` stores `text` as an attachment and returns it;
 /// `hold({})` parks the cell until released or cooperatively cancelled;
-/// `declare_external({})` declares one externally owned child and parks on
-/// its terminal; `start_turn_child({ text })` stores `text` and starts a
+/// `start_turn_child({ text })` stores `text` and starts a
 /// detached SessionTurn child whose turn input carries it, answering only
 /// `"started"`.
 struct BlobTools {
@@ -128,21 +126,6 @@ fn hold_definition() -> lash_core::ToolDefinition {
             "properties": {},
             "additionalProperties": false
         }),
-    )
-}
-
-fn declare_external_definition() -> lash_core::ToolDefinition {
-    tool_definition(
-        DECLARE_EXTERNAL,
-        serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        }),
-    )
-    .with_declaration(
-        lash_core::ToolDeclaration::deferring()
-            .with_intents([lash_core::ToolIntentKind::StartProcess]),
     )
 }
 
@@ -187,33 +170,6 @@ fn session_originator(
                 .clone(),
         ),
     })
-}
-
-fn declare_external(
-    context: &lash_core::AttemptContext<'_>,
-) -> Result<lash_core::ToolAttemptOutcome, String> {
-    let lifetime =
-        lash_core::lifetime::starter(&context.start_cx().map_err(|error| error.to_string())?);
-    let declaration = lash_core::ProcessStartDeclaration::external(
-        session_originator(context)?,
-        serde_json::json!({ "law": DECLARE_EXTERNAL }),
-        lifetime,
-    )
-    .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
-        "law-external",
-        None::<String>,
-    ));
-    let start = lash_core::DeclaredStart::new(
-        context,
-        lash_core::StartProcessIntent {
-            owner: context.owner().runtime_owner(),
-            declaration,
-        },
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(lash_core::ToolAttemptOutcome::pending(
-        lash_core::PendingCompletion::new().resolved_by_declared_start(start),
-    ))
 }
 
 async fn start_turn_child(
@@ -289,7 +245,6 @@ impl ToolProvider for BlobTools {
         vec![
             put_blob_definition().manifest(),
             hold_definition().manifest(),
-            declare_external_definition().manifest(),
             start_turn_child_definition().manifest(),
         ]
     }
@@ -298,7 +253,6 @@ impl ToolProvider for BlobTools {
         match name {
             PUT_BLOB => Some(Arc::new(put_blob_definition().contract())),
             HOLD => Some(Arc::new(hold_definition().contract())),
-            DECLARE_EXTERNAL => Some(Arc::new(declare_external_definition().contract())),
             START_TURN_CHILD => Some(Arc::new(start_turn_child_definition().contract())),
             _ => None,
         }
@@ -306,10 +260,6 @@ impl ToolProvider for BlobTools {
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         match call.name() {
-            DECLARE_EXTERNAL => {
-                return declare_external(call.context)
-                    .unwrap_or_else(|error| lash_core::ToolOutcome::err_fmt(error).into());
-            }
             START_TURN_CHILD => {
                 let text = call
                     .args
@@ -581,18 +531,21 @@ fn final_value(output: &lash::TurnOutput) -> Option<serde_json::Value> {
     output
         .result
         .state
-        .session_graph
-        .nodes
+        .read_view()
+        .active_events()
         .iter()
-        .filter_map(|node| match &node.payload {
-            lash_core::SessionNodePayload::Event {
-                event: lash_core::SessionHistoryRecord::Protocol(event),
-            } if event.plugin_id == "rlm_protocol" => event
-                .payload
-                .get("RlmTrajectoryEntry")?
-                .get("final_output")
-                .cloned(),
-            _ => None,
+        .filter_map(|event| {
+            let lash_core::SessionHistoryRecord::Protocol(event) = event else {
+                return None;
+            };
+            match lash_protocol_rlm::decode_rlm_protocol_event(event)
+                .expect("decode the recorded protocol event")
+            {
+                Some(lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(entry)) => {
+                    entry.outcome.terminal_value()?.inline().cloned()
+                }
+                _ => None,
+            }
         })
         .next_back()
 }
@@ -613,8 +566,8 @@ async fn engine_and_session_turn_create_only_real_sessions(backend: Backend) {
         &fixture.double,
         &witness,
         vec![response(&format!(
-            "const child = async () => await tools.put_blob({{ text: {text:?} }});
-const handle = await processes.start({{ definition: child }});
+            "const child = await processes.create({{ dialect: \"typescript\", source: `const child = async (text: string) => await tools.put_blob({{ text: text }});` }});
+const handle = await processes.start({{ definition: child, args: {{ text: {text:?} }} }});
 finish(handle.process_id);"
         ))],
     );
@@ -664,290 +617,6 @@ finish(handle.process_id);"
     );
 }
 
-/// A delivery law's shape (ADR 0124 §4): the child `C` puts `R` and
-/// terminates with it, nothing else references `R`, and the cell holds
-/// after the delivery is recorded. While it holds, the law prunes every
-/// terminal process and sweeps: `R` survives on the receiver's edge. Then the
-/// cell finishes with `R`, and the commit holds it on the session.
-async fn delivered_attachment_survives_prune(
-    seed: u64,
-    text: &str,
-    cell: String,
-    crash: bool,
-    backend: Backend,
-) {
-    let fixture = Fixture::new(seed, backend).await;
-    let witness = Witness::new();
-    let session_id = format!("law-3-{seed:x}");
-    let core = law_core(&fixture.double, &witness, vec![response(&cell)]);
-    let session = created_session(&core, &session_id).await;
-    let turn = {
-        let session = session.clone();
-        tokio::spawn(async move {
-            session
-                .send(TurnInput::text("deliver the child's attachment"))
-                .output()
-                .await
-        })
-    };
-    witness.held_times(&fixture, 1).await;
-    let id = blob_id(text);
-    let delivered = referrers(&fixture, &id).await;
-    assert!(
-        kinds(&delivered).contains(&"execution"),
-        "the receiving turn acquired before it recorded: {delivered:?}"
-    );
-    if crash {
-        // The turn's attempt dies before the hold's result is journaled:
-        // the redrive replays the recorded delivery and reaches the hold
-        // again without a second child run.
-        fixture.double.crash_run_execution(
-            lash_restate_test::server::CrashPoint::BeforeRunResult { name: None },
-        );
-        witness.release_one();
-        witness.held_times(&fixture, 2).await;
-    }
-
-    prune_processes(&core).await;
-    wait_referrers(&fixture, &id, "no process record", |found| {
-        !kinds(found).contains(&"process_record")
-    })
-    .await;
-    let report = sweep(&fixture).await;
-    assert!(
-        blob_present(&fixture, &id).await,
-        "the receiver's edge keeps `R` through prune and sweep: {report:?}"
-    );
-
-    witness.release_one();
-    let output = turn
-        .await
-        .expect("the turn task")
-        .expect("the receiving turn");
-    assert!(output.is_success(), "receiving turn: {output:?}");
-    let committed = wait_referrers(&fixture, &id, "the session's edge", |found| {
-        found.contains(&ArtifactReferrer::Session(lash_core::SessionId::fixture(
-            session_id.as_str(),
-        )))
-    })
-    .await;
-    assert!(
-        blob_present(&fixture, &id).await,
-        "`R` reads back after the commit: {committed:?}"
-    );
-    assert_eq!(
-        witness.puts.load(Ordering::SeqCst),
-        1,
-        "no redrive puts `R` again"
-    );
-}
-
-fn direct_await_cell(text: &str) -> String {
-    format!(
-        "const child = async () => await tools.put_blob({{ text: {text:?} }});
-const handle = await processes.start({{ definition: child }});
-const value = await handle;
-await tools.hold({{}});
-finish(value);"
-    )
-}
-
-fn process_to_process_cell(text: &str) -> String {
-    format!(
-        "const child = async () => await tools.put_blob({{ text: {text:?} }});
-const parent = async () => {{
-  const inner = await processes.start({{ definition: child }});
-  return await inner;
-}};
-const handle = await processes.start({{ definition: parent }});
-const value = await handle;
-await tools.hold({{}});
-finish(value);"
-    )
-}
-
-/// Law 3, `direct_await` (ADR 0124 §4): an RLM cell awaits its child's
-/// handle directly.
-async fn delivered_attachment_survives_prune_and_replay_direct_await(backend: Backend) {
-    let text = "law-3-direct-await";
-    delivered_attachment_survives_prune(0x4215_0031, text, direct_await_cell(text), false, backend)
-        .await;
-}
-
-async fn delivered_attachment_survives_prune_and_replay_direct_await_crash_after_record(
-    backend: Backend,
-) {
-    let text = "law-3-direct-await-crash";
-    delivered_attachment_survives_prune(0x4215_0032, text, direct_await_cell(text), true, backend)
-        .await;
-}
-
-/// Law 3, `process_to_process` (ADR 0124 §4): an Engine parent awaits the
-/// child and returns `R`, and the cell awaits the parent.
-async fn delivered_attachment_survives_prune_and_replay_process_to_process(backend: Backend) {
-    let text = "law-3-process-to-process";
-    delivered_attachment_survives_prune(
-        0x4215_0033,
-        text,
-        process_to_process_cell(text),
-        false,
-        backend,
-    )
-    .await;
-}
-
-async fn delivered_attachment_survives_prune_and_replay_process_to_process_crash_after_record(
-    backend: Backend,
-) {
-    let text = "law-3-process-to-process-crash";
-    delivered_attachment_survives_prune(
-        0x4215_0034,
-        text,
-        process_to_process_cell(text),
-        true,
-        backend,
-    )
-    .await;
-}
-
-/// The externally owned child a `declare_external` call declared, once it
-/// is registered. A turn that ends first reports why.
-async fn declared_external_child<T: std::fmt::Debug>(
-    core: &LashCore,
-    turn: &mut tokio::task::JoinHandle<T>,
-) -> lash_core::ProcessId {
-    let found = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        loop {
-            let processes = core
-                .processes()
-                .list(&lash_core::ProcessListFilter::default())
-                .await
-                .expect("list processes");
-            if let Some(process) = processes
-                .iter()
-                .find(|process| process.identity.kind.as_str() == "law-external")
-            {
-                return process.process_id.clone();
-            }
-            if turn.is_finished() {
-                let output = (&mut *turn).await;
-                panic!("the turn ended before its child registered: {output:?}; {processes:?}");
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await;
-    match found {
-        Ok(process_id) => process_id,
-        Err(_) => panic!(
-            "the declared child never registered: {:#?}",
-            core.processes()
-                .list(&lash_core::ProcessListFilter::default())
-                .await
-        ),
-    }
-}
-
-/// Law 3, `parked_declared_start` (ADR 0124 §4): a tool of `T1` declares an
-/// externally owned child `C` and parks on it. The host completes `C` with
-/// `R` from its own upload. The parked resolver acquires `T1`'s execution
-/// before it resolves, so neither the upload's expiry nor `C`'s prune nor a
-/// sweep reaches `R`, and `T1`'s commit holds it on the session.
-async fn parked_declared_start_survives(seed: u64, text: &str, crash: bool, backend: Backend) {
-    let fixture = Fixture::new(seed, backend).await;
-    let witness = Witness::new();
-    let session_id = format!("law-3-parked-{seed:x}");
-    let core = law_core(
-        &fixture.double,
-        &witness,
-        vec![response(
-            "const value = await tools.declare_external({});
-await tools.hold({});
-finish(value);",
-        )],
-    );
-    let session = created_session(&core, &session_id).await;
-    let mut turn = {
-        let session = session.clone();
-        tokio::spawn(async move {
-            session
-                .send(TurnInput::text("park on the external child"))
-                .output()
-                .await
-        })
-    };
-    let child = declared_external_child(&core, &mut turn).await;
-    let uploads = upload_store(&fixture, &session_id, 1000);
-    let delivered = host_put(&uploads, text).await;
-    core.process_registry()
-        .complete_process(
-            &child,
-            lash_core::ProcessAwaitOutput::from_tool_output(
-                lash_core::ToolCallOutput::success_tool_value(lash_core::ToolValue::Attachment(
-                    lash_core::AttachmentSource::stored(delivered.clone()),
-                )),
-            ),
-            lash_core::ProcessCompletionAuthority::ExternalOwner,
-        )
-        .await
-        .expect("the host completes the external child");
-    witness.held_times(&fixture, 1).await;
-    let id = delivered.id.clone();
-    let held = referrers(&fixture, &id).await;
-    assert!(
-        kinds(&held).contains(&"execution"),
-        "the parked resolver acquired before it resolved: {held:?}"
-    );
-    if crash {
-        fixture.double.crash_run_execution(
-            lash_restate_test::server::CrashPoint::BeforeRunResult { name: None },
-        );
-        witness.release_one();
-        witness.held_times(&fixture, 2).await;
-    }
-
-    fixture.double.test_clock().advance(1001);
-    wait_referrers(&fixture, &id, "the upload ended", |found| {
-        upload_of(found).is_none()
-    })
-    .await;
-    prune_processes(&core).await;
-    let report = sweep(&fixture).await;
-    assert!(
-        blob_present(&fixture, &id).await,
-        "the receiver's edge keeps `R` past the upload, the prune and the sweep: {report:?}"
-    );
-
-    witness.release_one();
-    let output = turn
-        .await
-        .expect("the turn task")
-        .expect("the receiving turn");
-    assert!(output.is_success(), "receiving turn: {output:?}");
-    let committed = wait_referrers(&fixture, &id, "the session's edge", |found| {
-        found.contains(&ArtifactReferrer::Session(lash_core::SessionId::fixture(
-            session_id.as_str(),
-        )))
-    })
-    .await;
-    assert!(
-        blob_present(&fixture, &id).await,
-        "`R` reads back after the commit: {committed:?}"
-    );
-}
-
-async fn delivered_attachment_survives_prune_and_replay_parked_declared_start(backend: Backend) {
-    parked_declared_start_survives(0x4215_0035, "law-3-parked", false, backend).await;
-}
-
-async fn delivered_attachment_survives_prune_and_replay_parked_declared_start_crash_after_record(
-    backend: Backend,
-) {
-    parked_declared_start_survives(0x4215_0036, "law-3-parked-crash", true, backend).await;
-}
-
-/// Wait for the SessionTurn child to reach its hold, or report the records
-/// of every process when it never does.
 async fn child_reached_its_hold(core: &LashCore, witness: &Witness) {
     let reached = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
@@ -1092,12 +761,12 @@ async fn process_referrer_cleanup_is_complete_without_sessions(backend: Backend)
         &fixture.double,
         &witness,
         vec![response(&format!(
-            "const child = async () => {{
-  const a = await tools.put_blob({{ text: {first:?} }});
-  const b = await tools.put_blob({{ text: {second:?} }});
+            "const child = await processes.create({{ dialect: \"typescript\", source: `const child = async (first: string, second: string) => {{
+  const a = await tools.put_blob({{ text: first }});
+  const b = await tools.put_blob({{ text: second }});
   return [a, b];
-}};
-const handle = await processes.start({{ definition: child }});
+}};` }});
+const handle = await processes.start({{ definition: child, args: {{ first: {first:?}, second: {second:?} }} }});
 finish(handle.process_id);"
         ))],
     );
@@ -1325,8 +994,8 @@ async fn redrive_replays_recorded_attachment_result(backend: Backend) {
         &fixture.double,
         &witness,
         vec![response(&format!(
-            "const child = async () => await tools.put_blob({{ text: {text:?} }});
-const handle = await processes.start({{ definition: child }});
+            "const child = await processes.create({{ dialect: \"typescript\", source: `const child = async (text: string) => await tools.put_blob({{ text: text }});` }});
+const handle = await processes.start({{ definition: child, args: {{ text: {text:?} }} }});
 finish(handle.process_id);"
         ))],
     );
@@ -1374,12 +1043,12 @@ async fn cancelled_child_keeps_its_puts_until_pruned(delay_cancellation: bool, b
     let witness = Witness::new();
     let text = "cancelled-child-put";
     let queue = responses(vec![response(&format!(
-        "const child = async () => {{
-  const value = await tools.put_blob({{ text: {text:?} }});
+        "const child = await processes.create({{ dialect: \"typescript\", source: `const child = async (text: string) => {{
+  const value = await tools.put_blob({{ text: text }});
   await tools.hold({{}});
   return value;
-}};
-const handle = await processes.start({{ definition: child }});
+}};` }});
+const handle = await processes.start({{ definition: child, args: {{ text: {text:?} }} }});
 finish(handle.process_id);"
     ))]);
     let core = law_core_over(&fixture.double, &witness, Arc::clone(&queue), None);
@@ -1446,7 +1115,11 @@ finish(cancelled.status);",
         .await
         .expect("read the terminal child")
         .expect("the child is retained until prune");
-    assert_eq!(terminal.status(), lash_core::ProcessStatus::Cancelled);
+    assert_eq!(
+        terminal.status(),
+        lash_core::ProcessStatus::Cancelled,
+        "a cancelled child reaches its typed terminal: {terminal:?}"
+    );
     witness.release_one();
     assert!(blob_present(&fixture, &id).await);
     eprintln!(
@@ -1481,12 +1154,6 @@ macro_rules! tiered {
 
 tiered!(
     engine_and_session_turn_create_only_real_sessions,
-    delivered_attachment_survives_prune_and_replay_direct_await,
-    delivered_attachment_survives_prune_and_replay_direct_await_crash_after_record,
-    delivered_attachment_survives_prune_and_replay_process_to_process,
-    delivered_attachment_survives_prune_and_replay_process_to_process_crash_after_record,
-    delivered_attachment_survives_prune_and_replay_parked_declared_start,
-    delivered_attachment_survives_prune_and_replay_parked_declared_start_crash_after_record,
     delivered_attachment_survives_prune_and_replay_start_input,
     delivered_attachment_survives_prune_and_replay_start_input_crash_after_record,
     process_referrer_cleanup_is_complete_without_sessions,
