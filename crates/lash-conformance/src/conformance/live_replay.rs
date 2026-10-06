@@ -1113,13 +1113,18 @@ fn expect_live_replay_subscribe_gap(
     }
 }
 
+/// The subscription's next event, however long the store takes to deliver
+/// it. A store's delivery is not bounded by how loaded its host is: a
+/// PostgreSQL store under a full workspace run stalls past any wall-clock
+/// deadline a law could pick (FIG-5148). An event that never arrives leaves
+/// the law to the test target's timeout.
 async fn next_live_replay_event(
     subscription: &mut crate::LiveReplaySubscription,
     context: &str,
 ) -> Arc<SessionObservationEvent> {
-    tokio::time::timeout(Duration::from_secs(1), subscription.next())
+    subscription
+        .next()
         .await
-        .unwrap_or_else(|_| panic!("{context}: timed out waiting for live replay event"))
         .unwrap_or_else(|| panic!("{context}: live replay subscriber closed"))
         .unwrap_or_else(|err| panic!("{context}: live replay subscriber failed: {err}"))
 }
