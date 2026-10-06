@@ -14,8 +14,21 @@
 //! concurrent reap waits for it and concurrent claimers never take one actor
 //! twice; an owner commit's fence is a conditional `UPDATE` of the actor row,
 //! which a concurrent claim or reap either precedes or waits behind.
+//!
+//! Every engine transaction also bounds itself (L8, FIG-5178): it sets
+//! transaction-local lock, statement and idle-in-transaction timeouts in the
+//! same round trip that reads the clock, so a convoy or a stalled client
+//! surfaces as a retryable refusal instead of holding actor rows. The node
+//! lease's commits and every terminal and cancel commit
+//! ([`CommitLabel::RESERVED`]) run on a small pool of their own, so a burst of
+//! ordinary commits cannot starve a heartbeat into a self-stop.
+//!
+//! Cross-node signals ([`PostgresSignals`]) live beside this module: wake
+//! hints published with `pg_notify` after commit, never inside a writing
+//! transaction, and each node's liveness lock, a session advisory lock its
+//! listener holds.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use lash_durable::domain::{
     ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
@@ -30,7 +43,7 @@ use lash_durable::{
 };
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
-use sqlx::postgres::PgRow;
+use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgConnection, PgPool, Row};
 
 use crate::StoreError;
@@ -44,6 +57,45 @@ mod session_close;
 mod snapshots;
 mod turns;
 mod waits;
+
+#[path = "../durable_signals.rs"]
+mod signals;
+
+pub use signals::PostgresSignals;
+
+/// Connections held back for [`CommitLabel::RESERVED`] commits and the
+/// liveness probes. The lease's commits are serial per node, so this bounds
+/// how many terminal and cancel commits run at once beside them.
+const RESERVED_CONNECTIONS: u32 = 4;
+
+/// `lock_timeout` of every engine transaction, in milliseconds. S2
+/// (FIG-5167) measured row-lock waits in single milliseconds at sixteen
+/// nodes; a wait this long is a convoy, refused as contended.
+const LOCK_TIMEOUT_MS: &str = "2000";
+
+/// `statement_timeout` of every engine transaction, in milliseconds.
+const STATEMENT_TIMEOUT_MS: &str = "5000";
+
+/// `idle_in_transaction_session_timeout` of every engine transaction, in
+/// milliseconds: a client that stalls inside a transaction loses its session
+/// rather than holding actor rows.
+const IDLE_IN_TRANSACTION_TIMEOUT_MS: &str = "5000";
+
+/// The reserved pool, opened on first use over the shared pool's connect
+/// options and shared by every handle of one storage.
+#[derive(Clone, Default)]
+pub(crate) struct Reserve(Arc<OnceLock<PgPool>>);
+
+impl Reserve {
+    fn pool(&self, shared: &PgPool) -> &PgPool {
+        self.0.get_or_init(|| {
+            PgPoolOptions::new()
+                .max_connections(RESERVED_CONNECTIONS)
+                .min_connections(0)
+                .connect_lazy_with((*shared.connect_options()).clone())
+        })
+    }
+}
 
 /// The owner commit a domain write is applied in: after its fence.
 pub(crate) struct Committing<'a> {
@@ -80,6 +132,44 @@ lash_store_sql::statements! {
              FROM c
              WHERE a.actor_key = c.actor_key
              RETURNING a.actor_key, a.epoch, c.state";
+
+        /// Lock the rows of actors `?1` in key order: a mailbox commit
+        /// that wakes several actors takes their locks before any write,
+        /// so two such commits never wait on each other in a cycle.
+        lock_actors = "SELECT actor_key FROM actors
+             WHERE actor_key = ANY(?1)
+             ORDER BY actor_key
+             FOR NO KEY UPDATE";
+
+        /// Bound this transaction: lock timeout `?1`, statement timeout
+        /// `?2` and idle-in-transaction timeout `?3`, all milliseconds,
+        /// then the server's instant in epoch milliseconds, in one round
+        /// trip.
+        begin_bounded = "SELECT set_config('lock_timeout', ?1, true),
+                    set_config('statement_timeout', ?2, true),
+                    set_config('idle_in_transaction_session_timeout', ?3, true),
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT";
+
+        /// Every registered boot, and whether some session holds its
+        /// liveness lock. A free lock is taken for this statement's
+        /// transaction only, so the probe holds nothing after it.
+        liveness = "SELECT node_id, boot_id,
+                    NOT pg_try_advisory_xact_lock(1818325864, hashtext(boot_id))
+             FROM nodes
+             ORDER BY node_id, boot_id";
+
+        /// Take boot `?1`'s liveness lock for the rest of this transaction
+        /// when no session holds it: true when it was free.
+        take_liveness = "SELECT pg_try_advisory_xact_lock(1818325864, hashtext(?1))";
+
+        /// Hold boot `?1`'s liveness lock for this session's life, waiting
+        /// for an earlier session of the same boot to end.
+        hold_liveness = "SELECT pg_advisory_lock(1818325864, hashtext(?1))";
+
+        /// Send notification payload `?2[i]` on channel `?1[i]`, for each
+        /// `i`, outside any writing transaction.
+        notify = "SELECT pg_notify(t.channel, t.payload)
+             FROM unnest(CAST(?1 AS TEXT[]), CAST(?2 AS TEXT[])) AS t(channel, payload)";
     }
 }
 
@@ -104,6 +194,7 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
 #[derive(Clone)]
 pub struct PostgresDurableStore {
     pool: PgPool,
+    reserve: Reserve,
     fence: WriterFence,
     /// The clock a test stands in for the database's.
     #[cfg(any(test, feature = "testing"))]
@@ -187,9 +278,10 @@ async fn finish<T>(tx: Tx, outcome: Result<T, DurableError>) -> Result<T, Durabl
 }
 
 impl PostgresDurableStore {
-    pub(crate) fn new(pool: PgPool, fence: WriterFence) -> Self {
+    pub(crate) fn new(pool: PgPool, fence: WriterFence, reserve: Reserve) -> Self {
         Self {
             pool,
+            reserve,
             fence,
             #[cfg(any(test, feature = "testing"))]
             clock: None,
@@ -235,14 +327,97 @@ impl PostgresDurableStore {
         Ok(DurableInstant(now))
     }
 
-    /// A guarded transaction and the instant it runs at.
+    /// A guarded, bounded transaction and the instant it runs at, on the
+    /// reserved pool when `label` is reserved.
     async fn open(&self, label: CommitLabel) -> Result<(Tx, DurableInstant), DurableError> {
         tracing::trace!(label = label.as_str(), "durable postgres commit");
-        let mut tx: Tx = begin_guarded(&self.pool, &self.fence)
+        let pool = if label.is_reserved() {
+            self.reserve.pool(&self.pool)
+        } else {
+            &self.pool
+        };
+        let mut tx: Tx = begin_guarded(pool, &self.fence)
             .await
             .map_err(store_failure)?;
-        let now = self.instant_on(&mut tx).await?;
+        let row = sqlx::query(SQL.postgres.begin_bounded.sql())
+            .bind(LOCK_TIMEOUT_MS)
+            .bind(STATEMENT_TIMEOUT_MS)
+            .bind(IDLE_IN_TRANSACTION_TIMEOUT_MS)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(sqlx_failure)?;
+        let now = match self.injected_instant() {
+            Some(now) => now,
+            None => DurableInstant(get(&row, 3)?),
+        };
         Ok((tx, now))
+    }
+
+    /// Every registered boot's liveness lock, read on the reserved pool.
+    async fn liveness(&self) -> Result<Vec<lash_durable::BootLiveness>, DurableError> {
+        let rows: Vec<(String, String, bool)> = sqlx::query_as(SQL.postgres.liveness.sql())
+            .fetch_all(self.reserve.pool(&self.pool))
+            .await
+            .map_err(sqlx_failure)?;
+        Ok(rows
+            .into_iter()
+            .map(|(node, boot, held)| lash_durable::BootLiveness {
+                boot: Owner {
+                    node: NodeId::new(node),
+                    boot: BootId::new(boot),
+                },
+                held,
+            })
+            .collect())
+    }
+
+    /// Reap `boot` when its liveness lock is free and the reaper's own is
+    /// held, in one transaction under the reap's label. Taking the free lock
+    /// for the transaction keeps the boot from re-locking until the reap
+    /// commits; a boot that re-locks after it finds its lease gone.
+    async fn reap_released(
+        &self,
+        reaper: &NodeLease,
+        boot: &Owner,
+    ) -> Result<Vec<Reaped>, DurableError> {
+        let (mut tx, now) = self.open(CommitLabel::REAP).await?;
+        let outcome = async {
+            if !node_live(&mut tx, &reaper.owner).await? {
+                return Err(DurableError::NodeLeaseLost {
+                    node: reaper.owner.node.clone(),
+                });
+            }
+            for (owner, free) in [(&reaper.owner, false), (boot, true)] {
+                let taken: bool = sqlx::query_scalar(SQL.postgres.take_liveness.sql())
+                    .bind(owner.boot.as_str())
+                    .fetch_one(&mut **tx)
+                    .await
+                    .map_err(sqlx_failure)?;
+                if taken != free {
+                    return Ok(Vec::new());
+                }
+            }
+            let deleted = sqlx::query(SQL.node.delete_boot.sql())
+                .bind(boot.node.as_str())
+                .bind(boot.boot.as_str())
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(sqlx_failure)?;
+            if deleted.is_none() {
+                return Ok(Vec::new());
+            }
+            Ok(release_owned_by(&mut tx, boot, now)
+                .await?
+                .into_iter()
+                .map(|(actor, epoch)| Reaped {
+                    actor,
+                    from: boot.clone(),
+                    epoch,
+                })
+                .collect())
+        }
+        .await;
+        finish(tx, outcome).await
     }
 }
 
@@ -456,11 +631,37 @@ fn note_woken(woken: &mut Vec<Woken>, entry: Woken) {
     }
 }
 
+/// Lock, in key order, every actor `writes` appends to or wakes, when
+/// there are several: rows locked in write order would let two commits that
+/// name the same actors in opposite orders deadlock. A domain write keeps
+/// its own order (its row, then the actor it wakes) after these.
+async fn lock_mail_targets(tx: &mut PgConnection, writes: &MailTx) -> Result<(), DurableError> {
+    let mut targets: Vec<&str> = writes
+        .writes()
+        .iter()
+        .filter_map(|write| match write {
+            MailWrite::Append { actor, .. } | MailWrite::Wake { actor } => Some(actor.as_str()),
+            MailWrite::CreateActor { .. } | MailWrite::Domain(_) => None,
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    if targets.len() > 1 {
+        sqlx::query(SQL.postgres.lock_actors.sql())
+            .bind(&targets)
+            .execute(&mut *tx)
+            .await
+            .map_err(sqlx_failure)?;
+    }
+    Ok(())
+}
+
 async fn apply_mail(
     tx: &mut PgConnection,
     writes: &MailTx,
     now: DurableInstant,
 ) -> Result<MailCommit, DurableError> {
+    lock_mail_targets(tx, writes).await?;
     let mut receipt = MailCommit::default();
     for write in writes.writes() {
         match write {
@@ -854,3 +1055,7 @@ mod tests;
 #[cfg(test)]
 #[path = "../wait_law_tests.rs"]
 mod wait_law_tests;
+
+#[cfg(test)]
+#[path = "../durable_concurrency_tests.rs"]
+mod concurrency_tests;

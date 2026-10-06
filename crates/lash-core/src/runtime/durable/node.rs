@@ -10,9 +10,12 @@
 //! - **Claims** take at most `claim_batch` actors at once and never more
 //!   than `max_active` in all.
 //! - **Mail** reaches a hot owner by the wake hint of a mailbox commit made
-//!   on this node ([`Backend::commit_mail`]), or by the owner's own read at
-//!   every claim poll: the poll is the correctness backstop, the hint only
-//!   cuts latency.
+//!   on this node ([`Backend::commit_mail`]), published to the owner's node
+//!   when the store set has signals and the notifier is `AfterCommit`, or by
+//!   the owner's own read at every claim poll: the poll is the correctness
+//!   backstop, the hint only cuts latency. With signals the node also holds
+//!   a liveness lock, so a crashed node is reaped as soon as its session
+//!   ends.
 //! - **Idle eviction and release** belong to each activation: a session
 //!   stays hot for `idle_evict` with nothing to do, and releases as
 //!   `waiting` with the earliest due time its sources noted.
@@ -21,7 +24,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use lash_durable::runner::{Activation, Runner, RunnerConfig, Stopped};
-use lash_durable::{ActorDispatch, DurableError, FormatSet, NodeId};
+use lash_durable::{ActorDispatch, DurableError, FormatSet, NodeId, Notifier};
 
 use super::session::SessionActivation;
 use crate::Backend;
@@ -54,7 +57,7 @@ pub async fn serve(
         session: serve.sessions,
         process: serve.processes,
     };
-    Runner::new(
+    let mut runner = Runner::new(
         Arc::clone(backend.durable()),
         backend.clock(),
         RunnerConfig {
@@ -66,7 +69,11 @@ pub async fn serve(
         },
         Arc::new(dispatch),
     )
-    .with_hints(backend.hints().clone())
-    .run(stop)
-    .await
+    .with_hints(backend.hints().clone());
+    if settings.notifier == Notifier::AfterCommit
+        && let Some(signals) = backend.stores().durable_signals()
+    {
+        runner = runner.with_signals(signals);
+    }
+    runner.run(stop).await
 }

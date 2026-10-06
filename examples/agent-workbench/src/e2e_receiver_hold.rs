@@ -50,6 +50,10 @@ impl lash::StoreSet for ReceiverHoldStores {
     fn durable_store(&self) -> Arc<dyn lash::durable::DurableStore> {
         self.inner.durable_store()
     }
+
+    fn durable_signals(&self) -> Option<Arc<dyn lash::durable::Signals>> {
+        self.inner.durable_signals()
+    }
     fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
         Arc::clone(&self.registry)
     }

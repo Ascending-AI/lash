@@ -222,9 +222,11 @@ impl Backend {
         &self.inner.hints
     }
 
-    /// Commit the mailbox transaction `tx` under `label`, then hint every
-    /// actor it woke to this node's runner. A hint is only a hint: another
-    /// node's actor sees the commit at its next poll or scan.
+    /// Commit the mailbox transaction `tx` under `label`, then hand every
+    /// actor it woke to this node's runner: an actor the node runs is hinted
+    /// in process, and with signals an actor another node owns, or a readied
+    /// unowned one, is published after the commit. A hint is only a hint:
+    /// an actor whose hint is lost sees the commit at its next poll.
     ///
     /// # Errors
     ///
@@ -235,9 +237,7 @@ impl Backend {
         label: lash_durable::CommitLabel,
     ) -> Result<lash_durable::MailCommit, DurableError> {
         let commit = self.durable().commit_mail(tx, label).await?;
-        for woken in &commit.woken {
-            self.inner.hints.wake(woken);
-        }
+        self.inner.hints.woke(&commit);
         Ok(commit)
     }
 
@@ -371,6 +371,12 @@ pub trait StoreSet: Send + Sync {
     /// The durable store over this store set's database: actors, nodes,
     /// mail and the domain rows of ADR 0132.
     fn durable_store(&self) -> Arc<dyn DurableStore>;
+
+    /// The cross-node signals over this store set's database: wake hints
+    /// after commit and node liveness locks (L8, FIG-5178). `None` for a
+    /// store with one node per database (SQLite), whose wakes stay in
+    /// process; its runner relies on in-process hints and the polls.
+    fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>>;
 
     /// The identity of this store set's storage.
     fn binding_identity(&self) -> &StoreBindingId;

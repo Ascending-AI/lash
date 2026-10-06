@@ -57,6 +57,37 @@ and refuses an older database with `migration_pending`.
 `LASH_POSTGRES_DATABASE_URL` pointing at that store. The host owns traffic
 routing, backups and worker lifecycle.
 
+## Connect PostgreSQL nodes
+
+Several lash nodes can serve one PostgreSQL store (ADR 0132 §3). Each node
+uses three kinds of connection:
+
+- the shared pool (`PostgresStoreConfig::max_connections`);
+- four reserved connections for its lease, terminal and cancel commits, so a
+  burst of ordinary commits cannot starve its heartbeat;
+- one listener connection, which receives wake hints (`LISTEN`) and holds the
+  node's liveness lock, a session advisory lock.
+
+Budget `max_connections + 5` server connections per node. The listener needs
+a session of its own: connect directly or through a pooler in session mode.
+A transaction-mode pooler silently drops both `LISTEN` and the session lock.
+
+When a node's process dies, its listener session ends and the other nodes
+reap it within a claim poll (250 ms by default) instead of waiting for its
+15-second lease. A node cut off by a network partition keeps its session until
+the server notices the dead connection, so set `tcp_keepalives_idle`,
+`tcp_keepalives_interval` and `tcp_keepalives_count` on the server to bound
+that; otherwise the lease reaps it. Either way the epoch fence refuses every
+commit the cut-off node attempts after the reap.
+
+Wake hints are only hints: a node polls for claimable work and for its hot
+actors' mail at most every claim poll, so a lost notification costs latency,
+never work. `Notifier::PollOnly` turns the listener off, and with it the fast
+crash detection.
+
+The topology is the host's (ADR 0132 §13): `Once` survives a database
+failover only when acknowledged commits survive promotion.
+
 ## Read the compatibility report
 
 ```sh

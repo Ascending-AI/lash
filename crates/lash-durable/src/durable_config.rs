@@ -16,7 +16,15 @@ pub enum Notifier {
     PollOnly,
     /// After each commit that woke an actor, the store's notification
     /// channel hints the owner's node. A latency hint only; correctness
-    /// never depends on it.
+    /// never depends on it. On a store with a notification channel
+    /// (PostgreSQL) the listener's session also holds the node's liveness
+    /// lock, so a crashed node is reaped as soon as its session ends rather
+    /// than when its lease lapses. A store without one (SQLite, one node)
+    /// hints in process only.
+    ///
+    /// `LISTEN` and the session lock need a session of their own: connect
+    /// the store directly or through a session-mode pooler, never a
+    /// transaction-mode one.
     AfterCommit,
 }
 
@@ -36,7 +44,8 @@ pub struct GroupCommit {
 pub struct DurableSettings {
     /// L1, then L8: node-lease timings, including the claim poll.
     pub lease: LeaseSettings,
-    /// L3: the most actors one claim takes.
+    /// L3, then L8: the most actors one claim takes; a claim never takes
+    /// more than the node's free slots either.
     pub claim_batch: usize,
     /// L3: the most actors a node runs at once.
     pub max_active: usize,
@@ -52,7 +61,8 @@ pub struct DurableSettings {
     pub snapshot_every_fuel: u64,
     /// L6: how many `Until` children one cascade transaction marks.
     pub cascade_batch: usize,
-    /// L8: how wakes reach other nodes.
+    /// L8: how wakes reach other nodes, and whether a node's crash is seen
+    /// through its listener's liveness lock.
     pub notifier: Notifier,
 }
 
@@ -70,7 +80,7 @@ impl Default for DurableSettings {
             },
             snapshot_every_fuel: 1_000_000,
             cascade_batch: 256,
-            notifier: Notifier::PollOnly,
+            notifier: Notifier::AfterCommit,
         }
     }
 }

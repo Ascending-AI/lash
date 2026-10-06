@@ -42,6 +42,7 @@ pub mod laws;
 mod port;
 mod probe;
 pub mod runner;
+mod signals;
 mod tx;
 
 pub use config::{LeaseConfig, LeaseConfigError, LeaseSettings};
@@ -61,4 +62,5 @@ pub use port::{
     MailCommit, NodeLease, NodeSpec, Owner, Reaped, Woken,
 };
 pub use probe::{DurableProbe, NoProbe};
+pub use signals::{BootLiveness, Signal, SignalFeed, Signals, WakeBatch};
 pub use tx::{ActorTx, Mail, MailTx, MailWrite, OpenedActor, Release};

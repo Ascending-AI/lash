@@ -39,6 +39,7 @@ L13 = FIG-5193.
 - **S1:** `CompletionKeyPreparation`, the one survivor of `lash-core-effect`'s `await_event_resolver.rs`, moved to `completion_key.rs`.
 - **S4:** `ExecutionDraft.limit` is L3a's (FIG-5171) `lash_sansio::ExecutionLimit`; I0 defines no copy.
 - **S9, facade:** `DurableBackendBuilder::new` keeps the `Arc<dyn StoreSet>` that L10a's skeleton landed with, because every host already hands it one. `config` takes `DurableSettings` (the unvalidated parameters) rather than a `DurableConfig`, so `build` is where they are validated and `InvalidConfig` is reachable. `projection_provider` exists with the `rlm` feature, which brings `lashlang`; `build` registers the providers into a `lashlang::ProjectionCatalog` (whose `register` is L7p's) and maps a refused registration, or a host provider of the lash-provided `history` type, to `DuplicateProvider`. The facade re-exports the build vocabulary from `lash::durable` (`CompletionKeySecrets`, `DurableBuildError`, `DurableConfig`, `DurableSettings`, `DurableStore`, `KeyVersion`, `SecretBytes`, `SecretsRefusal`) and the engine state machine from `lash::plugins` (`EngineAction`, `EngineEvent`, `EngineState`, `EngineStateFormat`, `HostWaitKind`, `KeyName`, `StepName`, `StepRequest`), so an external engine and store set can be written against the facade alone.
+- **S9, signals (L8, FIG-5178):** `StoreSet` gained `durable_signals() -> Option<Arc<dyn lash_durable::Signals>>`, agreed with the orchestrator. PostgreSQL answers `PostgresSignals` (after-commit `pg_notify` wake hints, a listener per node that holds the boot's session advisory lock, liveness probes and the reap of a boot whose lock is released); SQLite and the test store sets answer `None`, because one node per database keeps its wakes in process. `serve` passes it to `Runner::with_signals` when `DurableConfig`'s notifier is `AfterCommit`, and every mailbox commit through `Backend::commit_mail` hands what it woke to the shared `Hints`, which hint in process or publish.
 - **S1, work ports:** `EffectEngine::{session_work, process_work}` became `DurableSessionWork` and `DurableProcessWork` (`runtime/work/durable.rs`), the facade core's session-work engine and process port over the backend. A shift ask is `Backend::wake_session` (L3s) and a process start is `Backend::wake_process` (L6); `schedule_shift` and `await_shift` are L3s stubs, the terminal wait and its publication are L5's, and cancel delivery is L6's mail. `install_session_shifts` is real (get-or-init).
 - **S1, perf:** the runtime-perf scenario `ScopedEffectController` is `ScopedEffects`; its report name `scoped_effect_controller` and its budget are unchanged.
 
@@ -115,7 +116,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 | `lash_park_events` | L6 | L6 |
 | session closing state | L6b | L6b |
 | format columns, fleet format | L11 | L11 |
-| notifier, advisory lock (no tables) | none | L8 |
+| notifier, advisory lock (no tables; the liveness probe and the released-boot reap read and write `nodes` and `actors` through the PostgreSQL engine module) | none | L8 |
 | drops of replaced tables | the lane that replaces them | L10b squashes the 1.0 baseline last |
 
 ## Stub inventory

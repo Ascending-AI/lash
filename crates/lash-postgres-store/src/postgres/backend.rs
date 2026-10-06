@@ -116,6 +116,10 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         Arc::new(self.inner.storage.durable_store())
     }
 
+    fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>> {
+        Some(Arc::new(self.inner.storage.durable_signals()))
+    }
+
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
         &self.inner.binding
     }

@@ -314,6 +314,10 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         Arc::new(SqliteStoreSet::durable_store(self))
     }
 
+    fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>> {
+        None
+    }
+
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
         &self.inner.binding
     }

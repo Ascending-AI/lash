@@ -666,6 +666,9 @@ pub struct PostgresStorage {
     /// this build's writable range and the fleet epoch `F` its fences last
     /// read, seeded with the open transaction's admitted `F`.
     fence: guarded_tx::WriterFence,
+    /// The durability engine's reserved connections, shared by every
+    /// durable store handle of this storage.
+    durable_reserve: durable::Reserve,
 }
 
 #[derive(Clone)]
@@ -859,6 +862,7 @@ impl PostgresStorage {
             observer: config.observer,
             catalog_id: catalog_id.into(),
             fence: guarded_tx::WriterFence::new(writable, fleet_format),
+            durable_reserve: durable::Reserve::default(),
         })
     }
 
@@ -934,6 +938,7 @@ impl PostgresStorage {
             observer: config.observer,
             catalog_id: catalog_id.into(),
             fence: guarded_tx::WriterFence::new(writable, fleet_format),
+            durable_reserve: durable::Reserve::default(),
         })
     }
 
@@ -959,6 +964,7 @@ impl PostgresStorage {
             observer: config.observer,
             catalog_id: catalog_id.into(),
             fence: guarded_tx::WriterFence::new(writable, fleet_format),
+            durable_reserve: durable::Reserve::default(),
         })
     }
 
@@ -999,6 +1005,7 @@ impl PostgresStorage {
                 lash_core_execution::FleetFormat::writable(),
                 fleet_format,
             ),
+            durable_reserve: durable::Reserve::default(),
         })
     }
 
@@ -1274,7 +1281,17 @@ impl PostgresStorage {
 
     /// The durability engine's store over this catalog.
     pub fn durable_store(&self) -> PostgresDurableStore {
-        PostgresDurableStore::new(self.pool.clone(), self.fence.clone())
+        PostgresDurableStore::new(
+            self.pool.clone(),
+            self.fence.clone(),
+            self.durable_reserve.clone(),
+        )
+    }
+
+    /// The durability engine's cross-node signals over this catalog: wake
+    /// hints after commit and node liveness locks.
+    pub fn durable_signals(&self) -> PostgresSignals {
+        PostgresSignals::new(self.durable_store())
     }
 
     /// The store→engine delivery obligation ledger of `kind` over this
@@ -1447,7 +1464,7 @@ mod turn_ingress;
 mod worker_recovery;
 
 pub use backend::PostgresStoreSet;
-pub use durable::PostgresDurableStore;
+pub use durable::{PostgresDurableStore, PostgresSignals};
 use guarded_tx::begin_guarded;
 pub use migrate::{MigrateError, MigrationPhase, MigrationRefusal, MigrationReport, MigrationStep};
 mod connection_budget;

@@ -91,6 +91,26 @@ impl CommitLabel {
     /// `drain.release`: An actor released by a draining node.
     pub const DRAIN_RELEASE: Self = Self::new("drain.release");
 
+    /// The commits a store serves from reserved connection capacity (L8,
+    /// FIG-5178): the node lease's and every terminal and cancel write, so
+    /// a burst of ordinary commits (model results, round outcomes) can
+    /// neither starve a heartbeat into a self-stop nor hold back an ending.
+    pub const RESERVED: [Self; 7] = [
+        Self::HEARTBEAT,
+        Self::REAP,
+        Self::NODE_REGISTER,
+        Self::NODE_RELEASE,
+        Self::TURN_CANCEL,
+        Self::PROCESS_CANCEL,
+        Self::PROCESS_TERMINAL,
+    ];
+
+    /// Whether a store serves this commit from its reserved capacity.
+    #[must_use]
+    pub fn is_reserved(self) -> bool {
+        Self::RESERVED.contains(&self)
+    }
+
     /// Every label in the catalog, L1's lease labels first.
     pub const ALL: [Self; 39] = [
         Self::CLAIM,

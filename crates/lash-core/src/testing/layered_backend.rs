@@ -312,6 +312,10 @@ impl StoreSet for LayeredStoreSet {
         self.inner.durable_store()
     }
 
+    fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>> {
+        self.inner.durable_signals()
+    }
+
     fn binding_identity(&self) -> &StoreBindingId {
         &self.binding
     }

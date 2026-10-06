@@ -1,4 +1,9 @@
 //! Node-lease timings: host configuration, validated once.
+//!
+//! The defaults are the PostgreSQL measurement's (S2, FIG-5167): a 3 s
+//! heartbeat against a 15 s lease, a 10 s self-stop, a 2 s reap sweep, and a
+//! claim poll that backs off from 25 ms to a 250 ms ceiling while claims come
+//! back empty, so a lost wake hint costs at most a quarter second.
 
 use std::time::Duration;
 
@@ -16,8 +21,14 @@ pub struct LeaseSettings {
     pub self_stop_after: Duration,
     /// How often a node reaps dead nodes.
     pub reap_every: Duration,
-    /// How often a node polls for claimable actors.
+    /// The claim poll's ceiling: how long an idle node waits between claims,
+    /// and how long an owner waits for mail with no hint. A lost wake costs
+    /// at most this.
     pub claim_poll: Duration,
+    /// The claim poll's floor: how soon a node claims again after a claim
+    /// that took work. Each empty claim doubles the wait up to
+    /// `claim_poll`; a wake hint claims at once.
+    pub claim_backoff: Duration,
 }
 
 impl Default for LeaseSettings {
@@ -27,7 +38,8 @@ impl Default for LeaseSettings {
             heartbeat_every: Duration::from_secs(3),
             self_stop_after: Duration::from_secs(10),
             reap_every: Duration::from_secs(2),
-            claim_poll: Duration::from_secs(1),
+            claim_poll: Duration::from_millis(250),
+            claim_backoff: Duration::from_millis(25),
         }
     }
 }
@@ -61,6 +73,14 @@ pub enum LeaseConfigError {
         /// The lease lifetime.
         ttl: Duration,
     },
+    /// The claim backoff's floor is above its ceiling.
+    #[error("claim_backoff ({claim_backoff:?}) must not exceed claim_poll ({claim_poll:?})")]
+    BackoffAbovePoll {
+        /// The floor.
+        claim_backoff: Duration,
+        /// The ceiling.
+        claim_poll: Duration,
+    },
     /// A timing does not fit a stored millisecond count.
     #[error("lease timing `{field}` is too large")]
     TooLarge {
@@ -89,6 +109,7 @@ impl LeaseSettings {
             ("self_stop_after", self.self_stop_after),
             ("reap_every", self.reap_every),
             ("claim_poll", self.claim_poll),
+            ("claim_backoff", self.claim_backoff),
         ] {
             if value.as_millis() == 0 {
                 return Err(LeaseConfigError::BelowResolution { field });
@@ -107,6 +128,12 @@ impl LeaseSettings {
             return Err(LeaseConfigError::SelfStopNotBeforeExpiry {
                 self_stop_after: self.self_stop_after,
                 ttl: self.ttl,
+            });
+        }
+        if self.claim_backoff > self.claim_poll {
+            return Err(LeaseConfigError::BackoffAbovePoll {
+                claim_backoff: self.claim_backoff,
+                claim_poll: self.claim_poll,
             });
         }
         Ok(LeaseConfig { settings: self })
@@ -161,6 +188,18 @@ mod tests {
         assert!(matches!(
             settings.validate(),
             Err(LeaseConfigError::HeartbeatNotBeforeSelfStop { .. })
+        ));
+    }
+
+    #[test]
+    fn the_claim_backoff_stays_under_its_ceiling() {
+        let settings = LeaseSettings {
+            claim_backoff: Duration::from_millis(500),
+            ..LeaseSettings::default()
+        };
+        assert!(matches!(
+            settings.validate(),
+            Err(LeaseConfigError::BackoffAbovePoll { .. })
         ));
     }
 

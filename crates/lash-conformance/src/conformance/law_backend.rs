@@ -142,6 +142,10 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("durable store")
     }
 
+    fn durable_signals(&self) -> Option<Arc<dyn lash_core::durable_port::Signals>> {
+        None
+    }
+
     fn worker_recovery(&self) -> Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore> {
         Self::no_second_substrate("worker recovery accounting")
     }
