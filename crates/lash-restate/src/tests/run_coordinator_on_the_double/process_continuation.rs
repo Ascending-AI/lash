@@ -8,6 +8,7 @@ use crate::process::{
     RestateProcessRunner, RestateProcessWorkflowInput, RestateProcessWorkflowOutput,
     RestateProcessWorkflowPayload, SegmentStarted,
 };
+use crate::realization::LashToolRealization as _;
 use lash_core::facade_support::SystemClock;
 use lash_core::tool_run::{
     AggregateConsumer, AggregateLeaf, AggregatePlan, MaterialBundle, MaterialHolder, MaterialOwner,
@@ -351,6 +352,17 @@ impl World {
                             super::super::test_restate_authority_id(),
                             super::super::test_build_generation(),
                             &crate::services::DEFAULT_NAMESPACE,
+                        )
+                        .serve(),
+                    )
+                    // A final that declares intents realizes them in their
+                    // own invocation (FIG-4987).
+                    .bind(
+                        crate::realization::LashToolRealizationImpl::new(
+                            Arc::clone(&runner.probe) as Arc<dyn lash_core::tool_dispatch::ToolRealizer>,
+                            super::super::test_restate_authority_id(),
+                            super::super::test_build_generation(),
+                            crate::RestateNamespace::default(),
                         )
                         .serve(),
                     )
