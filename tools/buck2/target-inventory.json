@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 54,
-  "cargo_target_count": 218,
+  "cargo_target_count": 219,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_122c210f[static]",
     "//crates/lash-conformance:lash-conformance__fv_1e77b00c[static]",
@@ -256,6 +256,8 @@
     "//crates/lash-perf:lash-perf__fv_d3353e2c[static]",
     "//crates/lash-perf:lash-perf__unit_test__fv_a4dca5e6",
     "//crates/lash-perf:lash-perf__unit_test__fv_d3353e2c",
+    "//crates/lash-perf:postgres-substrate__bin__fv_a4dca5e6",
+    "//crates/lash-perf:postgres-substrate__bin__fv_d3353e2c",
     "//crates/lash-perf:tool_batch_baseline__bin__fv_a4dca5e6",
     "//crates/lash-perf:tool_batch_baseline__bin__fv_d3353e2c",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_a4dca5e6",
@@ -1353,6 +1355,8 @@
     "//crates/lash-perf:lash-perf__fv_d3353e2c[check]",
     "//crates/lash-perf:lash-perf__unit_test__fv_a4dca5e6[check]",
     "//crates/lash-perf:lash-perf__unit_test__fv_d3353e2c[check]",
+    "//crates/lash-perf:postgres-substrate__bin__fv_a4dca5e6[check]",
+    "//crates/lash-perf:postgres-substrate__bin__fv_d3353e2c[check]",
     "//crates/lash-perf:tool_batch_baseline__bin__fv_a4dca5e6[check]",
     "//crates/lash-perf:tool_batch_baseline__bin__fv_d3353e2c[check]",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_a4dca5e6[check]",
@@ -2450,6 +2454,8 @@
     "//crates/lash-perf:lash-perf__fv_d3353e2c",
     "//crates/lash-perf:lash-perf__unit_test__fv_a4dca5e6",
     "//crates/lash-perf:lash-perf__unit_test__fv_d3353e2c",
+    "//crates/lash-perf:postgres-substrate__bin__fv_a4dca5e6",
+    "//crates/lash-perf:postgres-substrate__bin__fv_d3353e2c",
     "//crates/lash-perf:tool_batch_baseline__bin__fv_a4dca5e6",
     "//crates/lash-perf:tool_batch_baseline__bin__fv_d3353e2c",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_a4dca5e6",
@@ -20277,6 +20283,26 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash-perf:lash-perf__unit_test__fv_d3353e2c",
+      "package": "lash-perf"
+    },
+    {
+      "build_label": "//crates/lash-perf:postgres-substrate__bin__fv_a4dca5e6",
+      "check_label": "//crates/lash-perf:postgres-substrate__bin__fv_a4dca5e6[check]",
+      "clippy_label": "//crates/lash-perf:postgres-substrate__bin__fv_a4dca5e6__clippy[clippy.txt]",
+      "features": [],
+      "kind": "bin",
+      "label": "//crates/lash-perf:postgres-substrate__bin__fv_a4dca5e6",
+      "package": "lash-perf"
+    },
+    {
+      "build_label": "//crates/lash-perf:postgres-substrate__bin__fv_d3353e2c",
+      "check_label": "//crates/lash-perf:postgres-substrate__bin__fv_d3353e2c[check]",
+      "clippy_label": "//crates/lash-perf:postgres-substrate__bin__fv_d3353e2c__clippy[clippy.txt]",
+      "features": [
+        "dhat-heap"
+      ],
+      "kind": "bin",
+      "label": "//crates/lash-perf:postgres-substrate__bin__fv_d3353e2c",
       "package": "lash-perf"
     },
     {
@@ -49442,6 +49468,8 @@
       "//crates/lash-perf:lash-perf__fv_d3353e2c",
       "//crates/lash-perf:lash-perf__unit_test__fv_a4dca5e6",
       "//crates/lash-perf:lash-perf__unit_test__fv_d3353e2c",
+      "//crates/lash-perf:postgres-substrate__bin__fv_a4dca5e6",
+      "//crates/lash-perf:postgres-substrate__bin__fv_d3353e2c",
       "//crates/lash-perf:tool_batch_baseline__bin__fv_a4dca5e6",
       "//crates/lash-perf:tool_batch_baseline__bin__fv_d3353e2c",
       "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_a4dca5e6",
@@ -50538,7 +50566,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_b81ca3f5"
     ]
   },
-  "generated_label_count": 285,
+  "generated_label_count": 286,
   "packages": [
     {
       "declared_features": [
@@ -51415,6 +51443,7 @@
         "serde",
         "serde_json",
         "sha2",
+        "sqlx",
         "stats_alloc",
         "tempfile",
         "tokio",
@@ -51462,6 +51491,15 @@
           "clippy_label": "//crates/lash-perf:lash-perf__bin__unit_test__clippy[clippy.txt]",
           "kind": "bin-unit-test",
           "label": "//crates/lash-perf:lash-perf__bin__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-perf:postgres-substrate__bin",
+          "cargo": "postgres-substrate",
+          "check_label": "//crates/lash-perf:postgres-substrate__bin[check]",
+          "clippy_label": "//crates/lash-perf:postgres-substrate__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//crates/lash-perf:postgres-substrate__bin",
           "tags": []
         },
         {
@@ -56111,6 +56149,7 @@
     "//crates/lash-perf:lash-perf__bin",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__unit_test",
+    "//crates/lash-perf:postgres-substrate__bin",
     "//crates/lash-perf:tool_batch_baseline__bin",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
     "//crates/lash-perf:vm-worker-matrix__bin",
@@ -56398,6 +56437,7 @@
     "//crates/lash-perf:lash-perf__bin[check]",
     "//crates/lash-perf:lash-perf__bin__unit_test[check]",
     "//crates/lash-perf:lash-perf__unit_test[check]",
+    "//crates/lash-perf:postgres-substrate__bin[check]",
     "//crates/lash-perf:tool_batch_baseline__bin[check]",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test[check]",
     "//crates/lash-perf:vm-worker-matrix__bin[check]",
@@ -56684,6 +56724,7 @@
     "//crates/lash-perf:lash-perf__bin__clippy[clippy.txt]",
     "//crates/lash-perf:lash-perf__bin__unit_test__clippy[clippy.txt]",
     "//crates/lash-perf:lash-perf__unit_test__clippy[clippy.txt]",
+    "//crates/lash-perf:postgres-substrate__bin__clippy[clippy.txt]",
     "//crates/lash-perf:tool_batch_baseline__bin__clippy[clippy.txt]",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__clippy[clippy.txt]",
     "//crates/lash-perf:vm-worker-matrix__bin__clippy[clippy.txt]",
@@ -56970,6 +57011,7 @@
     "//crates/lash-perf:lash-perf__bin",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__unit_test",
+    "//crates/lash-perf:postgres-substrate__bin",
     "//crates/lash-perf:tool_batch_baseline__bin",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
     "//crates/lash-perf:vm-worker-matrix__bin",
@@ -57256,6 +57298,7 @@
     "//crates/lash-perf:lash-perf__bin",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__unit_test",
+    "//crates/lash-perf:postgres-substrate__bin",
     "//crates/lash-perf:tool_batch_baseline__bin",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
     "//crates/lash-perf:vm-worker-matrix__bin",

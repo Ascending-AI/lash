@@ -1031,6 +1031,7 @@ PACKAGE_DEPS = {
             "serde": "//third-party/rust:p0331",
             "serde_json": "//third-party/rust:p0338",
             "sha2": "//third-party/rust:p0345",
+            "sqlx": "//third-party/rust:p0361",
             "stats_alloc": "//third-party/rust:p0369",
             "tokio": "//third-party/rust:p0399",
             "tokio_util": "//third-party/rust:p0405",

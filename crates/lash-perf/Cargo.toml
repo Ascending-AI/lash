@@ -27,6 +27,11 @@ name = "vm-worker-matrix"
 path = "src/bin/vm_worker_matrix.rs"
 test = false
 
+[[bin]]
+name = "postgres-substrate"
+path = "src/bin/postgres_substrate.rs"
+test = false
+
 [lints]
 workspace = true
 
@@ -70,6 +75,7 @@ crc32fast = "=1.5.0"
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres"] }
 stats_alloc = "0.1"
 dhat = { version = "0.3", optional = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
