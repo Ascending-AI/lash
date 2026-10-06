@@ -954,7 +954,6 @@
     "tests::response_phase_replay::an_unavailable_recorded_callback_refuses_before_any_callback": 1,
     "tests::response_phase_replay::recorded_callback_order_survives_reordered_installation": 1,
     "tests::response_phase_replay::stream_state_pairs_multiple_callbacks_of_one_plugin_on_cold_replay": 1,
-    "tests::send_handle::a_journaled_send_outcome_requires_the_data_owned_by_its_variant": 1,
     "tests::tool_intent_ingress::a_digest_only_start_redrives_without_republishing_its_environment": 69,
     "tests::tool_intent_ingress::crash_after_admission_redrives_to_exactly_one_realization": 99,
     "tests::tool_intent_ingress::distinct_host_trigger_declarations_create_two_occurrences_and_redrive_exactly_once": 130,

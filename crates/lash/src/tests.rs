@@ -157,6 +157,5 @@ pub(crate) use harness::{
 mod aggregate_oracle;
 mod plugin_reopen;
 mod response_phase_replay;
-mod send_handle;
 mod tool_intent_ingress;
 mod turn_streaming;

@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1145 rows over 708 files, 3304 laws.
-# By class: mechanical 142, semantic 99, delete 589, replace 315.
-# By lane: L1b 11, L5 2, L7p 8, L9b 59, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49, L4 7.
-# By status: todo 492, ported 40, deleted 613.
+# 1152 rows over 708 files, 3304 laws.
+# By class: mechanical 142, semantic 99, delete 596, replace 315.
+# By lane: L1b 11, L5 2, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49, L4 7.
+# By status: todo 491, ported 40, deleted 621.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -1031,8 +1031,6 @@ class = "mechanical"
 lane = "L9b"
 laws = [
   "over_budget_intent_batch_refuses_every_intent_and_executes_zero_commands",
-  "execution_context_attempt_dispatch_binds_the_direct_client",
-  "prepared_attempt_runner_dispatch_binds_the_direct_client",
 ]
 disposition = "port"
 status = "todo"
@@ -1143,6 +1141,34 @@ disposition = "subject-deleted"
 status = "deleted"
 
 [[row]]
+path = "crates/lash-core/tests/runtime/tests/attempt_atomicity.rs"
+test = "execution_context_attempt_dispatch_binds_the_direct_client"
+area = "attempts"
+needs = ["turn", "round"]
+class = "delete"
+lane = "L9b"
+laws = [
+  "execution_context_attempt_dispatch_binds_the_direct_client",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the binding was observed only through the attempt crossing sentinel's ledger, which I0 (FIG-5194) deleted with the effect controller"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/attempt_atomicity.rs"
+test = "prepared_attempt_runner_dispatch_binds_the_direct_client"
+area = "attempts"
+needs = ["turn", "round"]
+class = "delete"
+lane = "L9b"
+laws = [
+  "prepared_attempt_runner_dispatch_binds_the_direct_client",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the binding was observed only through the attempt crossing sentinel's ledger, which I0 (FIG-5194) deleted with the effect controller"
+
+[[row]]
 path = "crates/lash-core/tests/runtime/tests/child_sessions.rs"
 test = "*"
 area = "child-sessions"
@@ -1184,8 +1210,6 @@ class = "mechanical"
 lane = "L9b"
 laws = [
   "turn_effect_envelope_does_not_carry_checkpoint_payload",
-  "controller_rejection_fails_turn_explicitly",
-  "wrong_controller_outcome_fails_turn_explicitly",
   "start_exec_without_code_executor_stops_as_runtime_error",
   "a_recorded_sync_failure_fails_the_turn_under_its_causes_code",
   "direct_concurrency_requires_keys_and_releases_unkeyed_guard",
@@ -1259,6 +1283,34 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/effect.rs"
+test = "controller_rejection_fails_turn_explicitly"
+area = "effect-seam"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = [
+  "controller_rejection_fails_turn_explicitly",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "a test-injected effect controller that refuses or answers the wrong outcome; I0 (FIG-5194) made ActorContext the one concrete effect context, so no controller can be injected (substrate-seams S1)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/effect.rs"
+test = "wrong_controller_outcome_fails_turn_explicitly"
+area = "effect-seam"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = [
+  "wrong_controller_outcome_fails_turn_explicitly",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "a test-injected effect controller that refuses or answers the wrong outcome; I0 (FIG-5194) made ActorContext the one concrete effect context, so no controller can be injected (substrate-seams S1)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect/fig1127.rs"
@@ -8609,7 +8661,7 @@ laws = [
   "a_journaled_send_outcome_requires_the_data_owned_by_its_variant",
 ]
 disposition = "subject-deleted"
-status = "todo"
+status = "deleted"
 
 [[row]]
 path = "crates/lash/src/tests/send_handle/pins.rs"
@@ -8880,13 +8932,26 @@ needs = ["turn"]
 class = "mechanical"
 lane = "L9b"
 laws = [
-  "a_send_under_another_authority_is_answered_with_the_binding_mismatch",
   "an_admission_writer_refusal_is_recorded_and_reaches_the_sender",
   "refusal_reaches_sender",
   "laws! generates: sqlite_file, postgres",
 ]
 disposition = "port"
 status = "todo"
+
+[[row]]
+path = "crates/lash/src/tests/wrong_authority_redeploy.rs"
+test = "a_send_under_another_authority_is_answered_with_the_binding_mismatch"
+area = "authority"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = [
+  "a_send_under_another_authority_is_answered_with_the_binding_mismatch",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "a second Restate deployment's turn-cancel authority binding (TurnCancelBindingMismatch); nodes over one store share no deployment authority, and L3 (FIG-5172) deletes the binding tables once a turn cancel is mail"
 
 [[row]]
 path = "crates/lash/tests/artifact_referrers_evidence.rs"
@@ -8957,11 +9022,37 @@ laws = [
   "eviction_recovers_the_facade_on_sqlite_memory",
   "eviction_recovers_the_facade_on_sqlite_file",
   "eviction_recovers_the_facade_on_postgres",
-  "eviction_recovers_the_facade_on_native_restate_sqlite",
-  "eviction_recovers_the_facade_on_native_restate_postgres",
 ]
 disposition = "port"
 status = "todo"
+
+[[row]]
+path = "crates/lash/tests/facade_host_wrappers/live_replay_bounds.rs"
+test = "eviction_recovers_the_facade_on_native_restate_sqlite"
+area = "facade"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = [
+  "eviction_recovers_the_facade_on_native_restate_sqlite",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the native Restate tier; the law's SQLite memory, SQLite file and PostgreSQL instances stay on the file's '*' row"
+
+[[row]]
+path = "crates/lash/tests/facade_host_wrappers/live_replay_bounds.rs"
+test = "eviction_recovers_the_facade_on_native_restate_postgres"
+area = "facade"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = [
+  "eviction_recovers_the_facade_on_native_restate_postgres",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the native Restate tier; the law's SQLite memory, SQLite file and PostgreSQL instances stay on the file's '*' row"
 
 [[row]]
 path = "crates/lash/tests/facade_host_wrappers/tiers.rs"
