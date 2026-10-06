@@ -629,7 +629,7 @@ try {
         .iter()
         .filter_map(|record| match record {
             lash::persistence::SessionHistoryRecord::Protocol(event) => {
-                event.payload.get("RlmTrajectoryEntry")
+                event.payload["event"].get("RlmTrajectoryEntry")
             }
             lash::persistence::SessionHistoryRecord::Conversation(_) => None,
         })
