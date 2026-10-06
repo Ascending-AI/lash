@@ -55,6 +55,10 @@ use lash::direct::LlmOutputPart as _;
 use lash::direct::LlmTerminalReason as _;
 use lash::direct::LlmUsage as _;
 use lash::durability::BoundaryReason as _;
+use lash::durability::RunSelectKey as _;
+use lash::durability::RunSelectValue as _;
+use lash::durability::RunSelectable as _;
+use lash::durability::SelectKey as _;
 use lash::observe::InMemoryLiveReplayStore as _;
 use lash::persistence::CheckpointKind as _;
 use lash::persistence::DurabilityTier as _;
@@ -369,10 +373,11 @@ mod http_transport_inventory {
 // home fails here, in lash CI, instead of in a host's pin bump.
 //
 // The parsers are deliberately small and textual, matching the style of
-// `tests/integration/one_home.rs`; each test asserts the size of the set it derived so a
+// `tests/integration/one_home.rs`; both laws share the export scanner below.
+// Each test asserts the size of the set it derived so a
 // broken parser fails loudly instead of vacuously passing.
 
-mod whole_module_coverage {
+pub(super) mod whole_module_coverage {
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
 
@@ -574,15 +579,24 @@ mod whole_module_coverage {
         (names, external_globs)
     }
 
-    /// Facade re-exports grouped by module home: `(leaf names, glob prefixes)`
-    /// per enclosing `pub mod` path in `src/lib.rs` (`"root"` at file scope).
-    /// Mirrors the `collect` logic of `tests/integration/one_home.rs`.
-    fn facade_exports() -> BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)> {
-        let src = uncommented(&read("src/lib.rs"));
+    type ExportMap = BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)>;
+
+    /// Facade re-exports grouped by their public module path, following file
+    /// modules as well as inline modules (`"root"` at crate scope).
+    pub(crate) fn facade_exports() -> ExportMap {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut out = BTreeMap::new();
+        collect_facade_exports(&read("src/lib.rs"), &dir, "", &mut out);
+        out
+    }
+
+    fn collect_facade_exports(src: &str, dir: &Path, home: &str, out: &mut ExportMap) {
+        let src = uncommented(src);
         let bytes = src.as_bytes();
 
         // Inline `pub mod NAME { .. }` spans.
         let mut ranges: Vec<(String, usize, usize)> = Vec::new();
+        let mut file_modules = Vec::new();
         let mut search = 0;
         while let Some(rel) = src[search..].find("pub mod ") {
             let start = search + rel;
@@ -608,6 +622,8 @@ mod whole_module_coverage {
                     k += 1;
                 }
                 ranges.push((name, start, k));
+            } else if j < bytes.len() {
+                file_modules.push((name, start));
             }
             search = start + 8;
         }
@@ -616,25 +632,46 @@ mod whole_module_coverage {
             let mut chain: Vec<&(String, usize, usize)> =
                 ranges.iter().filter(|r| r.1 <= pos && pos <= r.2).collect();
             chain.sort_by_key(|r| r.1);
-            if chain.is_empty() {
+            let mut path = Vec::new();
+            if !home.is_empty() {
+                path.push(home);
+            }
+            path.extend(chain.iter().map(|r| r.0.as_str()));
+            if path.is_empty() {
                 "root".to_string()
             } else {
-                chain
-                    .iter()
-                    .map(|r| r.0.as_str())
-                    .collect::<Vec<_>>()
-                    .join("::")
+                path.join("::")
             }
         };
-
-        let mut out: BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
         for (pos, body) in pub_use_statements(&src) {
             let (leaves, globs) = use_leaves_and_globs(&body);
             let entry = out.entry(module_for(pos)).or_default();
             entry.0.extend(leaves);
             entry.1.extend(globs);
         }
-        out
+        for (name, pos) in file_modules {
+            let parent = module_for(pos);
+            let parent = if parent == "root" { "" } else { &parent };
+            let local_parent = parent
+                .strip_prefix(home)
+                .unwrap_or(parent)
+                .trim_start_matches("::");
+            let module_dir = dir.join(local_parent.replace("::", "/"));
+            let file = module_dir.join(format!("{name}.rs"));
+            let file = if file.exists() {
+                file
+            } else {
+                module_dir.join(&name).join("mod.rs")
+            };
+            let sub = std::fs::read_to_string(&file)
+                .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
+            let home = if parent.is_empty() {
+                name.clone()
+            } else {
+                format!("{parent}::{name}")
+            };
+            collect_facade_exports(&sub, &module_dir.join(name), &home, out);
+        }
     }
 
     /// Assert `facade_module` re-exports every public item of the leaf module
@@ -776,6 +813,34 @@ mod whole_module_coverage {
         out
     }
 
+    fn exported_item_bodies(src: &str, dir: &Path) -> BTreeMap<String, String> {
+        let src = uncommented(src);
+        let mut bodies = item_bodies(&src);
+        let mut visited = BTreeSet::new();
+        for (pos, body) in pub_use_statements(&src) {
+            if depth_at(&src, pos) != 0 {
+                continue;
+            }
+            let prefix = body.trim().split("::").next().unwrap_or("");
+            if !visited.insert(prefix.to_string()) {
+                continue;
+            }
+            let file = dir.join(format!("{prefix}.rs"));
+            let modrs = dir.join(prefix).join("mod.rs");
+            let file = if file.exists() {
+                file
+            } else if modrs.exists() {
+                modrs
+            } else {
+                continue;
+            };
+            let sub = std::fs::read_to_string(&file)
+                .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
+            bodies.extend(exported_item_bodies(&sub, &dir.join(prefix)));
+        }
+        bodies
+    }
+
     #[test]
     fn trace_event_reachable_types_are_nameable() {
         // Every type reachable from a public `TraceEvent` field must be
@@ -783,7 +848,8 @@ mod whole_module_coverage {
         // variant but cannot name the payload type cannot write a function
         // over it or build one in a test.
         let src = read("../lash-trace/src/lib.rs");
-        let bodies = item_bodies(&src);
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../lash-trace/src");
+        let bodies = exported_item_bodies(&src, &dir);
         let mut defined: BTreeSet<String> = bodies.keys().cloned().collect();
         // `pub use` re-exports name types defined in sibling crates; they are
         // reachable and must have a facade home, but their own fields are out
