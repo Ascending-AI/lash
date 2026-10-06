@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import ast
-import datetime as dt
 import functools
 import json
 import os
@@ -23,7 +22,6 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CHECKOUT_STEP = ROOT / "scripts" / "ci" / "checkout-step.sh"
-CONFIDENCE_WORKFLOW = ROOT / ".github" / "workflows" / "confidence.yml"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_CACHE_WORKFLOW = ROOT / ".github" / "workflows" / "release-cache.yml"
@@ -359,42 +357,6 @@ def shell_logical_commands(script: str) -> list[str]:
 
 
 class ConfidenceGateCiContractTest(unittest.TestCase):
-    def test_full_stage_jobs_share_exactly_one_build_artifact(self):
-        jobs = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())["jobs"]
-        # Only these stages run the prebuilt tests; coverage and cargo-mutants
-        # build in their own target trees and need only the tools.
-        build_consumers = {"confidence-harnesses", "confidence-generated", "confidence-minimizer",
-                           "confidence-backends", "sim-search"}
-        consumers = build_consumers | {"confidence-coverage", "confidence-mutation-core",
-                                       "confidence-mutation-sim", "confidence-mutation-packages-rotating"}
-        self.assertEqual(consumers | {"confidence", "confidence-build", "confidence-conclusion", "append-vec-miri"}, set(jobs))
-        self.assertNotIn("needs", jobs["append-vec-miri"])
-        self.assertNotIn("download-artifact@", str(jobs["append-vec-miri"]["steps"]))
-        build = "confidence-build-${{ github.sha }}-${{ github.run_attempt }}"
-        tools = "confidence-tools-${{ github.sha }}-${{ github.run_attempt }}"
-        for artifact in (build, tools):
-            uploads = [s for j in jobs.values() for s in j["steps"]
-                       if "upload-artifact@" in s.get("uses", "") and s["with"]["name"] == artifact]
-            self.assertEqual(1, len(uploads), artifact)
-            self.assertIn(uploads[0], jobs["confidence-build"]["steps"])
-            self.assertEqual("error", uploads[0]["with"]["if-no-files-found"])
-        for job in consumers:
-            with self.subTest(job=job):
-                self.assertEqual("confidence-build", jobs[job]["needs"])
-                downloads = [s for s in jobs[job]["steps"] if "download-artifact@" in s.get("uses", "")]
-                expected = [tools, build] if job in build_consumers else [tools]
-                self.assertEqual(expected, [s["with"]["name"] for s in downloads])
-                self.assertNotIn("rust-cache@", str(jobs[job]["steps"]))
-                self.assertNotIn("continue-on-error", jobs[job])
-        for job in jobs.values():
-            self.assertGreater(job["timeout-minutes"], 0)
-            self.assertLess(job["timeout-minutes"], 360)
-        for job in ("confidence-generated", "sim-search"):
-            self.assertEqual(list(range(1, 10)), jobs[job]["strategy"]["matrix"]["shard"])
-            self.assertIs(False, jobs[job]["strategy"]["fail-fast"])
-        self.assertIn("inputs.lane != 'full'", jobs["confidence"]["if"])
-        self.assertEqual("always()", jobs["confidence-conclusion"]["if"])
-        self.assertIn("scripts/ci/conclusion.py conclusion", str(jobs["confidence-conclusion"]["steps"]))
 
 
     def test_full_stage_partition_calls_every_original_function_once(self):
@@ -439,38 +401,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertEqual(["run", "-p", "lash-sim", "--locked", "--", "run", "--out", "/tmp/evidence/sim",
                               "--profile", "full-random", "--shard", f"{shard}/9"], result.stdout.splitlines())
 
-    def test_confidence_checkout_uses_trigger_sha_in_a_shallow_repository(self):
-        jobs = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())["jobs"]
-        scripts = {next(s["run"] for s in job["steps"] if s["name"] == "Check out repository")
-                   for job in jobs.values()}
-        # Every producer, consumer and conclusion uses the identical checkout:
-        # the canonical step scripts/test_checkout_step.py holds every workflow to.
-        self.assertEqual(1, len(scripts))
-        script = scripts.pop()
-        self.assertEqual(CHECKOUT_STEP.read_text(), script)
-        self.assertIn('git config gc.auto 0', script)
-        self.assertIn('git checkout --detach --force FETCH_HEAD', script)
-        with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp)
-            remote = root / "repo.git"
-            remote.mkdir()
-            def git(*args):
-                return subprocess.check_output(["git", "-C", str(remote), *args], text=True).strip()
-            git("init", "-q")
-            git("config", "user.name", "Samuel Galanakis")
-            git("config", "user.email", "47306720+SamGalanakis@users.noreply.github.com")
-            git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "Add fixture")
-            sha = git("rev-parse", "HEAD")
-            git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "Advance fixture")
-            clone = root / "checkout"
-            clone.mkdir()
-            env = dict(os.environ, GITHUB_SERVER_URL=root.as_uri(), GITHUB_REPOSITORY="repo",
-                       GITHUB_SHA=sha, CHECKOUT_TOKEN="fixture-token")
-            result = subprocess.run(["bash", "-euc", script], cwd=clone, env=env, capture_output=True, text=True)
-            self.assertEqual(0, result.returncode, result.stderr)
-            head = subprocess.check_output(["git", "-C", str(clone), "rev-parse", "HEAD"], text=True).strip()
-            self.assertEqual(sha, head)
-            self.assertTrue((clone / ".git/shallow").exists())
 
     def test_worker_profiles_retain_workspace_outputs_without_changing_segments(self):
         jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
@@ -931,120 +861,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn('("push", "workflow_dispatch")', release)
         self.assertIn("no full-profile (workflow_dispatch) CI ", release)
 
-    def test_ci_shards_fast_confidence_not_broad_replay_backend(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
-        gate = GATE.read_text(encoding="utf-8")
-
-        self.assertNotIn("confidence-fast:", workflow)
-        self.assertNotIn("confidence-fast-summary:", workflow)
-        self.assertIn("confidence:", confidence_workflow)
-        self.assertNotIn("Confidence gate fast lane", workflow)
-        self.assertNotIn("bash scripts/confidence-gate.sh fast\n", workflow)
-        for shard in FAST_SHARDS:
-            self.assertIn(shard, gate)
-
-        min_seeds = shell_int_constant(gate, "SIM_SEARCH_MIN_SEEDS")
-        min_boundaries = shell_int_constant(gate, "SIM_SEARCH_MIN_MAX_BOUNDARIES")
-        self.assertGreaterEqual(min_seeds, 4)
-        self.assertGreaterEqual(min_boundaries, 256)
-
-    def test_ci_confidence_out_root_matches_every_workflow_artifact_path(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
-        expected_env = (
-            "LASH_CONFIDENCE_OUT_DIR: "
-            "${{ github.workspace }}/target/confidence"
-        )
-        self.assertIn(expected_env, workflow)
-        self.assertIn(expected_env, confidence_workflow)
-
-        ci_root = ROOT / "target" / "confidence"
-        ci_env = {
-            **os.environ,
-            "CI": "true",
-            "GITHUB_ACTIONS": "true",
-            "GITHUB_WORKSPACE": str(ROOT),
-            "LASH_CONFIDENCE_OUT_DIR": str(ci_root),
-            "LASH_CONFIDENCE_MUTATION_SCOPE": "full",
-            "LASH_CONFIDENCE_COVERAGE_SCOPE": "run",
-        }
-
-        def computed_artifact_dir(selector: str) -> pathlib.Path:
-            result = subprocess.run(
-                ["bash", str(GATE), "--dry-run", selector],
-                cwd=ROOT,
-                env=ci_env,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            match = re.search(r"^Artifacts: (.+)$", result.stdout, re.MULTILINE)
-            self.assertIsNotNone(match, result.stdout)
-            return pathlib.Path(match.group(1))
-
-        computed = {
-            f"fast:{shard}": computed_artifact_dir(f"fast:{shard}")
-            for shard in FAST_SHARDS
-        }
-        computed["fast:summary"] = computed_artifact_dir("fast:summary")
-        computed["full"] = computed_artifact_dir("full")
-        computed["sim-search:2/9"] = computed_artifact_dir("sim-search:2/9")
-
-        for shard in FAST_SHARDS:
-            self.assertEqual(
-                computed[f"fast:{shard}"], ci_root / "fast" / shard
-            )
-        self.assertEqual(computed["fast:summary"], ci_root / "fast")
-        self.assertEqual(computed["full"], ci_root / "full")
-        self.assertEqual(
-            computed["sim-search:2/9"], ci_root / "sim-search" / "2-of-9"
-        )
-
-        # Pair each workflow-consumed artifact path with the selector output it
-        # is meant to consume. This deliberately parses only `path:` values:
-        # command-local staging paths are not gate outputs.
-        upload_steps = [
-            step
-            for source in (workflow, confidence_workflow)
-            for step in re.split(
-                r"(?=^      - (?:name|uses):)", source, flags=re.MULTILINE
-            )
-            if "uses: actions/upload-artifact@" in step
-        ]
-        consumed_paths = [
-            match.group(1)
-            for step in upload_steps
-            for match in re.finditer(
-                r"^\s+path:\s+(target/confidence.+)$", step, re.MULTILINE
-            )
-        ]
-        computed_relative = {
-            selector: path.relative_to(ROOT).as_posix()
-            for selector, path in computed.items()
-        }
-        expected_consumed_paths = {
-            str(pathlib.PurePosixPath(computed_relative["full"]).parent / "**"),
-            str(
-                pathlib.PurePosixPath(computed_relative["sim-search:2/9"]).parent
-                / "**"
-            ),
-        }
-        expected_consumed_paths.update(
-            f"target/confidence/stages/{stage}/**"
-            for stage in ("harnesses", "generated-${{ matrix.shard }}", "minimizer", "backends",
-                           "coverage", "mutation-core", "mutation-sim-${{ matrix.artifact }}",
-                           "mutation-packages-rotating-${{ matrix.package }}-${{ matrix.shard }}")
-        )
-        self.assertCountEqual(consumed_paths, expected_consumed_paths)
-
-        self.assertNotIn("path: target/confidence/fast/${{ matrix.shard }}", workflow)
-        self.assertNotIn("  confidence-fast:", workflow)
-        self.assertIn("path: target/confidence/**", confidence_workflow)
-        self.assertIn(
-            "path: target/confidence/sim-search/**", confidence_workflow
-        )
 
     def test_store_properties_have_reproducible_pr_and_soak_budgets(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
@@ -1432,47 +1248,16 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             ):
                 self.assertIn(argument, rows[0])
 
-    def test_failure_artifacts_are_attempt_qualified(self) -> None:
+    def test_perf_failure_artifacts_are_attempt_qualified(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
         perf_workflow = PERF_WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
 
-        self.assertIn(
-            "confidence-artifacts-attempt-${{ github.run_attempt }}",
-            confidence_workflow,
-        )
-        self.assertIn(
-            "confidence-sim-search-${{ matrix.shard }}-attempt-${{ github.run_attempt }}",
-            confidence_workflow,
-        )
         self.assertIn("if: always()", perf_workflow)
         self.assertIn(
             "perf-guard-full-attempt-${{ github.run_attempt }}", perf_workflow
         )
-        self.assertIn(
-            '"artifact_name": "confidence-artifacts-attempt-${GITHUB_RUN_ATTEMPT:-local}"',
-            gate,
-        )
 
-    def test_failed_confidence_attempt_keeps_original_artifacts(self) -> None:
-        workflow = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())
-        uploads = [step for job in workflow["jobs"].values() for step in job.get("steps", [])
-                   if step.get("uses", "").startswith("actions/upload-artifact@")]
-        self.assertGreater(len(uploads), 0)
-        for step in uploads:
-            name = step["with"]["name"]
-            self.assertIn("${{ github.run_attempt }}", name)
-            self.assertNotEqual(step["with"].get("overwrite", False), True)
-            with tempfile.TemporaryDirectory() as directory:
-                root = pathlib.Path(directory)
-                names = [name.replace("${{ github.run_attempt }}", str(attempt)) for attempt in (1, 2)]
-                first = root / names[0]
-                second = root / names[1]
-                first.write_bytes(b"original failing log and history")
-                second.write_bytes(b"later green evidence")
-                self.assertEqual(first.read_bytes(), b"original failing log and history")
-                self.assertEqual(second.read_bytes(), b"later green evidence")
 
     def test_scenario_review_includes_untracked_sources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1686,252 +1471,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("if: failure() && matrix.artifact != 'none'", functional)
         self.assertIn("Upload functional E2E failure artifacts", functional)
 
-    def test_sim_search_lane_is_sharded_and_budgeted_at_plan_targets(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-
-        required_gate_snippets = [
-            "run_sim_search_lane()",
-            'sim_search_shard="${requested_lane#sim-search:}"',
-            '"schema": "lash.confidence.sim-search-run.v1"',
-            'search_seeds="${LASH_SIM_DEFAULT_SEEDS:-256}"',
-            'search_max_boundaries="${LASH_SIM_DEFAULT_MAX_BOUNDARIES:-500}"',
-            # Re-pinned from 5000 (FIG-3222): every shard of run 35091816279 was
-            # cancelled at the 100-minute job cap without writing a search
-            # summary, so 5000 was a number the lane never reached. The gate
-            # carries the sizing arithmetic.
-            'search_seeds="${LASH_SIM_FULL_SEEDS:-$SIM_SEARCH_FULL_SEEDS}"',
-            'search_max_boundaries="${LASH_SIM_FULL_MAX_BOUNDARIES:-2000}"',
-            'local search_shard="${LASH_SIM_SHARD:-1/1}"',
-            "--mode search",
-            '--shard "$search_shard"',
-            # Shards are bounded by wall clock, not just the seed estimate: a
-            # shard that runs out of time still writes a summary.
-            "sim_search_pass_budget_seconds",
-            "--time-budget",
-            '"reached_seeds": counts.get("reached_seeds")',
-            'counts.get("reached_seeds") or 0) < min_seeds',
-            "sim search lane must run in search mode",
-        ]
-        for snippet in required_gate_snippets:
-            self.assertIn(snippet, gate)
-
-        # The fast lane is the merge gate: its generated sim lane keeps the
-        # binary's fast-random defaults and never runs the search lane.
-        self.assertIn('if [ "$lane" = "fast" ]; then\n    return\n  fi', gate)
-        self.assertNotIn("scheduled-depth", gate)
-        self.assertNotIn("BROAD_SCHEDULED_DEPTH", gate)
-
-        # Weekly full confidence partitions the complete search seed space in
-        # one matrix, including shard 1; generated simulation is separate.
-        required_confidence_snippets = [
-            "sim-search:",
-            'bash scripts/confidence-gate.sh "sim-search:${{ matrix.shard }}/9"',
-            "shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]",
-            "LASH_SIM_SHARD",
-            "${{ matrix.shard }}/9",
-        ]
-        for snippet in required_confidence_snippets:
-            self.assertIn(snippet, confidence_workflow)
-
-        # The per-merge CI workflow must not run search
-        # shards or override sim budgets.
-        self.assertNotIn("sim-search", workflow)
-        self.assertNotIn("LASH_SIM_SHARD", workflow)
-        self.assertNotIn("LASH_SIM_FULL_SEEDS", workflow)
-
-    def test_sim_search_fits_its_job_cap(self) -> None:
-        """Sim-search was cancelled at 100 minutes in run 35091816279.
-
-        The seed budget must fit the cap with the shared-build download
-        counted as the fixed cost it is.
-        """
-        gate = GATE.read_text(encoding="utf-8")
-        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
-
-        # The full lane is sized, not left at a number no shard has reached,
-        # and the wall-clock bound is derived from the job cap minus the
-        # measured fixed cost rather than the seed estimate alone.
-        full_seeds = shell_int_constant(gate, "SIM_SEARCH_FULL_SEEDS")
-        min_seeds = shell_int_constant(gate, "SIM_SEARCH_MIN_SEEDS")
-        job_cap_seconds = shell_int_constant(gate, "SIM_SEARCH_JOB_CAP_SECONDS")
-        setup_seconds = shell_int_constant(gate, "SIM_SEARCH_SETUP_SECONDS")
-        shards = 9
-        per_shard = full_seeds // shards
-        sim_search_cap = int(
-            re.search(
-                r"^    timeout-minutes: (\d+)$",
-                workflow_job_block(confidence_workflow, "sim-search"),
-                re.MULTILINE,
-            ).group(1)
-        )
-        # The gate's job cap is the workflow's timeout-minutes on the
-        # sim-search job, and the setup constant is the measured 25 minutes of
-        # shared-build download/restore plus checkout before the script runs.
-        self.assertEqual(job_cap_seconds, sim_search_cap * 60)
-        self.assertEqual(setup_seconds, 25 * 60)
-        lane_budget_seconds = job_cap_seconds - setup_seconds
-        # Each pass is handed the remaining lane budget divided by the passes
-        # still to run, so the corpus pass inherits the search pass's slack.
-        self.assertIn(
-            "remaining=$((job_cap_seconds - setup_seconds - (SECONDS - script_started_at)))",
-            gate,
-        )
-        self.assertIn('printf \'%s\\n\' "$((remaining / passes_left))"', gate)
-        self.assertIn(
-            'search_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 2)")',
-            gate,
-        )
-        self.assertIn(
-            'corpus_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 1)")',
-            gate,
-        )
-        # The estimate still has to be plausible: a shard runs two search
-        # passes (the search lane and the named regression corpus). Measured
-        # end to end through the gate at 2000 max boundaries, the pair costs
-        # about 105 s of setup plus 112 s per seed.
-        self.assertLessEqual(
-            105 + per_shard * 112,
-            lane_budget_seconds,
-            f"{per_shard} seeds per shard do not fit the {sim_search_cap}-minute cap",
-        )
-        self.assertEqual(full_seeds % shards, 0, "seeds must divide over the shards")
-        self.assertGreater(per_shard, min_seeds)
-
-        # The shard records what it actually cost, so the estimate above is
-        # re-pinned from a measurement rather than re-guessed.
-        self.assertIn('local search_seconds=$((SECONDS - search_started_at))', gate)
-        self.assertIn('"search_seconds": int(search_seconds),', gate)
-        self.assertIn('artifact["corpus_seconds"] = int(corpus_seconds)', gate)
-        self.assertIn('artifact["shard_seconds"]', gate)
-
-    def test_mutation_packages_legs_fit_their_job_cap(self) -> None:
-        """Run 35117123483 cancelled three package legs at the 100-minute cap.
-
-        A cancelled leg writes no verdict at all, and the mutant spaces are
-        far wider than one job can sweep (protocol-rlm alone listed 1,641
-        mutants), so the matrix fans each package out into legs that each
-        judge a bounded slice. The slice index rotates with the run number so
-        successive runs sweep the space instead of re-judging one prefix.
-        """
-        gate = GATE.read_text(encoding="utf-8")
-        stage = (ROOT / "scripts/ci/confidence-stage.sh").read_text(encoding="utf-8")
-        confidence = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())
-        job = confidence["jobs"]["confidence-mutation-packages-rotating"]
-
-        # Every leg is bounded: the stage opts in, the matrix hands each leg a
-        # shard coordinate, and the run number rotates the judged slice.
-        self.assertIn("LASH_MUTATION_PACKAGES_BOUNDED=1", stage)
-        run_step = next(
-            s for s in job["steps"] if s.get("name") == "Run mutation-packages-rotating"
-        )
-        self.assertEqual(
-            "${{ matrix.shard }}/${{ matrix.shards }}",
-            run_step["env"]["LASH_MUTATION_PACKAGES_SHARD"],
-        )
-        self.assertEqual(
-            "${{ github.run_number }}", run_step["env"]["LASH_MUTATION_RUN_INDEX"]
-        )
-
-        # The matrix fans each package into a contiguous 1..legs set of legs.
-        expected_legs = {
-            "lash-internal-core": 2,
-            "lash-internal-lashlang": 4,
-            "lash-internal-protocol-rlm": 4,
-            "lash-internal-protocol-standard": 1,
-            "lash-internal-sqlite-store": 3,
-            "lash-internal-postgres-store": 4,
-        }
-        rows = job["strategy"]["matrix"]["include"]
-        self.assertEqual(sorted(expected_legs), sorted({r["package"] for r in rows}))
-        for package, leg_count in expected_legs.items():
-            legs = [r for r in rows if r["package"] == package]
-            self.assertEqual(
-                list(range(1, leg_count + 1)),
-                sorted(r["shard"] for r in legs),
-                f"{package} legs are not a contiguous 1..{leg_count} set",
-            )
-            self.assertTrue(
-                all(r["shards"] == leg_count for r in legs),
-                f"{package} legs disagree on the leg count",
-            )
-        self.assertIs(False, job["strategy"]["fail-fast"])
-
-        # Legs are distinguishable in job names, out dirs and artifact names,
-        # so one leg's evidence can never overwrite or impersonate another's.
-        upload = next(s for s in job["steps"] if "upload-artifact@" in s.get("uses", ""))
-        self.assertIn("${{ matrix.package }}-${{ matrix.shard }}", upload["with"]["name"])
-        self.assertIn("${{ matrix.package }}-${{ matrix.shard }}", upload["with"]["path"])
-        self.assertIn(
-            "${{ matrix.package }}-${{ matrix.shard }}",
-            run_step["env"]["LASH_CONFIDENCE_OUT_DIR"],
-        )
-        self.assertIn("${{ matrix.package }}-${{ matrix.shard }}", job["name"])
-
-        # The gate counts the space with `cargo mutants --list`, derives the
-        # slice from the leg coordinate plus the run index, and hands it to
-        # cargo-mutants as --shard in both passes.
-        shard_fn = shell_function_body(gate, "mutation_packages_shard")
-        self.assertIn("--list", shard_fn)
-        self.assertIn("LASH_MUTATION_PACKAGES_SHARD", shard_fn)
-        self.assertIn("LASH_MUTATION_RUN_INDEX", shard_fn)
-        for function in ("run_mutation_smoke", "run_mutation_full"):
-            body = shell_function_body(gate, function)
-            self.assertIn('mutation_packages_shard "$package"', body)
-            self.assertIn("--shard", body)
-            self.assertIn('${LASH_MUTATION_PACKAGES_BOUNDED:-0}', body)
-        self.assertIn(
-            "LASH_MUTATION_SMOKE_SHARD", shell_function_body(gate, "run_mutation_smoke")
-        )
-        self.assertIn(
-            "LASH_MUTATION_FULL_SHARD", shell_function_body(gate, "run_mutation_full")
-        )
-        self.assertIn("LASH_MUTATION_PACKAGES_SHARD must be", gate)
-        self.assertIn(
-            "mutation-shard.json", shell_function_body(gate, "run_mutants_recorded")
-        )
-
-        # Budget arithmetic: fixed cost + smoke slice + full slice must fit
-        # the job cap read out of the workflow, at the per-mutant wall clock
-        # run 35117123483 measured at --jobs 2 (smoke at the 180 s cap, full
-        # at the 600 s cap; each slice also pays the unmutated baseline).
-        cap = job["timeout-minutes"]
-        smoke_budget = shell_int_constant(gate, "MUTATION_PACKAGES_SMOKE_MUTANTS")
-        full_budgets = shell_assoc_array(gate, "MUTATION_PACKAGES_FULL_MUTANTS")
-        shell_int_constant(gate, "MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT")
-        self.assertEqual(sorted(expected_legs), sorted(full_budgets))
-        smoke_minutes_per_mutant = {
-            "lash-internal-core": 2.5,
-            "lash-internal-lashlang": 0.8,
-            "lash-internal-protocol-rlm": 1.3,
-            "lash-internal-protocol-standard": 0.2,
-            "lash-internal-sqlite-store": 1.5,
-            "lash-internal-postgres-store": 1.0,
-        }
-        full_minutes_per_mutant = {
-            "lash-internal-core": 4.0,
-            "lash-internal-lashlang": 0.8,
-            "lash-internal-protocol-rlm": 1.3,
-            "lash-internal-protocol-standard": 0.2,
-            "lash-internal-sqlite-store": 1.5,
-            "lash-internal-postgres-store": 4.0,
-        }
-        for package in expected_legs:
-            with self.subTest(package=package):
-                leg_minutes = (
-                    25
-                    + smoke_budget * smoke_minutes_per_mutant[package]
-                    + 8
-                    + int(full_budgets[package]) * full_minutes_per_mutant[package]
-                    + 12
-                )
-                self.assertLessEqual(
-                    leg_minutes,
-                    cap,
-                    f"{package}: {leg_minutes:.0f}-minute leg does not fit "
-                    f"the {cap}-minute cap",
-                )
 
     def test_mutation_packages_bounded_leg_rotates_slices(self) -> None:
         """The leg coordinate plus the run index must pick distinct slices."""
@@ -2206,268 +1745,6 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
                             "selector names its source",
                         )
 
-    def test_weekly_full_claim_requires_complete_mutant_union(self) -> None:
-        """A rotating mutation leg's evidence says rotating, never full.
-
-        The weekly Confidence run selects `full`, but its
-        mutation-packages-rotating stage judges one bounded slice per leg,
-        indexed by leg coordinate and run number. Reserving `full` for a
-        verified complete mutant union at one revision means every artifact
-        that leg writes -- the mutation evidence manifest, the confidence
-        summary, and the per-command shard sidecars -- records the slice and
-        the revision instead of claiming full scope. The unsharded local
-        `full` lane is the only mode that may still claim it, so the control
-        run below keeps that label pinned.
-        """
-        gate = GATE.read_text(encoding="utf-8")
-        stage = (ROOT / "scripts/ci/confidence-stage.sh").read_text(encoding="utf-8")
-        confidence_source = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
-        confidence = yaml.safe_load(confidence_source)
-        revision = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-        ).strip()
-
-        # The stage, the job, and the run summary all name the rotation.
-        self.assertIn("mutation-packages-rotating)", stage)
-        self.assertLess(
-            stage.index("mutation-packages-rotating)"),
-            stage.index("LASH_MUTATION_PACKAGES_BOUNDED=1"),
-        )
-        job = confidence["jobs"]["confidence-mutation-packages-rotating"]
-        self.assertIn("rotating", job["name"])
-        self.assertNotIn("confidence-mutation-packages:", confidence_source)
-        self.assertIn(
-            "LASH_CONFIDENCE_STAGE: mutation-packages-rotating", confidence_source
-        )
-        conclusion = workflow_job_block(confidence_source, "confidence-conclusion")
-        self.assertIn("GITHUB_STEP_SUMMARY", conclusion)
-        self.assertIn("rotating", conclusion)
-        self.assertIn(
-            "GITHUB_STEP_SUMMARY", shell_function_body(gate, "run_mutants_recorded")
-        )
-
-        artifact_paths = (
-            "declare -A confidence_artifact_paths=(\n"
-            + gate.split("declare -A confidence_artifact_paths=(\n", 1)[1].split(
-                "\n)\n", 1
-            )[0]
-            + "\n)"
-        )
-        schedule_table = (
-            "confidence_schedule_table=(\n"
-            + gate.split("confidence_schedule_table=(\n", 1)[1].split("\n)\n", 1)[0]
-            + "\n)"
-        )
-        # shell_function_body, not _definition: the summary writers' heredocs
-        # carry a column-0 `}` (the JSON close), which the definition regex
-        # would read as the function's end.
-        functions = "\n".join(
-            f"{name}() {{\n{shell_function_body(gate, name)}"
-            for name in (
-                "schedule_selector",
-                "schedule_row_matches_area",
-                "schedule_has_area",
-                "schedule_lane_fallback_reason",
-                "artifact_path",
-                "schedule_has_artifact",
-                "scheduled_artifact_path",
-                "existing_artifact_path",
-                "scheduled_existing_artifact_path",
-                "confidence_revision",
-                "bounded_rotation_json",
-                "mutation_recorded_scope",
-                "mutation_testing_label",
-                "mutation_packages_shard",
-                "run_mutation_smoke",
-                "run_mutation_full",
-                "run_mutants_recorded",
-                "mutation_count",
-                "mutation_artifact_json",
-                "full_mutation_suites_complete",
-                "full_mutation_status",
-                "mutation_evidence_status",
-                "coverage_evidence_status",
-                "mutation_evidence_path",
-                "restate_postgres_workers_e2e_status",
-                "write_mutation_evidence_summary",
-                "confidence_class",
-                "write_confidence_summary",
-                "finalize_mutation_gate",
-            )
-        )
-        harness = f"""\
-set -euo pipefail
-{artifact_paths}
-{schedule_table}
-{functions}
-step() {{ :; }}
-require_tool() {{ :; }}
-cargo() {{
-  if [[ "$*" == *--list* ]]; then seq 1 23; return 0; fi
-  return 0
-}}
-lane=full
-area=all
-requested_selector=full
-fast_shard=all
-sim_search_shard=
-mutation_scope=full
-coverage_scope=run
-selected_packages=(pkg-x)
-area_mutation_file_args=()
-out_dir="$1"
-out_root="$1"
-mutation_jobs=2
-mutation_failures=0
-mutation_commands_run=0
-MUTATION_PACKAGES_SMOKE_MUTANTS=12
-MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=4
-declare -A MUTATION_PACKAGES_FULL_MUTANTS=([pkg-x]="5")
-MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'
-run_mutation_smoke
-run_mutation_full
-finalize_mutation_gate
-write_confidence_summary passed
-cp "${{out_dir}}/confidence-summary.json" "${{out_dir}}/confidence-summary-passed.json"
-write_confidence_summary failed
-"""
-        base_env = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.startswith("LASH_") and key != "GITHUB_STEP_SUMMARY"
-        }
-
-        # 23 mutants, smoke budget 12 -> 2 slices, full budget 5 -> 5 slices.
-        # Leg 2/4 of run 7 judges slice ((7-1)*4+1)%denom.
-        expected_smoke_shard = f"{(6 * 4 + 1) % 2}/2"
-        expected_full_shard = f"{(6 * 4 + 1) % 5}/5"
-        with tempfile.TemporaryDirectory() as directory:
-            out_dir = pathlib.Path(directory) / "leg"
-            step_summary = pathlib.Path(directory) / "step-summary.md"
-            step_summary.touch()
-            env = dict(
-                base_env,
-                LASH_MUTATION_PACKAGES_BOUNDED="1",
-                LASH_MUTATION_PACKAGES_SHARD="2/4",
-                LASH_MUTATION_RUN_INDEX="7",
-                GITHUB_STEP_SUMMARY=str(step_summary),
-            )
-            result = subprocess.run(
-                ["bash", "-c", harness, "rotating-leg", str(out_dir)],
-                cwd=ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(0, result.returncode, result.stderr)
-
-            smoke_sidecar = json.loads(
-                (out_dir / "mutants-pkg-x-smoke" / "mutation-shard.json").read_text()
-            )
-            full_sidecar = json.loads(
-                (out_dir / "mutants-pkg-x-full" / "mutation-shard.json").read_text()
-            )
-            self.assertEqual(expected_smoke_shard, smoke_sidecar["shard"])
-            self.assertEqual(expected_full_shard, full_sidecar["shard"])
-            for sidecar in (smoke_sidecar, full_sidecar):
-                rotation = sidecar["bounded_rotation"]
-                self.assertEqual("2/4", rotation["leg"])
-                self.assertEqual("7", rotation["run_index"])
-                self.assertEqual(revision, rotation["revision"])
-                self.assertIs(False, rotation["complete_mutant_union"])
-
-            command_status = json.loads(
-                (out_dir / "mutants-pkg-x-full" / "confidence-status.json").read_text()
-            )
-            self.assertEqual("bounded_rotating", command_status["scope"])
-
-            evidence = json.loads(
-                (out_dir / "mutation-evidence.json").read_text()
-            )
-            self.assertEqual("bounded_rotating", evidence["scope"])
-            self.assertEqual("passed", evidence["status"])
-            self.assertEqual("bounded_rotating_slice", evidence["full_mutation_status"])
-            self.assertEqual("2/4", evidence["bounded_rotation"]["leg"])
-            self.assertEqual(revision, evidence["bounded_rotation"]["revision"])
-            self.assertIs(
-                False, evidence["bounded_rotation"]["complete_mutant_union"]
-            )
-            self.assertIn("rotating", evidence["semantics"])
-            self.assertNotIn("true_full", evidence["semantics"])
-            full_suites = {
-                row["name"]: row for row in evidence["full_mutation_suites"]
-            }
-            self.assertEqual(
-                expected_full_shard, full_suites["pkg-x full mutation"]["shard"]
-            )
-
-            for name in ("confidence-summary-passed.json", "confidence-summary.json"):
-                summary = json.loads((out_dir / name).read_text())
-                with self.subTest(manifest=name):
-                    self.assertEqual(
-                        "bounded_rotating_mutation_leg", summary["confidence_class"]
-                    )
-                    self.assertEqual(
-                        "false", summary["global_full_confidence_claim"]
-                    )
-                    self.assertIn("rotating", summary["mutation_testing"])
-                    self.assertNotIn("true_full", summary["mutation_testing"])
-                    self.assertEqual(
-                        "bounded_rotating_slice", summary["full_mutation_status"]
-                    )
-                    self.assertIs(
-                        False, summary["bounded_rotation"]["complete_mutant_union"]
-                    )
-                    contract = summary["artifact_contract"]["full_lane"]
-                    self.assertEqual(
-                        "bounded_rotating_mutation_leg",
-                        contract["confidence_class"],
-                    )
-                    self.assertEqual(
-                        "false", contract["global_full_confidence_claim"]
-                    )
-                    self.assertEqual(
-                        "bounded_rotating", contract["effective_mutation_scope"]
-                    )
-
-            summary_text = step_summary.read_text(encoding="utf-8")
-            self.assertIn(
-                f"bounded rotating slice `{expected_smoke_shard}`", summary_text
-            )
-            self.assertIn(
-                f"bounded rotating slice `{expected_full_shard}`", summary_text
-            )
-            self.assertIn("leg 2/4, run index 7", summary_text)
-            self.assertIn(revision, summary_text)
-
-        # The unsharded lane is the one place a complete mutant union exists,
-        # so its manifest keeps the true_full labels a rotating leg dropped.
-        with tempfile.TemporaryDirectory() as directory:
-            out_dir = pathlib.Path(directory) / "unbounded"
-            step_summary = pathlib.Path(directory) / "step-summary.md"
-            step_summary.touch()
-            env = dict(base_env, GITHUB_STEP_SUMMARY=str(step_summary))
-            result = subprocess.run(
-                ["bash", "-c", harness, "unbounded", str(out_dir)],
-                cwd=ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(0, result.returncode, result.stderr)
-            evidence = json.loads(
-                (out_dir / "mutation-evidence.json").read_text()
-            )
-            self.assertEqual("full", evidence["scope"])
-            self.assertIsNone(evidence["bounded_rotation"])
-            self.assertEqual("run", evidence["full_mutation_status"])
-            summary = json.loads(
-                (out_dir / "confidence-summary-passed.json").read_text()
-            )
-            self.assertEqual("true_full", summary["confidence_class"])
-            self.assertEqual("true", summary["global_full_confidence_claim"])
-            self.assertIn("true_full", summary["mutation_testing"])
-            self.assertIsNone(summary["bounded_rotation"])
 
     def test_mutation_package_loops_skip_the_real_cargo_fault_matrix_probes(self) -> None:
         """The fault-matrix chunk tests fork a real `cargo test` each and alone
@@ -2784,36 +2061,8 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
                         r"^(?:v[0-9]+(?:\.[0-9]+){0,2}|stable)$",
                     )
 
-    def test_broad_lane_is_manual_or_scheduled_confidence_not_ci_cd(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
-        gate = GATE.read_text(encoding="utf-8")
-
-        self.assertIn('type: string', confidence_workflow)
-        self.assertNotIn('type: choice', confidence_workflow)
-        self.assertNotIn('options:', confidence_workflow)
-        self.assertIn('default: "full"', confidence_workflow)
-        self.assertIn('CONFIDENCE_SELECTOR: ${{', confidence_workflow)
-        self.assertIn(
-            'run: bash scripts/confidence-gate.sh "$CONFIDENCE_SELECTOR"',
-            confidence_workflow,
-        )
-        self.assertIn("inputs.lane || 'full'", confidence_workflow)
-        self.assertIn("schedule:", confidence_workflow)
-        self.assertNotIn("bash scripts/confidence-gate.sh broad", workflow)
-
-        self.assertIn('"bounded_broad_confidence": {', gate)
-        self.assertIn('"workflow": "Confidence"', gate)
-        self.assertIn('"lane": "broad"', gate)
-        self.assertIn('"trigger": "workflow_dispatch_or_schedule"', gate)
-        self.assertIn(
-            '"artifact_name": "confidence-artifacts-attempt-${GITHUB_RUN_ATTEMPT:-local}"',
-            gate,
-        )
-        self.assertIn('"full_confidence_claim": "false"', gate)
 
     def test_confidence_selector_vocabulary_and_area_plans_are_executable(self) -> None:
-        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
 
         for snippet in (
@@ -2824,8 +2073,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             "store, process, trigger, effect-host, protocol, provider, sim",
         ):
             self.assertIn(snippet, gate)
-        self.assertIn("full+area:<surface>", confidence_workflow)
-        self.assertIn("fast:<shard>+area:<surface>", confidence_workflow)
 
         with tempfile.TemporaryDirectory() as directory:
             env = {"LASH_CONFIDENCE_OUT_DIR": directory}
@@ -3059,7 +2306,6 @@ finalize_mutation_gate
 
     def test_durable_stores_are_critical_coverage_and_mutation_packages(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
 
         critical_packages = gate.split("critical_packages=(", 1)[1].split(")", 1)[0]
@@ -3133,7 +2379,6 @@ derive_mutation_jobs() {{
             coverage_body,
         )
         self.assertIn('if [ "$lane" = "full" ]; then', gate)
-        self.assertIn('cron: "29 4 * * 0"', confidence_workflow)
         self.assertNotIn("scripts/confidence-gate.sh default", workflow)
 
     def test_every_gate_postgres_container_preloads_pg_stat_statements(self) -> None:
@@ -4043,7 +3288,6 @@ class ReleaseDryRunTests(unittest.TestCase):
         self.assertNotIn("gh run list", resolve)
         preconditions = jobs["validate-release-preconditions"]["steps"][-1]["run"]
         self.assertIn('run.get("event") == "workflow_dispatch"', preconditions)
-        self.assertIn("check_confidence", preconditions)
         self.assertNotIn("dry_run", preconditions)
 
     def test_linux_worker_uses_optimized_sdk_features_and_resolved_output(self):
@@ -4081,116 +3325,6 @@ class ReleaseDryRunTests(unittest.TestCase):
         self.assertNotIn("cargo test", run)
         self.assertTrue(any(step.get("if") == "always()" and 'rm -rf -- "$RUNNER_TEMP/build-cache"' in step.get("run", "")
                             for step in steps))
-
-
-class ReleaseConfidenceTests(unittest.TestCase):
-    def setUp(self):
-        from unittest.mock import patch
-        workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text())
-        script = next(step["run"] for step in workflow["jobs"]["validate-release-preconditions"]["steps"]
-                      if step.get("name") == "Validate full-profile CI and weekly Confidence")
-        source = script.split("python3 - <<'CONFIDENCE_PY'\n", 1)[1].split("\nCONFIDENCE_PY", 1)[0]
-        namespace = {"__name__": "contract_test"}
-        exec(compile(source, str(RELEASE_WORKFLOW), "exec"), namespace)
-        self.check = namespace["check_confidence"]
-        self.now = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
-        self.run = {"databaseId": 123, "headSha": "abc", "url": "https://example.test/runs/123",
-                    "status": "completed", "conclusion": "success"}
-        self.completed = "2026-09-05T00:00:00Z"
-        self.output = self.enterContext(patch("subprocess.check_output"))
-        self.ancestry = self.enterContext(patch("subprocess.run"))
-        self.ancestry.return_value.returncode = 0
-        self.enterContext(patch("builtins.print"))
-        self.refresh()
-
-    def refresh(self, runs=None):
-        self.output.side_effect = [json.dumps([self.run] if runs is None else runs),
-                                  json.dumps([{"jobs": [{"completed_at": self.completed}]}])]
-
-    def test_fresh_green_ancestor_or_equal_passes(self):
-        for target in ("abc", "descendant"):
-            self.refresh()
-            self.check(target, "", self.now)
-            self.ancestry.assert_called_with(["git", "merge-base", "--is-ancestor", "abc", target], check=False)
-        command = self.output.call_args_list[0].args[0]
-        self.assertIn("schedule", command)
-        self.assertIn("main", command)
-        self.assertEqual("1", command[command.index("--limit") + 1])
-
-    def test_latest_red_refuses_without_falling_back(self):
-        self.run["conclusion"] = "failure"
-        self.refresh()
-        with self.assertRaises(SystemExit) as error:
-            self.check("target", "", self.now)
-        for detail in ("release refused", "https://example.test/runs/123", "abc", "1.000 days", "failure"):
-            self.assertIn(detail, str(error.exception))
-
-    def test_eight_day_boundary_and_stale_future_or_missing_completion(self):
-        self.completed = "2026-08-29T00:00:00Z"
-        self.refresh()
-        self.check("target", "", self.now)
-        for completed in ("2026-08-28T23:59:59Z", "2026-09-07T00:00:00Z", None):
-            with self.subTest(completed=completed):
-                self.completed = completed
-                self.refresh()
-                with self.assertRaisesRegex(SystemExit, "older than 8 days"):
-                    self.check("target", "", self.now)
-
-    def test_missing_weekly_refuses_with_diagnostics(self):
-        self.refresh([])
-        with self.assertRaisesRegex(SystemExit, "run URL=unavailable; head SHA=unavailable; age=unknown; conclusion=missing"):
-            self.check("target", "", self.now)
-
-    def test_nonancestor_refuses(self):
-        self.ancestry.return_value.returncode = 1
-        with self.assertRaisesRegex(SystemExit, "not an ancestor"):
-            self.check("target", "", self.now)
-
-    def test_running_weekly_refuses(self):
-        self.run.update(status="in_progress", conclusion="")
-        self.refresh()
-        with self.assertRaisesRegex(SystemExit, "not green"):
-            self.check("target", "", self.now)
-
-    def test_override_requires_nonblank_reason_and_logs(self):
-        from unittest.mock import patch
-        with patch("builtins.print") as output:
-            self.check("target", "emergency release\nwith review", self.now)
-            self.assertIn("::warning::CONFIDENCE RELEASE OVERRIDE", output.call_args.args[0])
-            self.assertIn("emergency release", output.call_args.args[0])
-            self.assertNotIn("\n", output.call_args.args[0])
-        self.output.assert_not_called()
-        self.refresh([])
-        with self.assertRaises(SystemExit):
-            self.check("target", " \n ", self.now)
-
-    def test_api_failure_is_not_silently_bypassed(self):
-        self.output.side_effect = subprocess.CalledProcessError(1, "gh")
-        with self.assertRaises(subprocess.CalledProcessError):
-            self.check("target", "", self.now)
-
-
-class MutationRequestTests(unittest.TestCase):
-    def test_mutation_lives_on_weekly_confidence_not_a_pr_workflow(self):
-        self.assertFalse((ROOT / ".github/workflows/mutation.yml").exists())
-        ci = yaml.safe_load(WORKFLOW.read_text())
-        self.assertNotIn("mutation", ci["jobs"]["ci-conclusion"]["needs"])
-        confidence = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())
-        for job in (
-            "confidence-mutation-core",
-            "confidence-mutation-sim",
-            "confidence-mutation-packages-rotating",
-        ):
-            self.assertIn(job, confidence["jobs"])
-        gate = GATE.read_text()
-        request = gate.split('  # Every mutation in the targeted files, using the same weekly runner.', 1)[1].split('fi', 1)[0]
-        self.assertIn("run_area_targeted_mutation_evidence", request)
-        plan = subprocess.run(["bash", str(GATE), "--dry-run", "mutation"], text=True, capture_output=True)
-        self.assertEqual(0, plan.returncode, plan.stderr)
-        self.assertIn("observation/replay.rs", plan.stdout)
-        self.assertNotIn("effect_replay_driver", plan.stdout)
-        self.assertIn("commit_admission", plan.stdout)
-        self.assertIn("Mutation scope: targeted", plan.stdout)
 
 
 if __name__ == "__main__":

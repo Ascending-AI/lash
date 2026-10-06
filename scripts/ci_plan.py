@@ -336,8 +336,7 @@ POSTGRES_STORE_JOBS = ("postgres-store", "postgres-store-synthetic-next")
 # PG16 is the sole primary lane. PG14/PG18 compare catalog shape
 # only; they are merge-group breadth when the diff touches a durable schema
 # crate, and part of the full profile on workflow_dispatch (weekly/release
-# certification). Weekly confidence backends remain the compatibility witness
-# for unrelated landings.
+# certification).
 POSTGRES_PRIMARY_LEG = {"postgres": "16", "role": "primary"}
 POSTGRES_COMPATIBILITY_LEGS = [
     {"postgres": "14", "role": "compatibility"},
@@ -419,51 +418,6 @@ BUCK2_TEST_JOB = "buck2-tests"
 # Trusted Rust events run the core partition in `buck2-tests`. The tail is
 # breadth: merge groups and dispatches run it on the combined tree.
 BUCK2_TEST_JOBS = frozenset({BUCK2_TEST_JOB, "buck2-tests-tail"})
-
-
-# Confidence is a separate scheduled/manual workflow. Pin its producer and
-# consumers here so its conclusion uses the same fail-closed entrypoint as CI.
-CONFIDENCE_JOB_POLICY = {
-    "confidence": "selector",
-    "confidence-build": "full-producer",
-    "append-vec-miri": "full-independent",
-    "confidence-harnesses": "full-consumer",
-    "confidence-generated": "full-consumer",
-    "confidence-minimizer": "full-consumer",
-    "confidence-backends": "full-consumer",
-    "confidence-coverage": "full-consumer",
-    "confidence-mutation-core": "full-consumer",
-    "confidence-mutation-sim": "full-consumer",
-    "confidence-mutation-packages-rotating": "full-consumer",
-    "sim-search": "full-consumer",
-}
-
-
-def evaluate_confidence_conclusion(needs: Mapping, event_name: str, selector: str) -> list[str]:
-    problems = []
-    expected = set(CONFIDENCE_JOB_POLICY)
-    for job in sorted(expected - set(needs)):
-        problems.append(f"aggregator is missing needed job: {job}")
-    for job in sorted(set(needs) - expected):
-        problems.append(f"aggregator has unmapped needed job: {job}")
-    active = event_name in {"schedule", "workflow_dispatch"}
-    if event_name not in {"schedule", "workflow_dispatch", "pull_request", "merge_group"}:
-        problems.append(f"unknown Confidence event: {event_name!r}")
-    if event_name == "schedule" and selector != "full":
-        problems.append("scheduled Confidence must select full")
-    if not selector:
-        problems.append("Confidence selector is missing")
-    for job in sorted(expected & set(needs)):
-        policy = CONFIDENCE_JOB_POLICY[job]
-        if policy not in {"selector", "full-producer", "full-consumer", "full-independent"}:
-            problems.append(f"unknown Confidence policy for {job}: {policy!r}")
-            continue
-        required = active and ((selector != "full") if policy == "selector" else (selector == "full"))
-        result = needs[job].get("result")
-        wanted = "success" if required else "skipped"
-        if result != wanted:
-            problems.append(f"{job} ended with {result!r}, expected {wanted}")
-    return problems
 
 
 class PlanError(ValueError):
@@ -2737,18 +2691,6 @@ def main() -> int:
     except (KeyError, json.JSONDecodeError) as error:
         print(f"Invalid needs JSON: {error}", file=sys.stderr)
         return 1
-    if os.environ.get("CONCLUSION_WORKFLOW") == "confidence":
-        problems = evaluate_confidence_conclusion(
-            needs, os.environ.get("GITHUB_EVENT_NAME", ""),
-            os.environ.get("CONFIDENCE_SELECTOR", ""),
-        )
-        print(json.dumps(needs, indent=2, sort_keys=True))
-        for problem in problems:
-            print(f"Confidence conclusion rejected: {problem}", file=sys.stderr)
-        if problems:
-            return 1
-        print("Confidence conclusion accepted: every stage satisfied its policy.")
-        return 0
     workers_e2e_enabled = os.environ.get("WORKERS_E2E_ENABLED")
     if workers_e2e_enabled not in {"true", "false"}:
         print(

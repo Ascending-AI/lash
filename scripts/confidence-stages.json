@@ -1,0 +1,343 @@
+{
+  "environment": {
+    "LASH_CI_FEATURES": "",
+    "LASH_SIM_RUN_SALT": "{salt}"
+  },
+  "stages": [
+    {
+      "name": "append-vec-miri",
+      "group": "append-vec-miri",
+      "command": [
+        "bash",
+        "scripts/hermetic-build.sh",
+        "miri"
+      ],
+      "timeout_seconds": 3300,
+      "needs_build": false,
+      "environment": {}
+    },
+    {
+      "name": "build",
+      "group": "build",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "full"
+      ],
+      "timeout_seconds": 4200,
+      "needs_build": false,
+      "environment": {
+        "LASH_CONFIDENCE_STAGE": "build"
+      }
+    },
+    {
+      "name": "harnesses",
+      "group": "harnesses",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "full"
+      ],
+      "timeout_seconds": 2700,
+      "needs_build": true,
+      "environment": {
+        "LASH_CONFIDENCE_STAGE": "harnesses"
+      }
+    },
+    {
+      "name": "generated-{shard}",
+      "group": "generated",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "full"
+      ],
+      "timeout_seconds": 3900,
+      "needs_build": true,
+      "environment": {
+        "LASH_CONFIDENCE_STAGE": "generated",
+        "LASH_SIM_SHARD": "{shard}/9"
+      },
+      "matrix": {
+        "shard": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "minimizer",
+      "group": "minimizer",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "full"
+      ],
+      "timeout_seconds": 4200,
+      "needs_build": true,
+      "environment": {
+        "LASH_CONFIDENCE_STAGE": "minimizer"
+      }
+    },
+    {
+      "name": "backends",
+      "group": "backends",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "full"
+      ],
+      "timeout_seconds": 2700,
+      "needs_build": true,
+      "environment": {
+        "LASH_CONFIDENCE_STAGE": "backends"
+      }
+    },
+    {
+      "name": "coverage",
+      "group": "coverage",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "full"
+      ],
+      "timeout_seconds": 2700,
+      "needs_build": true,
+      "environment": {
+        "LASH_CONFIDENCE_STAGE": "coverage"
+      }
+    },
+    {
+      "name": "mutation-core",
+      "group": "mutation-core",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "full"
+      ],
+      "timeout_seconds": 2400,
+      "needs_build": true,
+      "environment": {
+        "LASH_CONFIDENCE_STAGE": "mutation-core"
+      }
+    },
+    {
+      "name": "mutation-sim-{artifact}",
+      "group": "mutation-sim",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "full"
+      ],
+      "timeout_seconds": 3000,
+      "needs_build": true,
+      "environment": {
+        "LASH_CONFIDENCE_STAGE": "mutation-sim",
+        "LASH_MUTATION_SIM_GROUP": "{group}",
+        "LASH_MUTATION_SIM_SHARD": "{shard}"
+      },
+      "matrix": {
+        "include": [
+          {
+            "group": "scheduler",
+            "shard": "0/1",
+            "artifact": "scheduler-0"
+          },
+          {
+            "group": "oracles",
+            "shard": "0/6",
+            "artifact": "oracles-0"
+          },
+          {
+            "group": "oracles",
+            "shard": "1/6",
+            "artifact": "oracles-1"
+          },
+          {
+            "group": "oracles",
+            "shard": "2/6",
+            "artifact": "oracles-2"
+          },
+          {
+            "group": "oracles",
+            "shard": "3/6",
+            "artifact": "oracles-3"
+          },
+          {
+            "group": "oracles",
+            "shard": "4/6",
+            "artifact": "oracles-4"
+          },
+          {
+            "group": "oracles",
+            "shard": "5/6",
+            "artifact": "oracles-5"
+          },
+          {
+            "group": "readiness",
+            "shard": "0/4",
+            "artifact": "readiness-0"
+          },
+          {
+            "group": "readiness",
+            "shard": "1/4",
+            "artifact": "readiness-1"
+          },
+          {
+            "group": "readiness",
+            "shard": "2/4",
+            "artifact": "readiness-2"
+          },
+          {
+            "group": "readiness",
+            "shard": "3/4",
+            "artifact": "readiness-3"
+          }
+        ]
+      }
+    },
+    {
+      "name": "mutation-packages-rotating-{package}-{shard}",
+      "group": "mutation-packages-rotating",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "full"
+      ],
+      "timeout_seconds": 6000,
+      "needs_build": true,
+      "environment": {
+        "LASH_CONFIDENCE_STAGE": "mutation-packages-rotating",
+        "LASH_CONFIDENCE_PACKAGE": "{package}",
+        "LASH_MUTATION_PACKAGES_SHARD": "{shard}/{shards}",
+        "LASH_MUTATION_RUN_INDEX": "{run_index}"
+      },
+      "matrix": {
+        "include": [
+          {
+            "package": "lash-internal-core",
+            "shard": 1,
+            "shards": 2
+          },
+          {
+            "package": "lash-internal-core",
+            "shard": 2,
+            "shards": 2
+          },
+          {
+            "package": "lash-internal-lashlang",
+            "shard": 1,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-lashlang",
+            "shard": 2,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-lashlang",
+            "shard": 3,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-lashlang",
+            "shard": 4,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-protocol-rlm",
+            "shard": 1,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-protocol-rlm",
+            "shard": 2,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-protocol-rlm",
+            "shard": 3,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-protocol-rlm",
+            "shard": 4,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-protocol-standard",
+            "shard": 1,
+            "shards": 1
+          },
+          {
+            "package": "lash-internal-sqlite-store",
+            "shard": 1,
+            "shards": 3
+          },
+          {
+            "package": "lash-internal-sqlite-store",
+            "shard": 2,
+            "shards": 3
+          },
+          {
+            "package": "lash-internal-sqlite-store",
+            "shard": 3,
+            "shards": 3
+          },
+          {
+            "package": "lash-internal-postgres-store",
+            "shard": 1,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-postgres-store",
+            "shard": 2,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-postgres-store",
+            "shard": 3,
+            "shards": 4
+          },
+          {
+            "package": "lash-internal-postgres-store",
+            "shard": 4,
+            "shards": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "sim-search-{shard}",
+      "group": "sim-search",
+      "command": [
+        "bash",
+        "scripts/confidence-gate.sh",
+        "sim-search:{shard}/9"
+      ],
+      "timeout_seconds": 6000,
+      "needs_build": true,
+      "environment": {},
+      "matrix": {
+        "shard": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    }
+  ]
+}

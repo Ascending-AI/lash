@@ -63,6 +63,12 @@ changes the release channel in `Cargo.toml` at the cut.
 
 ## Tag and capture
 
+Run the local Confidence runner on the release SHA before cutting, and record
+its summary. Use `just confidence-local` at that checkout and attach the
+`.kiln/confidence-local/<timestamp>/summary.txt` evidence to the release record.
+The release workflow validates the release SHA's full-profile CI; Confidence
+has no GitHub workflow or release precondition.
+
 The release workflow owns the tag. The release owner certifies the exact main
 SHA before publication; preparation workers do not dispatch CI or create the
 release tag. At the tagged checkout, capture into an empty destination:

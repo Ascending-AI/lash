@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Schedule the Confidence workflow locally without duplicating its test plan."""
+"""Run the on-demand Confidence stage plan on this host."""
 from __future__ import annotations
 
 import argparse
@@ -20,7 +20,6 @@ import time
 import shutil
 import tomllib
 
-import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 @dataclass(frozen=True)
 class Stage:
     name: str
-    job: str
+    group: str
     command: tuple[str, ...]
     environment: dict[str, str]
     timeout: int
@@ -39,58 +38,25 @@ class Stage:
         return self.name.startswith('mutation-') or self.name == 'coverage'
 
 
-def expand(value: object, matrix: dict, context: dict) -> str:
-    def replacement(match):
-        expression = match[1].strip()
-        namespace, key = expression.split('.', 1)
-        values = matrix if namespace == 'matrix' else context if namespace == 'github' else {}
-        if key not in values:
-            raise ValueError(f'Unsupported workflow expression: {expression}')
-        return str(values[key])
-    return re.sub(r'\$\{\{(.*?)\}\}', replacement, str(value))
-
-
 def stages(root: Path, run_index: int, salt: str) -> list[Stage]:
-    workflow = yaml.safe_load((root / '.github/workflows/confidence.yml').read_text())
-    context = {'workspace': str(root), 'run_number': run_index,
-               'run_id': salt, 'run_attempt': 1}
-    global_env = {key: expand(value, {}, context)
-                  for key, value in workflow.get('env', {}).items() if key.startswith('LASH_')}
+    plan = json.loads((root / 'scripts/confidence-stages.json').read_text())
+    context = {'root': str(root), 'run_index': run_index, 'salt': salt}
     result = []
-    for job_id, job in workflow['jobs'].items():
-        if job_id in {'confidence', 'confidence-conclusion'}:
-            continue
-        matrix = job.get('strategy', {}).get('matrix', {})
-        axes = {key: value for key, value in matrix.items() if key not in {'include', 'exclude'}}
+    for stage in plan['stages']:
+        matrix = stage.get('matrix', {})
+        axes = {key: value for key, value in matrix.items() if key != 'include'}
         rows = [dict(zip(axes, values)) for values in itertools.product(*axes.values())] if axes else []
-        rows = [row for row in rows if row not in matrix.get('exclude', [])]
         rows.extend(matrix.get('include', []))
         for row in rows or [{}]:
-            # Transfer/setup/upload are CI transport, not stage work. Locally
-            # all consumers see the producer's original tree and timestamps.
-            steps = [step for step in job['steps']
-                     if 'scripts/confidence-gate.sh' in step.get('run', '')
-                     or step.get('run') == 'bash scripts/hermetic-build.sh miri']
-            if len(steps) != 1:
-                raise ValueError(f'{job_id}: expected exactly one Confidence execution step')
-            step = steps[0]
-            environment = global_env | {
-                key: expand(value, row, context) for key, value in step.get('env', {}).items()
-            }
-            command = tuple(shlex.split(expand(step['run'], row, context)))
-            if job_id == 'sim-search':
-                name = f"sim-search-{row['shard']}"
-            elif job_id == 'append-vec-miri':
-                name = job_id
-            elif job_id == 'confidence-build':
-                name = 'build'
-            else:
-                name = Path(environment['LASH_CONFIDENCE_OUT_DIR']).name
+            values = context | row
+            name = stage['name'].format_map(values)
             if not re.fullmatch(r'[a-zA-Z0-9_-]+', name):
                 raise ValueError(f'Unsafe stage name: {name}')
-            result.append(Stage(name, job_id, command, environment,
-                                int(job['timeout-minutes']) * 60,
-                                job.get('needs') == 'confidence-build'))
+            environment = {key: value.format_map(values)
+                           for key, value in (plan['environment'] | stage['environment']).items()}
+            command = tuple(arg.format_map(values) for arg in stage['command'])
+            result.append(Stage(name, stage['group'], command, environment,
+                                stage['timeout_seconds'], stage['needs_build']))
     if len({stage.name for stage in result}) != len(result):
         raise ValueError('Duplicate local stage names')
     return result
@@ -107,8 +73,9 @@ def default_jobs() -> int:
 
 def source_signature(root: Path) -> str:
     paths = ['crates', 'examples', 'runbooks', 'Cargo.toml', 'Cargo.lock',
-             '.github/workflows/confidence.yml', 'scripts/confidence-gate.sh',
-             'scripts/ci/confidence-stage.sh']
+             'scripts/confidence-stages.json', 'scripts/confidence-gate.sh',
+             'scripts/ci/confidence-stage.sh', 'scripts/ci/confidence_local.py',
+             'scripts/confidence-local.sh']
     listed = subprocess.check_output(
         ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', *paths],
         cwd=root).decode().split('\0')
@@ -151,14 +118,13 @@ async def run_stage(stage: Stage, output: Path, root: Path) -> dict:
     scratch = destination / 'tmp'
     scratch.mkdir()
     environment = dict(os.environ)
-    # Coordinates belong to the workflow, never to a previously selected shard.
+    # Coordinates belong to the local plan, never to a previously selected shard.
     for key in ('LASH_CONFIDENCE_STAGE', 'LASH_SIM_SHARD', 'LASH_MUTATION_SIM_GROUP',
                 'LASH_MUTATION_SIM_SHARD', 'LASH_CONFIDENCE_PACKAGE', 'LASH_MUTATION_PACKAGES_SHARD',
                 'LASH_POSTGRES_DATABASE_URL'):
         environment.pop(key, None)
     environment.update(stage.environment)
-    environment.update(LASH_CONFIDENCE_OUT_DIR=str(destination), TMPDIR=str(scratch),
-                       GITHUB_STEP_SUMMARY=str(destination / 'step-summary.md'))
+    environment.update(LASH_CONFIDENCE_OUT_DIR=str(destination), TMPDIR=str(scratch))
     # The existing mutation service discovers the assigned port through Docker
     # inspect. Publishing port zero gives every mutation shard its own server.
     environment['LASH_CONFIDENCE_MUTATION_POSTGRES_PORT'] = '0'
@@ -166,7 +132,7 @@ async def run_stage(stage: Stage, output: Path, root: Path) -> dict:
     target = Path(environment.get('CARGO_TARGET_DIR', str(root / 'target')))
     environment['LASH_VM_WORKER'] = str(target / 'debug/lash-vm-worker')
     if stage.name == 'build':
-        # This named Cargo recipe produces the tree consumed by CI's Cargo
+        # This named Cargo recipe produces the tree consumed by local Cargo
         # stages. Retain Cargo artifacts and its managed admission, rather
         # than routing --no-run to a Buck2 test execution.
         environment['KILN_CARGO_ROUTE'] = ''
@@ -189,7 +155,7 @@ async def run_stage(stage: Stage, output: Path, root: Path) -> dict:
             code = await asyncio.wait_for(process.wait(), stage.timeout)
             status = 'success' if code == 0 else 'failure'
         except asyncio.TimeoutError:
-            log.write(f'\nStage exceeded workflow timeout ({stage.timeout}s).\n')
+            log.write(f'\nStage exceeded stage timeout ({stage.timeout}s).\n')
             await terminate(process)
             status = 'cancelled'
         except asyncio.CancelledError:
@@ -198,7 +164,7 @@ async def run_stage(stage: Stage, output: Path, root: Path) -> dict:
             raise
         except OSError as error:
             log.write(f'Unable to start stage: {error}\n')
-    record = {'stage': stage.name, 'job': stage.job, 'result': status,
+    record = {'stage': stage.name, 'group': stage.group, 'result': status,
               'exit_code': code, 'seconds': round(time.monotonic() - started, 3),
               'command': list(command), 'environment': stage.environment,
               'output': str(destination), 'log': str(log_path)}
@@ -226,7 +192,7 @@ async def execute(catalog: list[Stage], selected: set[str], output: Path,
 
     async def consume(stage):
         if stage.needs_build and not built:
-            return {'stage': stage.name, 'job': stage.job, 'result': 'skipped',
+            return {'stage': stage.name, 'group': stage.group, 'result': 'skipped',
                     'seconds': 0, 'reason': 'shared build failed'}
         async def launch():
             async with slots:
@@ -240,7 +206,7 @@ async def execute(catalog: list[Stage], selected: set[str], output: Path,
     records.extend(await asyncio.gather(*(consume(stage) for stage in consumers)))
     for stage in catalog:
         if stage.name not in selected and stage.name not in previous:
-            records.append({'stage': stage.name, 'job': stage.job, 'result': 'skipped',
+            records.append({'stage': stage.name, 'group': stage.group, 'result': 'skipped',
                             'seconds': 0, 'reason': 'outside requested local selection'})
     return records
 
@@ -267,21 +233,28 @@ def evidence_files(output: Path):
 
 
 def summarize(root: Path, output: Path, records: list[dict], wall: float) -> int:
-    workflow = yaml.safe_load((root / '.github/workflows/confidence.yml').read_text())
-    needed = workflow['jobs']['confidence-conclusion']['needs']
-    needs = {}
-    for job in needed:
-        results = [record['result'] for record in records if record['job'] == job]
-        result = ('failure' if 'failure' in results else 'cancelled' if 'cancelled' in results
-                  else 'skipped' if not results or 'skipped' in results else 'success')
-        needs[job] = {'result': result}
-    (output / 'needs.json').write_text(json.dumps(needs, indent=2) + '\n')
-    environment = dict(os.environ, CONCLUSION_WORKFLOW='confidence',
-                       CONFIDENCE_SELECTOR='full', GITHUB_EVENT_NAME='workflow_dispatch',
-                       NEEDS_JSON=json.dumps(needs))
-    conclusion = subprocess.run(['python3', 'scripts/ci/conclusion.py', 'conclusion'],
-                                cwd=root, env=environment, capture_output=True, text=True)
-    (output / 'conclusion.log').write_text(conclusion.stdout + conclusion.stderr)
+    catalog = stages(root, output_run_index(output), 'summary')
+    groups = {}
+    problems = []
+    for group in sorted({stage.group for stage in catalog}):
+        expected = {stage.name for stage in catalog if stage.group == group}
+        actual = [record for record in records if record['group'] == group]
+        results = [record['result'] for record in actual]
+        complete = len(actual) == len(expected) and {record['stage'] for record in actual} == expected
+        result = ('failure' if not complete or 'failure' in results else 'cancelled' if 'cancelled' in results
+                  else 'skipped' if 'skipped' in results else 'success' if all(r == 'success' for r in results)
+                  else 'failure')
+        groups[group] = {'result': result}
+        if result != 'success':
+            problems.append(f'{group} ended with {result!r}, expected success')
+    unknown = {record['group'] for record in records} - set(groups)
+    if unknown:
+        problems.append(f'Unknown stage groups: {sorted(unknown)}')
+    (output / 'groups.json').write_text(json.dumps(groups, indent=2) + '\n')
+    conclusion_code = int(bool(problems))
+    conclusion_text = ('\n'.join(f'Confidence conclusion rejected: {problem}' for problem in problems)
+                       if problems else 'Confidence conclusion accepted: every stage succeeded.') + '\n'
+    (output / 'conclusion.log').write_text(conclusion_text)
     failed = []
     missed = []
     test_counts = {'passed': 0, 'failed': 0, 'ignored': 0}
@@ -307,8 +280,8 @@ def summarize(root: Path, output: Path, records: list[dict], wall: float) -> int
                     count = re.search(rf'(\d+) {key}\b', nextest[2])
                     if count:
                         test_counts[key] += int(count[1])
-    summary = {'seconds': round(wall, 3), 'stages': records, 'needs': needs,
-               'conclusion_exit_code': conclusion.returncode,
+    summary = {'seconds': round(wall, 3), 'stages': records, 'groups': groups,
+               'conclusion_exit_code': conclusion_code,
                'test_counts_from_logs': test_counts, 'failed_tests': failed, 'missed_mutants': missed}
     (output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
     lines = ['Confidence local stage summary', 'stage | result | seconds']
@@ -317,12 +290,11 @@ def summarize(root: Path, output: Path, records: list[dict], wall: float) -> int
     lines.extend(['', 'FAILED tests:', *(failed or ['none recorded']), '',
                   'MISSED mutants:', *(missed or ['none recorded']), '',
                   f'Wall time: {wall:.1f}s', f'Test counts from logs: {test_counts}',
-                  f'Conclusion exit: {conclusion.returncode}', conclusion.stdout.strip(),
-                  conclusion.stderr.strip(), f'Artifacts: {output}'])
+                  f'Conclusion exit: {conclusion_code}', conclusion_text.strip(), f'Artifacts: {output}'])
     text = '\n'.join(lines) + '\n'
     (output / 'summary.txt').write_text(text)
     print(text, end='', flush=True)
-    return conclusion.returncode
+    return conclusion_code
 
 
 def main() -> int:
@@ -332,15 +304,15 @@ def main() -> int:
     parser.add_argument('--only', action='append', default=[], metavar='STAGE-GLOB',
                         help='select stage names; repeat for a union; build is included for consumers')
     parser.add_argument('--skip-mutation', action='store_true',
-                        help='omit mutation stages (the strict full CI conclusion remains incomplete)')
+                        help='omit mutation stages (the strict full conclusion remains incomplete)')
     parser.add_argument('--resume', action='store_true',
                         help='reuse completed stages in --out-dir; --only explicitly reruns matching stages')
     parser.add_argument('--out-dir', type=Path,
                         help='fresh evidence directory; inside the repo use .kiln (default: .kiln/confidence-local/<timestamp>)')
     parser.add_argument('--run-index', type=int,
                         default=int(os.environ.get('LASH_MUTATION_RUN_INDEX', '1')),
-                        help='CI run_number for rotating mutation slices (default: 1)')
-    parser.add_argument('--list', action='store_true', help='list workflow stages without running them')
+                        help='Local run index for rotating mutation slices (default: 1)')
+    parser.add_argument('--list', action='store_true', help='list local stages without running them')
     args = parser.parse_args()
     if args.jobs < 1 or args.run_index < 1:
         parser.error('jobs and run-index must be positive')
@@ -363,7 +335,7 @@ def main() -> int:
                 if (not args.only or any(fnmatch.fnmatchcase(stage.name, glob) for glob in args.only))
                 and not (args.skip_mutation and stage.name.startswith('mutation-'))}
     if not selected:
-        parser.error('no workflow stages match the selection')
+        parser.error('no local stages match the selection')
     if any(stage.needs_build and stage.name in selected for stage in catalog):
         selected.add('build')
     if prior_plan:
@@ -398,7 +370,7 @@ def main() -> int:
     except KeyboardInterrupt:
         records = [json.loads(path.read_text()) for path in output.glob('*/local-stage.json')]
         present = {record['stage'] for record in records}
-        records.extend({'stage': stage.name, 'job': stage.job, 'result': 'cancelled',
+        records.extend({'stage': stage.name, 'group': stage.group, 'result': 'cancelled',
                         'seconds': 0, 'reason': 'local runner interrupted'}
                        for stage in catalog if stage.name not in present)
     return summarize(ROOT, output, records, time.time() - plan['started_at'])

@@ -83,7 +83,7 @@ elif [ "$lane" = "fast" ] && [ "$fast_shard" != "all" ]; then
 else
   out_dir="${out_root}/${lane}"
 fi
-# Stage jobs already supply the complete upload directory, including stage.
+# Local stages already supply the complete output directory, including stage.
 if [ -n "${LASH_CONFIDENCE_STAGE:-}" ]; then
   out_dir="$out_root"
 fi
@@ -149,7 +149,7 @@ else
       ;;
   esac
 fi
-# Optional core replay/commit request reuses the weekly area mutation runner.
+# Optional core replay/commit request reuses the local area mutation runner.
 if [ "$lane" = "mutation" ]; then
   if [ "$area" != "all" ]; then
     echo "The mutation selector has a fixed core replay/commit target set." >&2
@@ -180,7 +180,7 @@ fast_shards=(
 )
 
 # What each fast shard runs, stated once. `run_fast_shard` composes from here
-# instead of carrying its own case arms, and the CI contract test pins that the
+# instead of carrying its own case arms, and the gate contract test pins that the
 # keys are exactly the shards above plus `summary`, that they match the suites
 # the schedule table declares for those selectors, and that every step names a
 # function this script defines.
@@ -231,7 +231,7 @@ SIM_SEARCH_SETUP_SECONDS=1500
 #   - checkout, toolchain, protoc                     -2 min
 #   = lane budget                                    75 min = 4500 s
 #
-# The workflow matrix fans each package out into fixed legs
+# The local stage plan fans each package out into fixed legs
 # (LASH_MUTATION_PACKAGES_SHARD "leg/legs"). A leg judges two bounded slices
 # of the package's mutant space -- a quick smoke slice and a deeper full
 # slice -- where slice index ((run - 1) * legs + leg - 1) % denom is
@@ -475,7 +475,7 @@ Lanes:
           Set LASH_CONFIDENCE_COVERAGE_SCOPE=none for bounded default/broad
           replay/backend lanes that must record coverage as not_run rather than
           install cargo-llvm-cov. True full always requires coverage.
-  Set LASH_CONFIDENCE_BOOTSTRAP=1 to install pinned versions if missing.
+  The local gate installs pinned versions of missing tools on demand.
   Missing required tools fail the lane; skipped coverage or mutation shards are
   recorded as not_run, never as passed.
 
@@ -487,18 +487,14 @@ Fast shards:
   fast:minimizer-fixtures
   fast:summary
 
-  `fast` runs all fast shards sequentially and then runs fast:summary. CI runs
-  these shards as independent jobs and then runs fast:summary after downloading
-  the shard artifacts.
+  `fast` runs all fast shards sequentially and then runs fast:summary.
 
 Sim search shards:
   sim-search:<i>/<n> runs only the deterministic simulation search lane at
   full-lane budgets for one seed-index shard, writing artifacts under
-  target/confidence/<worktree-slug>/sim-search/<i>-of-<n>/ locally. CI pins
-  LASH_CONFIDENCE_OUT_DIR to target/confidence so the weekly Confidence workflow
-  partitions the full search seed space as shard 1/<n> on the main full job
-  plus matrix jobs for the remaining shards, so the union covers every seed
-  exactly once.
+  target/confidence/<worktree-slug>/sim-search/<i>-of-<n>/ locally.
+  scripts/confidence-local.sh partitions the full search seed space across nine
+  shards, so their union covers every configured seed exactly once per run.
 USAGE
 }
 
@@ -692,7 +688,7 @@ write_confidence_prerequisite_failure() {
   "prerequisite": "${prerequisite}",
   "detail": "${detail}",
   "install_command": "${install_command}",
-  "bootstrap_command": "LASH_CONFIDENCE_BOOTSTRAP=1 LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh ${requested_selector}",
+  "local_runner_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh ${requested_selector}",
   "exact_retry_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh ${requested_selector}"
 }
 EOF
@@ -814,14 +810,14 @@ EOF
 fi
 
 bootstrap_tools() {
-  if [ "${LASH_CONFIDENCE_BOOTSTRAP:-0}" != "1" ]; then
+  if [ "$lane" = fast ] || [ -n "$sim_search_shard" ]; then
     return
   fi
-  if ! command -v cargo-mutants >/dev/null 2>&1; then
+  if [ "$mutation_scope" != none ] && ! command -v cargo-mutants >/dev/null 2>&1; then
     step "Bootstrap cargo-mutants 27.1.0"
     cargo install cargo-mutants --version 27.1.0 --locked
   fi
-  if [ "$lane" = "mutation" ]; then
+  if [ "$lane" = "mutation" ] || [ "$coverage_scope" = none ]; then
     return
   fi
   if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
@@ -852,7 +848,7 @@ Required tool '$tool' is not installed for the '$lane' confidence lane.
 Install with:
   cargo install ${crate} --version ${version} --locked
 or rerun with:
-  LASH_CONFIDENCE_BOOTSTRAP=1 scripts/confidence-gate.sh ${requested_selector}
+  scripts/confidence-gate.sh ${requested_selector}
 EOF
   write_confidence_prerequisite_failure \
     "$tool" \
@@ -910,18 +906,7 @@ EOF
   "run_seconds": ${run_seconds}
 }
 EOF
-    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-      if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
-        printf -- '- `%s`: bounded rotating slice `%s` (leg %s, run index %s) at revision `%s` — %s\n' \
-          "$name" "$MUTATION_RECORDED_SHARD" "${LASH_MUTATION_PACKAGES_SHARD:-1/1}" \
-          "${LASH_MUTATION_RUN_INDEX:-unset}" "$(confidence_revision)" "$status" \
-          >>"$GITHUB_STEP_SUMMARY"
-      else
-        printf -- '- `%s`: fixed shard `%s` at revision `%s` — %s\n' \
-          "$name" "$MUTATION_RECORDED_SHARD" "$(confidence_revision)" "$status" \
-          >>"$GITHUB_STEP_SUMMARY"
-      fi
-    fi
+
   fi
 }
 
@@ -999,8 +984,7 @@ require_llvm_tools() {
     && rustup component list --installed | grep -Eq '^llvm-tools(-preview)?($|-)'; then
     return
   fi
-  if [ "${LASH_CONFIDENCE_BOOTSTRAP:-0}" = "1" ] \
-    && ! command -v rustup >/dev/null 2>&1 \
+  if ! command -v rustup >/dev/null 2>&1 \
     && command -v nix >/dev/null 2>&1; then
     bootstrap_nix_llvm_tools
     return
@@ -1015,7 +999,7 @@ Set compatible binaries explicitly:
   LLVM_COV=/path/to/llvm-cov LLVM_PROFDATA=/path/to/llvm-profdata
 
 Or let the gate build the matching Nix LLVM package inferred from rustc -vV:
-  LASH_CONFIDENCE_BOOTSTRAP=1 scripts/confidence-gate.sh ${requested_selector}
+  scripts/confidence-gate.sh ${requested_selector}
 EOF
     write_confidence_prerequisite_failure \
       "llvm-tools" \
@@ -1028,7 +1012,7 @@ Coverage requires llvm-tools-preview, or explicit LLVM_COV and LLVM_PROFDATA pat
 Install with:
   rustup component add llvm-tools-preview
 or rerun with:
-  LASH_CONFIDENCE_BOOTSTRAP=1 scripts/confidence-gate.sh ${requested_selector}
+  scripts/confidence-gate.sh ${requested_selector}
 If rustup is unavailable but Nix is installed, the bootstrap path builds
 nixpkgs#llvmPackages_\${rustc_llvm_major}.llvm and exports LLVM_COV/LLVM_PROFDATA.
 EOF
@@ -1730,7 +1714,7 @@ write_full_lane_prerequisites() {
   },
   "true_full_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full",
   "bounded_broad_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_BROAD_SIM_SEEDS=2 LASH_BROAD_SIM_MAX_BOUNDARIES=128 LASH_MUTATION_JOBS=2 LASH_MUTATION_TIMEOUT_SECONDS=300 scripts/confidence-gate.sh broad",
-  "bootstrap_true_full_command": "LASH_CONFIDENCE_BOOTSTRAP=1 LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full",
+  "local_full_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full",
   "postgres_env": "LASH_POSTGRES_DATABASE_URL"
 }
 EOF
@@ -2886,10 +2870,8 @@ write_confidence_summary() {
     },
     "bounded_broad_confidence": {
       "confidence_class": "bounded_broad",
-      "workflow": "Confidence",
       "lane": "broad",
-      "trigger": "workflow_dispatch_or_schedule",
-      "artifact_name": "confidence-artifacts-attempt-${GITHUB_RUN_ATTEMPT:-local}",
+      "trigger": "local_on_demand",
       "coverage_scope": "${coverage_scope}",
       "coverage_evidence_status": "$(coverage_evidence_status)",
       "mutation_scope": "${mutation_scope}",
@@ -3099,13 +3081,13 @@ fi
 # worker beside the test executable cannot find the producer's workspace bin.
 export LASH_VM_WORKER="${LASH_VM_WORKER:-${repo}/target/debug/lash-vm-worker}"
 if [ "${LASH_CONFIDENCE_STAGE:-}" != build ] && [ ! -x "$LASH_VM_WORKER" ]; then
-  echo "Confidence requires the built VM worker at ${LASH_VM_WORKER}; build the workspace bins or restore the confidence tools artifact" >&2
+  echo "Confidence requires the built VM worker at ${LASH_VM_WORKER}; run scripts/confidence-local.sh to build the workspace bins" >&2
   exit 127
 fi
 
 if [ "$lane" = "mutation" ]; then
   bootstrap_tools
-  # Every mutation in the targeted files, using the same weekly runner.
+  # Every mutation in the targeted files, using the local runner.
   # cargo-mutants counts shards from zero: 0/1 is the whole space.
   export LASH_AREA_MUTATION_SHARD=0/1
   run_area_targeted_mutation_evidence
@@ -3114,7 +3096,7 @@ if [ "$lane" = "mutation" ]; then
 fi
 
 if [ -n "${LASH_CONFIDENCE_STAGE:-}" ]; then
-  # CI stages reuse the same full-depth functions and one producer artifact.
+  # Local stages reuse the same full-depth functions and shared build.
   # shellcheck source=scripts/ci/confidence-stage.sh
   source "$repo/scripts/ci/confidence-stage.sh"
   exit 0

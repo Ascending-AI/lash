@@ -520,7 +520,7 @@ confidence-broad:
 confidence-full:
   bash "{{repo}}/scripts/confidence-gate.sh" full
 
-# CI's complete stage matrix, one shared build, and its strict conclusion.
+# Local Confidence stage matrix, one shared build, and its strict conclusion.
 confidence-local *args:
   bash "{{repo}}/scripts/confidence-local.sh" "$@"
 

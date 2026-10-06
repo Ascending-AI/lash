@@ -50,7 +50,7 @@ case "$LASH_CONFIDENCE_STAGE" in
     selected_packages=("$LASH_CONFIDENCE_PACKAGE")
     # Each leg is one job inside the 100-minute cap; the mutant space cannot
     # be swept whole, so the stage judges bounded slices (sized by
-    # MUTATION_PACKAGES_* in scripts/confidence-gate.sh). The workflow's
+    # MUTATION_PACKAGES_* in scripts/confidence-gate.sh). The local plan's
     # matrix legs hand their coordinate down as LASH_MUTATION_PACKAGES_SHARD
     # and the slice index rotates across runs via LASH_MUTATION_RUN_INDEX.
     # The stage is named rotating because that is what the evidence covers:

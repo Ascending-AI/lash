@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One local entry point for the unchanged Confidence workflow's stages.
+# One on-demand entry point for the local Confidence stages.
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo"

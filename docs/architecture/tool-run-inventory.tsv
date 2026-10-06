@@ -1,6 +1,5 @@
 row	path	baseline_line	disposition	owner	stages	match_families	job
 M0001	.github/workflows/ci.yml	2347	edit	FIG-4900	FIG-4900	EFFECT_GROUP, effect-group	Move semantic filters/guards/perf probes to new laws; remove transport-only selectors in the defining deletion commit. Z05 audits final selection.
-M0002	.github/workflows/confidence.yml	472	edit	FIG-4900	FIG-4900,FIG-4899	tool-child	Move semantic filters/guards/perf probes to new laws; remove transport-only selectors in the defining deletion commit. Z05 audits final selection.
 M0003	BUCK	134	edit	FIG-4899	FIG-4899	tool_child	Regenerate target/source membership in each owning deletion or dependency landing via kiln sync; preserve measured budgets.
 M0004	Cargo.lock	1	edit	FIG-4870	FIG-4870	closure/dependency edge; no literal hit	Pin final cleanup SDK revision and regenerate dependency closure; preserve package identities and features.
 M0005	Cargo.toml	1	edit	FIG-4870	FIG-4870	closure/dependency edge; no literal hit	Pin final cleanup SDK revision and regenerate dependency closure; preserve package identities and features.

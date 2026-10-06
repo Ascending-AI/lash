@@ -161,8 +161,8 @@ bound, not a discovered runtime invariant violation.
   fast lane, and
   `target/confidence/<worktree-slug>/sim-search/<i>-of-<n>/` runs for sharded
   search-fleet runs, including env-gated Postgres conformance evidence when the
-  lane is enabled. CI overrides the run to the established unqualified
-  `target/confidence/` artifact tree.
+  lane is enabled. The local runner gives each stage its own directory under
+  `.kiln/confidence-local/<timestamp>/`.
 
 ## Implemented DST substance
 
@@ -368,14 +368,14 @@ at lane-scaled budgets: 256 seeds @ 500 max boundaries for default
 (`LASH_SIM_DEFAULT_SEEDS`/`LASH_SIM_DEFAULT_MAX_BOUNDARIES`), 512 @ 512 for
 broad (`LASH_SIM_BROAD_SEEDS`/`LASH_SIM_BROAD_MAX_BOUNDARIES`), and 243 @
 2000 for full (`LASH_SIM_FULL_SEEDS`/`LASH_SIM_FULL_MAX_BOUNDARIES`), all
-shardable with `LASH_SIM_SHARD`. The weekly Confidence workflow partitions the
-full seed space across nine `sim-search:<i>/9` matrix jobs, so the fleet covers every configured seed
-exactly once per week. `scripts/confidence-gate.sh sim-search:<i>/<n>` runs
+shardable with `LASH_SIM_SHARD`. The on-demand local Confidence runner partitions the
+full seed space across nine `sim-search:<i>/9` stages, so the fleet covers every
+configured seed exactly once per run. No GitHub workflow runs Confidence. `scripts/confidence-gate.sh sim-search:<i>/<n>` runs
 one shard standalone. A dedicated `sim-search:` shard is bounded by wall
 clock, not the seed count alone: the gate hands each pass a `--time-budget`
 derived from the job cap minus measured fixed cost, and `lash-sim` stops
 cleanly at the budget and records `reached_seeds` in the summary, so a slow
-shard still produces evidence. The fast lane is the release gate and keeps
+shard still produces evidence. The fast lane keeps
 its small fixed evidence budget; it never runs the search lane.
 
 ## Known limitations

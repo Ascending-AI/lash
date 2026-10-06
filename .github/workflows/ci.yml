@@ -136,8 +136,6 @@ env:
   # release.yml, which do not link through mold) overrides it at job scope.
   # Mold reduces link cost across the workspace test binaries.
   RUSTFLAGS: -C link-arg=-fuse-ld=mold
-  # Preserve the pre-worktree-isolation artifact tree consumed below.
-  LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence
 
 jobs:
   # Keep path classification cheap and conservative. Every event whose exact

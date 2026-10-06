@@ -211,9 +211,11 @@ gate; this changes its derived port base while preserving its path-qualified
 ownership identity. The refusal prints this override and the occupied lock
 path.
 The default confidence evidence root is
-`target/confidence/<worktree-slug>/` for local runs. CI explicitly pins
-`LASH_CONFIDENCE_OUT_DIR` to `target/confidence` so its established artifact
-upload and summary paths are unchanged.
+`target/confidence/<worktree-slug>/` for individual local lanes.
+`just confidence-local` runs the complete local stage plan from
+`scripts/confidence-stages.json`, with evidence and its summary under
+`.kiln/confidence-local/<timestamp>/`. Confidence runs on this host on demand;
+no GitHub workflow runs it or uses its conclusion as a precondition.
 
 Every checkout uses a fixed external network named `lash-e2e-<worktree-slug>`.
 Scripts create it idempotently and never delete it, because host network
@@ -311,10 +313,10 @@ toolchain anyone builds with.
 
 AppendVec's unsafe buffer has a separate interpreter gate. Run
 `kiln gate lash <fork> -- bash scripts/hermetic-build.sh miri` locally, or
-`bash scripts/hermetic-build.sh miri` in CI. The driver installs the dated
-nightly and Miri component from `scripts/miri-toolchain.toml` under `.tgt/miri`
+`bash scripts/hermetic-build.sh miri` from the local Confidence runner. The driver installs
+the dated nightly and Miri component from `scripts/miri-toolchain.toml` under `.tgt/miri`
 and runs the complete `append_vec::tests::` suite with 20 Miri seeds, including
-its threaded tests. Confidence requires this gate on scheduled and manual full
+its threaded tests. The local Confidence stage plan includes this gate on full
 runs; it stays off the per-merge path. Update the interpreter pin explicitly
 when moving Miri versions.
 
