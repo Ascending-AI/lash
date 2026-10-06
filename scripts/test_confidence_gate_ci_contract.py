@@ -684,7 +684,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "docs_only": "false",
             "fail_open": "false",
             "pr_pg_store": "false",
-            "pr_host_restate": "false",
+            "pr_host_e2e": "false",
         }
         # This scenario exercises deferral. The fast pull-request board runs
         # no live suite at all — the store suite is merge-group and dispatch
@@ -908,13 +908,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 )
         justfile = sources["justfile"]
         self.assertIn("kiln run //examples/toolbench:toolbench", justfile)
-        attachment = sources["scripts/agent-workbench-attachment-usage-gate.sh"]
-        self.assertIn("kiln test --test_timeout=300 --test_output=all", attachment)
-        self.assertIn(
-            "--test_arg=tests::attachments_usage_tests::attachment_usage_gate",
-            attachment,
-        )
-        self.assertIn("--test_arg=--exact", attachment)
 
     def test_soak_callers_forward_only_declared_runtime_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1071,30 +1064,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             ):
                 self.assertIn(argument, rows[0])
             self.assertNotIn(database, rows[0])
-
-            calls.unlink(missing_ok=True)
-            result = subprocess.run(
-                ["bash", "scripts/agent-workbench-attachment-usage-gate.sh", "3030"],
-                cwd=ROOT,
-                env=environment,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            rows = [
-                json.loads(line)
-                for line in calls.read_text(encoding="utf-8").splitlines()
-            ]
-            self.assertEqual(len(rows), 1)
-            for argument in (
-                "--test_timeout=300",
-                "--test_output=all",
-                "--test_arg=tests::attachments_usage_tests::attachment_usage_gate",
-                "--test_arg=--exact",
-                "--test_arg=--test-threads=1",
-            ):
-                self.assertIn(argument, rows[0])
 
     def test_perf_failure_artifacts_are_attempt_qualified(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -2831,7 +2800,6 @@ derive_mutation_jobs() {{
             "repo-gates": (
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
-                "bash scripts/check-loadtest-chart.sh",
             ),
             "feature-lanes": (
                 "//:feature_lane_compile",

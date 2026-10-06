@@ -3,8 +3,8 @@
 FIG-3482 investigates retained history across execution segments. The
 post-1.0 sweep authorizes implementing a necessary stored horizon before
 the 1.0 cut. This inventory was checked against main `f9dfed0c61` and the
-release implementation. Restate is the only shipping engine. SQLite file,
-SQLite memory and PostgreSQL are storage tiers.
+release implementation. SQLite file, SQLite memory and PostgreSQL are
+storage tiers.
 
 Hosts call `Processes::release_events(process_id, through)` to release an
 event prefix's payloads. The process keeps its identity, incarnation,
@@ -21,7 +21,6 @@ does not make process-owned rows prune-eligible.
 | Process events | One row per producer emit, signal or lifecycle transition. Replay matching, pages, event awaiters and observation summaries read them. | Terminal process pruning deletes the log. A running process previously had no release lever. | Strips selected payloads; retains ordering, invocation, semantics, admitted signal binding and replay fences. |
 | Effect-summary events | At most eight individually recorded occurrences per effect node; later occurrences accumulate omission counts. Pending summaries travel in segment state until a boundary write. Producer emits and signals have no such cap. | Runtime incorporation writes events in the next boundary's transaction; terminal pruning owns their rows. | Releases committed payloads. Suffix snapshots report their summary incomplete. Pending summaries stay untouched. |
 | Segment handovers and start markers | Each successor records a continuation, route, generation and execution-start fence. Normal retirement removes consumed handovers. Rows can coexist while retirement is owed or fails. | Engine-owned journaled resume and retirement; terminal pruning removes survivors. | Nothing. The successor continuation and start marker remain replay authority. |
-| Restate invocation journals and results | Segment budgets bound completed effect count, not arbitrary result bytes or the number of completed segments. Independent tool attempts are records in their owning Run journal; process-backed work has process invocations. | Restate completion retention; active execution retains its journal. | Nothing. SQL cleanup cannot replace engine retention. |
 | Wake delivery rows | A wake-producing event adds a row with its own content. Claim, enqueue and discard update it. Settled rows stay process-owned; the outbox contract has no running-process deletion. | Process deletion cascades the rows. Owed wakes prevent terminal pruning; discarded wakes permit explicit redrive. | Nothing. Release preserves content and claims, including pending work. These rows can also accumulate during a long process. |
 | Wake allocation and receiver floors | One monotonic floor per process and target session, independent of queue-row lifetime. | Session/process-state cleanup and receiver terminal transitions. | Nothing. Event sequences and floors never reset. |
 | Process record, wait, cancellation and outcome | Current state replaces the record; its values can be large. | Lifecycle writes and terminal pruning. | Nothing. Outcomes stay awaitable. Cancellation retains its special replay-matching payload. |
@@ -34,7 +33,6 @@ does not make process-owned rows prune-eligible.
 Evidence: [event SQL](../../crates/lash-store-sql/src/process/events.rs),
 [append and replay matching](../../crates/lash-core-execution/src/runtime/process/validation.rs),
 [effect accounting](../../crates/lash-core-execution/src/runtime/process/effect_summary.rs),
-[workflow handover](../../crates/lash-restate/src/process/workflow.rs),
 [handover SQL](../../crates/lash-store-sql/src/process/segment_handovers.rs),
 [wake SQL](../../crates/lash-store-sql/src/process/wake_deliveries.rs),
 [outbox and retention contracts](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs),
@@ -114,32 +112,6 @@ keys and replacement signal-ordinal evidence. Storage has neither proof.
 No TTL, registration retention field, automatic cleaner, successor process
 or `ContinuedAsNew` terminal is added.
 
-## Restate retention configuration
-
-[The live-server recipe](../../scripts/ci/restate_suite.py) pins Restate
-1.7.12. Its [pinned configuration defaults](https://github.com/restatedev/restate/blob/v1.7.12/crates/types/src/config/invocation.rs#L127)
-set journal, idempotency and workflow completion retention to 24 hours.
-These are source-verified defaults, not deployed-server measurements.
-
-[Lash service binding](../../crates/lash-restate/src/services.rs) sets authority,
-lazy-state and retry options, but no retention override. The SDK dependency and host re-export contract are recorded in the
-[lash-restate README](../../crates/lash-restate/README.md). Hosts must inspect
-their namespace-qualified services and handlers because server defaults and
-existing overrides can differ. The [pinned service contract](https://github.com/restatedev/restate/blob/v1.7.12/crates/types/src/schema/service.rs#L121)
-caps journal retention by workflow completion retention for workflows and
-idempotency retention for keyed requests.
-
-Workflow retention starts after the run completes and controls later state
-and promise access, as [Restate's service documentation](https://docs.restate.dev/services/configuration#retention-of-completed-invocations)
-describes. It cannot reclaim a running or paused segment's journal. Hosts
-account for late attachments and requests before reducing it. Lash's recorded
-start contract refuses started work whose required journal is gone instead
-of repeating effects with an empty journal. Event release changes none of this.
-
-Live expiry timing, physical disk reclamation, deployed overrides and late
-requests after expiry were not exercised. The server double supplies no
-evidence about live Restate retention.
-
 ## Bounded measurement
 
 The previous worker measured 2,000 replay-keyed producer events on SQLite
@@ -172,9 +144,7 @@ The [store law](../../crates/lash-conformance/src/conformance/process_registry/e
 checks typed expiry, tails, equal-key and conflicting replay, signal counts,
 monotonic allocation, clamping and repetition on all three storage tiers.
 The [facade law](../../crates/lash/src/process_observation/tests.rs) checks the
-read gap, cursor and incomplete fold. The [handover law](../../crates/lash-restate/src/tests/segment_generation_handoff/crash_cuts.rs)
-releases at a stored-but-unjournaled handover, crashes that step, forces engine
-replay and checks the continuation, outcome and one successor.
+read gap, cursor and incomplete fold.
 
 Transaction serialization and rollback above are source reasoning. Crash-reopen
 release transactions, concurrent append/release stress, pending-wake redrive

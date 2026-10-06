@@ -95,8 +95,8 @@ Keep local validation proportional to the change:
   crates can still select a large part of the workspace. Neither starts
   Postgres, S3, or E2E.
 - Add a targeted live recipe only for a named durability or behavior risk that
-  the current CI plan does not exercise. Merely touching `lash-core` or
-  `lash-restate` does not require running both durable geometries locally. Implementer loops never run those live gates.
+  the current CI plan does not exercise. Merely touching `lash-core` does not
+  require running live gates locally. Implementer loops never run those live gates.
 
 For Rust compilation, target analysis, and focused unit or integration tests,
 use the checkout-independent Buck2 workflow in
@@ -150,8 +150,7 @@ Nothing heavy runs automatically on a push to `main`. `ci.yml` has no `push`
 trigger at all: the queue already validated the exact tree that main
 fast-forwards to, so a second automatic run over the same tree bought nothing.
 The heavy families — `Test heavy suites`, `Test S3 store against Garage`, both
-`Functional E2E` jobs, `Restate + Postgres + S3 Workers` and its coverage
-summary, `Fuzz smoke`, `Stack budget`, `Test deferred Unicode suites`,
+`Functional E2E` jobs, `Fuzz smoke`, `Stack budget`, `Test deferred Unicode suites`,
 `Lashlang Git consumer` and `Build worker release artifacts` —
 run on a manual `workflow_dispatch` of `ci.yml`, which is exactly the full
 profile release.yml certifies against. `Feature lanes` still compiles on
@@ -195,12 +194,6 @@ offsets are stable:
 - `+0..+9` attachment/usage workbench PostgreSQL, selected by the workbench
   port's last decimal digit;
 - `+10` push/confidence PostgreSQL, `+11` push S3, `+12` mutation PostgreSQL;
-- `+30..+34` agent-workbench Restate, endpoint, and PostgreSQL;
-- `+35..+39` run-conformance Restate (admin, ingress, node, two
-  endpoints); it is serialized by the
-  checkout lock;
-- `+40` distributed-worker S3;
-- `+41`, `+43..+46` process-operations S3, Restate, and PostgreSQL;
 
 Explicit existing environment overrides such as `LASH_PUSH_GATE_PORT_BASE`,
 `LASH_PUSH_GATE_POSTGRES_PORT`, `LASH_CONFIDENCE_OUT_DIR`, and each recipe's
@@ -220,8 +213,8 @@ no GitHub workflow runs it or uses its conclusion as a precondition.
 Every checkout uses a fixed external network named `lash-e2e-<worktree-slug>`.
 Scripts create it idempotently and never delete it, because host network
 watchers treat Docker network add/remove as interface churn. Compose projects
-are fixed per checkout rather than per run. Their repeated `postgres`, `s3`,
-and `restate` aliases are safe only because the worktree lock and labeled
+are fixed per checkout rather than per run. Their repeated `postgres` and `s3`
+aliases are safe only because the worktree lock and labeled
 leftover check prevent two lane projects from sharing this network at once. A
 nonblocking worktree lock rejects a second same-checkout battery with exit 73.
 The refusal names the owner PID, lock path, and exact orphan remedy. Compose
@@ -235,19 +228,7 @@ while a slot lock turns a residual hash collision into a clean refusal rather
 than a host-port race.
 
 After upgrading from the older global-name gate layout, remove pre-change
-unlabeled state once, after confirming no old gate is running. In particular,
-remove the old distributed-worker project with the current Compose file's
-required values supplied only for configuration parsing:
-
-```sh
-source scripts/ci/s3-service.sh  # the S3 service values the Compose file reads
-LASH_GATE_WORKTREE_SLUG=legacy LASH_E2E_S3_PORT=1 \
-LASH_E2E_BIN_DIR=/tmp LASH_E2E_NETWORK=lash-e2e \
-  docker compose -p restate-postgres-workers \
-  -f runbooks/restate-postgres-workers/docker-compose.yml \
-  down -v --remove-orphans
-```
-
+unlabeled state once, after confirming no old gate is running.
 Remove obsolete `lash-*-push-gate-*` containers explicitly, and remove the old
 `lash-e2e` network only when no container is attached. New gates never remove
 unlabeled legacy state for you.
@@ -259,8 +240,8 @@ change, run:
 just gate-worktree-concurrency-check /path/to/peer-kiln-fork
 ```
 
-For two Kiln forks, pass the peer's printed checkout path. The check runs PostgreSQL,
-S3, and Restate smokes concurrently in both checkouts, then proves a second
+For two Kiln forks, pass the peer's printed checkout path. The check runs PostgreSQL
+and S3 smokes concurrently in both checkouts, then proves a second
 same-checkout run refuses cleanly. Evidence is written below
 `target/gate-concurrency-proof/<worktree-slug>/` unless
 `LASH_GATE_PROOF_OUT_DIR` overrides it.

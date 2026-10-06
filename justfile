@@ -27,10 +27,8 @@ agent-workbench port='3030':
 agent-workbench-up port='3030':
   ./scripts/agent-workbench-dev.sh up --port "{{port}}"
 
-# Non-destructive: replaces only the workbench process and keeps the Restate
-# engine and its journals, any managed Postgres, the registered deployment, and
-# the application data. Export the same RESTATE_AUTHORITY_ID as the running
-# stack.
+# Non-destructive: replaces only the workbench process and keeps any managed
+# Postgres and the application data.
 agent-workbench-restart port='3030':
   ./scripts/agent-workbench-dev.sh restart --port "{{port}}"
 
@@ -91,9 +89,8 @@ workbench-continue-as-budget-gate:
   kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=continue_as_warning_override --test_output=errors
   kiln test //crates/lash-protocol-rlm:protocol_drivers__test --test_arg=scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_seed --test_output=errors
 
-# The send-to-completion latency gate (FIG-3843): `send()` → Restate shift →
-# `outcome()` measured end to end on a live `restate-server`, the same-process
-# fast fixture gated at overhead p50 < 50 ms / p99 < 250 ms over 10,000
+# The send-to-completion latency gate (FIG-3843): `send()` → `outcome()`
+# measured end to end, the same-process fast fixture gated at overhead p50 < 50 ms / p99 < 250 ms over 10,000
 # samples, every other case (stream, tool, failure, busy, controlled
 # real-provider, cross-worker, poll, grace) measured and reported. The report
 # and the raw sample ledger land under the artifact directory. The harness
@@ -150,10 +147,7 @@ latency-gate *args:
     exit "$status"
   fi
 
-agent-workbench-attachment-usage-gate port='3030':
-  bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"
-
-# Fast live proof of the shared Postgres/S3/Restate gate isolation contract.
+# Fast live proof of the shared Postgres/S3 gate isolation contract.
 gate-container-smoke:
   bash "{{repo}}/scripts/gate-container-smoke.sh"
 
@@ -419,20 +413,6 @@ publish-all *args:
 
 check-file-size:
   python3 scripts/check-production-file-size.py
-
-# Foreground on-demand FIG-3790 load test: installs the chart, runs the
-# workload, collects and archives the results, then uninstalls. Run through
-# kiln gate so every cluster, namespace and artifact has an owner. The target
-# is local (kind) today; scaleway is PENDING credentials (FIG-4172).
-multi-node-load target="local":
-  bash "{{repo}}/scripts/multi-node-load.sh" "{{target}}"
-
-loadtest-chart-check:
-  bash "{{repo}}/scripts/check-loadtest-chart.sh"
-  python3 "{{repo}}/scripts/test_loadtest_topology.py"
-  python3 "{{repo}}/scripts/test_loadtest_faults.py"
-  python3 "{{repo}}/scripts/test_loadtest_upgrade.py"
-  python3 "{{repo}}/scripts/test_loadtest_manifest.py"
 
 # Deterministic DOM/API/SQL transcript acceptance (Surfaces A-E).
 workbench-transcript-projection-e2e:

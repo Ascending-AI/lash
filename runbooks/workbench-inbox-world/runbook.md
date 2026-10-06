@@ -9,12 +9,12 @@ real model: a plain chat turn, a live mocked-inbox world
 (two accounts), the agent operating an inbox through its typed `inbox.<slug>` authority,
 and finally a **trigger-driven durable forwarding process** — register a concierge on
 `mail.received` for one account, deliver a message into it from the UI, and watch a copy
-land in the other account's inbox via a Restate-backed background process.
+land in the other account's inbox via a durable background process.
 
 **Why this matters.** The workbench is the full demo surface: triggers, typed module
 authorities, durable processes, and the split app/observation event stream. Forwarding is
 the one flow that exercises the whole chain — UI compose → host `mail.received` emission
-inside a Restate execution scope → trigger registration match → durable process →
+inside a durable execution scope → trigger registration match → durable process →
 `inbox.personal.send` back through the same authority the chat uses. If any link drops,
 the message never arrives — a single structural gate covers the chain.
 
@@ -41,12 +41,11 @@ prose and the exact TypeScript it writes are its own; gate on structural outcome
 ## Working material
 
 - **Boot**: `bash scripts/agent-workbench-dev.sh up --port <port>` from the repo root — it
-  starts Dockerized
-  Restate, the workbench, registers the deployment, and exits after printing the URL.
+  starts the workbench and exits after printing the URL.
   For an isolated run set `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp>` (golden rule 1 depends
-  on an empty world), a fresh `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_OPEN=0`
-  (headless boot — no browser open) and `RESTATE_AUTHORITY_ID=<stable-id>`.
-  Readiness: `GET /healthz` → 200. **Teardown owns Docker**:
+  on an empty world), a fresh `AGENT_WORKBENCH_RUN_DIR` and `AGENT_WORKBENCH_OPEN=0`
+  (headless boot — no browser open).
+  Readiness: `GET /healthz` → 200. **Teardown is yours**:
   `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env at the end,
   success or Abort. (`just agent-workbench <port>` / `just agent-workbench-down <port>` name
   the same operations but do not carry this row's environment.)
@@ -137,7 +136,7 @@ registration that never fires fails there. Screenshot `04-registered.png`.
 In the **accounts** tab, use the **work** card's compose form to deliver a message with a
 distinctive title (e.g. `Quarterly report`) and text. The form sends the real mail fields
 `title` and `text` to `/api/accounts/work/messages`. This is the host emitting `mail.received`
-inside a Restate execution scope — **do not touch the chat from here on** (golden rule 2).
+inside a durable execution scope — **do not touch the chat from here on** (golden rule 2).
 
 Gates, in order:
 
@@ -176,8 +175,7 @@ same shot rather than as a separate `06-process-rail.png`; a screenshot taken wh
 ## Phase 6 — Teardown and score
 
 `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env; confirm the
-workbench and the Restate container are
-gone. Then fill:
+workbench is gone. Then fill:
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

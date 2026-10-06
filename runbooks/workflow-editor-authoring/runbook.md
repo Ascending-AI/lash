@@ -12,7 +12,7 @@ proves that the friendly editor, the graph/code lens, and execution all describe
 workflow.
 
 **No real tokens.** `examples/workflow-graph-roundtrip` uses deterministic host-owned
-mock operations. Do not configure OpenRouter or a Restate stack for this run.
+mock operations. Do not configure OpenRouter for this run.
 
 **The canonical source in this scenario is not an RLM dialect.** This host opens no RLM
 session and prompts no model. The text the code pane shows is the **workflow-graph lens's**

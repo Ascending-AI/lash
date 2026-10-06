@@ -16,7 +16,6 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-        exclude: '^deploy/helm/[^/]+/templates/'
       - id: check-json
 
   - repo: local

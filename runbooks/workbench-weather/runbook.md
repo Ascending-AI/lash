@@ -87,8 +87,8 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
    unpinned row silently changes tier. A mismatch or unrecorded model substitution is a
    mislabeled row and triggers Abort/RCA.
 10. **Start from nothing.** Use the fixed allocations below. The row gets its own session
-    id, data directory, run directory, artifacts, ports, Restate and Postgres containers,
-    and trace, none of them carried over from an earlier run.
+    id, data directory, run directory, artifacts, ports, Postgres container, and trace, none
+    of them carried over from an earlier run.
 
 ## Working material
 
@@ -103,9 +103,9 @@ credential values.
 Use these allocations exactly; they are intentionally explicit rather than relying on the
 workbench port-derivation fallback:
 
-| Workbench | Restate endpoint | ingress | admin | node | Postgres | Session |
-| ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 3302 | 11801 | 10800 | 21790 | 21791 | 18152 | `fig2351-weather-typescript-<run-id>` |
+| Workbench | Postgres | Session |
+| ---: | ---: | --- |
+| 3302 | 18152 | `fig2351-weather-typescript-<run-id>` |
 
 Export all of the following with that table's values before
 `bash scripts/agent-workbench-dev.sh up --port <workbench-port>` (the
@@ -116,23 +116,16 @@ exporting it only creates a variable a driver believes in.
 
 - `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig2351-weather/<run-id>/typescript/data`;
 - `AGENT_WORKBENCH_RUN_DIR=/workspace/tmp/fig2351-weather/<run-id>/typescript/run`;
-- `AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:<endpoint>`;
-- `RESTATE_INGRESS_URL=http://127.0.0.1:<ingress>`;
-- `RESTATE_ADMIN_URL=http://127.0.0.1:<admin>`;
-- `AGENT_WORKBENCH_RESTATE_ADMIN_PORT=<admin>` and
-  `AGENT_WORKBENCH_RESTATE_NODE_PORT=<node>`;
-- `AGENT_WORKBENCH_RESTATE_ENDPOINT_URL=http://127.0.0.1:<endpoint>`;
-- `AGENT_WORKBENCH_RESTATE_CONTAINER=lash-agent-workbench-fig2351-typescript-restate`;
 - `AGENT_WORKBENCH_POSTGRES=1`, `AGENT_WORKBENCH_POSTGRES_PORT=<postgres>`, and
   `AGENT_WORKBENCH_DATABASE_URL=postgres://lash:lash@127.0.0.1:<postgres>/lash`;
 - `AGENT_WORKBENCH_POSTGRES_CONTAINER=lash-agent-workbench-fig2351-typescript-postgres`.
 
-Before boot, require the row's data/run/artifact directories not to exist and all six
+Before boot, require the row's data/run/artifact directories not to exist and both
 allocated ports to be free. Never inspect, stop, or reuse anything on ports 3063 or 3067.
 Save evidence under
 `/workspace/tmp/fig2351-weather/<run-id>/typescript/artifacts`. Tear the row down with the
 same exported environment and `bash scripts/agent-workbench-dev.sh down --port <workbench-port>`; then require
-the workbench port closed and both exact containers absent. Preserve artifacts, but remove
+the workbench port closed and the exact Postgres container absent. Preserve artifacts, but remove
 the row's data and run directories only after evidence has been copied.
 
 Browser truth is the scoped page
@@ -215,7 +208,7 @@ completed turn. Any disagreement is a contract violation → Abort/RCA. Save
 ## Phase 4 — Teardown and score
 
 Do: tear down the row using its exact exported environment. Confirm the PID is gone, all
-allocated ports are closed, and both exact containers are absent. Save a concise teardown
+allocated ports are closed, and the exact Postgres container is absent. Save a concise teardown
 transcript as `04-teardown.txt`.
 
 Expect: no workbench-owned process, listener, or container from the row remains.
@@ -227,7 +220,7 @@ generic “looks good.”
 
 | Gate | Objective gate | Result | Evidence |
 | --- | --- | --- | --- |
-| Fresh isolated boot | six explicit ports free before boot; scoped DOM/API/store/trace are empty and agree | | `00-*` |
+| Fresh isolated boot | both explicit ports free before boot; scoped DOM/API/store/trace are empty and agree | | `00-*` |
 | Dialect and model identity | code-block `language` and the disclosure `<summary>` read `typescript`; no badge, no `settings.rlm_dialect`, and no language field on `exec_code_completed` is expected; served model recorded and pinned | | `00-identities.json`, `01-finished-trace.json` |
 | Do → expect completion | running observed; then idle + no active turn + one completed/final-value terminal within five minutes | | `01-finished.png`, state, trace |
 | Validation-only tools | every agent tool is a Parallel web-search or web-fetch MCP call | | `02-execution-history.json` |
@@ -236,7 +229,7 @@ generic “looks good.”
 | Rendered weather shape | concrete temperature/unit, source condition, humidity, and wind/unit; no broken placeholder token | | `03-weather-answer.png`, `03-answer-values.json` |
 | Internal consistency | source rounding, sanity bounds, and all displayed unit conversions agree | | `03-answer-values.json` |
 | Three-layer fidelity | one user/assistant pair agrees across DOM, API, durable graph, and trace — assistant by shared id, user by text and turn | | `03-crosscheck.json` |
-| Teardown | exact PID, ports, and containers are gone | | `04-teardown.txt` |
+| Teardown | exact PID, ports, and container are gone | | `04-teardown.txt` |
 
 ### Run summary
 

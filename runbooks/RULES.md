@@ -5,8 +5,7 @@ Read this before running any scenario in `runbooks/`. Each runbook links here an
 phases, and scorecard.
 
 `runbooks/` has **two layers**. Scripted deterministic harnesses
-(`runbooks/restate-postgres-workers/`, `runbooks/rlm-smoke/`, and the
-`scripts/*-e2e.sh` runners) are gate **evidence**: they boot real hosts or infrastructure
+(`runbooks/rlm-smoke/` and the `scripts/*-e2e.sh` runners) are gate **evidence**: they boot real hosts or infrastructure
 and assert exact outcomes, and they stay scripts. Runbooks are the **agent-judged semantic
 layer** on top: you (the agent) shift browser scenarios or inspect a deterministic companion's
 artifact bundle, then judge the observed behavior with your own reasoning. A deterministic
@@ -84,7 +83,7 @@ Independent scenario rows may execute concurrently from the start, subject to th
 repository's two-heavy-job limit and each runbook's port/container isolation rules.
 Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
 or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
-stable JSON work shard. The matrix currently expands to **32 rows**: 28 RLM scenarios, three
+stable JSON work shard. The matrix currently expands to **25 rows**: 22 RLM scenarios, two
 no-RLM-session rows, and one composite that exercises host-language surface. The arithmetic
 is asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave
 this number stale without turning CI red.
@@ -137,8 +136,7 @@ Four rules keep the tiers honest:
 
 Where a runbook is half mechanics and half behaviour, the mechanical half runs deterministic
 and only the residue is funded: `judged-matrix.toml` records that split per scenario in
-`deterministic_phases`. The `agent-workbench-attachment-usage-gate` companion runs once per battery
-and supplies attachment persistence and model trace evidence.
+`deterministic_phases`.
 
 The judge is separate and unchanged: `judge_model_floor` stays `gpt-5.6-sol`. A cheap driver
 producing the evidence does not license a cheap reader of it.
@@ -279,25 +277,20 @@ its Buck2 rustc flags, and builds before workbench launcher locks.
 
 `just agent-workbench-restart <port>` (`scripts/agent-workbench-dev.sh restart`) is the
 non-destructive same-configuration replacement (FIG-3035). It replaces **only** the Workbench
-process, at the same address, endpoints, store backend and `RESTATE_AUTHORITY_ID`, and keeps
-the Restate engine and its journals, any managed Postgres, the registered deployment and the
-application data directory. It re-registers no deployment. This is the command a phase that
-proves durable state survives a process replacement uses.
+process, at the same address and store backend, and keeps any managed Postgres and the
+application data directory. This is the command a phase that proves durable state survives a
+process replacement uses.
 
 It is verified and is **not** blocked: FIG-3035 landed it, the 2026-09-15 judged shift
 executed it on every workbench row that needs a process replacement, and every continuity gate
 held. A phase that still reads "blocked by FIG-1164" is stale documentation, not a live
 constraint. It refuses before stopping anything unless the launcher's own run metadata proves it owns a
-matching stack at exactly the current settings — including the recorded Restate trust domain,
-so a row that exports a different `RESTATE_AUTHORITY_ID` is refused rather than silently bound
-to a new durable state, and a stack started by an older launcher, which recorded no trust
-domain, is refused too. Because no deployment is re-registered, a rebuild that changes the
-Restate service surface needs the reset path instead. An interrupted replacement is retryable
-with the same command.
+matching stack at exactly the current settings. An interrupted replacement is retryable with
+the same command.
 
 `just agent-workbench-reset <port>` (`restart --reset-dev-state`) is unchanged and remains an
-explicitly destructive recovery command: it clears Restate journals and the corresponding
-application data, and works only for a wholly launcher-owned disposable stack. Legacy,
+explicitly destructive recovery command: it clears the stack's durable state and application
+data, and works only for a wholly launcher-owned disposable stack. Legacy,
 external, mixed, or ambiguous stacks are refused. Never substitute it for a
 process-replacement phase, because deleting the evidence cannot prove persistence.
 

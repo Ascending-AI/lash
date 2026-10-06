@@ -31,9 +31,5 @@ SQLite integrity without writing, and runs typed store assertions against
 copied SQLite catalogs and a restored PostgreSQL dump. No reader falls back to
 local fixture sources.
 
-Journal replay is a separate, non-required workflow during the freeze. It
-reads the `replay-corpus` leg through `LASH_REPLAY_CORPUS_ROOT` and compares
-every journal whose generation is this build's (`crates/lash-restate/README.md`).
-
 At the cut, `docs/release/cut-1.0.md` describes regeneration, tagged capture
 and required-gate activation. Existing rehearsal corpora are historical evidence.

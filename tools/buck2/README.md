@@ -119,10 +119,6 @@ execution while compilation remains remote and cacheable. A `hermetic-postgres`
 test brings its service with it: `postgres_action_runner.py` starts the pinned
 PostgreSQL 16 inside the test action, which therefore stays remote and cached
 ([hermetic PostgreSQL tests](../../docs/agents/hermetic-build.md#hermetic-postgresql-tests)).
-Registered Restate suites also declare their pinned server and run each
-shard with private Restate and PostgreSQL inside its remote action. Their
-`restate_<suite>_<leg>` labels keep the existing suite selections and replay
-checks; see [service gates](../../docs/agents/hermetic-build.md#service-and-cargo-owned-gates).
 
 Callers that execute build outputs request `--materializations final` and use
 `outputs.py --report PATH --label //package:target --single`; do not guess an

@@ -2,12 +2,11 @@
 
 A production-grade recoverable-chat host reference for RLM background
 processes, subagents, web tools, deferred-tool discovery, button triggers, and
-Restate-backed cron triggers.
+cron triggers.
 
-Restate is required. Run the example from the repo root with the bundled
-entrypoint. The default command starts the workbench as a detached local
-service, waits for readiness, registers the Restate deployment, and then exits
-after printing the URL:
+Run the example from the repo root with the bundled entrypoint. The default
+command starts the workbench as a detached local service, waits for readiness,
+and then exits after printing the URL:
 
 ```bash
 OPENROUTER_API_KEY=... just agent-workbench
@@ -23,8 +22,7 @@ OPENROUTER_API_KEY=... AGENT_WORKBENCH_POSTGRES=1 just agent-workbench 3000
 Alternatively, set `AGENT_WORKBENCH_DATABASE_URL` to an existing Postgres database.
 
 Open `http://127.0.0.1:3030`. Pass a port, for example `just agent-workbench 3000`, to
-override the web port; the helper derives the dependent Restate and Postgres ports from
-that value. Useful lifecycle commands:
+override the web port; the helper derives the dependent Postgres port from that value. Useful lifecycle commands:
 
 ```bash
 just agent-workbench-status 3000
@@ -35,21 +33,17 @@ just agent-workbench-reset 3000
 just agent-workbench-down 3000
 ```
 
-`restart` refuses safely because replacing the only host behind a replayable Restate
-deployment is not supported by this launcher. `reset` is explicitly destructive: for a wholly
-launcher-owned disposable stack, it clears the Restate journals and corresponding SQLite/data
+`restart` replaces only the workbench process and keeps the application data. `reset` is
+explicitly destructive: for a wholly launcher-owned disposable stack, it clears the SQLite/data
 directory or managed Postgres state, then starts fresh. It refuses legacy, external, mixed, or
 ambiguous ownership. `down` stops the workbench and every exactly identified container the
 entrypoint started, and leaves the stopped stack's application data and ownership records in
-place. Running `just agent-workbench <port>` again with the same `RESTATE_AUTHORITY_ID` resumes
-that stopped stack: the same data directory and durable state, a fresh engine and process.
-Exporting a different `RESTATE_AUTHORITY_ID` is refused, because the retained durable state is
-bound to the trust domain it was written under. `just agent-workbench-reset <port>` clears a
-stopped stack as readily as a running one.
+place. Running `just agent-workbench <port>` again resumes that stopped stack: the same data
+directory and durable state, a fresh engine and process. `just agent-workbench-reset <port>`
+clears a stopped stack as readily as a running one.
 
-Durability scenarios that require state to survive a process replacement remain blocked until a
-separately verified immutable same-configuration host-restart mechanism exists. Do not use
-`agent-workbench-reset` for them; it deliberately deletes the evidence they assert survives.
+Durability scenarios that require state to survive a process replacement use `restart`. Do not
+use `agent-workbench-reset` for them; it deliberately deletes the evidence they assert survives.
 
 ## Sessions
 
@@ -94,47 +88,6 @@ bytes, serving PNG as `image/png` and other binary resources as
 `application/octet-stream`. `AGENT_WORKBENCH_SEARCH_MCP_URL`
 overrides the search peer URL for an isolated fixture run.
 
-S28 is `s28_workbench_mcp_peer_restart` in the upgrade harness, and
-`s28_workbench_mcp_peer_restart_postgresql` over PostgreSQL. It uses
-`tests/mcp_peer_restart.py` to compare two browser contexts, HTTP responses,
-store records and actual Restate V7 tool outcomes while killing and restarting
-the independently owned HTTP peer. `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=mcp-fixture`
-provides deterministic RLM requests without a model service.
-
-From an isolated Kiln fork, run either browser scenario with one command:
-
-```sh
-python3 scripts/e2e-gate.py //crates/lash-upgrade-harness:e2e_hosts__test s28_workbench_mcp_peer_restart
-python3 scripts/e2e-gate.py //crates/lash-upgrade-harness:e2e_hosts__test s29_workbench_kill_after_acceptance
-```
-
-The runner enters the fork's private Kiln gate, prebuilds the workbench and VM
-worker, starts pinned Restate, and forwards the harness environment to an exact,
-uncached local `kiln test`. It prepares a Python environment with
-`playwright==1.62.0` through `uv`; Chromium must already be installed in
-`~/.cache/ms-playwright`. Any registered `e2e_hosts` test can use the same
-command with its full test name. Runs serialize within the fork and write
-fresh artifacts under `target/e2e-gate/`, or a fresh in-fork directory supplied
-with `--artifacts`. The final line reports executed, passed and failed counts
-from Kiln's JUnit output and the artifact path. A failed scenario exits nonzero
-and retains its logs, SQLite data and cleanup receipts.
-
-S28 and S29 keep their `full` and `release` tiers in `scripts/lash-e2e-manifest.json`.
-For exact-source execution through the planner on a clean committed checkout:
-
-```sh
-python3 scripts/lash-e2e.py run --tier full --scenario S28 \
-  --case S28/default/sqlite_file/live/rlm --sha "$(git rev-parse HEAD)" \
-  --artifacts target/s28-plan
-python3 scripts/lash-e2e.py run --tier full --scenario S29 \
-  --case S29/default/sqlite_file/live/standard --sha "$(git rev-parse HEAD)" \
-  --artifacts target/s29-plan
-```
-
-These commands write execution results; tier certification still requires the
-complete receipts checked by `lash-e2e.py reconcile`. PostgreSQL and S28 replay
-permutations remain held until their own oracles are implemented.
-
 ## Coverage
 
 The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
@@ -147,10 +100,7 @@ source of truth for the CI split.
 
 For the old attached process style, use `just agent-workbench-foreground 3000`.
 
-The entrypoint checks for Restate ingress/admin on the configured ports. If
-they are not already running, it starts `restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b` in Docker,
-waits for ingress/admin, starts the workbench and its in-process Restate
-endpoint, registers the endpoint through Restate Admin, then opens the browser.
+The entrypoint starts the workbench, then opens the browser.
 It writes PID, log, and run metadata under `.agent-workbench/run/`; stale PID
 files are cleaned up automatically. Readiness is checked with
 `/healthz`, so a random process on the same port is reported as a port conflict
@@ -163,13 +113,6 @@ Configuration is read from `.env` or the process environment:
 - `AGENT_WORKBENCH_ADDR`: bind address, default `127.0.0.1:3030`. Passing a
   port to the `just` recipes, for example `just agent-workbench 3000`, binds
   `127.0.0.1:<port>`.
-- `AGENT_WORKBENCH_RESTATE_ADDR`: Restate endpoint bind address, default
-  `127.0.0.1:9081`. The `just agent-workbench` entrypoint starts Restate with
-  host networking, so Restate can call this localhost endpoint directly.
-- `RESTATE_INGRESS_URL`: Restate ingress URL, default `http://127.0.0.1:8080`.
-- `RESTATE_AUTHORITY_ID`: required stable logical identity for the Restate state.
-  Keep it unchanged when the ingress endpoint moves; assign a different value
-  to every independent Restate state.
 - `AGENT_WORKBENCH_DATA_DIR`: persistence directory, default
   `.agent-workbench`.
 - `AGENT_WORKBENCH_LIVE_REPLAY_STORE`: the live replay store session feeds
@@ -205,21 +148,7 @@ Configuration is read from `.env` or the process environment:
   `.agent-workbench/trace.jsonl`.
 - `AGENT_WORKBENCH_LASHLANG_EXECUTION_TRACE`: JSONL Lashlang execution graph
   trace path, default `.agent-workbench/lashlang-execution.jsonl`.
-- `RESTATE_ADMIN_URL`: Restate Admin URL used by the entrypoint for deployment
-  registration, default `http://127.0.0.1:19070` so the dev runner does not
-  collide with other local Restate/admin listeners.
-- `AGENT_WORKBENCH_RESTATE_ADMIN_PORT`: host port for the Restate Admin
-  container started by the entrypoint, default `19070`.
-- `AGENT_WORKBENCH_RESTATE_NODE_PORT`: host port for the Restate node endpoint
-  started by the entrypoint, default `19071`.
-- `AGENT_WORKBENCH_RESTATE_ENDPOINT_URL`: URL Restate should use to reach the
-  workbench endpoint, default `http://127.0.0.1:9081` for the host-networked
-  Docker Restate container started by the entrypoint.
 - `AGENT_WORKBENCH_OPEN`: set to `0` to skip opening the browser.
-- `AGENT_WORKBENCH_RESTATE_IMAGE`: Restate Docker image for the entrypoint,
-  default `restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b`.
-- `AGENT_WORKBENCH_RESTATE_CONTAINER`: Restate Docker container name for the
-  entrypoint, default `lash-agent-workbench-dev-restate`.
 - `AGENT_WORKBENCH_TOKIO_STACK_BYTES`: Tokio worker thread stack for the
   workbench process, default `8388608`. Override only when diagnosing stack
   regressions or comparing runtime stack-size lanes.
@@ -260,9 +189,7 @@ fails startup: the workbench serves without web tools and reconnects in the
 background.
 
 Open the workbench at `http://127.0.0.1:3030` by default, or at the port passed
-to the `just` recipe. Restate ingress is
-`http://127.0.0.1:8080`; the local Restate admin/UI is on
-`http://127.0.0.1:19070`.
+to the `just` recipe.
 
 The browser UI has three work areas: the left rail contains red and blue trigger
 buttons, a cron schedule card, per-turn model controls, and the persisted session token
@@ -270,17 +197,16 @@ ledger; the center
 pane is a chat/event stream; and the right rail polls the process registry for
 visible background work. A **chat / accounts** tab switch at the top of the
 center pane opens a dedicated mock-email view (see below). The buttons emit
-`ui.button.pressed` trigger occurrences. The cron card is
-backed by Restate: ask the agent to schedule something and it can construct a
-typed `cron.Schedule` source whose registrations sync to Restate virtual
-objects. Started background processes appear in the right rail. The rail is a
+`ui.button.pressed` trigger occurrences. Ask the agent to schedule something and
+it can construct a typed `cron.Schedule` source; the cron card lists its
+registrations. Started background processes appear in the right rail. The rail is a
 runtime-wide view, so a process remains visible after the session that started it is
 deleted or reset. Non-terminal cards expose **cancel**, which submits cooperative
 cancellation through `POST /api/work/{process_id}/cancel`; the resulting
 `process.cancel_requested` and terminal status come back through the durable process
 registry. Hosts can delete and rotate the current session with `DELETE /api/session`
 (`POST /api/reset` remains the UI-compatible alias) without deleting Runtime Processes.
-The response waits for Restate to finish the durable delete: success rotates to
+The response waits for the durable delete to finish: success rotates to
 the returned id, while a terminal delete failure returns `409` and identifies
 the old session as still live. Rotation is required after success because a
 deleted session id is permanently retired and cannot be reopened in the same
@@ -336,7 +262,7 @@ The **stop turn** button (or **Esc**) cooperatively cancels the exact running
 turn: `POST /api/turn/cancel` sends its stable session and turn address through
 `TurnWorkDriver::request_cancel`. The request lives on Lash's durable
 keyed-promise seam, so it survives a workbench web-process restart and is
-observed by the current or replayed Restate owner. The authoritative terminal
+observed by the current or recovered owner. The authoritative terminal
 result is `TurnStop::Cancelled` with the original request id, opaque
 host-defined origin, and optional reason; the UI clears only after the request
 is accepted or the turn has already won the completion race.
@@ -377,7 +303,7 @@ lanes after those cursors:
   event to `.agent-workbench/product-events.json` with a monotonic per-session
   sequence and stable event id, then broadcasts it as a freshness hint. A
   lagged subscriber receives an authoritative `resync` snapshot instead of an
-  error. The registry deduplicates stable ids across Restate replay and process
+  error. The registry deduplicates stable ids across recovery and process
   restart. This log is now the durable home of the user half of the transcript,
   so its growth is intentional and bounded by reset, which drops the session
   history and persists that removal. Rewriting the full snapshot after every
@@ -454,9 +380,8 @@ canonical message was committed.
 
 ### Recovery is not retry-as-copy
 
-Restate recovery replays the same invocation and the same Lash turn id. The
-stable product ids and observation cursors converge that replay onto the same
-rows. A user-facing “retry turn” is different: it submits a new turn with a new
+Recovery resumes the same Lash turn id. The stable product ids and observation
+cursors converge the resumed turn onto the same rows. A user-facing “retry turn” is different: it submits a new turn with a new
 turn id and is therefore a new transcript copy with new product identities.
 
 Do not use provider `retryable` classification or `had_tool_calls` as evidence
@@ -467,12 +392,10 @@ recorded. Recovery must never re-execute an uncertain tool merely to rebuild UI
 state; rebuild from durable snapshots, and make externally visible tool effects
 idempotent or split them into explicit durable process steps.
 
-The workbench is an ordinal-addressed Restate host. Leaf providers use sealed
-`AttemptContext` and return versioned
-`ToolIntents`; Lash records the final attempt before realizing each declaration
-as one journal-first command. Process starts, signalling, cancellation,
-and typed process-event emission can therefore migrate to declarations without
-nested Restate ordinals. A detached start records `on_parent_end: Abandon`;
+Leaf providers use sealed `AttemptContext` and return versioned `ToolIntents`;
+Lash records the final attempt before realizing each declaration. Process
+starts, signalling, cancellation, and typed process-event emission are
+therefore declarations. A detached start records `on_parent_end: Abandon`;
 owned children use the default `Cancel`. Lash processes are cooperative and
 Lash deliberately has no hard-kill primitive; engines own kill semantics, so
 v1 records the deviation from Temporal's three-way Parent Close Policy as the
@@ -483,7 +406,7 @@ visibility during redrive.
 
 The chat composer can upload one PNG (up to 1 MiB) through
 `POST /api/attachments`, then includes the returned content-addressed id as
-`attachment_id` in `POST /api/turn`. The Restate workflow resolves the durable file-store
+`attachment_id` in `POST /api/turn`. The turn resolves the durable file-store
 blob and supplies it as a stored MIME-tagged `AttachmentSource` through Lash's generic turn
 contract. The Workbench's PNG-only check is a host-surface policy: Lash's provider transports
 enforce their own image/file allowlists from the recorded `lash::provider::AttachmentCapabilitySnapshot`, and an
@@ -529,8 +452,8 @@ finish(await Promise.all([work, personal]));
 </typescript>
 ```
 
-Adding or removing an account enqueues a durable tool-catalog refresh that a
-Restate workflow drains and commits — nothing executes in the HTTP handler.
+Adding or removing an account enqueues a durable tool-catalog refresh that the
+engine drains and commits — nothing executes in the HTTP handler.
 The next opened turn picks up the new `inbox.<slug>` authority automatically.
 Inbox tools resolve by parsing the tool name rather than scanning live
 accounts, so a session persisted with a since-removed account's tools still
@@ -540,9 +463,8 @@ fails with the world's unknown-account error.
 Delivering a message is the third trigger
 source in the demo: the host appends it to the inbox and emits `mail.received`
 with payload `mail.Received { account: str, title: str, text: str }`. Like the
-button, the emission runs inside a Restate execution scope
-(`WorkbenchMailReceivedWorkflow`) so any registered trigger starts a durable
-process. Register an inbox concierge once and it fires on every delivery:
+button, the emission runs inside a durable execution scope so any registered
+trigger starts a durable process. Register an inbox concierge once and it fires on every delivery:
 
 ```text
 <typescript>
@@ -602,8 +524,7 @@ finish(
 ```
 
 The cron card is the schedule reference integration: there is no `schedule`
-syntax in the language and no UI tick button. In this example, Restate owns the
-timer policy. The workbench plugin declares the `cron.Schedule` source; the cell
+syntax in the language and no UI tick button. The workbench plugin declares the `cron.Schedule` source; the cell
 builds a `cron.Schedule` value and registers it with the runtime trigger
 registry:
 
@@ -629,50 +550,7 @@ finish(
 </typescript>
 ```
 
-After a Restate-backed turn registers an enabled `cron.Schedule`, the workbench
-syncs that source key to `WorkbenchCronJob/{session_id}:{source_key}`. The
-virtual object stores the source request and next execution timestamp in
-Restate K/V state. Its `run` handler emits a validated
-`cron.Tick` trigger occurrence for that stored source key:
-
-```json
-{ "fired_at": "2026-06-02T12:00:00Z" }
-```
-
-The occurrence idempotency key includes the journaled fire time, so it is
-unique per tick and stable across retries of the same tick. The `run` handler
-re-arms the next delayed `run` *before* emitting, so a tick that fails cannot
-kill the schedule. A cron remains valid while its owning session has durable
-store metadata, including when another workbench session is current. A job
-whose session has a permanent deletion tombstone cancels with
-`reason: "session_retired"`; a job with neither a tombstone nor session store
-metadata cancels as an orphan with `reason: "session_absent"`. Resetting the
-workbench cancels the old session's cron jobs derived from its durable trigger
-registrations (plus anything armed in-process), clears the mocked mail world,
-and rotates the session; an equal-request re-sync revives a chain whose stored
-next execution is already in the past. Trigger lifecycle routes return `200`
-only after the committed durable mutation has converged in Restate. A `500`
-means the mutation is durable but Restate may still be stale; the next sync
-reconciles it. Two same-session syncs may race, but the next sync self-heals.
-The disposition read and cancel trace
-are Restate-journaled. Tick and zombie-guard traces record
-`session_state: "live"`, `"retired"`, or `"unknown"`. The trace JSONL files include
-`agent_workbench.cron.restate.sync_upserted`,
-`agent_workbench.cron.restate.sync_cancelled`,
-`agent_workbench.cron.restate.run`, and
-`agent_workbench.cron.restate.zombie_cancelled` events.
-
-The trigger occurrence history is also the durable tick-audit surface. Fired
-ticks keep the existing `cron.Tick` payload and serialized record bytes; their
-omitted `outcome` field decodes as `fired`. An observed zombie-guard refusal
-records one delivery-free occurrence with `outcome.kind: "dropped"`, a stable
-reason such as `session_retired`, and the scheduled timestamp. The workbench
-cron chain has only one armed invocation at a time, so it does not coalesce
-cron ticks; any queued-work coalescing happens after each fired occurrence is
-already durable.
-An invocation canceled before its handler runs, or reaching the handler after
-its cron state was cleared, exposes no source or scheduled-tick identity to
-record and therefore remains outside this audit guarantee.
+No timer fires a registered `cron.Schedule` in this build.
 
 Host wiring has two pieces: source constructors such as `cron.Schedule` and
 `mail.received` are declared through the plugin's `lashlang_resources()` hook,
@@ -780,17 +658,6 @@ reg.triggers().declare(
 )?;
 ```
 
-For a model-free live smoke that starts Restate, registers the endpoint through
-Admin, submits a deterministic turn through Restate `/send`, verifies the
-returned invocation completed successfully, schedules
-`cron.Schedule({ expr: "*/2 * * * * *", tz: "UTC" })`, waits for a tick, checks
-the JSONL trace, and asserts no workbench/process invocation remains active,
-run:
-
-```bash
-just agent-workbench-restate-e2e
-```
-
 ## Conformance and projection gates
 
 The ownership split is intentional:
@@ -799,12 +666,6 @@ The ownership split is intentional:
   API and cover snapshot-then-subscribe recovery, trimmed-gap forwarding,
   redelivery identity deduplication, terminal replacement, and the rule that
   dropping observation does not cancel server work.
-- The existing `live_restate_ingress_owner_restart_resumes_and_remains_cancellable`
-  gate supplies owner-loss evidence by killing the real workbench endpoint
-  process, starting a replacement, observing the superseding lease generation,
-  and settling the same turn. This runs for SQLite and PostgreSQL under
-  `just agent-workbench-restate-e2e`; no separate receipt sink or standalone
-  checker is introduced.
 - Workbench projection cases cover correlation-based provisional retraction,
   the real `/api/events` resync response after forced broadcast lag,
   generation-fenced browser recovery, session-scoped reset cursors, canonical
@@ -825,10 +686,7 @@ failure text fails the safe-copy assertion.
 
 Use `lashctl` for deployment operations. Set `LASH_SQLITE_PATH` to the
 workbench's database file `<data-dir>/lash-sessions.db`, or `LASH_POSTGRES_DATABASE_URL` for a
-PostgreSQL store. Use the workbench's `RESTATE_AUTHORITY_ID`,
-`RESTATE_INGRESS_URL` and `RESTATE_ADMIN_URL`. Set lashctl’s `RESTATE_NAMESPACE`
-to the workbench’s `AGENT_WORKBENCH_RESTATE_NAMESPACE` so control
-intents reach the engine that owns the work.
+PostgreSQL store.
 
 - `lashctl --json park list [--after '<cursor JSON>'] [--limit 50]` lists parks.
 - `lashctl --json park events [--after '<cursor JSON>']` reads transitions.
@@ -841,8 +699,8 @@ intents reach the engine that owns the work.
   resets that delivery in its owning ledger.
 - `lashctl --json deployment-status --accepting-new-work false` reports live
   and parked work. The flag describes host admission policy; it changes no routing.
-- `drain <generation>`, `drain-status <generation> --restate-admin-url <url>`
-  and `end-drain <generation>` remain the PostgreSQL generation drain verbs.
+- `drain <generation>` and `end-drain <generation>` remain the PostgreSQL
+  generation drain verbs.
 
 Recovery commands also accept `--sqlite-path <database-file>` instead of
 `LASH_SQLITE_PATH`.

@@ -1,16 +1,20 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1062 rows over 673 files, 3166 laws.
-# By class: mechanical 133, semantic 99, delete 557, replace 273.
-# By lane: L1b 11, L9b 59, L9c 240, L9d 70, L9e 91, L9f 104, L9g 64, L9h 84, L11 82, L8 24, L10a 184, I0 49.
-# By status: todo 451, ported 31, deleted 580.
+# 1104 rows over 687 files, 3257 laws.
+# By class: mechanical 140, semantic 99, delete 559, replace 306.
+# By lane: L1b 11, L9b 59, L9c 242, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 82, L8 26, L10a 184, I0 49.
+# By status: todo 484, ported 38, deleted 582.
 #
 # New laws owed (replace rows), by owning lane:
+# - L8: runbooks/process-operations/runbook.md
+#   an operator can inspect and act on the process-operations surface on a multi-node PostgreSQL and S3 deployment, and every outcome stays truthful in durable state across a node kill (judged runbook)
 # - L8: runbooks/restate-postgres-workers/README.md
 #   a multi-node durable deployment over one PostgreSQL store serves sessions, survives a node kill and drains (runbook)
 # - L8: runbooks/restate-postgres-workers/tests/process_operations_replacement.rs
 #   a process's start key, feed and plugin state survive a node kill and resume on another node (lash-postgres-workers)
+# - L8: runbooks/session-operator/runbook.md
+#   session operator verbs (withdraw an input, cancel a running run, redrive, cancel or fork parked work, repeat a lost reply) act once on live PostgreSQL and refuse stale repeats with unchanged receipts
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::attempt_context_provider_realizes_every_v2_intent_through_the_coordinator
 #   attempt context provider realizes every v2 intent through the coordinator
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::before_tool_hook_receives_resolved_argument_projection_policy
@@ -243,6 +247,10 @@
 #   operator json contract postgres
 # - L9c: crates/lashctl/tests/operator_json_contract.rs::recovery_json_uses_sqlite_and_keeps_typed_refusals
 #   recovery json uses sqlite and keeps typed refusals
+# - L9c: runbooks/session-binding/runbook.md
+#   a session-binding runbook selects the session binding, catalog acquisition, deletion and fork laws once they run on the durable harness
+# - L9c: runbooks/workbench-session-config/runbook.md
+#   a session-config runbook selects the recorded-config, stale-revision, redrive and tool-call-limit laws once they run on the durable harness
 # - L9d: crates/lash-protocol-rlm/src/executor/tests/per_process_surface.rs
 #   trigger fired process runs under session contributed event type
 # - L9d: crates/lash-restate-test/tests/admission_invariant.rs
@@ -325,6 +333,10 @@
 #   generated backend failure seed records script evidence
 # - L9f: crates/lash-sim/src/cache_regression.rs::rlm_live_bound_state_is_prefix_stable_for_every_serializer
 #   rlm live bound state is prefix stable for every serializer
+# - L9f: crates/lash-sim/src/generation_disposition_matrix.rs::protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed
+#   an RLM session's protocol-owned stop sequence is left off the wire and the attempt receipt reports SuppressedProtocolOwned
+# - L9f: crates/lash-sim/src/generation_disposition_matrix.rs::runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value
+#   a session's output-token cap above the model's capacity is clamped on the wire and the turn's attempt receipt reports ClampedToCapacity
 # - L9f: crates/lash-sim/src/invariants/tests.rs::a_broken_frame_chain_breaks_frame_lineage
 #   a broken frame chain breaks frame lineage
 # - L9f: crates/lash-sim/src/invariants/tests.rs::a_rerun_outside_the_window_breaks_the_effect_window
@@ -385,20 +397,44 @@
 #   minimizer preserves trigger wakeup operational fixture reason
 # - L9f: crates/lash-sim/src/minimize.rs::removing_a_sessions_provider_family_removes_its_checkpoint_evidence
 #   removing a sessions provider family removes its checkpoint evidence
+# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::coverage_oracles_are_failing_capable_not_presence_only
+#   every coverage oracle can fail on a recorded run, not only on missing facts
+# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::every_battery_slot_declares_the_one_oracle_id_its_verdict_uses
+#   every oracle battery slot's verdict uses exactly the one oracle id the slot declares
+# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would
+#   sharing one oracle memo across candidates gives the verdicts a fresh memo per candidate would
+# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::scenario_contract_generated_facts_fail_on_contract_specific_mutations
+#   each contract's generated facts fail when mutated in a way specific to that contract
+# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::scenario_contract_oracles_emit_one_named_verdict_per_contract
+#   each scenario contract oracle emits exactly one verdict named for its contract
 # - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::seeded_duplicate_raw_graph_row_mutation_fails_with_projection_contrast
 #   seeded duplicate raw graph row mutation fails with projection contrast
+# - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::state_machine_semantic_oracle_checks_contract_outcomes_not_presence
+#   the state-machine semantic oracle checks contract outcomes, not the presence of facts
 # - L9f: crates/lash-sim/src/provider_variations.rs::rlm_stop_honoring_fixture_settles_once_without_wire_stop_or_unclosed_retry
 #   rlm stop honoring fixture settles once without wire stop or unclosed retry
+# - L9f: crates/lash-sim/src/replay.rs::promoted_queued_active_turn_cancel_regression_replays
+#   a promoted generated regression trace, recorded on the durable engine, replays with active-turn queued input hidden and the cancellation terminalizing the pending row before any later idle admission
 # - L9f: crates/lash-sim/src/request_snapshot.rs
 #   second history bearing turn snapshots the full assembled provider request
+# - L9f: crates/lash-sim/src/runner/agent_contracts_effect_boundary_tests.rs
+#   every provider tool-body invocation (scalar, batched, pending, and inside a process segment) has exactly one recorded attempt for its call and attempt ordinal; a race whose tool wins ends its turn cleanly
+# - L9f: crates/lash-sim/src/runner/agent_contracts_payload_tests.rs::lifted_process_display_name_does_not_change_the_oracle_verdict
+#   a host-declared display label on a lifted process is what observation records and does not change the lifted-process oracle verdict
 # - L9f: crates/lash-sim/src/runner/attempt_probe.rs
 #   durable content law bites on real run evidence
+# - L9f: crates/lash-sim/src/runner/generated_profiles.rs::time_budget_stops_the_sweep_cleanly_and_records_reached_seeds
+#   a spent time budget stops a generated-sim seed sweep cleanly and records the seeds it reached
 # - L9f: crates/lash-sim/src/runner/tests.rs::cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations
 #   cache dialect rlm prompt prefix is byte stable across iterations
 # - L9f: crates/lash-sim/src/runner/tests.rs::final_value_semantic_channel_proof_uses_runtime_outcome_and_event
 #   final value semantic channel proof uses runtime outcome and event
 # - L9f: crates/lash-sim/src/runner/tests.rs::full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler
 #   full random seed 12 keeps modeled provider exchange slots owned by scheduler
+# - L9f: crates/lash-sim/src/runner/tests.rs::generated_sim_profile_writes_trace_replay_and_provider_artifacts
+#   a generated-sim profile run writes its trace, replay and provider artifacts
+# - L9f: crates/lash-sim/src/runner/tests.rs::generated_sim_search_mode_keeps_summary_lean_and_labels_shards
+#   generated-sim search mode keeps its summary lean and labels every shard
 # - L9f: crates/lash-sim/src/runner/tests.rs::live_provider_failure_oracle_bites_on_a_committing_turn
 #   live provider failure oracle bites on a committing turn
 # - L9f: crates/lash-sim/src/runner/tests.rs::pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary
@@ -423,12 +459,40 @@
 #   standard generated run checks commits and requires v3 state
 # - L9f: crates/lash-sim/tests/logical_turn.rs
 #   admitted switch is seeded atomic ordered and exactly once; and 4 more law(s) of the file, by test name
+# - L9f: crates/lash-sim/tests/stack_policy.rs::assert_product_stack_probe_passes
+#   every fixed Agent product contract runs to completion in a child process held to the 2 MiB product stack budget, one case per contract
 # - L9h: crates/lash-perf/src/bin/tool_batch_baseline/native_run_cost_tests.rs
 #   l15 census tracks native run records and all descendants
 # - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::a_dropped_runtime_frees_its_in_process_lane
 #   a dropped runtime frees its in process lane
+# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::rlm_globals_keeps_fixed_session_projection_across_real_turns
+#   the RLM-globals perf scenario keeps one fixed session projection across real turns
 # - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::scenario_wiring_drives_the_benchmark_plugin_list_in_order
 #   scenario wiring drives the benchmark plugin list in order
+# - L9h: crates/lash-perf/src/runtime_perf/measurement/contention.rs::async_settlement_smoke_drains_every_open_child_span
+#   the async-settlement scenario drains every open child span and reports spawn, settle and drain samples
+# - L9h: crates/lash-perf/src/runtime_perf/measurement/contention.rs::writer_contention_smoke_reports_wait_release_latency_and_execution
+#   the writer-contention scenario reports wait, release-latency and execution samples for same-session and many-session writers
+# - L9h: crates/lash-perf/src/runtime_perf/measurement/queued_work.rs::queued_work_admission_stress_advances_its_commit_cursor
+#   queued-work admission under stress advances its commit cursor
+# - L9h: crates/lash-perf/src/runtime_perf/measurement/queued_work.rs::turn_input_ingress_stress_advances_its_commit_cursor
+#   turn-input ingress under stress advances its commit cursor
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::async_completion_smoke_witnesses_match_session_geometry
+#   async-completion witnesses match the session geometry
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::checkpoint_state_hot_paths_capture_one_changed_component_per_turn
+#   checkpoint-state hot paths capture one changed component per turn
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_queued_work_contention_sqlite_smoke_reports_structure_and_counters
+#   the durable queued-work contention scenario on SQLite reports its structure and counters
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_sqlite_checkpoint_curve_reports_paired_structural_samples
+#   the durable SQLite checkpoint curve reports paired structural samples
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_knee_smoke_reports_each_step
+#   the high-traffic SQLite knee scenario reports each step
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_smoke_reports_load_structure
+#   the high-traffic SQLite scenario reports its load structure
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_trigger_waits_for_terminal_delivery
+#   a high-traffic trigger waits for terminal delivery
+# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls
+#   durable SQLite turn scenarios report their phases and store calls
 # - L9h: examples/agent-workbench/src/main_sections/tests/commit_budget.rs
 #   commit budget is explicit host policy with no implicit builder fallback
 # - L9h: examples/agent-workbench/src/main_sections/tests/continue_as_projection.rs
@@ -499,6 +563,8 @@
 #   operation catalog and fragment validation match the editor contract; and 20 more law(s) of the file, by test name
 # - L9h: examples/workflow-graph-roundtrip/tests/type_facets.rs
 #   type facets are projected and client echoes are ignored on save; and 1 more law(s) of the file, by test name
+# - L9h: runbooks/workbench-cron-schedule/runbook.md
+#   a recurring schedule registered from a Workbench chat turn fires one turn per tick; disable, re-enable and delete take effect at the next boundary (judged runbook)
 # END SUMMARY
 #
 # Every test that uses the Restate server double (`lash_restate_test`), every
@@ -16080,7 +16146,6 @@ class = "mechanical"
 lane = "L9h"
 laws = [
   "rlm_globals_runs_on_the_default_wiring",
-  "rlm_globals_keeps_fixed_session_projection_across_real_turns",
 ]
 disposition = "port"
 status = "ported"
@@ -16178,14 +16243,8 @@ lane = "L9f"
 laws = [
   "provider_counter_gap_round_trips_and_stays_on_original_turn",
   "unmapped_scenario_semantics_fail_loudly_for_every_suite",
-  "scenario_contract_oracles_emit_one_named_verdict_per_contract",
-  "scenario_contract_generated_facts_fail_on_contract_specific_mutations",
   "critic_named_contracts_reject_generic_proxy_fact_backings",
-  "state_machine_semantic_oracle_checks_contract_outcomes_not_presence",
-  "coverage_oracles_are_failing_capable_not_presence_only",
-  "every_battery_slot_declares_the_one_oracle_id_its_verdict_uses",
   "a_slot_claims_its_own_declared_oracle_id_and_no_other",
-  "one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would",
   "every_execution_fact_contract_resolves_to_its_registry_fact_spec_row",
   "fact_spec_rows_publish_each_contract_under_its_registry_oracle_name",
 ]
@@ -16219,7 +16278,6 @@ class = "mechanical"
 lane = "L9f"
 laws = [
   "provider_release_replay_preserves_the_boundary_across_host_poll_orders",
-  "promoted_queued_active_turn_cancel_regression_replays",
 ]
 disposition = "port"
 status = "ported"
@@ -16242,8 +16300,6 @@ laws = [
   "fixed_script_profile_writes_deterministic_manifest",
   "fixed_script_manifest_schema_contains_required_proofs_and_artifact_fields",
   "fixed_script_timeout_proofs_preserve_timeout_envelopes",
-  "generated_sim_search_mode_keeps_summary_lean_and_labels_shards",
-  "generated_sim_profile_writes_trace_replay_and_provider_artifacts",
   "runtime_scenario_contracts_dispatch_to_contract_owned_facts",
   "generated_transcript_write_failure_is_best_effort",
   "runtime_completion_ready_gates_provider_tool_and_durable_boundaries",
@@ -17397,3 +17453,683 @@ laws = [
 disposition = "port"
 status = "ported"
 note = "I0 (FIG-5194) deleted the journaling-host twin (its own row); the rest run on the backend's own context"
+
+[[row]]
+path = "crates/lash-sim/tests/stack_policy.rs"
+test = "assert_product_stack_probe_passes"
+area = "stack-policy"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "stack_policy_probe_agent_foreground_tool_call_round_trip_passes_at_2_mib",
+  "stack_policy_probe_agent_started_process_tool_call_graph_passes_at_2_mib",
+  "stack_policy_probe_agent_durable_input_suspension_resolution_passes_at_2_mib",
+  "stack_policy_probe_agent_started_process_subagent_spawn_passes_at_2_mib",
+  "stack_policy_probe_agent_nested_process_start_await_passes_at_2_mib",
+  "stack_policy_probe_agent_session_turn_process_child_passes_at_2_mib",
+  "stack_policy_probe_agent_failed_child_preserves_failure_graph_passes_at_2_mib",
+  "stack_policy_probe_agent_parallel_spawn_and_join_passes_at_2_mib",
+  "stack_policy_probe_agent_tuple_values_finish_as_json_arrays_passes_at_2_mib",
+  "stack_policy_probe_cases_cover_every_fixed_agent_product_contract",
+]
+disposition = "owed"
+status = "todo"
+owed = "every fixed Agent product contract runs to completion in a child process held to the 2 MiB product stack budget, one case per contract"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). The lexical stack-policy lint in the same file stays."
+
+[[row]]
+path = "crates/lash-sim/src/runner/agent_contracts_effect_boundary_tests.rs"
+test = "*"
+area = "sim-effect-boundary"
+needs = ["turn", "process", "cell"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "scalar_lashlang_pending_provider_invocation_crosses_native_recorded_attempt_boundary",
+  "batched_lashlang_provider_invocations_cross_native_recorded_attempt_boundary",
+  "scalar_lashlang_process_segment_tool_call_crosses_native_recorded_attempt_boundary",
+  "a_race_turn_on_restate_succeeds",
+]
+disposition = "owed"
+status = "todo"
+owed = "every provider tool-body invocation (scalar, batched, pending, and inside a process segment) has exactly one recorded attempt for its call and attempt ordinal; a race whose tool wins ends its turn cleanly"
+note = "I0 (FIG-5194) removed the three recorded-attempt boundary tests with the effect-host seam; FIG-5190 follow-up deleted the file with its race test, which needs the durable engine's backend (not assembled yet). The laws are owed together."
+
+[[row]]
+path = "crates/lash-sim/src/runner/agent_contracts_effect_boundary_tests.rs"
+test = "process_effect_outcome_contract_normalizes_only_opaque_replay_identity"
+area = "sim-effect-boundary"
+needs = ["turn"]
+class = "delete"
+lane = "L9f"
+laws = [
+  "process_effect_outcome_contract_normalizes_only_opaque_replay_identity",
+]
+disposition = "covered-by:crates/lash-sim/src/runner/agent_contracts_payload_tests.rs::process_effect_outcome_contract_normalizes_only_opaque_replay_identity"
+status = "deleted"
+note = "A verbatim copy of the test of the same name in agent_contracts_payload_tests.rs, which stays."
+
+[[row]]
+path = "crates/lash-sim/src/runner/agent_contracts_payload_tests.rs"
+test = "lifted_process_display_name_does_not_change_the_oracle_verdict"
+area = "sim-oracles"
+needs = ["turn", "process", "cell"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "lifted_process_display_name_does_not_change_the_oracle_verdict",
+]
+disposition = "owed"
+status = "todo"
+owed = "a host-declared display label on a lifted process is what observation records and does not change the lifted-process oracle verdict"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
+test = "scenario_contract_oracles_emit_one_named_verdict_per_contract"
+area = "sim-oracles"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "scenario_contract_oracles_emit_one_named_verdict_per_contract",
+]
+disposition = "owed"
+status = "todo"
+owed = "each scenario contract oracle emits exactly one verdict named for its contract"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
+test = "scenario_contract_generated_facts_fail_on_contract_specific_mutations"
+area = "sim-oracles"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "scenario_contract_generated_facts_fail_on_contract_specific_mutations",
+]
+disposition = "owed"
+status = "todo"
+owed = "each contract's generated facts fail when mutated in a way specific to that contract"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
+test = "state_machine_semantic_oracle_checks_contract_outcomes_not_presence"
+area = "sim-oracles"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "state_machine_semantic_oracle_checks_contract_outcomes_not_presence",
+]
+disposition = "owed"
+status = "todo"
+owed = "the state-machine semantic oracle checks contract outcomes, not the presence of facts"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
+test = "coverage_oracles_are_failing_capable_not_presence_only"
+area = "sim-oracles"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "coverage_oracles_are_failing_capable_not_presence_only",
+]
+disposition = "owed"
+status = "todo"
+owed = "every coverage oracle can fail on a recorded run, not only on missing facts"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
+test = "every_battery_slot_declares_the_one_oracle_id_its_verdict_uses"
+area = "sim-oracles"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "every_battery_slot_declares_the_one_oracle_id_its_verdict_uses",
+]
+disposition = "owed"
+status = "todo"
+owed = "every oracle battery slot's verdict uses exactly the one oracle id the slot declares"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
+test = "one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would"
+area = "sim-oracles"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would",
+]
+disposition = "owed"
+status = "todo"
+owed = "sharing one oracle memo across candidates gives the verdicts a fresh memo per candidate would"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/runner/tests.rs"
+test = "generated_sim_search_mode_keeps_summary_lean_and_labels_shards"
+area = "sim-runner"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "generated_sim_search_mode_keeps_summary_lean_and_labels_shards",
+]
+disposition = "owed"
+status = "todo"
+owed = "generated-sim search mode keeps its summary lean and labels every shard"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/runner/tests.rs"
+test = "generated_sim_profile_writes_trace_replay_and_provider_artifacts"
+area = "sim-runner"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "generated_sim_profile_writes_trace_replay_and_provider_artifacts",
+]
+disposition = "owed"
+status = "todo"
+owed = "a generated-sim profile run writes its trace, replay and provider artifacts"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/runner/generated_profiles.rs"
+test = "time_budget_stops_the_sweep_cleanly_and_records_reached_seeds"
+area = "sim-runner"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "time_budget_stops_the_sweep_cleanly_and_records_reached_seeds",
+]
+disposition = "owed"
+status = "todo"
+owed = "a spent time budget stops a generated-sim seed sweep cleanly and records the seeds it reached"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-sim/src/generation_disposition_matrix.rs"
+test = "runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value"
+area = "generation-settings"
+needs = ["turn"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value",
+]
+disposition = "owed"
+status = "todo"
+owed = "a session's output-token cap above the model's capacity is clamped on the wire and the turn's attempt receipt reports ClampedToCapacity"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). The provider-level cases of generation_disposition_matrix stay."
+
+[[row]]
+path = "crates/lash-sim/src/generation_disposition_matrix.rs"
+test = "protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed"
+area = "generation-settings"
+needs = ["turn", "cell"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed",
+]
+disposition = "owed"
+status = "todo"
+owed = "an RLM session's protocol-owned stop sequence is left off the wire and the attempt receipt reports SuppressedProtocolOwned"
+note = "FIG-5190 follow-up deleted this test: it replays a contract on the durable engine, whose backend is not assembled yet (FIG-5194). The provider-level cases of generation_disposition_matrix stay."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/harness/tests.rs"
+test = "rlm_globals_keeps_fixed_session_projection_across_real_turns"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "rlm_globals_keeps_fixed_session_projection_across_real_turns",
+]
+disposition = "owed"
+status = "todo"
+owed = "the RLM-globals perf scenario keeps one fixed session projection across real turns"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/measurement/contention.rs"
+test = "writer_contention_smoke_reports_wait_release_latency_and_execution"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "writer_contention_smoke_reports_wait_release_latency_and_execution",
+]
+disposition = "owed"
+status = "todo"
+owed = "the writer-contention scenario reports wait, release-latency and execution samples for same-session and many-session writers"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/measurement/contention.rs"
+test = "async_settlement_smoke_drains_every_open_child_span"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "async_settlement_smoke_drains_every_open_child_span",
+]
+disposition = "owed"
+status = "todo"
+owed = "the async-settlement scenario drains every open child span and reports spawn, settle and drain samples"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/measurement/queued_work.rs"
+test = "queued_work_admission_stress_advances_its_commit_cursor"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "queued_work_admission_stress_advances_its_commit_cursor",
+]
+disposition = "owed"
+status = "todo"
+owed = "queued-work admission under stress advances its commit cursor"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/measurement/queued_work.rs"
+test = "turn_input_ingress_stress_advances_its_commit_cursor"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "turn_input_ingress_stress_advances_its_commit_cursor",
+]
+disposition = "owed"
+status = "todo"
+owed = "turn-input ingress under stress advances its commit cursor"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls",
+]
+disposition = "owed"
+status = "todo"
+owed = "durable SQLite turn scenarios report their phases and store calls"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "durable_queued_work_contention_sqlite_smoke_reports_structure_and_counters"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "durable_queued_work_contention_sqlite_smoke_reports_structure_and_counters",
+]
+disposition = "owed"
+status = "todo"
+owed = "the durable queued-work contention scenario on SQLite reports its structure and counters"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "checkpoint_state_hot_paths_capture_one_changed_component_per_turn"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "checkpoint_state_hot_paths_capture_one_changed_component_per_turn",
+]
+disposition = "owed"
+status = "todo"
+owed = "checkpoint-state hot paths capture one changed component per turn"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "durable_sqlite_checkpoint_curve_reports_paired_structural_samples"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "durable_sqlite_checkpoint_curve_reports_paired_structural_samples",
+]
+disposition = "owed"
+status = "todo"
+owed = "the durable SQLite checkpoint curve reports paired structural samples"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "high_traffic_sqlite_smoke_reports_load_structure"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "high_traffic_sqlite_smoke_reports_load_structure",
+]
+disposition = "owed"
+status = "todo"
+owed = "the high-traffic SQLite scenario reports its load structure"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "high_traffic_sqlite_knee_smoke_reports_each_step"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "high_traffic_sqlite_knee_smoke_reports_each_step",
+]
+disposition = "owed"
+status = "todo"
+owed = "the high-traffic SQLite knee scenario reports each step"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "high_traffic_trigger_waits_for_terminal_delivery"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "high_traffic_trigger_waits_for_terminal_delivery",
+]
+disposition = "owed"
+status = "todo"
+owed = "a high-traffic trigger waits for terminal delivery"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "async_completion_smoke_witnesses_match_session_geometry"
+area = "lash-perf"
+needs = ["turn"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "async_completion_smoke_witnesses_match_session_geometry",
+]
+disposition = "owed"
+status = "todo"
+owed = "async-completion witnesses match the session geometry"
+note = "FIG-5190 follow-up deleted this test: it runs a real turn on the durable engine, whose backend is not assembled yet (FIG-5194)."
+
+[[row]]
+path = "runbooks/workbench-cron-schedule/runbook.md"
+test = "*"
+area = "runbook"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9h"
+laws = [
+  "a chat turn registers one cron.Schedule",
+  "each tick produces one occurrence, one wake delivery and one completed turn",
+  "a disabled schedule stays silent at its next boundary",
+  "re-enabling resumes ticks without a second subscription",
+  "a deleted schedule stays silent",
+]
+disposition = "owed"
+status = "todo"
+owed = "a recurring schedule registered from a Workbench chat turn fires one turn per tick; disable, re-enable and delete take effect at the next boundary (judged runbook)"
+note = "FIG-5190 follow-up deleted the runbook: every phase reads the Restate cron object and its trace spans."
+
+[[row]]
+path = "runbooks/process-operations/runbook.md"
+test = "*"
+area = "runbook-live"
+needs = ["process", "multinode"]
+class = "replace"
+lane = "L8"
+laws = [
+  "typed wake discard and redrive",
+  "retarget",
+  "visibility and wake-turn policy",
+  "worker crash recovery",
+  "process-id reuse",
+  "retention",
+  "start-key idempotency",
+  "process event cursors",
+  "plugin state",
+  "FIG-1293 migrated-tool atomicity across a Workbench process replacement",
+]
+disposition = "owed"
+status = "todo"
+owed = "an operator can inspect and act on the process-operations surface on a multi-node PostgreSQL and S3 deployment, and every outcome stays truthful in durable state across a node kill (judged runbook)"
+note = "FIG-5190 follow-up deleted the runbook and its compose file: its companion recipe and worker binaries went with Restate. Its successor is L8b (FIG-5199); the gate's lane list has no L8b, so the row is held under L8."
+
+[[row]]
+path = "runbooks/session-operator/runbook.md"
+test = "*"
+area = "runbook-live"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L8"
+laws = [
+  "withdrawal",
+  "running_cancel",
+  "parked_redrive",
+  "parked_cancel",
+  "parked_fork",
+  "lost_reply_repeat",
+]
+disposition = "owed"
+status = "todo"
+owed = "session operator verbs (withdraw an input, cancel a running run, redrive, cancel or fork parked work, repeat a lost reply) act once on live PostgreSQL and refuse stale repeats with unchanged receipts"
+note = "FIG-5190 follow-up deleted the runbook, its audit query and scripts/session_operator_e2e.py: the operator host binary and live server launcher went with Restate. Its successor is L8b (FIG-5199); the gate's lane list has no L8b, so the row is held under L8."
+
+[[row]]
+path = "crates/lash-sim/tests/stack_policy.rs"
+test = "*"
+area = "stack-policy"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9f"
+laws = [
+  "lint_stack_policy_rejects_raw_stack_literals_and_global_stack_escape_hatches",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5190 follow-up deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+
+[[row]]
+path = "crates/lash-sim/src/runner/agent_contracts_payload_tests.rs"
+test = "*"
+area = "sim-oracles"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9f"
+laws = [
+  "process_effect_outcome_contract_normalizes_only_opaque_replay_identity",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5190 follow-up deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+
+[[row]]
+path = "crates/lash-sim/src/runner/generated_profiles.rs"
+test = "*"
+area = "sim-runner"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9f"
+laws = [
+  "salted_seed_runs_explore_disjoint_seed_sets_and_reproduce_by_index",
+  "named_regression_corpus_retains_the_unsalted_seed_derivation",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5190 follow-up deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+
+[[row]]
+path = "crates/lash-sim/src/generation_disposition_matrix.rs"
+test = "*"
+area = "generation-settings"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9f"
+laws = [
+  "generation_disposition_matrix",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5190 follow-up deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/measurement/contention.rs"
+test = "*"
+area = "lash-perf"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9h"
+laws = [
+  "gate_bypass_second_completer_hits_receipt_conflict_then_rebuilds_after_backoff",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5190 follow-up deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/measurement/queued_work.rs"
+test = "*"
+area = "lash-perf"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9h"
+laws = [
+  "(no test functions left) defines: run_once_queued_work_admission_stress, run_once_turn_input_ingress_interrupt",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5190 follow-up deleted the file's two tests: both needed an engine (their own rows). The scenario runners stay for the perf binary."
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "*"
+area = "lash-perf"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9h"
+laws = [
+  "postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads",
+  "affected_postgres_scenarios_leave_base_database_clean",
+  "typed_phase_nesting_records_each_open_span",
+  "typed_and_named_phase_paths_share_one_completion_key",
+  "ending_an_unstarted_phase_is_a_no_op",
+  "durable_representative_turn_inventory_is_backend_complete_and_opt_in",
+  "durable_queued_work_contention_inventory_is_backend_complete_and_opt_in",
+  "harness_predicates_and_phase_contracts_describe_one_partition",
+  "durable_checkpoint_curve_inventory_is_backend_complete_and_opt_in",
+  "turn_scenarios_require_the_typed_commit_phase_metrics",
+  "every_required_phase_has_a_checked_in_wall_clock_budget",
+  "typed_runtime_phase_inventory_is_required_and_budgeted",
+  "runtime_phase_inventory_is_closed_in_both_directions",
+  "materially_different_shared_phases_use_scenario_budgets",
+  "fig_1910_catalog_variants_are_opt_in_but_guarded_witnesses",
+  "runtime_perf_direct_counterparts_link_to_correctness_coverage",
+  "runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5190 follow-up deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+
+[[row]]
+path = "runbooks/session-binding/runbook.md"
+test = "*"
+area = "runbook"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "park and resume keep the recorded owners",
+  "a child session's store is its own, never the parent's or a fallback",
+  "the catalog driver opens the target once and keeps that handle",
+  "revoked or failing bindings answer typed, without side effects",
+  "delete retries through its obligation and the installed administration",
+  "a retained fork point outlives its source session",
+]
+disposition = "owed"
+status = "todo"
+owed = "a session-binding runbook selects the session binding, catalog acquisition, deletion and fork laws once they run on the durable harness"
+note = "FIG-5190 follow-up deleted the runbook: every test it selected was deleted with the engine (each has its own row, mostly L9c), and its live geometries were the Restate E2E recipes."
+
+[[row]]
+path = "runbooks/workbench-session-config/runbook.md"
+test = "*"
+area = "runbook"
+needs = ["turn", "cell"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a model and reasoning change is a recorded command applied at the next run boundary",
+  "a stale config revision is refused, typed, and publishes nothing",
+  "restart and redrive read the recorded config despite catalog drift",
+  "host prompt context changes through the RLM owner's command",
+  "a recorded tool-call limit produces a typed program failure and the session stays usable",
+]
+disposition = "owed"
+status = "todo"
+owed = "a session-config runbook selects the recorded-config, stale-revision, redrive and tool-call-limit laws once they run on the durable harness"
+note = "FIG-5190 follow-up deleted the runbook: its companions ran on the Restate double (shift_laws_on_the_double, the restate_double tool_call_limit instantiation) or were deleted with the engine (each has its own row)."
+
+[[row]]
+path = "runbooks/workbench-trigger-retention/runbook.md"
+test = "*"
+area = "runbook"
+needs = ["turn", "wait"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "reclaim and recognise redelivery",
+  "forget reports an exact count",
+  "forgotten redelivery runs; a later fence still suppresses",
+  "refuse an implicit cutoff or a non-operator",
+]
+disposition = "covered-by:row:examples/agent-workbench/src/main_sections/tests/trigger_retention.rs"
+status = "deleted"
+note = "FIG-5190 follow-up deleted the runbook: its only evidence was the trigger_retention.rs companion on the Restate double, deleted with its own row whose four laws are these four phases."
+
+[[row]]
+path = "crates/lash-sim/src/replay.rs"
+test = "promoted_queued_active_turn_cancel_regression_replays"
+area = "lash-sim"
+needs = ["turn"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "promoted_queued_active_turn_cancel_regression_replays",
+]
+disposition = "owed"
+status = "todo"
+owed = "a promoted generated regression trace, recorded on the durable engine, replays with active-turn queued input hidden and the cancellation terminalizing the pending row before any later idle admission"
+note = "FIG-5190 follow-up deleted the test with its fixture, crates/lash-sim/replays/queued-active-turn-cancel-race: the trace was recorded on the Restate effect controller."

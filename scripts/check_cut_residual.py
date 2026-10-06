@@ -36,13 +36,13 @@ def activation_only(before: str, after: str) -> bool:
             match = re.fullmatch(r"  ([A-Za-z0-9_-]+):\s*", line)
             if match:
                 job = match[1]
-            if (job in ("version-bumps", "release-journal-replay")
+            if (job == "version-bumps"
                     and re.fullmatch(r"    continue-on-error: (true|false)\s*", line)):
                 continue
-            if re.fullmatch(r"\s*- (version-bumps|release-journal-replay)\s*", line):
+            if re.fullmatch(r"\s*- version-bumps\s*", line):
                 continue
             if "needs:" in line:
-                line = re.sub(r"\b(version-bumps|release-journal-replay),?\s*", "", line)
+                line = re.sub(r"\bversion-bumps,?\s*", "", line)
                 line = re.sub(r",\s*\]", "]", line)
             lines.append(line)
         return lines
@@ -50,9 +50,8 @@ def activation_only(before: str, after: str) -> bool:
     # Making an advisory check required cannot add a new exemption.
     if after.count("continue-on-error: true") > before.count("continue-on-error: true"):
         return False
-    for gate in ("version-bumps", "release-journal-replay"):
-        if after.count(gate) < before.count(gate):
-            return False
+    if after.count("version-bumps") < before.count("version-bumps"):
+        return False
     return normalized(before) == normalized(after)
 
 

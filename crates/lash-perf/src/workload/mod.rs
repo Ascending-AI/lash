@@ -159,10 +159,7 @@ impl Workload {
         );
         ensure!(
             u64::from(spec.faults.worker_kill_s) + u64::from(spec.faults.worker_restart_delay_s)
-                < u64::from(spec.faults.restate_restart_s)
-                && u64::from(spec.faults.restate_restart_s)
-                    + u64::from(spec.faults.restate_restart_delay_s)
-                    < u64::from(spec.faults.rolling_deploy_s)
+                < u64::from(spec.faults.rolling_deploy_s)
                 && u64::from(spec.faults.rolling_deploy_s)
                     + u64::from(spec.faults.rolling_worker_pause_s)
                     < u64::from(spec.fault_window_s),

@@ -41,7 +41,7 @@ it does not substitute for the judged browser row.
 ## Phase 0: isolated Workbench
 
 1. Set fresh `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_DATA_DIR`, and
-   `AGENT_WORKBENCH_TRACE` paths, a free port, a fresh `RESTATE_AUTHORITY_ID`, and
+   `AGENT_WORKBENCH_TRACE` paths, a free port, and
    `OPENROUTER_MODEL=deepseek/deepseek-v4-flash`, and
    `AGENT_WORKBENCH_OUTPUT_TOKEN_CAP=256`. Start with
    `bash scripts/agent-workbench-dev.sh up --port <port>` (the `just agent-workbench <port>`
@@ -50,7 +50,7 @@ it does not substitute for the judged browser row.
    Expect the judged host, and confirm the served model from the host's own
    `agent_workbench.startup` record. That record carries `addr`, `data_dir`,
    `dev_provider_scenario`, `dialect`, `lashlang_execution_path`, `model`,
-   `restate_endpoint_addr`, `restate_ingress_url`, `store_backend` and `trace_path`. Read the
+   `store_backend` and `trace_path`. Read the
    served dialect from its `dialect` field and require `typescript`;
    `composition_changed.rendered_system_prompt` carries the dialect the prompt was rendered
    for, and the two must agree. Save `00-ready.png` and
@@ -180,7 +180,7 @@ metadata from that variable exactly as startup did, so a row that set a fresh ru
 `up` and then tears down in a plain shell sends `down` looking in the repo default, finds
 nothing there, and refuses: `refusing service teardown: stack metadata is missing at
 <path>`. That refusal reads like a safety guard, and the natural response — leaving the
-stack alone — leaves this row's host serving and its Restate container up, which is the
+stack alone — leaves this row's host serving, which is the
 ownership gate failing quietly. Re-run the teardown with the variable exported and it
 completes. A host started by hand rather than through the launcher has no stack metadata to
 find at all: stop it by exact PID with SIGTERM, having confirmed that PID is the workbench

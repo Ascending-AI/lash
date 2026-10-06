@@ -1,8 +1,7 @@
 # Deploying and upgrading lash
 
 This guide is for operators deploying lash 1.0 and planning a roll to the next
-release. The [rolling upgrade runbook](../../runbooks/rolling-upgrade/runbook.md)
-rehearses the two-build sequence. [ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
+release. [ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 defines the compatibility contract.
 
 ## Upgrading lash before 1.0
@@ -13,12 +12,10 @@ moving the build generation, so an unchanged generation is not evidence
 that two builds are compatible.
 
 Every lash version bump before 1.0 must therefore reset lash's state
-instead of rolling: recreate the stores, and retire the old build's Restate
-deployments, its generation lanes (`…_g$OLD_GENERATION`) and any
-invocations still pinned to them.
+instead of rolling: stop the old build and recreate the stores.
 
 From 1.0 on, any replay or format change moves the generation, and the
-drain, finalize and object-upgrade path in this guide applies.
+drain and finalize path in this guide applies.
 [ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 states the freeze in its release-cut guardrails and defines the post-1.0
 contract.
@@ -57,46 +54,9 @@ backup goes with the error. A component opened on its own
 (`SqliteStore::open`, `SqliteTriggerStore::open` and the like) never migrates
 and refuses an older database with `migration_pending`.
 
-**PostgreSQL with Restate workers.** Workers share one PostgreSQL store and a
-Restate namespace. Run `lashctl` with `LASH_POSTGRES_DATABASE_URL` pointing at
-that store. The host owns traffic routing, backups, worker lifecycle and
-Restate deployment registration and retirement. Give each build a distinct,
-immutable Restate endpoint URI; never replace one generation's deployment at
-another generation's URI. Keep the old deployment registered while its pinned
-work remains. New invocations use the newest deployment; a recorded route or
-parked journal can still require the old one.
-
-## Size Restate's invoker timeouts for long tool work
-
-A tool body runs as a recorded step inside its Run's Restate invocation, and
-the invocation cannot suspend while the body runs. Restate's invoker asks an
-invocation to suspend after `worker.invoker.inactivity-timeout` without
-progress and aborts it `worker.invoker.abort-timeout` later. On the pinned
-Restate 1.7 the defaults are 1 minute and 10 minutes. Lash sets neither.
-
-A body that runs longer than the two together is aborted before its result
-is recorded. Every retry replays the journal and runs the body again from the
-start, and the aborted attempt's body still runs to its end. Lash's handler
-attempt bound (`TURN_HANDLER_MAX_ATTEMPTS`, 8) ends the loop: the invocation
-pauses with its journal kept, and `send` answers the turn as parked with
-`EngineRetryExhausted`. So such a body runs up to 8 times, and the turn never
-finishes on its own.
-
-Declare long work `isolated` instead: the call starts a lash process that
-the host's registered `ProcessEngine` runs in its own invocation, on the
-host's nodes. How that engine waits on long work is the engine's business;
-an engine that suspends its invocation on durable timers while the work runs
-is never aborted by the invoker's timeouts. Work a host runs outside lash
-takes the same path: the host's engine submits it and awaits its completion
-durably, so it has the process's deadline, cancellation and recovery. Lash
-has no process row it never runs. Lash ships no engine that runs OS
-programs. Its cancellation of a process is cooperative, and a host that
-needs hard isolation (an OS kill and reap) builds it into its own engine.
-
-Size the server's two timeouts above the longest inline tool body you admit.
-The `long-tool-body` suite of `scripts/restate-suites.toml` holds the tool
-body rule on a live server with a 1 second inactivity and 2 second abort
-timeout.
+**PostgreSQL workers.** Workers share one PostgreSQL store. Run `lashctl` with
+`LASH_POSTGRES_DATABASE_URL` pointing at that store. The host owns traffic
+routing, backups and worker lifecycle.
 
 ## Read the compatibility report
 
@@ -109,17 +69,14 @@ The CLI reports no generation of its own: a deployment's drain generation `G`
 folds in its registered plugins, so only the serving node knows it.
 `result.fleet_generations` lists generations with pinned work or a drain mark
 in the PostgreSQL store. Each entry has `generation`, `draining`, and
-`source: "postgres"`. `version` does not read the Restate admin API, so this
-list cannot show a registered deployment that has no store work and no drain
-mark; `finalize` reads it. Use `fleet_generations` to find the generation to drain, and confirm the
-serving node's generation before retiring its deployment. The result also
+`source: "postgres"`. Use `fleet_generations` to find the generation to drain,
+and confirm the serving node's generation before stopping it. The result also
 reports the release, fleet epoch `F`'s writable range, each component's
-`reads` and `writes` ranges, and the remote and Restate wire ranges.
+`reads` and `writes` ranges, and the remote wire range.
 
 One release runs one worker feature set. If workers use mixed feature sets,
 they occupy separate generation lanes, and each lane must drain separately.
-A component is the PostgreSQL schema, the SQLite database, or a Restate
-object family. Each store stamp has a version and a
+A component is the PostgreSQL schema or the SQLite database. Each store stamp has a version and a
 `min_reader` floor. An older build admits a safely expanded component while
 the floor still allows it; an unsafe schema addition is refused. `F` selects
 the format all live writers emit. Before finalize, N+1 writes only shapes and
@@ -150,20 +107,16 @@ An incompatible store may report a typed refusal:
 | `fleet_unrecorded` | The PostgreSQL store records no `F`. `lashctl migrate` seeds it and a worker open never records one. Run `lashctl migrate`, then open again. |
 | `retired_sqlite_layout` | The configured SQLite path is a directory in the retired layout of three database files. Nothing migrates it: configure the path of a database file and recreate the store there. |
 | `unknown_vocabulary` | A stored kind or state is unknown to this build. Keep the record and route to a build that understands it. |
-| `pre_release` | A build from before 1.0 wrote the store, the Restate object or the call. 1.0 restarted every counter, so nothing reads or migrates it. Recreate the stores and serve this build from a Restate namespace no pre-release build has used. |
+| `pre_release` | A build from before 1.0 wrote the store. 1.0 restarted every counter, so nothing reads or migrates it. Recreate the stores. |
 
 A writer that observes a finalized `F` outside its range stops with
-`WriterFenced` before making a mutation. A Restate call with disjoint wire
-ranges returns `lash.wire_unsupported`; an object whose `_compat` floor is too
-high, or that a pre-release build stamped, returns `lash.incompatible`, as
-does a call from a pre-release build. Preserve the old deployment and the affected
-state while investigating either refusal.
+`WriterFenced` before making a mutation. Preserve the old build and the
+affected state while investigating the refusal.
 
 ## Roll PostgreSQL workers from N to N+1
 
-1. Back up the shared store and record both builds' `version` reports. Keep
-   the Restate namespace unchanged. Set `LASH_POSTGRES_DATABASE_URL` for the
-   target store. Use N+1's binary to inspect and apply its expand migration:
+1. Back up the shared store and record both builds' `version` reports. Set
+   `LASH_POSTGRES_DATABASE_URL` for the target store. Use N+1's binary to inspect and apply its expand migration:
 
    ```sh
    lashctl migrate --phase expand --dry-run --json
@@ -181,50 +134,29 @@ state while investigating either refusal.
    database seeds `F` the same way when its open-time migration provisions it.
 
 2. Run the new build's preflight again, and verify the old build still admits
-   the expanded store. Start N+1 workers beside N at a new Restate endpoint
-   URI. Register that deployment, move traffic gradually, and watch both
-   builds' errors and in-flight work. Do not unregister N during the roll.
+   the expanded store. Start N+1 workers beside N, move traffic gradually, and
+   watch both builds' errors and in-flight work. Do not stop N during the
+   roll.
 
 3. When new traffic is on N+1, mark N's recorded generation for drain:
 
    ```sh
    lashctl drain "$OLD_GENERATION" --json
-   lashctl drain-status "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json
    ```
 
    `drain` marks the generation and hands its work over at once, as a core's
    drain does: every turn parked on a durable wait and every live process on
-   N is asked to move to N+1 through the Restate deployment that
-   `RESTATE_INGRESS_URL`, `RESTATE_AUTHORITY_ID` and `RESTATE_NAMESPACE` name.
-   Repeat `drain-status` until its `drained` field is true and exit code is 0.
-   Drained means nothing left needs N's deployment: the generation is marked,
-   and it holds no live or parked process, no parked or in-flight turn, no
-   session is closing, and no unfinished engine invocation is pinned to a
-   deployment serving N. `unfinished_invocations` includes real old work,
-   terminal reads, session shifts and paused invocations until they return.
-   `drain-status` obtains that evidence through Restate's admin API and requires
-   `--restate-admin-url`. An unreachable or unreadable API fails the command;
-   it never reports drained. Code 5 means retained work remains: inspect the
-   counts and settle it through its owning host.
+   N is asked to move to N+1.
 
-   Continuation adoption transfers the complete logical Run and rebinds short
-   source subscriptions to N+1. A source may remain unresolved after N is
-   removed; stale subscriptions, waits, reads or shifts must not pin N. L11's
-   deployment witness resolves that source after non-forced removal. Process
-   segment journal pins and independently owned old work still hold the drain.
-   Keep N registered until every real invocation or retained route needs it
-   no longer. A missing heartbeat or empty host queue is no retirement proof.
-
-   Stalled obligations do not hold the drain, so a drained result can still
-   list them. `stalled_obligations` counts them per kind, and `stalled` lists
-   each one, at most 100 per kind in id order, with its `kind`,
-   `obligation_id`, typed `reason` (`attempts_exhausted`, `refused` or
-   `undecodable`), the `row` it lives on, and, when this build cannot name
-   that row, an `undecodable` detail such as a kind no build of this release
-   knows. No obligation is pinned to a generation: whichever build leads
-   recovery delivers one that is re-armed, and an `undecodable` one stays
-   stalled whichever deployments remain. Retiring N neither loses nor settles
-   them. Read the list before you retire N, settle each obligation through
+   Stalled obligations do not hold the drain. `lashctl stalled list <kind>`
+   lists each one of a kind in id order, with its `obligation_id`, typed
+   `reason` (`attempts_exhausted`, `refused` or `undecodable`), the `row` it
+   lives on, and, when this build cannot name that row, an `undecodable`
+   detail such as a kind no build of this release knows. No obligation is
+   pinned to a generation: whichever build leads recovery delivers one that
+   is re-armed (`lashctl stalled rearm <kind> <id>`), and an `undecodable` one
+   stays stalled whichever builds remain. Stopping N neither loses nor
+   settles them. Read the list before you stop N, settle each obligation through
    the owning host (re-arm it once its cause is fixed), and keep the ones no
    build can decode, with the listing, in the release record.
 
@@ -235,48 +167,27 @@ state while investigating either refusal.
    close. `LashCore::session_faults` lists every faulted session, including
    one whose shift admission met the corruption with no obligation to stall.
 
-4. Retire N's Restate deployment only after the drain and the host's pinned
-   invocation check both pass: remove every deployment that serves N's
-   generation lanes (`…_g$OLD_GENERATION`) from the Restate server. Then
-   finalize (next section) while N's drain mark still stands, and close the
+4. Finalize (next section) while N's drain mark still stands, and close the
    generation drain after it:
 
    ```sh
    lashctl end-drain "$OLD_GENERATION" --json
    ```
 
-   Record the drain status, the retirement evidence and the finalize result
-   with the release record.
+   Record the drain and the finalize result with the release record.
 
 ## Finalize the release
 
 Finalize ends the rollback window. It is the last step of N's drain, and it
 is irreversible: it moves the fleet epoch `F` to N+1's, every writer whose
 writable range excludes the new `F` stops with `WriterFenced` at its next
-transaction, and N no longer opens the store. Run it with N+1's `lashctl`,
-the build whose epoch it moves to, and name N's generation and the Restate
-admin API the deployments are registered with:
+transaction, and N no longer opens the store. Finalize changes nothing until
+N's generation is drained, and refuses `held` while an operator holds it,
+carrying the hold's reason and when it was set. This build's `lashctl` has no
+`finalize` verb.
 
-```sh
-lashctl finalize "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json
-```
-
-Finalize changes nothing, and refuses typed, until all of these hold:
-
-| Refusal | Exit | Meaning and action |
-| --- | --- | --- |
-| `generation_not_drained` | 5 | N's generation is not marked draining, or it still holds a live or parked process, a parked or in-flight turn, a closing session, or unfinished invocations pinned to its deployment. The refusal carries the drain status; keep polling `drain-status`. |
-| `deployments_retained` | 3 | The Restate server still holds a deployment serving N's generation lanes, in any namespace. The refusal lists each by id and URI. Remove them once their pinned invocations have drained. |
-| `held` | 3 | An operator holds the automatic finalize. The refusal carries the hold's reason and when it was set. |
-
-Retirement is read from the Restate server's deployment listing and the
-store's own drain records, never from worker heartbeats: a registered
-deployment that is asleep still counts. A Restate admin API that cannot be
-read fails closed with exit 1.
-
-The host's rollout runs `lashctl finalize` as the drain's automatic last
-step. An operator who wants to keep the rollback window open, for example to
-watch N+1 under production traffic, holds it first:
+An operator who wants to keep the rollback window open, for example to
+watch N+1 under production traffic, holds the automatic finalize first:
 
 ```sh
 lashctl finalize-hold set --reason "watch N+1 for a day" --json
@@ -287,13 +198,7 @@ lashctl finalize-hold clear --json
 The hold lives on the fleet-format row, which finalize locks to move `F`, so
 a hold set while a rollout finalizes is either seen by that finalize or set
 after it committed. While the hold stands, the automatic finalize refuses
-`held`, and an operator can still finalize by hand:
-
-```sh
-lashctl finalize "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --override-hold --json
-```
-
-Finalizing by hand leaves the hold set; clear it separately.
+`held`.
 
 After it moves `F`, finalize runs every backfill N+1 carries to completion.
 A backfill rewrites rows into N+1's shape in batches. Each batch is one
@@ -303,9 +208,9 @@ batch in flight, and rows already in the new shape are left as they are. The
 `lash_migrations` ledger records each backfill's `running` or `applied`
 state, its cursor and its rewritten-row count, and the result lists every
 backfill finalize completed. If finalize is interrupted after it moved `F`,
-run it again before `end-drain`: it checks retirement again, reports
-`already_finalized` and resumes the backfills from their cursors. The
-backfills alone can also be resumed, at any time after finalize:
+run it again before `end-drain`: it reports `already_finalized` and resumes
+the backfills from their cursors. The backfills alone can also be resumed, at
+any time after finalize:
 
 ```sh
 lashctl migrate --phase backfill --json
@@ -330,33 +235,9 @@ Before finalize it is refused `contract_before_finalize`; before its
 backfills are done, `contract_before_backfills`, naming each pending one.
 Both are exit 3, and the dry run refuses the same way the run does.
 
-### Upgrade the Restate objects
-
-Each Lash virtual object records its family format in its `_compat` state,
-and every family binds an `upgrade` handler. After finalize, `upgrade`
-rewrites the object's values in the newest format of its family and raises
-its `_compat` in one exclusive invocation. Before finalize it rewrites
-nothing, because rollback to N is still promised. List the objects still at
-an older format, then sweep them:
-
-```sh
-lashctl objects-preflight --restate-admin-url "$RESTATE_ADMIN_URL" --namespace "$LASH_NAMESPACE" --json
-lashctl objects-sweep --restate-admin-url "$RESTATE_ADMIN_URL" --restate-ingress-url "$RESTATE_INGRESS_URL" --namespace "$LASH_NAMESPACE" --json
-```
-
-Both commands read the engine, not the PostgreSQL store. The preflight lists
-each family's objects that are still at an older format and exits 0 when
-there are none, or 5 when some remain. The sweep calls `upgrade` on each
-listed object and exits 0 once none remain. Before finalize it is refused
-`not_finalized` (exit 3). An object whose `_compat` does not admit this build
-is refused `incompatible` (exit 4). The object state is the sweep's only
-cursor, so a sweep that is interrupted can be run again: the objects it
-already upgraded answer `current`, and it upgrades the rest. The LashTurn
-outcome is session history and is read in place; the sweep never rewrites it.
-
 A SQLite store is not finalized by `lashctl`. The host that owns it
-finalizes with `SqliteStoreSet::finalize`, which applies the same drain and
-retirement checks and commits `F` and the plugin writer ranges in one
+finalizes with `SqliteStoreSet::finalize`, which applies the drain checks and
+commits `F` and the plugin writer ranges in one
 transaction that holds the database exclusively, so a crash leaves the old
 epoch or the new one, never a mix. Finalize and migration share the store's
 ownership lock. A SQLite store has no operator hold.
@@ -364,26 +245,22 @@ ownership lock. A SQLite store has no operator hold.
 ## Roll back before finalize
 
 Before finalize, N+1 writes the format selected by N's `F`, so a healthy N
-build can reopen the expanded store. Register N at a **fresh** Restate URI and
-route new traffic there. Keep N+1's deployment registered until its own pinned
-invocations drain. Reverse the drain against N+1's `G`, check its status, then
-retire it and end its drain:
+build can reopen the expanded store. Route new traffic back to N. Reverse the
+drain against N+1's `G`, then stop it and end its drain:
 
 ```sh
 lashctl drain "$NEW_GENERATION" --json
-lashctl drain-status "$NEW_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json
 lashctl end-drain "$NEW_GENERATION" --json
 ```
 
 An N+1 continuation that N cannot decode stays on its recorded generation; a
-rollback must not delete that deployment or its state. If either build reports
+rollback must not delete that state. If either build reports
 a typed incompatibility, stop traffic to that build and resolve the recorded
 version or route before resuming.
 
 Rollback is safe until finalize, and only until then. Finalize moves `F`
-only after N has drained and its deployments are removed, and that move
-fences N's writers; recovery then rolls forward. The Restate object sweep
-also runs only after finalize.
+only after N has drained, and that move fences N's writers; recovery then
+rolls forward.
 
 ## Client and server version skew
 
@@ -392,6 +269,5 @@ the highest version both sides support. N+1 and N select N's wire version
 while their ranges overlap. A disjoint range is refused before a request is
 decoded or has an effect. Every request carries the selected version; replies,
 errors and stream events use that request's version, including when a load
-balancer sends it to a server that did not see the original `Hello`.
-Restate's shared handlers use the same range-selection rule per call. Keep
+balancer sends it to a server that did not see the original `Hello`. Keep
 both builds' endpoints available while their recorded routes remain live.

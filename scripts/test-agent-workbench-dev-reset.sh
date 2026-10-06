@@ -49,12 +49,6 @@ cleanup() {
     fi
   done < <(find "$test_tmp" -type f -name 'workbench-*.pid' -print 2>/dev/null)
   cleanup_fixture_runtime_resources "$launcher_runtime_root" "$test_tmp" "$mock_state"
-  if [[ -n "${legacy_reservation_file:-}" \
-    && -f "$legacy_reservation_file" && ! -L "$legacy_reservation_file" \
-    && "$(<"$legacy_reservation_file")" \
-      = '1 restate 00000000-0000-0000-0000-000000000000 0000000000000000000000000000000000000000000000000000000000000000' ]]; then
-    rm -f "$legacy_reservation_file"
-  fi
   rm -rf -- "$test_tmp"
 }
 trap cleanup EXIT
@@ -96,9 +90,6 @@ cat > "$mock_bin/timeout" <<'MOCK'
 set -euo pipefail
 command_text="$*"
 port="${command_text##*/}"
-case " ${MOCK_EXTERNAL_PORTS:-} " in
-  *" $port "*) exit 0 ;;
-esac
 if [[ -f "$MOCK_STATE/tcp-$port" ]]; then
   exit 0
 fi
@@ -130,14 +121,6 @@ case "$command" in
             com.lash.agent-workbench.component=*) component="${label#*=}" ;;
           esac
           ;;
-        -e)
-          setting="${args[$((i + 1))]}"
-          case "$setting" in
-            RESTATE_INGRESS__BIND_PORT=*|RESTATE_ADMIN__BIND_PORT=*)
-              ports+=("${setting#*=}")
-              ;;
-          esac
-          ;;
         -p) ports+=("${args[$((i + 1))]}") ;;
       esac
     done
@@ -152,9 +135,7 @@ case "$command" in
     for port in "${ports[@]}"; do
       : > "$MOCK_STATE/tcp-$port"
     done
-    if [[ "$component" = restate && "${MOCK_BLOCK_RESTATE_MARKER:-0}" = 1 ]]; then
-      mkdir -p "$MOCK_RESTATE_MARKER"
-    elif [[ "$component" = postgres && "${MOCK_BLOCK_POSTGRES_MARKER:-0}" = 1 ]]; then
+    if [[ "$component" = postgres && "${MOCK_BLOCK_POSTGRES_MARKER:-0}" = 1 ]]; then
       mkdir -p "$MOCK_POSTGRES_MARKER"
     fi
     printf '%s\n' "$id"
@@ -206,19 +187,12 @@ case "$command" in
         fi
         found="$file"
         printf 'rm %s %s\n' "$id" "$component" >> "$MOCK_STATE/docker-rm.log"
-        rm -f "$file" "$MOCK_STATE/journal-$id"
+        rm -f "$file" "$MOCK_STATE/container-state-$id"
         name="${file##*/container-}"
-        service_port=""
         while IFS= read -r port; do
-          service_port="$port"
           [[ -n "$port" ]] && rm -f "$MOCK_STATE/tcp-$port"
         done < "$MOCK_STATE/container-ports-$name"
         rm -f "$MOCK_STATE/container-ports-$name"
-        if [[ "$component" = restate ]]; then
-          awk -F '\t' -v port="$service_port" '$1 != port' "$MOCK_STATE/deployments" \
-            > "$MOCK_STATE/deployments.next"
-          mv "$MOCK_STATE/deployments.next" "$MOCK_STATE/deployments"
-        fi
         break
       fi
     done
@@ -256,20 +230,6 @@ printf '%s\n' "$((count + 1))" > "$MOCK_STATE/build-count"
 mkdir -p "$MOCK_BUILD_DIR/buck-out"
 cat > "$MOCK_BUILD_DIR/buck-out/agent-workbench" <<'BIN'
 #!/usr/bin/env bash
-# `register-deployment <endpoint-url>` is the launcher's registration step,
-# run through this binary so the real one applies the engine's collision
-# guard. Emulate its observable effect — the admin POST it makes after the
-# guard passes — so the launcher's retries, fault handling and id read-back
-# exercise the same mock surface.
-if [[ "${1:-}" = register-deployment ]]; then
-  uri="${2:?register-deployment requires an endpoint URL}"
-  curl --http2-prior-knowledge -fsS \
-    -H 'content-type: application/json' \
-    -X POST \
-    --data "$(printf '{"uri":"%s","force":true}' "$uri")" \
-    "${RESTATE_ADMIN_URL%/}/deployments"
-  exit $?
-fi
 trap 'exit 0' TERM INT
 start="$(awk '{print $22}' "/proc/$$/stat")"
 printf '%s %s\n' "$$" "$start" > "$MOCK_STATE/spawned-${AGENT_WORKBENCH_ADDR##*:}"
@@ -277,10 +237,7 @@ mkdir -p "$AGENT_WORKBENCH_DATA_DIR"
 printf 'attempt application state\n' > "$AGENT_WORKBENCH_DATA_DIR/attempt-app-state"
 {
   printf 'AGENT_WORKBENCH_ADDR=%s\n' "$AGENT_WORKBENCH_ADDR"
-  printf 'AGENT_WORKBENCH_RESTATE_ADDR=%s\n' "$AGENT_WORKBENCH_RESTATE_ADDR"
   printf 'AGENT_WORKBENCH_DATABASE_URL=%s\n' "$AGENT_WORKBENCH_DATABASE_URL"
-  printf 'RESTATE_INGRESS_URL=%s\n' "$RESTATE_INGRESS_URL"
-  printf 'RESTATE_ADMIN_URL=%s\n' "$RESTATE_ADMIN_URL"
   printf 'AGENT_WORKBENCH_DATA_DIR=%s\n' "$AGENT_WORKBENCH_DATA_DIR"
 } > "$MOCK_STATE/workbench-env-${AGENT_WORKBENCH_ADDR##*:}"
 while :; do sleep 1; done
@@ -299,13 +256,6 @@ cat > "$mock_bin/curl" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 url="${@: -1}"
-payload=""
-args=("$@")
-for ((i = 0; i < ${#args[@]}; i++)); do
-  if [[ "${args[$i]}" = --data ]]; then
-    payload="${args[$((i + 1))]}"
-  fi
-done
 if [[ "$url" = */healthz ]]; then
   [[ "${MOCK_HEALTH_FAIL:-0}" != 1 ]] || exit 1
   [[ -f "$MOCK_PID_FILE" ]] || exit 1
@@ -313,33 +263,34 @@ if [[ "$url" = */healthz ]]; then
   current="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
   [[ "$current" = "$start" ]] || exit 1
   printf '{"service":"agent-workbench"}\n'
-elif [[ "$url" = */deployments && -z "$payload" ]]; then
-  admin_address="${url%/deployments}"
-  admin_address="${admin_address%/}"
-  admin_address="${admin_address#*://}"
-  admin_address="${admin_address%%/*}"
-  admin_port="${admin_address##*:}"
-  printf '{"deployments":['
-  separator=""
-  while IFS=$'\t' read -r record_port deployment_id uri; do
-    [[ "$record_port" = "$admin_port" && -n "$deployment_id" && -n "$uri" ]] || continue
-    printf '%s{"id":"%s","uri":"%s"}' "$separator" "$deployment_id" "$uri"
-    separator=,
-  done < "$MOCK_STATE/deployments"
-  printf ']}\n'
-elif [[ "$url" = */deployments ]]; then
-  printf '%s\n' "$payload" >> "$MOCK_STATE/registration-payloads"
-  uri="$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin)["uri"])')"
-  deployment_number="$(( $(wc -l < "$MOCK_STATE/registration-payloads") ))"
-  deployment_id="dp_mock$deployment_number"
-  admin_address="${url%/deployments}"
-  admin_address="${admin_address%/}"
-  admin_address="${admin_address#*://}"
-  admin_address="${admin_address%%/*}"
-  admin_port="${admin_address##*:}"
-  printf '%s\t%s\t%s\n' "$admin_port" "$deployment_id" "$uri" >> "$MOCK_STATE/deployments"
-  if [[ "${MOCK_POST_REMOVE_RESTATE_MARKER:-0}" = 1 ]]; then
-    rm -f "$MOCK_RESTATE_MARKER"
+else
+  exit 2
+fi
+MOCK
+
+# The python3 stand-in also injects the faults a ready stack can meet before
+# `up` reports it: they fire once the launcher has published the stack's
+# application data ownership, its last step before reporting ready.
+cat > "$mock_bin/python3" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" = */tools/buck2/driver.py ]]; then
+  shift
+  exec "${BASH_SOURCE[0]%/*}/mock-buck2-driver" "$@"
+fi
+target="${@: -1}"
+if [[ -n "${MOCK_RECORD_PUBLISH_FAIL_MATCH:-}" \
+  && "$target" = *"$MOCK_RECORD_PUBLISH_FAIL_MATCH"* \
+  && -f "$target" \
+  && "$(<"$target")" = '2 prepared '* \
+  && ! -e "$MOCK_STATE/record-publish-failed" ]]; then
+  : > "$MOCK_STATE/record-publish-failed"
+  exit 1
+fi
+if [[ "$target" = */.agent-workbench-dev-reset-owner ]]; then
+  /usr/bin/python3 "$@" || exit
+  if [[ "${MOCK_POST_REMOVE_POSTGRES_MARKER:-0}" = 1 ]]; then
+    rm -f "$MOCK_POSTGRES_MARKER"
   fi
   if [[ "${MOCK_POST_REMOVE_PID:-0}" = 1 && -f "$MOCK_PID_FILE" ]]; then
     cp "$MOCK_PID_FILE" "$MOCK_STATE/removed-pid-record"
@@ -352,40 +303,12 @@ elif [[ "$url" = */deployments ]]; then
       sleep 0.01
     done
   fi
-  printf '{"id":"%s"}\n' "$deployment_id"
-else
-  exit 2
-fi
-MOCK
-
-cat > "$mock_bin/python3" <<'MOCK'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" = */tools/buck2/driver.py ]]; then
-  shift
-  exec "${BASH_SOURCE[0]%/*}/mock-buck2-driver" "$@"
-fi
-target="${@: -1}"
-if [[ -n "${MOCK_RECORD_CREATE_FAIL_MATCH:-}" \
-  && "$target" = *"$MOCK_RECORD_CREATE_FAIL_MATCH"* \
-  && ! -e "$MOCK_STATE/record-create-failed" ]]; then
-  : > "$MOCK_STATE/record-create-failed"
-  exit 1
-fi
-if [[ -n "${MOCK_RECORD_PUBLISH_FAIL_MATCH:-}" \
-  && "$target" = *"$MOCK_RECORD_PUBLISH_FAIL_MATCH"* \
-  && -f "$target" \
-  && "$(<"$target")" = '2 prepared '* \
-  && ! -e "$MOCK_STATE/record-publish-failed" ]]; then
-  : > "$MOCK_STATE/record-publish-failed"
-  exit 1
+  exit 0
 fi
 exec /usr/bin/python3 "$@"
 MOCK
 
 chmod +x "$mock_bin"/*
-: > "$mock_state/deployments"
-: > "$mock_state/registration-payloads"
 : > "$mock_state/docker-rm.log"
 : > "$mock_state/docker-rm-attempt.log"
 
@@ -395,13 +318,11 @@ launcher_env() {
   env PATH="$mock_bin:$PATH" \
     MOCK_STATE="$mock_state" \
     MOCK_PID_FILE="$data_dir/run/workbench-127.0.0.1_${port}.pid" \
-    MOCK_RESTATE_MARKER="$data_dir/run/restate-127.0.0.1_${port}.container" \
     MOCK_POSTGRES_MARKER="$data_dir/run/postgres-127.0.0.1_${port}.container" \
     XDG_RUNTIME_DIR="$test_tmp/runtime" \
     MOCK_BUILD_DIR="$test_tmp/build-$port" \
     AGENT_WORKBENCH_RUN_DIR="$data_dir/run" \
     AGENT_WORKBENCH_DATA_DIR="$data_dir" \
-    RESTATE_ADMIN_URL="http://127.0.0.1:$((19070 + (port - 3030) * 10))/v2" \
     AGENT_WORKBENCH_OPEN=0 \
     AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
     "$@"
@@ -434,57 +355,16 @@ pid_file="$data_sqlite/run/workbench-127.0.0.1_${port_sqlite}.pid"
 reset_file="$data_sqlite/run/reset-127.0.0.1_${port_sqlite}.meta"
 [[ -f "$reset_file" && -f "$data_sqlite/.agent-workbench-dev-reset-owner" ]] \
   || fail "fresh owned SQLite stack did not record reset ownership"
-grep -Eq '^owned_restate_deployment_id=dp_mock[0-9]+$' "$reset_file" \
-  || fail "fresh owned SQLite stack did not record its Restate deployment id"
-grep -Eq '^owned_restate_registry_hash=[0-9a-f]{64}$' "$reset_file" \
-  || fail "fresh owned SQLite stack did not record its exact Restate registry snapshot"
 pid_identity "$pid_file" || fail "fresh SQLite workbench is not alive"
-[[ "$(<"$mock_state/registration-payloads")" = '{"uri":"http://127.0.0.1:9101","force":true}' ]] \
-  || fail "fresh registration did not carry the stack's endpoint URI"
 
 fresh_pid_record="$(<"$pid_file")"
 fresh_build_count="$(<"$mock_state/build-count")"
 run_launcher "$data_sqlite" "$port_sqlite" up > "$test_tmp/up-idempotent.log" 2>&1
 [[ "$(<"$pid_file")" = "$fresh_pid_record" && "$(<"$mock_state/build-count")" = "$fresh_build_count" ]] \
   || fail "live up was not idempotent"
-assert_count 1 "$mock_state/registration-payloads"
 
 printf 'durable application state\n' > "$data_sqlite/durable-seed"
 old_pid_record="$(<"$pid_file")"
-restate_marker_probe="$data_sqlite/run/restate-127.0.0.1_${port_sqlite}.container"
-old_restate_record="$(<"$restate_marker_probe")"
-old_restate_id="${old_restate_record#* }"
-old_restate_id="${old_restate_id%% *}"
-printf 'durable Restate journal\n' > "$mock_state/journal-$old_restate_id"
-meta_file="$data_sqlite/run/workbench-127.0.0.1_${port_sqlite}.meta"
-grep -Eq '^restate_authority_digest=' "$meta_file" \
-  || fail "fresh stack did not record its Restate authority digest"
-
-# A recorded stack with no authority digest predates this launcher and cannot
-# prove its durable trust domain is unchanged, so it is not replaceable.
-cp "$meta_file" "$test_tmp/meta-with-authority"
-grep -v '^restate_authority_digest=' "$test_tmp/meta-with-authority" > "$meta_file"
-if run_launcher "$data_sqlite" "$port_sqlite" restart \
-  > "$test_tmp/restart-legacy-meta.log" 2>&1; then
-  fail "restart of a stack with no recorded authority unexpectedly succeeded"
-fi
-[[ "$(<"$pid_file")" = "$old_pid_record" ]] && pid_identity "$pid_file" \
-  || fail "legacy-metadata restart refusal changed the live PID"
-cp "$test_tmp/meta-with-authority" "$meta_file"
-
-# The durable trust domain is part of the configuration a replacement keeps.
-if launcher_env "$data_sqlite" "$port_sqlite" \
-  RESTATE_AUTHORITY_ID=some-other-authority \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --port "$port_sqlite" \
-  > "$test_tmp/restart-authority-refusal.log" 2>&1; then
-  fail "restart under a different RESTATE_AUTHORITY_ID unexpectedly succeeded"
-fi
-grep -Fq 'RESTATE_AUTHORITY_ID' "$test_tmp/restart-authority-refusal.log" \
-  || fail "authority refusal did not name the setting that must stay stable"
-[[ "$(<"$pid_file")" = "$old_pid_record" ]] && pid_identity "$pid_file" \
-  || fail "authority refusal changed the live PID"
-[[ -f "$data_sqlite/durable-seed" && -f "$mock_state/journal-$old_restate_id" ]] \
-  || fail "authority refusal mutated durable state"
 
 # A restart at a configuration this launcher has no run metadata for is refused
 # before anything is stopped.
@@ -501,11 +381,6 @@ pid_identity "$pid_file" || fail "replacement workbench process is not alive"
   || fail "non-destructive restart reused the old process identity"
 [[ -f "$data_sqlite/durable-seed" ]] \
   || fail "non-destructive restart deleted application data"
-[[ -f "$mock_state/journal-$old_restate_id" ]] \
-  || fail "non-destructive restart discarded the Restate journal"
-[[ "$(<"$restate_marker_probe")" = "$old_restate_record" ]] \
-  || fail "non-destructive restart replaced the Restate container"
-assert_count 1 "$mock_state/registration-payloads"
 assert_count 0 "$mock_state/docker-rm.log"
 replaced_pid_record="$(<"$pid_file")"
 grep -Fq "owned_pid_record=${replaced_pid_record/ /\\ }" "$reset_file" \
@@ -516,16 +391,10 @@ old_pid_record="$(<"$pid_file")"
 
 run_launcher "$data_sqlite" "$port_sqlite" restart --reset-dev-state \
   > "$test_tmp/reset-success.log" 2>&1
-[[ ! -e "$data_sqlite/durable-seed" && ! -e "$mock_state/journal-$old_restate_id" ]] \
-  || fail "explicit reset retained old SQLite or Restate state"
+[[ ! -e "$data_sqlite/durable-seed" ]] \
+  || fail "explicit reset retained old SQLite state"
 pid_identity "$pid_file" || fail "replacement SQLite workbench is not alive"
 [[ "$(<"$pid_file")" != "$old_pid_record" ]] || fail "reset reused the old process identity"
-assert_count 2 "$mock_state/registration-payloads"
-if grep -Fvq '"uri":"http://127.0.0.1:9101"' "$mock_state/registration-payloads"; then
-  fail "a registration targeted a foreign endpoint URI"
-fi
-grep -Fq "rm $old_restate_id restate" "$mock_state/docker-rm.log" \
-  || fail "reset did not remove the exact old Restate container"
 
 stable_pid_record="$(<"$pid_file")"
 mutation_count="$(wc -l < "$mock_state/docker-rm.log")"
@@ -552,31 +421,6 @@ fi
   || fail "mismatched PID refusal removed a container"
 printf '%s\n' "$stable_pid_record" > "$pid_file"
 pid_identity "$pid_file" || fail "mismatched PID refusal signaled the unrelated identity"
-
-restate_marker="$data_sqlite/run/restate-127.0.0.1_${port_sqlite}.container"
-owned_restate_marker="$(<"$restate_marker")"
-printf '%s\n' "${owned_restate_marker%% *}" > "$restate_marker"
-if run_launcher "$data_sqlite" "$port_sqlite" restart --reset-dev-state \
-  > "$test_tmp/legacy-marker-refusal.log" 2>&1; then
-  fail "legacy container marker reset unexpectedly succeeded"
-fi
-[[ "$(<"$pid_file")" = "$stable_pid_record" ]] && pid_identity "$pid_file" \
-  || fail "legacy marker refusal changed the live stack"
-[[ "$(wc -l < "$mock_state/docker-rm.log")" = "$mutation_count" ]] \
-  || fail "legacy marker refusal removed a container"
-printf '%s\n' "$owned_restate_marker" > "$restate_marker"
-chmod 600 "$restate_marker"
-
-if launcher_env "$data_sqlite" "$port_sqlite" \
-  AGENT_WORKBENCH_RESTATE_CONTAINER=changed-container-name \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state --port "$port_sqlite" \
-  > "$test_tmp/container-setting-refusal.log" 2>&1; then
-  fail "changed container setting reset unexpectedly succeeded"
-fi
-[[ "$(<"$pid_file")" = "$stable_pid_record" ]] && pid_identity "$pid_file" \
-  || fail "changed container setting refusal changed the live stack"
-[[ "$(wc -l < "$mock_state/docker-rm.log")" = "$mutation_count" ]] \
-  || fail "changed container setting refusal removed a container"
 
 ln -s "$data_sqlite" "$test_tmp/data-symlink"
 if launcher_env "$test_tmp/data-symlink" "$port_sqlite" \
@@ -606,15 +450,11 @@ printf 'second disposable state\n' > "$data_sqlite/durable-seed"
 if launcher_env "$data_sqlite" "$port_sqlite" MOCK_POST_KILL=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state --port "$port_sqlite" \
   > "$test_tmp/reset-failure.log" 2>&1; then
-  fail "replacement registration failure unexpectedly succeeded"
+  fail "replacement startup failure unexpectedly succeeded"
 fi
 [[ ! -e "$data_sqlite/durable-seed" ]] \
   || fail "failed replacement claimed reset without clearing old application state"
 [[ ! -e "$pid_file" ]] || fail "failed replacement left a managed PID"
-[[ ! -e "$data_sqlite/run/restate-127.0.0.1_${port_sqlite}.container" ]] \
-  || fail "failed replacement left its Restate ownership marker"
-[[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_sqlite" ]] \
-  || fail "failed replacement left its Restate container"
 grep -Fq 'the disposable dev state was reset, but replacement startup failed' \
   "$test_tmp/reset-failure.log" || fail "failed replacement omitted reset status"
 grep -Fq 'recovery command saved at ' "$test_tmp/reset-failure.log" \
@@ -633,12 +473,6 @@ env PATH="$mock_bin:$PATH" \
   MOCK_BUILD_DIR="$test_tmp/build-$port_sqlite" \
   AGENT_WORKBENCH_RUN_DIR="$test_tmp/wrong-run" \
   AGENT_WORKBENCH_DATA_DIR="$test_tmp/wrong-data" \
-  AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:65501 \
-  AGENT_WORKBENCH_RESTATE_ENDPOINT_URL=http://127.0.0.1:65501 \
-  RESTATE_INGRESS_URL=http://127.0.0.1:65502 \
-  RESTATE_ADMIN_URL=http://127.0.0.1:65503/v1 \
-  AGENT_WORKBENCH_RESTATE_NODE_PORT=65504 \
-  AGENT_WORKBENCH_RESTATE_CONTAINER=wrong-restate-container \
   AGENT_WORKBENCH_DATABASE_URL=postgres://wrong.invalid/wrong \
   AGENT_WORKBENCH_POSTGRES=1 \
   AGENT_WORKBENCH_OPEN=0 \
@@ -646,22 +480,15 @@ env PATH="$mock_bin:$PATH" \
   bash "$recovery_file" \
   > "$test_tmp/recovery-success.log" 2>&1
 pid_identity "$pid_file" || fail "saved recovery script did not start a healthy replacement"
-assert_count 4 "$mock_state/registration-payloads"
 [[ ! -e "$recovery_file" ]] || fail "successful recovery retained a stale recovery script"
 expected_recovery_env="$test_tmp/expected-recovery-env"
 cat > "$expected_recovery_env" <<EOF
 AGENT_WORKBENCH_ADDR=127.0.0.1:3032
-AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:9101
 AGENT_WORKBENCH_DATABASE_URL=
-RESTATE_INGRESS_URL=http://127.0.0.1:8100
-RESTATE_ADMIN_URL=http://127.0.0.1:19090/v2
 AGENT_WORKBENCH_DATA_DIR=$data_sqlite
 EOF
 cmp -s "$expected_recovery_env" "$mock_state/workbench-env-$port_sqlite" \
   || fail "saved recovery script did not transmit the original stack settings"
-[[ -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_sqlite" \
-  && ! -e "$mock_state/container-wrong-restate-container" ]] \
-  || fail "saved recovery script did not restore the original container identity"
 
 data_postgres="$test_tmp/data-postgres"
 port_postgres=3034
@@ -672,62 +499,36 @@ postgres_pid_file="$data_postgres/run/workbench-127.0.0.1_${port_postgres}.pid"
 pid_identity "$postgres_pid_file" || fail "fresh managed-Postgres workbench is not alive"
 postgres_marker="$data_postgres/run/postgres-127.0.0.1_${port_postgres}.container"
 read -r _ old_postgres_id _ _ < "$postgres_marker"
-printf 'managed Postgres state\n' > "$mock_state/journal-$old_postgres_id"
+printf 'managed Postgres state\n' > "$mock_state/container-state-$old_postgres_id"
 launcher_env "$data_postgres" "$port_postgres" AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state --port "$port_postgres" \
   > "$test_tmp/postgres-reset.log" 2>&1
 grep -Fq "rm $old_postgres_id postgres" "$mock_state/docker-rm.log" \
   || fail "managed Postgres reset did not remove the exact old container"
-[[ ! -e "$mock_state/journal-$old_postgres_id" ]] \
+[[ ! -e "$mock_state/container-state-$old_postgres_id" ]] \
   || fail "managed Postgres reset retained old container state"
 pid_identity "$postgres_pid_file" || fail "replacement managed-Postgres workbench is not alive"
 
-data_existing="$test_tmp/data-existing-uri"
-port_existing=3036
-printf '19130\tdp_existing\thttp://127.0.0.1:9141/\n' > "$mock_state/deployments"
-builds_before="$(<"$mock_state/build-count")"
-if launcher_env "$data_existing" "$port_existing" MOCK_EXTERNAL_PORTS='8140 19130' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_existing" \
-  > "$test_tmp/existing-uri-refusal.log" 2>&1; then
-  fail "fresh up replaced an already-registered URI"
-fi
-[[ "$(<"$mock_state/build-count")" = "$((builds_before + 1))" ]] \
-  || fail "existing-URI refusal built a new host"
-grep -Fq 'already registered' "$test_tmp/existing-uri-refusal.log" \
-  || fail "existing-URI refusal was not precise"
-
 data_unowned="$test_tmp/data-unowned-name"
 port_unowned=3038
-unowned_name="lash-agent-workbench-dev-restate-$port_unowned"
+unowned_name="lash-agent-workbench-dev-postgres-$port_unowned"
 unowned_id="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-printf '%s %s restate\n' "$unowned_id" '00000000-0000-0000-0000-000000000000' \
+printf '%s %s postgres\n' "$unowned_id" '00000000-0000-0000-0000-000000000000' \
   > "$mock_state/container-$unowned_name"
-rm -f "$mock_state/deployments"
-: > "$mock_state/deployments"
 rm_count_before="$(wc -l < "$mock_state/docker-rm.log")"
-if launcher_env "$data_unowned" "$port_unowned" MOCK_UNREADY_CONTAINER_NAME="$unowned_name" \
+if launcher_env "$data_unowned" "$port_unowned" AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_unowned" \
   > "$test_tmp/unowned-name-refusal.log" 2>&1; then
-  fail "launcher adopted an unowned same-name Restate container"
+  fail "launcher adopted an unowned same-name Postgres container"
 fi
 [[ -f "$mock_state/container-$unowned_name" ]] \
   || fail "launcher deleted an unowned same-name container"
 [[ "$(wc -l < "$mock_state/docker-rm.log")" = "$rm_count_before" ]] \
   || fail "unowned same-name refusal removed a container"
 
-if launcher_env "$test_tmp/data-secret-url" 3040 \
-  RESTATE_ADMIN_URL='http://user:diagnostic-secret@127.0.0.1:19170/v2' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3040 \
-  > "$test_tmp/secret-url-refusal.log" 2>&1; then
-  fail "credential-bearing diagnostic URL unexpectedly succeeded"
-fi
-! grep -Fq 'diagnostic-secret' "$test_tmp/secret-url-refusal.log" \
-  || fail "credential-bearing URL was exposed in diagnostics"
-
 nonloopback_builds_before="$(<"$mock_state/build-count")"
 if launcher_env "$test_tmp/data-nonloopback-service" 3040 \
-  RESTATE_INGRESS_URL=http://192.0.2.10:8180 \
-  RESTATE_ADMIN_URL=http://192.0.2.10:19170/v2 \
+  AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_POSTGRES_HOST=192.0.2.10 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3040 \
   > "$test_tmp/nonloopback-service-refusal.log" 2>&1; then
   fail "ambiguous non-loopback service identity unexpectedly succeeded"
@@ -744,7 +545,7 @@ port_missing_pid=3042
 if launcher_env "$data_missing_pid" "$port_missing_pid" MOCK_POST_REMOVE_PID=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_missing_pid" \
   > "$test_tmp/missing-pid-cleanup.log" 2>&1; then
-  fail "post-registration PID metadata loss unexpectedly succeeded"
+  fail "post-start PID metadata loss unexpectedly succeeded"
 fi
 read -r removed_pid removed_start < "$mock_state/removed-pid-record"
 removed_current="$(awk '{print $22}' "/proc/$removed_pid/stat" 2>/dev/null || true)"
@@ -753,9 +554,7 @@ removed_current="$(awk '{print $22}' "/proc/$removed_pid/stat" 2>/dev/null || tr
 grep -Fq "stopping process $removed_pid" "$test_tmp/missing-pid-cleanup.log" \
   || fail "cleanup did not use its retained exact process identity"
 [[ ! -e "$data_missing_pid" ]] \
-  || fail "successful exact process and engine retirement retained attempt application state"
-[[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_missing_pid" ]] \
-  || fail "successful cleanup after PID metadata loss retained Restate"
+  || fail "successful exact process retirement retained attempt application state"
 
 data_failed_process="$test_tmp/data-failed-process"
 port_failed_process=3050
@@ -774,7 +573,7 @@ failed_process_current="$(awk '{print $22}' "/proc/$failed_process_pid/stat" 2>/
   && -f "$data_failed_process/run/reset-127.0.0.1_${port_failed_process}.meta" ]] \
   || fail "failed process retirement did not retain its live process and application state"
 [[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$process_rm_attempts_before" ]] \
-  || fail "failed process retirement attempted to remove its Restate engine"
+  || fail "failed process retirement attempted to remove a container"
 grep -Fq 'startup cleanup could not stop the owned workbench' \
   "$test_tmp/failed-process-retirement.log" \
   || fail "failed process retirement did not report its retained state"
@@ -789,156 +588,39 @@ done
 [[ "$failed_process_current" != "$failed_process_start" ]] \
   || fail "retained mock workbench did not stop during test cleanup"
 
-data_failed_retirement="$test_tmp/data-failed-retirement"
-port_failed_retirement=3044
-rm_attempts_before_failure="$(wc -l < "$mock_state/docker-rm-attempt.log")"
-if launcher_env "$data_failed_retirement" "$port_failed_retirement" \
-  AGENT_WORKBENCH_POSTGRES=1 MOCK_POST_KILL=1 \
-  MOCK_RM_FAIL_COMPONENT=restate MOCK_RM_FAIL_MODE=always \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_failed_retirement" \
-  > "$test_tmp/failed-retirement.log" 2>&1; then
-  fail "startup with persistently failed Restate retirement unexpectedly succeeded"
-fi
-failed_state_key="127.0.0.1_${port_failed_retirement}"
-[[ -f "$data_failed_retirement/attempt-app-state" \
-  && -f "$data_failed_retirement/.agent-workbench-dev-reset-owner" \
-  && -f "$data_failed_retirement/run/reset-$failed_state_key.meta" ]] \
-  || fail "failed Restate retirement deleted application state or ownership metadata"
-[[ -f "$data_failed_retirement/run/restate-$failed_state_key.container" \
-  && -f "$data_failed_retirement/run/postgres-$failed_state_key.container" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_failed_retirement" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_failed_retirement" ]] \
-  || fail "failed Restate retirement discarded exact engine or store ownership evidence"
-grep -Fq 'startup cleanup is incomplete; retained its application state and ownership metadata' \
-  "$test_tmp/failed-retirement.log" \
-  || fail "failed Restate retirement did not report retained partial state"
-read -r _ failed_restate_id _ _ \
-  < "$data_failed_retirement/run/restate-$failed_state_key.container"
-read -r _ failed_postgres_id _ _ \
-  < "$data_failed_retirement/run/postgres-$failed_state_key.container"
-mapfile -t failed_retirement_attempts \
-  < <(tail -n "+$((rm_attempts_before_failure + 1))" "$mock_state/docker-rm-attempt.log")
-[[ "${#failed_retirement_attempts[@]}" = 2 \
-  && "${failed_retirement_attempts[0]}" = "rm $failed_restate_id restate" \
-  && "${failed_retirement_attempts[1]}" = "rm $failed_restate_id restate" ]] \
-  || fail "failed Restate retirement did not make the bounded exact-ID retry"
-! grep -Fq "rm $failed_postgres_id postgres" "$mock_state/docker-rm.log" \
-  || fail "failed Restate retirement removed its dependent Postgres store"
-
-data_retry_cleanup="$test_tmp/data-retry-cleanup"
-port_retry_cleanup=3046
-rm -f "$mock_state/docker-rm-failed-restate"
-rm_log_before_retry="$(wc -l < "$mock_state/docker-rm.log")"
-if launcher_env "$data_retry_cleanup" "$port_retry_cleanup" \
-  AGENT_WORKBENCH_POSTGRES=1 MOCK_POST_KILL=1 \
-  MOCK_RM_FAIL_COMPONENT=restate MOCK_RM_FAIL_MODE=once \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_retry_cleanup" \
-  > "$test_tmp/retry-cleanup.log" 2>&1; then
-  fail "post-registration process failure unexpectedly succeeded"
-fi
-[[ ! -e "$data_retry_cleanup" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_retry_cleanup" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_retry_cleanup" ]] \
-  || fail "successful exact-ID cleanup retry retained attempt state"
-mapfile -t retry_removals < <(tail -n "+$((rm_log_before_retry + 1))" "$mock_state/docker-rm.log")
-[[ "${#retry_removals[@]}" = 2 \
-  && "${retry_removals[0]}" = *' restate' \
-  && "${retry_removals[1]}" = *' postgres' ]] \
-  || fail "cleanup retry did not prove Restate retirement before Postgres removal"
-
 data_reset_failed_retirement="$test_tmp/data-reset-failed-retirement"
 port_reset_failed_retirement=3048
-run_launcher "$data_reset_failed_retirement" "$port_reset_failed_retirement" up \
+launcher_env "$data_reset_failed_retirement" "$port_reset_failed_retirement" \
+  AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_reset_failed_retirement" \
   > "$test_tmp/reset-failed-retirement-up.log" 2>&1
 reset_failure_state_key="127.0.0.1_${port_reset_failed_retirement}"
-read -r _ reset_old_restate_id _ _ \
-  < "$data_reset_failed_retirement/run/restate-$reset_failure_state_key.container"
+read -r _ reset_old_postgres_id _ _ \
+  < "$data_reset_failed_retirement/run/postgres-$reset_failure_state_key.container"
 if launcher_env "$data_reset_failed_retirement" "$port_reset_failed_retirement" \
-  MOCK_POST_KILL=1 MOCK_RM_FAIL_COMPONENT=restate MOCK_RM_FAIL_MODE=always \
-  MOCK_RM_ALLOW_ID="$reset_old_restate_id" \
+  AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_POST_KILL=1 MOCK_RM_FAIL_COMPONENT=postgres MOCK_RM_FAIL_MODE=always \
+  MOCK_RM_ALLOW_ID="$reset_old_postgres_id" \
   bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
     --port "$port_reset_failed_retirement" \
   > "$test_tmp/reset-failed-retirement.log" 2>&1; then
-  fail "replacement with persistently failed Restate retirement unexpectedly succeeded"
+  fail "replacement with persistently failed Postgres retirement unexpectedly succeeded"
 fi
 [[ -f "$data_reset_failed_retirement/attempt-app-state" \
   && -f "$data_reset_failed_retirement/.agent-workbench-dev-reset-owner" \
   && -f "$data_reset_failed_retirement/run/reset-$reset_failure_state_key.meta" \
-  && -f "$data_reset_failed_retirement/run/restate-$reset_failure_state_key.container" ]] \
+  && -f "$data_reset_failed_retirement/run/postgres-$reset_failure_state_key.container" ]] \
   || fail "replacement retirement failure deleted new application state or ownership metadata"
 grep -Fq 'replacement cleanup is incomplete; retained its application state and ownership metadata' \
   "$test_tmp/reset-failed-retirement.log" \
   || fail "replacement retirement failure falsely reported a stopped stack"
 ! grep -Fq 'stack is stopped' "$test_tmp/reset-failed-retirement.log" \
-  || fail "replacement retirement failure claimed its retained engine was stopped"
+  || fail "replacement retirement failure claimed its retained store was stopped"
 replacement_recovery_file="$(sed -n \
   's/^\[agent-workbench\] recovery command saved at \([^;]*\);.*/\1/p' \
   "$test_tmp/reset-failed-retirement.log")"
 [[ -f "$replacement_recovery_file" && "$(stat -c '%a' "$replacement_recovery_file")" = 600 ]] \
   || fail "replacement retirement failure did not retain private recovery evidence"
-
-data_external_sqlite="$test_tmp/data-external-sqlite"
-port_external_sqlite=3052
-external_sqlite_rm_before="$(wc -l < "$mock_state/docker-rm-attempt.log")"
-if launcher_env "$data_external_sqlite" "$port_external_sqlite" \
-  MOCK_EXTERNAL_PORTS='8300 19290' MOCK_POST_KILL=1 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_external_sqlite" \
-  > "$test_tmp/external-sqlite-failure.log" 2>&1; then
-  fail "external-Restate SQLite host failure unexpectedly succeeded"
-fi
-external_sqlite_state_key="127.0.0.1_${port_external_sqlite}"
-[[ -f "$data_external_sqlite/attempt-app-state" \
-  && -f "$data_external_sqlite/run/workbench-$external_sqlite_state_key.meta" ]] \
-  || fail "external Restate failure deleted SQLite application state or private run metadata"
-grep -Fq $'\thttp://127.0.0.1:9301' "$mock_state/deployments" \
-  || fail "external Restate failure did not retain its registered deployment"
-[[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$external_sqlite_rm_before" ]] \
-  || fail "external Restate failure attempted to remove an engine"
-grep -Fq 'cannot retire the external Restate engine' "$test_tmp/external-sqlite-failure.log" \
-  || fail "external Restate failure did not explain retained application state"
-
-data_external_postgres="$test_tmp/data-external-postgres"
-port_external_postgres=3054
-external_postgres_rm_before="$(wc -l < "$mock_state/docker-rm-attempt.log")"
-if launcher_env "$data_external_postgres" "$port_external_postgres" \
-  AGENT_WORKBENCH_POSTGRES=1 MOCK_EXTERNAL_PORTS='8320 19310' MOCK_POST_KILL=1 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_external_postgres" \
-  > "$test_tmp/external-postgres-failure.log" 2>&1; then
-  fail "external-Restate managed-Postgres host failure unexpectedly succeeded"
-fi
-external_postgres_state_key="127.0.0.1_${port_external_postgres}"
-[[ -f "$data_external_postgres/attempt-app-state" \
-  && -f "$data_external_postgres/run/workbench-$external_postgres_state_key.meta" \
-  && -f "$data_external_postgres/run/postgres-$external_postgres_state_key.container" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_external_postgres" ]] \
-  || fail "external Restate failure deleted managed Postgres or its ownership evidence"
-grep -Fq $'\thttp://127.0.0.1:9321' "$mock_state/deployments" \
-  || fail "external Restate managed-Postgres failure lost its registered deployment"
-[[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$external_postgres_rm_before" ]] \
-  || fail "external Restate failure attempted dependent managed-Postgres removal"
-
-data_external_foreground="$test_tmp/data-external-foreground"
-port_external_foreground=3056
-foreground_rm_before="$(wc -l < "$mock_state/docker-rm-attempt.log")"
-if launcher_env "$data_external_foreground" "$port_external_foreground" \
-  AGENT_WORKBENCH_POSTGRES=1 MOCK_EXTERNAL_PORTS='8340 19330' MOCK_POST_KILL=1 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" foreground --port "$port_external_foreground" \
-  > "$test_tmp/external-foreground-failure.log" 2>&1; then
-  fail "external-Restate foreground host failure unexpectedly succeeded"
-fi
-external_foreground_state_key="127.0.0.1_${port_external_foreground}"
-[[ -f "$data_external_foreground/attempt-app-state" \
-  && -f "$data_external_foreground/run/workbench-$external_foreground_state_key.meta" \
-  && -f "$data_external_foreground/run/postgres-$external_foreground_state_key.container" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_external_foreground" ]] \
-  || fail "foreground external-engine failure deleted application or managed-Postgres state"
-grep -Fq $'\thttp://127.0.0.1:9341' "$mock_state/deployments" \
-  || fail "foreground external-engine failure lost its registered deployment"
-[[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$foreground_rm_before" ]] \
-  || fail "foreground external-engine failure attempted dependent store removal"
-grep -Fq 'foreground cleanup cannot retire the external Restate engine' \
-  "$test_tmp/external-foreground-failure.log" \
-  || fail "foreground external-engine failure did not report retained state"
 
 data_shared="$test_tmp/data-shared-owner"
 port_shared_owner=3058
@@ -975,7 +657,7 @@ fi
   || fail "nested data refusal mutated the existing stack"
 
 shared_reset_file="$data_shared/run/reset-127.0.0.1_${port_shared_owner}.meta"
-sed -i 's/^reset_schema=6$/reset_schema=5/' "$shared_reset_file"
+sed -i 's/^reset_schema=7$/reset_schema=6/' "$shared_reset_file"
 if run_launcher "$data_shared" "$port_shared_owner" restart --reset-dev-state \
   > "$test_tmp/legacy-exclusive-lease-refusal.log" 2>&1; then
   fail "pre-exclusivity reset record unexpectedly authorized deletion"
@@ -1032,23 +714,23 @@ run_footprint_parent="$test_tmp/run-footprint-parent"
 run_footprint_dir="$run_footprint_parent/owner-run"
 run_footprint_data="$test_tmp/data-run-footprint-owner"
 port_run_footprint_owner=3071
+mkdir -p "$run_footprint_data"
 launcher_env "$run_footprint_data" "$port_run_footprint_owner" \
   AGENT_WORKBENCH_RUN_DIR="$run_footprint_dir" \
   MOCK_PID_FILE="$run_footprint_dir/workbench-127.0.0.1_${port_run_footprint_owner}.pid" \
-  MOCK_EXTERNAL_PORTS='8490 19480' \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_run_footprint_owner" \
   > "$test_tmp/run-footprint-owner-up.log" 2>&1
 run_footprint_pid_file="$run_footprint_dir/workbench-127.0.0.1_${port_run_footprint_owner}.pid"
 run_footprint_pid_record="$(<"$run_footprint_pid_file")"
 [[ ! -e "$run_footprint_data/.agent-workbench-dev-reset-owner" ]] \
-  || fail "external-engine run unexpectedly claimed reset ownership"
-printf 'external run footprint state\n' > "$run_footprint_data/run-footprint-state"
+  || fail "pre-existing-data run unexpectedly claimed reset ownership"
+printf 'non-resettable run footprint state\n' > "$run_footprint_data/run-footprint-state"
 run_footprint_builds_before="$(<"$mock_state/build-count")"
 if launcher_env "$run_footprint_parent" 3073 \
   AGENT_WORKBENCH_RUN_DIR="$test_tmp/run-footprint-candidate-run" \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3073 \
   > "$test_tmp/enclosing-run-footprint-refusal.log" 2>&1; then
-  fail "candidate data unexpectedly enclosed another stack's external run footprint"
+  fail "candidate data unexpectedly enclosed another stack's run footprint"
 fi
 [[ ! -e "$test_tmp/run-footprint-candidate-run" \
   && "$(<"$mock_state/build-count")" = "$((run_footprint_builds_before + 1))" \
@@ -1070,7 +752,7 @@ default_owner_port=3074
 env PATH="$mock_bin:$PATH" MOCK_STATE="$mock_state" \
   MOCK_PID_FILE="$default_data/run/workbench-127.0.0.1_${default_owner_port}.pid" \
   XDG_RUNTIME_DIR="$test_tmp/runtime" MOCK_BUILD_DIR="$test_tmp/build-$default_owner_port" \
-  RESTATE_ADMIN_URL=http://127.0.0.1:19510/v2 AGENT_WORKBENCH_OPEN=0 \
+  AGENT_WORKBENCH_OPEN=0 \
   AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
   bash "$default_repo/scripts/agent-workbench-dev.sh" up --port "$default_owner_port" \
   > "$test_tmp/default-owner-up.log" 2>&1
@@ -1083,7 +765,7 @@ if env PATH="$mock_bin:$PATH" MOCK_STATE="$mock_state" \
   MOCK_PID_FILE="$default_data/run/workbench-127.0.0.1_${default_consumer_port}.pid" \
   XDG_RUNTIME_DIR="$test_tmp/runtime" MOCK_BUILD_DIR="$test_tmp/build-$default_consumer_port" \
   AGENT_WORKBENCH_DATA_DIR="$default_consumer_data" \
-  RESTATE_ADMIN_URL=http://127.0.0.1:19530/v2 AGENT_WORKBENCH_OPEN=0 \
+  AGENT_WORKBENCH_OPEN=0 \
   AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
   bash "$default_repo/scripts/agent-workbench-dev.sh" up --port "$default_consumer_port" \
   > "$test_tmp/default-run-custom-data-refusal.log" 2>&1; then
@@ -1094,174 +776,52 @@ fi
   && "$(<"$default_owner_pid_file")" = "$default_owner_pid_record" ]] \
   || fail "default-run overlap refusal changed the owner or custom data path"
 
-data_service_owner="$test_tmp/data-service-owner"
-port_service_owner=3078
-run_launcher "$data_service_owner" "$port_service_owner" up \
-  > "$test_tmp/service-owner-up.log" 2>&1
-service_owner_pid_file="$data_service_owner/run/workbench-127.0.0.1_${port_service_owner}.pid"
-service_owner_pid_record="$(<"$service_owner_pid_file")"
-service_owner_restate_marker="$data_service_owner/run/restate-127.0.0.1_${port_service_owner}.container"
-read -r _ service_owner_restate_id _ _ < "$service_owner_restate_marker"
-printf 'service owner state\n' > "$data_service_owner/service-owner-state"
-service_deployments_before="$(<"$mock_state/deployments")"
-service_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
-service_builds_before="$(<"$mock_state/build-count")"
-if launcher_env "$test_tmp/data-shared-engine-consumer" 3080 \
-  RESTATE_INGRESS_URL=http://localhost:8560 \
-  RESTATE_ADMIN_URL=http://localhost:19550/v2 \
-  AGENT_WORKBENCH_RESTATE_NODE_PORT=19551 \
-  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-shared-engine-name \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3080 \
-  > "$test_tmp/shared-engine-refusal.log" 2>&1; then
-  fail "second launcher unexpectedly borrowed a reset-owned Restate engine"
-fi
-[[ ! -e "$test_tmp/data-shared-engine-consumer" \
-  && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" \
-  && -f "$data_service_owner/service-owner-state" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_service_owner" \
-  && "$(<"$mock_state/deployments")" = "$service_deployments_before" \
-  && "$(wc -l < "$mock_state/docker-rm.log")" = "$service_rm_before" \
-  && "$(<"$mock_state/build-count")" = "$((service_builds_before + 1))" ]] \
-  || fail "shared Restate refusal changed the owner, engine, deployment, or candidate state"
-grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
-  "$test_tmp/shared-engine-refusal.log" \
-  || fail "shared Restate refusal did not identify the exclusive service lease"
-
-split_ingress_builds_before="$(<"$mock_state/build-count")"
-if launcher_env "$test_tmp/data-split-ingress-consumer" 3080 \
-  RESTATE_INGRESS_URL=http://localhost:8560 \
-  RESTATE_ADMIN_URL=http://127.0.0.1:19110/v2 \
-  AGENT_WORKBENCH_RESTATE_NODE_PORT=19111 \
-  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-split-ingress-engine \
-  MOCK_EXTERNAL_PORTS=19110 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3080 \
-  > "$test_tmp/split-ingress-refusal.log" 2>&1; then
-  fail "second launcher unexpectedly shared one owned Restate ingress endpoint"
-fi
-[[ ! -e "$test_tmp/data-split-ingress-consumer" \
-  && "$(<"$mock_state/build-count")" = "$((split_ingress_builds_before + 1))" \
-  && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" ]] \
-  || fail "split-ingress refusal mutated the owner or candidate"
-grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
-  "$test_tmp/split-ingress-refusal.log" \
-  || fail "split-ingress refusal did not identify the individual endpoint reservation"
-
-split_admin_builds_before="$(<"$mock_state/build-count")"
-if launcher_env "$test_tmp/data-split-admin-consumer" 3081 \
-  RESTATE_INGRESS_URL=http://127.0.0.1:8111 \
-  RESTATE_ADMIN_URL=http://localhost:19550/v2 \
-  AGENT_WORKBENCH_RESTATE_NODE_PORT=19112 \
-  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-split-admin-engine \
-  MOCK_EXTERNAL_PORTS=8111 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3081 \
-  > "$test_tmp/split-admin-refusal.log" 2>&1; then
-  fail "second launcher unexpectedly shared one owned Restate admin endpoint"
-fi
-[[ ! -e "$test_tmp/data-split-admin-consumer" \
-  && "$(<"$mock_state/build-count")" = "$((split_admin_builds_before + 1))" \
-  && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" ]] \
-  || fail "split-admin refusal mutated the owner or candidate"
-grep -Fq 'Restate admin service is reserved by another launcher-owned disposable stack' \
-  "$test_tmp/split-admin-refusal.log" \
-  || fail "split-admin refusal did not identify the individual endpoint reservation"
-
-lease_rollback_port=3083
-lease_rollback_ingress=$((8080 + (lease_rollback_port - 3030) * 10))
-lease_rollback_admin=$((19070 + (lease_rollback_port - 3030) * 10))
-lease_rollback_ingress_hash="$(printf '%s' "loopback:$lease_rollback_ingress" | sha256sum | awk '{print $1}')"
-lease_rollback_admin_hash="$(printf '%s' "loopback:$lease_rollback_admin" | sha256sum | awk '{print $1}')"
-lease_rollback_ingress_file="$launcher_runtime_root/restate-ingress-$lease_rollback_ingress_hash.lease"
-lease_rollback_admin_file="$launcher_runtime_root/restate-admin-$lease_rollback_admin_hash.lease"
-rm -f "$mock_state/record-create-failed"
-if launcher_env "$test_tmp/data-lease-publication-rollback" "$lease_rollback_port" \
-  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$lease_rollback_admin_hash.lease" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_rollback_port" \
-  > "$test_tmp/lease-publication-rollback.log" 2>&1; then
-  fail "startup ignored failure to publish its second endpoint reservation"
-fi
-[[ ! -e "$lease_rollback_ingress_file" && ! -e "$lease_rollback_admin_file" \
-  && ! -e "$test_tmp/data-lease-publication-rollback" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$lease_rollback_port" ]] \
-  || fail "partial endpoint-reservation publication did not roll back exact attempt resources"
-
-lease_retry_port=3084
-lease_retry_ingress=$((8080 + (lease_retry_port - 3030) * 10))
-lease_retry_admin=$((19070 + (lease_retry_port - 3030) * 10))
-lease_retry_ingress_hash="$(printf '%s' "loopback:$lease_retry_ingress" | sha256sum | awk '{print $1}')"
-lease_retry_admin_hash="$(printf '%s' "loopback:$lease_retry_admin" | sha256sum | awk '{print $1}')"
-lease_retry_ingress_file="$launcher_runtime_root/restate-ingress-$lease_retry_ingress_hash.lease"
-lease_retry_admin_file="$launcher_runtime_root/restate-admin-$lease_retry_admin_hash.lease"
-rm -f "$mock_state/record-create-failed" "$mock_state/lease-remove-failed"
-if launcher_env "$test_tmp/data-lease-removal-retry" "$lease_retry_port" \
-  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$lease_retry_admin_hash.lease" \
-  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease && ! -e "$MOCK_STATE/lease-remove-failed" ]]; then : > "$MOCK_STATE/lease-remove-failed"; return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_retry_port" \
-  > "$test_tmp/lease-removal-retry.log" 2>&1; then
-  fail "startup ignored second endpoint publication failure"
-fi
-[[ -e "$mock_state/lease-remove-failed" \
-  && ! -e "$lease_retry_ingress_file" && ! -e "$lease_retry_admin_file" \
-  && ! -e "$test_tmp/data-lease-removal-retry" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$lease_retry_port" ]] \
-  || fail "lease cleanup progress did not survive engine retirement and a transient unlink failure"
-
-lease_commit_port=3088
-lease_commit_ingress=$((8080 + (lease_commit_port - 3030) * 10))
-lease_commit_ingress_hash="$(printf '%s' "loopback:$lease_commit_ingress" | sha256sum | awk '{print $1}')"
-lease_commit_ingress_file="$launcher_runtime_root/restate-ingress-$lease_commit_ingress_hash.lease"
-rm -f "$mock_state/lease-publish-failed"
-if launcher_env "$test_tmp/data-lease-postcommit" "$lease_commit_port" \
-  'BASH_FUNC_python3%%=() { local target="${@: -1}"; if [[ "$target" = *restate-ingress-*.lease && ! -e "$MOCK_STATE/lease-publish-failed" ]]; then command python3 "$@" || return; : > "$MOCK_STATE/lease-publish-failed"; return 1; fi; command python3 "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_commit_port" \
-  > "$test_tmp/lease-postcommit.log" 2>&1; then
-  fail "startup ignored a lease publisher error after commit"
-fi
-[[ -e "$mock_state/lease-publish-failed" && ! -e "$lease_commit_ingress_file" \
-  && ! -e "$test_tmp/data-lease-postcommit" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$lease_commit_port" ]] \
-  || fail "observable post-commit lease publication was not reconciled and cleaned"
+# A store lease whose publisher commits and then reports failure, and which can
+# never be unlinked: startup cleanup retires the store but keeps the lease.
+lease_commit_failure='BASH_FUNC_python3%%=() { if [[ "${@: -1}" = *postgres-*.lease ]]; then command python3 "$@" || return; return 1; fi; command python3 "$@"; }'
+lease_removal_failure='BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *postgres-*.lease ]]; then return 1; fi; command rm "$@"; }'
+postgres_lease_file() {
+  local service=$((15432 + ($1 - 3030) * 10))
+  printf '%s/postgres-%s.lease\n' "$launcher_runtime_root" \
+    "$(printf '%s' "loopback:$service" | sha256sum | awk '{print $1}')"
+}
 
 lease_public_retry_port=3089
-lease_public_retry_ingress=$((8080 + (lease_public_retry_port - 3030) * 10))
-lease_public_retry_admin=$((19070 + (lease_public_retry_port - 3030) * 10))
-lease_public_retry_ingress_hash="$(printf '%s' "loopback:$lease_public_retry_ingress" | sha256sum | awk '{print $1}')"
-lease_public_retry_admin_hash="$(printf '%s' "loopback:$lease_public_retry_admin" | sha256sum | awk '{print $1}')"
-lease_public_retry_ingress_file="$launcher_runtime_root/restate-ingress-$lease_public_retry_ingress_hash.lease"
-rm -f "$mock_state/record-create-failed"
+lease_public_retry_file="$(postgres_lease_file "$lease_public_retry_port")"
 if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
-  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$lease_public_retry_admin_hash.lease" \
-  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_public_retry_port" \
+  "$lease_commit_failure" "$lease_removal_failure" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_public_retry_port" \
   > "$test_tmp/lease-public-retry-first.log" 2>&1; then
   fail "persistent lease cleanup failure unexpectedly succeeded"
 fi
-lease_public_retry_receipt="$test_tmp/data-lease-public-retry/run/restate-127.0.0.1_${lease_public_retry_port}.service-retired"
-[[ -f "$lease_public_retry_ingress_file" && -f "$lease_public_retry_receipt" \
+lease_public_retry_receipt="$test_tmp/data-lease-public-retry/run/postgres-127.0.0.1_${lease_public_retry_port}.service-retired"
+[[ -f "$lease_public_retry_file" && -f "$lease_public_retry_receipt" \
   && -d "$test_tmp/data-lease-public-retry" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$lease_public_retry_port" ]] \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$lease_public_retry_port" ]] \
   || fail "persistent lease failure did not retain exact public retry authority"
 grep -Fq "down --addr 127.0.0.1:$lease_public_retry_port" \
   "$test_tmp/lease-public-retry-first.log" \
   || fail "persistent lease failure did not report its public recovery command"
-lease_public_retry_record="$(<"$lease_public_retry_ingress_file")"
+lease_public_retry_record="$(<"$lease_public_retry_file")"
 read -r _ _ _ lease_public_retry_id <<<"$lease_public_retry_record"
-printf '1 restate 00000000-0000-0000-0000-000000000000 %s\n' \
-  "$lease_public_retry_id" > "$lease_public_retry_ingress_file"
-if run_launcher "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" down \
+printf '1 postgres 00000000-0000-0000-0000-000000000000 %s\n' \
+  "$lease_public_retry_id" > "$lease_public_retry_file"
+if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
   > "$test_tmp/lease-public-retry-mismatch.log" 2>&1; then
   fail "public startup cleanup accepted a changed service lease"
 fi
-[[ "$(<"$lease_public_retry_ingress_file")" \
-  = "1 restate 00000000-0000-0000-0000-000000000000 $lease_public_retry_id" \
+[[ "$(<"$lease_public_retry_file")" \
+  = "1 postgres 00000000-0000-0000-0000-000000000000 $lease_public_retry_id" \
   && -f "$lease_public_retry_receipt" && -d "$test_tmp/data-lease-public-retry" ]] \
   || fail "public startup cleanup changed a mismatched lease or its retained authority"
-printf '%s\n' "$lease_public_retry_record" > "$lease_public_retry_ingress_file"
+printf '%s\n' "$lease_public_retry_record" > "$lease_public_retry_file"
 lease_public_retry_key="127.0.0.1_${lease_public_retry_port}"
 lease_public_retry_finalization="$launcher_runtime_root/$lock_hash-$lease_public_retry_key-start-finalizing"
 printf 'retained partial-cleanup state\n' > "$test_tmp/data-lease-public-retry/sentinel"
 if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-rf -- $AGENT_WORKBENCH_DATA_DIR" ]]; then command rm -rf -- "$AGENT_WORKBENCH_DATA_DIR/run" "$AGENT_WORKBENCH_DATA_DIR/.agent-workbench-dev-attempt-owner"; return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
   > "$test_tmp/lease-public-retry-partial.log" 2>&1; then
   fail "public startup cleanup ignored a partial data deletion"
 fi
@@ -1272,7 +832,7 @@ fi
 grep -Fq 'start_finalization_phase=retired' "$lease_public_retry_finalization" \
   || fail "partial startup cleanup did not retain its incomplete data phase"
 if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down \
   > "$test_tmp/lease-public-retry-untargeted.log" 2>&1; then
   fail "untargeted down overlooked nondefault startup finalization authority"
 fi
@@ -1285,7 +845,7 @@ grep -Fq "down --addr 127.0.0.1:$lease_public_retry_port" \
 lease_public_retry_builds_before="$(<"$mock_state/build-count")"
 if launcher_env "$test_tmp/data-lease-public-retry" 3091 \
   AGENT_WORKBENCH_RUN_DIR="$test_tmp/lease-public-retry-borrower-run" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3091 \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3091 \
   > "$test_tmp/lease-public-retry-borrower.log" 2>&1; then
   fail "borrower ignored startup finalization authority for the same data path"
 fi
@@ -1295,7 +855,7 @@ fi
 if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
   MOCK_START_FINALIZATION="$lease_public_retry_finalization" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_START_FINALIZATION" ]]; then return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
   > "$test_tmp/lease-public-retry-final-clear.log" 2>&1; then
   fail "public startup cleanup ignored retained finalization authority"
 fi
@@ -1310,55 +870,53 @@ grep -Fq "down --addr 127.0.0.1:$lease_public_retry_port" \
 launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
   MOCK_START_FINALIZATION="$lease_public_retry_finalization" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_START_FINALIZATION" ]]; then command rm -f -- "$MOCK_START_FINALIZATION"; return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
   > "$test_tmp/lease-public-retry-second.log" 2>&1
-[[ ! -e "$lease_public_retry_ingress_file" && ! -e "$lease_public_retry_receipt" \
+[[ ! -e "$lease_public_retry_file" && ! -e "$lease_public_retry_receipt" \
   && ! -e "$test_tmp/data-lease-public-retry" \
   && ! -e "$lease_public_retry_finalization" ]] \
   || fail "fault-free public down did not complete retained startup lease cleanup"
-run_launcher "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port" up \
+launcher_env "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_public_retry_port" \
   > "$test_tmp/lease-public-retry-fresh-up.log" 2>&1
-run_launcher "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port" down \
+launcher_env "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
   > "$test_tmp/lease-public-retry-fresh-down.log" 2>&1
 
 default_finalization_port=3030
 default_finalization_data="$test_tmp/data-default-start-finalization"
 default_finalization_key="127.0.0.1_${default_finalization_port}"
-default_finalization_admin=19070
-default_finalization_admin_hash="$(printf '%s' "loopback:$default_finalization_admin" | sha256sum | awk '{print $1}')"
 default_finalization_stable="$launcher_runtime_root/$lock_hash-$default_finalization_key-start-finalizing"
-rm -f "$mock_state/record-create-failed"
 if launcher_env "$default_finalization_data" "$default_finalization_port" \
-  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$default_finalization_admin_hash.lease" \
-  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$default_finalization_port" \
+  "$lease_commit_failure" "$lease_removal_failure" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$default_finalization_port" \
   > "$test_tmp/default-start-finalization-first.log" 2>&1; then
   fail "default startup cleanup fault unexpectedly succeeded"
 fi
 printf 'default retained data\n' > "$default_finalization_data/sentinel"
 if launcher_env "$default_finalization_data" "$default_finalization_port" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-rf -- $AGENT_WORKBENCH_DATA_DIR" ]]; then return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$default_finalization_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$default_finalization_port" \
   > "$test_tmp/default-start-finalization-partial.log" 2>&1; then
   fail "default targeted cleanup ignored a pre-side-effect data removal fault"
 fi
 [[ -f "$default_finalization_stable" \
   && -f "$default_finalization_data/sentinel" \
   && -f "$default_finalization_data/run/.agent-workbench-dev-run-owner-$default_finalization_key" \
-  && -f "$default_finalization_data/run/restate-$default_finalization_key.service-retired" ]] \
+  && -f "$default_finalization_data/run/postgres-$default_finalization_key.service-retired" ]] \
   || fail "default partial cleanup did not retain stable and local authority"
 if launcher_env "$default_finalization_data" "$default_finalization_port" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down \
   > "$test_tmp/default-start-finalization-untargeted.log" 2>&1; then
   fail "untargeted down finalized the default receipt without an explicit target"
 fi
 [[ -f "$default_finalization_stable" \
   && -f "$default_finalization_data/sentinel" \
   && -f "$default_finalization_data/run/.agent-workbench-dev-run-owner-$default_finalization_key" \
-  && -f "$default_finalization_data/run/restate-$default_finalization_key.service-retired" ]] \
+  && -f "$default_finalization_data/run/postgres-$default_finalization_key.service-retired" ]] \
   || fail "untargeted default down mutated retained startup authority or data"
 launcher_env "$default_finalization_data" "$default_finalization_port" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$default_finalization_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$default_finalization_port" \
   > "$test_tmp/default-start-finalization-second.log" 2>&1
 [[ ! -e "$default_finalization_data" && ! -e "$default_finalization_stable" ]] \
   || fail "exact default target did not complete retained startup cleanup"
@@ -1367,20 +925,13 @@ external_start_finalization_port=3168
 external_start_finalization_data="$test_tmp/data-external-start-finalization"
 external_start_finalization_run="$test_tmp/run-external-start-finalization"
 external_start_finalization_key="127.0.0.1_${external_start_finalization_port}"
-external_start_finalization_admin=$((19070 + (external_start_finalization_port - 3030) * 10))
-external_start_finalization_ingress=$((8080 + (external_start_finalization_port - 3030) * 10))
-external_start_finalization_admin_hash="$(printf '%s' "loopback:$external_start_finalization_admin" | sha256sum | awk '{print $1}')"
-external_start_finalization_ingress_hash="$(printf '%s' "loopback:$external_start_finalization_ingress" | sha256sum | awk '{print $1}')"
-external_start_finalization_lease="$launcher_runtime_root/restate-ingress-$external_start_finalization_ingress_hash.lease"
+external_start_finalization_lease="$(postgres_lease_file "$external_start_finalization_port")"
 external_start_finalization_receipt="$launcher_runtime_root/$lock_hash-$external_start_finalization_key-start-finalizing"
-rm -f "$mock_state/record-create-failed"
 if launcher_env "$external_start_finalization_data" "$external_start_finalization_port" \
   AGENT_WORKBENCH_RUN_DIR="$external_start_finalization_run" \
   MOCK_PID_FILE="$external_start_finalization_run/workbench-$external_start_finalization_key.pid" \
-  MOCK_RESTATE_MARKER="$external_start_finalization_run/restate-$external_start_finalization_key.container" \
-  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$external_start_finalization_admin_hash.lease" \
-  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$external_start_finalization_port" \
+  "$lease_commit_failure" "$lease_removal_failure" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$external_start_finalization_port" \
   > "$test_tmp/external-start-finalization-first.log" 2>&1; then
   fail "external-run startup ignored persistent lease cleanup failure"
 fi
@@ -1388,22 +939,20 @@ printf 'external-run retained data\n' > "$external_start_finalization_data/senti
 if launcher_env "$external_start_finalization_data" "$external_start_finalization_port" \
   AGENT_WORKBENCH_RUN_DIR="$external_start_finalization_run" \
   MOCK_PID_FILE="$external_start_finalization_run/workbench-$external_start_finalization_key.pid" \
-  MOCK_RESTATE_MARKER="$external_start_finalization_run/restate-$external_start_finalization_key.container" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-rf -- $AGENT_WORKBENCH_DATA_DIR" ]]; then command rm -f -- "$AGENT_WORKBENCH_DATA_DIR/.agent-workbench-dev-attempt-owner"; return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$external_start_finalization_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$external_start_finalization_port" \
   > "$test_tmp/external-start-finalization-partial.log" 2>&1; then
   fail "external-run cleanup ignored a partial data deletion"
 fi
 [[ -f "$external_start_finalization_data/sentinel" \
-  && -f "$external_start_finalization_run/restate-$external_start_finalization_key.service-retired" \
+  && -f "$external_start_finalization_run/postgres-$external_start_finalization_key.service-retired" \
   && -f "$external_start_finalization_receipt" ]] \
   || fail "external run path did not retain independent startup finalization authority"
 if launcher_env "$test_tmp/data-external-start-finalization-mismatch" \
   "$external_start_finalization_port" \
   AGENT_WORKBENCH_RUN_DIR="$external_start_finalization_run" \
   MOCK_PID_FILE="$external_start_finalization_run/workbench-$external_start_finalization_key.pid" \
-  MOCK_RESTATE_MARKER="$external_start_finalization_run/restate-$external_start_finalization_key.container" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$external_start_finalization_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$external_start_finalization_port" \
   > "$test_tmp/external-start-finalization-mismatch.log" 2>&1; then
   fail "external-run recovery accepted a mismatched data context"
 fi
@@ -1414,7 +963,7 @@ external_start_finalization_builds_before="$(<"$mock_state/build-count")"
 if launcher_env "$test_tmp/data-external-start-finalization-borrower" \
   "$external_start_finalization_port" \
   AGENT_WORKBENCH_RUN_DIR="$test_tmp/run-external-start-finalization-borrower" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$external_start_finalization_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$external_start_finalization_port" \
   > "$test_tmp/external-start-finalization-borrower.log" 2>&1; then
   fail "fresh launcher reused an identity with pending startup finalization"
 fi
@@ -1425,38 +974,30 @@ fi
 launcher_env "$external_start_finalization_data" "$external_start_finalization_port" \
   AGENT_WORKBENCH_RUN_DIR="$external_start_finalization_run" \
   MOCK_PID_FILE="$external_start_finalization_run/workbench-$external_start_finalization_key.pid" \
-  MOCK_RESTATE_MARKER="$external_start_finalization_run/restate-$external_start_finalization_key.container" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$external_start_finalization_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$external_start_finalization_port" \
   > "$test_tmp/external-start-finalization-second.log" 2>&1
 [[ ! -e "$external_start_finalization_data" \
   && ! -e "$external_start_finalization_lease" \
   && ! -e "$external_start_finalization_receipt" \
-  && ! -e "$external_start_finalization_run/restate-$external_start_finalization_key.service-retired" ]] \
+  && ! -e "$external_start_finalization_run/postgres-$external_start_finalization_key.service-retired" ]] \
   || fail "fault-free exact external-run down did not finish startup finalization"
 
 existing_data_port=3170
 existing_data_dir="$test_tmp/data-existing-start-finalization"
 existing_data_run="$test_tmp/run-existing-start-finalization"
 existing_data_key="127.0.0.1_${existing_data_port}"
-existing_data_admin=$((19070 + (existing_data_port - 3030) * 10))
-existing_data_ingress=$((8080 + (existing_data_port - 3030) * 10))
-existing_data_admin_hash="$(printf '%s' "loopback:$existing_data_admin" | sha256sum | awk '{print $1}')"
-existing_data_ingress_hash="$(printf '%s' "loopback:$existing_data_ingress" | sha256sum | awk '{print $1}')"
-existing_data_lease="$launcher_runtime_root/restate-ingress-$existing_data_ingress_hash.lease"
+existing_data_lease="$(postgres_lease_file "$existing_data_port")"
 existing_data_stable="$launcher_runtime_root/$lock_hash-$existing_data_key-start-finalizing"
 existing_data_owner="$existing_data_run/.agent-workbench-dev-run-owner-$existing_data_key"
-existing_data_service="$existing_data_run/restate-$existing_data_key.service-retired"
+existing_data_service="$existing_data_run/postgres-$existing_data_key.service-retired"
 mkdir -p "$existing_data_dir"
 printf 'preexisting bytes\n' > "$existing_data_dir/sentinel"
 existing_data_sentinel_hash="$(sha256sum "$existing_data_dir/sentinel" | awk '{print $1}')"
-rm -f "$mock_state/record-create-failed"
 if launcher_env "$existing_data_dir" "$existing_data_port" \
   AGENT_WORKBENCH_RUN_DIR="$existing_data_run" \
   MOCK_PID_FILE="$existing_data_run/workbench-$existing_data_key.pid" \
-  MOCK_RESTATE_MARKER="$existing_data_run/restate-$existing_data_key.container" \
-  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$existing_data_admin_hash.lease" \
-  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$existing_data_port" \
+  "$lease_commit_failure" "$lease_removal_failure" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$existing_data_port" \
   > "$test_tmp/existing-data-first.log" 2>&1; then
   fail "preexisting-data startup cleanup fault unexpectedly succeeded"
 fi
@@ -1467,10 +1008,9 @@ fi
 if launcher_env "$existing_data_dir" "$existing_data_port" \
   AGENT_WORKBENCH_RUN_DIR="$existing_data_run" \
   MOCK_PID_FILE="$existing_data_run/workbench-$existing_data_key.pid" \
-  MOCK_RESTATE_MARKER="$existing_data_run/restate-$existing_data_key.container" \
   MOCK_EXISTING_OWNER="$existing_data_owner" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_EXISTING_OWNER" ]]; then return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$existing_data_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$existing_data_port" \
   > "$test_tmp/existing-data-owner-retry.log" 2>&1; then
   fail "preexisting-data cleanup ignored a pre-side-effect run-record fault"
 fi
@@ -1486,10 +1026,9 @@ grep -Fq 'start_finalization_phase=data-finalized' "$existing_data_stable" \
 if launcher_env "$existing_data_dir" "$existing_data_port" \
   AGENT_WORKBENCH_RUN_DIR="$existing_data_run" \
   MOCK_PID_FILE="$existing_data_run/workbench-$existing_data_key.pid" \
-  MOCK_RESTATE_MARKER="$existing_data_run/restate-$existing_data_key.container" \
   MOCK_EXISTING_SERVICE="$existing_data_service" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_EXISTING_SERVICE" ]]; then command rm "$@"; return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$existing_data_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$existing_data_port" \
   > "$test_tmp/existing-data-service-retry.log" 2>&1; then
   fail "preexisting-data cleanup ignored a post-side-effect service-record fault"
 fi
@@ -1501,8 +1040,7 @@ fi
 launcher_env "$existing_data_dir" "$existing_data_port" \
   AGENT_WORKBENCH_RUN_DIR="$existing_data_run" \
   MOCK_PID_FILE="$existing_data_run/workbench-$existing_data_key.pid" \
-  MOCK_RESTATE_MARKER="$existing_data_run/restate-$existing_data_key.container" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$existing_data_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$existing_data_port" \
   > "$test_tmp/existing-data-final.log" 2>&1
 [[ ! -e "$existing_data_stable" && ! -e "$existing_data_owner" \
   && ! -e "$existing_data_service" && -f "$existing_data_dir/sentinel" \
@@ -1514,22 +1052,16 @@ first_context_port=3172
 first_context_data="$test_tmp/data-first-recovery-context"
 first_context_wrong_data="$test_tmp/data-first-recovery-context-wrong"
 first_context_key="127.0.0.1_${first_context_port}"
-first_context_admin=$((19070 + (first_context_port - 3030) * 10))
-first_context_ingress=$((8080 + (first_context_port - 3030) * 10))
-first_context_admin_hash="$(printf '%s' "loopback:$first_context_admin" | sha256sum | awk '{print $1}')"
-first_context_ingress_hash="$(printf '%s' "loopback:$first_context_ingress" | sha256sum | awk '{print $1}')"
-first_context_lease="$launcher_runtime_root/restate-ingress-$first_context_ingress_hash.lease"
+first_context_lease="$(postgres_lease_file "$first_context_port")"
 first_context_owner="$first_context_data/run/.agent-workbench-dev-run-owner-$first_context_key"
-first_context_service="$first_context_data/run/restate-$first_context_key.service-retired"
+first_context_service="$first_context_data/run/postgres-$first_context_key.service-retired"
 first_context_stable="$launcher_runtime_root/$lock_hash-$first_context_key-start-finalizing"
 mkdir -p "$first_context_data"
 printf 'original recovery context bytes\n' > "$first_context_data/sentinel"
 first_context_sentinel_hash="$(sha256sum "$first_context_data/sentinel" | awk '{print $1}')"
-rm -f "$mock_state/record-create-failed"
 if launcher_env "$first_context_data" "$first_context_port" \
-  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$first_context_admin_hash.lease" \
-  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$first_context_port" \
+  "$lease_commit_failure" "$lease_removal_failure" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$first_context_port" \
   > "$test_tmp/first-context-first.log" 2>&1; then
   fail "first-context startup cleanup fault unexpectedly succeeded"
 fi
@@ -1540,8 +1072,7 @@ first_context_removals="$(wc -l < "$mock_state/docker-rm.log")"
 if launcher_env "$first_context_wrong_data" "$first_context_port" \
   AGENT_WORKBENCH_RUN_DIR="$first_context_data/run" \
   MOCK_PID_FILE="$first_context_data/run/workbench-$first_context_key.pid" \
-  MOCK_RESTATE_MARKER="$first_context_data/run/restate-$first_context_key.container" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$first_context_port" \
+  AGENT_WORKBENCH_POSTGRES=1 bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$first_context_port" \
   > "$test_tmp/first-context-wrong.log" 2>&1; then
   fail "first public startup recovery accepted a wrong data context"
 fi
@@ -1553,7 +1084,8 @@ fi
   && "$(sha256sum "$first_context_data/sentinel" | awk '{print $1}')" \
     = "$first_context_sentinel_hash" ]] \
   || fail "wrong first recovery context mutated original authority, resources, or data"
-run_launcher "$first_context_data" "$first_context_port" down \
+launcher_env "$first_context_data" "$first_context_port" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$first_context_port" \
   > "$test_tmp/first-context-correct.log" 2>&1
 [[ ! -e "$first_context_lease" && ! -e "$first_context_owner" \
   && ! -e "$first_context_service" && ! -e "$first_context_stable" \
@@ -1578,7 +1110,6 @@ fi
 [[ -e "$mock_state/postgres-lease-publish-failed" \
   && -e "$mock_state/postgres-lease-remove-failed" \
   && ! -e "$postgres_lease_retry_file" && ! -e "$test_tmp/data-postgres-lease-retry" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$postgres_lease_retry_port" \
   && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$postgres_lease_retry_port" ]] \
   || fail "Postgres lease cleanup progress did not survive retirement and publication/removal errors"
 launcher_env "$test_tmp/data-postgres-lease-fresh" "$postgres_lease_retry_port" \
@@ -1590,58 +1121,56 @@ launcher_env "$test_tmp/data-postgres-lease-fresh" "$postgres_lease_retry_port" 
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$postgres_lease_retry_port" \
   > "$test_tmp/postgres-lease-fresh-down.log" 2>&1
 
-prepared_restate_port=3164
-prepared_restate_admin=$((19070 + (prepared_restate_port - 3030) * 10))
-prepared_restate_admin_hash="$(printf '%s' "loopback:$prepared_restate_admin" | sha256sum | awk '{print $1}')"
-prepared_restate_data="$test_tmp/data-prepared-restate"
-rm -f "$mock_state/record-create-failed"
-if launcher_env "$prepared_restate_data" "$prepared_restate_port" \
-  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$prepared_restate_admin_hash.lease" \
-  'BASH_FUNC_python3%%=() { if [[ "${@: -1}" = *restate-*.service-retired && "${@: -2:1}" = replace ]]; then return 1; fi; command python3 "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$prepared_restate_port" \
-  > "$test_tmp/prepared-restate-first.log" 2>&1; then
-  fail "startup ignored persistent Restate retirement promotion failure"
+prepared_lease_port=3164
+prepared_lease_data="$test_tmp/data-prepared-lease"
+if launcher_env "$prepared_lease_data" "$prepared_lease_port" AGENT_WORKBENCH_POSTGRES=1 \
+  'BASH_FUNC_python3%%=() { if [[ "${@: -1}" = *postgres-*.lease ]]; then command python3 "$@" || return; return 1; fi; if [[ "${@: -1}" = *postgres-*.service-retired && "${@: -2:1}" = replace ]]; then return 1; fi; command python3 "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$prepared_lease_port" \
+  > "$test_tmp/prepared-lease-first.log" 2>&1; then
+  fail "startup ignored persistent Postgres retirement promotion failure"
 fi
-prepared_restate_key="127.0.0.1_${prepared_restate_port}"
-prepared_restate_receipt="$prepared_restate_data/run/restate-$prepared_restate_key.service-retired"
-prepared_restate_record="$(<"$prepared_restate_receipt")"
-read -r _ _ _ _ prepared_restate_id <<<"$prepared_restate_record"
-[[ "$prepared_restate_record" = '2 prepared restate '* \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$prepared_restate_port" ]] \
-  || fail "Restate promotion failure did not retain exact prepared absent-engine proof"
-if launcher_env "$prepared_restate_data" "$prepared_restate_port" \
-  MOCK_UNKNOWN_CONTAINER_ID="$prepared_restate_id" \
+prepared_lease_key="127.0.0.1_${prepared_lease_port}"
+prepared_lease_receipt="$prepared_lease_data/run/postgres-$prepared_lease_key.service-retired"
+prepared_lease_record="$(<"$prepared_lease_receipt")"
+read -r _ _ _ _ prepared_lease_id <<<"$prepared_lease_record"
+[[ "$prepared_lease_record" = '2 prepared postgres '* \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$prepared_lease_port" ]] \
+  || fail "Postgres promotion failure did not retain exact prepared absent-store proof"
+if launcher_env "$prepared_lease_data" "$prepared_lease_port" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_UNKNOWN_CONTAINER_ID="$prepared_lease_id" \
   'BASH_FUNC_docker%%=() { if [[ "$1" = inspect && "${@: -1}" = "$MOCK_UNKNOWN_CONTAINER_ID" ]]; then printf "temporary inspect failure\n" >&2; return 1; fi; command docker "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_restate_port" \
-  > "$test_tmp/prepared-restate-unknown.log" 2>&1; then
-  fail "public recovery inferred Restate absence from unknown observation"
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_lease_port" \
+  > "$test_tmp/prepared-lease-unknown.log" 2>&1; then
+  fail "public recovery inferred store absence from unknown observation"
 fi
-[[ "$(<"$prepared_restate_receipt")" = "$prepared_restate_record" \
-  && -d "$prepared_restate_data" ]] \
-  || fail "unknown Restate observation changed prepared authority or dependent data"
-if launcher_env "$prepared_restate_data" "$prepared_restate_port" \
-  MOCK_MISMATCH_CONTAINER_ID="$prepared_restate_id" \
-  'BASH_FUNC_docker%%=() { if [[ "$1" = inspect && "${@: -1}" = "$MOCK_MISMATCH_CONTAINER_ID" ]]; then printf "%s %s %s\n" "$MOCK_MISMATCH_CONTAINER_ID" 00000000-0000-0000-0000-000000000000 restate; return 0; fi; command docker "$@"; }' \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_restate_port" \
-  > "$test_tmp/prepared-restate-mismatch.log" 2>&1; then
-  fail "public recovery accepted changed Restate labels"
+[[ "$(<"$prepared_lease_receipt")" = "$prepared_lease_record" \
+  && -d "$prepared_lease_data" ]] \
+  || fail "unknown store observation changed prepared authority or dependent data"
+if launcher_env "$prepared_lease_data" "$prepared_lease_port" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_MISMATCH_CONTAINER_ID="$prepared_lease_id" \
+  'BASH_FUNC_docker%%=() { if [[ "$1" = inspect && "${@: -1}" = "$MOCK_MISMATCH_CONTAINER_ID" ]]; then printf "%s %s %s\n" "$MOCK_MISMATCH_CONTAINER_ID" 00000000-0000-0000-0000-000000000000 postgres; return 0; fi; command docker "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_lease_port" \
+  > "$test_tmp/prepared-lease-mismatch.log" 2>&1; then
+  fail "public recovery accepted changed store labels"
 fi
-[[ "$(<"$prepared_restate_receipt")" = "$prepared_restate_record" \
-  && -d "$prepared_restate_data" ]] \
-  || fail "mismatched Restate identity changed prepared authority or dependent data"
-printf '2 prepared restate 00000000-0000-0000-0000-000000000000 %s\n' \
-  "$prepared_restate_id" > "$prepared_restate_receipt"
-if run_launcher "$prepared_restate_data" "$prepared_restate_port" down \
-  > "$test_tmp/prepared-restate-receipt-mismatch.log" 2>&1; then
-  fail "public recovery accepted a changed prepared Restate receipt"
+[[ "$(<"$prepared_lease_receipt")" = "$prepared_lease_record" \
+  && -d "$prepared_lease_data" ]] \
+  || fail "mismatched store identity changed prepared authority or dependent data"
+printf '2 prepared postgres 00000000-0000-0000-0000-000000000000 %s\n' \
+  "$prepared_lease_id" > "$prepared_lease_receipt"
+if launcher_env "$prepared_lease_data" "$prepared_lease_port" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_lease_port" \
+  > "$test_tmp/prepared-lease-receipt-mismatch.log" 2>&1; then
+  fail "public recovery accepted a changed prepared store receipt"
 fi
-[[ -d "$prepared_restate_data" ]] \
-  || fail "changed prepared Restate receipt permitted dependent data deletion"
-printf '%s\n' "$prepared_restate_record" > "$prepared_restate_receipt"
-run_launcher "$prepared_restate_data" "$prepared_restate_port" down \
-  > "$test_tmp/prepared-restate-second.log" 2>&1
-[[ ! -e "$prepared_restate_data" ]] \
-  || fail "fault-free public down did not reconcile prepared Restate retirement"
+[[ -d "$prepared_lease_data" ]] \
+  || fail "changed prepared store receipt permitted dependent data deletion"
+printf '%s\n' "$prepared_lease_record" > "$prepared_lease_receipt"
+launcher_env "$prepared_lease_data" "$prepared_lease_port" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_lease_port" \
+  > "$test_tmp/prepared-lease-second.log" 2>&1
+[[ ! -e "$prepared_lease_data" ]] \
+  || fail "fault-free public down did not reconcile prepared store retirement"
 
 prepared_postgres_port=3166
 prepared_postgres_data="$test_tmp/data-prepared-postgres"
@@ -1659,88 +1188,19 @@ prepared_postgres_receipt="$prepared_postgres_data/run/postgres-$prepared_postgr
   && "$(<"$prepared_postgres_receipt")" = '2 prepared postgres '* \
   && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$prepared_postgres_port" \
   && -d "$prepared_postgres_data" ]] \
-  || fail "Postgres promotion failure did not retain exact prepared absent-engine proof"
+  || fail "Postgres promotion failure did not retain exact prepared absent-store proof"
 launcher_env "$prepared_postgres_data" "$prepared_postgres_port" \
   AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_postgres_port" \
   > "$test_tmp/prepared-postgres-second.log" 2>&1
 [[ ! -e "$prepared_postgres_data" ]] \
   || fail "fault-free public down did not reconcile prepared Postgres retirement"
-service_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
-
-partial_ready_port=3085
-partial_ready_admin=$((19070 + (partial_ready_port - 3030) * 10))
-partial_ready_builds_before="$(<"$mock_state/build-count")"
-if launcher_env "$test_tmp/data-partial-ready" "$partial_ready_port" \
-  MOCK_EXTERNAL_PORTS="$partial_ready_admin" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$partial_ready_port" \
-  > "$test_tmp/partial-ready-refusal.log" 2>&1; then
-  fail "launcher treated one ready Restate endpoint as a coherent external service"
-fi
-[[ ! -e "$test_tmp/data-partial-ready" \
-  && "$(<"$mock_state/build-count")" = "$((partial_ready_builds_before + 1))" ]] \
-  || fail "partial external endpoint refusal mutated candidate state"
-
-legacy_reservation_port=3087
-legacy_reservation_ingress=$((8080 + (legacy_reservation_port - 3030) * 10))
-legacy_reservation_admin=$((19070 + (legacy_reservation_port - 3030) * 10))
-legacy_reservation_hash="$(printf '%s' "loopback:$legacy_reservation_ingress|loopback:$legacy_reservation_admin" | sha256sum | awk '{print $1}')"
-legacy_reservation_file="$launcher_runtime_root/restate-$legacy_reservation_hash.lease"
-printf '1 restate 00000000-0000-0000-0000-000000000000 %064d\n' 0 \
-  > "$legacy_reservation_file"
-chmod 600 "$legacy_reservation_file"
-if launcher_env "$test_tmp/data-legacy-reservation" "$legacy_reservation_port" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$legacy_reservation_port" \
-  > "$test_tmp/legacy-reservation-refusal.log" 2>&1; then
-  fail "launcher accepted a legacy composite endpoint reservation"
-fi
-rm -f "$legacy_reservation_file"
-[[ ! -e "$test_tmp/data-legacy-reservation" ]] \
-  || fail "legacy reservation refusal mutated candidate state"
-
-if launcher_env "$test_tmp/data-other-runtime-consumer" 3081 \
-  XDG_RUNTIME_DIR="$test_tmp/other-runtime" \
-  TMPDIR="$test_tmp/other-tmp" \
-  RESTATE_INGRESS_URL=http://127.0.0.1:8560 \
-  RESTATE_ADMIN_URL=http://127.0.0.1:19550/v2 \
-  AGENT_WORKBENCH_RESTATE_NODE_PORT=19551 \
-  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-runtime-engine-name \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3081 \
-  > "$test_tmp/other-runtime-engine-refusal.log" 2>&1; then
-  fail "caller-selected XDG runtime unexpectedly hid the managed Restate lease"
-fi
-[[ ! -e "$test_tmp/data-other-runtime-consumer" \
-  && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" \
-  && "$(<"$mock_state/deployments")" = "$service_deployments_before" \
-  && "$(wc -l < "$mock_state/docker-rm.log")" = "$service_rm_before" ]] \
-  || fail "alternate-runtime refusal changed the owner, registry, or candidate state"
-grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
-  "$test_tmp/other-runtime-engine-refusal.log" \
-  || fail "alternate-runtime refusal did not use the stable same-user lease namespace"
-
-printf '19550\tdp_unexpected\thttp://127.0.0.1:9999\n' >> "$mock_state/deployments"
-mixed_registry_snapshot="$(<"$mock_state/deployments")"
-mixed_registry_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
-if run_launcher "$data_service_owner" "$port_service_owner" restart --reset-dev-state \
-  > "$test_tmp/mixed-registry-reset-refusal.log" 2>&1; then
-  fail "reset ignored an unexpected deployment on its managed Restate engine"
-fi
-[[ "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" \
-  && -f "$data_service_owner/service-owner-state" \
-  && "$(<"$mock_state/deployments")" = "$mixed_registry_snapshot" \
-  && "$(wc -l < "$mock_state/docker-rm.log")" = "$mixed_registry_rm_before" ]] \
-  || fail "mixed-registry reset refusal changed a process, deployment, or engine"
-grep -Fq 'deployment registry does not prove exclusive ownership' \
-  "$test_tmp/mixed-registry-reset-refusal.log" \
-  || fail "mixed-registry reset refusal did not report the exclusive registry proof"
-awk -F '\t' '$2 != "dp_unexpected"' "$mock_state/deployments" \
-  > "$mock_state/deployments.next"
-mv "$mock_state/deployments.next" "$mock_state/deployments"
-
 data_nonreset_service_owner="$test_tmp/data-nonreset-service-owner"
 mkdir -p "$data_nonreset_service_owner"
 port_nonreset_service_owner=3086
-run_launcher "$data_nonreset_service_owner" "$port_nonreset_service_owner" up \
+launcher_env "$data_nonreset_service_owner" "$port_nonreset_service_owner" \
+  AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_nonreset_service_owner" \
   > "$test_tmp/nonreset-service-owner-up.log" 2>&1
 nonreset_service_pid_file="$data_nonreset_service_owner/run/workbench-127.0.0.1_${port_nonreset_service_owner}.pid"
 nonreset_service_pid_record="$(<"$nonreset_service_pid_file")"
@@ -1748,20 +1208,19 @@ nonreset_service_pid_record="$(<"$nonreset_service_pid_file")"
   || fail "pre-existing application data unexpectedly became reset-owned"
 nonreset_service_builds_before="$(<"$mock_state/build-count")"
 if launcher_env "$test_tmp/data-nonreset-service-consumer" 3088 \
-  RESTATE_INGRESS_URL=http://127.0.0.1:8640 \
-  RESTATE_ADMIN_URL=http://127.0.0.1:19630/v2 \
-  AGENT_WORKBENCH_RESTATE_NODE_PORT=19631 \
-  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-nonreset-engine-name \
+  AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_POSTGRES_HOST=localhost \
+  AGENT_WORKBENCH_POSTGRES_PORT=$((15432 + (port_nonreset_service_owner - 3030) * 10)) \
+  AGENT_WORKBENCH_POSTGRES_CONTAINER=alternate-nonreset-database-name \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3088 \
-  > "$test_tmp/nonreset-shared-engine-refusal.log" 2>&1; then
-  fail "second launcher unexpectedly borrowed a non-resettable managed Restate engine"
+  > "$test_tmp/nonreset-shared-database-refusal.log" 2>&1; then
+  fail "second launcher unexpectedly borrowed a non-resettable managed Postgres"
 fi
 [[ "$(<"$nonreset_service_pid_file")" = "$nonreset_service_pid_record" \
   && ! -e "$test_tmp/data-nonreset-service-consumer" \
   && "$(<"$mock_state/build-count")" = "$((nonreset_service_builds_before + 1))" ]] \
   || fail "non-resettable service refusal changed the owner or candidate state"
-grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
-  "$test_tmp/nonreset-shared-engine-refusal.log" \
+grep -Fq 'Postgres service is reserved by another launcher-owned disposable stack' \
+  "$test_tmp/nonreset-shared-database-refusal.log" \
   || fail "non-resettable service refusal did not identify the persistent service lease"
 
 data_database_owner="$test_tmp/data-database-owner"
@@ -1787,13 +1246,31 @@ fi
   && -f "$data_database_owner/database-owner-state" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_database_owner" \
   && ! -e "$test_tmp/data-shared-database-consumer" \
-  && "$(wc -l < "$mock_state/docker-rm.log")" = "$((database_rm_before + 1))" ]] \
+  && "$(wc -l < "$mock_state/docker-rm.log")" = "$database_rm_before" ]] \
   || fail "shared Postgres refusal changed the owner or retained candidate state"
 ! grep -Fq "rm $database_owner_postgres_id postgres" "$mock_state/docker-rm.log" \
   || fail "shared Postgres refusal removed the owner's exact database container"
 grep -Fq 'Postgres service is reserved by another launcher-owned disposable stack' \
   "$test_tmp/shared-database-refusal.log" \
   || fail "shared Postgres refusal did not identify the exclusive service lease"
+
+if launcher_env "$test_tmp/data-other-runtime-consumer" 3081 \
+  XDG_RUNTIME_DIR="$test_tmp/other-runtime" \
+  TMPDIR="$test_tmp/other-tmp" \
+  AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_POSTGRES_HOST=localhost \
+  AGENT_WORKBENCH_POSTGRES_PORT=15952 \
+  AGENT_WORKBENCH_POSTGRES_CONTAINER=alternate-runtime-database-name \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3081 \
+  > "$test_tmp/other-runtime-database-refusal.log" 2>&1; then
+  fail "caller-selected XDG runtime unexpectedly hid the managed Postgres lease"
+fi
+[[ ! -e "$test_tmp/data-other-runtime-consumer" \
+  && "$(<"$database_owner_pid_file")" = "$database_owner_pid_record" \
+  && "$(wc -l < "$mock_state/docker-rm.log")" = "$database_rm_before" ]] \
+  || fail "alternate-runtime refusal changed the owner or candidate state"
+grep -Fq 'Postgres service is reserved by another launcher-owned disposable stack' \
+  "$test_tmp/other-runtime-database-refusal.log" \
+  || fail "alternate-runtime refusal did not use the stable same-user lease namespace"
 
 database_lease_hash="$(printf '%s' 'loopback:15952' | sha256sum | awk '{print $1}')"
 database_lease_file="$launcher_runtime_root/postgres-$database_lease_hash.lease"
@@ -1813,23 +1290,6 @@ fi
 grep -Fq 'Postgres service lease does not prove exclusive ownership' \
   "$test_tmp/missing-database-lease-refusal.log" \
   || fail "missing Postgres lease refusal did not explain the exclusivity proof failure"
-
-service_lease_hash="$(printf '%s' 'loopback:8560' | sha256sum | awk '{print $1}')"
-service_lease_file="$launcher_runtime_root/restate-ingress-$service_lease_hash.lease"
-rm -f "$service_lease_file"
-service_reset_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
-if run_launcher "$data_service_owner" "$port_service_owner" restart --reset-dev-state \
-  > "$test_tmp/missing-service-lease-refusal.log" 2>&1; then
-  fail "reset trusted an immutable container ID without its exclusive service lease"
-fi
-[[ "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" \
-  && -f "$data_service_owner/service-owner-state" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_service_owner" \
-  && "$(wc -l < "$mock_state/docker-rm.log")" = "$service_reset_rm_before" ]] \
-  || fail "missing service-lease refusal changed the owned stack"
-grep -Fq 'service lease does not prove exclusive ownership' \
-  "$test_tmp/missing-service-lease-refusal.log" \
-  || fail "missing service-lease refusal did not explain the exclusivity proof failure"
 
 data_ownership_lock="$launcher_runtime_root/data-ownership.lock"
 exec 10> "$data_ownership_lock"
@@ -1852,48 +1312,11 @@ if launcher_env "$test_tmp/data-numeric-workbench" 3089 \
   > "$test_tmp/numeric-workbench-refusal.log" 2>&1; then
   fail "noncanonical workbench port alias unexpectedly succeeded"
 fi
-if launcher_env "$test_tmp/data-numeric-endpoint" 3089 \
-  AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:09081 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3089 \
-  > "$test_tmp/numeric-endpoint-refusal.log" 2>&1; then
-  fail "noncanonical Restate endpoint port alias unexpectedly succeeded"
-fi
-if launcher_env "$test_tmp/data-numeric-ingress" 3089 \
-  RESTATE_INGRESS_URL=http://127.0.0.1:08080 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3089 \
-  > "$test_tmp/numeric-ingress-refusal.log" 2>&1; then
-  fail "noncanonical Restate ingress port alias unexpectedly succeeded"
-fi
-if launcher_env "$test_tmp/data-numeric-admin" 3089 \
-  RESTATE_ADMIN_URL=http://127.0.0.1:019070/v2 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3089 \
-  > "$test_tmp/numeric-admin-refusal.log" 2>&1; then
-  fail "noncanonical Restate admin port alias unexpectedly succeeded"
-fi
-if launcher_env "$test_tmp/data-numeric-node" 3089 \
-  AGENT_WORKBENCH_RESTATE_NODE_PORT=019071 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3089 \
-  > "$test_tmp/numeric-node-refusal.log" 2>&1; then
-  fail "noncanonical Restate node port alias unexpectedly succeeded"
-fi
 [[ ! -e "$test_tmp/data-numeric-workbench" \
-  && ! -e "$test_tmp/data-numeric-endpoint" \
-  && ! -e "$test_tmp/data-numeric-ingress" \
-  && ! -e "$test_tmp/data-numeric-admin" \
-  && ! -e "$test_tmp/data-numeric-node" \
   && "$(<"$mock_state/build-count")" = "$port_alias_builds_before" ]] \
   || fail "noncanonical port refusal performed startup work"
 grep -Fq 'workbench port must use canonical decimal notation' "$test_tmp/numeric-workbench-refusal.log" \
   || fail "workbench alias refusal omitted its canonical notation requirement"
-grep -Fq 'Restate endpoint port must use canonical decimal notation' "$test_tmp/numeric-endpoint-refusal.log" \
-  || fail "endpoint alias refusal omitted its canonical notation requirement"
-grep -Fq 'expected URL with explicit host and port' "$test_tmp/numeric-ingress-refusal.log" \
-  || fail "ingress alias refusal omitted its URL port requirement"
-grep -Fq 'expected URL with explicit host and port' "$test_tmp/numeric-admin-refusal.log" \
-  || fail "admin alias refusal omitted its URL port requirement"
-grep -Fq 'Restate node port must use canonical decimal notation' "$test_tmp/numeric-node-refusal.log" \
-  || fail "node alias refusal omitted its canonical notation requirement"
-
 data_numeric_owner="$test_tmp/data-numeric-port-owner"
 port_numeric_owner=3090
 launcher_env "$data_numeric_owner" "$port_numeric_owner" \
@@ -1918,81 +1341,49 @@ fi
 grep -Fq 'Postgres port must use canonical decimal notation' "$test_tmp/numeric-port-refusal.log" \
   || fail "numeric PostgreSQL port refusal omitted its canonical notation requirement"
 
-data_external_down="$test_tmp/data-external-down"
-port_external_down=3094
-external_down_ingress=$((8080 + (port_external_down - 3030) * 10))
-external_down_admin=$((19070 + (port_external_down - 3030) * 10))
-launcher_env "$data_external_down" "$port_external_down" \
-  AGENT_WORKBENCH_POSTGRES=1 MOCK_EXTERNAL_PORTS="$external_down_ingress $external_down_admin" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_external_down" \
-  > "$test_tmp/external-down-up.log" 2>&1
-external_down_postgres="$mock_state/container-lash-agent-workbench-dev-postgres-$port_external_down"
-external_down_postgres_record="$(<"$external_down_postgres")"
-external_down_deployments="$(<"$mock_state/deployments")"
-if launcher_env "$data_external_down" "$port_external_down" AGENT_WORKBENCH_POSTGRES=1 \
-  MOCK_EXTERNAL_PORTS="$external_down_ingress $external_down_admin" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_external_down" \
-  > "$test_tmp/external-down-refusal.log" 2>&1; then
-  fail "targeted down reported complete retirement behind an external Restate engine"
-fi
-[[ -f "$external_down_postgres" \
-  && "$(<"$external_down_postgres")" = "$external_down_postgres_record" \
-  && "$(<"$mock_state/deployments")" = "$external_down_deployments" \
-  && -f "$data_external_down/run/workbench-127.0.0.1_${port_external_down}.meta" ]] \
-  || fail "targeted external-engine down deleted dependent database or ownership evidence"
-grep -Fq 'retaining managed Postgres because the Restate engine is external' \
-  "$test_tmp/external-down-refusal.log" \
-  || fail "targeted external-engine down did not report dependent retention"
-
 data_down_failure="$test_tmp/data-down-failure"
 port_down_failure=3096
 launcher_env "$data_down_failure" "$port_down_failure" AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_down_failure" \
   > "$test_tmp/down-failure-up.log" 2>&1
-down_failure_restate="$mock_state/container-lash-agent-workbench-dev-restate-$port_down_failure"
 down_failure_postgres="$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_failure"
 down_failure_postgres_record="$(<"$down_failure_postgres")"
 if launcher_env "$data_down_failure" "$port_down_failure" AGENT_WORKBENCH_POSTGRES=1 \
-  MOCK_RM_FAIL_COMPONENT=restate MOCK_RM_FAIL_MODE=always \
+  MOCK_RM_FAIL_COMPONENT=postgres MOCK_RM_FAIL_MODE=always \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down \
   > "$test_tmp/down-all-failure.log" 2>&1; then
-  fail "down-all reported success after persistent Restate retirement failure"
+  fail "down-all reported success after persistent Postgres retirement failure"
 fi
-[[ -f "$down_failure_restate" && -f "$down_failure_postgres" \
+[[ -f "$down_failure_postgres" \
   && "$(<"$down_failure_postgres")" = "$down_failure_postgres_record" ]] \
-  || fail "down-all removed dependent PostgreSQL after Restate retirement failed"
-grep -Fq 'could not remove the exact owned restate container' "$test_tmp/down-all-failure.log" \
-  || fail "down-all did not report the failed engine retirement"
+  || fail "down-all lost the PostgreSQL container whose retirement failed"
+grep -Fq 'could not remove the exact owned postgres container' "$test_tmp/down-all-failure.log" \
+  || fail "down-all did not report the failed store retirement"
 
 data_down_success="$test_tmp/data-down-success"
 port_down_success=3098
-run_launcher "$data_down_success" "$port_down_success" up \
+launcher_env "$data_down_success" "$port_down_success" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_down_success" \
   > "$test_tmp/down-success-up.log" 2>&1
-down_success_ingress=$((8080 + (port_down_success - 3030) * 10))
-down_success_admin=$((19070 + (port_down_success - 3030) * 10))
-down_success_ingress_lease_hash="$(printf '%s' "loopback:$down_success_ingress" | sha256sum | awk '{print $1}')"
-down_success_admin_lease_hash="$(printf '%s' "loopback:$down_success_admin" | sha256sum | awk '{print $1}')"
-down_success_ingress_lease="$launcher_runtime_root/restate-ingress-$down_success_ingress_lease_hash.lease"
-down_success_admin_lease="$launcher_runtime_root/restate-admin-$down_success_admin_lease_hash.lease"
-[[ -f "$down_success_ingress_lease" && -f "$down_success_admin_lease" ]] \
-  || fail "successful-down fixture did not create both endpoint service leases"
-launcher_env "$data_down_success" "$port_down_success" \
+down_success_lease="$(postgres_lease_file "$port_down_success")"
+[[ -f "$down_success_lease" ]] \
+  || fail "successful-down fixture did not create its store service lease"
+launcher_env "$data_down_success" "$port_down_success" AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down \
   > "$test_tmp/down-success.log" 2>&1
-[[ ! -e "$down_success_ingress_lease" && ! -e "$down_success_admin_lease" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_success" ]] \
-  || fail "successful down-all stranded its retired Restate service lease"
+[[ ! -e "$down_success_lease" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_success" ]] \
+  || fail "successful down-all stranded its retired Postgres service lease"
 data_down_reuse="$test_tmp/data-down-reuse"
-launcher_env "$data_down_reuse" "$port_down_success" \
+launcher_env "$data_down_reuse" "$port_down_success" AGENT_WORKBENCH_POSTGRES=1 \
   AGENT_WORKBENCH_RUN_DIR="$test_tmp/run-down-reuse" \
   MOCK_PID_FILE="$test_tmp/run-down-reuse/workbench-127.0.0.1_${port_down_success}.pid" \
-  MOCK_RESTATE_MARKER="$test_tmp/run-down-reuse/restate-127.0.0.1_${port_down_success}.container" \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_down_success" \
   > "$test_tmp/down-reuse-up.log" 2>&1
 pid_identity "$test_tmp/run-down-reuse/workbench-127.0.0.1_${port_down_success}.pid" \
   || fail "fresh independent stack could not reuse ports after proven down-all retirement"
 
-# `down` retires the process, engine and managed services but keeps the records
+# `down` retires the process and managed services but keeps the records
 # that say who owns the application data. That stopped stack is this launcher's
 # own: `up` with the same settings must resume it in place, keeping its durable
 # application state, and it must stay resettable afterwards.
@@ -2017,8 +1408,6 @@ pid_identity "$down_resume_pid_file" || fail "the resumed stopped stack is not a
 down_resume_owned_pid="$(sed -n 's/^owned_pid_record=//p' "$down_resume_reset_file" | tr -d '\\')"
 [[ "$down_resume_owned_pid" = "$(<"$down_resume_pid_file")" ]] \
   || fail "the resumed stack's ownership record does not name its live process"
-grep -Eq '^owned_restate_deployment_id=dp_mock[0-9]+$' "$down_resume_reset_file" \
-  || fail "the resumed stack did not record its own Restate deployment id"
 run_launcher "$data_down_resume" "$port_down_resume" restart --reset-dev-state \
   > "$test_tmp/down-resume-reset.log" 2>&1 \
   || fail "the resumed stack could not be reset"
@@ -2035,9 +1424,6 @@ port_down_reset=3166
 run_launcher "$data_down_reset" "$port_down_reset" up > "$test_tmp/down-reset-up.log" 2>&1
 [[ -f "$data_down_reset/.agent-workbench-dev-reset-owner" ]] \
   || fail "down-then-reset fixture did not record reset ownership"
-down_reset_marker="$data_down_reset/run/restate-127.0.0.1_${port_down_reset}.container"
-down_reset_restate_id="$(cut -d' ' -f2 < "$down_reset_marker")"
-printf 'durable Restate journal\n' > "$mock_state/journal-$down_reset_restate_id"
 printf 'durable application state\n' > "$data_down_reset/durable-seed"
 run_launcher "$data_down_reset" "$port_down_reset" down > "$test_tmp/down-reset-down.log" 2>&1
 [[ -e "$data_down_reset/durable-seed" ]] \
@@ -2051,47 +1437,6 @@ pid_identity "$data_down_reset/run/workbench-127.0.0.1_${port_down_reset}.pid" \
   || fail "the stack started after resetting a stopped stack is not alive"
 run_launcher "$data_down_reset" "$port_down_reset" down \
   > "$test_tmp/down-reset-final-down.log" 2>&1
-
-# Resuming binds the retained durable state to the trust domain it was written
-# under. A different RESTATE_AUTHORITY_ID must be refused, and the refusal must
-# name the command that clears the stack.
-data_resume_authority="$test_tmp/data-resume-authority"
-port_resume_authority=3168
-launcher_env "$data_resume_authority" "$port_resume_authority" \
-  RESTATE_AUTHORITY_ID=fig-3125-original \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_resume_authority" \
-  > "$test_tmp/resume-authority-up.log" 2>&1
-launcher_env "$data_resume_authority" "$port_resume_authority" \
-  RESTATE_AUTHORITY_ID=fig-3125-original \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_resume_authority" \
-  > "$test_tmp/resume-authority-down.log" 2>&1
-if launcher_env "$data_resume_authority" "$port_resume_authority" \
-  RESTATE_AUTHORITY_ID=fig-3125-other \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_resume_authority" \
-  > "$test_tmp/resume-authority-mismatch.log" 2>&1; then
-  fail "up resumed a stopped stack under a different durable trust domain"
-fi
-grep -Fq 'RESTATE_AUTHORITY_ID does not match' "$test_tmp/resume-authority-mismatch.log" \
-  || fail "refused resume did not name the mismatched durable trust domain"
-grep -Fq 'restart --reset-dev-state' "$test_tmp/resume-authority-mismatch.log" \
-  || fail "refused resume did not name the command that clears the stopped stack"
-launcher_env "$data_resume_authority" "$port_resume_authority" \
-  RESTATE_AUTHORITY_ID=fig-3125-original \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_resume_authority" \
-  > "$test_tmp/resume-authority-match.log" 2>&1 \
-  || fail "up refused the stopped stack under its original durable trust domain"
-pid_identity "$data_resume_authority/run/workbench-127.0.0.1_${port_resume_authority}.pid" \
-  || fail "the stack resumed under its original trust domain is not alive"
-launcher_env "$data_resume_authority" "$port_resume_authority" \
-  RESTATE_AUTHORITY_ID=fig-3125-original \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
-  --port "$port_resume_authority" \
-  > "$test_tmp/resume-authority-reset.log" 2>&1 \
-  || fail "the stack resumed under its original trust domain could not be reset"
-launcher_env "$data_resume_authority" "$port_resume_authority" \
-  RESTATE_AUTHORITY_ID=fig-3125-original \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_resume_authority" \
-  > "$test_tmp/resume-authority-final-down.log" 2>&1
 
 race_data="$test_tmp/data-race"
 race_run="$test_tmp/run-race"
@@ -2133,8 +1478,6 @@ fi
 spawned_pid_file="$mock_state/spawned-$port_pid_failure"
 [[ -f "$spawned_pid_file" ]] && ! pid_identity "$spawned_pid_file" \
   || fail "detached PID publication failure left its captured child alive"
-[[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_pid_failure" ]] \
-  || fail "detached PID publication failure retained its removable engine"
 
 data_foreground_pid_failure="$test_tmp/data-foreground-pid-publication"
 port_foreground_pid_failure=3104
@@ -2147,35 +1490,30 @@ fi
 foreground_spawned_pid="$mock_state/spawned-$port_foreground_pid_failure"
 [[ -f "$foreground_spawned_pid" ]] && ! pid_identity "$foreground_spawned_pid" \
   || fail "foreground PID publication failure left its captured child alive"
-[[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_pid_failure" ]] \
-  || {
-    cat "$test_tmp/foreground-pid-publication-failure.log" >&2
-    fail "foreground PID publication failure retained its removable engine"
-  }
 
 data_marker_failure="$test_tmp/data-marker-publication"
 port_marker_failure=3106
-marker_failure_path="$data_marker_failure/run/restate-127.0.0.1_${port_marker_failure}.container"
-if launcher_env "$data_marker_failure" "$port_marker_failure" \
-  MOCK_BLOCK_RESTATE_MARKER=1 MOCK_RESTATE_MARKER="$marker_failure_path" \
+marker_failure_path="$data_marker_failure/run/postgres-127.0.0.1_${port_marker_failure}.container"
+if launcher_env "$data_marker_failure" "$port_marker_failure" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_BLOCK_POSTGRES_MARKER=1 MOCK_POSTGRES_MARKER="$marker_failure_path" \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_marker_failure" \
   > "$test_tmp/marker-publication-failure.log" 2>&1; then
-  fail "Restate marker publication failure unexpectedly succeeded"
+  fail "Postgres marker publication failure unexpectedly succeeded"
 fi
-[[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_marker_failure" ]] \
-  || fail "Restate marker publication failure leaked its captured exact container"
+[[ ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_marker_failure" ]] \
+  || fail "Postgres marker publication failure leaked its captured exact container"
 
-data_missing_marker="$test_tmp/data-missing-engine-marker"
+data_missing_marker="$test_tmp/data-missing-store-marker"
 port_missing_marker=3108
-if launcher_env "$data_missing_marker" "$port_missing_marker" \
-  MOCK_POST_REMOVE_RESTATE_MARKER=1 MOCK_POST_KILL=1 \
+if launcher_env "$data_missing_marker" "$port_missing_marker" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_POST_REMOVE_POSTGRES_MARKER=1 MOCK_POST_KILL=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_missing_marker" \
-  > "$test_tmp/missing-engine-marker-cleanup.log" 2>&1; then
-  fail "post-registration missing engine marker failure unexpectedly succeeded"
+  > "$test_tmp/missing-store-marker-cleanup.log" 2>&1; then
+  fail "post-start missing store marker failure unexpectedly succeeded"
 fi
-[[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_missing_marker" \
+[[ ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_missing_marker" \
   && ! -e "$data_missing_marker" ]] \
-  || fail "in-memory engine capture did not protect missing-marker cleanup ordering"
+  || fail "in-memory store capture did not protect missing-marker cleanup ordering"
 
 data_down_missing="$test_tmp/data-down-missing-metadata"
 port_down_missing=3110
@@ -2183,7 +1521,6 @@ launcher_env "$data_down_missing" "$port_down_missing" AGENT_WORKBENCH_POSTGRES=
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_down_missing" \
   > "$test_tmp/down-missing-up.log" 2>&1
 down_missing_pid="$data_down_missing/run/workbench-127.0.0.1_${port_down_missing}.pid"
-down_missing_restate="$mock_state/container-lash-agent-workbench-dev-restate-$port_down_missing"
 down_missing_postgres="$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_missing"
 rm -f "$data_down_missing/run/workbench-127.0.0.1_${port_down_missing}.meta"
 if launcher_env "$data_down_missing" "$port_down_missing" AGENT_WORKBENCH_POSTGRES=1 \
@@ -2191,7 +1528,7 @@ if launcher_env "$data_down_missing" "$port_down_missing" AGENT_WORKBENCH_POSTGR
   > "$test_tmp/down-missing-meta-refusal.log" 2>&1; then
   fail "targeted down treated missing stack metadata as retired resources"
 fi
-[[ ! -e "$down_missing_pid" && -f "$down_missing_restate" && -f "$down_missing_postgres" ]] \
+[[ ! -e "$down_missing_pid" && -f "$down_missing_postgres" ]] \
   || fail "missing stack metadata allowed dependent service deletion"
 
 data_down_marker="$test_tmp/data-down-missing-marker"
@@ -2201,36 +1538,15 @@ launcher_env "$data_down_marker" "$port_down_marker" AGENT_WORKBENCH_POSTGRES=1 
   > "$test_tmp/down-marker-up.log" 2>&1
 down_marker_pid="$data_down_marker/run/workbench-127.0.0.1_${port_down_marker}.pid"
 down_marker_pid_record="$(<"$down_marker_pid")"
-rm -f "$data_down_marker/run/restate-127.0.0.1_${port_down_marker}.container"
+rm -f "$data_down_marker/run/postgres-127.0.0.1_${port_down_marker}.container"
 if launcher_env "$data_down_marker" "$port_down_marker" AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_marker" \
   > "$test_tmp/down-missing-marker-refusal.log" 2>&1; then
-  fail "targeted down treated a missing engine marker as retired"
+  fail "targeted down treated a missing store marker as retired"
 fi
 [[ "$(<"$down_marker_pid")" = "$down_marker_pid_record" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_marker" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_marker" ]] \
-  || fail "missing engine marker changed the live process or dependent services"
-
-data_down_registry="$test_tmp/data-down-mixed-registry"
-port_down_registry=3114
-run_launcher "$data_down_registry" "$port_down_registry" up \
-  > "$test_tmp/down-registry-up.log" 2>&1
-down_registry_pid="$data_down_registry/run/workbench-127.0.0.1_${port_down_registry}.pid"
-down_registry_pid_record="$(<"$down_registry_pid")"
-down_registry_admin=$((19070 + (port_down_registry - 3030) * 10))
-printf '%s\t%s\t%s\n' "$down_registry_admin" dp_external http://127.0.0.1:65530 \
-  >> "$mock_state/deployments"
-if run_launcher "$data_down_registry" "$port_down_registry" down \
-  > "$test_tmp/down-mixed-registry-refusal.log" 2>&1; then
-  fail "down retired a managed Restate engine with a changed deployment registry"
-fi
-[[ "$(<"$down_registry_pid")" = "$down_registry_pid_record" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_registry" ]] \
-  || fail "changed-registry down altered the process or managed engine"
-grep -Fq 'current Restate deployment registry does not prove exclusive ownership' \
-  "$test_tmp/down-mixed-registry-refusal.log" \
-  || fail "changed-registry down did not report its exclusive ownership refusal"
+  || fail "missing store marker changed the live process or its store"
 
 data_down_invalid_pid="$test_tmp/data-down-invalid-pid"
 port_down_invalid_pid=3116
@@ -2245,8 +1561,7 @@ if launcher_env "$data_down_invalid_pid" "$port_down_invalid_pid" AGENT_WORKBENC
   > "$test_tmp/down-invalid-pid-refusal.log" 2>&1; then
   fail "down treated invalid process metadata as process retirement"
 fi
-[[ -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_invalid_pid" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_invalid_pid" ]] \
+[[ -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_invalid_pid" ]] \
   || fail "invalid process metadata allowed dependent service deletion"
 grep -Fq 'workbench process metadata is missing or invalid' \
   "$test_tmp/down-invalid-pid-refusal.log" \
@@ -2269,7 +1584,6 @@ if launcher_env "$data_down_mismatch" "$port_down_mismatch" AGENT_WORKBENCH_POST
 fi
 [[ "$(awk '{print $22}' "/proc/$down_mismatch_actual_pid/stat" 2>/dev/null || true)" \
     = "$down_mismatch_actual_start" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_mismatch" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_mismatch" ]] \
   || fail "mismatched process receipt changed the original process or dependencies"
 grep -Fq 'workbench PID belongs to a different process incarnation' \
@@ -2285,51 +1599,23 @@ launcher_env "$data_down_retry" "$port_down_retry" AGENT_WORKBENCH_POSTGRES=1 \
 down_retry_pid="$data_down_retry/run/workbench-127.0.0.1_${port_down_retry}.pid"
 down_retry_receipt="$data_down_retry/run/workbench-127.0.0.1_${port_down_retry}.process-retired"
 down_retry_pid_record="$(<"$down_retry_pid")"
-rm -f "$mock_state/docker-rm-failed-restate"
+rm -f "$mock_state/docker-rm-failed-postgres"
 if launcher_env "$data_down_retry" "$port_down_retry" AGENT_WORKBENCH_POSTGRES=1 \
-  MOCK_RM_FAIL_COMPONENT=restate MOCK_RM_FAIL_MODE=once \
+  MOCK_RM_FAIL_COMPONENT=postgres MOCK_RM_FAIL_MODE=once \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_retry" \
   > "$test_tmp/down-retry-first.log" 2>&1; then
-  fail "first down ignored a transient Restate retirement failure"
+  fail "first down ignored a transient PostgreSQL retirement failure"
 fi
 [[ "$(<"$down_retry_pid")" = "$down_retry_pid_record" \
   && -f "$down_retry_receipt" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_retry" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_retry" ]] \
   || fail "failed down did not retain exact process and service retry receipts"
 launcher_env "$data_down_retry" "$port_down_retry" AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_retry" \
   > "$test_tmp/down-retry-second.log" 2>&1
 [[ ! -e "$down_retry_pid" && ! -e "$down_retry_receipt" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_retry" \
   && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_retry" ]] \
   || fail "fault-free down retry did not complete the exact retained teardown"
-
-data_down_store_retry="$test_tmp/data-down-store-retry"
-port_down_store_retry=3130
-launcher_env "$data_down_store_retry" "$port_down_store_retry" AGENT_WORKBENCH_POSTGRES=1 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_down_store_retry" \
-  > "$test_tmp/down-store-retry-up.log" 2>&1
-store_retry_key="127.0.0.1_${port_down_store_retry}"
-store_retry_restate_receipt="$data_down_store_retry/run/restate-$store_retry_key.service-retired"
-rm -f "$mock_state/docker-rm-failed-postgres"
-if launcher_env "$data_down_store_retry" "$port_down_store_retry" AGENT_WORKBENCH_POSTGRES=1 \
-  MOCK_RM_FAIL_COMPONENT=postgres MOCK_RM_FAIL_MODE=once \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_store_retry" \
-  > "$test_tmp/down-store-retry-first.log" 2>&1; then
-  fail "first down ignored a transient PostgreSQL retirement failure"
-fi
-[[ -f "$store_retry_restate_receipt" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_store_retry" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_store_retry" ]] \
-  || fail "partial down did not retain exact retired-engine evidence before PostgreSQL retry"
-launcher_env "$data_down_store_retry" "$port_down_store_retry" AGENT_WORKBENCH_POSTGRES=1 \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_store_retry" \
-  > "$test_tmp/down-store-retry-second.log" 2>&1
-[[ ! -e "$store_retry_restate_receipt" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_store_retry" \
-  && ! -e "$data_down_store_retry/run/workbench-$store_retry_key.process-retired" ]] \
-  || fail "fault-free PostgreSQL retry did not complete retained teardown receipts"
 
 data_observation_failure="$test_tmp/data-process-observation-failure"
 port_observation_failure=3122
@@ -2343,7 +1629,6 @@ fi
 read -r observation_pid observation_start < "$mock_state/removed-pid-record"
 [[ "$(awk '{print $22}' "/proc/$observation_pid/stat" 2>/dev/null || true)" \
     = "$observation_start" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_observation_failure" \
   && -f "$data_observation_failure/attempt-app-state" ]] \
   || fail "unknown process observation deleted the live child or dependent state"
 grep -Fq 'process identity could not be observed' "$test_tmp/process-observation-failure.log" \
@@ -2363,7 +1648,7 @@ wait_foreground_ready() {
 
 data_foreground_normal="$test_tmp/data-foreground-normal"
 port_foreground_normal=3124
-launcher_env "$data_foreground_normal" "$port_foreground_normal" \
+launcher_env "$data_foreground_normal" "$port_foreground_normal" AGENT_WORKBENCH_POSTGRES=1 \
   bash -c 'printf "%s\n" "$$" > "$MOCK_STATE/launcher-'"$port_foreground_normal"'"; exec bash "$1" foreground --port "$2"' \
   _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_normal" \
   > "$test_tmp/foreground-normal.log" 2>&1 &
@@ -2375,14 +1660,14 @@ read -r foreground_normal_child _ < \
 kill -TERM "$foreground_normal_child"
 wait "$foreground_normal_invocation" \
   || fail "normal foreground child exit did not preserve success status"
-[[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_normal" ]] \
-  || fail "normal foreground exit did not retire its exact engine"
+[[ ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_foreground_normal" ]] \
+  || fail "normal foreground exit did not retire its exact store"
 ! grep -Fq 'unbound variable' "$test_tmp/foreground-normal.log" \
   || fail "normal foreground cleanup outlived its ownership context"
 
 data_foreground_crash="$test_tmp/data-foreground-crash"
 port_foreground_crash=3132
-launcher_env "$data_foreground_crash" "$port_foreground_crash" \
+launcher_env "$data_foreground_crash" "$port_foreground_crash" AGENT_WORKBENCH_POSTGRES=1 \
   bash -c 'printf "%s\n" "$$" > "$MOCK_STATE/launcher-'"$port_foreground_crash"'"; exec bash "$1" foreground --port "$2"' \
   _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_crash" \
   > "$test_tmp/foreground-crash.log" 2>&1 &
@@ -2395,15 +1680,15 @@ kill -KILL "$foreground_crash_child"
 foreground_crash_status=0
 wait "$foreground_crash_invocation" || foreground_crash_status=$?
 [[ "$foreground_crash_status" = 137 \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_crash" ]] \
-  || fail "foreground child crash did not preserve status and retire its exact engine"
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_foreground_crash" ]] \
+  || fail "foreground child crash did not preserve status and retire its exact store"
 ! grep -Fq 'unbound variable' "$test_tmp/foreground-crash.log" \
   || fail "foreground crash cleanup outlived its ownership context"
 
 data_foreground_term="$test_tmp/data-foreground-term"
 port_foreground_term=3126
 foreground_term_attempts_before="$(wc -l < "$mock_state/docker-rm-attempt.log")"
-launcher_env "$data_foreground_term" "$port_foreground_term" \
+launcher_env "$data_foreground_term" "$port_foreground_term" AGENT_WORKBENCH_POSTGRES=1 \
   bash -c 'printf "%s\n" "$$" > "$MOCK_STATE/launcher-'"$port_foreground_term"'"; exec bash "$1" foreground --port "$2"' \
   _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_term" \
   > "$test_tmp/foreground-term.log" 2>&1 &
@@ -2418,12 +1703,12 @@ kill -TERM "$foreground_term_launcher"
 foreground_term_status=0
 wait "$foreground_term_invocation" || foreground_term_status=$?
 [[ "$foreground_term_status" = 143 \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_term" ]] \
-  || fail "foreground TERM did not preserve signal status and retire its exact engine"
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_foreground_term" ]] \
+  || fail "foreground TERM did not preserve signal status and retire its exact store"
 foreground_term_attempts="$(tail -n "+$((foreground_term_attempts_before + 1))" \
-  "$mock_state/docker-rm-attempt.log" | grep -c ' restate$' || true)"
+  "$mock_state/docker-rm-attempt.log" | grep -c ' postgres$' || true)"
 [[ "$foreground_term_attempts" = 1 ]] \
-  || fail "foreground TERM executed engine retirement more than once"
+  || fail "foreground TERM executed store retirement more than once"
 ! grep -Fq 'unbound variable' "$test_tmp/foreground-term.log" \
   || fail "foreground TERM cleanup ran after its ownership context expired"
 
@@ -2505,34 +1790,6 @@ launcher_env "$data_foreground_finalize_all" "$port_foreground_finalize_all" \
 [[ ! -e "$foreground_finalize_all_transaction" ]] \
   || fail "untargeted down did not consume the exact completed transaction"
 
-data_foreground_registry="$test_tmp/data-foreground-registry"
-port_foreground_registry=3128
-launcher_env "$data_foreground_registry" "$port_foreground_registry" \
-  bash -c 'printf "%s\n" "$$" > "$MOCK_STATE/launcher-'"$port_foreground_registry"'"; exec bash "$1" foreground --port "$2"' \
-  _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_registry" \
-  > "$test_tmp/foreground-registry.log" 2>&1 &
-foreground_registry_invocation=$!
-wait_foreground_ready "$test_tmp/foreground-registry.log" "$foreground_registry_invocation" \
-  || fail "changed-registry foreground fixture did not become ready"
-foreground_registry_admin=$((19070 + (port_foreground_registry - 3030) * 10))
-printf '%s\t%s\t%s\n' "$foreground_registry_admin" dp_foreign http://127.0.0.1:65531 \
-  >> "$mock_state/deployments"
-foreground_registry_launcher="$(<"$mock_state/launcher-$port_foreground_registry")"
-kill -TERM "$foreground_registry_launcher"
-foreground_registry_status=0
-wait "$foreground_registry_invocation" || foreground_registry_status=$?
-[[ "$foreground_registry_status" = 143 \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_registry" \
-  && -f "$data_foreground_registry/attempt-app-state" ]] \
-  || fail "changed-registry foreground cleanup removed its engine or dependent state"
-grep -Fq 'cannot prove fresh exclusive Restate registry ownership' \
-  "$test_tmp/foreground-registry.log" \
-  || fail "changed-registry foreground cleanup did not report its fresh refusal"
-grep -Fq $'\tdp_foreign\thttp://127.0.0.1:65531' "$mock_state/deployments" \
-  || fail "changed-registry foreground cleanup lost the foreign registration"
-! grep -Fq 'unbound variable' "$test_tmp/foreground-registry.log" \
-  || fail "changed-registry foreground cleanup ran outside its ownership context"
-
 data_original_pid="$test_tmp/data-original-pid-binding"
 port_original_pid=3134
 launcher_env "$data_original_pid" "$port_original_pid" AGENT_WORKBENCH_POSTGRES=1 \
@@ -2552,7 +1809,6 @@ if launcher_env "$data_original_pid" "$port_original_pid" AGENT_WORKBENCH_POSTGR
   fail "down trusted a substituted already-retired PID over the original launch identity"
 fi
 [[ "$(awk '{print $22}' "/proc/$original_pid/stat" 2>/dev/null || true)" = "$original_start" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_original_pid" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_original_pid" \
   && -f "$data_original_pid/attempt-app-state" ]] \
   || fail "substituted retired PID changed the original host or dependent state"
@@ -2572,7 +1828,6 @@ launcher_env "$data_readiness_unknown" "$port_readiness_unknown" \
 readiness_pid_file="$data_readiness_unknown/run/workbench-127.0.0.1_${port_readiness_unknown}.pid"
 read -r readiness_pid readiness_start < "$readiness_pid_file"
 [[ "$(awk '{print $22}' "/proc/$readiness_pid/stat" 2>/dev/null || true)" = "$readiness_start" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_readiness_unknown" \
   && -f "$data_readiness_unknown/attempt-app-state" ]] \
   || fail "unknown readiness observation did not retain the live host and dependencies"
 grep -Fq 'process identity could not be observed' "$test_tmp/readiness-unknown.log" \
@@ -2604,22 +1859,21 @@ launcher_env "$data_clear_retry" "$port_clear_retry" AGENT_WORKBENCH_POSTGRES=1 
   > "$test_tmp/clear-retry-up.log" 2>&1
 clear_retry_key="127.0.0.1_${port_clear_retry}"
 clear_retry_transaction="$data_clear_retry/run/workbench-$clear_retry_key.teardown"
-clear_retry_restate_marker="$data_clear_retry/run/restate-$clear_retry_key.container"
+clear_retry_postgres_marker="$data_clear_retry/run/postgres-$clear_retry_key.container"
 if launcher_env "$data_clear_retry" "$port_clear_retry" AGENT_WORKBENCH_POSTGRES=1 \
-  MOCK_CLEAR_FAIL_MATCH="restate-$clear_retry_key.container" \
+  MOCK_CLEAR_FAIL_MATCH="postgres-$clear_retry_key.container" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = *"$MOCK_CLEAR_FAIL_MATCH"* && ! -e "$MOCK_STATE/record-clear-failed" ]]; then : > "$MOCK_STATE/record-clear-failed"; return 1; fi; command rm "$@"; }' \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_clear_retry" \
   > "$test_tmp/clear-retry-first.log" 2>&1; then
   fail "down ignored a transient final ownership-record clearing failure"
 fi
-[[ -f "$clear_retry_transaction" && -f "$clear_retry_restate_marker" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_clear_retry" \
+[[ -f "$clear_retry_transaction" && -f "$clear_retry_postgres_marker" \
   && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_clear_retry" ]] \
   || fail "failed final clearing did not retain authoritative teardown completion evidence"
 launcher_env "$data_clear_retry" "$port_clear_retry" AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_clear_retry" \
   > "$test_tmp/clear-retry-second.log" 2>&1
-[[ ! -e "$clear_retry_transaction" && ! -e "$clear_retry_restate_marker" ]] \
+[[ ! -e "$clear_retry_transaction" && ! -e "$clear_retry_postgres_marker" ]] \
   || fail "fault-free down did not resume final ownership-record clearing"
 
 data_publish_retry="$test_tmp/data-publication-retry"
@@ -2628,17 +1882,16 @@ launcher_env "$data_publish_retry" "$port_publish_retry" AGENT_WORKBENCH_POSTGRE
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_publish_retry" \
   > "$test_tmp/publication-retry-up.log" 2>&1
 publish_retry_key="127.0.0.1_${port_publish_retry}"
-publish_retry_receipt="$data_publish_retry/run/restate-$publish_retry_key.service-retired"
+publish_retry_receipt="$data_publish_retry/run/postgres-$publish_retry_key.service-retired"
 if launcher_env "$data_publish_retry" "$port_publish_retry" AGENT_WORKBENCH_POSTGRES=1 \
-  MOCK_RECORD_PUBLISH_FAIL_MATCH="restate-$publish_retry_key.service-retired" \
+  MOCK_RECORD_PUBLISH_FAIL_MATCH="postgres-$publish_retry_key.service-retired" \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_publish_retry" \
   > "$test_tmp/publication-retry-first.log" 2>&1; then
   fail "down ignored a post-removal retirement-receipt publication failure"
 fi
-[[ "$(<"$publish_retry_receipt")" = '2 prepared restate '* \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_publish_retry" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_publish_retry" ]] \
-  || fail "publication failure did not retain prepared exact-ID evidence and dependency order"
+[[ "$(<"$publish_retry_receipt")" = '2 prepared postgres '* \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_publish_retry" ]] \
+  || fail "publication failure did not retain prepared exact-ID evidence"
 launcher_env "$data_publish_retry" "$port_publish_retry" AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_publish_retry" \
   > "$test_tmp/publication-retry-second.log" 2>&1
@@ -2665,7 +1918,6 @@ wait "$foreground_retry_invocation" || foreground_retry_status=$?
 foreground_retry_key="127.0.0.1_${port_foreground_retry}"
 [[ "$foreground_retry_status" = 143 \
   && -f "$data_foreground_retry/run/workbench-$foreground_retry_key.teardown" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_retry" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_foreground_retry" ]] \
   || fail "foreground partial retirement did not retain public retry evidence"
 launcher_env "$data_foreground_retry" "$port_foreground_retry" AGENT_WORKBENCH_POSTGRES=1 \
@@ -2685,7 +1937,6 @@ if launcher_env "$data_startup_retry" "$port_startup_retry" AGENT_WORKBENCH_POST
 fi
 startup_retry_key="127.0.0.1_${port_startup_retry}"
 [[ -f "$data_startup_retry/run/workbench-$startup_retry_key.teardown" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_startup_retry" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_startup_retry" \
   && -f "$data_startup_retry/attempt-app-state" ]] \
   || fail "startup partial cleanup did not retain a public teardown transaction"
@@ -2710,7 +1961,6 @@ if launcher_env "$data_reset_retry" "$port_reset_retry" AGENT_WORKBENCH_POSTGRES
 fi
 reset_retry_key="127.0.0.1_${port_reset_retry}"
 [[ -f "$data_reset_retry/run/workbench-$reset_retry_key.teardown" \
-  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_reset_retry" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_reset_retry" \
   && -f "$data_reset_retry/old-reset-state" ]] \
   || fail "failed reset retirement did not preserve retry evidence and old application state"
@@ -2719,7 +1969,6 @@ launcher_env "$data_reset_retry" "$port_reset_retry" AGENT_WORKBENCH_POSTGRES=1 
     --port "$port_reset_retry" > "$test_tmp/reset-pg-retry-second.log" 2>&1
 [[ ! -e "$data_reset_retry/old-reset-state" \
   && ! -e "$data_reset_retry/run/workbench-$reset_retry_key.teardown" \
-  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_reset_retry" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_reset_retry" ]] \
   || fail "fault-free reset retry did not complete retirement and start a fresh stack"
 
@@ -2859,7 +2108,7 @@ if launcher_env "$data_meta_release" "$port_meta_release" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-f $MOCK_META_RELEASE" && ! -e "$MOCK_STATE/meta-clear-failed" ]]; then : > "$MOCK_STATE/meta-clear-failed"; return 1; fi; command rm "$@"; }' \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_meta_release" \
   > "$test_tmp/meta-release-failure.log" 2>&1; then
-  fail "post-registration failure unexpectedly succeeded"
+  fail "post-start failure unexpectedly succeeded"
 fi
 grep -Fq 'startup cleanup did not complete; retrying only the same verified attempt resources' \
   "$test_tmp/meta-release-failure.log" \
@@ -2874,14 +2123,12 @@ external_finalize_key="127.0.0.1_${port_external_finalize}"
 launcher_env "$data_external_finalize" "$port_external_finalize" \
   AGENT_WORKBENCH_RUN_DIR="$run_external_finalize" \
   MOCK_PID_FILE="$run_external_finalize/workbench-$external_finalize_key.pid" \
-  MOCK_RESTATE_MARKER="$run_external_finalize/restate-$external_finalize_key.container" \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_external_finalize" \
   > "$test_tmp/external-finalize-up.log" 2>&1
 printf 'external-run old state\n' > "$data_external_finalize/old-reset-state"
 launcher_env "$data_external_finalize" "$port_external_finalize" \
   AGENT_WORKBENCH_RUN_DIR="$run_external_finalize" \
   MOCK_PID_FILE="$run_external_finalize/workbench-$external_finalize_key.pid" \
-  MOCK_RESTATE_MARKER="$run_external_finalize/restate-$external_finalize_key.container" \
   bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
     --port "$port_external_finalize" > "$test_tmp/external-finalize-reset.log" 2>&1
 [[ ! -e "$data_external_finalize/old-reset-state" ]] \

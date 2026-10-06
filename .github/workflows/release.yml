@@ -263,8 +263,8 @@ jobs:
           path: .benchmarks/perf-guard/*
           if-no-files-found: warn
 
-  # The send-to-completion latency gate (FIG-3843): `send()` → Restate shift →
-  # `outcome()` measured on a live restate-server; the same-process fast
+  # The send-to-completion latency gate (FIG-3843): `send()` → `outcome()`
+  # measured end to end; the same-process fast
   # fixture fails the release when added overhead reaches p50 >= 50 ms or
   # p99 >= 250 ms. Every other case is measured and reported in the uploaded
   # JSON. `just latency-gate` reproduces the run locally.
@@ -273,7 +273,7 @@ jobs:
     runs-on: ubuntu-24.04
     # The gate builds the harness in the release profile (restore-only against
     # the linux-release cache, as the perf guard does) and then runs every
-    # latency case against a live restate-server.
+    # latency case.
     timeout-minutes: 120
     needs: prepare-release
 

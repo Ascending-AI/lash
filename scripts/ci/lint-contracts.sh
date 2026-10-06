@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Keep portable Cargo contracts and frontend type checks in one bounded group.
-# Trusted events prove the OFF and Restate release resolutions in the
+# Trusted events prove the OFF release resolution in the
 # feature-lanes job and run the schema actions alongside Clippy.
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -18,7 +18,6 @@ cargo_contracts() {
   local status=0
   if [[ "$BUCK2_TRUSTED" == false ]]; then
     cargo check -p lash-runtime --lib --no-default-features --locked || status=$?
-    cargo check -p lash-runtime --lib --no-default-features --features restate --locked || status=$?
     bash scripts/ci/check-schema-contracts.sh || status=$?
   fi
   return "$status"

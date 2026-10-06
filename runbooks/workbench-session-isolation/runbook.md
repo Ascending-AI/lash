@@ -39,7 +39,7 @@ markers and structural API state, never exact assistant prose.
 - Require `OPENROUTER_API_KEY`. The web tool is the **keyless** Parallel Search MCP the
   workbench registers itself (`WORKBENCH_SEARCH_MCP_SERVER` in `bootstrap.rs`); no search
   provider key is needed or read. Boot one empty, port-isolated stack:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> bash scripts/agent-workbench-dev.sh up --port <port>`.
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`.
   Gate `GET /healthz` → 200. Teardown on success or Abort:
   `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env. (The
   `just agent-workbench` / `just agent-workbench-down` recipes name the same operations but
@@ -182,8 +182,8 @@ matrix inputs as `04-state-*.json`, `04-triggers-*.json`, and `04-work-*.json`.
 
 ## Phase 5 — Teardown and score
 
-Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the one workbench process and its
-port-derived Restate container are gone.
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the one workbench process
+is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

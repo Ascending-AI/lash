@@ -84,8 +84,8 @@ Effect values use explicit variants and IEEE number bits, preserving undefined,
 non-finite numbers, negative zero, tuples and record order. Projection identities use parent-owned namespaces and keys; they carry no
 backing host handles. Frames include their eight-byte envelope in
 the configured cap, and encoding stops before crossing that allocation bound.
-Linux native-process laws run in this lane. Persistence, journal replay and live
-Restate kill points belong to the broker/adapter lanes.
+Linux native-process laws run in this lane. Persistence and kill points belong to
+the broker/adapter lanes.
 
 `lash-vm-protocol` defines `WORKER_PROTOCOL_VERSION` and
 `MIN_SUPPORTED_WORKER_PROTOCOL_VERSION` once for both sides. Pool admission

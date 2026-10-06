@@ -5,7 +5,7 @@
 
 **Purpose.** Verify that admitted effects use their actual execution scope and replay key,
 that session and turn attribution contains only known runtime facts, and that complete causal
-identity survives native, SQLite, PostgreSQL, Restate, and remote projections.
+identity survives native, SQLite, PostgreSQL, and remote projections.
 
 ## Contract
 
@@ -47,7 +47,7 @@ fields.
 3. Do not run schema probes against a user or shared database. Do not change schema stamps to
    make an incompatible store open.
 4. Stop on any local/controller/store call after a wrong-scope refusal, any invented session id,
-   any missing known trigger field, or any difference between the core and Restate trace parent.
+   any missing known trigger field, or any difference between the core and remote trace parent.
 
 ## Phase 1 — Representation and admission
 
@@ -57,30 +57,15 @@ From the repository root:
 . ./env.sh
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=scoped_controller_refuses_wrong_scope_before_controller_or_local_execution
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=task_proxy_refuses_wrong_scope_before_handoff
-kiln test --test_output=all //crates/lash-restate:lash-restate__unit_test --test_arg=restate_scope_controller_refuses_wrong_scope_before_index_or_local_execution
 kiln test --test_output=all //crates/lash-sansio:lash-sansio__unit_test --test_arg=same_replay_key_in_distinct_scopes_has_distinct_graph_identity
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=effect_header_round_trips_without_universal_subject_or_replay_slots
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=legacy_universal_effect_header_is_refused
 ```
 
-The first three tests must refuse before the wrapped controller, local executor, task handoff,
-or Restate `scope_effect_begin`. The graph test must produce distinct addresses for identical
-local replay keys in different scopes. The header tests must show a required `address` and no
+The first two tests must refuse before the wrapped controller, local executor or task
+handoff. The graph test must produce distinct addresses for identical local replay keys in
+different scopes. The header tests must show a required `address` and no
 universal `subject` or optional duplicate `replay` slot, while refusing the old shape.
-
-Run the durable host contracts against fresh storage. The SQL effect engine was
-retired in `476264fbea`; since its removal
-the shared `effect_controller_` conformance family mounts only on Restate's in-process
-recording context; the SQLite conformance binary keeps no effect-controller laws:
-
-```sh
-kiln test --test_output=all //crates/lash-restate:lash-restate__unit_test --test_arg=effect_controller_ --test_arg=--nocapture
-```
-
-(The former filter `sqlite_effect_host_satisfies_scope_conformance` names no test and matched
-nothing; it passed vacuously.) The Restate refusal
-(`restate_scope_controller_refuses_wrong_scope_before_index_or_local_execution`) is already
-run above in this phase — running it twice adds no coverage and inflates the phase count.
 
 For an owned PostgreSQL gate, let the repository's service owner provide the database rather
 than hand-rolling a container, and run it inside `kiln gate` so the container lands in your
@@ -120,7 +105,7 @@ run there; repeating it here under a second rationale inflates the phase count w
 a witness.)
 
 Inspect failures as identity failures. Do not accept matching display labels as proof. The
-remote round trip must retain every known trigger field, and both core and Restate projections
+remote round trip must retain every known trigger field, and the core and remote projections
 must use the same scoped causal graph address while retaining unrelated base trace metadata.
 
 ## Phase 4 — Remote grammar and cutover
@@ -166,11 +151,11 @@ remains v1. Those unchanged byte contracts are separate from the versioned forma
 **A version cutover is a fresh-trust-domain redeployment boundary.** This is a standing
 property of any bump on the surfaces above, not a statement about one particular release: when
 the build you are deploying moves any of them past the store's stamp, do not perform a rolling
-upgrade or mix old and new hosts, workers, Restate handlers, or remote peers. Drain in-flight
-work, stop the old deployment, and provision the replacement SQLite/PostgreSQL stores and
-Restate state from this build together; the PostgreSQL component schema has no migration across
+upgrade or mix old and new hosts, workers, or remote peers. Drain in-flight
+work, stop the old deployment, and provision the replacement SQLite/PostgreSQL stores from this
+build together; the PostgreSQL component schema has no migration across
 a cutover, so the replacement database must be created from this build's `schema.sql`. Reset the
-tombstones, await-event revocation ledger, effect journal, and Restate state as one operation,
+tombstones, await-event revocation ledger and effect journal as one operation,
 then start every producer and consumer on the same build. Old affected encodings must refuse; there is no compatibility alias or
 fabricated default authority. This runbook does not authorize deleting or rewriting a shared
 store: production replacement requires the deployment owner's approved drain and provisioning
@@ -180,6 +165,6 @@ procedure, while local verification may recreate only stores owned by the curren
 
 Record the exact commit, command, exit status, and bounded terminal log for each phase. A pass
 requires scope mismatch before side effects, distinct scoped addresses, truthful optional
-attribution, complete known cause, matching core/Restate parent selection, exact owner grammar,
+attribution, complete known cause, matching core/remote parent selection, exact owner grammar,
 and explicit old-format refusal. Preserve the logs with the delivery evidence; never substitute
 source inspection for a failed command.

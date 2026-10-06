@@ -10,15 +10,12 @@ Content-Length does not determine admission or allocation.
 Providers select the limit with `ProviderOptions.response_body_bytes`. `None`
 uses 16 MiB. The limit covers non-SSE completion bodies, HTTP errors, and
 auxiliary reads such as generation lookups and upload responses. SSE keeps its
-separate event and total budgets. Restate connections select their ingress and
-admin response limit with `RestateConnectionConfig.response_body_bytes`, which
-also defaults to 16 MiB and applies to control and attach requests.
+separate event and total budgets.
 
 An excess body returns `HttpFailureContext::ResponseBodyTooLarge` with the limit
 and the minimum observed size, and the failure code
-`lash:http_response_body_too_large`. The refusal is not retryable. Restate
-classifies it as terminal rather than repeatedly reattaching to an answer the
-caller refuses to admit. Provider error handling preserves the read failure
+`lash:http_response_body_too_large`. The refusal is not retryable. Provider
+error handling preserves the read failure
 instead of substituting an empty response body. Successful and error bodies
 share the same read boundary; neither JSON parsing nor diagnostic truncation
 runs on excess bytes.
@@ -42,7 +39,4 @@ allocates before handing chunks or a buffered body to the reader. The reader
 never uses a caller-supplied Content-Length to reserve that memory.
 
 The laws cover buffered and streamed inputs, advisory lengths, native HTTP
-fixtures, both OpenAI endpoints, and Restate control/attach requests. Caller
-witnesses use the current Restate turn path over SQLite memory/file and
-PostgreSQL. They also check native Restate admin and ingress decoding paths on
-the same server double.
+fixtures and both OpenAI endpoints.

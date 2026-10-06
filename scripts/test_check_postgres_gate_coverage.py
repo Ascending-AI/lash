@@ -46,7 +46,7 @@ FACADE_LABELS = (
     "//crates/lash:facade_host_wrappers__test,"
     "//crates/lash:integration__test"
 )
-SKIPS = "skip=postgres_live_restate,skip=live_postgres"
+SKIPS = "skip=postgres_live_s3"
 
 
 def postgres_laws(count: int) -> str:
@@ -133,8 +133,8 @@ class PassingShapes(Fixture):
     def test_second_service_law_needs_its_skip(self) -> None:
         self.write_source(
             "src/live.rs",
-            '#[test]\n#[ignore = "requires a Restate server and PostgreSQL"]\n'
-            "fn postgres_live_restate_law() {}",
+            '#[test]\n#[ignore = "requires an S3 server and PostgreSQL"]\n'
+            "fn postgres_live_s3_law() {}",
         )
         self.assert_clean()
 
@@ -172,8 +172,8 @@ class SelectionDefects(Fixture):
         self.write_recipe(FACADE_LABELS, "nocapture")
         self.write_source(
             "src/live.rs",
-            '#[test]\n#[ignore = "requires a Restate server and PostgreSQL"]\n'
-            "fn postgres_live_restate_law() {}",
+            '#[test]\n#[ignore = "requires an S3 server and PostgreSQL"]\n'
+            "fn postgres_live_s3_law() {}",
         )
         violations = self.violations()
         self.assertTrue(any("skip=" in v.detail for v in violations), violations)

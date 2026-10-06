@@ -243,14 +243,11 @@
   "faults": {
     "worker_kill_s": 300,
     "worker_restart_delay_s": 5,
-    "restate_restart_s": 600,
-    "restate_restart_delay_s": 5,
     "rolling_deploy_s": 900,
     "rolling_worker_pause_s": 10
   },
   "collection": {
     "scrape_s": 1,
-    "journal_sample_s": 10,
     "retention_s": 7200,
     "recovery_stable_s": 60,
     "comparison_repetitions": 3,
@@ -265,7 +262,6 @@
     "maximum_drain_batch": "V: turns.rs:547",
     "polling": "V: inventory observation rows",
     "process_prune": "V: config.rs:30",
-    "restate_partitions": "V: upstream v1.7.12 common.rs:1081",
     "fields": {
       "/format_version": "I: synthetic default from FIG-3790 section 2",
       "/seed": "I: synthetic default from FIG-3790 section 2",
@@ -335,12 +331,9 @@
       "/provider/max_concurrent": "I: synthetic default from FIG-3790 section 2",
       "/faults/worker_kill_s": "I: synthetic default from FIG-3790 section 2",
       "/faults/worker_restart_delay_s": "I: synthetic default from FIG-3790 section 2",
-      "/faults/restate_restart_s": "I: synthetic default from FIG-3790 section 2",
-      "/faults/restate_restart_delay_s": "I: synthetic default from FIG-3790 section 2",
       "/faults/rolling_deploy_s": "I: synthetic default from FIG-3790 section 2",
       "/faults/rolling_worker_pause_s": "I: synthetic default from FIG-3790 section 2",
       "/collection/scrape_s": "I: synthetic default from FIG-3790 section 2",
-      "/collection/journal_sample_s": "I: synthetic default from FIG-3790 section 2",
       "/collection/retention_s": "I: synthetic default from FIG-3790 section 2",
       "/collection/recovery_stable_s": "I: synthetic default from FIG-3790 section 2",
       "/collection/comparison_repetitions": "I: synthetic default from FIG-3790 section 2",

@@ -40,8 +40,8 @@ fn write(fleet: FleetFormat) -> Row {
 MANIFEST_ROW = """\
 static DURABLE_FORMATS: &[EngineDurableFormat] = &[
     EngineDurableFormat {
-        id: "restate.widget",
-        name: "Restate widget",
+        id: "durable.widget",
+        name: "Durable widget",
         version: WIDGET_FORMAT_VERSION as u32,
         constant: "WIDGET_FORMAT_VERSION",
         upgrade_policy: UpgradePolicy::Migrate,

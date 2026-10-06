@@ -18,7 +18,7 @@ The proof a change needs is minimal and fast; main's hourly full run covers
 the rest and reds are fixed forward:
 
 - the tests the change adds or changes, run once on the cheapest tier
-  (SQLite stores, the in-process Restate server double), by full test path;
+  (SQLite stores), by full test path;
 - for a bug, a law that fails once on the unfixed code;
 - no other new tests: a test must pin a named rule or a found bug
   (coverage padding and change detectors are rejected in review, see

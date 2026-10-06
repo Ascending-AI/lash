@@ -1,22 +1,21 @@
 //! The component compatibility descriptor (ADR 0115 §1).
 //!
 //! Every versioned stored component (the PostgreSQL schema, the SQLite
-//! database file, each Restate object family) carries a durable stamp
+//! database file) carries a durable stamp
 //! `{version, min_reader}`. A build declares which stamps it opens and which
 //! versions it produces in one [`CompatDescriptor`] per component, and every
 //! open runs [`admit`] on the stamp before it takes traffic. A refusal is a
 //! typed [`CompatRefusal`] whose message names the `lashctl` remedy.
 //!
 //! The stamps themselves are written and read by the backends; this module
-//! owns only the vocabulary and the rule, so both stores and the Restate
-//! objects answer the same way.
+//! owns only the vocabulary and the rule, so both stores answer the same way.
 
 use serde::{Deserialize, Serialize};
 
 pub use lash_sansio::VersionRange;
 
-/// One versioned stored component: a PostgreSQL schema, a SQLite database
-/// file, or one Restate object family.
+/// One versioned stored component: a PostgreSQL schema or a SQLite database
+/// file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ComponentId(&'static str);
 
@@ -27,8 +26,6 @@ impl ComponentId {
     /// A SQLite deployment's one database file; its stamp is its
     /// `lash_compat` row.
     pub const SQLITE_CORE: Self = Self("sqlite-core");
-    /// Every `LashDurableWaitIndex` object; its stamp is the object's `_compat`.
-    pub const RESTATE_DURABLE_WAIT_REGISTRY: Self = Self("restate-durable-wait-registry");
 
     /// The component's stable name, as refusals and `lashctl version` print it.
     pub const fn as_str(self) -> &'static str {
@@ -544,36 +541,7 @@ const fn store(component: ComponentId, version: u32) -> CompatDescriptor {
 pub const DESCRIPTORS: &[CompatDescriptor] = &[
     store(ComponentId::POSTGRES, POSTGRES_SCHEMA_VERSION),
     store(ComponentId::SQLITE_CORE, SQLITE_CORE_SCHEMA_VERSION),
-    CompatDescriptor {
-        component: ComponentId::RESTATE_DURABLE_WAIT_REGISTRY,
-        reads: RESTATE_OBJECT_FAMILY_FORMATS,
-        writes: RESTATE_OBJECT_FAMILY_FORMATS,
-    },
 ];
-
-/// The formats this build reads and writes for every Restate object family.
-#[cfg(not(feature = "synthetic-next"))]
-const RESTATE_OBJECT_FAMILY_FORMATS: VersionRange = VersionRange::exactly(1);
-
-/// Phase A's synthetic N+1 (ADR 0115 §6) moves every Restate object family
-/// to format 2 and keeps reading and writing format 1.
-#[cfg(feature = "synthetic-next")]
-const RESTATE_OBJECT_FAMILY_FORMATS: VersionRange = VersionRange::between(1, 2);
-
-/// The release line this build writes into every Restate `_compat` record
-/// and call envelope: 1 from the 1.0 release on.
-///
-/// The 1.0 cut restarts every format counter at 1, so a number a pre-release
-/// build wrote and the same number from a release build name different
-/// shapes. The line tells them apart: state and calls that state no line, or
-/// line 0, are pre-release and refused as [`CompatRefusal::PreRelease`]
-/// before anything is decoded. Counters never restart again, so the line
-/// stays 1.
-pub const RELEASE_LINE: u32 = 1;
-
-/// The component a Restate call envelope's refusal names: the wire is no
-/// stored component and declares no descriptor.
-pub const RESTATE_WIRE_COMPONENT: &str = "restate-wire";
 
 /// The descriptor this build declares for `component`.
 pub fn descriptor(component: ComponentId) -> Option<&'static CompatDescriptor> {
@@ -691,20 +659,6 @@ pub enum CompatRefusal {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         writing_release: Option<String>,
     },
-    /// A Restate object's `_compat` writer floor is above the newest family
-    /// format this build writes (ADR 0115 §3.2): a newer release upgraded
-    /// the object, and this build may still read it but never mutate it.
-    #[error(
-        "{component} is at format {found} with writer floor {min_writer}, above the newest \
-         this build writes ({writes}): a newer release upgraded it. Run a build whose range \
-         reaches {min_writer}; `lashctl version` prints a build's ranges"
-    )]
-    WriterFloorAbove {
-        component: String,
-        found: u32,
-        min_writer: u32,
-        writes: VersionRange,
-    },
     #[error(
         "{component} carries additions this build cannot write beside: {}. Run the release \
          that expanded it; `lashctl preflight` lists them{}",
@@ -762,15 +716,13 @@ pub enum CompatRefusal {
     },
     /// State or a call a pre-release build wrote (FIG-4819). The 1.0 cut
     /// restarted every counter, so its numbers do not mean what this
-    /// build's do, and no release reads it: a Restate object or call that
-    /// states no release line, or a store whose floor is above this build's
-    /// range although an older release stamped it.
+    /// build's do, and no release reads it: a store whose floor is above this
+    /// build's range although an older release stamped it.
     #[error(
         "{component} holds pre-release state: a lash build from before the 1.0 release wrote \
          it, and 1.0 restarted every format counter, so its numbers do not mean what this \
          build's do. No release reads pre-release state and none migrates it; it is refused \
-         unchanged. Recreate the store, and serve this build from a Restate namespace no \
-         pre-release build has used{}",
+         unchanged. Recreate the store{}",
         release_suffix(.writing_release)
     )]
     PreRelease {
@@ -864,8 +816,7 @@ impl CompatRefusal {
             | Self::PreRelease {
                 writing_release, ..
             } => *writing_release = release,
-            Self::WriterFloorAbove { .. }
-            | Self::RetiredSqliteLayout { .. }
+            Self::RetiredSqliteLayout { .. }
             | Self::UnknownVocabulary { .. }
             | Self::PluginWriterOutsideRange { .. }
             | Self::PluginWriterUnprovisioned { .. }
@@ -1110,12 +1061,12 @@ mod tests {
             too_old
         );
         let refusal = CompatRefusal::PreRelease {
-            component: "restate-wire".into(),
+            component: "postgres".into(),
             writing_release: None,
         };
         assert_eq!(
             serde_json::to_string(&refusal).expect("encode"),
-            r#"{"refusal":"pre_release","component":"restate-wire"}"#
+            r#"{"refusal":"pre_release","component":"postgres"}"#
         );
     }
 }

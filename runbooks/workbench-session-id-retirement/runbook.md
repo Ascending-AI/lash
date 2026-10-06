@@ -6,8 +6,8 @@
 
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. It is verified: the phases below execute it, and no step
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the
+> application data. It is verified: the phases below execute it, and no step
 > of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
@@ -20,8 +20,7 @@ that inherited no transcript, trigger registration, or scoped work, and that rep
 the web process does not resurrect the retired id.
 
 **Why this matters.** Deletion is a permanent identity fence, not a request to clear a
-name for reuse. Effect journals, revocation ledgers, queued input, and Restate state can
-only remain unambiguous if a tombstoned id is never admitted again. The host must make
+name for reuse. Effect journals, revocation ledgers, and queued input can only remain unambiguous if a tombstoned id is never admitted again. The host must make
 the refusal intelligible and rotate to a new id rather than silently manufacturing a
 second lifetime behind the old name.
 
@@ -262,9 +261,8 @@ this runbook's header names (FIG-1164, FIG-3035):
 `bash scripts/agent-workbench-dev.sh restart --port <port>`). The launcher records the
 stack's run metadata under `AGENT_WORKBENCH_RUN_DIR` — the boot's value, or the default
 `.agent-workbench/run` when boot did not set it — and the restart refuses without it, so
-re-export both variables the boot used. It keeps the Restate deployment,
-its journals and the application data, and reports that it did; `workbench-engine-restart`
-executes the same command in its FIG-1117 companion. Never substitute the destructive reset.
+re-export both variables the boot used. It keeps the managed services and the application
+data, and reports that it did. Never substitute the destructive reset.
 After the restart, poll `/healthz`. Require:
 
 - a new Workbench PID;
@@ -281,8 +279,7 @@ restored rotated page as `05-rotated-after-restart.png` and the repeated refusal
 
 ## Phase 6 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the Workbench process and its
-port-derived Restate container are gone.
+Run `just agent-workbench-down <port>` and confirm the Workbench process is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

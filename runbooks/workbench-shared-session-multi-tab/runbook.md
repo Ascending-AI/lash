@@ -143,7 +143,7 @@ order.
 ## Working material
 
 - Require `OPENROUTER_API_KEY`. Boot one empty, port-isolated stack with
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> bash scripts/agent-workbench-dev.sh up --port <port>`.
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`.
   Gate `GET /healthz` → 200. Teardown on success or Abort is
   `bash scripts/agent-workbench-dev.sh down --port <port>` with the same environment. (The
   `just agent-workbench <port>` / `just agent-workbench-down <port>` recipes name the same
@@ -432,8 +432,8 @@ Those are companion coverage, not judged browser gates.
 
 ## Phase 7 — Teardown and score
 
-Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the one workbench process and its
-port-derived Restate container are gone.
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the one workbench process
+is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

@@ -7,15 +7,14 @@
 
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. No step of this row is blocked any more. See the
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the
+> application data. No step of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
 **Purpose.** Referee the *client's reconnection machine*. Every other workbench runbook
-executes the shell while the web process it talks to stays alive; `workbench-engine-restart`
-bounces the Restate container underneath a living web process. Nothing executes the opposite
-fault — **the web process dies and is replaced while a browser is attached and a turn is in
+executes the shell while the web process it talks to stays alive. Nothing executes the
+opposite fault — **the web process dies and is replaced while a browser is attached and a turn is in
 flight**, which is what every deploy of the workbench actually does to every connected tab.
 That fault is the only one that exercises the reconnection machine end to end:
 per-channel availability, the stream-connect watchdog, the NDJSON retry loops, stream
@@ -65,10 +64,9 @@ at `live` over a dead backend, a banner stuck at `reconnecting` over a healthy o
 transcript that lost a row on the way through recovery, or a transcript that grew one because
 two projection paths both drew the same message.
 
-**Why the web process, not Restate.** Every composer send is submitted to Restate as a
-workflow invocation (`send_turn` → `commit_and_start_user_turn` in `routes.rs`) and executed through the workbench's
-registered endpoint. So killing the web process mid-turn does **not** kill the turn: Restate
-retains the invocation and executes it against the replacement process. The in-flight turn's
+**Why the web process.** Every composer send is admitted as a durable turn (`send_turn` →
+`commit_and_start_user_turn` in `routes.rs`). So killing the web process mid-turn does **not**
+kill the turn: the durable state retains it and the replacement process executes it. The in-flight turn's
 correct outcome is therefore *usually* completion, and the durable stores — not the DOM at
 the moment of the kill — decide what "correct" means. This is what makes the scenario worth
 running: the client must converge on a truth that changed while it was disconnected.
@@ -86,11 +84,10 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
    scenario depends on, and destructive reset is equally invalid. The narrow command is
    `bash scripts/agent-workbench-dev.sh restart --port <p>` (`just agent-workbench-restart <p>`
    is the same command, after sourcing the fork's `env.sh`),
-   which replaces only the Workbench process and keeps the Restate engine, its journals and the
-   application data. Run it with the same `AGENT_WORKBENCH_DATA_DIR` / `AGENT_WORKBENCH_RUN_DIR`
-   and the same `RESTATE_AUTHORITY_ID` as boot; the launcher refuses rather than replacing
-   anything if they differ. Then gate the outcome yourself: the Restate container **id and
-   start time unchanged**, and a changed Workbench **PID**. An unchanged PID or a different
+   which replaces only the Workbench process and keeps the application data. Run it with the
+   same `AGENT_WORKBENCH_DATA_DIR` / `AGENT_WORKBENCH_RUN_DIR` as boot; the launcher refuses
+   rather than replacing anything if they differ. Then gate the outcome yourself: a changed
+   Workbench **PID**. An unchanged PID or a different
    durable directory voids the phase.
 2. **Gate on the phase, and read it where the phase actually lives.** The phase is not a
    single element. `#shellStatus` is hidden **exactly** when the phase is `live`, and its
@@ -174,9 +171,7 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
   subsequent helper invocation.
 - Pick one run session id `<S>` = `runbook-reconnect-<run-id>` and open `/?session_id=<S>`.
 - Identities to record at boot and re-check after the restart: the workbench PID
-  (`<run-dir>/workbench-127.0.0.1_<p>.pid`), the Restate container name
-  (`lash-agent-workbench-dev-restate-<p>` unless `AGENT_WORKBENCH_RESTATE_CONTAINER` is set)
-  with its `docker inspect` id and `.State.StartedAt`, and the rendered session id.
+  (`<run-dir>/workbench-127.0.0.1_<p>.pid`) and the rendered session id.
 - UI affordances: the chat composer and its **send** control, the transcript timeline, the
   phase pill, the connection banner and its **retry now** button.
 - **Layer 1 — rendered DOM:** `#timeline .message.user` / `.message.assistant` counts and
@@ -204,7 +199,7 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
   non-`event` line. When `resident_replacement` appears, capture the provisional row multiset
   before the refetch and after it resolves.
 - Teardown: `bash scripts/agent-workbench-dev.sh down --port <p>` and confirm the
-  port-derived Restate container is gone.
+  workbench process is gone.
 
 Save every named artifact and API/store/trace extract under the run's artifact directory.
 
@@ -213,8 +208,7 @@ Save every named artifact and API/store/trace extract under the run's artifact d
 Boot, gate `/healthz` → 200, and open `/?session_id=<S>`. Require the composer, an empty
 transcript, and the rendered session id `<S>` agreeing with
 `/api/state?session_id=<S>.settings.session_id`. Require the phase pair for `live`:
-`#shellStatus` hidden **and** `#busyText` reading `idle`. Record the workbench PID, the
-Restate container id and `StartedAt`, and confirm all three layers are empty for `<S>`.
+`#shellStatus` hidden **and** `#busyText` reading `idle`. Record the workbench PID and confirm all three layers are empty for `<S>`.
 Screenshot `00-live-empty.png`; save `00-identities.json`.
 
 ## Phase 1 — Baseline: one send settles, phase stays live
@@ -242,15 +236,13 @@ transition is the evidence and it cannot be recovered after the fact. Screenshot
 
 A turn that has already settled is a retry of this step: it exercises reload, not reconnection.
 Note also that the interruption is deliberately *not* an interruption of execution — the send
-was submitted to Restate, so the sleep is durable and the replacement process picks the
-invocation back up.
+was admitted as a durable turn, so the sleep is durable and the replacement process picks the
+turn back up.
 
 **2b — restart only the web process.** Run
 `bash scripts/agent-workbench-dev.sh restart --port <p>` with the exported data and run
-directories, in the shell that still exports this row's `RESTATE_AUTHORITY_ID`. It is
-non-destructive: the Restate journals and the application data are retained, and no deployment
-is re-registered. Then gate that the recorded PID is gone and the new PID differs, the Restate
-container id and `StartedAt` are unchanged, and `/healthz` answers again.
+directories. It is non-destructive: the application data is retained. Then gate that the
+recorded PID is gone, the new PID differs, and `/healthz` answers again.
 
 **2c — require the phase to leave live and return, unassisted.** From the sampler timeline,
 require at least one sample whose phase is `reconnecting` or `unavailable`, and a later
@@ -326,15 +318,14 @@ the defect to that path and is as much a failure as a duplicate on both. Screens
 ## Phase 5 — Teardown and score
 
 Run `bash scripts/agent-workbench-dev.sh down --port <p>` and confirm the workbench process
-and the port-derived Restate container are both gone (`docker ps -a` shows no
-`lash-agent-workbench-dev-restate-<p>`).
+is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Boot/scope | `/healthz` 200; rendered and API session id both `<S>`; phase pair = `live`; all three layers empty | | `00-live-empty.png`, `00-identities.json` |
 | Baseline send | 1 user + 1 assistant row = 1+1 API = 1+1 store = 1 `turn_completed`; phase stayed `live` | | `01-baseline-live.png`, `01-baseline-*.json` |
 | Turn in flight | `running` pill and exactly one `active_turns` address recorded before the kill | | `02-inflight-running.png` |
-| Web-process-only replacement | PID changed; Restate container id and `StartedAt` unchanged | | command log, `04-phase-timeline.json` |
+| Web-process-only replacement | PID changed; same data and run directories | | command log, `04-phase-timeline.json` |
 | Phase left `live` and returned unassisted | a `reconnecting`/`unavailable` sample, then a later `live` sample, with no reload or retry-now between | | `04-phase-timeline.json`, `03-degraded.png`, `04-reconverged-live.png` |
 | Degraded shell told the truth | while degraded: banner visible, prior rows retained, never an empty idle session | | `03-degraded.png`, `04-phase-timeline.json` |
 | In-flight turn resolved from durable truth | trace/store decide the outcome; the rendered transcript agrees; no stale active address | | `05-postrestart-*.json` |
@@ -342,10 +333,10 @@ and the port-derived Restate container are both gone (`docker ps -a` shows no
 | Recovery path recorded | the fired path(s) are named from captured stream traffic; gap recovery landed on the same multiset; a resident replacement preserved any provisional rows | | `06-recovery-paths.json` |
 | "retry now" converges without re-deriving | phase returns to `live`; row multiset unchanged across the press | | `07-retry-now.png`, `07-retry-*.json` |
 | Reload identity | post-reload row multiset equals pre-reload multiset | | `08-after-reload.png`, `08-reload-multiset.json` |
-| Teardown | workbench and port-derived Restate container gone | | command log |
+| Teardown | workbench process gone | | command log |
 
 **Aggregate:** with a browser attached and a turn in flight, did replacing the workbench web
-process — Restate untouched — shift the shell honestly through a degraded phase and back to
+process shift the shell honestly through a degraded phase and back to
 `live` with no human action, resolve the interrupted turn to whatever the durable stores
 actually say happened, and leave one transcript that the rendered DOM, the durable session
 graph, the state and product-event projections, and the turn trace all agree on — before and

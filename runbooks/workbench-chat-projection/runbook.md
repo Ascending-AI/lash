@@ -202,8 +202,7 @@ both multisets as `04-reload-multiset.json`.
 
 ## Phase 4 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the workbench and its port-derived
-Restate container are gone.
+Run `just agent-workbench-down <port>` and confirm the workbench is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

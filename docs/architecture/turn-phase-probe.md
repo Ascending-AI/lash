@@ -13,14 +13,9 @@ not as a supported host lifecycle API.
 - `crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs` measures phase
   duration, allocation and process memory. Its typed phases map to snake-case
   report keys, and each key can have several simultaneous open spans.
-- `crates/lash-sim/tests/logical_turn.rs` pauses after the first committed turn
-  to inspect frame-switch ordering and atomicity.
-- The former `runbooks/restate-postgres-workers/src/bin/frame_crash.rs` consumer
-  is retired. The runbook now submits `TurnScenario::FrameSwitchCrash` in
-  `src/bin/runner/segment_one.rs`. The current probe-based crash proof is
-  `crates/lash-conformance/src/conformance/frame_switch_redrive.rs`, whose
-  `PanicAfterSwitchCommit` injects a crash at `PostCommitDelivery` and proves
-  redrive from the recorded admission on the in-process Restate server double.
+- `crates/lash-conformance/src/conformance/frame_switch_redrive.rs` is the
+  probe-based crash proof: `PanicAfterSwitchCommit` injects a crash at
+  `PostCommitDelivery` and proves redrive from the recorded admission.
 
 These are instrumentation consumers. Hosts submit through `send()`; the engine
 owns executing, admission and recovery under ADRs 0101, 0109 and 0110. A probe

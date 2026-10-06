@@ -43,11 +43,8 @@ leaves no second RLM dialect to select. It emits
 `context-overflow-recovery e2e passed: rows=N` only after the focused contract test and
 every row's gates pass.
 
-**Storage and engine.** The default store set is a SQLite scratch
-directory, fresh per row, and the engine is a local `restate-server` the
-companion starts through `scripts/ci/with-service.sh restate` (the zero-infra
-effect engine, ADR 0104); the provider is scripted and makes no provider
-network call. In a Kiln fork, the
+**Storage.** The default store set is a SQLite scratch directory, fresh per
+row; the provider is scripted and makes no provider network call. In a Kiln fork, the
 companion builds through the shared Buck2 pool and runs the harness locally.
 Portable CI uses Cargo because it has no Kiln fork. Do not configure a live
 provider: a live model cannot be made to overflow on demand.

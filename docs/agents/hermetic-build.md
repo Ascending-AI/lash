@@ -24,7 +24,7 @@ python3 scripts/dev-test.py
 `//:workspace_tests` adds developer-deferred binaries and is the complete PR
 partition. Neither is every correctness gate. The PostgreSQL store package's
 tests are in both: each starts [its own server](#hermetic-postgresql-tests).
-The other PostgreSQL suites, S3, Restate, nested-Cargo tests, release artifacts
+The other PostgreSQL suites, S3, nested-Cargo tests, release artifacts
 and named recipes retain their contracts.
 
 | Command | Behavior |
@@ -63,7 +63,7 @@ The proof a change needs is minimal and fast; main's hourly full run covers
 the rest and reds are fixed forward:
 
 - the tests the change adds or changes, run once on the cheapest tier
-  (SQLite stores, the in-process Restate server double), by full test path;
+  (SQLite stores), by full test path;
 - for a bug, a law that fails once on the unfixed code;
 - one `kiln clippy`;
 - only when they apply: `//crates/lash:ui_fixtures` and
@@ -270,8 +270,7 @@ metadata for the workspace's Cargo resolver 3. `sync.py --verify-resolution` rec
 
 `//:feature_lanes` provides metadata-only checks matching the lane commands.
 `//:feature_lane_tests` links and executes the
-required test units. Runtime default-off and Restate release-feature witnesses
-remain explicit regressions. Required-feature targets outside the default graph
+required test units. Runtime default-off witnesses remain explicit regressions. Required-feature targets outside the default graph
 remain recorded with a Cargo feature-gate reason in the inventory.
 
 The existing third-party feature limitation remains explicit. External
@@ -724,9 +723,8 @@ on `with-service.sh`.
 The tool contract in [ADR 0099](../adr/0099-tool-children-of-effect-groups-are-live-closing-settled.md)
 uses owning Run/source laws. Select a full test path from the current source and
 verify the executed-case count in the printed `kiln test` report. A successful
-zero-case filter proves nothing. Use the Restate server double and SQLite for
-the developer proof; registered live or synthetic-next gates retain their own
-release jobs. Do not select retired child/group-service test families or revive
+zero-case filter proves nothing. Use SQLite for the developer proof;
+registered live or synthetic-next gates retain their own release jobs. Do not select retired child/group-service test families or revive
 removed targets. Generated target membership changes through `kiln sync` in the
 owning definition closure.
 
@@ -754,37 +752,6 @@ three source groups into disjoint legs. Each leg uploads its own evidence and
 has a 50-minute job cap; a baseline refusal is a failure, never mutation signal.
 
 
-Registered Restate suites without a `ci_driver` run as cacheable remote
-actions. The registry in `scripts/restate-suites.toml` generates a target
-named `restate_<suite>_<leg>` beside its Rust test binary, with hyphens in the
-suite name replaced by underscores. The existing entrypoint selects it:
-
-```sh
-kiln gate lash <fork> -- python3 scripts/ci/restate_suite.py suite server-double --leg live
-kiln test //crates/lash-restate-test:restate_server_double_live \
-  --test_arg=--exact \
-  --test_arg=live_restate_routes_new_invocations_to_the_newest_deployment_and_keeps_pins
-```
-
-Each shard declares the checksum-pinned Restate 1.7.13 release binary
-(`native//:restate`), its suite runner, registry and divergence files. It
-starts one private server, runs each selected law in its own process with
-the existing progress bound and strict replay-divergence checks, then stops
-and reaps the server. A readiness failure also stops it before removing its
-data. The action's loopback, PID namespace and temporary directory isolate
-its services. Law logs, server logs, the suite summary and JUnit cases are
-returned as test outputs. Shards partition the selected registered laws by
-name, so each law executes once.
-
-The same action starts the pinned PostgreSQL 16 and applies the published
-schema, preserving the SQL coverage the former local suite gate supplied.
-New suite actions use the canonical unmeasured test-run policy until they
-have measurements; ordinary compile and test requests are unchanged.
-`target-inventory.json` lists the suite/leg labels under
-`restate_suite_targets`. The workbench's registered custom driver keeps its
-local fixture ownership. `serve` and explicit `--binary` recipes keep their
-caller-owned service lifecycle.
-
 `scripts/ci/with-service.sh` starts the same private PostgreSQL/Garage containers
 used by CI, publishes an ephemeral loopback port, waits for readiness and removes
 the container on success, failure or interruption:
@@ -809,23 +776,7 @@ witnesses for schema diffs; full dispatch runs all three. Compatibility compares
 live catalog artifacts and version stamps. Use `kiln gate lash <fork> -- <cmd>`
 for other live gates, with identities and ports derived from `KILN_GATE_ID`.
 
-Main's hourly full-profile dispatch derives its Restate suite/leg matrix from
-`scripts/restate-suites.toml`. Registering a suite adds live and replay jobs.
-`python3 scripts/ci/restate_matrix.py check` verifies the producer, matrix,
-runner and conclusion wiring. Jobs run at most sixteen at once. Registered
-suite actions use private PostgreSQL and Restate servers on the pool. The original three-job cap
-had no shared service constraint. With 109–134 job-minutes across 48 legs,
-sixteen slots imply about 6.8–8.4 minutes at even load instead of 36–45 minutes.
-The existing 26–29 minute jobs should then set the full-run critical path.
-A registry `ci_driver` retains specialized fixture cleanup.
-Run the same entrypoint locally through a gate:
-
-```sh
-kiln gate lash <fork> -- python3 scripts/ci/restate_matrix.py run <suite> --leg replay
-```
-
-The ordinary partition retains ignored-test selection and exclusions. Live
-Restate tests remain ignored. The five
+The ordinary partition retains ignored-test selection and exclusions. The five
 `durable_fault_matrix_real_cargo_filters_chunk_0..4` cases remain in the named
 nested-Cargo heavy gate. Deep TypeScript child-process tests retain their measured
 resource requests and tail partition; their previous local-only exception has
@@ -839,8 +790,8 @@ publication. The trusted facade seal stays `//crates/lash:ui_fixtures`, comparin
 the same `.stderr` pins. Beside it, `//crates/lash:facade_completeness` runs
 `scripts/facade_completeness.py` over the `doc-json` subtarget (rustdoc JSON)
 of the facade and every first-party library in its closure; `[facade]` in
-`tools/buck2/package-policy.toml` names the package. Runtime trybuild, workflow-graph frontend gates, Restate
-workers and Git-consumer checks retain their supported recipes. Workbench
+`tools/buck2/package-policy.toml` names the package. Runtime trybuild, workflow-graph frontend gates and
+Git-consumer checks retain their supported recipes. Workbench
 projection remains a declared pool test with pinned Node; full browser/service
 E2E remains separate.
 

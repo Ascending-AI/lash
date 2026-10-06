@@ -48,10 +48,7 @@ structure rather than exact assistant wording.
 
 - Boot with a fresh data directory:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
-  Gate `GET /healthz` → 200. The entire Restate stack is port-isolated by default: the
-  helper derives its endpoint, ingress, admin port, node port, and container name from
-  `<port>`, so concurrent runs on distinct workbench ports do not need manual Restate
-  overrides. Teardown with
+  Gate `GET /healthz` → 200. Teardown with
   `just agent-workbench-down <port>`.
 - UI: composer, **inject now** (`#injectNow`), **queue next** (`#queueNext`), ingress receipt
   rows, transcript, running pill, and the `#stop` / `#abort` controls. Both ingress buttons are
@@ -78,30 +75,9 @@ structure rather than exact assistant wording.
   0 count across every iteration means the evidence was omitted, not that the marker was
   absent; re-read the same iterations from `llm_call_started`, which carries the assembled
   messages, before scoring any exactly-once gate.
-- The deterministic companion gate is `just agent-workbench-restate-e2e`. It proves the
-  active input id completes exactly once under the in-flight turn, the queued draft
-  dispatches only after settle. ADR 0101 defines current run admission and
-  shift-fence settlement; its store-law evidence lives in
-  `crates/lash-conformance/src/conformance/runtime_persistence/run_admissions.rs`. The recipe
-  takes no filter, and the unfiltered suite is roughly 45 live Restate tests behind a cold
-  workspace build — tens of minutes before the one test this row needs even starts. To run
-  this row's law alone, call the suite runner directly with `--only`, beside a disposable
-  pg16 so the registry's per-shard database and run-id variables resolve:
-
-  ```bash
-  export AGENT_WORKBENCH_E2E_RUN_ID="turn-ingress-$(date +%s)-$$"
-  kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- bash -c '
-    set -euo pipefail
-    export AGENT_WORKBENCH_E2E_POSTGRES_BASE_URL="${LASH_POSTGRES_DATABASE_URL%/*}"
-    exec python3 scripts/ci/restate_suite.py suite agent-workbench \
-      --leg live \
-      --only live_restate_turn_input_ingress_delivers_once_and_queues_after_settle
-  '
-  ```
-
-  Expect `1/1 ok` on one server. Run `just agent-workbench-restate-e2e` for the whole
-  suite — with its fixture cleanup and stale-fence companion law — only when the row is
-  being scored against the whole companion.
+- ADR 0101 defines current run admission and shift-fence settlement; its store-law
+  evidence lives in
+  `crates/lash-conformance/src/conformance/runtime_persistence/run_admissions.rs`.
 
 ## Phase 0 — Boot and pre-flight
 
@@ -182,8 +158,7 @@ transcript rows visible.
 
 ## Phase 5 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm both the workbench and its Restate
-container are gone.
+Run `just agent-workbench-down <port>` and confirm the workbench is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

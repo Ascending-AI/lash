@@ -157,7 +157,7 @@ def _discover_file(path, text, excluded):
         raw = literal.group()
         value = raw[raw.index('"') + 1:raw.rindex('"')]
         if (not TAG.fullmatch(value) or value.startswith(('http:', 'https:'))
-                or not (re.search(r'[/ :]v[0-9]', value) or value.startswith(('lash', 'restate-authority')))):
+                or not (re.search(r'[/ :]v[0-9]', value) or value.startswith('lash'))):
             continue
         if any(start <= literal.start() < end for start, end in reserved):
             continue

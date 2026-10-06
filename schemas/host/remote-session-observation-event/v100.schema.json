@@ -1464,39 +1464,6 @@
           "type": "object"
         },
         {
-          "description": "A Restate object's `_compat` writer floor is above the newest family\nformat this build writes (ADR 0115 \u00a73.2): a newer release upgraded\nthe object, and this build may still read it but never mutate it.",
-          "properties": {
-            "component": {
-              "type": "string"
-            },
-            "found": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "min_writer": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "refusal": {
-              "const": "writer_floor_above",
-              "type": "string"
-            },
-            "writes": {
-              "$ref": "#/$defs/VersionRange"
-            }
-          },
-          "required": [
-            "refusal",
-            "component",
-            "found",
-            "min_writer",
-            "writes"
-          ],
-          "type": "object"
-        },
-        {
           "properties": {
             "component": {
               "type": "string"
@@ -1603,7 +1570,7 @@
           "type": "object"
         },
         {
-          "description": "State or a call a pre-release build wrote (FIG-4819). The 1.0 cut\nrestarted every counter, so its numbers do not mean what this\nbuild's do, and no release reads it: a Restate object or call that\nstates no release line, or a store whose floor is above this build's\nrange although an older release stamped it.",
+          "description": "State or a call a pre-release build wrote (FIG-4819). The 1.0 cut\nrestarted every counter, so its numbers do not mean what this\nbuild's do, and no release reads it: a store whose floor is above this\nbuild's range although an older release stamped it.",
           "properties": {
             "component": {
               "type": "string"

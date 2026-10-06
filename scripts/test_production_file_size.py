@@ -39,7 +39,7 @@ class ProductionFileSizeGuardTests(unittest.TestCase):
     def test_test_tree_uses_the_larger_test_budget(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "crates/lash-restate/src/tests.rs"
+            source = root / "crates/lash-core/src/tests.rs"
             source.parent.mkdir(parents=True)
             source.write_text("fn one() {}\nfn two() {}\nfn three() {}\nfn four() {}\n")
 
@@ -48,7 +48,7 @@ class ProductionFileSizeGuardTests(unittest.TestCase):
 
             self.assertEqual(within_test_budget.returncode, 0, within_test_budget.stderr)
             self.assertNotEqual(over_test_budget.returncode, 0)
-            self.assertIn("test:4:crates/lash-restate/src/tests.rs", over_test_budget.stderr)
+            self.assertIn("test:4:crates/lash-core/src/tests.rs", over_test_budget.stderr)
 
 
     def test_exact_boundaries_doc_comments_and_unterminated_line(self) -> None:

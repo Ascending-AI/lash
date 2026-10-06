@@ -191,9 +191,9 @@ declare -A uniform_store_suites=(
   # The facade's PostgreSQL-only laws: every `#[ignore]`d test in
   # //crates/lash that a pg16 container alone satisfies. The `postgres` name
   # filter derives them -- scripts/check_postgres_gate_coverage.py fails on a
-  # PostgreSQL-gated law whose name or binary escapes it -- and the skips name
-  # the laws that also need a second service, which their own suites own.
-  [pg-facade-laws]="//crates/lash:lash__unit_test,//crates/lash:integration__test|postgres|lash-runtime|--lib --bins --test integration --features rlm,sqlite,testing,typescript|cargo-test|ignored-only,nocapture,skip=postgres_live_restate,skip=live_postgres,skip=native_restate,skip=catalog_storm_native,skip=mcp_law_turn_failures_postgres_live"
+  # PostgreSQL-gated law whose name or binary escapes it, and on a law that
+  # also needs a second service unless a skip here names it.
+  [pg-facade-laws]="//crates/lash:lash__unit_test,//crates/lash:integration__test|postgres|lash-runtime|--lib --bins --test integration --features rlm,sqlite,testing,typescript|cargo-test|ignored-only,nocapture"
   [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads|lash-perf||nextest|include-ignored"
   [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|include-ignored"
   [pg-cross-backend]="//crates/lash-sim:cross_backend_store_differential__test||lash-sim|--test cross_backend_store_differential|nextest-ci|include-ignored,single-threaded,nocapture"
@@ -356,9 +356,7 @@ case "${suite}" in
   # The suites self-serialize on a per-process guard, and two processes on one
   # database would truncate each other's tables. Cargo runs the binaries one at
   # a time against the one database; under Buck2 every test action, and so
-  # every shard of the sharded binaries, has a server of its own. The Restate
-  # ingress law is an ignored case of another package's binary and runs
-  # against the job's service.
+  # every shard of the sharded binaries, has a server of its own.
   pg-store)
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046

@@ -6,8 +6,8 @@
 
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. No step of this row is blocked any more. See the
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the
+> application data. No step of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
@@ -56,9 +56,9 @@ the post-restart code ran — never on the assistant's ability to recall.
    browser and `/api/state` prove the turn settled; `trace.jsonl` proves what code
    executed.
 4. **Replace only the web process.** `just agent-workbench-restart <port>` replaces the
-   Workbench process and keeps the Restate container and its journals, the application data
-   directory and, in the PostgreSQL pass, the managed Postgres container. Invoke it with the
-   same data directory, backend environment and `RESTATE_AUTHORITY_ID` as boot; the launcher
+   Workbench process and keeps the application data directory and, in the PostgreSQL pass,
+   the managed Postgres container. Invoke it with the same data directory and backend
+   environment as boot; the launcher
    refuses rather than replacing anything if any of those differ. Reloading the page,
    changing configuration, or tearing anything else down forfeits the cold-open proof.
 5. **Both geometries or no verdict.** Run the whole scenario twice: the default SQLite
@@ -125,7 +125,7 @@ traces establish executed operations; they do not expose exact submitted compone
 
 - Require `OPENROUTER_API_KEY`; a missing key is a harness gap → Abort before boot.
 - Execute the `typescript` row on SQLite and on PostgreSQL with independent fresh data
-  directories, ports, markers, and artifacts. Set a fresh `RESTATE_AUTHORITY_ID` and
+  directories, ports, markers, and artifacts. Set
   `OPENROUTER_MODEL=deepseek/deepseek-v4-pro` on boot and restart; verify the served
   dialect and model from the request/execution trace. Prompts ask for outcomes and every
   gate reads the TypeScript surface.
@@ -206,14 +206,14 @@ trace end offset as the restart boundary, and screenshot the settled pair as
 
 ## Phase 3 — Replace the web process
 
-Run the non-destructive same-configuration replacement, in the shell that still exports this
-row's `RESTATE_AUTHORITY_ID`:
+Run the non-destructive same-configuration replacement with this row's environment still
+exported:
 
 ```sh
 AGENT_WORKBENCH_DATA_DIR=<same-tmp> [AGENT_WORKBENCH_POSTGRES=1] just agent-workbench-restart <port>
 ```
 
-It keeps the Restate journals and the application data; never substitute
+It keeps the application data; never substitute
 `just agent-workbench-reset`, which deletes exactly the evidence this phase needs. After it
 returns, poll `/healthz` until ready. Omit the bracketed PostgreSQL setting only for the
 SQLite pass. Require a new PID and an unchanged session id across the rendered page,
@@ -260,8 +260,8 @@ the exact defect class this scenario exists to catch.
 
 ## Phase 6 — Teardown and score
 
-Run `just agent-workbench-down <port>` for both stacks and confirm each workbench process,
-its Restate container, and (PostgreSQL pass) its Postgres container are gone.
+Run `just agent-workbench-down <port>` for both stacks and confirm each workbench process
+and (PostgreSQL pass) its Postgres container are gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

@@ -120,9 +120,6 @@ impl CheckpointArtifactShape {
     }
 }
 
-#[cfg(test)]
-pub(crate) const CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY: u64 = 1;
-
 struct DurableCheckpointCurveFixture {
     point: CheckpointCurvePoint,
     fixture: lash_protocol_rlm::RlmCheckpointPerfFixture,

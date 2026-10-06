@@ -77,12 +77,9 @@ wait_log_pattern() {
 }
 
 # The third argument is the reap budget in seconds, default 30. A workbench
-# host needs more: its shutdown pays the Restate SDK's fixed 10s drain grace
-# and then deletes the session it opened against the Parallel Search MCP
-# server at boot, which is a live network round trip. Measured runs land just
-# either side of 31s, so a 30s budget fails the case on timing alone while the
-# host is shutting down correctly. The example-core rows keep 30s: they have
-# neither cost.
+# host needs more: its shutdown deletes the session it opened against the
+# Parallel Search MCP server at boot, which is a live network round trip. The
+# example-core rows keep 30s: they have no such cost.
 wait_reaped() {
   local pid="$1" label="$2" budget="${3:-30}"
   if ! timeout "${budget}s" tail --pid="$pid" -f /dev/null >/dev/null 2>&1; then
@@ -165,22 +162,17 @@ assert_count() {
 run_workbench_signal_with_streams_and_fixture() {
   local dir="$artifact_root/workbench-signal-streams"
   mkdir -p "$dir/data"
-  local port restate_port marker log trace runner app events observations count nested_count
+  local port marker log trace runner app events observations count nested_count
   port="$(free_port)"
-  restate_port="$(free_port)"
   marker="$dir/shutdown.marker"
   log="$dir/host.log"
   trace="$dir/trace.jsonl"
-  # The valid-empty fixture's nested core runs on the workbench's own
-  # restate-server, in a namespace of its own.
   env AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
     AGENT_WORKBENCH_ADDR="127.0.0.1:$port" \
-    AGENT_WORKBENCH_RESTATE_ADDR="127.0.0.1:$restate_port" \
     AGENT_WORKBENCH_DATA_DIR="$dir/data" \
     AGENT_WORKBENCH_TRACE="$trace" \
     AGENT_WORKBENCH_OPEN=0 \
     LASH_HOST_SHUTDOWN_MARKER="$marker" \
-    RESTATE_AUTHORITY_ID="example-core-shutdown-workbench-signal-$port" \
     cargo run -p agent-workbench --profile judged --locked --features provider-wire-fixtures \
     >"$log" 2>&1 &
   runner=$!
@@ -225,9 +217,8 @@ run_workbench_signal_with_streams_and_fixture() {
 run_workbench_bind_error() {
   local dir="$artifact_root/workbench-bind-error"
   mkdir -p "$dir/data"
-  local port restate_port marker log trace holder runner count
+  local port marker log trace holder runner count
   port="$(free_port)"
-  restate_port="$(free_port)"
   marker="$dir/shutdown.marker"
   log="$dir/host.log"
   trace="$dir/trace.jsonl"
@@ -245,12 +236,10 @@ PY
   wait_listener_ready "$holder" "$dir/listener.log"
   env AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=auth-failure-once \
     AGENT_WORKBENCH_ADDR="127.0.0.1:$port" \
-    AGENT_WORKBENCH_RESTATE_ADDR="127.0.0.1:$restate_port" \
     AGENT_WORKBENCH_DATA_DIR="$dir/data" \
     AGENT_WORKBENCH_TRACE="$trace" \
     AGENT_WORKBENCH_OPEN=0 \
     LASH_HOST_SHUTDOWN_MARKER="$marker" \
-    RESTATE_AUTHORITY_ID="example-core-shutdown-workbench-bind-error-$port" \
     cargo run -p agent-workbench --profile judged --locked >"$log" 2>&1 &
   runner=$!
   owned_pids+=("$runner")

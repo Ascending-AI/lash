@@ -364,11 +364,6 @@
           "exclusiveMaximum": 1.0,
           "exclusiveMinimum": 0.0
         },
-        "journal_sample_s": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
         "recovery_stable_s": {
           "type": "integer",
           "format": "uint32",
@@ -388,7 +383,6 @@
       "additionalProperties": false,
       "required": [
         "scrape_s",
-        "journal_sample_s",
         "retention_s",
         "recovery_stable_s",
         "comparison_repetitions",
@@ -441,16 +435,6 @@
     "Faults": {
       "type": "object",
       "properties": {
-        "restate_restart_delay_s": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "restate_restart_s": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
         "rolling_deploy_s": {
           "type": "integer",
           "format": "uint32",
@@ -476,8 +460,6 @@
       "required": [
         "worker_kill_s",
         "worker_restart_delay_s",
-        "restate_restart_s",
-        "restate_restart_delay_s",
         "rolling_deploy_s",
         "rolling_worker_pause_s"
       ]
@@ -693,10 +675,6 @@
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
-            "/collection/journal_sample_s": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
             "/collection/recovery_stable_s": {
               "type": "string",
               "pattern": "^[IV](: .+)?$"
@@ -738,14 +716,6 @@
               "pattern": "^[IV](: .+)?$"
             },
             "/fault_window_s": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/faults/restate_restart_delay_s": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/faults/restate_restart_s": {
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
@@ -996,7 +966,6 @@
             "/collection/bootstrap_resamples",
             "/collection/comparison_repetitions",
             "/collection/confidence",
-            "/collection/journal_sample_s",
             "/collection/recovery_stable_s",
             "/collection/retention_s",
             "/collection/scrape_s",
@@ -1008,8 +977,6 @@
             "/drain_timeout_s",
             "/external_occurrences_per_turn",
             "/fault_window_s",
-            "/faults/restate_restart_delay_s",
-            "/faults/restate_restart_s",
             "/faults/rolling_deploy_s",
             "/faults/rolling_worker_pause_s",
             "/faults/worker_kill_s",
@@ -1087,10 +1054,6 @@
           "type": "string",
           "pattern": "^[IV](: .+)?$"
         },
-        "restate_partitions": {
-          "type": "string",
-          "pattern": "^[IV](: .+)?$"
-        },
         "worker_shape": {
           "type": "string",
           "pattern": "^[IV](: .+)?$"
@@ -1105,7 +1068,6 @@
         "maximum_drain_batch",
         "polling",
         "process_prune",
-        "restate_partitions",
         "fields"
       ]
     },

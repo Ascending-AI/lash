@@ -6,7 +6,7 @@ the saved version and streams node-correlated display events over SSE.
 
 The backend owns in-memory editor versions. Run publishes the saved artifact
 and process definition through `core.host_artifacts()`, then calls
-`core.processes().start()` inside the host command's Restate handler. Restate executes the durable process over SQLite.
+`core.processes().start()`. The durable engine executes the process over SQLite.
 The overlay folds `core.processes().events()` and uses
 `lash::process::trace_lashlang_process_map` to validate node identities.
 Live process observation supplies transient node starts and waits. Display events
@@ -41,9 +41,8 @@ for the judged browser journey. [RUNBOOK.md](RUNBOOK.md) remains as a stable
 compatibility link and records the deterministic integration command.
 
 SQLite process records live in the database file `WORKFLOW_GRAPH_SQLITE_PATH`,
-default `.workflow-graph/lash.db`. The backend starts a local Restate server and retains it while
-serving. Its journal lasts for that server's lifetime. Editor versions remain
-in memory and reset when the backend restarts.
+default `.workflow-graph/lash.db`. Editor versions remain in memory and reset
+when the backend restarts.
 
 Display operations are leaf tools whose committed intents append
 `workflow.display` events. The sample email, web, and agent tools return fixed

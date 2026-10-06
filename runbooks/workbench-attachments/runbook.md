@@ -6,8 +6,8 @@
 
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. It is verified: the phases below execute it, and the
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the
+> application data. It is verified: the phases below execute it, and the
 > block that once stood in front of them is lifted. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
@@ -66,9 +66,7 @@ cross-surface identity, not the quality of the model's image description.
    backend the workbench boots owns blob storage: SQLite keeps attachment bytes in the
    `attachment_blobs` table of the session catalog
    (`<data-dir>/lash-sessions.db`), while Postgres wires
-   `FileAttachmentStore` under `<data-dir>/attachments`. The deterministic companion gate
-   reopens the backend's attachment store and checks model usage in trace records
-   against the SQLite session-store backend.
+   `FileAttachmentStore` under `<data-dir>/attachments`.
 6. **The transcript image is the attachment contract.** The matching user row must contain
    exactly one `a.message-attachment[data-attachment-id]` wrapping exactly one `<img>` whose
    `src` equals the link's `href`; the id on the link and the URL on both must agree with the
@@ -79,9 +77,6 @@ cross-surface identity, not the quality of the model's image description.
 
 ## Working material
 
-- First run `just agent-workbench-attachment-usage-gate <gate-port>` on **its own port**,
-  not the browser stack's. It is model-free and asserts upload → reference → persist →
-  retrieve and non-zero reported usage in JSONL `llm_call_completed` records.
 - Boot the browser scenario with a fresh directory:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
   (the `just agent-workbench <port>` recipe is the same command, but it does not export
@@ -194,7 +189,6 @@ confirm the workbench and its managed services are gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Deterministic companion | SQLite gate command exits zero | | command log |
 | Rendered upload | attached filename is visible before send | | `01-attached.png`, upload JSON |
 | Byte fidelity | source and pre-restart retrieval hashes/lengths agree | | source, `01-before-restart.png` |
 | Turn reference | `/api/turn` carries the upload id; correlated upload/request/wire traces carry matching reference and content facts | | request capture, `02-upload-trace.json`, `02-provider-request.json`, `02-provider-wire.json` |

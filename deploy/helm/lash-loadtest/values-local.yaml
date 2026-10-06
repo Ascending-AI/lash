@@ -1,3 +1,0 @@
-# Local kind on the quiet host is the 1.0 performance baseline target.
-# Resources, topology, workload and faults come unchanged from values.yaml.
-{}

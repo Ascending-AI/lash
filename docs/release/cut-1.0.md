@@ -45,8 +45,8 @@ never grants a blanket exception for workflow changes.
 
 ## Activate the gates
 
-After the reset, make version-bumps and release-journal-replay required in the
-CI conclusion and release publication dependencies. Compare with the reset
+After the reset, make version-bumps required in the CI conclusion and release
+publication dependencies. Compare with the reset
 commit. Comparing the reset with pre-cut main intentionally refuses counters
 moving backwards.
 
@@ -84,8 +84,5 @@ generations. Use the workspace Kiln feature graph for capture and replay. The
 manifest names the exact source commit; each journal records its generation
 and ordered entries.
 
-Commit the tagged corpus and point `LASH_REPLAY_CORPUS_ROOT` in required replay
-jobs at `fixtures/release/v1.0.0/replay-corpus`. Remove rehearsal inputs from
-required job selection. The tagged corpus is immutable. Later builds compare
-only journals with their generation; other generations retain their drain
-routes. The added-step law checks the exact JOURNAL_LOGIC_EPOCH bump message.
+Commit the tagged corpus. Remove rehearsal inputs from required job selection.
+The tagged corpus is immutable.

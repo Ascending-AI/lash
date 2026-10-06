@@ -5,9 +5,6 @@ crates/lash-perf/src/runtime_perf/store.rs  |  self.inner.load_session_window(se
 crates/lash-perf/src/runtime_perf/store.rs  |  self.inner.load_ancestors(session_id, anchor, budget).await  |  1  # PAGED decorator forwards caller budget
 crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs  |  .load_session_window(  |  1  # WINDOW reopen checkpoint measurement loads current frame
 crates/lash-sim/src/content_oracle.rs  |  .load_ancestors(  |  1  # PAGED simulator oracle walks committed graph in bounded pages
-runbooks/restate-postgres-workers/src/bin/runner/process_assertions.rs  |  .load_session_window(  |  1  # WINDOW read-view runbook assertion reads current frame
-crates/lash-sim/src/crash_matrix/invariants.rs  |  .load_ancestors(  |  1  # PAGED crash matrix reconstructs committed transcript across frames
-crates/lash-sim/src/crash_matrix/cases/definition_create.rs  |  .load_ancestors(  |  1  # PAGED crash create oracle reads the committed frame in a bounded page
 crates/lash-core/src/runtime/session_api.rs  |  .load_session_window(crate::store::WindowSelector::Current)  |  1  # WINDOW read-view session API reads current frame
 crates/lash-core/src/runtime/session_api.rs  |  .load_session_window(crate::store::WindowSelector::Admitted(base.clone()))  |  1  # WINDOW turn session API reads admitted frame
 crates/lash/src/durable_session.rs  |  Ok(self.store().await?.load_ancestors(anchor, budget).await?)  |  1  # PAGED public history facade forwards caller budget

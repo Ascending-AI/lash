@@ -519,30 +519,4 @@ mod tests {
             Err(ReplayError::Divergence(message)) if message.contains("observed payload changed")
         ));
     }
-
-    #[test]
-    fn promoted_queued_active_turn_cancel_regression_replays() {
-        let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("replays/queued-active-turn-cancel-race/trace.json");
-        let trace = read_trace(&trace_path).expect("read promoted replay fixture");
-        let report = replay_trace(&trace_path, &trace).expect("replay promoted fixture");
-
-        assert!(report.terminal_verdict.is_passed());
-        assert_eq!(report.delivered_event_count, trace.events.len());
-        assert!(trace.oracles.iter().any(|verdict| {
-            verdict.oracle_id
-                == "sim.oracle.scenario-mini.runtime.queued-input-hidden-while-live.v1"
-                && verdict.is_passed()
-        }));
-        assert!(trace.oracles.iter().any(|verdict| {
-            verdict.oracle_id
-                == "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-admission.v1"
-                && verdict.is_passed()
-        }));
-        assert!(
-            report.final_summary.sessions.iter().any(|session| {
-                session.queued_ingress_count > 0 && session.cancellation_count > 0
-            })
-        );
-    }
 }

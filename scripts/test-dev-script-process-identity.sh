@@ -108,12 +108,7 @@ assert_agent_workbench_default_derivation() {
   local expected_offset="$2"
   local output="$test_tmp/agent-workbench-trace-$workbench_port.log"
   local status
-  env -u AGENT_WORKBENCH_RESTATE_ADDR \
-    -u RESTATE_INGRESS_URL \
-    -u RESTATE_ADMIN_URL \
-    -u AGENT_WORKBENCH_RESTATE_ADMIN_PORT \
-    -u AGENT_WORKBENCH_RESTATE_NODE_PORT \
-    -u AGENT_WORKBENCH_POSTGRES \
+  env -u AGENT_WORKBENCH_POSTGRES \
     -u AGENT_WORKBENCH_POSTGRES_PORT \
     -u AGENT_WORKBENCH_DATABASE_URL \
     AGENT_WORKBENCH_RUN_DIR="$test_tmp/agent-workbench/trace-$workbench_port/run" \
@@ -123,14 +118,6 @@ assert_agent_workbench_default_derivation() {
 
   grep -Fqx "+ port_offset=$expected_offset" "$output" \
     || fail "agent-workbench port $workbench_port used an unexpected offset"
-  grep -Fqx "+ default_restate_endpoint_port=$((9081 + expected_offset))" "$output" \
-    || fail "agent-workbench port $workbench_port used an unexpected endpoint port"
-  grep -Fqx "+ default_restate_ingress_port=$((8080 + expected_offset))" "$output" \
-    || fail "agent-workbench port $workbench_port used an unexpected ingress port"
-  grep -Fqx "+ default_restate_admin_port=$((19070 + expected_offset))" "$output" \
-    || fail "agent-workbench port $workbench_port used an unexpected admin port"
-  grep -Fqx "+ default_restate_node_port=$((19071 + expected_offset))" "$output" \
-    || fail "agent-workbench port $workbench_port used an unexpected node port"
   grep -Fqx "+ default_postgres_port=$((15432 + expected_offset))" "$output" \
     || fail "agent-workbench port $workbench_port used an unexpected Postgres port"
 }
@@ -139,14 +126,9 @@ run_agent_workbench_port_cases() {
   local output="$test_tmp/agent-workbench-port.log"
   local status
 
-  env -u AGENT_WORKBENCH_RESTATE_ADDR \
-    -u RESTATE_INGRESS_URL \
-    -u RESTATE_ADMIN_URL \
-    -u AGENT_WORKBENCH_RESTATE_ADMIN_PORT \
-    -u AGENT_WORKBENCH_RESTATE_NODE_PORT \
-    -u AGENT_WORKBENCH_POSTGRES \
-    -u AGENT_WORKBENCH_POSTGRES_PORT \
+  env -u AGENT_WORKBENCH_POSTGRES_PORT \
     -u AGENT_WORKBENCH_DATABASE_URL \
+    AGENT_WORKBENCH_POSTGRES=1 \
     AGENT_WORKBENCH_RUN_DIR="$test_tmp/agent-workbench/high/run" \
     bash "$repo_root/scripts/agent-workbench-dev.sh" status --port 21440 \
     > "$output" 2>&1 || status=$?
@@ -156,10 +138,6 @@ run_agent_workbench_port_cases() {
 
   status=0
   AGENT_WORKBENCH_RUN_DIR="$test_tmp/agent-workbench/explicit-high/run" \
-    AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:49081 \
-    RESTATE_INGRESS_URL=http://127.0.0.1:48080 \
-    RESTATE_ADMIN_URL=http://127.0.0.1:49070 \
-    AGENT_WORKBENCH_RESTATE_NODE_PORT=49071 \
     AGENT_WORKBENCH_POSTGRES=1 \
     AGENT_WORKBENCH_POSTGRES_PORT=45432 \
     bash "$repo_root/scripts/agent-workbench-dev.sh" status --port 21440 \

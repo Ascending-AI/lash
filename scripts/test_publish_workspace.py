@@ -24,6 +24,7 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-core-llm": "lash-internal-core-llm",
     "lash-core-store": "lash-internal-core-store",
     "lash-core-worker": "lash-internal-core-worker",
+    "lash-durable": "lash-internal-durable",
     "lash-http-transport": "lash-internal-http-transport",
     "lash-lashlang-runtime": "lash-internal-lashlang-runtime",
     "lash-llm-tools": "lash-internal-llm-tools",
@@ -40,7 +41,6 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-provider-openai": "lash-internal-provider-openai",
     "lash-remote-protocol": "lash-internal-remote-protocol",
     "lash-render": "lash-internal-render",
-    "lash-restate": "lash-internal-restate",
     "lash-rlm-types": "lash-internal-rlm-types",
     "lash-s3-store": "lash-internal-s3-store",
     "lash-sansio": "lash-internal-sansio",
@@ -467,22 +467,18 @@ class PublishWorkspaceTest(unittest.TestCase):
         self.assertEqual(remote["rename"], "lash-remote-protocol")
         self.assertIn("core-conversions", remote["features"])
 
-        for extension_name in (
-            "lash-internal-provider-openai",
-            "lash-internal-restate",
-        ):
-            extension = next(
-                package
-                for package in metadata["packages"]
-                if package["name"] == extension_name
-            )
-            facade_dev_dependency = next(
-                dependency
-                for dependency in extension["dependencies"]
-                if dependency["name"] == "lash-runtime" and dependency["kind"] == "dev"
-            )
-            self.assertEqual(facade_dev_dependency["rename"], "lash")
-            self.assertEqual(facade_dev_dependency["req"], "*")
+        extension = next(
+            package
+            for package in metadata["packages"]
+            if package["name"] == "lash-internal-provider-openai"
+        )
+        facade_dev_dependency = next(
+            dependency
+            for dependency in extension["dependencies"]
+            if dependency["name"] == "lash-runtime" and dependency["kind"] == "dev"
+        )
+        self.assertEqual(facade_dev_dependency["rename"], "lash")
+        self.assertEqual(facade_dev_dependency["req"], "*")
 
     def test_uploaded_crate_digest_mismatch_fails_the_release(self) -> None:
         # The point of the post-publish check: if crates.io serves anything

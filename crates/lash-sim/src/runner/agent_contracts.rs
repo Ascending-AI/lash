@@ -1364,9 +1364,5 @@ fn normalize_contract_tool_output(value: Value) -> Value {
 }
 
 #[cfg(test)]
-#[path = "agent_contracts_effect_boundary_tests.rs"]
-mod effect_boundary_tests;
-
-#[cfg(test)]
 #[path = "agent_contracts_payload_tests.rs"]
 mod payload_tests;

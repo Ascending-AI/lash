@@ -11,9 +11,7 @@ scorecard: an evidence-less failed attempt must remain visible before its succes
 including after cursor replay and snapshot hydration. Each fault is deterministic so the
 visible wording and final state are objective gates.
 
-**Deterministic companion.** `just agent-workbench-restate-e2e` asserts the auth terminal,
-same-session recovery, retry attempt reset, and single-copy live/replay observations.
-`kiln test --test_output=all //crates/lash-core-llm:lash-core-llm__unit_test --test_arg=charge_safety` asserts the
+**Deterministic companion.** `kiln test --test_output=all //crates/lash-core-llm:lash-core-llm__unit_test --test_arg=charge_safety` asserts the
 paid-output refusal and the charge-safety decision surface — six tests; require that count.
 (The previously named
 `retryable_mid_stream_failure_preserves_paid_output_without_retry` does not exist, and the
@@ -67,8 +65,8 @@ internal assertions.
   JSON array, not an object with an `items` or `work` key), and the observation
   stream used by the page. Disk truth: `<fresh-data-dir>/trace.jsonl` and
   `active-turns.json`.
-- End every phase with `bash scripts/agent-workbench-dev.sh down --port <port>` and confirm its managed Restate
-  container is gone before reusing the port.
+- End every phase with `bash scripts/agent-workbench-dev.sh down --port <port>` and confirm the
+  workbench process is gone before reusing the port.
 
 ## Phase 0 — Common pre-flight
 
@@ -198,11 +196,9 @@ UI and `/api/work` must identify the same process id. Screenshot `05-failed-proc
 
 ## Phase 5 — Teardown and score
 
-Tear down the final stack and confirm its managed Restate container
-(`lash-agent-workbench-dev-restate-<port>`) is gone. The four phases are sequential and one
-stack owns exactly one Restate container, so the other three were already removed by their
-own phase teardowns — confirm those retrospectively from the per-phase teardown logs rather
-than expecting four containers to be present here.
+Tear down the final stack and confirm its workbench process is gone. The four phases are
+sequential, so the other three stacks were already removed by their own phase teardowns —
+confirm those retrospectively from the per-phase teardown logs.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

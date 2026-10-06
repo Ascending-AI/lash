@@ -6,8 +6,8 @@
 
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. It is verified: the phases below execute it, and no step
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the
+> application data. It is verified: the phases below execute it, and no step
 > of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
@@ -41,9 +41,8 @@ the model's surrounding prose.
 4. **Restart means the web process.** Use `bash scripts/agent-workbench-dev.sh restart
    --port <port>` (equivalently `just agent-workbench-restart <port>`) with the same explicit
    `AGENT_WORKBENCH_RUN_DIR` and `AGENT_WORKBENCH_DATA_DIR` — the verified non-destructive
-   same-configuration replacement named in this runbook's FIG-1164/FIG-3035 header. Restate,
-   the data directory, the session
-   id, and `deferred-tool-grants.db` must remain unchanged; never substitute the destructive
+   same-configuration replacement named in this runbook's FIG-1164/FIG-3035 header. The data
+   directory, the session id, and `deferred-tool-grants.db` must remain unchanged; never substitute the destructive
    reset.
 5. **No second search after restart.** Snapshot the trace byte offset before Phase 3.
    The post-restart slice must contain a completed `workbench_deferred_text_sha256` tool call
@@ -63,8 +62,7 @@ the model's surrounding prose.
   subdirectories, exported as `AGENT_WORKBENCH_DATA_DIR` and `AGENT_WORKBENCH_RUN_DIR`.
   (Earlier wording pinned `/workspace/tmp/fig1116-*/` paths and warned off ports 3056/3057;
   that is an older layout and conflicts with RULES.md.)
-- Boot with both variables exported plus `AGENT_WORKBENCH_OPEN=0` and
-  `RESTATE_AUTHORITY_ID=<stable-id>`:
+- Boot with both variables exported plus `AGENT_WORKBENCH_OPEN=0`:
   `bash scripts/agent-workbench-dev.sh up --port <port>`. Gate `GET /healthz` → 200. Phase 2
   restarts with the same exports and `… restart --port <port>`. (The `just agent-workbench …`
   recipes name the same operations but do not carry this row's environment.)
@@ -75,7 +73,7 @@ the model's surrounding prose.
   `<data-dir>/lash-sessions.db`, `<data-dir>/trace.jsonl`, and
   `<data-dir>/lashlang-execution.jsonl`.
 - Teardown: `bash scripts/agent-workbench-dev.sh down --port <port>` with the same run/data variables, then
-  verify the Workbench process and managed Restate container are gone.
+  verify the Workbench process is gone.
 
 ## Phase 0 — Fresh boot and baseline
 
@@ -83,7 +81,7 @@ Require `OPENROUTER_API_KEY`; a missing key is a harness gap → Abort. Choose a
 free 3200-range port. Require both run/data paths to be absent or empty, boot the stack,
 and poll `/healthz`. Open `/?session_id=<S>` using the durable session id exposed by the
 app. Require the rendered session id, `/api/state.settings.session_id`, and
-`<data-dir>/session-id` to agree. Record the Workbench PID and Restate container id.
+`<data-dir>/session-id` to agree. Record the Workbench PID.
 
 Require the initial SQLite query
 `SELECT call_path, grant_json FROM deferred_tool_grants ORDER BY call_path` to return no
@@ -129,15 +127,13 @@ newest transcript rows visible.
 
 ## Phase 2 — Restart with the same durable state
 
-Record the current `trace.jsonl` byte length, Workbench PID, session id, Restate
-container id, and SHA-256 of `01-grants.json`. Run
+Record the current `trace.jsonl` byte length, Workbench PID, session id, and SHA-256 of `01-grants.json`. Run
 `bash scripts/agent-workbench-dev.sh restart --port <port>` with the same explicit run/data
 variables — the non-destructive same-configuration replacement of golden rule 4. It prints
-`replaced process; the Restate deployment, its journals and the application data … were
-retained`, which is the readiness evidence for this phase. Then poll `/healthz` and reload the
+`replaced process; the managed services and the application data … were retained`, which is the readiness evidence for this phase. Then poll `/healthz` and reload the
 same session URL.
 
-Require a new Workbench PID, unchanged Restate container id, unchanged session id, and
+Require a new Workbench PID, unchanged session id, and
 the Phase 1 transcript reconstructed exactly. Query SQLite again and require the
 `text.sha256` row and `grant_json` to be byte-identical to `01-grants.json`. Screenshot
 `02-restarted.png`; save `02-state.json`, `02-grants.json`, and `02-identities.json`.
@@ -166,7 +162,7 @@ Screenshot `03-persisted-grant-call.png` with the second result visible.
 ## Phase 4 — Teardown and score
 
 Run `just agent-workbench-down <port>` with the same run/data variables. Confirm the
-Workbench process and managed Restate container are gone. Preserve the artifact directory.
+Workbench process is gone. Preserve the artifact directory.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
@@ -175,7 +171,7 @@ Workbench process and managed Restate container are gone. Preserve the artifact 
 | Two-step handshake | search cell precedes a distinct deferred-call cell | | `01-two-blocks.json` |
 | Deferred execution | raw deferred call completes; UI/API show exact digest | | `01-deferred-call.json`, `01-search-call-complete.png` |
 | Durable grant | SQLite row contains definition, source, binding | | `01-grants.json` |
-| Workbench restart | new PID; same Restate/session/data; transcript reconstructs | | `02-*` |
+| Workbench restart | new PID; same session/data; transcript reconstructs | | `02-*` |
 | Restart persistence | direct call succeeds with no new search; grant JSON unchanged | | `03-post-restart-trace.json`, `03-grants.json` |
 | Three-layer projection | DOM, API/store, and trace counts agree pairwise after both turns | | `01-crosscheck.json`, `03-crosscheck.json` |
 

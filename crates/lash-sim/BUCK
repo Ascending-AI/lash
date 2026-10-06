@@ -190,17 +190,16 @@ lash_rust_integration_test(
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
-        ":lash-sim__bin",
     ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    test_env = {"CARGO_BIN_EXE_lash-sim": "$(location :lash-sim__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-sim",
     library_crate_name = "lash_sim",
     manifest_dir = "crates/lash-sim",
     package_name = "lash-sim",
-    rustc_env = {"CARGO_BIN_EXE_lash-sim": "$(location :lash-sim__bin)"},
+    rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
 )

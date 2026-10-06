@@ -51,18 +51,14 @@ deterministic_only = { emits = false, referent = "runbook" }
 [scenarios]
 provider-runtime-feedback = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "runtime_feedback_ workspace nextest companion; live outgoing retry request remains judged" }
 context-overflow-recovery = { tier = "deterministic", model = "scripted-provider" }
-process-operations = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the `just process-operations-e2e` companion, the FIG-1292 preflight, and Phases 0-10; only the five FIG-1293 tool rows call a provider" }
 rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 tictactoe-full-game = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
-workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro", deterministic_phases = "FIG-1346 three-variant completion companion on the Restate double; Scenarios A-C remain live judged rows" }
-workbench-attachments = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the shared `just agent-workbench-attachment-usage-gate` companion; only Phase 2 calls a provider" }
-workbench-break-glass = { tier = "deterministic", model = "scripted-provider" }
+workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-attachments = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "only Phase 2 calls a provider" }
 workbench-chat-projection = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "Surfaces A-E, on the named dev-provider scenarios; only Phases 0-4 call a provider" }
 workbench-continue-as = { tier = "frontier", model = "openai/gpt-5.6-sol" }
-workbench-cron-schedule = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-deferred-tools = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-durable-stop = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
-workbench-engine-restart = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 workbench-execution-state-rehydration = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-failure-paths = { tier = "deterministic", model = "scripted-provider" }
 workbench-inbox-world = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
@@ -111,9 +107,5 @@ host-effect-ledger = { tier = "deterministic", model = "scripted-provider" }
 host-provisioned-schema = { tier = "deterministic", model = "scripted-provider" }
 mcp-naming-refresh = { tier = "deterministic", model = "scripted-provider" }
 runtime-identity = { tier = "deterministic", model = "scripted-provider" }
-session-binding = { tier = "deterministic", model = "scripted-provider" }
-session-operator = { tier = "deterministic", model = "scripted-provider" }
 resident-tool-authority = { tier = "deterministic", model = "scripted-provider" }
 workbench-attachment-reclamation = { tier = "deterministic", model = "scripted-provider" }
-workbench-session-config = { tier = "deterministic", model = "scripted-provider" }
-workbench-trigger-retention = { tier = "deterministic", model = "scripted-provider" }

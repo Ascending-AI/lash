@@ -50,8 +50,7 @@ and renders no button for either. `curl` against `/api/admin/store-maintenance`
 ## Safety and stop conditions
 
 1. Use a port in the range this runbook's operator owns, a fresh
-   `AGENT_WORKBENCH_DATA_DIR`, a fresh `AGENT_WORKBENCH_RUN_DIR`, and a fresh
-   `RESTATE_AUTHORITY_ID`. Abort if any is already owned; do not take it over.
+   `AGENT_WORKBENCH_DATA_DIR`, and a fresh `AGENT_WORKBENCH_RUN_DIR`. Abort if any is already owned; do not take it over.
 2. Never point this procedure at a data directory holding content you are not
    authorized to destroy. Every arm below is run against a stack created for this
    rehearsal and torn down at the end.
@@ -85,7 +84,6 @@ AGENT_WORKBENCH_DATA_DIR="$work/data" \
 AGENT_WORKBENCH_RUN_DIR="$work/run" \
 AGENT_WORKBENCH_OPEN=0 \
 AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
-RESTATE_AUTHORITY_ID="attachment-reclamation-$port" \
   bash scripts/agent-workbench-dev.sh up --port "$port"
 ```
 
@@ -310,7 +308,6 @@ cleanly is worse than none.
 
 ```sh
 AGENT_WORKBENCH_DATA_DIR="$work/data" AGENT_WORKBENCH_RUN_DIR="$work/run" \
-RESTATE_AUTHORITY_ID="attachment-reclamation-$port" \
   bash scripts/agent-workbench-dev.sh down --port "$port"
 rm -rf "$work"
 ```

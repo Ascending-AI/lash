@@ -2,8 +2,6 @@
 
 `figments-v1.json` implements FIG-3790 design sections 2 and 3 for lane L1.
 Its traffic mix, rates and byte buckets are synthetic defaults.
-Topology and resource limits live in `deploy/helm/lash-loadtest/values.yaml`,
-which the portable definition records alongside the workload.
 The first measurements may justify revised defaults before baseline extraction.
 The `inventory` object pins the Lash and Figments source snapshots used by the
 design. This directory contains no production data and needs no Figments checkout.
@@ -92,23 +90,19 @@ serial tools, parked children, signalled and cancelled host starts, attachments
 shared by an actor pair, active and idle queued inputs and their cancels, turn
 cancels, deletes, rotations and retryable first attempts. The fixture test
 checks that coverage. Its fault phase is also shortened for the fault
-controller's smoke (FIG-4169): after a 60 s warm-up, a worker kill at 20 s, a
-Restate node restart at 60 s and a rolling deploy at 100 s of a 150 s window,
-each restarted after 5 s, with a 10 s recovery hold.
+controller's smoke (FIG-4169): after a 60 s warm-up, a worker kill at 20 s and
+a rolling deploy at 100 s of a 150 s window, each restarted after 5 s, with a
+10 s recovery hold.
 
 `fixtures/sizes-v1.json` covers every text/JSON byte bucket and all six attachment
 aggregate/count combinations. `fixtures/mix-v1.json` sets a 25,000-plan sample
 and statistical bounds for 12 distributions, overlapping membership and
 conditional/auxiliary rates. Provider fixtures parse 300 responses and their
 retries with the existing TypeScript frontend. These are input-generation
-checks. `runbooks/restate-postgres-workers/src/load` executes them through
-lash's public API with independent witness evidence (FIG-4168); the
-measurement lane owns clocks, counters and proof of model-code pool execution.
+checks. No driver executes them today; the measurement lane owns clocks,
+counters and proof of model-code pool execution.
 
-The FIG-4241 smoke prefill uses two turns. The live driver adds a bounded
-operation workflow for administrative and pressure compaction, an auxiliary
-request, external occurrences, trigger edits and promotion discovery.
-`admitted_response` combines the plans of every input admitted by a run into
+The FIG-4241 smoke prefill uses two turns. `admitted_response` combines the plans of every input admitted by a run into
 one cell, with one finish value listing all input keys. Each turn's tool,
 attachment and child-process plan still executes when it is batched with a
 queued input. The provider implements the generated chunk deadlines with SSE.

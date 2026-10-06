@@ -19,7 +19,7 @@ ignore = "...")``) -- and requires, for each:
   ignored tests;
 * a PostgreSQL-only law is actually selected there (its fragment matches the
   suite's name filter and is not swallowed by a ``--skip``);
-* a law whose reason names a second service (``restate``, ``managed``, ``s3``)
+* a law whose reason names a second service (``managed``, ``s3``)
   is *not* silently run by a Postgres-only suite -- wherever a suite's filter
   would select it, a skip in the same suite must name it.
 
@@ -49,7 +49,7 @@ STORE_TESTS = Path("scripts/ci/store-tests.sh")
 POSTGRES = re.compile(r"postgres", re.IGNORECASE)
 # A reason naming one of these means a pg16 container alone does not satisfy
 # the law, so the Postgres suite must not select it.
-SECOND_SERVICE = re.compile(r"restate|managed|\bs3\b|minio", re.IGNORECASE)
+SECOND_SERVICE = re.compile(r"managed|\bs3\b|minio", re.IGNORECASE)
 
 # `#[ignore]` and `#[ignore = "reason"]`.
 ATTR_IGNORE = re.compile(r'#\[\s*ignore\b(?:\s*=\s*"([^"]*)")?\s*\]')
@@ -58,8 +58,8 @@ ATTR_IGNORE = re.compile(r'#\[\s*ignore\b(?:\s*=\s*"([^"]*)")?\s*\]')
 # "...")`).
 ARG_IGNORE = re.compile(r'\bignore\s*=\s*"([^"]*)"')
 # A bare gate literal among a macro's arguments, where the macro's own
-# `$(#[ignore = $ignore])?` arm writes the attribute: `laws!(live_postgres,
-# Postgres, true, "requires PostgreSQL and live Restate")`.
+# `$(#[ignore = $ignore])?` arm writes the attribute: `laws!(s3_postgres,
+# Postgres, true, "requires PostgreSQL and S3")`.
 GATE_REASON = re.compile(r'requires[^"]*postgres|postgres[^"]*requires', re.IGNORECASE)
 STRING_LITERAL = re.compile(r'"([^"]*)"')
 

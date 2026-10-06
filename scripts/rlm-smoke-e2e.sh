@@ -83,9 +83,7 @@ for scenario in "${scenarios[@]}"; do
     cp -a "$scenario_dir/workspace/." "$workspace/"
     chmod -R u+rwX "$workspace"
 
-    # Each row's host runs against its own local restate-server, the
-    # zero-infra effect engine (ADR 0104 section 4).
-    "$repo/scripts/ci/with-service.sh" restate -- "$smoke_host_bin" \
+    "$smoke_host_bin" \
         --scenario "$scenario" \
         --scenario-dir "$scenario_dir" \
         --workspace "$workspace" \

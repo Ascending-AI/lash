@@ -11,12 +11,6 @@ from typing import Any, Iterator
 
 REPO = Path(__file__).resolve().parents[1]
 
-# This independent schema probe installs a captured provider transport. Host
-# sources, including the workers harness, use the facade without exemptions.
-RUNBOOK_INTERNAL_SOURCES = frozenset({
-    Path('runbooks/restate-postgres-workers/src/schema_admission_tests.rs'),
-})
-
 
 def dependency_tables(
     document: dict[str, Any],
@@ -95,8 +89,6 @@ def violations() -> list[tuple[Path, int, str]]:
     found: list[tuple[Path, int, str]] = []
     for source in sorted(sources):
         relative = source.relative_to(REPO)
-        if relative in RUNBOOK_INTERNAL_SOURCES:
-            continue
         names = "|".join(re.escape(name) for name in sorted(import_crates(source, forbidden)))
         if not names:
             continue

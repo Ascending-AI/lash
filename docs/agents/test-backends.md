@@ -47,7 +47,7 @@ The facade's remaining PostgreSQL-only laws -- ignored tests spread across
 `//crates/lash:lash__unit_test` and the integration binaries -- run in the
 same job as `pg-facade-laws`, which selects them by name: a law a pg16
 container alone satisfies carries `postgres` in its libtest path. A law that
-also needs a live Restate or a managed service is named and skipped there;
+also needs a managed service is named and skipped there;
 its own suite owns it.
 `scripts/check_postgres_gate_coverage.py` fails if a PostgreSQL-gated ignored
 test lands in a binary no Postgres suite runs, or is named so the filter
@@ -65,26 +65,18 @@ journal semantics. These are targeted soak recipes, not extra default gates.
 
 | Host | Code and targets | Gate or recipe |
 | --- | --- | --- |
-| In-process Restate server double | `crates/lash-restate-test/src/server/` implements the server protocol. `backend.rs` installs lash-restate over SQLite memory by default; `backend_with_store_set` accepts another store set. Its `ServerConfig::always_replay` mode replays the handler journal. Store fixtures that need engine execution borrow this host. | Cacheable `kiln test` targets under `//crates/lash-restate-test` and the SQLite conformance binaries. Adapter-level recording/replay context laws also register in `crates/lash-restate/src/tests/conformance_and_poison.rs`, target `//crates/lash-restate:lash-restate__unit_test`. |
-| Live Restate | The same lash-restate engine runs against a pinned real `restate-server`. Live registrations are explicit, often ignored in ordinary libtest runs. `scripts/restate-suites.toml` names the binary, filters, endpoint binds, shards and any held divergences. | The registered Run, source, continuation and deployment suites select their surviving laws by full path; `just server-double-e2e` runs server semantics, namespaces, crash windows and session shift continuation. The registry and `scripts/ci/restate_suite.py` define the `live` and `replay` legs. The replay leg sets inactivity timeout to zero. Run local service recipes inside `kiln gate lash <fork> -- ...`; CI invokes the shared recipes without kiln. |
-| lash-sim in-process recording effect host | The storage differential uses `lash_conformance::recording_backend_over` and `RecordingEffectHost` for lifecycle authority over its SQL stores. This host records fixture outcomes; it does not certify a production durable engine. Full simulated turns use `SimEngine` in `crates/lash-sim/src/backend.rs`, which runs lash-restate on the concurrent Restate server double over SQLite memory. | `kiln test //crates/lash-sim:cross_backend_store_differential__test` for the non-service differential laws and the cacheable lash-sim test targets for simulated histories. `just crash-matrix-restate-e2e` runs the crash matrix with live Restate. |
+| lash-sim in-process recording effect host | The storage differential uses `lash_conformance::recording_backend_over` and `RecordingEffectHost` for lifecycle authority over its SQL stores. This host records fixture outcomes; it does not certify a production durable engine. Full simulated turns use `SimEngine` in `crates/lash-sim/src/backend.rs`, which builds lash's durable engine over SQLite memory. | `kiln test //crates/lash-sim:cross_backend_store_differential__test` for the non-service differential laws and the cacheable lash-sim test targets for simulated histories. |
 
-The live suite runner bounds retries and test time. The registry in
-`scripts/restate-suites.toml` defines any held replay laws and their per-ticket
-divergence records; a held law has no passing replay proof. `scripts/confidence-gate.sh` composes these existing targets and
+`scripts/confidence-gate.sh` composes these existing targets and
 service recipes into optional confidence lanes; its lanes do not create
 another backend.
 
 ## Synthetic-next upgrade tier
 
 `synthetic-next` builds N and N+1 from the same source with different advertised
-read/write ranges. It is an upgrade configuration over SQLite, PostgreSQL and
-Restate, not a new store. `just _upgrade-harness-builds` resolves the exact
-feature variants from `tools/buck2/target-inventory.json`. `just e2e-rolling` runs the rolling harness;
-`just phase-a` runs its selected fault/rollback legs. The harness uses separate
-node processes, a SQLite directory, PostgreSQL and a live Restate server.
-CI's functional E2E board invokes these recipes. Normal feature-lane checks
-prove compile/test availability; they do not replace the live upgrade proof.
+read/write ranges. It is an upgrade configuration over SQLite and PostgreSQL,
+not a new store. Normal feature-lane checks prove compile/test availability;
+they do not replace a live upgrade proof.
 
 ## Retired implementations and mechanisms
 
@@ -92,16 +84,17 @@ Each row names the deletion commit, not merely the ADR that proposed it.
 
 | Retired item | Retirement evidence and replacement |
 | --- | --- |
-| In-memory store conformance legs | Retired in `dd80a5e7cc`, which removed their registrations and moved unique engine laws to the Restate test engine. The Rust stores were then retired in `60e0e86b2a`. Store laws now register on SQLite file/memory and PostgreSQL. |
+| In-memory store conformance legs | Retired in `dd80a5e7cc`, which removed their registrations and moved unique engine laws to the engine's test host. The Rust stores were then retired in `60e0e86b2a`. Store laws now register on SQLite file/memory and PostgreSQL. |
 | Rust in-memory stores, `lash-core-memory`, local process registry, native effect host and store-delegated turn control | Retired in `60e0e86b2a`. The store set is SQL storage; the engine owns turn execution and replay. Process observation buffers and recording fixtures still exist, but do not constitute that retired persistence tier. |
 | In-memory Lashlang artifact store on the facade | Retired in `7f11e493a7` from the facade in favor of the backend's artifact store. Remaining Rust stores were retired in `60e0e86b2a`. |
 | PostgreSQL effect engine | Retired in `4f03596847`. PostgreSQL keeps storage, with no engine journal tables or await-event engine. |
-| SQLite effect engine and store-journal turn host | Retired in `476264fbea`. Restate owns effect journals; SQLite file and memory remain storage. |
+| SQLite effect engine and store-journal turn host | Retired in `476264fbea`. SQLite file and memory remain storage. |
 | SQL session-execution leases | Retired in `1ea8fcff75`. Writes use the sealed shift fence and session-head compare-and-set. |
-| Process leases and native recovery sweeps | Retired in `33e7ebc44d`. Restate owns execution and lost-run reconciliation; the process registry retains lifecycle, events and wake obligations. |
+| Process leases and native recovery sweeps | Retired in `33e7ebc44d`. The engine owns execution and lost-run reconciliation; the process registry retains lifecycle, events and wake obligations. |
 | Turn-input and queued-work claim tokens, `queued_runs` ledger | Retired in `671a616419`. Admission binds inputs and work; run identity keys settlement. |
 | Await-event signing material | Retired in `7ab7707a8f`. Wait keys are identities; a host owns any authorization policy. |
 | Runtime-owned tool-intent admission | Retired in `0417b7f48b`. The engine realizes intents and the submission ledger retains their binding and outcome. |
+| The Restate engine, its server double and its live suites | Retired in `5ad9641f9e` (FIG-5190). Lash's durable engine replaces it ([ADR 0132](../adr/0132-durability-is-state-first-over-the-lash-store.md)); each test law that went with it has a row in `docs/testing/substrate-port-ledger.toml`. |
 | Local rewind after worker loss | Retired in `9c1bbd2189`. The parent settles the admitted operation and fails retryable so the execution substrate redrives from the checkpoint. Parking a live VM is a different, surviving operation. |
 | Runtime-operation effect journals outside turn/session scope | Retired in `caa1f7efe3`. Engine-owned workflows/objects carry durable waits and operation scopes. |
 | Orchestrating tools and their registry lane | Retired in `501f323f61`. Tools are opaque providers; a Pending result can declare a child start. |

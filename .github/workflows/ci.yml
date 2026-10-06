@@ -145,7 +145,7 @@ jobs:
       rust: ${{ steps.classify.outputs.rust }}
       stores: ${{ steps.classify.outputs.stores }}
       pr_pg_store: ${{ steps.classify.outputs.pr_pg_store }}
-      pr_host_restate: ${{ steps.classify.outputs.pr_host_restate }}
+      pr_host_e2e: ${{ steps.classify.outputs.pr_host_e2e }}
       functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
       feature_lanes: ${{ steps.classify.outputs.feature_lanes }}
       workbench: ${{ steps.classify.outputs.workbench }}
@@ -458,7 +458,6 @@ jobs:
           bash scripts/ci/run-gate-commands.sh --jobs 4 --discover <<'GATES'
           python3 scripts/check_transcript_projection.py
           python3 scripts/check_worker_wire_schema.py
-          bash scripts/check-loadtest-chart.sh
           python3 scripts/check_feature_coverage.py check
           # The feature checker requires this literal witness. Discovery
           # also finds it; the runner executes each command only once.
@@ -580,8 +579,7 @@ jobs:
   # move. It runs beside the Buck2 partition on its own
   # runner, so it adds to a run's wall-clock only when it is the slowest job.
   # `//:feature_lane_compile` is the whole lane build graph, so it also covers the runtime
-  # OFF witness (FIG-3427) and the Restate release resolution (FIG-3610) that
-  # used to be named individually for the Lint job. It needs the pool's cache
+  # OFF witness (FIG-3427) that used to be named individually for the Lint job. It needs the pool's cache
   # credentials, so an untrusted pull request skips it; the merge group is
   # always trusted and proves every variant before anything lands.
   #
@@ -1526,8 +1524,8 @@ jobs:
       # //crates/lash binaries; before FIG-4743 no CI job selected them and
       # they only ran by hand. The suite derives the cases by name -- every
       # law a pg16 container alone satisfies carries `postgres` in its libtest
-      # path -- and skips the ones that also need a live Restate or managed
-      # service, which their own suites own.
+      # path -- and skips the ones that also need a managed service, which
+      # their own suites own.
       # scripts/check_postgres_gate_coverage.py fails the checks job if a new
       # PostgreSQL-gated test in the crate escapes the selection.
       - name: Test facade laws on Postgres
@@ -1853,7 +1851,7 @@ jobs:
     # PRs run the transcript host leg on shift, handler or example changes.
     # The other matrix legs remain full-profile work.
     if: >-
-      (github.event_name == 'pull_request' && needs.plan.outputs.pr_host_restate == 'true'
+      (github.event_name == 'pull_request' && needs.plan.outputs.pr_host_e2e == 'true'
       && needs.plan.outputs.buck2_trusted == 'true')
       || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true')
     # A dispatch is always a trusted event, so every leg may read the
@@ -2093,9 +2091,6 @@ jobs:
 
       - name: Check the durability engine's SQL boundary
         run: python3 scripts/check-durable-sql.py
-
-      - name: Check operator guide command coverage
-        run: python3 scripts/check_operator_guide_commands.py
 
       - name: Check diff hygiene
         run: bash scripts/ci/check-diff-hygiene.sh

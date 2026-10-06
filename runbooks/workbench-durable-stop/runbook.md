@@ -6,25 +6,24 @@
 
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. It is verified: the phases below execute it, and no step
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the
+> application data. It is verified: the phases below execute it, and no step
 > of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
 **Purpose.** Prove the Agent Workbench Stop control uses Lash's exact-turn,
 keyed-promise cancellation primitive end to end. Stop one live turn normally, then start
-another, restart only the workbench web process while Restate owns the turn, and Stop it
+another, restart only the workbench web process while the durable engine owns the turn, and Stop it
 from the reconstructed UI. Finally, exercise Stop while a foreground turn awaits an
 independent process and distinguish that cooperative cancellation from session
 revocation. Stop must commit `Cancelled` for both the turn and awaited process; deleting
 the session must unwind the dead turn as `SessionDeleted` without cancelling the process.
 
-**Why this matters.** A web-process-local token or tracked Restate invocation id cannot
-survive this scenario. The workbench persists only the routing address, Restate owns the
-running turn, and `TurnWorkDriver` resolves the reserved gate and terminal promises. A
-successful restart case therefore proves the Stop path is not secretly process-local or
-using the Restate Admin API.
+**Why this matters.** A web-process-local token cannot survive this scenario. The workbench
+persists only the routing address, the durable engine owns the running turn, and
+`TurnWorkDriver` resolves the reserved gate and terminal promises. A successful restart case
+therefore proves the Stop path is not secretly process-local.
 
 **FIG-1445 referee linkage.** A shallow Stop issued ~0.3s into process start proves
 immediate keyed-promise resolution but says nothing about cancellation deep inside a
@@ -61,17 +60,14 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 4. **Restart only the web process.** Use `just agent-workbench-restart <port>` (equivalently
    `bash scripts/agent-workbench-dev.sh restart --port <port>`), the verified non-destructive
    same-configuration replacement named in this runbook's FIG-1164/FIG-3035 header. The data
-   directory and Restate container must remain
-   unchanged; tearing down Restate invalidates the durability proof. Never substitute the
-   destructive reset.
-5. **Break-glass is not success.** Never use Restate Admin cancel/kill to pass a gate. If
+   directory must remain unchanged. Never substitute the destructive reset.
+5. **Break-glass is not success.** Never kill the turn out of band to pass a gate. If
    cleanup requires it after an Abort, record that separately; it must not be reported as
    a Lash `Cancelled` terminal.
 6. **Revocation is not Stop, and it is not survival either.** `DELETE /api/session`
    aborts the session's own foreground turn — a committed `Cancelled` terminal carrying the
    delete evidence, reason `workbench Abort control` — and prunes the processes in the
-   deleted session's retention scope, recorded in the delete trace
-   `agent_workbench.reset.restate.session_deleted` under `process_retention.pruned_processes`.
+   deleted session's retention scope.
    Processes owned by *other* sessions are untouched: they receive no
    `process.cancel_requested`, stay visible in `/api/work`, and reach their own terminal.
    Revocation therefore unwinds the deleted session's own work and nothing else; a judge
@@ -102,19 +98,15 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 
 - Boot with a fresh durable directory through `scripts/agent-workbench-dev.sh`, which since
   FIG-3153 is the live path and honours `AGENT_WORKBENCH_BIN`:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> bash scripts/agent-workbench-dev.sh up --port <port>`
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
   (`just agent-workbench <port>` predates it and does not carry this row's env).
-  Gate `GET /healthz` → 200. The entire Restate stack is port-isolated by default: the
-  helper derives its endpoint, ingress, admin port, node port, and container name from
-  `<port>`, so concurrent runs on distinct workbench ports do not need manual Restate
-  overrides. Teardown:
+  Gate `GET /healthz` → 200. Teardown:
   `just agent-workbench-down <port>`.
 - To judge the same flow on Postgres, add `AGENT_WORKBENCH_POSTGRES=1` to the boot
   command. The dev helper starts a Postgres 16 container on a port derived from
-  `<port>`, passes its URL as `AGENT_WORKBENCH_DATABASE_URL`, records a managed-container
-  marker beside the Restate marker. The persistence contract requires both containers to remain
-  unchanged across the Phase 2 `agent-workbench-restart` replacement;
-  `agent-workbench-down` removes both. Record the Postgres
+  `<port>`, passes its URL as `AGENT_WORKBENCH_DATABASE_URL`, and records a managed-container
+  marker. The persistence contract requires the container to remain unchanged across the
+  Phase 2 `agent-workbench-restart` replacement; `agent-workbench-down` removes it. Record the Postgres
   container name and require the startup trace payload's `store_backend` to be
   `"postgres"` before Phase 1.
 - Browser affordances: chat composer, **stop turn** button, running/idle pill, transcript.
@@ -157,21 +149,13 @@ Press **stop turn** while capturing the `POST /api/turn/cancel` response. Gates:
 Screenshot `01-cancelled.png`; save the cancel response as `01-cancel-receipt.json`.
 After `/api/state` no longer lists the address, another workbench Stop must return
 `accepted:false` with an empty `cancellations` list. This session-level route cannot
-address an inactive turn. Run `LASH_E2E_TURN_CONTROL_ONLY=1 just
-restate-postgres-workers-e2e` for the exact-address late-cancel proof; it requires
-`completion_won_race` and unchanged terminal, durable evidence, disposition, and
-active-address state after both normal completion and owner-crash recovery. The same
-run gates the repeated-request contract of golden rule 9 against real Postgres: on an
-accepted but not yet started turn it requires `already_requested` for a matching repeat,
-`policy_conflict` naming both policies for a conflicting one, and an unchanged durable
-request row and intent revision after both.
+address an inactive turn.
 
 ## Phase 2 — Restart the web process mid-turn, then Stop
 
 Submit another long-running turn. Gate on Stop plus one `/api/state.active_turns` entry
 and record its session/turn ids. Then run `just agent-workbench-restart <port>` — the
-non-destructive same-configuration replacement of golden rule 4 — without touching Restate,
-poll `/healthz` until the replacement process is ready, reload the page,
+non-destructive same-configuration replacement of golden rule 4 — poll `/healthz` until the replacement process is ready, reload the page,
 and gate all of the following before pressing Stop:
 
 - the rendered session id is unchanged;
@@ -259,9 +243,7 @@ Gate the split:
 
 - the first session's turn commits a `Cancelled` terminal carrying the delete evidence
   with reason `workbench Abort control` — not a success, and not a stranded turn;
-- the first session's process is pruned: it is absent from `/api/work`, and the delete
-  trace record `agent_workbench.reset.restate.session_deleted` reports it under
-  `process_retention.pruned_processes` with a matching count;
+- the first session's process is pruned: it is absent from `/api/work`;
 - no `process.cancel_requested` is emitted for the bystander's process;
 - the bystander's process stays visible in `/api/work` across the delete and reaches its
   own terminal with the expected value.
@@ -275,8 +257,7 @@ outlives the delete, or a stranded first turn is Abort/RCA.
 
 ## Phase 6 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm both the workbench process and its
-Restate container are gone.
+Run `just agent-workbench-down <port>` and confirm the workbench process is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

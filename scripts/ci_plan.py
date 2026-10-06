@@ -39,7 +39,7 @@ FAMILIES = (
     "rust",
     "stores",
     "pr_pg_store",
-    "pr_host_restate",
+    "pr_host_e2e",
     "functional_e2e",
     "feature_lanes",
     "workbench",
@@ -374,7 +374,7 @@ def _is_pr_pg_store_path(path: str, path_class: PathClass) -> bool:
     )
 
 
-def _is_pr_host_restate_path(path: str) -> bool:
+def _is_pr_host_e2e_path(path: str) -> bool:
     if path.startswith("examples/"):
         return True
     if path.startswith("crates/lash-core/src/runtime/"):
@@ -507,8 +507,6 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     "scripts/e2e-workbench-operation.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
     "scripts/e2e-workbench-recovery.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
     "scripts/e2e-workbench-weather.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
-    "scripts/session_operator_e2e.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
-    "scripts/generate_loadtest_ledger.py": "its recipe built the deleted Restate workers runbook's ledger (FIG-5190); L9h (FIG-5186) rewires it",
 }
 
 # Directories a CI script reads whole, one file per change -- the
@@ -849,7 +847,6 @@ def classify_path(path: str, root: Path | None = None) -> PathClass:
     if (
         path in TOOLING_ROOT_FILES
         or path.startswith("tools/")
-        or (path.startswith("deploy/helm/") and suffix not in DOC_SUFFIXES)
     ):
         return PathClass(PathKind.TOOLING)
     if parts and parts[0] in PACKAGE_ROOTS:
@@ -1354,7 +1351,6 @@ DEV_TEST_GLOBAL_INPUTS: Mapping[str, str] = {
     ".gitattributes": "checkout normalization of every file",
     ".pre-commit-config.yaml": "hooks over every file",
     ".gitleaksignore": "the hygiene scan over every file",
-    "deploy/helm/*": "chart inputs with no declared reader",
 }
 
 ROOT_BUCK = "BUCK"
@@ -2162,7 +2158,7 @@ def classify(
         "pr_pg_store": any(
             _is_pr_pg_store_path(path, classes[path]) for path in build
         ),
-        "pr_host_restate": any(_is_pr_host_restate_path(path) for path in build),
+        "pr_host_e2e": any(_is_pr_host_e2e_path(path) for path in build),
         "functional_e2e": breadth,
         "workbench": workbench_hit,
         "regress": any(_is_regress_path(path) for path in build),
@@ -2211,7 +2207,7 @@ def evaluate_conclusion(
         problems.append(f"plan output docs_only is {docs_only!r}, expected 'true' or 'false'")
     if fail_open_output not in {"true", "false"}:
         problems.append(f"plan output fail_open is {fail_open_output!r}, expected 'true' or 'false'")
-    for selector in ("pr_pg_store", "pr_host_restate"):
+    for selector in ("pr_pg_store", "pr_host_e2e"):
         if plan_outputs.get(selector) not in {"true", "false"}:
             problems.append(
                 f"plan output {selector} is {plan_outputs.get(selector)!r}, expected 'true' or 'false'"
@@ -2240,7 +2236,7 @@ def evaluate_conclusion(
             wanted = (
                 "success"
                 if event_name == "pull_request"
-                and plan_outputs.get("pr_host_restate") == "true"
+                and plan_outputs.get("pr_host_e2e") == "true"
                 and buck2_is_trusted
                 else "skipped"
             )

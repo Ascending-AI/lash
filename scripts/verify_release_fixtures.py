@@ -27,8 +27,7 @@ class VerificationError(ValueError):
 
 def service_identities() -> list[bytes]:
     return [os.environ[name].encode() for name in (
-        "LASH_POSTGRES_DATABASE_URL", "KILN_GATE_ID", "RESTATE_AUTHORITY_ID",
-        "RESTATE_INGRESS_URL", "RESTATE_ADMIN_URL",
+        "LASH_POSTGRES_DATABASE_URL", "KILN_GATE_ID",
     ) if os.environ.get(name)]
 
 

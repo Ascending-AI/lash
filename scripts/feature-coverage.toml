@@ -521,7 +521,7 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
 ]
 
-# The operator binary used by Phase A must carry the same N+1 Restate epoch.
+# The operator binary used by Phase A must carry the same N+1 epoch.
 [[lane]]
 name = "lashctl-synthetic-next"
 features = [

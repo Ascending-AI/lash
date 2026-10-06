@@ -22,8 +22,8 @@ on surrounding model prose.
    `FIG425_cancellable_<runid>` process cards with non-terminal status.
 2. **Delete the owner, not the runtime.** Use the workbench reset/new-session control.
    Do not issue raw `DELETE /api/session` from the browser context: it bypasses the
-   UI reset flow and is not the operator-facing equivalent. Never stop Restate, the
-   process worker, or the web process during this scenario.
+   UI reset flow and is not the operator-facing equivalent. Never stop the process worker or
+   the web process during this scenario.
 3. **The process rail is runtime-wide.** After deletion, the rendered session id must
    change while both original process ids remain visible through `/api/work`. A process
    visible only in a stale screenshot does not pass.
@@ -32,18 +32,13 @@ on surrounding model prose.
    from the shared durable catalog.
 5. **Cancel is cooperative and evidenced.** Use the cancellable card's **cancel** button.
    Require a `process.cancel_requested` event followed by a `cancelled` terminal for that
-   exact process id. Killing a Restate invocation is not a substitute.
+   exact process id. Killing the process out of band is not a substitute.
 
 ## Working material
 
 - Boot with a fresh durable directory:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> just agent-workbench <port>`.
-  `RESTATE_AUTHORITY_ID` is required and must stay stable for one Restate state; without it
-  the workbench refuses to start.
-  Gate `GET /healthz` → 200. The entire Restate stack is port-isolated by default: the
-  helper derives its endpoint, ingress, admin port, node port, and container name from
-  `<port>`, so concurrent runs on distinct workbench ports do not need manual Restate
-  overrides. Teardown:
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  Gate `GET /healthz` → 200. Teardown:
   `just agent-workbench-down <port>`.
 - Browser affordances: chat composer, work rail, per-process **cancel**, reset/new-session
   control, rendered session id.
@@ -52,9 +47,7 @@ on surrounding model prose.
   equivalent `POST /api/reset`).
 - Disk truth: `<data-dir>/lash-sessions.db` tables `processes`, `process_events`, and
   `process_observers`; the shared SQLite session catalog at
-  `<data-dir>/lash-sessions.db`; and `<data-dir>/trace.jsonl` event
-  `agent_workbench.reset.restate.session_deleted`, whose report includes the removed
-  observer count.
+  `<data-dir>/lash-sessions.db`; and `<data-dir>/trace.jsonl`.
 
 ## Phase 0 — Boot and record owner identity
 
@@ -74,9 +67,8 @@ that `const` is the name a reader sees, so use underscores in it:
   collection and owner deletion before it completes;
 - `FIG425_cancellable_<runid>` waits several minutes by looping over 2-second sleeps,
   then returns a marker that must never be reached. Do not use one multi-minute
-  sleep: Restate-suspended sleep observes cooperative cancellation only when the workflow
-  is re-invoked. Re-invocation after each short sleep therefore settles cancellation in
-  roughly 2 seconds instead of waiting minutes for one suspension to end.
+  sleep: cooperative cancellation is observed at each sleep boundary, so short sleeps settle
+  cancellation in roughly 2 seconds instead of waiting minutes for one sleep to end.
 
 Use this wait shape inside the cancellable definition (with its forbidden marker after
 the loop):
@@ -228,8 +220,7 @@ expected to come back empty and proves nothing either way. Screenshot
 
 ## Phase 5 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the workbench and its Restate
-container are gone.
+Run `just agent-workbench-down <port>` and confirm the workbench is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
@@ -240,7 +231,7 @@ container are gone.
 | Session survives a cancelled background session turn (FIG-884) | after cancelling a subagent, a follow-up turn answers and a second subagent is admitted and runs; no "already has a running turn" denial | | `03b-subagent-running.png`, `03b-subagent-cancel-receipt.json`, `03b-session-still-usable.png`, trace |
 | Cancelled child session retained, not reclaimed (FIG-3377) | `03b-sessions-before.json` has a non-zero baseline for the recorded child id; `03b-sessions-after.json` keeps its `session_meta`/`session_head` rows, has no `deleted_sessions` tombstone, and has no open `pending_turn_inputs` for that id | | `03b-subagent-running.json` (child session id), `03b-sessions-before.json`, `03b-sessions-after.json`, `03b-sessions-delta.txt` |
 | Survivor completion | completed terminal and terminal marker persist after owner deletion | | `04-survivor-completed.png`, `04-terminal-*.json` |
-| No break-glass substitution | no Restate Admin cancel/kill used | | command log |
+| No break-glass substitution | no out-of-band cancel or kill used | | command log |
 
 **Aggregate:** did the workbench visibly and durably preserve Runtime Process ownership at
 the runtime layer after deleting its originating session, including both natural

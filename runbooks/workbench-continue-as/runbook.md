@@ -6,8 +6,8 @@
 
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. It is verified: the phases below execute it, and no step
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the
+> application data. It is verified: the phases below execute it, and no step
 > of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
@@ -128,11 +128,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
   `AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS=41000`,
   `AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS=21000`,
   `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig992a-run/data`, a fresh
-  `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_OPEN=0`, and `RESTATE_AUTHORITY_ID=<stable-id>`.
-  `RESTATE_AUTHORITY_ID` is required and must stay stable for one Restate state; without it
-  the workbench refuses to start with
-  `Error: RESTATE_AUTHORITY_ID is required and must remain stable for one Restate state`.
-  Never touch ports 3056, 3057, or
+  `AGENT_WORKBENCH_RUN_DIR`, and `AGENT_WORKBENCH_OPEN=0`. Never touch ports 3056, 3057, or
   3180. Gate `GET /healthz` to 200 and record the configured model from `/api/state`.
 - Use one fresh session id `<S> = runbook-continue-as-<run-id>` and artifact directory
   `<artifacts>`. Save every named screenshot and JSON/text extract below under `<artifacts>`.
@@ -171,8 +167,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
   `just agent-workbench-restart 3200`), the verified non-destructive same-configuration
   replacement named in this runbook's FIG-1164/FIG-3035 header and in
   [RULES.md](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164). The helper replaces the
-  process and reports that the Restate deployment, its journals and the application data were
-  retained; that line is the readiness evidence for the phase. Never substitute the destructive
+  process and reports that the managed services and the application data were retained; that line is the readiness evidence for the phase. Never substitute the destructive
   reset. Teardown remains
   `bash scripts/agent-workbench-dev.sh down --port 3200`, followed by removal of
   `/workspace/tmp/fig992a-run/data` only after all evidence has been copied out.
@@ -185,7 +180,7 @@ id `<S>`, `/api/state.settings.session_id == <S>`, idle, and no active turns. Re
 session-scoped graph rows and zero session-scoped turn, RLM warning, or tool-call records.
 Passive `agent_workbench.api.work.response` records with an empty result are expected
 from the rendered browser surface and must be recorded separately from that activity gate.
-Record the workbench PID, Restate container id and `StartedAt`, model, and exact
+Record the workbench PID, model, and exact
 `AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS` and
 `AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS` launch values. The Phase 1 status and
 model-facing request prove the RLM session used the warning threshold. Screenshot
@@ -285,8 +280,7 @@ non-seeded marker is expected; only its appearance in the new-frame reply fails 
 
 Record the complete post-switch DOM row multiset, current frame node id, both frame records,
 and their relevant raw nodes. Restart only the workbench web process with the same data/run
-directories. Require a changed workbench PID, unchanged Restate container id and `StartedAt`,
-and `/healthz` recovery. Reload the scoped page, gate the rendered session id and idle phase,
+directories. Require a changed workbench PID and `/healthz` recovery. Reload the scoped page, gate the rendered session id and idle phase,
 then settle by stability.
 
 Require the post-reload row multiset to equal the pre-restart multiset exactly. Require the
@@ -299,7 +293,7 @@ Screenshot `06-after-restart-reload.png`; save `06-restart-identities.json`,
 ## Phase 6 — Teardown and score
 
 Run the prescribed `down` command. Confirm the workbench PID is gone, port 3200 refuses
-connections, and no `lash-agent-workbench-dev-restate-3200` container remains. Copy all final
+connections. Copy all final
 extracts first, then remove `/workspace/tmp/fig992a-run/data` and confirm it is absent.
 
 | Item | Objective gate | Verdict | Evidence |

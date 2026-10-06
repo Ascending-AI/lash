@@ -5,71 +5,16 @@
 > and teardown. This runbook adds only the approval scenarios.
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. It is verified: the phases below execute it, and no step
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the
+> application data. It is verified: the phases below execute it, and no step
 > of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
 **Purpose.** Prove with the real configured model that a host-gated tool parks
-on Lash's real Restate completion-key machinery, the workbench exposes the wait
+on Lash's completion-key machinery, the workbench exposes the wait
 to an operator, approve resumes successfully, deny reaches the cell as a typed
 tool failure, and a parked wait survives a workbench process restart.
-
-**Deterministic companion.** The completion laws use a scripted provider,
-file-backed workbench approval state and the in-process Restate server double
-with SQLite stores. The judged scenarios below use live Restate and the real
-model from `.env`; their receipts are separate.
-
-## FIG-1346 — out-of-band completion across reopen and redrive
-
-From the fork root, source `env.sh`. Run each full path once and retain the
-printed executed-case report:
-
-```sh
-. ./env.sh
-kiln test //examples/agent-workbench:agent-workbench__unit_test \
-  --test_arg=tests::approvals_tests::async_completion_success_crosses_session_reopen_and_redrive \
-  --test_arg=--exact
-kiln test //examples/agent-workbench:agent-workbench__unit_test \
-  --test_arg=tests::approvals_tests::async_completion_failure_crosses_session_reopen_and_redrive \
-  --test_arg=--exact
-kiln test //examples/agent-workbench:agent-workbench__unit_test \
-  --test_arg=tests::approvals_tests::async_completion_cancel_crosses_session_reopen_and_redrive \
-  --test_arg=--exact
-```
-
-Require one executed pass per invocation, three total. The approval body records
-its correlation key and returns Pending, which the Run records as Deferred.
-The fixture drops the caller and reopens the core and approval state over the
-same engine and stores. The reconstructed host resolves the saved key through
-`core.completions().resolve`; the engine resumes the accepted Run. Re-sending
-its stable input identity follows the recorded result, never drives a new turn.
-No provider network call or sleep occurs.
-
-Require exactly one provider invocation, accepted completion, the exact typed
-`AlreadyResolved` terminal on duplicate resolution, one user input, retained
-program/tool arguments and identical terminal history on another reopen.
-The host callback API uses `Resolution`; K4 authenticates and retains its
-canonical result under `Resolved(ref)` or `Cancelled`. There is no runtime
-per-call deadline or timeout result.
-
-| Completion | Host callback | Program result |
-| --- | --- | --- |
-| Success | `Resolution::Ok` | `ok=true`, exact supplied value |
-| Failure | `Resolution::Err` | `ok=false`, typed `execution` / `approval_denied` cause |
-| Cancel | `Resolution::Cancelled` | host cancellation terminal; no guest final value |
-
-A cancelled completion is uncatchable host control under the current RLM
-contract. Do not score it as a caught `ok=false` value or claim the turn stays
-live. A Deferred descriptor itself is never a completed-tool observation.
-
-This companion is deterministic CI evidence, not a judged browser run. Scenarios
-A–C below remain the live approval/restart scorecard. The browser
-currently offers approve and deny only; it has no cancel-completion route.
-Do not claim all three callback variants were exercised through the browser.
-If the required model key is absent, record a Phase 0 harness gap under RULES.md;
-do not substitute a scripted model for the live rows.
 
 ## Golden rules
 
@@ -80,8 +25,8 @@ do not substitute a scripted model for the live rows.
    3056/3057; that is an older layout and conflicts with RULES.md.)
 2. Boot with `bash scripts/agent-workbench-dev.sh up --port <port>`, restart with
    `… restart --port <port>`, tear down with `… down --port <port>`. Export the same
-   `AGENT_WORKBENCH_DATA_DIR`, `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_OPEN=0` and
-   `RESTATE_AUTHORITY_ID` for the boot and every restart; the `just agent-workbench …`
+   `AGENT_WORKBENCH_DATA_DIR`, `AGENT_WORKBENCH_RUN_DIR` and `AGENT_WORKBENCH_OPEN=0` for
+   the boot and every restart; the `just agent-workbench …`
    recipes name the same operations but do not carry this row's environment.
 3. The call must reach the host as raw tool id `workbench_ops_apply_change` from a
    `<typescript>` cell — the practical gate is
@@ -101,7 +46,7 @@ do not substitute a scripted model for the live rows.
 
 ## Phase 0 — fresh boot
 
-Verify the chosen browser, Restate endpoint, and workbench ports are free. Load
+Verify the chosen browser and workbench ports are free. Load
 the repository `.env`, create fresh data/run/artifact directories, export them,
 and boot the workbench. Gate on `/healthz`, the listening line, and a hydrated
 browser showing `idle`. Require `GET /api/approvals` and
@@ -165,10 +110,9 @@ Reset to a fresh session and submit:
 2. Replace the process with the verified non-destructive same-configuration restart this
    runbook's FIG-1164/FIG-3035 header names: `just agent-workbench-restart <port>`
    (equivalently `bash scripts/agent-workbench-dev.sh restart --port <port>`) with the same
-   exported data/run directories. It keeps the Restate deployment, its journals and the
-   application data, and prints the readiness evidence line
-   `replaced process; the Restate deployment, its journals and the application data at <dir>
-   were retained`. Never substitute the destructive reset. Then gate on
+   exported data/run directories. It keeps the managed services and the application data,
+   and prints the readiness evidence line
+   `replaced process; the managed services and the application data at <dir> were retained`. Never substitute the destructive reset. Then gate on
    that line and browser
    reconnection. Require the same session, approval key, arguments, active turn,
    and pre-restart DOM/message identities — comparing the approval card **excluding its
@@ -193,7 +137,6 @@ Reset to a fresh session and submit:
 
 | Item | Objective gate | Result | Evidence |
 |---|---|---|---|
-| FIG-1346 companion | three passing reopen/redrive variants; exactly one provider call each; typed terminal and durable history assertions | | focused nextest log |
 | Fresh slate | DOM idle; both approval APIs empty | | `00-*` |
 | Approve parks | one identical wait across DOM and both APIs; active graph uncommitted | | `01-*` |
 | Approve resumes | typed success result; one tool execution; terminal layers agree | | `02-*` |

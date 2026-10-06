@@ -9,7 +9,7 @@ Most agent stacks treat the LLM as the runtime and stitch state around it — a 
 ## What's inside
 
 - **Durable per-turn commits** — every completed turn lands as one atomic `RuntimeCommit` against a `SessionGraph`. Effects are the replay boundary; turns are the semantic commit boundary.
-- **Workflow-host integration** — a sans-IO turn machine behind one `EffectHost` boundary. Every host journals: the SQLite and PostgreSQL backends replay effects from their stores, and the first-party Restate adapter replays effects from host history, exposes durable exact-turn cancellation and terminal attachment through `TurnWorkDriver`, and retries the final idempotent commit.
+- **Workflow-host integration** — a sans-IO turn machine behind one `EffectHost` boundary. Lash's durable engine runs it over the SQLite or PostgreSQL store, exposes durable exact-turn cancellation and terminal attachment through `TurnWorkDriver`, and commits each turn once.
 - **Two execution modes, one commit unit** — `standard` uses native provider tool-calling with concurrent dispatch; `rlm` runs model-authored TypeScript, lowered into the `lashlang` IR, in resettable worker processes where every effect crosses the host. Language limits bound guest authority and processes contain native crashes; OS confinement belongs to the host.
 - **Tool providers and plugins** — ordinary host operations are `ToolProvider`s, delivered at least once and keyed for idempotency on the `call_id()` lash mints for each call; plugins add runtime/session behavior such as prompts, planning, memory, subagents, history transforms, UI activity, catalog policy, and tool-output budgeting. Hosts compose only what they embed.
 - **Provider portability** — Anthropic, OpenAI Responses, any OpenAI-compatible Chat Completions endpoint, OpenAI Codex, and Google Gemini / Code Assist. MCP servers attach through `lash-plugin-mcp`.
@@ -31,7 +31,7 @@ OPENROUTER_API_KEY=sk-or-... just agent-workbench 3000
 # then open http://127.0.0.1:3000
 ```
 
-See each example's README for environment knobs and Restate recipes.
+See each example's README for environment knobs and recipes.
 
 Each one is a Host Application in Lash's sense: it picks the runtime crates,
 providers, plugins, and Execution Mode it wants, and keeps ownership of its own

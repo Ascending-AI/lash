@@ -110,8 +110,7 @@ as an error, or more than one model call/attempt/exchange occurs.
 
 ## Phase 3 — Teardown and score
 
-Run `bash scripts/agent-workbench-dev.sh down --port <port>`. Confirm the Workbench port is closed and its
-port-derived Restate container is gone.
+Run `bash scripts/agent-workbench-dev.sh down --port <port>`. Confirm the Workbench port is closed.
 
 | Item | Objective gate | Verdict | Evidence |
 |---|---|---|---|
@@ -120,7 +119,7 @@ port-derived Restate container is gone.
 | Normal completion | rendered successful Standard result with zero assistant bytes | | `02-valid-empty-finished.png` |
 | Provider evidence | one completed terminal-observed attempt, native `stop`, 7/0 usage | | `02-valid-empty-report.json` |
 | Charge safety | one LLM call and one wire exchange | | rendered grid and report JSON |
-| Teardown | port and owned Restate container gone | | teardown log |
+| Teardown | port closed | | teardown log |
 
 **Aggregate:** did the real Standard runtime accept explicit normal terminal syntax
 independently of content while preserving the provider and usage evidence that proves why

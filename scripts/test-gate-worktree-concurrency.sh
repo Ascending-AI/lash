@@ -146,7 +146,7 @@ docker rm -f "$leftover_container" >/dev/null
 leftover_container=""
 
 compose_project="lash-gate-proof-compose-${LASH_GATE_WORKTREE_SLUG}"
-compose_file="$repo/runbooks/restate-postgres-workers/docker-compose.yml"
+compose_file="$proof_root/docker-compose.yml"
 compose_leftover_container="lash-gate-proof-compose-leftover-${LASH_GATE_WORKTREE_SLUG}"
 docker create --name "$compose_leftover_container" --label "$LASH_GATE_LABEL" \
   --label "com.docker.compose.project=$compose_project" \

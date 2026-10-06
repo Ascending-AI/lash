@@ -56,19 +56,17 @@ judging the wrong contract. Pass the handle itself to `processes.signal`,
    do not extend the dialect or the catalogue during the judged run.
 4. Restart with the repository helper and the exact original run/data
    directories: `bash scripts/agent-workbench-dev.sh restart --port <port>` with
-   `AGENT_WORKBENCH_DATA_DIR`, `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_OPEN=0` and
-   `RESTATE_AUTHORITY_ID` exported (`up` and `down` are the boot and teardown forms; the
+   `AGENT_WORKBENCH_DATA_DIR`, `AGENT_WORKBENCH_RUN_DIR` and `AGENT_WORKBENCH_OPEN=0`
+   exported (`up` and `down` are the boot and teardown forms; the
    `just agent-workbench …` recipes do not carry this row's environment). The helper prints
-   `replaced process; the Restate deployment, its journals and the application data … were
-   retained` — that line is the readiness evidence Phase 4 asks for. The pre-restart process
+   `replaced process; the managed services and the application data … were retained` — that line is the readiness evidence Phase 4 asks for. The pre-restart process
    id, execution-state engine id, and
    post-restart process id must agree.
 
 ## Phase 0 — Boot and language gate
 
 Boot a fresh Workbench with unique ports and a fresh persistent data directory.
-Export a fresh `RESTATE_AUTHORITY_ID` alongside it — `agent-workbench` refuses
-to start without one. Gate `/healthz`, `/api/state`, the rendered session id,
+Gate `/healthz`, `/api/state`, the rendered session id,
 and the prompt/trace language id. Save `00-ready.png`, `00-state.json`, and
 `00-models.json`.
 

@@ -79,12 +79,12 @@ class ClassifyTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = ci_plan.classify([("M", path)], "pull_request")
                 self.assertEqual(postgres, plan["pr_pg_store"])
-                self.assertEqual(host, plan["pr_host_restate"])
+                self.assertEqual(host, plan["pr_host_e2e"])
 
     def test_pr_service_map_fails_open_on_an_unknown_path(self) -> None:
         plan = ci_plan.classify([("M", "mystery.data")], "pull_request")
         self.assertEqual("true", plan["pr_pg_store"])
-        self.assertEqual("true", plan["pr_host_restate"])
+        self.assertEqual("true", plan["pr_host_e2e"])
 
     def test_docs_only_skips_every_expensive_family(self) -> None:
         plan = ci_plan.classify(
@@ -419,22 +419,6 @@ class PathClassifierTests(unittest.TestCase):
             and path not in discovered_repository_self_tests()
         )
         self.assertEqual([], unknown)
-
-    def test_loadtest_chart_changes_select_repository_gates(self) -> None:
-        paths = subprocess.run(
-            ["git", "ls-files", "deploy/helm/lash-loadtest"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
-        ).stdout.splitlines()
-        inputs = [path for path in paths if PurePosixPath(path).suffix not in ci_plan.DOC_SUFFIXES]
-        self.assertTrue(inputs)
-        for path in inputs:
-            with self.subTest(path=path):
-                self.assertEqual(ci_plan.PathKind.TOOLING, self.kind(path))
-                for status in ("A", "M", "D"):
-                    plan = ci_plan.classify([(status, path)], "pull_request")
-                    self.assertEqual("false", plan["fail_open"])
-                    self.assertEqual("true", plan["tooling"])
-                    self.assertEqual("false", plan["stores"])
 
 
 FIXTURE_WORKFLOW = """\
@@ -1638,7 +1622,7 @@ def successful_needs() -> dict[str, dict[str, object]]:
     plan_outputs = {family: "true" for family in ci_plan.FAMILIES}
     plan_outputs.update({
         "docs_only": "false", "fail_open": "false",
-        "pr_pg_store": "false", "pr_host_restate": "false",
+        "pr_pg_store": "false", "pr_host_e2e": "false",
     })
     needs = {
         job: {"result": "success", "outputs": {}}
@@ -1667,7 +1651,7 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
             )
         needs["functional-e2e"]["result"] = (
             "success"
-            if trusted and needs["plan"]["outputs"]["pr_host_restate"] == "true"
+            if trusted and needs["plan"]["outputs"]["pr_host_e2e"] == "true"
             else "skipped"
         )
     elif event == "merge_group":
@@ -2421,7 +2405,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
     def test_pr_service_jobs_follow_the_path_map(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         plan = jobs["plan"]["outputs"]
-        for selector in ("pr_pg_store", "pr_host_restate"):
+        for selector in ("pr_pg_store", "pr_host_e2e"):
             self.assertEqual(
                 f"${{{{ steps.classify.outputs.{selector} }}}}", plan[selector]
             )
@@ -2429,14 +2413,14 @@ class WorkflowRegistrationTests(unittest.TestCase):
             self.assertIn("pr_pg_store", jobs[job]["if"])
             self.assertEqual(jobs["postgres-store"]["if"], jobs[job]["if"])
             self.assertIn(job, jobs["ci-conclusion"]["needs"])
-        self.assertIn("pr_host_restate", jobs["functional-e2e"]["if"])
+        self.assertIn("pr_host_e2e", jobs["functional-e2e"]["if"])
         self.assertIn("ci-conclusion", jobs)
         self.assertIn("functional-e2e", jobs["ci-conclusion"]["needs"])
 
     def test_pr_service_checks_are_required_only_when_selected(self) -> None:
         for selector, jobs in (
             ("pr_pg_store", ci_plan.POSTGRES_STORE_JOBS),
-            ("pr_host_restate", ("functional-e2e",)),
+            ("pr_host_e2e", ("functional-e2e",)),
         ):
             for selected in ("true", "false"):
                 with self.subTest(selector=selector, selected=selected):
@@ -2452,7 +2436,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
                         needs[job]["result"] = "success" if selected == "true" else "skipped"
 
     def test_pr_service_plan_outputs_are_required(self) -> None:
-        for selector in ("pr_pg_store", "pr_host_restate"):
+        for selector in ("pr_pg_store", "pr_host_e2e"):
             needs = successful_needs()
             apply_event_deferrals(needs, "pull_request")
             del needs["plan"]["outputs"][selector]

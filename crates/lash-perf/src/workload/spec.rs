@@ -195,10 +195,6 @@ pub struct Faults {
     #[schemars(range(min = 1))]
     pub worker_restart_delay_s: u32,
     #[schemars(range(min = 1))]
-    pub restate_restart_s: u32,
-    #[schemars(range(min = 1))]
-    pub restate_restart_delay_s: u32,
-    #[schemars(range(min = 1))]
     pub rolling_deploy_s: u32,
     #[schemars(range(min = 1))]
     pub rolling_worker_pause_s: u32,
@@ -209,8 +205,6 @@ pub struct Faults {
 pub struct Collection {
     #[schemars(range(min = 1))]
     pub scrape_s: u32,
-    #[schemars(range(min = 1))]
-    pub journal_sample_s: u32,
     #[schemars(range(min = 1))]
     pub retention_s: u32,
     #[schemars(range(min = 1))]
@@ -240,8 +234,6 @@ pub struct Provenance {
     pub polling: String,
     #[schemars(regex(pattern = "^[IV](: .+)?$"))]
     pub process_prune: String,
-    #[schemars(regex(pattern = "^[IV](: .+)?$"))]
-    pub restate_partitions: String,
     pub fields: BTreeMap<String, String>,
 }
 

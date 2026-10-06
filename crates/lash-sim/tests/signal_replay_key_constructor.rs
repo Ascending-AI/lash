@@ -20,8 +20,8 @@
 //! Shape: a source-scanning lint test with a documented exemption inventory.
 //! It needs no CI
 //! wiring because it runs with the workspace suite. It scans the whole
-//! repository, not just `crates/`, because the runbook binary is exactly the
-//! copy that could escape the workspace unnoticed.
+//! repository, not just `crates/`, because a copy outside the workspace crates
+//! is exactly the one that could escape unnoticed.
 
 use std::path::{Path, PathBuf};
 
@@ -204,42 +204,10 @@ fn the_gate_rejects_a_reintroduced_literal() {
     );
 }
 
-/// The scan must actually reach the runbook binary that motivated the ticket;
-/// an empty or crates-only walk would pass vacuously. Since FIG-4299 the worker
-/// cannot name the key: it delivers a typed `ProcessSignal`, and the identity's
-/// append key comes from the one constructor, so the proof is that the worker
-/// takes that path — and that the identity still delegates to the constructor.
+/// A typed `ProcessSignal` proves nothing unless its identity's key still comes
+/// from the single constructor: pin that delegation in the exempt file.
 #[test]
-fn the_scan_reaches_the_runbook_worker_outside_the_workspace_crates() {
-    let worker = workspace_root().join("runbooks/restate-postgres-workers/src/bin/worker.rs");
-    assert!(
-        worker.is_file(),
-        "the runbook worker moved; re-point this gate's coverage proof"
-    );
-    let source = std::fs::read_to_string(&worker).expect("read the runbook worker");
-    assert!(
-        source.contains("ProcessSignalIdentity::new") && source.contains("ProcessSignal::new"),
-        "the runbook worker must deliver its signal as a typed ProcessSignal: \
-         the identity derives the replay key, so there is no caller-spelled key"
-    );
-    assert!(
-        source.contains(".signal("),
-        "the runbook worker must submit the signal through the typed signal API"
-    );
-    for bypass in [
-        "process_signal_wait_key",
-        "ProcessEventAppendRequest",
-        "with_replay_key",
-    ] {
-        assert!(
-            !source.contains(bypass),
-            "the runbook worker assembles its own signal append ({bypass}); \
-             a typed ProcessSignal must derive the replay key from its identity"
-        );
-    }
-
-    // The typed path only proves coverage if the identity's key still comes
-    // from the single constructor: pin that delegation in the exempt file.
+fn the_signal_identity_derives_its_replay_key_from_the_one_constructor() {
     let events = workspace_root().join(EXEMPT_FILES[0]);
     let events = std::fs::read_to_string(&events).expect("read the signal event constructors");
     assert!(

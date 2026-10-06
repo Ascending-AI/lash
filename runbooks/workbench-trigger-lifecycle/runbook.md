@@ -10,9 +10,6 @@ after its first delivery: it fires repeatedly without looping, can be disabled a
 re-enabled, can be deleted, and handles a fire during a foreground turn without taking
 over that turn's ingress.
 
-Operator retention and redelivery after tombstone forget have a separate
-[deterministic runbook](../workbench-trigger-retention/runbook.md).
-
 **Mid-turn contract.** Trigger occurrence dispatch and its durable process may run while
 the session has a foreground turn. Any resulting session wake is durable queued work; it
 must not submit a competing turn while that foreground turn owns ingress. The session's
@@ -21,7 +18,7 @@ the foreground turn still owns ingress, or `idle` once that run settles. An
 `active_turn_checkpoint` claim is part of the current turn; an `idle` claim starts the
 next run. The workbench submits nothing itself: the wake is scheduled by lash, and the
 page's active-turn claim is released by `terminalize_turn_execution` in
-[`restate.rs`](../../examples/agent-workbench/src/restate.rs) once the followed run
+[`turns.rs`](../../examples/agent-workbench/src/turns.rs) once the followed run
 settles. The deterministic companion gate is
 `tests::button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn` in
 [`trigger_lifecycle.rs`](../../examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs).
@@ -72,8 +69,8 @@ and work registry are.
 ## Working material
 
 - Require `OPENROUTER_API_KEY`. Boot an empty, port-isolated stack with
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> bash scripts/agent-workbench-dev.sh up --port <port>`.
-  Gate `GET /healthz` → 200. Teardown, including Restate, is
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`.
+  Gate `GET /healthz` → 200. Teardown is
   `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env, on success or
   Abort. (The `just agent-workbench` / `just agent-workbench-down` recipes name the same
   operations but do not carry this row's environment.)
@@ -102,14 +99,6 @@ and work registry are.
 
 The deferred-link companion must show all of these named cases green:
 
-- `replay_serves_a_positive_before_an_ambient_collision_from_the_journal` and
-  `replay_serves_a_negative_before_a_changed_ambient_without_resolver` prove the
-  engine's journal wins when a crashed attempt's invocation is replayed on the Restate
-  server double, with an empty checkpoint projection. The negative case replays with no
-  live resolver; the positive case reinstalls its journaled grant without resolving
-  again, and also changes parent attribution and descriptive label and introduces two
-  colliding ambient definitions, proving the canonical deferred envelope and
-  pre-catalog mask are stable;
 - `independent_link_can_accept_a_new_ambient_binding` proves the mask belongs only to
   the admitted link identity;
 - `fault_after_resolver_return_repeats_discovery_on_the_replay`,
@@ -158,20 +147,6 @@ These are definition-linking claims only. Explicit authored registration remains
 first operation allowed to create a subscription. Provider activation and route use
 belong to registration and delivery, not discovery.
 
-**Restate deployment cutover.** A resource-bearing RLM cell now emits exactly one
-batched `LanguageRuntimeValue` journal command after `ExecCode` admission and before
-its first dependent effect. Restate classifies that command as `JournaledRun`, so later
-commands in an already-running pre-cutover cell would move by one ordinal. This is an
-intentional clean cutover, not a compatible replay shape: deploy only after draining
-in-flight RLM `ExecCode` invocations, or recreate their Restate state. Do not redrive a
-pre-cutover in-flight cell under this build; Restate's command-shape mismatch must refuse
-it before any dependent effect re-executes. Cells without resource call paths emit no
-new command, and no existing Lash replay key, checkpoint ordinal, or durable format
-version changes.
-
-Durable replay claims in this companion come from the file-backed SQLite controller; Restate supplies
-the production engine-owned journal under the ordinal cutover above.
-
 **RLM snapshot cutover.** Snapshot version 19 adds the separate deferred-trigger
 resolution record, including captured provider identity and route. Version 18 snapshots
 cannot preserve that authority boundary and are rejected. Drain in-flight RLM sessions
@@ -181,7 +156,7 @@ compatibility decoder or silently reset a store.
 Enabling a deferred trigger resolver also adds one batched
 `deferred_trigger_resolution:v1` `LanguageRuntimeValue` command before deferred-tool
 resolution and before any dependent effect. Its effect id is distinct from the tool
-resolver's record, so the two outcomes cannot alias. This is an intentional Restate
+resolver's record, so the two outcomes cannot alias. This is an intentional journal
 ordinal cutover for deployments that enable the resolver: drain in-flight RLM
 `ExecCode` invocations before enabling it. A host with no resolver and no recorded
 trigger outcomes emits no trigger-definition command.
@@ -329,8 +304,8 @@ screenshot `11-deleted-silent.png`.
 
 ## Phase 7 — Teardown and score
 
-Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the workbench and its port-derived
-Restate container are gone.
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the workbench
+is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

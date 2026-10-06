@@ -906,22 +906,3 @@ async fn runtime_perf_commit_state(
         .await?;
     Ok(state)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn queued_work_admission_stress_advances_its_commit_cursor() {
-        Box::pin(run_once_queued_work_admission_stress(1))
-            .await
-            .expect("queued-work stress scenario");
-    }
-
-    #[tokio::test]
-    async fn turn_input_ingress_stress_advances_its_commit_cursor() {
-        run_once_turn_input_ingress_interrupt(1)
-            .await
-            .expect("turn-input ingress stress scenario");
-    }
-}

@@ -6,11 +6,11 @@ scripts that listens on the unix socket alone (``-c listen_addresses=''``),
 shuts it down, and only then starts the real server. A readiness check that
 answers the container's socket — ``pg_isready`` with no host — can pass
 against that temporary server and release a client into its shutdown:
-``FATAL: the database system is shutting down`` is how the Restate +
-Postgres workers E2E flaked when its schema apply ran mid-restart.
+``FATAL: the database system is shutting down`` is how a PostgreSQL-backed
+E2E flaked when its schema apply ran mid-restart.
 
-The contract this file holds: every readiness check the helper runs, every
-compose healthcheck, and every wait the harnesses carry is TCP-bound, so
+The contract this file holds: every readiness check the helper runs and every
+wait the harnesses carry is TCP-bound, so
 only the final server can ever answer it. The behaviour half runs
 ``lash_pg_wait`` against a fake exec so the deadline and the loud failure
 are proven rather than asserted about the source.
@@ -31,17 +31,13 @@ HELPER = ROOT / "scripts" / "ci" / "pg-service.sh"
 PROBE_ASSIGNMENT = re.compile(r"^LASH_PG_READY_PROBE='(.*)'$", re.MULTILINE)
 
 # Every file that starts a PostgreSQL container or checks one for readiness:
-# scripts that source the helper, compose healthchecks, and GitHub service
-# health commands. The sweep is by probe, not by name: a socket answer added
+# scripts that source the helper and GitHub service health commands. The sweep is by probe, not by name: a socket answer added
 # anywhere fails the whole class, not just the site this change touched.
 CONSUMERS = (
     "scripts/ci/with-service.sh",
     "scripts/push-gate.sh",
     "scripts/gate-container-smoke.sh",
     "scripts/confidence-gate.sh",
-)
-COMPOSE_FILES = (
-    "runbooks/process-operations/docker-compose.yml",
 )
 WORKFLOWS = (
     ".github/workflows/perf.yml",
@@ -73,19 +69,6 @@ class PgServiceContract(unittest.TestCase):
         self.assertIn("psql -h 127.0.0.1", text)
         self.assertEqual(text.count("pg_isready"), text.count("pg_isready -h"))
         self.assertEqual(text.count("psql"), text.count("psql -h"))
-
-    def test_the_compose_healthchecks_carry_the_probe(self) -> None:
-        """Compose config is static, so each file holds the probe literally.
-
-        `$$` is compose's escape for a literal dollar; normalised, the
-        healthcheck must be the same probe the helper exports — a healthcheck
-        that drifts back to the socket re-opens the race for every service
-        gated on it.
-        """
-        for name in COMPOSE_FILES:
-            with self.subTest(compose=name):
-                text = (ROOT / name).read_text(encoding="utf-8")
-                self.assertIn(probe(), text.replace("$$", "$"))
 
     def test_the_workflow_health_commands_carry_the_probe(self) -> None:
         for name in WORKFLOWS:

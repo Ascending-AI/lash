@@ -17,10 +17,6 @@ started_workbench_this_attempt=0
 started_workbench_pid=""
 workbench_bin=""
 started_workbench_start_time=""
-started_restate_this_attempt=0
-started_restate_name=""
-started_restate_id=""
-external_restate_used_this_attempt=0
 started_postgres_this_attempt=0
 started_postgres_name=""
 started_postgres_id=""
@@ -29,7 +25,7 @@ reset_committed=0
 reset_destructive_started=0
 reset_finalization_active=0
 reset_finalization_phase=""
-# `down` retires a stack's process, engine, managed services, leases and
+# `down` retires a stack's process, managed services, leases and
 # receipts but keeps the records that say who owns the application data, so the
 # durable state survives. Those records name this very stack, stopped: `up`
 # resumes it and `reset` clears it, instead of refusing it as another stack's.
@@ -41,34 +37,22 @@ stopped_stack_meta_record=""
 reset_stack_already_retired=0
 start_finalization_phase=""
 reset_recovery_command=""
-created_restate_ingress_service_lease_this_attempt=0
-created_restate_admin_service_lease_this_attempt=0
 created_postgres_service_lease_this_attempt=0
 created_run_owner_this_attempt=0
 created_meta_this_attempt=0
-restate_service_lease_record=""
 postgres_service_lease_record=""
 run_owner_record=""
-registered_deployment_id=""
-restate_registry_hash=""
-restate_retirement_authorized=0
 foreground_cleanup_done=0
 foreground_cleanup_status=0
 process_observation_uncertain=0
 # A non-destructive restart owns only the replacement process. It inherits the
 # managed-service facts of the stack it continues so the run metadata it
-# rewrites keeps naming the engine, stores and deployment that outlive it.
+# rewrites keeps naming the stores that outlive it.
 replacing_process=0
 inherited_service_facts=0
-inherited_restate_managed=""
-inherited_restate_name=""
-inherited_restate_id=""
 inherited_postgres_managed=""
 inherited_postgres_name=""
 inherited_postgres_id=""
-inherited_retirement_authorized=""
-inherited_deployment_id=""
-inherited_registry_hash=""
 
 log() {
   printf '[agent-workbench] %s\n' "$*" >&2
@@ -93,26 +77,22 @@ Usage:
 Defaults:
   up is detached and idempotent.
   restart without a flag is non-destructive: it replaces only the workbench
-  process, at the same address, endpoints, store and RESTATE_AUTHORITY_ID, and
-  keeps the Restate engine and its journals, any managed Postgres, the
-  registered deployment, and the application data directory. It refuses unless
-  this launcher's own run metadata proves it owns a matching stack here, and it
-  never re-registers a deployment, so a rebuild that changes the Restate service
-  surface needs --reset-dev-state instead. Interrupting it is retryable: rerun
-  the same command.
+  process, at the same address and store, and keeps any managed Postgres and
+  the application data directory. It refuses unless this launcher's own run
+  metadata proves it owns a matching stack here. Interrupting it is retryable:
+  rerun the same command.
   restart --reset-dev-state is destructive: it replaces a wholly launcher-owned
-  disposable stack, including its Restate journals and corresponding application
-  data. External, mixed, legacy, or ambiguous ownership is refused before
-  anything is stopped.
-  down stops the workbench and any Restate or Postgres container it started.
+  disposable stack, including its application data. External, mixed, legacy,
+  or ambiguous ownership is refused before anything is stopped.
+  down stops the workbench and any Postgres container it started.
   AGENT_WORKBENCH_POSTGRES=1 starts a port-isolated managed Postgres container
   unless AGENT_WORKBENCH_DATABASE_URL points at an existing database.
   --port PORT binds 127.0.0.1:PORT.
   Managed-service ports use a 10-port stride for each workbench-port step from
   3030 for workbench ports 2223 through 7676. Outside that range, set the
   managed-service endpoint environment variables explicitly.
-  Restate ingress/admin and PostgreSQL service hosts must use numeric loopback
-  addresses or localhost so managed-service identity remains unambiguous.
+  PostgreSQL service hosts must use numeric loopback addresses or localhost so
+  managed-service identity remains unambiguous.
   Without --port/--addr, AGENT_WORKBENCH_ADDR is used, then 127.0.0.1:3030.
   AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS sets the model context window; it
   defaults to 200000 and must be at least twice the plugin's compaction buffer
@@ -188,19 +168,6 @@ else:
 ' "$host" || die "service host must be a numeric loopback address or localhost"
 }
 
-url_is_diagnostic_safe() {
-  python3 -c '
-import sys
-from urllib.parse import urlsplit
-
-try:
-    url = urlsplit(sys.argv[1])
-except ValueError:
-    raise SystemExit(1)
-raise SystemExit(1 if url.username or url.password or url.query or url.fragment else 0)
-' "$1"
-}
-
 addr_host_port() {
   local addr="$1"
   local host="${addr%:*}"
@@ -241,114 +208,6 @@ wait_tcp() {
     fi
     sleep 1
   done
-}
-
-register_deployment() {
-  local admin_url="$1"
-  local endpoint_url="$2"
-  local deadline=$((SECONDS + 60))
-  local last_response=""
-  local status=0
-  # Registration goes through the host binary's `register-deployment`
-  # subcommand — `RestateEngine::register_deployment` — so the namespace
-  # collision guard applies to this launcher exactly as it does to a host
-  # that registers itself (FIG-3912). Exit 2 is the guard's permanent
-  # refusal; every other failure retries inside the readiness window.
-  until last_response="$(
-    env "RESTATE_INGRESS_URL=$restate_ingress_url" \
-      "RESTATE_ADMIN_URL=$admin_url" \
-      "$workbench_bin" register-deployment "$endpoint_url" 2>&1
-  )"; do
-    status=$?
-    if (( status == 2 )); then
-      printf '%s\n' "$last_response" >&2
-      return 1
-    fi
-    require_workbench_alive "during Restate deployment registration"
-    if (( SECONDS >= deadline )); then
-      printf '%s\n' "$last_response" >&2
-      return 1
-    fi
-    sleep 1
-  done
-  # The engine's registration answers no deployment id; read it back from
-  # the registry the registration just wrote.
-  registered_deployment_id="$(
-    deployment_registry_records "$admin_url" | awk -F '\t' -v target="${endpoint_url%/}" '
-      $2 == target { print $1; found = 1; exit }
-      END { if (!found) exit 1 }
-    '
-  )" || return 1
-  require_workbench_alive "after Restate deployment registration"
-}
-
-deployment_registry_records() {
-  local admin_url="$1"
-  local response
-  response="$(
-    curl --http2-prior-knowledge -fsS --max-time 5 \
-      "${admin_url%/}/deployments"
-  )" || return 1
-  printf '%s' "$response" | python3 -c '
-import json
-import re
-import sys
-
-try:
-    document = json.load(sys.stdin)
-except (json.JSONDecodeError, UnicodeDecodeError):
-    raise SystemExit(1)
-if not isinstance(document, dict) or not isinstance(document.get("deployments"), list):
-    raise SystemExit(1)
-records = []
-for deployment in document["deployments"]:
-    if not isinstance(deployment, dict):
-        raise SystemExit(1)
-    deployment_id = deployment.get("id")
-    uri = deployment.get("uri")
-    if not isinstance(deployment_id, str) or not re.fullmatch(r"dp_[A-Za-z0-9]+", deployment_id):
-        raise SystemExit(1)
-    if isinstance(uri, str):
-        identity = uri.rstrip("/")
-    elif isinstance(deployment.get("arn"), str):
-        identity = "<lambda>"
-    else:
-        raise SystemExit(1)
-    records.append((deployment_id, identity))
-for deployment_id, uri in sorted(records):
-    print(f"{deployment_id}\t{uri}")
-'
-}
-
-deployment_uri_registered() {
-  local admin_url="$1"
-  local endpoint_url="$2"
-  local response
-  response="$(deployment_registry_records "$admin_url")" || return 2
-  printf '%s\n' "$response" | awk -F '\t' -v target="${endpoint_url%/}" '
-    $2 == target { found = 1 }
-    END { exit(found ? 0 : 1) }
-  '
-}
-
-require_unused_deployment_uri() {
-  local admin_url="$1"
-  local endpoint_url="$2"
-  local status=0
-  deployment_uri_registered "$admin_url" "$endpoint_url" || status=$?
-  case "$status" in
-    0)
-      log "Restate deployment URI is already registered: $endpoint_url"
-      return 1
-      ;;
-    1)
-      return 0
-      ;;
-    *)
-      log "could not verify that Restate deployment URI is unused: $endpoint_url"
-      return 1
-      ;;
-  esac
 }
 
 open_browser() {
@@ -610,7 +469,7 @@ path_contains_reset_footprint_record() {
       -o -name 'workbench-*.process-retired' \
       -o -name 'workbench-*.teardown' \
       -o -name '*-*.service-retired' \
-      -o -name 'restate-*.lease' -o -name 'postgres-*.lease' \
+      -o -name 'postgres-*.lease' \
       -o -name '*-recover.sh' \) \
       -print -quit 2>/dev/null
   )" || return 0
@@ -698,19 +557,17 @@ path_overlaps_start_finalization() {
 # for the given ownership token. This is the state `down` leaves: a stack with
 # nothing left to stop.
 stack_resources_fully_retired() {
-  local token="$1" retired="" lease="" record="" lease_token=""
+  local token="$1" retired="" record="" lease_token=""
   for retired in "$pid_file" "$process_retirement_receipt_file" \
-    "$teardown_transaction_file" "$restate_marker_file" "$postgres_marker_file" \
-    "$restate_service_retirement_receipt_file" "$postgres_service_retirement_receipt_file"; do
+    "$teardown_transaction_file" "$postgres_marker_file" \
+    "$postgres_service_retirement_receipt_file"; do
     [[ ! -e "$retired" && ! -L "$retired" ]] || return 1
   done
-  for lease in "$restate_ingress_service_lease_file" "$restate_admin_service_lease_file" \
-    "$legacy_restate_service_lease_file" "$postgres_service_lease_file"; do
-    record="$(read_service_lease "$lease" 2>/dev/null || true)"
-    [[ -n "$record" ]] || continue
+  record="$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)"
+  if [[ -n "$record" ]]; then
     read -r _ _ lease_token _ <<<"$record"
     [[ "$lease_token" != "$token" ]] || return 1
-  done
+  fi
 }
 
 # The exact shape `down` leaves behind on a wholly launcher-owned stack: the
@@ -742,7 +599,7 @@ stopped_stack_records_resumable() {
     owned_workbench_addr="" owned_data_dir="" owned_data_identity="" owned_run_owner=""
     # shellcheck disable=SC1090
     source "$reset_file"
-    [[ "$reset_schema" = 6 && "$owned_token" = "$token" \
+    [[ "$reset_schema" = 7 && "$owned_token" = "$token" \
       && "$owned_state_key" = "$state_key" \
       && "$owned_state_dir" = "$state_dir" \
       && "$owned_workbench_addr" = "$expected_addr" \
@@ -754,7 +611,7 @@ stopped_stack_records_resumable() {
     meta_schema="" ownership_token=""
     # shellcheck disable=SC1090
     source "$meta_file"
-    [[ "$meta_schema" = 3 && "$ownership_token" = "$token" \
+    [[ "$meta_schema" = 4 && "$ownership_token" = "$token" \
       && "$workbench_addr" = "$expected_addr" && "$data_dir" = "$expected_data_dir" ]]
   ) || return 1
   [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" \
@@ -767,29 +624,12 @@ stopped_stack_records_resumable() {
   stopped_stack_token="$token"
 }
 
-stopped_stack_authority_digest() {
-  regular_private_file "$meta_file" || return 1
-  (
-    meta_schema="" restate_authority_digest=""
-    # shellcheck disable=SC1090
-    source "$meta_file"
-    [[ "$meta_schema" = 3 && -n "$restate_authority_digest" ]] || exit 1
-    printf '%s\n' "$restate_authority_digest"
-  )
-}
-
 # Continues the stopped stack's ownership instead of minting a new token: its
-# application data, run footprint and ownership records all carry that token,
-# and its durable Restate state is bound to one trust domain. The records this
-# resume inherits are never destroyed by a failed attempt — cleanup restores
+# application data, run footprint and ownership records all carry that token.
+# The records this resume inherits are never destroyed by a failed attempt — cleanup restores
 # them, so the same `up` is always retryable.
 adopt_stopped_stack() {
   (( resuming_stopped_stack )) || return 0
-  local recorded_authority=""
-  recorded_authority="$(stopped_stack_authority_digest)" \
-    || die "up refused: the stopped stack at $workbench_addr has unreadable run metadata; discard it with scripts/agent-workbench-dev.sh restart --reset-dev-state --addr $workbench_addr"
-  [[ "$recorded_authority" = "$(current_restate_authority_digest)" ]] \
-    || die "up refused: RESTATE_AUTHORITY_ID does not match the durable trust domain the stopped stack at $workbench_addr is bound to; export the original value and run the same up again, or discard that durable state with scripts/agent-workbench-dev.sh restart --reset-dev-state --addr $workbench_addr"
   stopped_stack_reset_record="$(cat -- "$reset_file")" \
     || die "up refused: could not read the stopped stack's ownership record $reset_file"
   stopped_stack_data_owner_record="$(cat -- "$data_owner_file")" \
@@ -891,7 +731,7 @@ read_service_lease() {
   regular_private_file "$file" || return 1
   local schema component token id extra
   read -r schema component token id extra < "$file" || return 1
-  [[ "$schema" = 1 && "$component" =~ ^(restate|postgres)$ \
+  [[ "$schema" = 1 && "$component" = postgres \
     && "$token" =~ ^[0-9a-fA-F-]{36}$ \
     && "$id" =~ ^[0-9a-fA-F]{12,64}$ && -z "$extra" ]] || return 1
   printf '%s %s %s %s\n' "$schema" "$component" "$token" "$id"
@@ -956,13 +796,6 @@ remove_service_lease() {
   [[ ! -e "$file" && ! -L "$file" ]]
 }
 
-restate_service_leases_match() {
-  local expected="$1" file
-  for file in "$restate_ingress_service_lease_file" "$restate_admin_service_lease_file"; do
-    [[ "$(read_service_lease "$file" 2>/dev/null || true)" = "$expected" ]] || return 1
-  done
-}
-
 remove_attempt_service_lease() {
   local file="$1" expected="$2" flag_name="$3"
   local -n outstanding="$flag_name"
@@ -973,15 +806,6 @@ remove_attempt_service_lease() {
   fi
   remove_service_lease "$file" "$expected" || return 1
   outstanding=0
-}
-
-remove_attempt_restate_service_leases() {
-  local expected="$1" failed=0
-  remove_attempt_service_lease "$restate_ingress_service_lease_file" "$expected" \
-    created_restate_ingress_service_lease_this_attempt || failed=1
-  remove_attempt_service_lease "$restate_admin_service_lease_file" "$expected" \
-    created_restate_admin_service_lease_this_attempt || failed=1
-  (( ! failed ))
 }
 
 require_service_unreserved() {
@@ -1403,11 +1227,6 @@ stop_attempt_workbench() {
   stop_pid_file "$pid_file"
 }
 
-stop_started_restate() {
-  stop_captured_container "$started_restate_name" "$started_restate_id" \
-    "$ownership_token" restate "$restate_marker_file"
-}
-
 stop_started_postgres() {
   stop_captured_container "$started_postgres_name" "$started_postgres_id" \
     "$ownership_token" postgres "$postgres_marker_file"
@@ -1480,7 +1299,7 @@ read_service_retirement_receipt() {
   local schema phase component token id extra
   read -r schema phase component token id extra < "$file" || return 1
   [[ "$schema" = 2 && "$phase" =~ ^(prepared|retired)$ \
-    && "$component" =~ ^(restate|postgres)$ \
+    && "$component" = postgres \
     && "$token" =~ ^[0-9a-fA-F-]{36}$ \
     && "$id" =~ ^[0-9a-fA-F]{12,64}$ && -z "$extra" ]] || return 1
   printf '%s %s %s %s %s\n' "$schema" "$phase" "$component" "$token" "$id"
@@ -1543,20 +1362,6 @@ validate_persisted_service_state() {
   fi
 }
 
-validate_additional_service_lease_state() {
-  local lease_file="$1" expected="$2" receipt_file="$3"
-  local component="$4" token="$5" id="$6" receipt phase
-  if [[ -e "$lease_file" || -L "$lease_file" ]]; then
-    [[ "$(read_service_lease "$lease_file" 2>/dev/null || true)" = "$expected" ]]
-    return
-  fi
-  receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
-  read -r _ phase _ _ _ <<<"$receipt"
-  [[ "$phase" = retired ]] && return 0
-  [[ "$phase" = prepared \
-    && "$(container_identity_observation "$id" "$id" "$token" "$component")" = retired ]]
-}
-
 retire_persisted_service() {
   local marker_file="$1" component="$2" lease_file="$3" expected_token="$4"
   local receipt_file="$5" receipt="" record="" name="" id="" token="" marker_component=""
@@ -1610,29 +1415,28 @@ retire_persisted_service() {
 read_teardown_transaction() {
   local file="$1"
   regular_private_file "$file" || return 1
-  local schema phase token pid start_time restate_id postgres_id extra
-  read -r schema phase token pid start_time restate_id postgres_id extra < "$file" || return 1
+  local schema phase token pid start_time postgres_id extra
+  read -r schema phase token pid start_time postgres_id extra < "$file" || return 1
   [[ "$schema" = 1 && "$phase" =~ ^(retiring|retired)$ \
     && "$token" =~ ^[0-9a-fA-F-]{36}$ \
     && "$pid" =~ ^[0-9]+$ && "$start_time" =~ ^[0-9]+$ \
-    && ( "$restate_id" = - || "$restate_id" =~ ^[0-9a-fA-F]{12,64}$ ) \
     && ( "$postgres_id" = - || "$postgres_id" =~ ^[0-9a-fA-F]{12,64}$ ) \
     && -z "$extra" ]] || return 1
-  printf '%s %s %s %s %s %s %s\n' \
-    "$schema" "$phase" "$token" "$pid" "$start_time" "$restate_id" "$postgres_id"
+  printf '%s %s %s %s %s %s\n' \
+    "$schema" "$phase" "$token" "$pid" "$start_time" "$postgres_id"
 }
 
 write_teardown_transaction() {
   local file="$1" phase="$2" token="$3" pid="$4" start_time="$5"
-  local restate_id="$6" postgres_id="$7" expected existing
-  expected="1 $phase $token $pid $start_time $restate_id $postgres_id"
+  local postgres_id="$6" expected existing
+  expected="1 $phase $token $pid $start_time $postgres_id"
   existing="$(read_teardown_transaction "$file" 2>/dev/null || true)"
   if [[ -n "$existing" ]]; then
     if [[ "$existing" = "$expected" ]]; then
       return 0
     fi
     if [[ "$phase" = retired \
-      && "$existing" = "1 retiring $token $pid $start_time $restate_id $postgres_id" ]]; then
+      && "$existing" = "1 retiring $token $pid $start_time $postgres_id" ]]; then
       printf '%s\n' "$expected" | publish_private_record replace "$file" \
         || [[ "$(read_teardown_transaction "$file" 2>/dev/null || true)" = "$expected" ]]
       return
@@ -1663,11 +1467,9 @@ remove_exact_private_record() {
 
 finalize_teardown_transaction() {
   local transaction_file="$1" transaction_expected="$2"
-  local process_expected="$3" restate_marker_expected="$4" postgres_marker_expected="$5"
-  local restate_ingress_lease_expected="$6" restate_admin_lease_expected="$7"
-  local postgres_lease_expected="$8"
-  local restate_receipt_expected="$9" postgres_receipt_expected="${10}"
-  local retain_transaction="${11:-0}"
+  local process_expected="$3" postgres_marker_expected="$4"
+  local postgres_lease_expected="$5" postgres_receipt_expected="$6"
+  local retain_transaction="${7:-0}"
   local transaction=""
   transaction="$(read_teardown_transaction "$transaction_file" 2>/dev/null || true)"
   [[ "$transaction" = "$transaction_expected" ]] || return 1
@@ -1678,23 +1480,11 @@ finalize_teardown_transaction() {
     remove_exact_private_record "$postgres_lease" "$postgres_lease_expected" \
       read_service_lease "Postgres service lease" || return 1
   fi
-  if [[ -n "$restate_marker_expected" ]]; then
-    remove_exact_private_record "$stack_restate_marker" "$restate_marker_expected" \
-      read_container_marker "Restate ownership marker" || return 1
-    remove_exact_private_record "$restate_ingress_lease" "$restate_ingress_lease_expected" \
-      read_service_lease "Restate ingress service lease" || return 1
-    remove_exact_private_record "$restate_admin_lease" "$restate_admin_lease_expected" \
-      read_service_lease "Restate admin service lease" || return 1
-  fi
   remove_exact_private_record "$stack_pid_file" "$process_expected" \
     read_pid_file "workbench PID receipt" || return 1
   if [[ -n "$postgres_receipt_expected" ]]; then
     remove_exact_private_record "$stack_postgres_receipt" "$postgres_receipt_expected" \
       read_service_retirement_receipt "Postgres retirement receipt" || return 1
-  fi
-  if [[ -n "$restate_receipt_expected" ]]; then
-    remove_exact_private_record "$stack_restate_receipt" "$restate_receipt_expected" \
-      read_service_retirement_receipt "Restate retirement receipt" || return 1
   fi
   remove_exact_private_record "$stack_process_receipt" \
     "2 retired $ownership_token $workbench_pid $workbench_start_time" \
@@ -1706,17 +1496,14 @@ finalize_teardown_transaction() {
 }
 
 owned_service_lease_remains() {
-  local token="$1" restate_id="$2" postgres_id="$3" file record
+  local token="$1" postgres_id="$2" file record
   local _schema component lease_token lease_id
-  for file in "$launcher_lock_root"/restate-*.lease \
-    "$launcher_lock_root"/postgres-*.lease; do
+  for file in "$launcher_lock_root"/postgres-*.lease; do
     [[ -e "$file" || -L "$file" ]] || continue
     record="$(read_service_lease "$file" 2>/dev/null || true)"
     [[ -n "$record" ]] || continue
     read -r _schema component lease_token lease_id <<<"$record"
-    if [[ "$lease_token" = "$token" \
-      && ( ( "$component" = restate && "$lease_id" = "$restate_id" ) \
-        || ( "$component" = postgres && "$lease_id" = "$postgres_id" ) ) ]]; then
+    if [[ "$lease_token" = "$token" && "$lease_id" = "$postgres_id" ]]; then
       return 0
     fi
   done
@@ -1725,9 +1512,9 @@ owned_service_lease_remains() {
 
 finalize_orphaned_teardown_transaction() {
   local transaction_file="$1" required_key="${2:-}" transaction=""
-  local schema phase token pid start_time restate_id postgres_id extra key
+  local schema phase token pid start_time postgres_id extra key
   transaction="$(read_teardown_transaction "$transaction_file" 2>/dev/null || true)"
-  read -r schema phase token pid start_time restate_id postgres_id extra <<<"$transaction"
+  read -r schema phase token pid start_time postgres_id extra <<<"$transaction"
   [[ -n "$transaction" && -z "$extra" && "$phase" = retired ]] || {
     log "refusing teardown: orphan transaction is not an exact completed transaction"
     return 1
@@ -1743,11 +1530,6 @@ finalize_orphaned_teardown_transaction() {
     log "refusing teardown: completed transaction process identity is not observably retired"
     return 1
   }
-  if [[ "$restate_id" != - ]] \
-    && [[ "$(container_identity_observation "$restate_id" "$restate_id" "$token" restate)" != retired ]]; then
-    log "refusing teardown: completed transaction Restate identity is not observably retired"
-    return 1
-  fi
   if [[ "$postgres_id" != - ]] \
     && [[ "$(container_identity_observation "$postgres_id" "$postgres_id" "$token" postgres)" != retired ]]; then
     log "refusing teardown: completed transaction Postgres identity is not observably retired"
@@ -1755,8 +1537,8 @@ finalize_orphaned_teardown_transaction() {
   fi
   local sibling
   for sibling in "$state_dir/workbench-$key.meta" "$state_dir/workbench-$key.pid" \
-    "$state_dir/workbench-$key.process-retired" "$state_dir/restate-$key.container" \
-    "$state_dir/postgres-$key.container" "$state_dir/restate-$key.service-retired" \
+    "$state_dir/workbench-$key.process-retired" \
+    "$state_dir/postgres-$key.container" \
     "$state_dir/postgres-$key.service-retired" \
     "$state_dir/.agent-workbench-dev-run-owner-$key"; do
     [[ ! -e "$sibling" && ! -L "$sibling" ]] || {
@@ -1764,7 +1546,7 @@ finalize_orphaned_teardown_transaction() {
       return 1
     }
   done
-  if owned_service_lease_remains "$token" "$restate_id" "$postgres_id"; then
+  if owned_service_lease_remains "$token" "$postgres_id"; then
     log "refusing teardown: completed transaction still has an owned service reservation"
     return 1
   fi
@@ -1774,8 +1556,7 @@ finalize_orphaned_teardown_transaction() {
 
 remove_matching_service_leases() {
   local component="$1" token="$2" id="$3" file record failed=0
-  for file in "$launcher_lock_root"/restate-*.lease \
-    "$launcher_lock_root"/postgres-*.lease; do
+  for file in "$launcher_lock_root"/postgres-*.lease; do
     [[ -e "$file" || -L "$file" ]] || continue
     record="$(read_service_lease "$file" 2>/dev/null || true)"
     [[ "$record" = "1 $component $token $id" ]] || continue
@@ -1819,10 +1600,10 @@ load_start_finalization_context() {
   start_finalization_data_dir="" start_finalization_data_hash=""
   start_finalization_data_identity="" start_finalization_token=""
   start_finalization_owner_record="" start_finalization_data_record=""
-  start_finalization_restate_record="" start_finalization_postgres_record=""
+  start_finalization_postgres_record=""
   # shellcheck disable=SC1090
   source "$file" || return 1
-  [[ "$start_finalization_schema" = 2 \
+  [[ "$start_finalization_schema" = 3 \
     && "$start_finalization_phase" =~ ^(retired|data-finalized)$ \
     && "$start_finalization_data_action" =~ ^(remove|preserve)$ \
     && -n "$start_finalization_workbench_addr" \
@@ -1864,27 +1645,18 @@ load_start_finalization_receipt() {
     [[ -z "$start_finalization_data_record" ]] || return 1
   fi
 
-  local record record_schema phase component token id extra found=0 expected_component
-  for expected_component in restate postgres; do
-    if [[ "$expected_component" = restate ]]; then
-      record="$start_finalization_restate_record"
-    else
-      record="$start_finalization_postgres_record"
-    fi
-    [[ -n "$record" ]] || continue
-    read -r record_schema phase component token id extra <<<"$record"
-    [[ "$record_schema" = 2 && "$phase" = retired \
-      && "$component" = "$expected_component" \
-      && "$token" = "$start_finalization_token" \
-      && "$id" =~ ^[0-9a-fA-F]{12,64}$ && -z "$extra" ]] || return 1
-    found=1
-  done
-  (( found ))
+  local record_schema phase component token id extra
+  read -r record_schema phase component token id extra \
+    <<<"$start_finalization_postgres_record"
+  [[ "$record_schema" = 2 && "$phase" = retired \
+    && "$component" = postgres \
+    && "$token" = "$start_finalization_token" \
+    && "$id" =~ ^[0-9a-fA-F]{12,64}$ && -z "$extra" ]]
 }
 
 write_start_finalization_receipt() {
   local phase="$1" data_action="$2" token="$3" owner_record="$4" data_record="$5"
-  local restate_record="$6" postgres_record="$7" publication=create content data_identity=-
+  local postgres_record="$6" publication=create content data_identity=-
   [[ "$phase" =~ ^(retired|data-finalized)$ \
     && "$data_action" =~ ^(remove|preserve)$ ]] || return 1
   if [[ -e "$data_dir" && ! -L "$data_dir" ]]; then
@@ -1896,7 +1668,7 @@ write_start_finalization_receipt() {
     [[ -z "$data_record" ]] || return 1
   fi
   content="$({
-    printf 'start_finalization_schema=2\n'
+    printf 'start_finalization_schema=3\n'
     printf 'start_finalization_phase=%q\n' "$phase"
     printf 'start_finalization_state_key=%q\n' "$state_key"
     printf 'start_finalization_state_dir=%q\n' "$state_dir"
@@ -1908,7 +1680,6 @@ write_start_finalization_receipt() {
     printf 'start_finalization_token=%q\n' "$token"
     printf 'start_finalization_owner_record=%q\n' "$owner_record"
     printf 'start_finalization_data_record=%q\n' "$data_record"
-    printf 'start_finalization_restate_record=%q\n' "$restate_record"
     printf 'start_finalization_postgres_record=%q\n' "$postgres_record"
   })" || return 1
   if [[ -e "$start_finalization_file" || -L "$start_finalization_file" ]]; then
@@ -1945,22 +1716,12 @@ remove_start_finalization_receipt() {
 
 finalize_start_finalization_receipt() {
   load_start_finalization_receipt "$start_finalization_file" || return 1
-  local restate_id=- postgres_id=- record phase component token id extra
-  for record in "$start_finalization_restate_record" \
-    "$start_finalization_postgres_record"; do
-    [[ -n "$record" ]] || continue
-    read -r _ phase component token id extra <<<"$record"
-    [[ "$(container_identity_observation "$id" "$id" "$token" "$component")" = retired ]] \
-      || return 1
-    if [[ "$component" = restate ]]; then
-      restate_id="$id"
-    else
-      postgres_id="$id"
-    fi
-  done
-  [[ ! -e "$restate_marker_file" && ! -L "$restate_marker_file" \
-    && ! -e "$postgres_marker_file" && ! -L "$postgres_marker_file" ]] || return 1
-  owned_service_lease_remains "$start_finalization_token" "$restate_id" "$postgres_id" \
+  local postgres_id phase component token
+  read -r _ phase component token postgres_id _ <<<"$start_finalization_postgres_record"
+  [[ "$(container_identity_observation "$postgres_id" "$postgres_id" "$token" postgres)" \
+    = retired ]] || return 1
+  [[ ! -e "$postgres_marker_file" && ! -L "$postgres_marker_file" ]] || return 1
+  owned_service_lease_remains "$start_finalization_token" "$postgres_id" \
     && return 1
   if [[ -e "$run_owner_file" || -L "$run_owner_file" ]]; then
     [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" \
@@ -1970,11 +1731,6 @@ finalize_start_finalization_receipt() {
     [[ "$start_finalization_data_action" = remove \
       && "$(read_data_creation_receipt "$data_creation_receipt_file" 2>/dev/null || true)" \
         = "$start_finalization_data_record" ]] || return 1
-  fi
-  if [[ -e "$restate_service_retirement_receipt_file" \
-    || -L "$restate_service_retirement_receipt_file" ]]; then
-    [[ "$(read_service_retirement_receipt "$restate_service_retirement_receipt_file" \
-      2>/dev/null || true)" = "$start_finalization_restate_record" ]] || return 1
   fi
   if [[ -e "$postgres_service_retirement_receipt_file" \
     || -L "$postgres_service_retirement_receipt_file" ]]; then
@@ -2003,16 +1759,9 @@ finalize_start_finalization_receipt() {
 
   remove_exact_private_record "$run_owner_file" "$start_finalization_owner_record" \
     read_run_owner "orphan startup run-footprint record" || return 1
-  if [[ -n "$start_finalization_postgres_record" ]]; then
-    remove_exact_private_record "$postgres_service_retirement_receipt_file" \
-      "$start_finalization_postgres_record" read_service_retirement_receipt \
-      "Postgres retirement receipt" || return 1
-  fi
-  if [[ -n "$start_finalization_restate_record" ]]; then
-    remove_exact_private_record "$restate_service_retirement_receipt_file" \
-      "$start_finalization_restate_record" read_service_retirement_receipt \
-      "Restate retirement receipt" || return 1
-  fi
+  remove_exact_private_record "$postgres_service_retirement_receipt_file" \
+    "$start_finalization_postgres_record" read_service_retirement_receipt \
+    "Postgres retirement receipt" || return 1
   local finalization_hash
   finalization_hash="$(sha256sum "$start_finalization_file" | awk '{print $1}')" \
     || return 1
@@ -2025,13 +1774,11 @@ finalize_start_finalization_receipt() {
 finalize_orphaned_start_attempt() {
   local key="$1" allow_data_cleanup="${2:-0}"
   local candidate_start_finalization_file="$launcher_lock_root/$launcher_lock_hash-$key-start-finalizing"
-  local restate_receipt="$state_dir/restate-$key.service-retired"
   local postgres_receipt="$state_dir/postgres-$key.service-retired"
-  local restate_marker="$state_dir/restate-$key.container"
   local postgres_marker="$state_dir/postgres-$key.container"
   local owner_file="$state_dir/.agent-workbench-dev-run-owner-$key"
   local owner_record="" schema token="" owner_token owner_key owner_hash extra recovered_token
-  local restate_receipt_record="" postgres_receipt_record="" has_service_receipt=0
+  local postgres_receipt_record=""
   if [[ -e "$candidate_start_finalization_file" || -L "$candidate_start_finalization_file" ]]; then
     if (( ! allow_data_cleanup )); then
       log "retained exact startup cleanup authority; retry targeted down with the original data/run settings"
@@ -2047,42 +1794,13 @@ finalize_orphaned_start_attempt() {
   [[ -n "$owner_record" && -z "$extra" && "$owner_key" = "$key" \
     && "$owner_hash" = "$data_path_hash" ]] || return 1
   token="$owner_token"
-  local component receipt marker
-  for component in restate postgres; do
-    if [[ "$component" = restate ]]; then
-      receipt="$restate_receipt"; marker="$restate_marker"
-    else
-      receipt="$postgres_receipt"; marker="$postgres_marker"
-    fi
-    if [[ -e "$receipt" || -L "$receipt" ]]; then
-      local receipt_record receipt_token
-      receipt_record="$(read_service_retirement_receipt "$receipt" 2>/dev/null || true)"
-      read -r _ _ _ receipt_token _ <<<"$receipt_record"
-      [[ -n "$receipt_token" && ( -z "$token" || "$receipt_token" = "$token" ) ]] || return 1
-      token="$receipt_token"
-      has_service_receipt=1
-      if [[ "$component" = restate ]]; then
-        restate_receipt_record="$receipt_record"
-      else
-        postgres_receipt_record="$receipt_record"
-      fi
-    elif [[ -e "$marker" || -L "$marker" ]]; then
-      return 1
-    fi
-  done
-  [[ -n "$token" && "$has_service_receipt" = 1 ]] || return 1
-  if (( allow_data_cleanup )) && [[ -n "$restate_receipt_record" ]]; then
-    local _schema _phase _component receipt_token receipt_id lease_file
-    read -r _schema _phase _component receipt_token receipt_id <<<"$restate_receipt_record"
-    for lease_file in "$restate_ingress_service_lease_file" \
-      "$restate_admin_service_lease_file"; do
-      if [[ -e "$lease_file" || -L "$lease_file" ]]; then
-        [[ "$(read_service_lease "$lease_file" 2>/dev/null || true)" \
-          = "1 restate $receipt_token $receipt_id" ]] || return 1
-      fi
-    done
-  fi
-  if (( allow_data_cleanup )) && [[ -n "$postgres_receipt_record" ]] \
+  [[ -e "$postgres_receipt" || -L "$postgres_receipt" ]] || return 1
+  local receipt_token
+  postgres_receipt_record="$(read_service_retirement_receipt "$postgres_receipt" 2>/dev/null || true)"
+  read -r _ _ _ receipt_token _ <<<"$postgres_receipt_record"
+  [[ -n "$receipt_token" && ( -z "$token" || "$receipt_token" = "$token" ) ]] || return 1
+  token="$receipt_token"
+  if (( allow_data_cleanup )) \
     && [[ -e "$postgres_service_lease_file" || -L "$postgres_service_lease_file" ]]; then
     local _pg_schema _pg_phase _pg_component pg_receipt_token pg_receipt_id
     read -r _pg_schema _pg_phase _pg_component pg_receipt_token pg_receipt_id \
@@ -2090,20 +1808,11 @@ finalize_orphaned_start_attempt() {
     [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
       = "1 postgres $pg_receipt_token $pg_receipt_id" ]] || return 1
   fi
-  if [[ -e "$restate_receipt" || -L "$restate_receipt" ]]; then
-    recovered_token="$(finalize_orphaned_service_receipt \
-      restate "$restate_receipt" "$restate_marker")" || return 1
-    [[ "$recovered_token" = "$token" ]] || return 1
-    restate_receipt_record="$(read_service_retirement_receipt "$restate_receipt" \
-      2>/dev/null || true)"
-  fi
-  if [[ -e "$postgres_receipt" || -L "$postgres_receipt" ]]; then
-    recovered_token="$(finalize_orphaned_service_receipt \
-      postgres "$postgres_receipt" "$postgres_marker")" || return 1
-    [[ "$recovered_token" = "$token" ]] || return 1
-    postgres_receipt_record="$(read_service_retirement_receipt "$postgres_receipt" \
-      2>/dev/null || true)"
-  fi
+  recovered_token="$(finalize_orphaned_service_receipt \
+    postgres "$postgres_receipt" "$postgres_marker")" || return 1
+  [[ "$recovered_token" = "$token" ]] || return 1
+  postgres_receipt_record="$(read_service_retirement_receipt "$postgres_receipt" \
+    2>/dev/null || true)"
   if (( ! allow_data_cleanup )); then
     log "retained exact startup cleanup authority; retry targeted down with the original data/run settings"
     return 1
@@ -2123,7 +1832,7 @@ finalize_orphaned_start_attempt() {
     data_action=remove
   fi
   write_start_finalization_receipt retired "$data_action" "$token" "$owner_record" "$creation_record" \
-    "$restate_receipt_record" "$postgres_receipt_record" || return 1
+    "$postgres_receipt_record" || return 1
   finalize_start_finalization_receipt
 }
 
@@ -2135,22 +1844,15 @@ stop_stack_from_meta() (
     return 1
   fi
   unset meta_schema workbench_addr workbench_pid workbench_start_time
-  unset restate_ingress_url restate_admin_url deployment_url
-  unset store_backend ownership_token restate_managed postgres_managed postgres_host postgres_port
-  unset restate_container_name restate_container_id postgres_container_name postgres_container_id
-  unset restate_retirement_authorized restate_deployment_id restate_registry_hash
+  unset store_backend ownership_token postgres_managed postgres_host postgres_port
+  unset postgres_container_name postgres_container_id
   # shellcheck disable=SC1090
   source "$stack_meta_file"
-  if [[ "${meta_schema:-}" != 3 || ! "${ownership_token:-}" =~ ^[0-9a-fA-F-]{36}$ \
+  if [[ "${meta_schema:-}" != 4 || ! "${ownership_token:-}" =~ ^[0-9a-fA-F-]{36}$ \
     || ! "${workbench_pid:-}" =~ ^[0-9]+$ || ! "${workbench_start_time:-}" =~ ^[0-9]+$ \
-    || ! "${restate_managed:-}" =~ ^[01]$ || ! "${postgres_managed:-}" =~ ^[01]$ \
+    || ! "${postgres_managed:-}" =~ ^[01]$ \
     || ! "${store_backend:-}" =~ ^(sqlite|postgres)$ ]]; then
     log "refusing teardown: stack metadata is legacy or invalid at $stack_meta_file"
-    return 1
-  fi
-  if [[ "$restate_managed" = 1 ]] \
-    && [[ -z "${restate_container_name:-}" || ! "${restate_container_id:-}" =~ ^[0-9a-fA-F]{12,64}$ ]]; then
-    log "refusing teardown: stack metadata lacks the original Restate identity"
     return 1
   fi
   if [[ "$postgres_managed" = 1 ]] \
@@ -2167,49 +1869,27 @@ stop_stack_from_meta() (
   fi
   local stack_pid_file="$state_dir/workbench-$stack_key.pid"
   local stack_process_receipt="$state_dir/workbench-$stack_key.process-retired"
-  local stack_restate_marker="$state_dir/restate-$stack_key.container"
   local stack_postgres_marker="$state_dir/postgres-$stack_key.container"
-  local stack_restate_receipt="$state_dir/restate-$stack_key.service-retired"
   local stack_postgres_receipt="$state_dir/postgres-$stack_key.service-retired"
   local stack_transaction="$state_dir/workbench-$stack_key.teardown"
-  local expected_restate_id="-" expected_postgres_id="-"
-  local expected_restate_marker="" expected_postgres_marker=""
-  local expected_restate_lease="" expected_postgres_lease=""
-  local expected_restate_receipt="" expected_postgres_receipt=""
-  if [[ "$restate_managed" = 1 ]]; then
-    expected_restate_id="$restate_container_id"
-    expected_restate_marker="$restate_container_name $restate_container_id $ownership_token restate"
-    expected_restate_receipt="2 retired restate $ownership_token $restate_container_id"
-  fi
+  local expected_postgres_id="-" expected_postgres_marker=""
+  local expected_postgres_lease="" expected_postgres_receipt=""
   if [[ "$postgres_managed" = 1 ]]; then
     expected_postgres_id="$postgres_container_id"
     expected_postgres_marker="$postgres_container_name $postgres_container_id $ownership_token postgres"
     expected_postgres_receipt="2 retired postgres $ownership_token $postgres_container_id"
   fi
   local transaction_retiring transaction_retired transaction="" transaction_phase=""
-  transaction_retiring="1 retiring $ownership_token $workbench_pid $workbench_start_time $expected_restate_id $expected_postgres_id"
-  transaction_retired="1 retired $ownership_token $workbench_pid $workbench_start_time $expected_restate_id $expected_postgres_id"
+  transaction_retiring="1 retiring $ownership_token $workbench_pid $workbench_start_time $expected_postgres_id"
+  transaction_retired="1 retired $ownership_token $workbench_pid $workbench_start_time $expected_postgres_id"
   if [[ -e "$stack_transaction" || -L "$stack_transaction" ]]; then
     transaction="$(read_teardown_transaction "$stack_transaction" 2>/dev/null || true)"
     if [[ "$transaction" != "$transaction_retiring" && "$transaction" != "$transaction_retired" ]]; then
       log "refusing teardown: transaction receipt is invalid or does not match original ownership"
       return 1
     fi
-    read -r _ transaction_phase _ _ _ _ _ <<<"$transaction"
+    read -r _ transaction_phase _ _ _ _ <<<"$transaction"
   fi
-
-  local ingress_host ingress_port admin_host admin_port canonical_ingress canonical_admin
-  read -r ingress_host ingress_port < <(url_host_port "$restate_ingress_url")
-  read -r admin_host admin_port < <(url_host_port "$restate_admin_url")
-  validate_port "Restate ingress" "$ingress_port"
-  validate_port "Restate admin" "$admin_port"
-  canonical_ingress="$(canonical_service_host "$ingress_host")"
-  canonical_admin="$(canonical_service_host "$admin_host")"
-  local restate_ingress_hash restate_admin_hash restate_ingress_lease restate_admin_lease
-  restate_ingress_hash="$(printf '%s' "$canonical_ingress:$ingress_port" | sha256sum | awk '{print $1}')"
-  restate_admin_hash="$(printf '%s' "$canonical_admin:$admin_port" | sha256sum | awk '{print $1}')"
-  restate_ingress_lease="$launcher_lock_root/restate-ingress-$restate_ingress_hash.lease"
-  restate_admin_lease="$launcher_lock_root/restate-admin-$restate_admin_hash.lease"
 
   local postgres_lease=""
   if [[ "$postgres_managed" = 1 ]]; then
@@ -2219,59 +1899,18 @@ stop_stack_from_meta() (
     postgres_hash="$(printf '%s' "$canonical_postgres:$postgres_port" | sha256sum | awk '{print $1}')"
     postgres_lease="$launcher_lock_root/postgres-$postgres_hash.lease"
   fi
-  expected_restate_lease="1 restate $ownership_token $expected_restate_id"
   expected_postgres_lease="1 postgres $ownership_token $expected_postgres_id"
 
   if [[ "$transaction_phase" = retired ]]; then
     finalize_teardown_transaction "$stack_transaction" "$transaction_retired" \
-      "$workbench_pid $workbench_start_time" "$expected_restate_marker" \
-      "$expected_postgres_marker" "$expected_restate_lease" "$expected_restate_lease" \
-      "$expected_postgres_lease" "$expected_restate_receipt" "$expected_postgres_receipt" \
-      "$retain_transaction"
+      "$workbench_pid $workbench_start_time" "$expected_postgres_marker" \
+      "$expected_postgres_lease" "$expected_postgres_receipt" "$retain_transaction"
     return
   fi
 
   validate_persisted_process_state "$stack_pid_file" "$stack_process_receipt" \
     "$ownership_token" "$workbench_pid" "$workbench_start_time" || return 1
 
-  if [[ "$restate_managed" = 1 ]]; then
-    if [[ "${restate_retirement_authorized:-}" != 1 \
-      || ! "${restate_deployment_id:-}" =~ ^dp_[A-Za-z0-9]+$ \
-      || ! "${restate_registry_hash:-}" =~ ^[0-9a-f]{64}$ ]]; then
-      log "refusing teardown: stack metadata does not authorize exclusive Restate retirement"
-      return 1
-    fi
-    validate_persisted_service_state "$stack_restate_marker" restate "$restate_ingress_lease" \
-      "$ownership_token" "$stack_restate_receipt" || return 1
-    validate_additional_service_lease_state "$restate_admin_lease" \
-      "$expected_restate_lease" "$stack_restate_receipt" restate \
-      "$ownership_token" "$restate_container_id" || return 1
-    [[ "$(read_container_marker "$stack_restate_marker" 2>/dev/null || true)" \
-      = "$expected_restate_marker" \
-      && "$(read_service_lease "$restate_ingress_lease" 2>/dev/null || true)" \
-      = "$expected_restate_lease" ]] || {
-      log "refusing teardown: Restate records do not match the original launch identity"
-      return 1
-    }
-    local restate_receipt="" restate_receipt_phase="" restate_observation="running"
-    restate_receipt="$(read_service_retirement_receipt "$stack_restate_receipt" 2>/dev/null || true)"
-    [[ -z "$restate_receipt" ]] || read -r _ restate_receipt_phase _ _ _ <<<"$restate_receipt"
-    if [[ "$restate_receipt_phase" = prepared ]]; then
-      restate_observation="$(container_identity_observation "$restate_container_id" \
-        "$restate_container_id" "$ownership_token" restate)"
-    fi
-    if [[ "$restate_receipt_phase" != retired && "$restate_observation" != retired ]]; then
-      local registry_records registry_hash expected_registry_record
-      registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
-      registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
-      expected_registry_record="$restate_deployment_id"$'\t'"${deployment_url%/}"
-      if [[ "$registry_records" != "$expected_registry_record" \
-        || "$registry_hash" != "$restate_registry_hash" ]]; then
-        log "refusing teardown: current Restate deployment registry does not prove exclusive ownership"
-        return 1
-      fi
-    fi
-  fi
   if [[ "$postgres_managed" = 1 ]]; then
     validate_persisted_service_state "$stack_postgres_marker" postgres "$postgres_lease" \
       "$ownership_token" "$stack_postgres_receipt" || return 1
@@ -2286,7 +1925,7 @@ stop_stack_from_meta() (
 
   if [[ -z "$transaction" ]]; then
     write_teardown_transaction "$stack_transaction" retiring "$ownership_token" \
-      "$workbench_pid" "$workbench_start_time" "$expected_restate_id" "$expected_postgres_id" || {
+      "$workbench_pid" "$workbench_start_time" "$expected_postgres_id" || {
       log "could not persist the prepared teardown transaction"
       return 1
     }
@@ -2295,39 +1934,24 @@ stop_stack_from_meta() (
   retire_persisted_process \
     "$stack_pid_file" "$stack_process_receipt" "$ownership_token" \
     "$workbench_pid" "$workbench_start_time" || return 1
-  if [[ "$restate_managed" = 1 ]]; then
-    retire_persisted_service "$stack_restate_marker" restate "$restate_ingress_lease" \
-      "$ownership_token" "$stack_restate_receipt" || return 1
-  elif [[ "$postgres_managed" = 1 ]]; then
-    log "workbench stopped; retaining managed Postgres because the Restate engine is external"
-    return 1
-  else
-    log "workbench stopped; external Restate remains registered"
-  fi
   if [[ "$postgres_managed" = 1 ]]; then
     retire_persisted_service "$stack_postgres_marker" postgres "$postgres_lease" \
       "$ownership_token" "$stack_postgres_receipt" || return 1
   fi
   [[ "$(read_process_retirement_receipt "$stack_process_receipt" 2>/dev/null || true)" \
     = "2 retired $ownership_token $workbench_pid $workbench_start_time" ]] || return 1
-  if [[ "$restate_managed" = 1 ]]; then
-    [[ "$(read_service_retirement_receipt "$stack_restate_receipt" 2>/dev/null || true)" \
-      = "$expected_restate_receipt" ]] || return 1
-  fi
   if [[ "$postgres_managed" = 1 ]]; then
     [[ "$(read_service_retirement_receipt "$stack_postgres_receipt" 2>/dev/null || true)" \
       = "$expected_postgres_receipt" ]] || return 1
   fi
   write_teardown_transaction "$stack_transaction" retired "$ownership_token" \
-    "$workbench_pid" "$workbench_start_time" "$expected_restate_id" "$expected_postgres_id" || {
+    "$workbench_pid" "$workbench_start_time" "$expected_postgres_id" || {
     log "could not persist completed teardown transaction"
     return 1
   }
   finalize_teardown_transaction "$stack_transaction" "$transaction_retired" \
-    "$workbench_pid $workbench_start_time" "$expected_restate_marker" \
-    "$expected_postgres_marker" "$expected_restate_lease" "$expected_restate_lease" \
-    "$expected_postgres_lease" "$expected_restate_receipt" "$expected_postgres_receipt" \
-    "$retain_transaction"
+    "$workbench_pid $workbench_start_time" "$expected_postgres_marker" \
+    "$expected_postgres_lease" "$expected_postgres_receipt" "$retain_transaction"
 )
 
 stop_target() {
@@ -2348,9 +1972,7 @@ stop_target() {
     if [[ -e "$pid_file" || -L "$pid_file" ]]; then
       stop_pid_file "$pid_file" || true
     fi
-    if [[ -e "$restate_service_retirement_receipt_file" \
-      || -L "$restate_service_retirement_receipt_file" \
-      || -e "$postgres_service_retirement_receipt_file" \
+    if [[ -e "$postgres_service_retirement_receipt_file" \
       || -L "$postgres_service_retirement_receipt_file" \
       || -e "$run_owner_file" || -L "$run_owner_file" ]]; then
       finalize_orphaned_start_attempt "$state_key" 1 || {
@@ -2373,7 +1995,7 @@ attempt_reset_metadata_matches() {
     unset reset_schema owned_token owned_state_key owned_data_dir
     # shellcheck disable=SC1090
     source "$file"
-    [[ "$reset_schema" = 6 && "$owned_token" = "$ownership_token" \
+    [[ "$reset_schema" = 7 && "$owned_token" = "$ownership_token" \
       && "$owned_state_key" = "$state_key" && "$owned_data_dir" = "$data_dir" ]]
   )
 }
@@ -2412,51 +2034,6 @@ remove_attempt_reset_ownership() {
   [[ ! -e "$reset_file" && ! -L "$reset_file" \
     && ! -e "$data_owner_file" && ! -L "$data_owner_file" ]] || return 1
   created_reset_ownership_this_attempt=0
-}
-
-cleanup_attempt_restate_service() {
-  local has_lease_progress=0
-  (( created_restate_ingress_service_lease_this_attempt \
-    || created_restate_admin_service_lease_this_attempt )) && has_lease_progress=1
-  if (( started_restate_this_attempt )); then
-    if (( created_restate_ingress_service_lease_this_attempt )) \
-      && [[ "$(read_service_lease "$restate_ingress_service_lease_file" 2>/dev/null || true)" \
-        != "$restate_service_lease_record" ]]; then
-      log "startup cleanup could not verify its exact Restate ingress service lease"
-      return 1
-    fi
-    if (( created_restate_admin_service_lease_this_attempt )) \
-      && [[ "$(read_service_lease "$restate_admin_service_lease_file" 2>/dev/null || true)" \
-        != "$restate_service_lease_record" ]]; then
-      log "startup cleanup could not verify its exact Restate admin service lease"
-      return 1
-    fi
-    if (( has_lease_progress )); then
-      retire_started_service_with_receipt "$restate_marker_file" \
-        "$restate_service_retirement_receipt_file" restate \
-        "$started_restate_name" "$started_restate_id" || return 1
-    else
-      stop_started_restate || return 1
-    fi
-    started_restate_this_attempt=0
-  fi
-  if (( created_restate_ingress_service_lease_this_attempt \
-    || created_restate_admin_service_lease_this_attempt )); then
-    [[ "$(read_service_retirement_receipt "$restate_service_retirement_receipt_file" \
-      2>/dev/null || true)" \
-      = "2 retired restate $ownership_token $started_restate_id" ]] || return 1
-    remove_attempt_restate_service_leases "$restate_service_lease_record" || return 1
-  fi
-  if [[ -e "$restate_service_retirement_receipt_file" \
-    || -L "$restate_service_retirement_receipt_file" ]]; then
-    finalize_attempt_service_records "$restate_marker_file" \
-      "$restate_service_retirement_receipt_file" restate \
-      "$started_restate_name" "$started_restate_id"
-  elif [[ -e "$restate_marker_file" || -L "$restate_marker_file" ]]; then
-    remove_exact_private_record "$restate_marker_file" \
-      "$started_restate_name $started_restate_id $ownership_token restate" \
-      read_container_marker "Restate ownership marker"
-  fi
 }
 
 cleanup_attempt_postgres_service() {
@@ -2498,17 +2075,16 @@ cleanup_attempt_postgres_service() {
 cleanup_start_attempt() {
   if (( replacing_process )); then
     # A process replacement created nothing but the replacement process. The
-    # engine, its journals, the managed stores, the registered deployment, the
-    # run footprint and the application data all predate this attempt and are
-    # never retired here.
+    # managed stores, the run footprint and the application data all predate
+    # this attempt and are never retired here.
     if (( started_workbench_this_attempt )); then
       if ! stop_attempt_workbench; then
-        log "replacement cleanup could not stop the process it started; retaining the engine, application state, and ownership metadata"
+        log "replacement cleanup could not stop the process it started; retaining application state and ownership metadata"
         return 1
       fi
       started_workbench_this_attempt=0
     fi
-    log "replacement cleanup retained the engine, managed services, deployment, and application data"
+    log "replacement cleanup retained the managed services and application data"
     return 0
   fi
   if (( reset_finalization_active )); then
@@ -2523,22 +2099,9 @@ cleanup_start_attempt() {
     log "startup cleanup retained the host and dependent resources after unknown process observation"
     return 1
   fi
-  if (( created_meta_this_attempt && started_restate_this_attempt \
-    && ! restate_retirement_authorized )) && [[ -n "$registered_deployment_id" ]]; then
-    capture_restate_registry_ownership
-    if (( restate_retirement_authorized )); then
-      write_meta || {
-        log "startup cleanup could not bind its fresh Restate registry ownership"
-        return 1
-      }
-    fi
-  fi
-  if (( created_meta_this_attempt && restate_retirement_authorized )) \
-    && [[ -n "$registered_deployment_id" \
-      && "$(read_pid_file "$pid_file" 2>/dev/null || true)" \
+  if (( created_meta_this_attempt )) \
+    && [[ "$(read_pid_file "$pid_file" 2>/dev/null || true)" \
         = "$started_workbench_pid $started_workbench_start_time" \
-      && "$(read_container_marker "$restate_marker_file" 2>/dev/null || true)" \
-        = "$started_restate_name $started_restate_id $ownership_token restate" \
       && ( "$started_postgres_this_attempt" = 0 \
         || "$(read_container_marker "$postgres_marker_file" 2>/dev/null || true)" \
           = "$started_postgres_name $started_postgres_id $ownership_token postgres" ) ]]; then
@@ -2547,38 +2110,15 @@ cleanup_start_attempt() {
       return 1
     fi
     started_workbench_this_attempt=0
-    started_restate_this_attempt=0
     started_postgres_this_attempt=0
-    created_restate_ingress_service_lease_this_attempt=0
-    created_restate_admin_service_lease_this_attempt=0
     created_postgres_service_lease_this_attempt=0
   fi
   if (( started_workbench_this_attempt )); then
     if ! stop_attempt_workbench; then
-      log "startup cleanup could not stop the owned workbench; retaining its engine, application state, and ownership metadata"
+      log "startup cleanup could not stop the owned workbench; retaining application state and ownership metadata"
       return 1
     fi
     started_workbench_this_attempt=0
-  fi
-  if (( external_restate_used_this_attempt )); then
-    log "startup cleanup cannot retire the external Restate engine; retaining application state, managed stores, and ownership metadata"
-    return 1
-  fi
-  if (( started_restate_this_attempt )) && [[ -n "$registered_deployment_id" ]]; then
-    if ! fresh_restate_registry_ownership; then
-      log "startup cleanup cannot prove fresh exclusive Restate registry ownership; retaining the engine and dependent state"
-      return 1
-    fi
-  fi
-  if (( started_restate_this_attempt \
-    || created_restate_ingress_service_lease_this_attempt \
-    || created_restate_admin_service_lease_this_attempt )) \
-    || [[ -e "$restate_service_retirement_receipt_file" \
-      || -L "$restate_service_retirement_receipt_file" ]]; then
-    if ! cleanup_attempt_restate_service; then
-      log "startup cleanup could not retire its exact Restate service and reservations; retaining application state and ownership metadata"
-      return 1
-    fi
   fi
   if (( started_postgres_this_attempt || created_postgres_service_lease_this_attempt )) \
     || [[ -e "$postgres_service_retirement_receipt_file" \
@@ -2681,10 +2221,8 @@ build_reset_recovery_command() {
     postgres_setting=1
   fi
   printf -v reset_recovery_command \
-    'env AGENT_WORKBENCH_RUN_DIR=%q AGENT_WORKBENCH_DATA_DIR=%q AGENT_WORKBENCH_RESTATE_ADDR=%q AGENT_WORKBENCH_RESTATE_ENDPOINT_URL=%q RESTATE_INGRESS_URL=%q RESTATE_ADMIN_URL=%q AGENT_WORKBENCH_RESTATE_NODE_PORT=%q AGENT_WORKBENCH_RESTATE_CONTAINER=%q AGENT_WORKBENCH_DATABASE_URL=%q AGENT_WORKBENCH_POSTGRES=%q' \
-    "$state_dir" "$data_dir" "$restate_endpoint_addr" "$(endpoint_url)" \
-    "$restate_ingress_url" "$restate_admin_url" "$restate_node_port" "$restate_container" \
-    "" "$postgres_setting"
+    'env AGENT_WORKBENCH_RUN_DIR=%q AGENT_WORKBENCH_DATA_DIR=%q AGENT_WORKBENCH_DATABASE_URL=%q AGENT_WORKBENCH_POSTGRES=%q' \
+    "$state_dir" "$data_dir" "" "$postgres_setting"
   if [[ "$owned_store_backend" = postgres ]]; then
     printf -v reset_recovery_command '%s AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_POSTGRES_HOST=%q AGENT_WORKBENCH_POSTGRES_PORT=%q AGENT_WORKBENCH_POSTGRES_CONTAINER=%q' \
       "$reset_recovery_command" "$postgres_host" "$postgres_port" "$postgres_container"
@@ -2790,11 +2328,9 @@ stop_all_known() {
     log "refusing service teardown: process metadata has no matching stack metadata at $expected_meta"
     failed=1
   done
-  for file in "$state_dir"/restate-*.service-retired \
-    "$state_dir"/postgres-*.service-retired; do
+  for file in "$state_dir"/postgres-*.service-retired; do
     [[ -e "$file" || -L "$file" ]] || continue
     key="${file##*/}"
-    key="${key#restate-}"
     key="${key#postgres-}"
     key="${key%.service-retired}"
     expected_meta="$state_dir/workbench-$key.meta"
@@ -2802,10 +2338,9 @@ stop_all_known() {
     found=1
     finalize_orphaned_start_attempt "$key" 0 || failed=1
   done
-  for file in "$state_dir"/restate-*.container "$state_dir"/postgres-*.container; do
+  for file in "$state_dir"/postgres-*.container; do
     [[ -e "$file" || -L "$file" ]] || continue
     key="${file##*/}"
-    key="${key#restate-}"
     key="${key#postgres-}"
     key="${key%.container}"
     expected_meta="$state_dir/workbench-$key.meta"
@@ -2827,10 +2362,7 @@ stop_all_known() {
     [[ -e "$file" || -L "$file" ]] || continue
     key="${file##*/}"
     key="${key#workbench-}"
-    key="${key#restate-}"
-    key="${key#postgres-}"
     key="${key%.process-retired}"
-    key="${key%.service-retired}"
     expected_meta="$state_dir/workbench-$key.meta"
     [[ -e "$expected_meta" || -L "$expected_meta" ]] && continue
     found=1
@@ -2853,72 +2385,6 @@ ensure_ports_available() {
     port_owner "$workbench_port" >&2
     die "workbench UI port $workbench_host:$workbench_port is already in use by a non-workbench process"
   fi
-  if tcp_ready "$endpoint_wait_host" "$endpoint_port"; then
-    port_owner "$endpoint_port" >&2
-    die "workbench Restate endpoint port $endpoint_host:$endpoint_port is already in use"
-  fi
-}
-
-require_restate_endpoint_admission() {
-  [[ ! -e "$legacy_restate_service_lease_file" && ! -L "$legacy_restate_service_lease_file" ]] \
-    || die "legacy composite Restate reservation cannot prove individual endpoint ownership"
-  require_service_unreserved "$restate_ingress_service_lease_file" "Restate ingress"
-  require_service_unreserved "$restate_admin_service_lease_file" "Restate admin"
-  local ingress_ready=0 admin_ready=0
-  tcp_ready "$ingress_host" "$ingress_port" && ingress_ready=1
-  tcp_ready "$admin_host" "$admin_port" && admin_ready=1
-  if (( ingress_ready != admin_ready )); then
-    die "Restate ingress and admin endpoints must both belong to one ready external service or both be free"
-  fi
-}
-
-ensure_restate() {
-  require_restate_endpoint_admission
-  local ingress_ready=0 admin_ready=0
-  tcp_ready "$ingress_host" "$ingress_port" && ingress_ready=1
-  tcp_ready "$admin_host" "$admin_port" && admin_ready=1
-  if (( ingress_ready && admin_ready )); then
-    external_restate_used_this_attempt=1
-    log "using existing Restate at ingress=$restate_ingress_url admin=$restate_admin_url"
-    return
-  fi
-  command -v docker >/dev/null 2>&1 || die "Restate is not running and docker is unavailable"
-  if docker inspect "$restate_container" >/dev/null 2>&1; then
-    die "Restate container name $restate_container already exists but is not a ready launcher-owned service"
-  fi
-  log "starting Restate container $restate_container from $restate_image"
-  local container_id
-  container_id="$(docker run -d \
-    --name "$restate_container" \
-    --network host \
-    --label "com.lash.agent-workbench.owner=$ownership_token" \
-    --label 'com.lash.agent-workbench.component=restate' \
-    -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
-    -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
-    -e RESTATE_BIND_PORT="$restate_node_port" \
-    "$restate_image")"
-  started_restate_name="$restate_container"
-  started_restate_id="$container_id"
-  started_restate_this_attempt=1
-  [[ "$container_id" =~ ^[0-9a-fA-F]{12,64}$ ]] \
-    || die "Docker returned an invalid Restate container id"
-  write_container_marker "$restate_marker_file" "$restate_container" "$container_id" restate
-
-  if ! wait_tcp "Restate ingress" "$ingress_host" "$ingress_port" 60; then
-    docker logs "$restate_container" >&2 || true
-    die "Restate ingress did not become ready at $restate_ingress_url"
-  fi
-  if ! wait_tcp "Restate admin" "$admin_host" "$admin_port" 60; then
-    docker logs "$restate_container" >&2 || true
-    die "Restate admin did not become ready at $restate_admin_url"
-  fi
-  restate_service_lease_record="1 restate $ownership_token $container_id"
-  publish_attempt_service_lease "$restate_ingress_service_lease_file" restate "$container_id" \
-    created_restate_ingress_service_lease_this_attempt \
-    || die "could not reserve the launcher-created Restate ingress service"
-  publish_attempt_service_lease "$restate_admin_service_lease_file" restate "$container_id" \
-    created_restate_admin_service_lease_this_attempt \
-    || die "could not reserve the launcher-created Restate admin service"
 }
 
 ensure_postgres() {
@@ -2961,107 +2427,34 @@ ensure_postgres() {
     || die "could not reserve the launcher-created Postgres service"
 }
 
-endpoint_url() {
-  if [[ -n "$configured_endpoint_url" ]]; then
-    printf '%s\n' "$configured_endpoint_url"
-  elif [[ "$endpoint_host" = "0.0.0.0" ]]; then
-    printf 'http://127.0.0.1:%s\n' "$endpoint_port"
-  else
-    printf 'http://%s:%s\n' "$endpoint_host" "$endpoint_port"
-  fi
-}
-
-# Digest of the durable Restate trust domain this stack is bound to. Lash
-# persists only the digest of RESTATE_AUTHORITY_ID and puts it in every
-# durable-wait address, so a process replacement carrying a different value
-# would not continue the same durable state. `-` records that the launcher ran
-# without one (the workbench itself refuses to boot in that case).
-current_restate_authority_digest() {
-  local value="${RESTATE_AUTHORITY_ID:-}"
-  if [[ -z "$value" ]]; then
-    printf -- '-\n'
-    return
-  fi
-  printf '%s' "$value" | sha256sum | awk '{print $1}'
-}
-
 write_meta() {
   local content
-  local meta_restate_managed="$started_restate_this_attempt"
-  local meta_restate_name="$started_restate_name"
-  local meta_restate_id="$started_restate_id"
   local meta_postgres_managed="$started_postgres_this_attempt"
   local meta_postgres_name="$started_postgres_name"
   local meta_postgres_id="$started_postgres_id"
-  local meta_retirement_authorized="$restate_retirement_authorized"
-  local meta_deployment_id="$registered_deployment_id"
-  local meta_registry_hash="$restate_registry_hash"
   if (( inherited_service_facts )); then
-    meta_restate_managed="$inherited_restate_managed"
-    meta_restate_name="$inherited_restate_name"
-    meta_restate_id="$inherited_restate_id"
     meta_postgres_managed="$inherited_postgres_managed"
     meta_postgres_name="$inherited_postgres_name"
     meta_postgres_id="$inherited_postgres_id"
-    meta_retirement_authorized="$inherited_retirement_authorized"
-    meta_deployment_id="$inherited_deployment_id"
-    meta_registry_hash="$inherited_registry_hash"
   fi
   content="$({
-    printf 'meta_schema=3\n'
+    printf 'meta_schema=4\n'
     printf 'workbench_addr=%q\n' "$workbench_addr"
     printf 'workbench_pid=%q\n' "$started_workbench_pid"
     printf 'workbench_start_time=%q\n' "$started_workbench_start_time"
     printf 'workbench_url=%q\n' "$workbench_url"
-    printf 'restate_endpoint_addr=%q\n' "$restate_endpoint_addr"
-    printf 'restate_ingress_url=%q\n' "$restate_ingress_url"
-    printf 'restate_admin_url=%q\n' "$restate_admin_url"
-    printf 'deployment_url=%q\n' "$(endpoint_url)"
     printf 'store_backend=%q\n' "$store_backend"
     printf 'data_dir=%q\n' "$data_dir"
     printf 'database_fingerprint=%q\n' "$database_fingerprint"
     printf 'ownership_token=%q\n' "$ownership_token"
-    printf 'restate_managed=%q\n' "$meta_restate_managed"
     printf 'postgres_managed=%q\n' "$meta_postgres_managed"
-    printf 'restate_container_name=%q\n' "$meta_restate_name"
-    printf 'restate_container_id=%q\n' "$meta_restate_id"
     printf 'postgres_container_name=%q\n' "$meta_postgres_name"
     printf 'postgres_container_id=%q\n' "$meta_postgres_id"
-    printf 'restate_retirement_authorized=%q\n' "$meta_retirement_authorized"
-    printf 'restate_deployment_id=%q\n' "$meta_deployment_id"
-    printf 'restate_registry_hash=%q\n' "$meta_registry_hash"
     printf 'postgres_host=%q\n' "$postgres_host"
     printf 'postgres_port=%q\n' "$postgres_port"
-    printf 'restate_authority_digest=%q\n' "$(current_restate_authority_digest)"
     printf 'log_file=%q\n' "$log_file"
   })"
   printf '%s\n' "$content" | publish_private_record replace "$meta_file"
-}
-
-capture_restate_registry_ownership() {
-  restate_retirement_authorized=0
-  restate_registry_hash=""
-  (( started_restate_this_attempt )) || return 0
-  local registry_records expected_record
-  registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
-  expected_record="$registered_deployment_id"$'\t'"$(endpoint_url)"
-  expected_record="${expected_record%/}"
-  if [[ -n "$registered_deployment_id" && "$registry_records" = "$expected_record" ]]; then
-    restate_registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
-    restate_retirement_authorized=1
-  fi
-}
-
-fresh_restate_registry_ownership() {
-  (( restate_retirement_authorized )) || return 1
-  [[ "$registered_deployment_id" =~ ^dp_[A-Za-z0-9]+$ \
-    && "$restate_registry_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
-  local registry_records registry_hash expected_record
-  registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
-  registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
-  expected_record="$registered_deployment_id"$'\t'"$(endpoint_url)"
-  expected_record="${expected_record%/}"
-  [[ "$registry_records" = "$expected_record" && "$registry_hash" = "$restate_registry_hash" ]]
 }
 
 attempt_meta_matches() {
@@ -3071,7 +2464,7 @@ attempt_meta_matches() {
     unset meta_schema workbench_addr workbench_pid workbench_start_time ownership_token
     # shellcheck disable=SC1090
     source "$file"
-    [[ "$meta_schema" = 3 && "$workbench_addr" = "$expected_addr" \
+    [[ "$meta_schema" = 4 && "$workbench_addr" = "$expected_addr" \
       && "$workbench_pid" = "$started_workbench_pid" \
       && "$workbench_start_time" = "$started_workbench_start_time" \
       && "$ownership_token" = "$expected_token" ]]
@@ -3100,20 +2493,18 @@ remove_attempt_meta() {
 
 remove_attempt_teardown_transaction() {
   [[ -e "$teardown_transaction_file" || -L "$teardown_transaction_file" ]] || return 0
-  local restate_id="${started_restate_id:--}" postgres_id="${started_postgres_id:--}"
-  local expected="1 retired $ownership_token $started_workbench_pid $started_workbench_start_time $restate_id $postgres_id"
+  local postgres_id="${started_postgres_id:--}"
+  local expected="1 retired $ownership_token $started_workbench_pid $started_workbench_start_time $postgres_id"
   remove_exact_private_record "$teardown_transaction_file" "$expected" \
     read_teardown_transaction "startup teardown transaction"
 }
 
 write_reset_metadata() {
-  local pid_record restate_record postgres_record="" reset_content data_owner_content
+  local pid_record postgres_record="" reset_content data_owner_content
   pid_record="$(pid_file_identity "$pid_file")" || return 1
-  restate_record="$(read_container_marker "$restate_marker_file")" || return 1
   if [[ "$store_backend" = postgres ]]; then
     postgres_record="$(read_container_marker "$postgres_marker_file")" || return 1
   fi
-  restate_service_leases_match "$restate_service_lease_record" || return 1
   if [[ "$store_backend" = postgres ]]; then
     [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
       = "$postgres_service_lease_record" ]] || return 1
@@ -3121,25 +2512,17 @@ write_reset_metadata() {
   [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$run_owner_record" ]] \
     || return 1
   reset_content="$({
-    printf 'reset_schema=6\n'
+    printf 'reset_schema=7\n'
     printf 'owned_token=%q\n' "$ownership_token"
     printf 'owned_state_key=%q\n' "$state_key"
     printf 'owned_state_dir=%q\n' "$state_dir"
     printf 'owned_workbench_addr=%q\n' "$workbench_addr"
-    printf 'owned_restate_endpoint_addr=%q\n' "$restate_endpoint_addr"
-    printf 'owned_restate_ingress_url=%q\n' "$restate_ingress_url"
-    printf 'owned_restate_admin_url=%q\n' "$restate_admin_url"
-    printf 'owned_deployment_url=%q\n' "$(endpoint_url)"
-    printf 'owned_restate_node_port=%q\n' "$restate_node_port"
     printf 'owned_data_dir=%q\n' "$data_dir"
     printf 'owned_data_identity=%q\n' "$(stat -c '%d:%i' "$data_dir")"
     printf 'owned_store_backend=%q\n' "$store_backend"
     printf 'owned_database_fingerprint=%q\n' "$database_fingerprint"
     printf 'owned_pid_record=%q\n' "$pid_record"
-    printf 'owned_restate_record=%q\n' "$restate_record"
     printf 'owned_postgres_record=%q\n' "$postgres_record"
-    printf 'owned_restate_ingress_service_lease=%q\n' "$restate_service_lease_record"
-    printf 'owned_restate_admin_service_lease=%q\n' "$restate_service_lease_record"
     printf 'owned_postgres_service_lease=%q\n' "$postgres_service_lease_record"
     printf 'owned_run_owner=%q\n' "$run_owner_record"
     printf 'owned_log_file=%q\n' "$log_file"
@@ -3173,36 +2556,8 @@ data_owner_matches() {
   )
 }
 
-finalize_reset_ownership() {
-  (( created_reset_ownership_this_attempt )) || return 0
-  local registry_records registry_hash expected_record
-  registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
-  expected_record="$registered_deployment_id"$'\t'"$(endpoint_url)"
-  if [[ -z "$registered_deployment_id" || "$registry_records" != "$expected_record" ]]; then
-    log "reset unavailable: Restate deployment registry is not exclusively owned by this launcher stack"
-    remove_attempt_reset_ownership \
-      || die "could not clear changed disposable-stack ownership metadata"
-    return 0
-  fi
-  registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
-  local existing_content additional_content
-  regular_private_file "$reset_file" && attempt_reset_metadata_matches "$reset_file" \
-    || die "could not verify disposable-stack ownership metadata before finalization"
-  existing_content="$(cat -- "$reset_file")"
-  additional_content="$({
-    printf 'owned_restate_deployment_id=%q\n' "$registered_deployment_id"
-    printf 'owned_restate_registry_hash=%q\n' "$registry_hash"
-  })"
-  printf '%s\n%s\n' "$existing_content" "$additional_content" \
-    | publish_private_record replace "$reset_file"
-}
-
 prepare_reset_ownership() {
   created_reset_ownership_this_attempt=0
-  if (( ! started_restate_this_attempt )); then
-    log "reset unavailable: Restate was not created by this launcher run"
-    return 0
-  fi
   if (( data_dir_existed_before_invocation && ! resuming_stopped_stack )); then
     log "reset unavailable: application data directory predated this launcher run"
     return 0
@@ -3224,64 +2579,46 @@ prepare_reset_ownership() {
     || die "refusing unsafe resettable application data directory $data_dir"
   created_reset_ownership_this_attempt=1
   write_reset_metadata \
-    || die "could not record complete disposable-stack ownership before registration"
+    || die "could not record complete disposable-stack ownership"
 }
 
 validate_run_metadata() {
   regular_private_file "$meta_file" || return 1
   (
     unset meta_schema workbench_addr workbench_pid workbench_start_time
-    unset workbench_url restate_endpoint_addr restate_ingress_url
-    unset restate_admin_url deployment_url store_backend data_dir database_fingerprint ownership_token
-    unset restate_managed postgres_managed restate_retirement_authorized
-    unset restate_container_name restate_container_id postgres_container_name postgres_container_id
-    unset restate_deployment_id restate_registry_hash
+    unset workbench_url store_backend data_dir database_fingerprint ownership_token
+    unset postgres_managed postgres_container_name postgres_container_id
     # shellcheck disable=SC1090
     source "$meta_file"
     expected_postgres_managed=0
     [[ "$owned_store_backend" != postgres ]] || expected_postgres_managed=1
-    read -r expected_restate_name expected_restate_id _ _ <<<"$owned_restate_record"
     expected_postgres_name=""
     expected_postgres_id=""
     if [[ "$expected_postgres_managed" = 1 ]]; then
       read -r expected_postgres_name expected_postgres_id _ _ <<<"$owned_postgres_record"
     fi
-    [[ "$meta_schema" = 3 \
+    [[ "$meta_schema" = 4 \
       && "$workbench_addr" = "$owned_workbench_addr" \
       && "$workbench_pid $workbench_start_time" = "$owned_pid_record" \
-      && "$restate_endpoint_addr" = "$owned_restate_endpoint_addr" \
-      && "$restate_ingress_url" = "$owned_restate_ingress_url" \
-      && "$restate_admin_url" = "$owned_restate_admin_url" \
-      && "$deployment_url" = "$owned_deployment_url" \
       && "$store_backend" = "$owned_store_backend" \
       && "$data_dir" = "$owned_data_dir" \
       && "$database_fingerprint" = "$owned_database_fingerprint" \
       && "$ownership_token" = "$owned_token" \
-      && "$restate_managed" = 1 \
       && "$postgres_managed" = "$expected_postgres_managed" \
-      && "$restate_container_name" = "$expected_restate_name" \
-      && "$restate_container_id" = "$expected_restate_id" \
       && "$postgres_container_name" = "$expected_postgres_name" \
-      && "$postgres_container_id" = "$expected_postgres_id" \
-      && "$restate_retirement_authorized" = 1 \
-      && "$restate_deployment_id" = "$owned_restate_deployment_id" \
-      && "$restate_registry_hash" = "$owned_restate_registry_hash" ]]
+      && "$postgres_container_id" = "$expected_postgres_id" ]]
   )
 }
 
 validate_reset_ownership() {
   reset_finalization_active=0
   reset_schema="" owned_token="" owned_state_key="" owned_workbench_addr=""
-  owned_state_dir="" owned_log_file=""
-  owned_restate_endpoint_addr="" owned_restate_ingress_url=""
-  owned_restate_admin_url="" owned_deployment_url="" owned_restate_node_port="" owned_data_dir=""
+  owned_state_dir="" owned_log_file="" owned_data_dir=""
   owned_data_identity=""
   owned_store_backend="" owned_database_fingerprint="" owned_pid_record=""
-  owned_restate_record="" owned_postgres_record=""
-  owned_restate_ingress_service_lease="" owned_restate_admin_service_lease=""
+  owned_postgres_record=""
   owned_postgres_service_lease=""
   owned_run_owner=""
-  owned_restate_deployment_id="" owned_restate_registry_hash=""
   if [[ -e "$reset_finalization_file" || -L "$reset_finalization_file" ]]; then
     load_reset_finalization_receipt \
       || die "reset refused: invalid or unsafe finalization receipt $reset_finalization_file"
@@ -3297,16 +2634,11 @@ validate_reset_ownership() {
     # shellcheck disable=SC1090
     source "$reset_file"
   fi
-  [[ "$reset_schema" = 6 && "$owned_token" =~ ^[0-9a-fA-F-]{36}$ ]] \
+  [[ "$reset_schema" = 7 && "$owned_token" =~ ^[0-9a-fA-F-]{36}$ ]] \
     || die "reset refused: invalid ownership record $reset_file"
   [[ "$owned_state_key" = "$state_key" \
     && "$owned_state_dir" = "$state_dir" \
     && "$owned_workbench_addr" = "$workbench_addr" \
-    && "$owned_restate_endpoint_addr" = "$restate_endpoint_addr" \
-    && "$owned_restate_ingress_url" = "$restate_ingress_url" \
-    && "$owned_restate_admin_url" = "$restate_admin_url" \
-    && "$owned_deployment_url" = "$(endpoint_url)" \
-    && "$owned_restate_node_port" = "$restate_node_port" \
     && "$owned_data_dir" = "$data_dir" \
     && "$owned_log_file" = "$log_file" \
     && "$owned_store_backend" = "$store_backend" \
@@ -3350,12 +2682,9 @@ validate_reset_ownership() {
   elif (( ! reset_finalization_active )); then
     die "reset refused: run-footprint ownership does not match launcher metadata"
   fi
-  local owned_pid owned_start owned_restate_name owned_restate_id
+  local owned_pid owned_start
   local owned_postgres_name="" owned_postgres_id="-" transaction=""
   read -r owned_pid owned_start <<<"$owned_pid_record"
-  read -r owned_restate_name owned_restate_id _ _ <<<"$owned_restate_record"
-  [[ "$owned_restate_name" = "$restate_container" ]] \
-    || die "reset refused: configured Restate container does not match disposable-stack ownership"
   if [[ "$owned_store_backend" = postgres ]]; then
     (( ! database_url_explicit )) \
       || die "reset refused: explicit database URL is external or ambiguous"
@@ -3366,7 +2695,7 @@ validate_reset_ownership() {
     die "reset refused: application database ownership is external or ambiguous"
   fi
   local expected_reset_transaction
-  expected_reset_transaction="1 retired $owned_token $owned_pid $owned_start $owned_restate_id $owned_postgres_id"
+  expected_reset_transaction="1 retired $owned_token $owned_pid $owned_start $owned_postgres_id"
   if (( reset_finalization_active )); then
     [[ "$reset_finalization_transaction" = "$expected_reset_transaction" ]] \
       || die "reset refused: finalization receipt does not match disposable-stack ownership"
@@ -3379,14 +2708,14 @@ validate_reset_ownership() {
   fi
   if [[ -e "$teardown_transaction_file" || -L "$teardown_transaction_file" ]]; then
     transaction="$(read_teardown_transaction "$teardown_transaction_file" 2>/dev/null || true)"
-    [[ "$transaction" = "1 retiring $owned_token $owned_pid $owned_start $owned_restate_id $owned_postgres_id" \
-      || "$transaction" = "1 retired $owned_token $owned_pid $owned_start $owned_restate_id $owned_postgres_id" ]] \
+    [[ "$transaction" = "1 retiring $owned_token $owned_pid $owned_start $owned_postgres_id" \
+      || "$transaction" = "1 retired $owned_token $owned_pid $owned_start $owned_postgres_id" ]] \
       || die "reset refused: teardown transaction does not match disposable-stack ownership"
     return 0
   fi
   if stack_resources_fully_retired "$owned_token"; then
-    # `down` already retired this stack's process, engine, managed services,
-    # leases and receipts. A stopped stack is the easiest case to reset: what
+    # `down` already retired this stack's process, managed services, leases
+    # and receipts. A stopped stack is the easiest case to reset: what
     # remains is deleting the application data it still owns and these records.
     # The live-ownership proofs below have nothing left to prove — every
     # resource they guard is proven absent here, which is stricter, not weaker.
@@ -3396,19 +2725,6 @@ validate_reset_ownership() {
   [[ "$(pid_file_identity "$pid_file" 2>/dev/null || true)" = "$owned_pid_record" ]] \
     || die "reset refused: workbench PID identity is missing or changed; finish the interrupted teardown with scripts/agent-workbench-dev.sh down --addr $workbench_addr, then run the same reset again"
   local name id token component
-  read -r name id token component <<<"$owned_restate_record"
-  [[ "$name" = "$restate_container" \
-    && "$token" = "$owned_token" && "$component" = restate \
-    && "$(read_container_marker "$restate_marker_file" 2>/dev/null || true)" = "$owned_restate_record" ]] \
-    || die "reset refused: Restate ownership marker does not match"
-  container_identity_matches "$name" "$id" "$token" "$component" \
-    || die "reset refused: Restate container identity does not match"
-  [[ "$owned_restate_ingress_service_lease" = "1 restate $owned_token $id" \
-    && "$owned_restate_admin_service_lease" = "$owned_restate_ingress_service_lease" \
-    && "$(read_service_lease "$restate_ingress_service_lease_file" 2>/dev/null || true)" = "$owned_restate_ingress_service_lease" \
-    && "$(read_service_lease "$restate_admin_service_lease_file" 2>/dev/null || true)" = "$owned_restate_admin_service_lease" ]] \
-    || die "reset refused: Restate service lease does not prove exclusive ownership"
-
   if [[ "$owned_store_backend" = postgres ]]; then
     (( ! database_url_explicit )) \
       || die "reset refused: explicit database URL is external or ambiguous"
@@ -3425,15 +2741,6 @@ validate_reset_ownership() {
   elif [[ "$owned_store_backend" != sqlite || -n "$agent_workbench_database_url" ]]; then
     die "reset refused: application database ownership is external or ambiguous"
   fi
-
-  local registry_records registry_hash expected_registry_record
-  registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
-  registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
-  expected_registry_record="$owned_restate_deployment_id"$'\t'"${owned_deployment_url%/}"
-  [[ -n "$owned_restate_deployment_id" \
-    && "$owned_restate_registry_hash" = "$registry_hash" \
-    && "$registry_records" = "$expected_registry_record" ]] \
-    || die "reset refused: Restate deployment registry does not prove exclusive ownership"
 }
 
 # The Buck2 label that builds this launcher's host binary. `--config=judged`
@@ -3550,10 +2857,7 @@ start_detached() {
     || die "this workbench was serving when the launch began and is not serving now; no host binary was built for it — run the same command again"
   local -a workbench_env=(
     "AGENT_WORKBENCH_ADDR=$workbench_addr"
-    "AGENT_WORKBENCH_RESTATE_ADDR=$restate_endpoint_addr"
     "AGENT_WORKBENCH_DATABASE_URL=$agent_workbench_database_url"
-    "RESTATE_INGRESS_URL=$restate_ingress_url"
-    "RESTATE_ADMIN_URL=$restate_admin_url"
     "AGENT_WORKBENCH_DATA_DIR=$data_dir"
   )
   printf '\n[%s] starting agent-workbench at %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$workbench_url" >> "$log_file"
@@ -3597,53 +2901,20 @@ wait_workbench_ready() {
   require_workbench_alive "after the health check became ready"
 }
 
-wait_workbench_endpoint_ready() {
-  local timeout_seconds="${1:-90}"
-  local deadline=$((SECONDS + timeout_seconds))
-  until tcp_ready "$endpoint_wait_host" "$endpoint_port"; do
-    require_workbench_alive "while waiting for its Restate endpoint"
-    if (( SECONDS >= deadline )); then
-      tail_log
-      cleanup_start_attempt || true
-      die "workbench Restate endpoint did not become ready at $restate_endpoint_addr"
-    fi
-    sleep 1
-  done
-  require_workbench_alive "after its Restate endpoint became ready"
-}
-
 run_up() {
   if ! ensure_ports_available; then
     return
   fi
-  require_restate_endpoint_admission
   require_exclusive_data_path_for_start
   adopt_stopped_stack
   start_attempt_active=1
   claim_data_directory
   mkdir -p "$state_dir"
   claim_run_footprint
-  ensure_restate
-  local deployment_url
-  deployment_url="$(endpoint_url)"
-  if ! require_unused_deployment_uri "$restate_admin_url" "$deployment_url"; then
-    cleanup_start_attempt || true
-    die "refusing to replace an existing Restate deployment; use restart --reset-dev-state only for a wholly launcher-owned disposable stack"
-  fi
   ensure_postgres
   start_detached
   wait_workbench_ready 90
-  wait_workbench_endpoint_ready 90
   prepare_reset_ownership
-  log "registering Restate deployment $deployment_url"
-  if ! register_deployment "$restate_admin_url" "$deployment_url"; then
-    tail_log
-    cleanup_start_attempt || true
-    die "failed to register Restate deployment $deployment_url through $restate_admin_url"
-  fi
-  capture_restate_registry_ownership
-  write_meta
-  finalize_reset_ownership
   require_workbench_alive "before reporting ready"
   release_data_creation_receipt \
     || die "could not retire application data creation metadata"
@@ -3664,61 +2935,37 @@ run_up() {
 # would collapse the empty fields an unmanaged store leaves.
 replacement_target_record() (
   local expected_addr="$workbench_addr"
-  local expected_endpoint_addr="$restate_endpoint_addr"
-  local expected_ingress_url="$restate_ingress_url"
-  local expected_admin_url="$restate_admin_url"
-  local expected_deployment_url
-  expected_deployment_url="$(endpoint_url)"
   local expected_store_backend="$store_backend"
   local expected_data_dir="$data_dir"
   local expected_database_fingerprint="$database_fingerprint"
   local expected_log_file="$log_file"
-  local expected_restate_container="$restate_container"
 
   regular_private_file "$meta_file" || return 1
   unset meta_schema workbench_addr workbench_pid workbench_start_time
-  unset workbench_url restate_endpoint_addr restate_ingress_url restate_admin_url
-  unset deployment_url store_backend data_dir database_fingerprint ownership_token
-  unset restate_managed postgres_managed restate_container_name restate_container_id
-  unset postgres_container_name postgres_container_id restate_retirement_authorized
-  unset restate_deployment_id restate_registry_hash postgres_host postgres_port
-  unset restate_authority_digest log_file
+  unset workbench_url store_backend data_dir database_fingerprint ownership_token
+  unset postgres_managed postgres_container_name postgres_container_id
+  unset postgres_host postgres_port log_file
   # shellcheck disable=SC1090
   source "$meta_file"
 
-  [[ "${meta_schema:-}" = 3 \
+  [[ "${meta_schema:-}" = 4 \
     && "${ownership_token:-}" =~ ^[0-9a-fA-F-]{36}$ \
     && "${workbench_pid:-}" =~ ^[0-9]+$ && "${workbench_start_time:-}" =~ ^[0-9]+$ \
-    && "${restate_managed:-}" =~ ^[01]$ && "${postgres_managed:-}" =~ ^[01]$ \
+    && "${postgres_managed:-}" =~ ^[01]$ \
     && "${store_backend:-}" =~ ^(sqlite|postgres)$ ]] || return 1
-  # Written only by launchers that record the durable trust domain. An older
-  # stack cannot prove its authority did not change, so it is not replaceable.
-  [[ -n "${restate_authority_digest:-}" ]] || return 1
-  [[ "${restate_managed:-}" != 1 \
-    || ( -n "${restate_container_name:-}" \
-      && "${restate_container_id:-}" =~ ^[0-9a-fA-F]{12,64}$ ) ]] || return 1
   [[ "${postgres_managed:-}" != 1 \
     || ( -n "${postgres_container_name:-}" \
       && "${postgres_container_id:-}" =~ ^[0-9a-fA-F]{12,64}$ ) ]] || return 1
-  [[ "${restate_managed:-}" != 1 || "${restate_container_name:-}" = "$expected_restate_container" ]] \
-    || return 1
 
   [[ "$workbench_addr" = "$expected_addr" \
-    && "$restate_endpoint_addr" = "$expected_endpoint_addr" \
-    && "$restate_ingress_url" = "$expected_ingress_url" \
-    && "$restate_admin_url" = "$expected_admin_url" \
-    && "$deployment_url" = "$expected_deployment_url" \
     && "$store_backend" = "$expected_store_backend" \
     && "$data_dir" = "$expected_data_dir" \
     && "$database_fingerprint" = "$expected_database_fingerprint" \
     && "$log_file" = "$expected_log_file" ]] || return 1
 
-  printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' \
+  printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' \
     "$workbench_pid" "$workbench_start_time" "$ownership_token" \
-    "$restate_managed" "${restate_container_name:-}" "${restate_container_id:-}" \
-    "$postgres_managed" "${postgres_container_name:-}" "${postgres_container_id:-}" \
-    "${restate_retirement_authorized:-0}" "${restate_deployment_id:-}" \
-    "${restate_registry_hash:-}" "$restate_authority_digest"
+    "$postgres_managed" "${postgres_container_name:-}" "${postgres_container_id:-}"
 )
 
 # Keeps the disposable-stack ownership record pointing at the live process, so
@@ -3731,7 +2978,7 @@ reset_ownership_names_process() {
     unset reset_schema owned_token owned_state_key owned_data_dir owned_pid_record
     # shellcheck disable=SC1090
     source "$reset_file"
-    [[ "$reset_schema" = 6 && "$owned_token" = "$ownership_token" \
+    [[ "$reset_schema" = 7 && "$owned_token" = "$ownership_token" \
       && "$owned_state_key" = "$state_key" && "$owned_data_dir" = "$data_dir" \
       && "$owned_pid_record" = "$expected_record" ]]
   )
@@ -3762,7 +3009,7 @@ wait_replaced_endpoint_free() {
   local deadline=$((SECONDS + 30))
   while tcp_ready "$host" "$port"; do
     if (( SECONDS >= deadline )); then
-      die "restart stopped after retiring the recorded process: $label port $host:$port did not become free; the engine, managed services and application data are retained and the same command is retryable"
+      die "restart stopped after retiring the recorded process: $label port $host:$port did not become free; the managed services and application data are retained and the same command is retryable"
     fi
     sleep 1
   done
@@ -3773,16 +3020,10 @@ run_replace_process() {
   record="$(replacement_target_record)" \
     || die "restart refused: no run metadata here proves this launcher owns a workbench stack at $workbench_addr with the current settings; use up to start one, or restart --reset-dev-state to replace a wholly launcher-owned disposable stack"
 
-  local prior_pid prior_start prior_token prior_restate_managed prior_restate_name
-  local prior_restate_id prior_postgres_managed prior_postgres_name prior_postgres_id
-  local prior_retirement_authorized prior_deployment_id prior_registry_hash prior_authority
-  IFS=$'\x1f' read -r prior_pid prior_start prior_token prior_restate_managed \
-    prior_restate_name prior_restate_id prior_postgres_managed prior_postgres_name \
-    prior_postgres_id prior_retirement_authorized prior_deployment_id \
-    prior_registry_hash prior_authority <<<"$record"
-
-  [[ "$prior_authority" = "$(current_restate_authority_digest)" ]] \
-    || die "restart refused: RESTATE_AUTHORITY_ID does not match the durable trust domain this stack is bound to; export the original value, or use restart --reset-dev-state to start a new durable state"
+  local prior_pid prior_start prior_token
+  local prior_postgres_managed prior_postgres_name prior_postgres_id
+  IFS=$'\x1f' read -r prior_pid prior_start prior_token prior_postgres_managed \
+    prior_postgres_name prior_postgres_id <<<"$record"
 
   # Continue the recorded stack's ownership: its containers, service leases,
   # run footprint and application data all carry this token.
@@ -3813,7 +3054,7 @@ run_replace_process() {
       ;;
   esac
   if [[ "$published_record" = "$prior_record" ]]; then
-    log "replacing workbench process $prior_pid at $workbench_addr; engine, managed services and application data are retained"
+    log "replacing workbench process $prior_pid at $workbench_addr; managed services and application data are retained"
     retire_persisted_process "$pid_file" "$process_retirement_receipt_file" \
       "$ownership_token" "$prior_pid" "$prior_start" \
       || die "restart stopped before replacement: could not retire the recorded workbench process; nothing else was stopped and the same command is retryable"
@@ -3839,28 +3080,20 @@ run_replace_process() {
   fi
 
   wait_replaced_endpoint_free "workbench UI" "$workbench_wait_host" "$workbench_port"
-  wait_replaced_endpoint_free "workbench Restate endpoint" "$endpoint_wait_host" "$endpoint_port"
 
   replacing_process=1
   inherited_service_facts=1
-  inherited_restate_managed="$prior_restate_managed"
-  inherited_restate_name="$prior_restate_name"
-  inherited_restate_id="$prior_restate_id"
   inherited_postgres_managed="$prior_postgres_managed"
   inherited_postgres_name="$prior_postgres_name"
   inherited_postgres_id="$prior_postgres_id"
-  inherited_retirement_authorized="$prior_retirement_authorized"
-  inherited_deployment_id="$prior_deployment_id"
-  inherited_registry_hash="$prior_registry_hash"
   start_attempt_active=1
   start_detached
   wait_workbench_ready 90
-  wait_workbench_endpoint_ready 90
   rebind_reset_ownership_process \
     || die "the replacement process is running but its disposable-stack ownership record could not be rebound; rerun the same restart command"
   require_workbench_alive "before reporting ready"
   start_attempt_active=0
-  log "replaced process; the Restate deployment, its journals and the application data at $data_dir were retained"
+  log "replaced process; the managed services and the application data at $data_dir were retained"
   log "ready: $workbench_url"
   open_browser "$workbench_url"
 }
@@ -3873,17 +3106,16 @@ run_reset_dev_state() {
   start_attempt_active=1
   log "resetting wholly launcher-owned disposable stack at $workbench_addr"
 
-  local reset_pid reset_start reset_restate_id reset_postgres_id="-"
+  local reset_pid reset_start reset_postgres_id="-"
   read -r reset_pid reset_start <<<"$owned_pid_record"
-  read -r _ reset_restate_id _ _ <<<"$owned_restate_record"
   if [[ "$owned_store_backend" = postgres ]]; then
     read -r _ reset_postgres_id _ _ <<<"$owned_postgres_record"
   fi
   local reset_transaction
-  reset_transaction="1 retired $owned_token $reset_pid $reset_start $reset_restate_id $reset_postgres_id"
+  reset_transaction="1 retired $owned_token $reset_pid $reset_start $reset_postgres_id"
   if (( ! reset_finalization_active )); then
     if (( reset_stack_already_retired )); then
-      log "the recorded process, engine and managed services are already retired; clearing the application data and ownership records they left behind"
+      log "the recorded process and managed services are already retired; clearing the application data and ownership records they left behind"
     else
       stop_stack_from_meta "$meta_file" 1 \
         || die "reset stopped before data deletion: resource retirement is incomplete and retryable"
@@ -3954,9 +3186,8 @@ run_reset_dev_state() {
       || die "reset completed data deletion but ownership metadata remains"
   fi
   local retired_record
-  for retired_record in "$pid_file" "$restate_marker_file" "$postgres_marker_file" \
-    "$process_retirement_receipt_file" "$restate_service_retirement_receipt_file" \
-    "$postgres_service_retirement_receipt_file"; do
+  for retired_record in "$pid_file" "$postgres_marker_file" \
+    "$process_retirement_receipt_file" "$postgres_service_retirement_receipt_file"; do
     [[ ! -e "$retired_record" && ! -L "$retired_record" ]] \
       || die "reset completed data deletion but retired resource metadata reappeared at $retired_record"
   done
@@ -3986,25 +3217,15 @@ run_reset_dev_state() {
   started_workbench_this_attempt=0
   started_workbench_pid=""
   started_workbench_start_time=""
-  started_restate_this_attempt=0
-  started_restate_name=""
-  started_restate_id=""
-  external_restate_used_this_attempt=0
   started_postgres_this_attempt=0
   started_postgres_name=""
   started_postgres_id=""
   created_reset_ownership_this_attempt=0
-  created_restate_ingress_service_lease_this_attempt=0
-  created_restate_admin_service_lease_this_attempt=0
   created_postgres_service_lease_this_attempt=0
   created_run_owner_this_attempt=0
   created_meta_this_attempt=0
-  restate_service_lease_record=""
   postgres_service_lease_record=""
   run_owner_record=""
-  registered_deployment_id=""
-  restate_registry_hash=""
-  restate_retirement_authorized=0
   log "disposable dev state cleared; starting a fresh stack"
   run_up
 }
@@ -4013,21 +3234,12 @@ run_foreground() {
   if ! ensure_ports_available; then
     return
   fi
-  require_restate_endpoint_admission
   require_exclusive_data_path_for_start
   adopt_stopped_stack
   start_attempt_active=1
   claim_data_directory
   mkdir -p "$state_dir"
   claim_run_footprint
-  ensure_restate
-
-  local deployment_url
-  deployment_url="$(endpoint_url)"
-  if ! require_unused_deployment_uri "$restate_admin_url" "$deployment_url"; then
-    cleanup_start_attempt || true
-    die "refusing to replace an existing Restate deployment at $deployment_url"
-  fi
   ensure_postgres
 
   cleanup_foreground() {
@@ -4040,10 +3252,10 @@ run_foreground() {
       log "foreground cleanup retained the host and dependent resources after unknown process observation"
       return 1
     fi
-    local persisted_stack_retired=0
+    local persisted_stack=0 persisted_stack_retired=0
     if [[ -n "$started_workbench_pid" ]]; then
       if [[ -z "$started_workbench_start_time" ]]; then
-        log "foreground cleanup could not stop the owned workbench; retaining its engine and application state"
+        log "foreground cleanup could not stop the owned workbench; retaining its application state"
         foreground_cleanup_status=1
         return 1
       fi
@@ -4052,9 +3264,10 @@ run_foreground() {
         && (( created_meta_this_attempt )); then
         if ! retire_persisted_process "$pid_file" "$process_retirement_receipt_file" \
           "$ownership_token" "$started_workbench_pid" "$started_workbench_start_time"; then
-          log "foreground cleanup could not stop the owned workbench; retaining its engine and application state"
+          log "foreground cleanup could not stop the owned workbench; retaining its application state"
           return 1
         fi
+        persisted_stack=1
       elif ! stop_process_identity "$started_workbench_pid" "$started_workbench_start_time"; then
         log "foreground cleanup could not stop its captured unpublished workbench process"
         return 1
@@ -4062,40 +3275,17 @@ run_foreground() {
       wait "$started_workbench_pid" >/dev/null 2>&1 || true
       started_workbench_this_attempt=0
     fi
-    if (( external_restate_used_this_attempt )); then
-      log "foreground cleanup cannot retire the external Restate engine; retaining application state, managed stores, and ownership metadata"
-      foreground_cleanup_status=1
-      return 1
-    fi
-    if (( started_restate_this_attempt )) && [[ -n "$registered_deployment_id" ]]; then
-      if ! fresh_restate_registry_ownership; then
-        log "foreground cleanup cannot prove fresh exclusive Restate registry ownership; retaining the engine and dependent state"
-        foreground_cleanup_status=1
-        return 1
-      fi
+    # Once the stack's run metadata names the retired process, the rest of the
+    # stack retires through its persisted teardown transaction, so a failure
+    # leaves public retry authority instead of an orphaned service.
+    if (( persisted_stack )); then
       if ! stop_stack_from_meta "$meta_file" 1; then
         log "foreground cleanup could not complete its persisted teardown transaction"
         return 1
       fi
       persisted_stack_retired=1
-      started_restate_this_attempt=0
       started_postgres_this_attempt=0
-      created_restate_ingress_service_lease_this_attempt=0
-      created_restate_admin_service_lease_this_attempt=0
       created_postgres_service_lease_this_attempt=0
-    fi
-    if (( ! persisted_stack_retired )) && {
-      (( started_restate_this_attempt \
-        || created_restate_ingress_service_lease_this_attempt \
-        || created_restate_admin_service_lease_this_attempt )) \
-        || [[ -e "$restate_service_retirement_receipt_file" \
-          || -L "$restate_service_retirement_receipt_file" ]]
-    }; then
-      if ! cleanup_attempt_restate_service; then
-        log "foreground cleanup could not retire its exact Restate service and reservations; retaining application state"
-        foreground_cleanup_status=1
-        return 1
-      fi
     fi
     if (( ! persisted_stack_retired )) && {
       (( started_postgres_this_attempt || created_postgres_service_lease_this_attempt )) \
@@ -4170,10 +3360,7 @@ run_foreground() {
     || die "no host binary was built for this launch — run the same command again"
   local -a workbench_env=(
     "AGENT_WORKBENCH_ADDR=$workbench_addr"
-    "AGENT_WORKBENCH_RESTATE_ADDR=$restate_endpoint_addr"
     "AGENT_WORKBENCH_DATABASE_URL=$agent_workbench_database_url"
-    "RESTATE_INGRESS_URL=$restate_ingress_url"
-    "RESTATE_ADMIN_URL=$restate_admin_url"
     "AGENT_WORKBENCH_DATA_DIR=$data_dir"
   )
   (
@@ -4191,12 +3378,6 @@ run_foreground() {
   created_meta_this_attempt=1
 
   wait_workbench_ready 90
-  wait_workbench_endpoint_ready 90
-  log "registering Restate deployment $deployment_url"
-  register_deployment "$restate_admin_url" "$deployment_url" \
-    || die "failed to register Restate deployment $deployment_url through $restate_admin_url"
-  capture_restate_registry_ownership
-  write_meta
 
   require_workbench_alive "before reporting ready"
   log "ready: $workbench_url"
@@ -4357,33 +3538,10 @@ if ((
   workbench_port_number < managed_service_port_min_workbench ||
     workbench_port_number > managed_service_port_max_workbench
 )); then
-  default_restate_endpoint_port=""
-  default_restate_ingress_port=""
-  default_restate_admin_port=""
-  default_restate_node_port=""
   default_postgres_port=""
 else
   port_offset=$(((workbench_port_number - 3030) * managed_service_port_stride))
-  default_restate_endpoint_port=$((9081 + port_offset))
-  default_restate_ingress_port=$((8080 + port_offset))
-  default_restate_admin_port=$((19070 + port_offset))
-  default_restate_node_port=$((19071 + port_offset))
   default_postgres_port=$((15432 + port_offset))
-fi
-
-restate_endpoint_addr="${AGENT_WORKBENCH_RESTATE_ADDR:-127.0.0.1:$default_restate_endpoint_port}"
-restate_ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$default_restate_ingress_port}"
-restate_admin_url="${RESTATE_ADMIN_URL:-http://127.0.0.1:${AGENT_WORKBENCH_RESTATE_ADMIN_PORT:-$default_restate_admin_port}}"
-restate_image="${AGENT_WORKBENCH_RESTATE_IMAGE:-restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b}"
-restate_node_port="${AGENT_WORKBENCH_RESTATE_NODE_PORT:-$default_restate_node_port}"
-configured_endpoint_url="${AGENT_WORKBENCH_RESTATE_ENDPOINT_URL:-}"
-url_is_diagnostic_safe "$restate_ingress_url" \
-  || die "RESTATE_INGRESS_URL must not contain credentials, a query, or a fragment"
-url_is_diagnostic_safe "$restate_admin_url" \
-  || die "RESTATE_ADMIN_URL must not contain credentials, a query, or a fragment"
-if [[ -n "$configured_endpoint_url" ]]; then
-  url_is_diagnostic_safe "$configured_endpoint_url" \
-    || die "AGENT_WORKBENCH_RESTATE_ENDPOINT_URL must not contain credentials, a query, or a fragment"
 fi
 
 postgres_requested="${AGENT_WORKBENCH_POSTGRES:-0}"
@@ -4417,38 +3575,11 @@ fi
 if ((
   workbench_port_number < managed_service_port_min_workbench ||
     workbench_port_number > managed_service_port_max_workbench
-)); then
-  managed_service_override_hint="AGENT_WORKBENCH_RESTATE_ADDR, RESTATE_INGRESS_URL, RESTATE_ADMIN_URL (or AGENT_WORKBENCH_RESTATE_ADMIN_PORT), and AGENT_WORKBENCH_RESTATE_NODE_PORT"
-  if (( postgres_enabled )) && [[ -z "$agent_workbench_database_url" ]]; then
-    managed_service_override_hint+="; also AGENT_WORKBENCH_POSTGRES_PORT"
-  fi
-  managed_service_overrides_complete=1
-  [[ -n "${AGENT_WORKBENCH_RESTATE_ADDR:-}" ]] || managed_service_overrides_complete=0
-  [[ -n "${RESTATE_INGRESS_URL:-}" ]] || managed_service_overrides_complete=0
-  if [[ -z "${RESTATE_ADMIN_URL:-}" &&
-    -z "${AGENT_WORKBENCH_RESTATE_ADMIN_PORT:-}" ]]; then
-    managed_service_overrides_complete=0
-  fi
-  [[ -n "${AGENT_WORKBENCH_RESTATE_NODE_PORT:-}" ]] || managed_service_overrides_complete=0
-  if (( postgres_enabled )) && [[ -z "$agent_workbench_database_url" ]] &&
-    [[ -z "${AGENT_WORKBENCH_POSTGRES_PORT:-}" ]]; then
-    managed_service_overrides_complete=0
-  fi
-  if (( ! managed_service_overrides_complete )); then
-    die "cannot derive managed service ports for workbench port $workbench_port; set $managed_service_override_hint explicitly"
-  fi
+)) && (( postgres_enabled && ! database_url_explicit )) &&
+  [[ -z "${AGENT_WORKBENCH_POSTGRES_PORT:-}" ]]; then
+  die "cannot derive managed service ports for workbench port $workbench_port; set AGENT_WORKBENCH_POSTGRES_PORT explicitly"
 fi
 
-restate_container="${AGENT_WORKBENCH_RESTATE_CONTAINER:-lash-agent-workbench-dev-restate-$workbench_port}"
-read -r endpoint_host endpoint_port < <(addr_host_port "$restate_endpoint_addr")
-read -r ingress_host ingress_port < <(url_host_port "$restate_ingress_url")
-read -r admin_host admin_port < <(url_host_port "$restate_admin_url")
-canonical_ingress_host="$(canonical_service_host "$ingress_host")"
-canonical_admin_host="$(canonical_service_host "$admin_host")"
-validate_port "Restate endpoint" "$endpoint_port"
-validate_port "Restate ingress" "$ingress_port"
-validate_port "Restate admin" "$admin_port"
-validate_port "Restate node" "$restate_node_port"
 if (( postgres_enabled )); then
   validate_port "Postgres" "$postgres_port"
   canonical_postgres_host="$(canonical_service_host "$postgres_host")"
@@ -4465,12 +3596,8 @@ if [[ -n "$agent_workbench_database_url" ]]; then
 fi
 
 workbench_wait_host="$workbench_host"
-endpoint_wait_host="$endpoint_host"
 if [[ "$workbench_wait_host" = "0.0.0.0" ]]; then
   workbench_wait_host="127.0.0.1"
-fi
-if [[ "$endpoint_wait_host" = "0.0.0.0" ]]; then
-  endpoint_wait_host="127.0.0.1"
 fi
 workbench_url="http://$workbench_wait_host:$workbench_port"
 data_dir="$(realpath -m -- "$configured_data_dir")"
@@ -4482,9 +3609,7 @@ process_retirement_receipt_file="$state_dir/workbench-$state_key.process-retired
 teardown_transaction_file="$state_dir/workbench-$state_key.teardown"
 meta_file="$state_dir/workbench-$state_key.meta"
 log_file="$state_dir/workbench-$state_key.log"
-restate_marker_file="$state_dir/restate-$state_key.container"
 postgres_marker_file="$state_dir/postgres-$state_key.container"
-restate_service_retirement_receipt_file="$state_dir/restate-$state_key.service-retired"
 postgres_service_retirement_receipt_file="$state_dir/postgres-$state_key.service-retired"
 reset_file="$state_dir/reset-$state_key.meta"
 data_owner_file="$data_dir/.agent-workbench-dev-reset-owner"
@@ -4511,13 +3636,7 @@ case "$action" in
       || die "unsafe launcher lock directory $launcher_lock_root"
     launcher_lock_file="$launcher_lock_root/$launcher_lock_hash.lock"
     launcher_data_lock_file="$launcher_lock_root/data-ownership.lock"
-    restate_ingress_service_hash="$(printf '%s' "$canonical_ingress_host:$ingress_port" | sha256sum | awk '{print $1}')"
-    restate_admin_service_hash="$(printf '%s' "$canonical_admin_host:$admin_port" | sha256sum | awk '{print $1}')"
-    legacy_restate_service_hash="$(printf '%s' "$canonical_ingress_host:$ingress_port|$canonical_admin_host:$admin_port" | sha256sum | awk '{print $1}')"
     postgres_service_hash="$(printf '%s' "$canonical_postgres_host:$postgres_port" | sha256sum | awk '{print $1}')"
-    restate_ingress_service_lease_file="$launcher_lock_root/restate-ingress-$restate_ingress_service_hash.lease"
-    restate_admin_service_lease_file="$launcher_lock_root/restate-admin-$restate_admin_service_hash.lease"
-    legacy_restate_service_lease_file="$launcher_lock_root/restate-$legacy_restate_service_hash.lease"
     postgres_service_lease_file="$launcher_lock_root/postgres-$postgres_service_hash.lease"
     reset_recovery_file="$launcher_lock_root/$launcher_lock_hash-$state_key-recover.sh"
     reset_finalization_file="$launcher_lock_root/$launcher_lock_hash-$state_key-reset-finalizing"

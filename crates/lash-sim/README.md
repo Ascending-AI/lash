@@ -27,11 +27,11 @@ the replay evidence. The `run` command has two modes:
   makes plan-scale seed budgets real.
 
 Every turn and every effect boundary of a generated world runs where a
-deployment runs it: inside a handler of lash-restate's engine on the
-in-process Restate server double (`lash-restate-test`), seeded by the
-workload's seed, on virtual time (`backend::SimEngine`). SQLite is storage
-only. Server attempts run concurrently, so sessions interleave as they would
-against a real server. A failed run records its full history.
+deployment runs it: on lash's durable engine (`backend::SimEngine`), over a
+SQLite memory store set, seeded by the workload's seed. The engine is built
+through `lash::durable::DurableBackendBuilder`, which I0 (FIG-5194) assembles;
+until then a world that runs a turn stops at the builder. A failed run records
+its full history.
 
 Generated trigger boundaries register the subscription's engine process in
 the world's process registry under the reservation's stable start key; it
@@ -197,14 +197,9 @@ The deferred cross-backend suites run in their named service gates.
   with package guards preventing protocol/agent contracts from sharing the
   same backing verdict or high-risk selected evidence while still retaining
   the 11 real per-behavior mini-oracles.
-- One regression fixture is promoted under `crates/lash-sim/replays/`, and
-  the promotion metadata is explicit that it is not a discovered product
-  bug. The `queued-active-turn-cancel-race` fixture is a generated
-  fast-random DST trace promoted as a deterministic regression GUARD that
-  pins the active-turn queued-input/cancel contract; its package manifest
-  records `historical_production_regression: false`, so it guards against
-  future regressions rather than recording one found in production. No
-  product regression has been discovered by this lane to date.
+- No regression fixture is promoted: the one there was recorded on the
+  retired engine and was deleted with it. No product regression has been
+  discovered by this lane to date.
 - Generator substance is real: the fast profile is genuinely seed-random,
   provider mutations have distinct executable behaviors, queued-ingress mode
   varies, and a durable effect is a REAL crash and redrive — its first handler
@@ -245,10 +240,7 @@ Store rows are read raw through `lash_sqlite_store::testing::read_rows_for_testi
 through a `HistoryRecorder`.
 
 The checkers run on every generated seed, as the run-only oracle
-`sim.oracle.global-invariants.v1`; on every crash-matrix cell and chaos-soak
-epoch once its end state holds, after one more recovery pass; on the
-pending-tool scenario on the Restate server double; and on the
-`logical_turn` scenarios. A violation fails the run and prints its seed,
+`sim.oracle.global-invariants.v1`, and on the `logical_turn` scenarios. A violation fails the run and prints its seed,
 invariant, the trace records and the store rows it names. The seed names the
 run's inputs, not its interleaving, so the printed history is the triage
 evidence. A violation a
@@ -256,111 +248,6 @@ known runtime defect causes is an entry in `invariants::quarantine::QUARANTINE`:
 it still prints, under the entry's name, and no longer fails the run; the fix
 deletes the entry. `invariants/tests.rs` breaks a real history once per
 checker and proves each checker fails it.
-
-## Crash-point matrix
-
-`tests/crash_point_matrix.rs` is the 1.0 durability gate (FIG-3849): one
-test per cell of {seam or ADR 0109 obligation kind} × {crash point}, each over
-`LASH_CRASH_MATRIX_SEEDS` seeds (default 3). A cell runs lash-restate's engine
-on the server double with one deployment — a `LashCore`, its `SessionShifts`
-and its recovery interval — and kills that deployment at the cell's crash
-point: after the producer's state commit, during the engine delivery, after
-the delivery before its settle, at a seeded journal step, or by losing the
-invocation outright. A fresh deployment comes up after a seeded outage and the
-recovery interval ticks on virtual time until the end-state invariants hold:
-every accepted input executed exactly once, every obligation settled or stalled
-typed, no orphaned child, no wedged session, every terminal run's scope
-closed, within the ADR 0109 §1.8 detection bound. The harness lives in
-`src/crash_matrix/`; its module docs say how an S8 slice activates the cells
-it owns. The binary is `dev-deferred`: the Buck2 tail runs it on main's
-full-profile dispatch.
-
-```sh
-kiln test --test_output=all --test_arg=--nocapture \
-  //crates/lash-sim:crash_point_matrix__test
-kiln test --test_output=all --test_arg=--include-ignored \
-  --test_arg=parent_end //crates/lash-sim:crash_point_matrix__test
-```
-
-The same cells run against a live `restate-server` (FIG-3872):
-`LASH_CRASH_MATRIX_ENGINE=live` switches every world from the double to the
-server `RESTATE_INGRESS_URL`/`RESTATE_ADMIN_URL` name, with the deployment's
-endpoint served on `LASH_CRASH_MATRIX_ENDPOINT_BIND`. Each cell is written
-once against `crash_matrix::engine::Engine`, so a cell an S8 slice activates
-runs live with no further change. Live, a deployment kill drops the endpoint's
-listener and every connection it served, a journal-step crash cuts the attempt
-at the matching frame before it leaves the deployment, and a hold refuses the
-held invocation's attempts; the engine module says how each fault lands and
-where it differs from the double. `just crash-matrix-restate-e2e` builds the
-binary, starts the pinned server (its name and port block from `KILN_GATE_ID`
-under `kiln gate`), runs every active cell one at a time and prints the counts;
-the Release workflow's `crash-matrix-restate` job runs it before publishing.
-
-```sh
-kiln gate lash <fork> -- just crash-matrix-restate-e2e
-```
-
-## Chaos soak
-
-`tests/chaos_soak.rs` is the release gate's soak (FIG-3873). It runs seeded
-epochs on the crash matrix's world. Each epoch opens sessions, including child
-sessions, and draws 200 steps from its seed. The workload steps are sends,
-batched sends, session commands, held runs that are cancelled or deleted
-(some with a child process), session deletes, and Lashlang processes with an
-engine waiter. The fault steps are deployment kills, first-attempt journal
-cuts, host crashes at the matrix's seam boundaries, and leader-lease loss.
-Rolling deploys register build N+1, move the deployment onto it, drain
-generation N and retire N's build. The epoch then ticks recovery until the
-crash matrix's invariants and the soak's own checks hold. The server double
-runs on manual time with Restate's default retry policy, so a replay's
-backoff spans virtual time as it does against a real server.
-
-`chaos_soak_smoke` runs two epochs within a four-minute wall-time budget and
-is `dev-deferred`.
-`chaos_soak_release` is ignored; `just chaos-soak` and release.yml's
-`chaos-soak` job run it for 90 minutes. Each epoch writes its case name, seed,
-active step or check phase, elapsed
-wall time and recovery progress directly to stderr, outside libtest capture.
-Buck2 also retains a separate progress file per case and epoch in the test
-report's undeclared-output directory. Steps have a 60-second watchdog; each epoch has a four-minute
-watchdog capped by the remaining soak duration. Open-ended runs stop admitting
-new epochs when less than a full epoch budget remains. A timeout records terminal
-and obligation state before bounded shutdown, then fails with its seed,
-violations and partial step trace. Host calls observe crashes since the last
-completed restart, including a crash that fired before admission. A crash
-during restart triggers another restart instead of being marked handled.
-While host work awaits a reply or a held run awaits recovery, the driver
-advances to pending retries' due times. Backoff still spans virtual time,
-and the stores and server share that clock; waiting for the next plan tick
-would deadlock a call whose answer depends on a retry.
-Held model calls deliberately never
-settle, so their worlds wait at most 50 ms per settle attempt while recovery
-and end-state checks retain their virtual-time bounds. The
-`LASH_CHAOS_SOAK_*` settings it prints replay the epoch alone. `LASH_CHAOS_SOAK_STEPS` cuts the plan to a
-prefix, and `LASH_CHAOS_SOAK_WITHOUT=<kind,...>` replaces step kinds with
-quiesces while keeping every other step where it was.
-
-A defect the soak finds that `main` has not fixed is an entry in
-`chaos_soak::findings::OPEN`: its id, the step kinds that expose it, and a
-short replay. Each entry has an ignored regression test in
-`tests/chaos_soak.rs` that fails while the defect stands. The smoke leaves
-out every open finding's kinds so it stays green on `main`; the release soak
-draws every kind and stays red until the findings are fixed. The fix moves
-the entry to `chaos_soak::findings::FIXED` and makes its regression test
-live, so its replay keeps passing.
-
-```sh
-kiln test --test_output=all --test_arg=chaos_soak_smoke \
-  --test_arg=--exact --test_arg=--nocapture //crates/lash-sim:chaos_soak__test
-LASH_CHAOS_SOAK_SEED=0x1001 LASH_CHAOS_SOAK_EPOCHS=1 \
-  kiln test --test_env=LASH_CHAOS_SOAK_SEED \
-    --test_env=LASH_CHAOS_SOAK_EPOCHS --test_output=all \
-    --test_arg=chaos_soak_smoke --test_arg=--exact --test_arg=--nocapture \
-    //crates/lash-sim:chaos_soak__test
-just chaos-soak 30m
-# Admit the full local 90-minute execution through Kiln's gate scheduler.
-kiln gate lash <fork> -- just chaos-soak
-```
 
 ## Search fleet
 
@@ -381,6 +268,5 @@ its small fixed evidence budget; it never runs the search lane.
 
 ## Known limitations
 
-- No real discovered product regression has been promoted under
-  `crates/lash-sim/replays/` yet; the plan's done-line keeps that criterion
-  open until the search fleet finds one.
+- No real discovered product regression has been promoted yet; the plan's
+  done-line keeps that criterion open until the search fleet finds one.

@@ -88,11 +88,6 @@ exceptions = [
 ]
 confidence-threshold = 0.8
 
-[licenses.private]
-# The local-only Restate worker runbook is not published and has no manifest
-# license; its dependencies remain checked while the private root is ignored.
-ignore = true
-
 [sources]
 # Git sources and other registries require explicit review.
 unknown-registry = "deny"

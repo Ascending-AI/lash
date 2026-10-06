@@ -39,12 +39,6 @@ policy.
 
 Workbench emits a startup trace, so its rows require the trace file itself.
 
-The owned Restate listener uses Restate SDK 0.11 `serve_with_cancel`. That API
-stops listener intake and applies its fixed ten-second connection grace before
-the listener task returns. It does not expose the accepted-connection task set,
-so the listener join is not proof that every active handler completed. This
-runbook claims stopped intake and completed SDK grace only.
-
 ## Focused and compile gates
 
 Run one workspace feature-graph check covering the optional valid-empty

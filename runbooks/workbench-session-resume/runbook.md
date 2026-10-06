@@ -6,8 +6,8 @@
 
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. It is verified: the phases below execute it, and the
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the
+> application data. It is verified: the phases below execute it, and the
 > block that once stood in front of them is lifted. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
@@ -33,8 +33,8 @@ shift it. Retain the executing prompt and verdict with the run artifacts.
    evidence for this scenario.
 2. **The replacement process starts cold.** Run `bash scripts/agent-workbench-dev.sh restart
    --port <port>`, the verified non-destructive same-configuration replacement named in this
-   runbook's header. Reloading only the page, restarting Restate, or replacing the data
-   directory does not satisfy this gate.
+   runbook's header. Reloading only the page or replacing the data directory does not satisfy
+   this gate.
 3. **The store is authoritative.** Before and after restart, the active `graph_nodes`
    path must contain every committed user and assistant nonce: use
    `<data-dir>/lash-sessions.db` in SQLite mode or `lash_graph_nodes` in the managed
@@ -72,10 +72,7 @@ shift it. Retain the executing prompt and verdict with the run artifacts.
   `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=replay-route-change OPENROUTER_MODEL=dev/replay-route-a AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
   (the `just agent-workbench <port>` recipe is the same command, but it does not export
   `CARGO_TARGET_DIR`, so source the fork's `env.sh` first).
-  Gate `GET /healthz` → 200. The entire Restate stack is port-isolated by default: the
-  helper derives its endpoint, ingress, admin port, node port, and container name from
-  `<port>`, so concurrent runs on distinct workbench ports do not need manual Restate
-  overrides. Teardown:
+  Gate `GET /healthz` → 200. Teardown:
   `bash scripts/agent-workbench-dev.sh down --port <port>` with the same environment.
 - Postgres boot variant:
   `AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`.
@@ -234,8 +231,7 @@ terminal response, and execution scorecard as `04-route-filtered.png`.
 
 ## Phase 5 — Teardown and score
 
-Run `bash scripts/agent-workbench-dev.sh down --port <port>` and confirm the workbench and its Restate
-container are gone.
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` and confirm the workbench is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

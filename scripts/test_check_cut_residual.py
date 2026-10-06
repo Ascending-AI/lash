@@ -50,8 +50,8 @@ class CutResidualTests(unittest.TestCase):
                          ["handwritten.rs", "unlisted.json"])
 
     def test_activation_does_not_allow_workflow_logic_or_new_exemptions(self):
-        before = "jobs:\n  release-journal-replay:\n    continue-on-error: true\n    run: check\n  publish:\n    needs: [build]\n"
-        after = before.replace("continue-on-error: true", "continue-on-error: false").replace("[build]", "[build, version-bumps, release-journal-replay]")
+        before = "jobs:\n  version-bumps:\n    continue-on-error: true\n    run: check\n  publish:\n    needs: [build]\n"
+        after = before.replace("continue-on-error: true", "continue-on-error: false").replace("[build]", "[build, version-bumps]")
         self.assertTrue(residual.activation_only(before, after))
         self.assertFalse(residual.activation_only(before, after.replace("run: check", "run: skip")))
         self.assertFalse(residual.activation_only(after, before))

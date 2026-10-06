@@ -19,8 +19,8 @@ cannot rot into a blanket allowance.
 The format manifest in ``crates/lash/src/formats.rs`` is checked against the
 same registry, in both directions: every registered surface either names its
 manifest row (``format_manifest = "<DurableFormat variant>"``, or
-``format_manifest = "engine:<id>"`` for a row the build's effect engine registers
-through ``lash::restate`` — ADR 0104 §2), states why it is outside the
+``format_manifest = "engine:<id>"`` for a row the build's durable engine
+registers), states why it is outside the
 manifest (``format_outside_manifest = "<reason>"``), or belongs to an excluded
 class; and every manifest row is exactly one registered surface whose
 ``manifest`` names it. That is what makes the manifest's exhaustiveness claim
