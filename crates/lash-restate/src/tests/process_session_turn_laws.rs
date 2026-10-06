@@ -1191,6 +1191,7 @@ fn park_of_exhausted_retries(failure: &str) -> lash_core::store::ParkReason {
 /// that does not serve the key: the registry, store and registration a
 /// retry needs, the context the attempt ran on, and how the attempt ended.
 struct UnservedCommittedChild {
+    engine_backend: lash_core::Backend,
     registry: Arc<dyn ProcessRegistry>,
     factory: Arc<dyn lash_core::DeploymentStore>,
     registration: ProcessRegistration,
@@ -1209,8 +1210,9 @@ async fn unserved_committed_child(child: &str) -> UnservedCommittedChild {
         .id;
     let factory = memory_session_store_factory().await;
     commit_keyed_child(&registry, &factory, &registration, &process_id).await;
+    let engine_backend = memory_engine_backend().await;
     let worker = worker_for(
-        memory_engine_backend().await,
+        engine_backend.clone(),
         Arc::clone(&registry),
         Arc::clone(&factory),
         answering_provider("never asked"),
@@ -1231,6 +1233,7 @@ async fn unserved_committed_child(child: &str) -> UnservedCommittedChild {
         )))
         .await;
     UnservedCommittedChild {
+        engine_backend,
         registry,
         factory,
         registration,
@@ -1373,10 +1376,12 @@ async fn a_profile_bind_fault_is_never_journaled_and_its_retry_runs_the_step_aga
     );
 
     // The engine's retry: the journal replays, and the step runs again on a
-    // deployment that binds the recorded model.
+    // deployment that binds the recorded model. That deployment shares the
+    // first's durable stores, which hold the turn prelude the journal names
+    // by digest (FIG-5133).
     committed.context.start_replay_allowing_journal_extension();
     let worker = worker_with_llm_profiles(
-        memory_engine_backend().await,
+        committed.engine_backend.clone(),
         Arc::clone(&committed.registry),
         Arc::clone(&committed.factory),
         Arc::new(BindOnlyLlmProfiles {
