@@ -480,6 +480,12 @@ impl AppState {
             crate::session_protocol::SessionProtocol::Rlm => spec.plugin(
                 lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
                 lash::rlm::RlmCreateExtras {
+                    termination: Some(lash::rlm::RlmTermination::Natural {
+                        schema: Some(
+                            lash::schema::JsonSchema::admit(json!({ "type": "string" }))
+                                .map_err(serde::de::Error::custom)?,
+                        ),
+                    }),
                     prompt: Some(workbench_rlm_prompt(&self.mail_world)),
                     ..Default::default()
                 },

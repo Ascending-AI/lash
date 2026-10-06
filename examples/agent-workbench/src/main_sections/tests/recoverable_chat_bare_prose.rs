@@ -1,6 +1,85 @@
 use super::*;
 use lash::SessionId;
 
+/// Chat rejects a raw tool record, accepts answer text, and still allows prose
+/// on the next turn. Both sends use the browser's production path (FIG-5156).
+#[tokio::test]
+async fn chat_finish_requires_text_session_wide_and_prose_still_ends_a_turn() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider_calls = Arc::clone(&calls);
+    let provider = lash::testing::TestProvider::builder()
+        .kind("chat-text-finish")
+        .complete(move |_| {
+            let call = provider_calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                Ok(text_response(match call {
+                    0 => "<typescript>finish({temperature: 15});</typescript>",
+                    1 => "<typescript>finish(\"It is 15 °C.\");</typescript>",
+                    _ => "A prose follow-up.",
+                }))
+            }
+        })
+        .build()
+        .into_handle();
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
+    let session_id = state.current_session_id();
+    for (turn, question) in [("text-finish", "weather?"), ("prose-follow-up", "and now?")] {
+        let turn_id = TurnId::from(turn);
+        state.track_turn(&session_id, &turn_id);
+        let follower = crate::restate::start_user_turn(
+            &state,
+            crate::restate::UserTurnRequest {
+                turn_id,
+                session_id: session_id.clone(),
+                text: question.to_string(),
+                model: state.selected_llm_profile(),
+                attachment_id: None,
+            },
+        )
+        .await
+        .expect("send chat input");
+        tokio::time::timeout(Duration::from_secs(30), follower)
+            .await
+            .expect("chat settles")
+            .expect("follower joins")
+            .expect("chat succeeds");
+        if turn == "text-finish" {
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                2,
+                "a record finish must ask again"
+            );
+        }
+    }
+    let session = state
+        .open_session(&session_id, "test.chat_termination")
+        .await
+        .expect("open chat");
+    let recorded: lash::rlm::RlmRecordedConfig = session
+        .read_view()
+        .protocol_turn_options()
+        .decode()
+        .expect("recorded RLM config");
+    let termination = recorded
+        .termination
+        .expect("chat states its termination session-wide");
+    assert!(termination.prose_ends_turn());
+    assert_eq!(
+        termination
+            .finish_schema()
+            .expect("text finish schema")
+            .as_value(),
+        &json!({"type": "string"})
+    );
+    drop(session);
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    let (replies, _) = settled_assistant_rows(&state, &session_id).await;
+    assert_eq!(replies, vec!["It is 15 °C.", "A prose follow-up."]);
+}
+
 /// The projection of a bare-prose reply the runtime committed itself.
 ///
 /// Read through the production `/api/state` handler so the assertion covers the

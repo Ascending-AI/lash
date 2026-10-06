@@ -5125,7 +5125,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Paid live row: hosts.rs s36_workbench_weather collects with capped live credentials, but its runbook judgement failed with z-ai/glm-5.3-flash, which finished with the raw search results instead of extracted weather values (FIG-5150).",
+          "hold_reason": "Paid live row: s36_workbench_weather collection passes, but z-ai/glm-5.3-flash still fails the weather judgement with Natural text termination: after reading a nonexistent content field on the search result, it finishes with an empty string and renders no weather facts (FIG-5156).",
           "registration": null
         }
       ],
