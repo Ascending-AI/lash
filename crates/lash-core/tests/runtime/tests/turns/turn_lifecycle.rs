@@ -1733,8 +1733,22 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for SteerAtBeforeTurnHooks {
             return;
         }
         let steer = self.0.clone();
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(steer.send_queued());
+        // The probe runs inside the engine handler's poll. Re-entering the
+        // test's runtime there (`block_in_place` + `Handle::block_on`) hands
+        // the worker's core away mid-poll and intermittently left the turn's
+        // attempt unpolled for good, so the send runs on a thread and runtime
+        // of its own while this worker waits for it.
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("steer runtime")
+                        .block_on(steer.send_queued());
+                })
+                .join()
+                .expect("steer thread");
         });
     }
 
