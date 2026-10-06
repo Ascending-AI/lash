@@ -1100,6 +1100,7 @@ impl GeneratedRuntimeWorld {
         let core = lash::LashCore::standard_builder(backend)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .live_replay_store(world_live_replay_store())
             .serve_test_llm_profile(provider_handle, model.clone())
             .tools(Arc::new(SuspendToolProvider::new(
                 tool_name.clone(),

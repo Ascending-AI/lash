@@ -2166,6 +2166,52 @@ fn test_delivered(
     }
 }
 
+/// A generated world reads a turn's activity from its live replay only once
+/// the turn's shift has stopped, so the replay keeps it however long the host
+/// takes to run the workload: a loaded run must see what an idle one sees
+/// (FIG-5148).
+#[tokio::test]
+async fn a_world_live_replay_keeps_activity_however_long_the_host_runs() {
+    use lash_core::{
+        LiveReplayEventDraft, LiveReplayOutcome, LiveReplayStore as _,
+        SessionObservationEventPayload, SessionRevision,
+    };
+
+    let clock = SimClock::new();
+    let store = lash::observe::InMemoryLiveReplayStore::with_clock(
+        world_live_replay_config(),
+        clock.clone(),
+    );
+    let session = SessionId::fixture("slow-host");
+    let revision = SessionRevision::new(1);
+    let cursor = store.current_cursor(&session, revision);
+    store
+        .publish(
+            &session,
+            revision,
+            vec![LiveReplayEventDraft::new(
+                None::<lash_core::TurnId>,
+                SessionObservationEventPayload::ResidentChanged,
+            )],
+        )
+        .await
+        .expect("publish one event");
+
+    clock.advance_by(60 * 60 * 1000).await;
+    store.expire_idle_sessions();
+
+    match store
+        .replay_after_cursor(&cursor)
+        .await
+        .expect("replay after the host's delay")
+    {
+        LiveReplayOutcome::Replayed(events) => assert_eq!(events.len(), 1),
+        LiveReplayOutcome::Gap(reason) => {
+            panic!("an hour of host time dropped the world's activity: {reason:?}")
+        }
+    }
+}
+
 #[tokio::test]
 async fn confidence_seed_cancellation_replays_exact_outcome() {
     let workload = generate_workload(0x80ea_b361_fe47_8810, "full-random", 2000).expect("workload");
