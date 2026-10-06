@@ -259,7 +259,7 @@ pub struct PluginTaskContext {
     pub session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub session_graph: Arc<dyn SessionGraphService>,
     pub processes: Arc<dyn crate::ProcessService>,
-    pub scoped_effect_controller: crate::ScopedEffectController<'static>,
+    pub scoped_effect_controller: crate::ActorContext,
     pub cancellation_token: tokio_util::sync::CancellationToken,
 }
 

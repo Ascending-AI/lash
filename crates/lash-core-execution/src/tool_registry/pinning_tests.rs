@@ -41,11 +41,11 @@ fn test_attempt_context() -> crate::AttemptContext<'static> {
         Arc::new(crate::testing::MockSessionManager::default()),
         Arc::new(crate::testing::MockSessionManager::default()),
         Arc::new(crate::UnavailableProcessService),
-        crate::runtime::ScopedEffectController::shared(
-            Arc::new(crate::testing::UnavailableEffectController),
-            crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
-        )
-        .expect("valid test runtime scope"),
+        crate::ActorContext::unavailable()
+            .scoped(crate::AdmittedScope::runtime_operation(
+                "test-runtime-effect-controller",
+            ))
+            .expect("valid test runtime scope"),
         Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",

@@ -1,5 +1,6 @@
 //! Retained scope boundaries in the execution's own journal.
 
+use crate::ActorContext;
 use std::sync::{Arc, Mutex};
 
 use lash_trace::{
@@ -9,7 +10,7 @@ use lash_trace::{
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::{
     RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectInvocation, RuntimeEffectOutcome, ScopedEffectController,
+    RuntimeEffectInvocation, RuntimeEffectOutcome,
 };
 
 /// Scope data retained by the execution journal; it grants no emission right.
@@ -63,7 +64,7 @@ impl super::TraceRuntime {
     /// The result retains data only; replay never restores the ephemeral permit.
     pub async fn record_boundary(
         &self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         key: String,
         scope: TraceScopeId,
         cause: TraceCause,
@@ -84,7 +85,7 @@ impl super::TraceRuntime {
             candidate: Arc::clone(&candidate),
         };
         let result = controller
-            .execute_effect(
+            .turn_effect(
                 RuntimeEffectEnvelope::new(
                     invocation,
                     RuntimeEffectCommand::TraceBoundary { scope, transition },

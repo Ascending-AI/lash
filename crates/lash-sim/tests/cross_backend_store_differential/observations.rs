@@ -212,8 +212,8 @@ pub(super) struct RawDurableState {
     pub(super) scope_close_obligations: Vec<ScopeCloseObligationObservation>,
     // `process_*` and `trigger_*` are deliberately excluded: they are separate
     // subsystems with dedicated conformance suites, while this harness and its
-    // operation vocabulary are scoped to one runtime session. Effect/await
-    // state is likewise owned by the separate EffectHost contract.
+    // operation vocabulary are scoped to one runtime session. Wait state is
+    // likewise owned by the actor's waits (ADR 0132 §5).
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

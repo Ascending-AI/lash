@@ -715,8 +715,8 @@ fn validate_window_session(
 /// [`commit_runtime_state`](Self::commit_runtime_state) completes, releases
 /// or drops them by the commit's [`IngressSettlement`] in the same atomic
 /// commit (FIG-3927). History reads are [`SessionHistoryStore`]'s. In-flight
-/// nondeterministic work belongs to the active
-/// [`EffectHost`](crate::EffectHost), not to the store contract.
+/// nondeterministic work belongs to the owning actor's context, not to the
+/// store contract.
 ///
 /// Every operation names its session: it takes `session_id` first, or a
 /// request that carries it (ADR 0112 §1).
@@ -1513,8 +1513,7 @@ pub type PluginWriterRangesFuture<'a> = std::pin::Pin<
 /// (vacuum/GC). The segments share one transactional domain: claims granted by
 /// the input and queue segments settle atomically in
 /// [`SessionCommitStore::commit_runtime_state`]. In-flight nondeterministic
-/// work belongs to the active [`EffectHost`](crate::EffectHost), not to the
-/// store contract.
+/// work belongs to the owning actor's context, not to the store contract.
 ///
 /// Every session-scoped operation names its session, as its first parameter
 /// or in a request that carries it. Runtime code reaches one session through

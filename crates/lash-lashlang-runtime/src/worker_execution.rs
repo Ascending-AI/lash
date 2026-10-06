@@ -221,24 +221,30 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
         crate::process::record_segment_boundary_decline(&reason, "worker declined segment capture");
     }
 }
+/// The in-memory capture of a run's last quiet point. L7 (FIG-5177) deletes
+/// it for `DurableSnapshotStore` on the durable path.
 struct Capture(Mutex<Option<Checkpoint>>);
 #[async_trait::async_trait]
-impl CheckpointStore for Capture {
-    async fn commit(&self, checkpoint: &Checkpoint) -> Result<(), CheckpointRefusal> {
+impl SnapshotStore for Capture {
+    async fn commit_quiet_point(
+        &self,
+        point: QuietPoint,
+    ) -> Result<SnapshotRev, QuietPointRefusal> {
         *self
             .0
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(checkpoint.clone());
-        Ok(())
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(point.checkpoint);
+        Ok(SnapshotRev(1))
     }
-    async fn latest(&self) -> Result<Option<Checkpoint>, CheckpointRefusal> {
+    async fn latest(&self) -> Result<Option<(SnapshotRev, Checkpoint)>, QuietPointRefusal> {
         Ok(self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone())
+            .clone()
+            .map(|checkpoint| (SnapshotRev(1), checkpoint)))
     }
-    async fn open_frame(&self, _frame: FrameEpoch) -> Result<(), CheckpointRefusal> {
+    async fn open_frame(&self, _frame: FrameEpoch) -> Result<(), QuietPointRefusal> {
         *self
             .0
             .lock()

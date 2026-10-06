@@ -74,7 +74,7 @@ pub(in crate::runtime::session_manager) struct ProcessSessionTurnInit<'a> {
     pub turn_id: TurnId,
     pub turn_input: crate::TurnInput,
     pub execution_write_authority: &'a crate::ProcessExecutionWriteAuthority,
-    pub scoped_effect_controller: crate::ScopedEffectController<'a>,
+    pub scoped_effect_controller: crate::ActorContext,
     pub cancellation: CancellationToken,
 }
 
@@ -1000,7 +1000,6 @@ impl RuntimeSessionServices {
         // (FIG-3673). A peek the engine cannot answer ends the attempt
         // recoverably.
         let cancelled_before_create = scoped_effect_controller
-            .controller()
             .observe_process_cancel(&cancellation)
             .await
             .map_err(|source| SessionTurnInitError::Reconcile {
@@ -1089,7 +1088,6 @@ impl RuntimeSessionServices {
                 ))),
             })?;
         let cancelled_after_create = scoped_effect_controller
-            .controller()
             .observe_process_cancel(&cancellation)
             .await
             .map_err(|source| SessionTurnInitError::Reconcile {
@@ -1275,56 +1273,34 @@ impl RuntimeSessionServices {
         &self,
         child: &RuntimeHandle,
         input: crate::TurnInput,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        scoped_effect_controller: crate::ActorContext,
         cancel: CancellationToken,
     ) -> Result<AssembledTurn, crate::PluginError> {
         let (event_tx, mut event_rx) = mpsc::channel::<SessionStreamEvent>(100);
         let sink = ChannelEventSink { tx: event_tx };
         let event_drain =
             crate::task::spawn(async move { while event_rx.recv().await.is_some() {} });
-        let turn = match scoped_effect_controller.into_static() {
-            Ok(scoped_effect_controller) => {
-                // Canonical recursion-growth seam: every shareable child turn
-                // gets a fresh Tokio task stack here. One process run owns at
-                // most one child turn, so no admission registry or limit lives
-                // at this layer.
-                let task = crate::task::spawn(run_initialized_session_turn(
-                    child.clone(),
-                    input,
-                    cancel,
-                    scoped_effect_controller,
-                    sink.clone(),
-                ));
-                let mut abort_on_drop = AbortTaskOnDrop::new(task.abort_handle());
-                let joined = task.await;
-                abort_on_drop.disarm();
-                match joined {
-                    Ok(turn) => turn,
-                    Err(err) if err.is_panic() => child_turn_panicked(err.into_panic()),
-                    Err(err) => Err(crate::PluginError::Session(format!(
-                        "child session turn task was cancelled: {err}"
-                    ))),
-                }
-            }
-            Err(scoped_effect_controller) => {
-                // Handler-scoped durable controllers cannot outlive their host
-                // invocation and therefore cannot cross Tokio's `'static`
-                // spawn contract. Preserve their exact journal semantics by
-                // retaining the scoped controller on the calling task.
-                use futures_util::FutureExt as _;
-                match std::panic::AssertUnwindSafe(run_initialized_session_turn(
-                    child.clone(),
-                    input,
-                    cancel,
-                    scoped_effect_controller,
-                    sink.clone(),
-                ))
-                .catch_unwind()
-                .await
-                {
-                    Ok(turn) => turn,
-                    Err(panic) => child_turn_panicked(panic),
-                }
+        let turn = {
+            // Canonical recursion-growth seam: every shareable child turn
+            // gets a fresh Tokio task stack here. One process run owns at
+            // most one child turn, so no admission registry or limit lives
+            // at this layer.
+            let task = crate::task::spawn(run_initialized_session_turn(
+                child.clone(),
+                input,
+                cancel,
+                scoped_effect_controller,
+                sink.clone(),
+            ));
+            let mut abort_on_drop = AbortTaskOnDrop::new(task.abort_handle());
+            let joined = task.await;
+            abort_on_drop.disarm();
+            match joined {
+                Ok(turn) => turn,
+                Err(err) if err.is_panic() => child_turn_panicked(err.into_panic()),
+                Err(err) => Err(crate::PluginError::Session(format!(
+                    "child session turn task was cancelled: {err}"
+                ))),
             }
         };
         drop(sink);
@@ -1412,14 +1388,14 @@ impl SessionTurnInitError {
 /// The process-backed turn-input validation: the child's turn keeps the
 /// process scope it was admitted under and a `trace_turn_id` stamped to its
 /// durable turn id.
-fn validated_process_turn_input<'run>(
+fn validated_process_turn_input(
     turn_id: &TurnId,
     mut input: crate::TurnInput,
     process_id: &crate::ProcessId,
     lineage: crate::ProcessLineage,
     execution_write_authority: &crate::ProcessExecutionWriteAuthority,
-    scoped_effect_controller: crate::ScopedEffectController<'run>,
-) -> Result<(crate::TurnInput, crate::ScopedEffectController<'run>), crate::PluginError> {
+    scoped_effect_controller: crate::ActorContext,
+) -> Result<(crate::TurnInput, crate::ActorContext), crate::PluginError> {
     let required_scope = crate::ExecutionScope::process(process_id);
     if scoped_effect_controller.execution_scope() != &required_scope {
         return Err(crate::PluginError::Session(format!(
@@ -1458,7 +1434,7 @@ async fn run_initialized_session_turn(
     runtime: RuntimeHandle,
     input: crate::TurnInput,
     cancel: CancellationToken,
-    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    scoped_effect_controller: crate::ActorContext,
     sink: ChannelEventSink,
 ) -> Result<AssembledTurn, crate::PluginError> {
     // This mutex is the child runtime's single-writer boundary. Hold it for
@@ -1781,12 +1757,9 @@ mod tests {
             "invocation:subagent:call",
         )
         .bind_attempt(2);
-        let controller = crate::testing::UnavailableEffectController;
-        let scoped_effect_controller = crate::ScopedEffectController::borrowed(
-            &controller,
-            crate::AdmittedScope::process(process_id.clone()),
-        )
-        .expect("process scope");
+        let scoped_effect_controller = crate::ActorContext::unavailable()
+            .scoped(crate::AdmittedScope::process(process_id.clone()))
+            .expect("process scope");
 
         let (input, _) = validated_process_turn_input(
             &crate::TurnId::fixture(process_id.as_str()),
@@ -1799,10 +1772,9 @@ mod tests {
         .expect("valid process-backed child turn input");
 
         assert_eq!(
-            crate::testing::TestExecutionContextBuilder::over_controller(std::sync::Arc::new(
-                crate::testing::UnavailableEffectController
+            crate::testing::TestExecutionContextBuilder::over_controller(
+                crate::ActorContext::unavailable()
             )
-                as std::sync::Arc<dyn crate::RuntimeEffectController>,)
             .turn_context(input.turn_context)
             .build()
             .into_runtime()

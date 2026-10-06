@@ -4,7 +4,7 @@ use std::sync::Arc;
 /// Build an empty code-execution context whose trigger router delivers through
 /// `trigger_store` to processes in `process_registry`.
 pub fn code_execution_context_with_trigger_store<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     trigger_store: Arc<dyn crate::TriggerStore>,
     process_registry: Arc<dyn crate::ProcessRegistry>,
 ) -> crate::RuntimeExecutionContext<'run> {
@@ -17,7 +17,7 @@ pub fn code_execution_context_with_trigger_store<'run>(
 /// [`code_execution_context_with_trigger_store`] under a stable parent
 /// invocation.
 pub fn code_execution_context_with_trigger_store_and_invocation<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     trigger_store: Arc<dyn crate::TriggerStore>,
     process_registry: Arc<dyn crate::ProcessRegistry>,
     invocation: crate::RuntimeInvocation,

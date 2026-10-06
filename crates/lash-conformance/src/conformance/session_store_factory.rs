@@ -8,6 +8,7 @@ use super::session_store_factory_vacuum::{
     session_store_factory_vacuum_is_scoped_to_bound_session,
 };
 use super::*;
+use crate::ActorContext;
 use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -78,7 +79,7 @@ turn_cancel_law! {
 /// resolver, which owns turn cancellation for the substrate.
 pub async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
     factory: Arc<dyn crate::store::ConformanceDeployment>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
 ) {
     turn_cancel::turn_cancel_wrong_binding_is_refused_at_every_phase(factory, effect_host).await;
 }
@@ -706,7 +707,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
 pub async fn ended_process_record_has_no_attachment_edges(
     factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
 ) {
     let _ = (registry, effect_host);
     let store: Arc<dyn crate::RuntimeStore> = factory.clone();

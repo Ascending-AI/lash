@@ -1300,7 +1300,6 @@ impl lash_core_execution::ProcessClockRebind for SqliteProcessRegistry {
             conn: self.conn.clone(),
             clock,
             wake_delivery_config: self.wake_delivery_config,
-            scope_fence_hosts: self.scope_fence_hosts.clone(),
             location: self.location.clone(),
             process_id_mint: self.process_id_mint.clone(),
         }))

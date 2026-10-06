@@ -49,7 +49,6 @@ impl<'a> RunCoordinator<'a> {
         };
         self.journal
             .scoped
-            .controller()
             .arm_run_source(descriptor.clone())
             .await?;
         handlers
@@ -261,7 +260,6 @@ impl<'a> RunCoordinator<'a> {
         };
         self.journal
             .scoped
-            .controller()
             .arm_run_source(descriptor.clone())
             .await?;
         if let Some(pending) = self.pending_metadata(&call.call_id)? {
@@ -340,7 +338,6 @@ impl<'a> RunCoordinator<'a> {
             .turn_cancel_wait(tokio_util::sync::CancellationToken::new());
         self.journal
             .scoped
-            .controller()
             .await_run_sources(Vec::new(), Vec::new(), cancel)
             .await?;
         Err(crate::RuntimeEffectControllerError::new(
@@ -395,7 +392,6 @@ impl<'a> RunCoordinator<'a> {
         match self
             .journal
             .scoped
-            .controller()
             .await_run_sources(subscriptions, selectable, cancel)
             .await
         {
@@ -409,7 +405,6 @@ impl<'a> RunCoordinator<'a> {
                     let seal = self
                         .journal
                         .scoped
-                        .controller()
                         .cancel_run_source(self.sources[id].clone())
                         .await?;
                     self.accept_source(id, seal).await?;
@@ -628,7 +623,7 @@ async fn read_source_result(
     );
     let outcome = journal
         .scoped
-        .execute_effect(
+        .tool_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::RestoreRunMaterial {

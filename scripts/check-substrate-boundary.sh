@@ -136,7 +136,7 @@ clock_exemption_is_allowlisted() {
     crates/lash-core/src/session/tool_execution.rs:571)
       [[ $source == *'tokio::task::yield_now()'* ]]
       ;; # Cooperative scheduling only; no time value participates in behavior.
-    crates/lash-core/src/runtime/commit_admission.rs:237)
+    crates/lash-core/src/runtime/commit_admission.rs:229)
       [[ $source == *'tokio::time::sleep(self.inner.wait_ttl)'* ]]
       ;; # Process-local admission timeout; no durable timestamp or ordering fact.
     *)
@@ -322,6 +322,89 @@ done <"$tmp_dir/rule4f.raw"
 if [[ -s "$tmp_dir/rule4f.hits" ]]; then
   cat "$tmp_dir/rule4f.hits" >&2
   echo "substrate boundary rule 4 failed: a pinned lash service is called through a typed client; route it through services::routed_workflow with a ServiceRoute" >&2
+  failed=1
+fi
+
+# Rule 7 — the effect seam is collapsed (ADR 0132; I0, FIG-5194). Every effect
+# runs on the concrete `ActorContext`: the effect-host, controller and layer
+# traits are deleted and none of their names may come back.
+#
+# `PluginError::RuntimeEffectController` (which carries a
+# `RuntimeEffectControllerError`) and the wire kind
+# `TurnFailureKind::RuntimeEffectController` are variants, not the trait:
+# their paths, tuple patterns and the wire kind's declaration are not hits.
+collapse_names='EffectEngine|EffectHost|RuntimeEffectController|ScopedEffectController|EffectTaskController|LayeredEngine|EffectLayer|LayeredEffectHost|AwaitEventResolver'
+collapse_forbidden="(^|[^[:alnum:]_])(${collapse_names})([^[:alnum:]_]|$)"
+capture_search "deleted effect seam" "$collapse_forbidden" "$tmp_dir/rule7.raw" "${rule4_runs[@]}"
+: >"$tmp_dir/rule7.hits"
+while IFS=: read -r file line source; do
+  stripped="$(sed -E \
+    -e 's/(PluginError|TurnFailureKind|Self)::RuntimeEffectController([^[:alnum:]_]|$)/\2/g' \
+    -e 's/(^|[^[:alnum:]_:])RuntimeEffectController[[:space:]]*\(/\1(/g' <<<"$source")"
+  if [[ $file == crates/lash-sansio/src/session_model/failure.rs ]]; then
+    stripped="$(sed -E 's/^[[:space:]]*RuntimeEffectController,[[:space:]]*$//' <<<"$stripped")"
+  fi
+  grep -Eq "$collapse_forbidden" <<<"$stripped" || continue
+  printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$tmp_dir/rule7.hits"
+done <"$tmp_dir/rule7.raw"
+if [[ -s "$tmp_dir/rule7.hits" ]]; then
+  cat "$tmp_dir/rule7.hits" >&2
+  echo "substrate boundary rule 7 failed: a deleted effect-seam name was found; effects run on ActorContext" >&2
+  failed=1
+fi
+
+# Rule 7b — no silent defaults (law S1). A method of `ProcessEngine`,
+# `ProjectionProvider` or `DurableStore` has no default body: each
+# implementation answers every method itself.
+default_traits='ProcessEngine|ProjectionProvider|DurableStore'
+capture_search "silent-default traits" "(^|[^[:alnum:]_])trait[[:space:]]+(${default_traits})([^[:alnum:]_]|$)" \
+  "$tmp_dir/rule7b.raw" "${rule4_runs[@]}"
+: >"$tmp_dir/rule7b.hits"
+cut -d: -f1 "$tmp_dir/rule7b.raw" | sort -u | while IFS= read -r file; do
+  # Print file:line:trait for each method inside one of the traits whose
+  # signature ends in a body rather than `;`.
+  awk -v traits="$default_traits" '
+    FNR == 1 { depth = -1; sig = "" }
+    {
+      code = $0
+      sub(/\/\/.*/, "", code)
+      if (depth < 0) {
+        if (!match(code, "(^|[^[:alnum:]_])trait[[:space:]]+(" traits ")([^[:alnum:]_]|$)")) {
+          next
+        }
+        trait = code
+        sub(/.*trait[[:space:]]+/, "", trait)
+        sub(/[^[:alnum:]_].*/, "", trait)
+        depth = 0
+        opened = 0
+      }
+      if (sig != "" || (depth == 1 && code ~ /^[[:space:]]*(pub[[:space:]]+)?(async[[:space:]]+)?(unsafe[[:space:]]+)?fn[[:space:]]/)) {
+        if (sig == "") {
+          sig_line = FNR
+        }
+        sig = sig code
+        if (code ~ /;[[:space:]]*$/) {
+          sig = ""
+        } else if (code ~ /\{/) {
+          print FILENAME ":" sig_line ":" trait " has a default method body"
+          sig = ""
+        }
+      }
+      opens = gsub(/\{/, "{", code)
+      closes = gsub(/\}/, "}", code)
+      depth += opens - closes
+      if (opens > 0) {
+        opened = 1
+      }
+      if (opened && depth <= 0) {
+        depth = -1
+      }
+    }
+  ' "$file"
+done >"$tmp_dir/rule7b.hits"
+if [[ -s "$tmp_dir/rule7b.hits" ]]; then
+  cat "$tmp_dir/rule7b.hits" >&2
+  echo "substrate boundary rule 7 failed: a method of ProcessEngine, ProjectionProvider or DurableStore has a default body" >&2
   failed=1
 fi
 

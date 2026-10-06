@@ -112,6 +112,8 @@ pub const TABLES: &[&str] = &[
     durable::ACTORS_TABLE,
     durable::MAIL_TABLE,
     durable::NODES_TABLE,
+    durable::run_records::TABLE,
+    durable::snapshots::TABLE,
     process::abandoned_consumer_holds::TABLE,
     process::change_clock::TABLE,
     process::event_horizons::TABLE,

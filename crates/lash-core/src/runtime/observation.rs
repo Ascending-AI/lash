@@ -1,3 +1,4 @@
+use crate::ActorContext;
 use crate::SessionId;
 use crate::TurnId;
 mod process_lifecycle;
@@ -55,7 +56,7 @@ pub struct RuntimeObservation {
     /// The deployment's effect host, which a host reaches the session's
     /// durable waits through without the runtime's writer, such as an
     /// admitted plugin task's cancel signal (FIG-4391).
-    pub effect_host: Arc<dyn crate::EffectHost>,
+    pub effect_host: ActorContext,
     /// The ingress relay an acceptance through this observation delivers
     /// with (ADR 0109 §3).
     pub ingress: super::shift::IngressRelay,

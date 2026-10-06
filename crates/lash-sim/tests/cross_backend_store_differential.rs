@@ -2035,19 +2035,6 @@ impl Clock for DifferentialClock {
     }
 }
 
-/// The lifecycle backend's session work: an engine that holds the core's
-/// installed `SessionShifts` and never runs it. The in-process engine the backend
-/// otherwise selects ticks the reconcile pass on a wall-clock cadence, and
-/// its relays claim due obligations on the shared Postgres database —
-/// a `SessionDelete` obligation went `Claimed` between the close's
-/// acknowledgement and the delete verb's own immediate attempt
-/// (FIG-3891). With the tick held, the verb's delivery is the only claimer.
-fn held_work_lifecycle_backend(backend: lash::Backend) -> lash::Backend {
-    lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
-        .with_session_work(Arc::new(lash_core::NoSessionWork::new()))
-        .into_backend()
-}
-
 async fn runners_for_case(
     case: CaseName,
     sqlite_root: &Path,
@@ -2165,22 +2152,19 @@ async fn runners_for_case_with_clock(
     );
     let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn DeploymentStore>;
 
-    let memory_lifecycle: lash::Backend = held_work_lifecycle_backend(
-        lash_conformance::recording_backend_over(sqlite_memory_stores.clone()),
-    );
-    let sqlite_lifecycle: lash::Backend =
-        held_work_lifecycle_backend(lash_conformance::recording_backend_over(sqlite_backend));
-    let postgres_lifecycle: lash::Backend =
-        held_work_lifecycle_backend(lash_conformance::recording_backend_over(Arc::new(
-            lash_postgres_store::PostgresStoreSet::with_clock(
-                postgres,
-                Arc::new(lash::persistence::FileAttachmentStore::new(
-                    sqlite_case_root.join("postgres-attachments"),
-                )),
-                lash_core::WakeDeliveryConfig::default(),
-                Arc::clone(&clock),
-            ),
-        )));
+    let memory_lifecycle: lash::Backend =
+        lash_conformance::backend_over(sqlite_memory_stores.clone());
+    let sqlite_lifecycle: lash::Backend = lash_conformance::backend_over(sqlite_backend);
+    let postgres_lifecycle: lash::Backend = lash_conformance::backend_over(Arc::new(
+        lash_postgres_store::PostgresStoreSet::with_clock(
+            postgres,
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                sqlite_case_root.join("postgres-attachments"),
+            )),
+            lash_core::WakeDeliveryConfig::default(),
+            Arc::clone(&clock),
+        ),
+    ));
 
     vec![
         BackendRunner {

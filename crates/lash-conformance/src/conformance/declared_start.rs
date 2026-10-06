@@ -13,6 +13,7 @@
 //! next await after the crash fired, and the tier redelivers the turn the way
 //! it recovers a crashed turn.
 
+use crate::ActorContext;
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
@@ -52,7 +53,7 @@ pub type SubagentPlugin =
 pub struct DeclaredStartTier {
     /// Distinguishes this tier's sessions from every other tier's.
     pub prefix: String,
-    pub effect_host: Arc<dyn crate::EffectHost>,
+    pub effect_host: ActorContext,
     pub stores: Arc<dyn crate::StoreSet>,
     /// Runs the parent turn, crashes and redrives it, and serves the child's
     /// process segments.
@@ -738,7 +739,7 @@ struct World {
     faults: crate::testing::ProcessRegistryFaults,
     process_work: crate::ProcessWorkWiring,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     script: Arc<Script>,
     intents: Arc<IntentOutcomes>,
     /// The turn's own token: cancelled before the turn runs, it is a cancel
@@ -793,12 +794,10 @@ impl World {
                 }
             })
             .build();
-        let mut host =
-            crate::LawBackend::over_stores(Arc::clone(&tier.stores), Arc::clone(&tier.effect_host))
-                .host_config(
-                    crate::CommitBudget::bounded(1024 * 1024, 512),
-                    crate::QueuedWorkBatchingConfig::new(1),
-                );
+        let mut host = crate::LawBackend::over_stores(Arc::clone(&tier.stores)).host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
         host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
         let protocol = match shape.producer {
             Producer::Native { .. } | Producer::Probe(_) | Producer::ReusedIdentity => {
@@ -886,7 +885,7 @@ impl World {
             faults,
             process_work,
             runner: Arc::clone(&tier.runner),
-            effect_host: Arc::clone(&tier.effect_host),
+            effect_host: tier.effect_host.clone(),
             script,
             intents: Arc::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
@@ -1003,7 +1002,7 @@ impl World {
     /// Requests the turn's immediate cancel, as a host does.
     async fn request_cancel(&self) {
         crate::TurnWorkDriver::for_session(
-            Arc::clone(&self.effect_host),
+            self.effect_host.clone(),
             self.session_id.clone(),
             Arc::clone(&self.store),
         )

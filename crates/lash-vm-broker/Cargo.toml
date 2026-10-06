@@ -28,7 +28,9 @@ testing = []
 # identity vocabulary, and on nothing that could decode or run guest state
 # (ADR 0123).
 [dependencies]
+lash-core-execution = { workspace = true }
 lash-core-store = { workspace = true }
+lash-durable = { workspace = true }
 lash-sansio = { workspace = true }
 lashlang = { workspace = true }
 lash-vm-protocol = { workspace = true }

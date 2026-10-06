@@ -38,6 +38,7 @@ mod ops;
 pub(crate) use javascript::*;
 mod projected_refresh;
 mod projected_wire;
+mod projection_provider;
 mod record;
 mod schema;
 mod state;
@@ -121,6 +122,9 @@ pub(crate) use format::*;
 pub(crate) use json::*;
 #[allow(unused_imports)]
 pub(crate) use ops::*;
+pub use projection_provider::{
+    ProjectionCatalog, ProjectionError, ProjectionProvider, ProjectionRefusal,
+};
 pub use state::LASHLANG_SNAPSHOT_VERSION;
 #[cfg(all(test, feature = "synthetic-next"))]
 pub(crate) use state::SnapshotStamps;
@@ -137,7 +141,7 @@ pub use value::{
     LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
     LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, ListValue, ProjectedBindingError,
     ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, ResourceHandle, StringValue, Value,
+    ProjectedValue, ProjectionType, ResourceHandle, ResourceRef, StringValue, Value,
 };
 use vm::IterState;
 

@@ -47,6 +47,7 @@
 //! segment arrives. The body is a [`ConformanceTurnAttempt`] over the
 //! process-scoped controller the engine lends each execution.
 
+use crate::ActorContext;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -86,9 +87,7 @@ impl ConformanceTurnEnd {
 /// its own channel — only a run that ends reports — and answers how its turn
 /// ended.
 pub type ConformanceTurnAttempt = Arc<
-    dyn for<'a> Fn(
-            crate::ScopedEffectController<'a>,
-        ) -> Pin<Box<dyn Future<Output = ConformanceTurnEnd> + Send + 'a>>
+    dyn Fn(crate::ActorContext) -> Pin<Box<dyn Future<Output = ConformanceTurnEnd> + Send>>
         + Send
         + Sync,
 >;
@@ -284,14 +283,14 @@ pub trait ConformanceTurnRunner: Send + Sync {
 /// The in-process tiers' runner: the turn is scoped on the host the runtime
 /// runs on and executed in the calling task.
 pub struct HostTurnRunner {
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
 }
 
 impl HostTurnRunner {
     /// A runner over `host`, which must be the effect host the law's runtime
     /// is built on: group children route through the executors that host
     /// registered.
-    pub fn shared(host: Arc<dyn crate::EffectHost>) -> Arc<dyn ConformanceTurnRunner> {
+    pub fn shared(host: ActorContext) -> Arc<dyn ConformanceTurnRunner> {
         Arc::new(Self { host })
     }
 }

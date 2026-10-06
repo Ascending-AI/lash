@@ -181,23 +181,7 @@ pub struct Checkpoint {
     pub frame_epoch: FrameEpoch,
 }
 
-/// Why a store refused a checkpoint.
+/// Why a store refused a quiet point.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("the checkpoint was not committed: {0}")]
-pub struct CheckpointRefusal(pub String);
-
-/// Where an owner's checkpoints are committed: a durable process's segment
-/// handover, a session's worker envelope.
-#[async_trait::async_trait]
-pub trait CheckpointStore: Send + Sync {
-    /// Commits `checkpoint` atomically, replacing the owner's last one.
-    async fn commit(&self, checkpoint: &Checkpoint) -> Result<(), CheckpointRefusal>;
-
-    /// The owner's last committed checkpoint, if any.
-    async fn latest(&self) -> Result<Option<Checkpoint>, CheckpointRefusal>;
-
-    /// Opens frame `frame_epoch` (F5): atomically drops the checkpoint of
-    /// every earlier frame, so nothing an earlier frame left is restored
-    /// into the new one.
-    async fn open_frame(&self, frame_epoch: FrameEpoch) -> Result<(), CheckpointRefusal>;
-}
+#[error("the quiet point was not committed: {0}")]
+pub struct QuietPointRefusal(pub String);

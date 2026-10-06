@@ -14,6 +14,7 @@
 //! L-S8 (a fresh execution of a started run is `SubstrateLost`) is the
 //! engine's own start marker, so the engine registers it where it keeps one.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -46,7 +47,7 @@ impl ShiftParts {
     pub(super) async fn new(
         prefix: &str,
         law: &str,
-        effect_host: &Arc<dyn crate::EffectHost>,
+        _effect_host: &ActorContext,
         stores: &Arc<dyn crate::StoreSet>,
         admission_bound: usize,
     ) -> Self {
@@ -70,12 +71,10 @@ impl ShiftParts {
                 }
             })
             .build();
-        let mut host = crate::LawBackend::over_stores(Arc::clone(stores), Arc::clone(effect_host))
-            .host_config(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1)
-                    .with_max_turn_input_admission(admission_bound),
-            );
+        let mut host = crate::LawBackend::over_stores(Arc::clone(stores)).host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(admission_bound),
+        );
         host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
         let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
         Self {
@@ -311,7 +310,7 @@ impl ShiftParts {
 #[expect(clippy::expect_used, reason = "conformance-law fixture")]
 pub async fn run_admission_binds_cancellation_authority_with_its_rows(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -374,7 +373,7 @@ pub async fn run_admission_binds_cancellation_authority_with_its_rows(
 #[expect(clippy::expect_used, reason = "conformance-law fixture")]
 pub async fn preparing_or_refusing_admission_leaves_cancellation_authority_unbound(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -470,7 +469,7 @@ pub async fn preparing_or_refusing_admission_leaves_cancellation_authority_unbou
 )]
 pub async fn admission_delivers_every_row_it_binds(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -648,7 +647,7 @@ pub async fn admission_delivers_every_row_it_binds(
 )]
 pub async fn one_unfinished_run_per_session(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -727,7 +726,7 @@ pub async fn one_unfinished_run_per_session(
 )]
 pub async fn a_run_admission_is_idempotent_across_new_rows_and_fences(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -805,10 +804,10 @@ pub(super) async fn on_tier<T, F>(
 ) -> T
 where
     T: Send + 'static,
-    F: for<'a> Fn(
+    F: Fn(
             crate::LashRuntime,
-            crate::ScopedEffectController<'a>,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>
+            crate::ActorContext,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>
         + Send
         + Sync
         + 'static,
@@ -862,7 +861,7 @@ pub(super) fn admitted(verdict: AdmitVerdict) -> Admitted {
 )]
 pub async fn one_shift_admits_many_items(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -943,7 +942,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for CrashBeforeCommit {
 )]
 pub async fn replay_cannot_mint_ownership(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1013,7 +1012,7 @@ pub async fn replay_cannot_mint_ownership(
 )]
 pub async fn admission_precedes_first_effect(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1080,7 +1079,7 @@ pub async fn admission_precedes_first_effect(
 )]
 pub async fn parked_run_blocks_admission(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1147,7 +1146,7 @@ pub async fn parked_run_blocks_admission(
 )]
 pub async fn a_command_enqueued_after_an_input_runs_admission_waits_for_the_next_boundary(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1290,7 +1289,7 @@ pub async fn a_command_enqueued_after_an_input_runs_admission_waits_for_the_next
 )]
 pub async fn a_host_task_is_admitted_as_its_own_operation_run(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1507,7 +1506,7 @@ fn operation_task_plugin(
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .push(scope.clone());
                     controller
-                        .execute_effect(
+                        .wait_effect(
                             crate::RuntimeEffectEnvelope::new(
                                 crate::RuntimeEffectInvocation::new(
                                     crate::EffectAddress::new(scope, "operation-task-sleep")
@@ -1566,7 +1565,7 @@ async fn idle_admission(
 )]
 pub async fn an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1659,7 +1658,7 @@ enum LaneItem {
 async fn first_rendering_calls(
     prefix: &str,
     law: &str,
-    effect_host: &Arc<dyn crate::EffectHost>,
+    effect_host: &ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     items: &[LaneItem],
@@ -1752,7 +1751,7 @@ async fn first_rendering_calls(
 /// run, an input run or a checkpoint admission did the taking.
 pub async fn a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

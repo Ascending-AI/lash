@@ -1,33 +1,6 @@
 use super::*;
 
 impl PostgresStore {
-    pub(crate) fn turn_cancel_closure_owner_binding(
-        &self,
-    ) -> Result<Option<lash_core_execution::TurnCancelClosureOwnerBinding>, StoreError> {
-        let owner = self
-            .turn_cancel_closure_owner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        owner
-            .map(|owner| {
-                let participant_id = format!("postgres-catalog:{}", self.catalog_id);
-                let owner =
-                    owner
-                        .upgrade()
-                        .ok_or_else(|| StoreError::TurnCancelClosureOwnerReleased {
-                            participant_id: participant_id.clone(),
-                        })?;
-                Ok(lash_core_execution::TurnCancelClosureOwnerBinding::new(
-                    participant_id,
-                    owner,
-                ))
-            })
-            .transpose()
-    }
-}
-
-impl PostgresStore {
     pub(crate) async fn admit_session_inner(
         &self,
         request: &SessionStoreCreateRequest,

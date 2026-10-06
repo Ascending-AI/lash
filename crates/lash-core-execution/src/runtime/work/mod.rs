@@ -8,10 +8,12 @@ use std::sync::Arc;
 
 mod awaiter;
 mod cadence;
+mod durable;
 mod wake_delivery;
 
 pub use awaiter::ProcessRegistryAwaiter;
 pub use cadence::{WorkCadenceError, WorkCadencePolicy};
+pub use durable::{DurableProcessWork, DurableSessionWork};
 pub use wake_delivery::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
 use super::process::{ProcessRegistry, WatchedRegistry};
@@ -180,7 +182,7 @@ pub trait SessionShifts: Send + Sync {
     /// run always runs on the build that took it.
     async fn admit(
         &self,
-        controller: crate::ScopedEffectController<'_>,
+        controller: crate::ActorContext,
         request: &crate::engine::ShiftRequest,
         admitting_generation: &crate::engine::BuildGeneration,
         ordinal: u32,
@@ -199,7 +201,7 @@ pub trait SessionShifts: Send + Sync {
     /// [`RunEnd::owed_close`]: crate::engine::RunEnd::owed_close
     async fn execute_run(
         &self,
-        controller: crate::ScopedEffectController<'_>,
+        controller: crate::ActorContext,
         admitted: crate::engine::Admitted,
     ) -> crate::engine::RunEnd;
 
@@ -216,7 +218,7 @@ pub trait SessionShifts: Send + Sync {
     /// close this never runs is still delivered once, by the relay.
     async fn close_run(
         &self,
-        controller: crate::ScopedEffectController<'_>,
+        controller: crate::ActorContext,
         session: &SessionId,
         run: &crate::TurnId,
     ) -> Result<(), crate::engine::ShiftAbort>;

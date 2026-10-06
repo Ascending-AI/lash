@@ -54,11 +54,12 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
         anchor: lash_trace::TraceAnchor::Untraced,
         started_at_ms: 1_700_000_000_000,
     };
-    let controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::testing::UnavailableEffectController),
-        lash_core::AdmittedScope::turn("trace-session", "trace-turn"),
-    )
-    .expect("the fixture's turn controller");
+    let controller = lash_core::ActorContext::unavailable()
+        .scoped(lash_core::AdmittedScope::turn(
+            "trace-session",
+            "trace-turn",
+        ))
+        .expect("the fixture's turn controller");
     let context = |standing| {
         lash_core::testing::TestExecutionContextBuilder::over_controller(controller.clone())
             .runtime_parent_invocation(lash_core::testing::exec_code_invocation(

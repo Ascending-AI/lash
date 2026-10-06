@@ -4,7 +4,7 @@ use lashlang::testing::ast_builders as b;
 
 /// A storage-backed test backend for paths that do not execute engine effects.
 pub(crate) async fn sqlite_recording_backend() -> lash_core::Backend {
-    lash_conformance::recording_backend_over(sqlite_memory_store_set().await)
+    lash_conformance::backend_over(sqlite_memory_store_set().await)
 }
 
 /// A fresh memory store set's Lashlang artifact store: a storage port a test

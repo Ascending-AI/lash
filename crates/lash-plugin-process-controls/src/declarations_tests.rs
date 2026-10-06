@@ -43,11 +43,12 @@ fn attempt_context(
 ) -> lash_core::testing::ToolCallFixture<'static> {
     // A recorded attempt always runs under a real owner scope; the mock
     // default is `RuntimeOperation`, which names no opener.
-    let scoped = lash_core::ScopedEffectController::shared(
-        std::sync::Arc::new(lash_core::testing::UnavailableEffectController),
-        lash_core::AdmittedScope::turn("test-session", "declaration-turn"),
-    )
-    .expect("the test scope validates");
+    let scoped = lash_core::ActorContext::unavailable()
+        .scoped(lash_core::AdmittedScope::turn(
+            "test-session",
+            "declaration-turn",
+        ))
+        .expect("the test scope validates");
     lash_core::testing::ToolCallFixture::mock()
         .scoped_effect_controller(scoped)
         .call_id(lash_core::ToolCallId::fixture("declaration-call"))

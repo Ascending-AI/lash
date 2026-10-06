@@ -172,16 +172,6 @@ impl DecoratedBackend {
             }),
         }
     }
-
-    /// Wrap the effect host in `layer`, once: every controller this
-    /// backend's host lends crosses the layer.
-    pub fn with_effect_layer(self, layer: Arc<dyn lash_core::testing::EffectLayer>) -> Self {
-        Self {
-            layered: self.layered.map_effect_host(|host| {
-                Arc::new(lash_core::testing::LayeredEffectHost::new(host, layer))
-            }),
-        }
-    }
 }
 
 impl From<DecoratedBackend> for Backend {

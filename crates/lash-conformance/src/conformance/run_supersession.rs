@@ -6,6 +6,7 @@
 //!   admission's execution: the store checks the fence in the ending
 //!   transaction, so an obsolete executor never ends its successor's run.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -102,7 +103,7 @@ fn superseded_refusal(terminal: Option<&lash_core::store::RunTerminal>) -> bool 
 )]
 pub async fn an_obsolete_executor_never_ends_its_successors_run(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

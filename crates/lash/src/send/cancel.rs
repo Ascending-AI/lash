@@ -146,7 +146,7 @@ async fn cancel_run(
         });
     }
     let driver = TurnWorkDriver::for_session(
-        std::sync::Arc::clone(&parts.effect_host),
+        parts.effect_host.clone(),
         parts.session_id.to_string(),
         std::sync::Arc::clone(parts.store.store()),
     );

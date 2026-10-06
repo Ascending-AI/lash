@@ -41,13 +41,12 @@ pub fn default_state() -> RuntimeSessionState {
 pub fn host_admitted_scope(
     config: &crate::RuntimeHostConfig,
     admitted: crate::AdmittedScope,
-) -> crate::ScopedEffectController<'static> {
+) -> crate::ActorContext {
     config
         .control
         .effect_host
-        .scoped_static(admitted)
-        .expect("effect host scoped_static")
-        .expect("effect host lends a 'static controller for this scope")
+        .scoped(admitted)
+        .expect("a valid admitted scope")
 }
 
 /// Admits `admitted` on `backend`'s effect host: the host a runtime built
@@ -56,12 +55,10 @@ pub fn host_admitted_scope(
 pub fn backend_admitted_scope(
     backend: &crate::Backend,
     admitted: crate::AdmittedScope,
-) -> crate::ScopedEffectController<'static> {
-    backend
-        .effect_host()
-        .scoped_static(admitted)
-        .expect("effect host scoped_static")
-        .expect("effect host lends a 'static controller for this scope")
+) -> crate::ActorContext {
+    crate::ActorContext::detached(backend.clone())
+        .scoped(admitted)
+        .expect("a valid admitted scope")
 }
 
 /// `backend_admitted_scope` for a turn scope.
@@ -69,7 +66,7 @@ pub fn backend_turn_scope(
     backend: &crate::Backend,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> crate::ScopedEffectController<'static> {
+) -> crate::ActorContext {
     backend_admitted_scope(backend, crate::AdmittedScope::turn(session_id, turn_id))
 }
 
@@ -78,7 +75,7 @@ pub fn backend_turn_scope(
 pub fn backend_process_scope(
     backend: &crate::Backend,
     process_id: &ProcessId,
-) -> crate::ScopedEffectController<'static> {
+) -> crate::ActorContext {
     backend_admitted_scope(backend, crate::AdmittedScope::process(process_id.clone()))
 }
 
@@ -87,7 +84,7 @@ pub fn host_turn_scope(
     config: &crate::RuntimeHostConfig,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> crate::ScopedEffectController<'static> {
+) -> crate::ActorContext {
     host_admitted_scope(config, crate::AdmittedScope::turn(session_id, turn_id))
 }
 
@@ -96,7 +93,7 @@ pub fn host_turn_scope(
 pub fn host_process_scope(
     config: &crate::RuntimeHostConfig,
     process_id: &ProcessId,
-) -> crate::ScopedEffectController<'static> {
+) -> crate::ActorContext {
     host_admitted_scope(config, crate::AdmittedScope::process(process_id.clone()))
 }
 
@@ -241,7 +238,7 @@ pub async fn submit_host_command(
 pub async fn drain_host_commands(
     runtime: &mut LashRuntime,
     fence: &crate::store::ShiftFence,
-    controller: Option<&crate::ScopedEffectController<'_>>,
+    controller: Option<&crate::ActorContext>,
 ) -> Result<Vec<crate::BatchId>, RuntimeError> {
     let mut drained = Vec::new();
     loop {

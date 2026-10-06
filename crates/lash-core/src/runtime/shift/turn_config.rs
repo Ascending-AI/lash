@@ -39,13 +39,13 @@
 //! deterministic refusal of the spec is recorded, with its cause typed
 //! ([`RunShapeRefusal`](crate::RunShapeRefusal), FIG-4652).
 
+use crate::ActorContext;
 use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::{
     EffectAddress, PersistedSessionConfig, RuntimeAttribution, RuntimeEffectCommand,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode, ScopedEffectController, SessionError,
-    TurnId,
+    RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode, SessionError, TurnId,
 };
 
 /// The replay key of `run`'s config record. Keyed by the run, never by
@@ -66,7 +66,7 @@ impl LashRuntime {
     /// defaults.
     pub(in crate::runtime) async fn resolve_turn_config(
         &mut self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         run: &TurnId,
         spec: Option<&crate::RunSpecHash>,
         inherited: Option<crate::ResolvedRun>,
@@ -122,7 +122,7 @@ impl LashRuntime {
             config_registry,
         };
         let resolved = controller
-            .execute_effect(
+            .turn_effect(
                 RuntimeEffectEnvelope::new(
                     invocation,
                     RuntimeEffectCommand::ResolveTurnConfig { run: run.clone() },

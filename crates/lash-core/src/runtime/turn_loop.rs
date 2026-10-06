@@ -5,6 +5,7 @@ use super::logical_turn::{
 };
 use super::turn_control::ActiveTurnControl;
 use super::*;
+use crate::ActorContext;
 use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
@@ -192,13 +193,10 @@ fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
     parent_turn_id.with_suffix(format_args!(":{phase}"))
 }
 
-async fn turn_control_binding<'a>(
-    effect_host: &'a dyn EffectHost,
-    scoped_effect_controller: &'a ScopedEffectController<'_>,
-) -> Result<crate::TurnControlBinding<'a>, RuntimeError> {
-    effect_host
-        .turn_control_binding(scoped_effect_controller)
-        .await
+async fn turn_control_binding(
+    scoped_effect_controller: &ActorContext,
+) -> Result<crate::TurnControlBinding<'_>, RuntimeError> {
+    scoped_effect_controller.turn_control_binding().await
 }
 
 /// The `ingress.admitted` trace of one admission (FIG-3927): the rows
@@ -264,7 +262,7 @@ pub(in crate::runtime) fn ingress_settled_trace_payload(
 /// the scope's journal key, so `turn_id` and `lane` keep each physical turn's
 /// lanes distinct.
 pub(in crate::runtime) fn turn_observation_cursor(
-    scoped_effect_controller: &ScopedEffectController<'_>,
+    scoped_effect_controller: &ActorContext,
     turn_id: &TurnId,
     lane: &str,
 ) -> crate::engine::ObservationCursor {
@@ -534,7 +532,7 @@ pub(in crate::runtime) async fn publish_observation(
 
 async fn publish_terminal_after_commit(
     turn_control: &ActiveTurnControl,
-    resolver: &dyn AwaitEventResolver,
+    resolver: &ActorContext,
     terminal: &TurnTerminal,
     session_id: &SessionId,
     turn_id: &TurnId,

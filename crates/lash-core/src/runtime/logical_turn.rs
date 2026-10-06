@@ -1,5 +1,6 @@
 use super::turn_loop::{LogicalTurnErrorContext, TurnPrepareContext, TurnSinks, TurnStopwatch};
 use super::*;
+use crate::ActorContext;
 use crate::TurnId;
 
 pub const MAX_AGENT_FRAME_SWITCHES: usize = 16;
@@ -314,7 +315,7 @@ impl LogicalTurnStart {
 impl LashRuntime {
     fn emit_physical_turn_start(
         observer: &TurnObserver,
-        scoped_effect_controller: &ScopedEffectController<'_>,
+        scoped_effect_controller: &ActorContext,
         turn_id: &TurnId,
         admissions: &LogicalTurnAdmissions,
         announce_queued_work: bool,
@@ -491,7 +492,7 @@ impl LashRuntime {
         start: LogicalTurnStart,
         events: &dyn EventSink,
         turn_events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
         local_stop: LocalTurnStop,
         admissions: LogicalTurnAdmissions,
         shift_fence: Option<&ShiftFence>,
@@ -519,7 +520,7 @@ impl LashRuntime {
         &mut self,
         mut start: LogicalTurnStart,
         observer: &TurnObserver,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
         local_stop: LocalTurnStop,
         mut admissions: LogicalTurnAdmissions,
         shift_fence: Option<&ShiftFence>,
@@ -681,6 +682,7 @@ impl LashRuntime {
                 // A terminal record starts no follow-on: work an earlier turn
                 // withheld for one is handed back open by its commit.
                 let terminal = Box::pin(self.finish_logical_turn_error(LogicalTurnErrorContext {
+                    run: std::marker::PhantomData,
                     code,
                     message,
                     trace_turn_id: turn_trace_turn_id,
@@ -717,6 +719,7 @@ impl LashRuntime {
                     input.trace_turn_id = Some(turn_trace_turn_id.clone());
                     Box::pin(self.stream_turn_with_scoped_effect_controller_inner(
                         TurnPrepareContext {
+                            run: std::marker::PhantomData,
                             input,
                             sinks: TurnSinks { observer },
                             scoped_effect_controller: turn_effect_controller,

@@ -17,6 +17,7 @@
 //! - after the registration, before the send: the row is there, so the start
 //!   is the recorded one and the turn completes.
 
+use crate::ActorContext;
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
@@ -96,7 +97,7 @@ struct SpawnWorld {
 )]
 impl SpawnWorld {
     fn new(
-        effect_host: Arc<dyn crate::EffectHost>,
+        _effect_host: ActorContext,
         stores: Arc<dyn crate::StoreSet>,
         runner: &Arc<dyn crate::ConformanceTurnRunner>,
         rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
@@ -136,11 +137,10 @@ impl SpawnWorld {
                 }
             })
             .build();
-        let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), effect_host)
-            .host_config(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            );
+        let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
         host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
         let faults = crate::testing::ProcessRegistryFaults::new(stores.process_registry());
         let watched = crate::facade_support::watch_process_registry(Arc::new(faults.clone()));
@@ -363,7 +363,7 @@ fn assert_finished_with_the_child_reply(cut: Cut, turn: Answer) {
 )]
 async fn served_process_start_law(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
@@ -402,7 +402,7 @@ async fn served_process_start_law(
 /// turn crashed is served on the redrive, and the turn completes.
 pub async fn a_drifted_spawn_whose_start_was_issued_is_served(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
@@ -425,7 +425,7 @@ pub async fn a_drifted_spawn_whose_start_was_issued_is_served(
 /// idempotently, sends its workflow and completes.
 pub async fn a_drifted_spawn_cut_before_its_send_is_served(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,

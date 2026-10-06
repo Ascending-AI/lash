@@ -8,7 +8,7 @@ error[E0061]: this method takes 2 arguments but 1 argument was supplied
  8 | |             serde_json::json!({ "pressed": true }),
  9 | |             "button-press-1",
 10 | |         ))
-   | |__________- argument #2 of type `ScopedEffectController<'_>` is missing
+   | |__________- argument #2 of type `ActorContext` is missing
    |
 note: method defined here
   --> src/admin.rs
@@ -20,5 +20,5 @@ help: provide the argument
  5 |         .emit(lash::triggers::TriggerOccurrenceRequest::new(
 ...
  9 |             "button-press-1",
-10 ~         ), /* ScopedEffectController<'_> */)
+10 ~         ), /* ActorContext */)
    |

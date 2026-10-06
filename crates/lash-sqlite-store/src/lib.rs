@@ -51,10 +51,10 @@ mod rendered_statement_sets_tests;
 mod session_deletion;
 
 use std::path::Path;
+use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex};
 
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use lash_core_execution::runtime::{
@@ -187,7 +187,6 @@ pub struct SqliteStore {
     /// The database this store is open on. Held so a store opened on a
     /// memory backend keeps its database alive.
     location: DatabaseLocation,
-    turn_cancel_closure_owner: Mutex<Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>>,
     readers: Vec<SqliteConnection>,
     next_reader: AtomicU64,
     decoded_graph_node_bodies: Arc<AtomicU64>,
@@ -231,10 +230,7 @@ pub struct SqliteProcessRegistry {
     conn: SqliteConnection,
     clock: Arc<dyn lash_core_execution::Clock>,
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
-    /// Effect hosts whose scope fence registration lifts (ADR 0049).
-    scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
-    /// This registry's database, which also keeps bound effect hosts'
-    /// process-scope fences beside the process rows (ADR 0049).
+    /// This registry's database.
     location: DatabaseLocation,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
@@ -418,32 +414,6 @@ impl SqliteStore {
         for reader in &self.readers {
             reader.close_for_testing().await;
         }
-    }
-
-    fn turn_cancel_closure_owner_binding(
-        &self,
-    ) -> Result<Option<lash_core_execution::TurnCancelClosureOwnerBinding>, StoreError> {
-        let owner = self
-            .turn_cancel_closure_owner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        owner
-            .map(|owner| {
-                let participant_id =
-                    format!("sqlite-catalog:{}", self.location.target().canonical_name());
-                let owner =
-                    owner
-                        .upgrade()
-                        .ok_or_else(|| StoreError::TurnCancelClosureOwnerReleased {
-                            participant_id: participant_id.clone(),
-                        })?;
-                Ok(lash_core_execution::TurnCancelClosureOwnerBinding::new(
-                    participant_id,
-                    owner,
-                ))
-            })
-            .transpose()
     }
 }
 

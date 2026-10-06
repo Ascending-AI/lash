@@ -121,7 +121,7 @@ pub async fn attachment_materialization_read_budgets(backend: Arc<dyn Attachment
 #[expect(clippy::expect_used, reason = "conformance fixture setup must succeed")]
 pub async fn attachment_materialization_turn_witnesses(
     prefix: &str,
-    effect_host: Arc<dyn EffectHost>,
+    _effect_host: ActorContext,
     stores: Arc<dyn StoreSet>,
     runner: Arc<dyn ConformanceTurnRunner>,
 ) {
@@ -158,7 +158,7 @@ pub async fn attachment_materialization_turn_witnesses(
             })
             .build()
             .into_handle();
-        let mut host = LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
+        let mut host = LawBackend::over_stores(Arc::clone(&stores))
             .host_config(
                 CommitBudget::bounded(1024 * 1024, 512),
                 QueuedWorkBatchingConfig::new(1),

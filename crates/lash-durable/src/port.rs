@@ -1,5 +1,6 @@
 //! The [`DurableStore`] port and the records it answers with.
 
+use crate::domain::{DurableReads, MailAnswer};
 use crate::error::DurableError;
 use crate::ids::{
     ActorKey, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, FormatSet, MailSeq, NodeId,
@@ -159,6 +160,9 @@ pub struct MailCommit {
     pub appended: Vec<(ActorKey, MailSeq)>,
     /// Every actor the commit woke, once each, in first-write order.
     pub woken: Vec<Woken>,
+    /// One answer per [`MailDomainWrite`](crate::domain::MailDomainWrite),
+    /// in write order.
+    pub answers: Vec<MailAnswer>,
 }
 
 /// An actor's row, read without a fence. For operators and test laws; an
@@ -191,9 +195,10 @@ pub struct ActorSnapshot {
 /// one module there. Every method that writes runs one database
 /// transaction, under a [`CommitLabel`].
 ///
-/// No method has a default body: an implementation states every rule.
+/// No method has a default body: an implementation states every rule. It
+/// answers the domain rows' [`DurableReads`] too.
 #[async_trait::async_trait]
-pub trait DurableStore: Send + Sync {
+pub trait DurableStore: DurableReads {
     /// The store's clock: the database's on PostgreSQL, the injected one on
     /// SQLite.
     async fn now(&self) -> Result<DurableInstant, DurableError>;

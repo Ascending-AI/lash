@@ -1,14 +1,12 @@
 //! Logical receipts are projections of accepted Run records.
 
+use crate::ActorContext;
 use crate::store::{SessionCommitStore, ToolCompletionReceipt, ToolRequestReceipt};
 use crate::tool_run::{
     BusinessReceipt, LogicalTerminal, MaterialEntry, ObservationPermit, ObservedFact, RunEvent,
     RunEventOrdinal, RunJournalEntry, RunTraceFacts,
 };
-use crate::{
-    AdmittedScope, EffectOpener, RunRecordStep, RuntimeEffectController,
-    RuntimeEffectControllerError, ScopedEffectController, ToolCallId,
-};
+use crate::{AdmittedScope, EffectOpener, RunRecordStep, RuntimeEffectControllerError, ToolCallId};
 use lash_trace::{
     DurableTraceScope, TraceContext, TraceEvent, TraceScopeOwner, TraceToolOwner,
     TraceToolTerminal, TraceTransitionKind,
@@ -37,7 +35,11 @@ pub struct RunRecordObserver {
 type AcceptedRequests = Arc<Mutex<BTreeMap<String, ToolRequestReceipt>>>;
 
 impl RunRecordObserver {
-    pub(crate) fn bind(&self, controller: &ScopedEffectController<'_>) {
+    #[expect(
+        dead_code,
+        reason = "V0 (FIG-5170) binds the observer when ActorContext::record_run_record lands; the effect wrapper that bound it is deleted (I0)"
+    )]
+    pub(crate) fn bind(&self, controller: &ActorContext) {
         *self
             .bound
             .lock()
@@ -83,11 +85,11 @@ impl RunRecordObserver {
     /// the accepted entry returned by the engine, including served entries.
     pub async fn record(
         &self,
-        engine: &dyn RuntimeEffectController,
+        engine: &ActorContext,
         name: String,
         step: RunRecordStep<'_>,
     ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
-        let (body, observations) = self.recording_step(engine, step)?;
+        let (body, observations) = self.recording_step(step)?;
         let entry = engine.record_run_record(name, body).await?;
         if let Some(observations) = observations {
             observations.observe(&entry).await?;
@@ -97,11 +99,11 @@ impl RunRecordObserver {
 
     pub fn start_record<'run>(
         &'run self,
-        engine: &'run dyn RuntimeEffectController,
+        engine: &'run ActorContext,
         name: String,
         step: RunRecordStep<'run>,
     ) -> crate::tool_dispatch::RunStepHandle<'run, RunJournalEntry> {
-        let (body, observations) = match self.recording_step(engine, step) {
+        let (body, observations) = match self.recording_step(step) {
             Ok(parts) => parts,
             Err(error) => {
                 return crate::tool_dispatch::RunStepHandle {
@@ -132,7 +134,6 @@ impl RunRecordObserver {
 
     fn recording_step<'run>(
         &self,
-        engine: &dyn RuntimeEffectController,
         step: RunRecordStep<'run>,
     ) -> Result<(RunRecordStep<'run>, Option<RunObservations>), RuntimeEffectControllerError> {
         let bound = self
@@ -155,11 +156,7 @@ impl RunRecordObserver {
             runtime: runtime.clone(),
             accepted: Arc::clone(&self.accepted),
         };
-        let issue = super::StepIssue::new(
-            bound.frontier,
-            engine.attempt_observation(),
-            bound.parent.clone(),
-        );
+        let issue = super::StepIssue::new(bound.frontier, None, bound.parent.clone());
         let body: RunRecordStep<'run> = Box::pin(async move {
             let live = issue.begin_native();
             let mut entry = step.await?;

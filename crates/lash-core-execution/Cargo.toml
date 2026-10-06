@@ -35,6 +35,7 @@ lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }
 lash-core-store = { workspace = true }
 lash-core-effect = { workspace = true }
+lash-durable = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt", "rt-multi-thread", "macros"] }

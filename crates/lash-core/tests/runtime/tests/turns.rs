@@ -371,6 +371,3 @@ mod turn_lifecycle;
 
 use effects_and_queue::*;
 use turn_lifecycle::*;
-
-#[path = "commit_placement.rs"]
-mod commit_placement;

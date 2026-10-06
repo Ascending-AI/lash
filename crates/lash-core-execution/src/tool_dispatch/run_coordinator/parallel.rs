@@ -303,7 +303,6 @@ impl<'a> RunCoordinator<'a> {
                 let timer = self
                     .journal
                     .scoped
-                    .controller()
                     .start_run_retry(deadline.saturating_sub(clock.timestamp_ms()));
                 let select_key = timer.key.shared();
                 self.journal.selection.pending.push(select_key.clone());
@@ -496,11 +495,7 @@ impl<'a> RunCoordinator<'a> {
                     deferred::SourceRace::Cancelled => return Ok(None),
                 },
                 None => Ok(index(
-                    self.journal
-                        .scoped
-                        .controller()
-                        .select_run_sources(keys.clone())
-                        .await?,
+                    self.journal.scoped.select_run_sources(keys.clone()).await?,
                 )?),
             };
             let (chosen, ready, selected_work) = match won {
@@ -981,7 +976,7 @@ impl<'a> RunCoordinator<'a> {
                     RunEvent::RetryTimerRegistered { backoff_ms, .. },
                 ] => {
                     let delay = *backoff_ms;
-                    let controller = self.journal.scoped.controller();
+                    let controller = self.journal.scoped;
                     self.journal.scoped.admit_journal_write()?;
                     let timer = controller.start_run_retry(delay);
                     let select_key = timer.key.shared();
@@ -1125,7 +1120,7 @@ impl<'a> RunCoordinator<'a> {
             )
             .await
         });
-        let controller = self.journal.scoped.controller();
+        let controller = self.journal.scoped;
         let crate::tool_dispatch::RunAttemptHandle { body, result } =
             controller.start_run_attempt(name, step);
         self.bodies.issue(body);
@@ -1210,10 +1205,8 @@ impl RunJournal<'_> {
         step: crate::RunRecordStep<'_>,
     ) -> Result<RunJournalEntry, SingletonRunError> {
         self.scoped.admit_journal_write()?;
-        let crate::tool_dispatch::RunStepHandle { body, result } = self
-            .scoped
-            .controller()
-            .start_run_record(name.clone(), step);
+        let crate::tool_dispatch::RunStepHandle { body, result } =
+            self.scoped.start_run_record(name.clone(), step);
         // This body belongs only to this record wait. A served record never
         // starts it, so returning the value can drop its unstarted body.
         let bodies = RunBodies::new();
@@ -1235,7 +1228,7 @@ impl RunJournal<'_> {
                         .collect();
                     let mut awaited = vec![decision_key];
                     awaited.extend(remaining.iter().copied());
-                    let chosen = self.scoped.controller().select_run_sources(awaited).await?;
+                    let chosen = self.scoped.select_run_sources(awaited).await?;
                     if chosen == 0 {
                         break;
                     }

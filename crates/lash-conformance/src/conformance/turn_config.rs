@@ -7,6 +7,7 @@
 //! reaches the run's replay, and an input that arrives after the change
 //! runs under it.
 
+use crate::ActorContext;
 use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -302,7 +303,7 @@ impl CommittedRunUnderALlmProfileChange {
     async fn new(
         prefix: &str,
         name: &str,
-        effect_host: &Arc<dyn crate::EffectHost>,
+        effect_host: &ActorContext,
         stores: &Arc<dyn crate::StoreSet>,
         runner: &Arc<dyn crate::ConformanceTurnRunner>,
     ) -> Self {
@@ -500,7 +501,7 @@ impl CommittedRunUnderALlmProfileChange {
 )]
 pub async fn a_committed_run_redriven_after_a_profile_change_answers_from_its_receipt(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -556,7 +557,7 @@ pub async fn a_committed_run_redriven_after_a_profile_change_answers_from_its_re
 /// [`a_committed_run_redriven_after_a_profile_change_answers_from_its_receipt`].
 pub async fn an_older_admission_redriven_after_a_profile_change_is_fenced_out(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -615,7 +616,7 @@ pub async fn an_older_admission_redriven_after_a_profile_change_is_fenced_out(
 async fn law_session(
     prefix: &str,
     name: &str,
-    effect_host: &Arc<dyn crate::EffectHost>,
+    effect_host: &ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
     models: Arc<dyn crate::LlmProfiles>,
 ) -> ConfigParts {
@@ -630,7 +631,7 @@ async fn law_session(
 async fn law_session_created_with(
     prefix: &str,
     name: &str,
-    effect_host: &Arc<dyn crate::EffectHost>,
+    effect_host: &ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
     models: Arc<dyn crate::LlmProfiles>,
     tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
@@ -659,18 +660,17 @@ async fn law_session_created_with(
 async fn law_session_recording(
     prefix: &str,
     name: &str,
-    effect_host: &Arc<dyn crate::EffectHost>,
+    _effect_host: &ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
     models: Arc<dyn crate::LlmProfiles>,
     policy: crate::SessionPolicy,
     tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
 ) -> ConfigParts {
     let session_id = SessionId::fixture(format!("{prefix}-turn-config-{name}-session"));
-    let mut host = crate::LawBackend::over_stores(Arc::clone(stores), Arc::clone(effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let mut host = crate::LawBackend::over_stores(Arc::clone(stores)).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     host.providers.models = models;
     // The created head records what a creator on the session's plugin set
     // resolves (FIG-4379). These laws run the standard fake protocol, which
@@ -782,7 +782,7 @@ fn recorded_models(models: &Arc<std::sync::Mutex<Vec<String>>>) -> Vec<String> {
 )]
 pub async fn an_input_sent_after_a_config_command_runs_on_the_new_profile(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -849,7 +849,7 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_profile(
 )]
 pub async fn a_config_transaction_waits_while_a_run_owns_the_head(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1008,7 +1008,7 @@ impl crate::ToolProvider for SwitchTool {
 /// journal holds exactly one `turn-config:{run}` entry for the run.
 pub async fn one_config_resolution_per_run(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1111,7 +1111,7 @@ pub async fn one_config_resolution_per_run(
 )]
 pub async fn an_unbindable_llm_profile_retries_and_never_fails_the_turn(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1243,7 +1243,7 @@ pub async fn an_unbindable_llm_profile_retries_and_never_fails_the_turn(
 )]
 pub async fn an_unknown_profile_key_is_refused_typed_and_publishes_nothing(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1430,7 +1430,7 @@ where
 )]
 pub async fn a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_refusal(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1551,7 +1551,7 @@ pub async fn a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_ref
 )]
 pub async fn a_profile_change_records_the_binding_minted_where_it_resolves(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1644,7 +1644,7 @@ const REASONING_MODEL: &str = "turn-config-reasoning-model";
 )]
 pub async fn a_reasoning_change_is_judged_against_the_final_recorded_llm_profile(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1829,7 +1829,7 @@ fn looping_model(calls: &Arc<AtomicUsize>) -> crate::ProviderHandle {
 async fn looping_session(
     prefix: &str,
     name: &str,
-    effect_host: &Arc<dyn crate::EffectHost>,
+    effect_host: &ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
     calls: &Arc<AtomicUsize>,
     recorded: crate::SessionPolicy,
@@ -1913,7 +1913,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for CrashBeforeFirstModelCall {
 )]
 pub async fn a_redrive_runs_under_the_execution_controls_its_run_recorded(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1998,7 +1998,7 @@ fn termination(missing_done_fails: bool) -> crate::TerminationPolicy {
 #[expect(clippy::expect_used, reason = "conformance fixture results must exist")]
 pub async fn a_missing_recorded_termination_is_a_typed_terminal_refusal(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -2136,7 +2136,7 @@ fn has_missing_done_issue(turn: &crate::AssembledTurn) -> bool {
 )]
 pub async fn a_redrive_assembles_the_terminal_its_run_recorded_termination_decides(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

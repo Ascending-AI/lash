@@ -36,7 +36,7 @@ impl OpenerState {
     /// Failed or interrupted adoption keeps capture fenced until journal recovery.
     pub async fn adopt_run<'a>(
         &self,
-        scoped: &'a crate::ScopedEffectController<'a>,
+        scoped: &'a crate::ActorContext,
         owner: crate::EffectOpener,
         successor: SegmentOrdinal,
         available: Vec<crate::store::plugin_writers::PluginRevision>,

@@ -24,6 +24,7 @@
 //! shift's execution where it stands, and the next run of the same scope is
 //! its redrive.
 
+use crate::ActorContext;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -426,7 +427,6 @@ impl crate::store::RuntimeStoreDecorator for RowWitness {
 struct LawParts {
     session_id: SessionId,
     stores: Arc<dyn crate::StoreSet>,
-    effect_host: Arc<dyn crate::EffectHost>,
 }
 
 impl LawParts {
@@ -439,12 +439,10 @@ impl LawParts {
         store: Arc<dyn crate::RuntimeStore>,
         model: crate::ProviderHandle,
     ) -> crate::LashRuntime {
-        let mut host =
-            crate::LawBackend::over_stores(Arc::clone(&self.stores), Arc::clone(&self.effect_host))
-                .host_config(
-                    crate::CommitBudget::bounded(1024 * 1024, 512),
-                    crate::QueuedWorkBatchingConfig::new(1),
-                );
+        let mut host = crate::LawBackend::over_stores(Arc::clone(&self.stores)).host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
         host.providers.models = crate::testing::standard_test_llm_profiles(model);
         let policy = crate::testing::mock_session_policy();
         Box::pin(
@@ -557,7 +555,7 @@ async fn has_work(store: &Arc<dyn crate::RuntimeStore>, session_id: &SessionId) 
 )]
 async fn a_row_is_answered_only_by_its_run(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    _effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     row: CheckpointRow,
@@ -576,7 +574,6 @@ async fn a_row_is_answered_only_by_its_run(
     let parts = LawParts {
         session_id: session_id.clone(),
         stores,
-        effect_host,
     };
     let run = TurnId::fixture(format!("{prefix}-run"));
     let follow_on = crate::store::PhysicalTurn::derive_turn_id(&run, 1);
@@ -733,7 +730,7 @@ async fn a_row_is_answered_only_by_its_run(
 /// its run, once.
 pub async fn a_checkpoint_input_is_answered_only_by_the_run_that_admitted_it(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -752,7 +749,7 @@ pub async fn a_checkpoint_input_is_answered_only_by_the_run_that_admitted_it(
 /// its run, once.
 pub async fn a_checkpoint_wake_is_answered_only_by_the_run_that_admitted_it(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

@@ -113,7 +113,7 @@ enum PluginOperationInvocation {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
-        scoped_effect_controller: crate::ScopedEffectController<'static>,
+        scoped_effect_controller: crate::ActorContext,
         cancellation_token: tokio_util::sync::CancellationToken,
     },
 }
@@ -1396,7 +1396,7 @@ impl PluginSession {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
-        scoped_effect_controller: crate::ScopedEffectController<'static>,
+        scoped_effect_controller: crate::ActorContext,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
     {

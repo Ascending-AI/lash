@@ -7,8 +7,9 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use super::definition_ref::{
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessSignature,
+    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
 };
+use super::engine_state::{EngineAction, EngineEvent, EngineState, EngineStateFormat};
 use super::events::ProcessAwaitOutput;
 use super::events::ProcessEventType;
 use super::model::{
@@ -330,23 +331,6 @@ impl ProcessEngineProcessContext {
             )
             .await
     }
-
-    pub async fn await_terminal(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<ProcessAwaitOutput, crate::PluginError> {
-        loop {
-            match self
-                .process_work
-                .port()
-                .await_process_terminal(process_id)
-                .await?
-            {
-                crate::ProcessTerminalWait::Terminal(output) => return Ok(output),
-                crate::ProcessTerminalWait::Reattach => continue,
-            }
-        }
-    }
 }
 
 pub struct ProcessEngineRunContext<'run> {
@@ -364,7 +348,7 @@ pub struct ProcessEngineRunContext<'run> {
     process_registry_available: bool,
     cancellation: CancellationToken,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    scoped_effect_controller: crate::ScopedEffectController<'run>,
+    scoped_effect_controller: crate::ActorContext,
     handover: Option<SegmentHandover>,
     runtime_context_builder: Option<RuntimeContextBuilder<'run>>,
     /// The runtime's shared trace handle ([`Self::with_trace_runtime`]).
@@ -392,7 +376,7 @@ impl<'run> ProcessEngineRunContext<'run> {
         process_registry_available: bool,
         cancellation: CancellationToken,
         turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-        scoped_effect_controller: crate::ScopedEffectController<'run>,
+        scoped_effect_controller: crate::ActorContext,
         handover: Option<SegmentHandover>,
         runtime_context_builder: RuntimeContextBuilder<'run>,
     ) -> Self {
@@ -515,18 +499,6 @@ impl<'run> ProcessEngineRunContext<'run> {
         self.cancellation.clone()
     }
 
-    /// Exposes effect controller to protocol and process-engine implementors while running a
-    /// durable process.
-    pub fn effect_controller(&self) -> &dyn crate::RuntimeEffectController {
-        self.scoped_effect_controller.controller()
-    }
-
-    /// Exposes scoped effect controller to protocol and process-engine implementors while running a
-    /// durable process.
-    pub fn scoped_effect_controller(&self) -> crate::ScopedEffectController<'run> {
-        self.scoped_effect_controller.clone()
-    }
-
     /// Transfers the persisted segment handover to a process-engine implementor exactly once,
     /// returning `None` after it has been taken or when no predecessor exists.
     pub fn take_handover(&mut self) -> Option<SegmentHandover> {
@@ -562,51 +534,45 @@ impl<'run> ProcessEngineRunContext<'run> {
     }
 }
 
+/// A host process engine: a state machine lash advances (ADR 0132 §7; S6
+/// of I0, FIG-5194). See [`super::engine_state`] for the advance contract,
+/// cancel and signals.
+///
+/// No method has a default body: every engine answers every question
+/// (law S1, no silent defaults). Core built-ins (`SessionTurn` and
+/// `External`) are not registered here.
 #[async_trait::async_trait]
-/// Deployment extension point for non-kernel process runtimes.
-///
-/// Core built-ins (`SessionTurn` and `External`) are not registered here;
-/// they have direct orchestration support in the kernel.
-///
-/// Lash's cancellation of a run is cooperative. An engine whose host needs
-/// hard isolation (an OS kill and reap) builds it into its own
-/// implementation; lash ships no engine that runs OS programs.
 pub trait ProcessEngine: Send + Sync {
+    /// The kind every process of this engine is registered under.
     fn kind(&self) -> &'static str;
 
-    /// The executable generation a run of `payload` would run as (FIG-3571):
-    /// the value the incarnation's start record carries and every later
-    /// attempt and segment must match before its first step. `None` for an
-    /// engine whose runs carry no generation, or for a payload the engine
-    /// refuses anyway.
-    fn program_identity(
-        &self,
-        _payload: &serde_json::Value,
-    ) -> Option<crate::ExecutableGeneration> {
-        None
-    }
+    /// The encoding of this engine's state. L11's claim filter reads it.
+    fn state_format(&self) -> EngineStateFormat;
+
+    /// How long a cancelled process may run best-effort steps before lash
+    /// forces its terminal. Recorded in `engine_config` at creation.
+    fn cancel_grace(&self) -> std::time::Duration;
+
+    /// The executable generation a run of `payload` would run as (FIG-3571),
+    /// or `None` for an engine whose runs carry no generation, or for a
+    /// payload the engine refuses anyway.
+    fn program_identity(&self, payload: &serde_json::Value) -> Option<crate::ExecutableGeneration>;
 
     /// What a process created now under `env_spec` records with its row
-    /// (FIG-4527): the configuration this deployment would otherwise supply
-    /// live on every run. It is asked once, by the start's registration step,
-    /// and written to [`ProcessRecord::engine_config`](super::ProcessRecord):
-    /// every run, redrive and replay of the process reads it back from there,
-    /// whatever the running deployment is configured with. `None` for an
-    /// engine with no such configuration. An engine maps settings from
-    /// `env_spec` into its own shape at creation, rather than reading another
-    /// configuration home during execution.
+    /// (FIG-4527), or `None` for an engine with no such configuration. Asked
+    /// once, at registration; every activation reads it back from the row.
     fn creation_config(
         &self,
-        _env_spec: &ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
-        Ok(None)
-    }
+        env_spec: &ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, crate::PluginError>;
 
-    async fn run(
+    /// The next state and action for `event` over `state`: synchronous and
+    /// effect-free. The same state and event always give the same answer.
+    fn advance(
         &self,
-        context: ProcessEngineRunContext<'_>,
-        payload: serde_json::Value,
-    ) -> Result<ProcessRunOutcome, ProcessInfraError>;
+        state: EngineState,
+        event: EngineEvent,
+    ) -> Result<(EngineState, EngineAction), ProcessInfraError>;
 
     /// Every artifact a start payload names, with the store that holds it
     /// (ADR 0113 §2.2).
@@ -616,12 +582,10 @@ pub trait ProcessEngine: Send + Sync {
     ) -> Result<Vec<crate::ArtifactName>, crate::PluginError>;
 
     /// Apply a resolved cleanup to the engine's own artifact store. An engine
-    /// whose artifacts all live in a store-set port answers `Ok(())`: lashlang
-    /// names only `ArtifactStoreId::LashlangModule`, which the module port
-    /// ends. The cleanup's carries are only those under
-    /// `ArtifactStoreId::Engine` of this engine's kind. A carry whose bytes
-    /// are missing returns `ArtifactStoreError::CarryArtifactMissing` so the
-    /// cleanup row stalls instead of retrying indefinitely.
+    /// whose artifacts all live in a store-set port answers `Ok(())`. A carry
+    /// whose bytes are missing returns
+    /// `ArtifactStoreError::CarryArtifactMissing` so the cleanup row stalls
+    /// instead of retrying indefinitely.
     async fn end_artifact_referrer(
         &self,
         cleanup: &crate::ResolvedArtifactCleanup,
@@ -629,39 +593,24 @@ pub trait ProcessEngine: Send + Sync {
 
     /// Add the claim's edge to one artifact this engine's store holds,
     /// refusing a fenced referrer with `ReferrerEnded`. Called only for names
-    /// `start_artifacts` reported under `ArtifactStoreId::Engine`, and only
-    /// after the caller armed the claim's guard with
-    /// `ArtifactCleanupLedger::arm_cleanup` (an engine store cannot write the
-    /// store set's ledger in its transaction).
+    /// `start_artifacts` reported under `ArtifactStoreId::Engine`, after the
+    /// caller armed the claim's guard.
     async fn acquire_engine_artifact(
         &self,
         claim: &crate::ReferrerClaim,
         artifact_ref: &str,
     ) -> Result<(), crate::PluginError>;
 
-    /// Answer what this engine's stored artifact says about a definition
-    /// reference: its authoritative signature and the signal event types the
-    /// definition declares.
-    ///
-    /// The signature travelling on the reference is a **claim**. This method
-    /// never reads it; the registry compares the claim against what is returned
-    /// here and refuses a disagreement before any durable row exists. An engine
-    /// that stores no artifacts leaves the default, which asserts *unknown*
-    /// rather than rubber-stamping the claim: a reference that claims a
-    /// signature such an engine cannot vouch for is refused, and an unclaimed
-    /// one is admitted as unknown.
+    /// What this engine's stored artifact says about a definition reference:
+    /// its authoritative signature and the signal event types it declares.
+    /// The signature on the reference is a claim this method never reads; an
+    /// engine that stores no artifacts answers `ProcessSignature::Unknown`.
     ///
     /// This is an **integrator class 3: process-engine implementor** seam.
     async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,
-    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
-        let _ = reference;
-        Ok(ProcessDefinitionResolution::new(
-            ProcessSignature::Unknown,
-            Vec::new(),
-        ))
-    }
+    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal>;
 }
 
 /// A process identity the engine registry produced, and the signal event types

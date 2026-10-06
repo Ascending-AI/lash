@@ -16,6 +16,8 @@ pub(crate) struct CoreSessionShiftsConfig {
     pub(super) store_factory: Arc<dyn DeploymentStore>,
     pub(super) live_replay_store: Arc<dyn LiveReplayStore>,
     pub(super) process_lifecycle_available: bool,
+    /// The build generation this core composed from its plugins.
+    pub(super) build_generation: lash_core::engine::BuildGeneration,
 }
 
 /// The core's `SessionShifts` (FIG-3600): opens a session's runtime with the
@@ -415,11 +417,7 @@ impl lash_core::SessionShifts for CoreSessionShifts {
         let process_port = self.config.env.process_work();
         let backend = self.config.env.core.backend();
         let drain = backend.generation_drain();
-        // The `SessionShifts` is installed by the core that bound the generation; a
-        // tick that finds none has nothing to reconcile against.
-        let Ok(generation) = backend.build_generation().cloned() else {
-            return Ok(cursor.clone());
-        };
+        let generation = self.config.build_generation.clone();
         let processes = self
             .config
             .env
@@ -471,7 +469,7 @@ impl lash_core::SessionShifts for CoreSessionShifts {
 
     async fn admit(
         &self,
-        controller: lash_core::ScopedEffectController<'_>,
+        controller: lash_core::ActorContext,
         request: &lash_core::engine::ShiftRequest,
         admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
@@ -529,7 +527,7 @@ impl lash_core::SessionShifts for CoreSessionShifts {
 
     async fn execute_run(
         &self,
-        controller: lash_core::ScopedEffectController<'_>,
+        controller: lash_core::ActorContext,
         admitted: lash_core::engine::Admitted,
     ) -> lash_core::engine::RunEnd {
         let runtime = match self.shift_runtime(admitted.session()).await {
@@ -560,7 +558,7 @@ impl lash_core::SessionShifts for CoreSessionShifts {
     /// never waits on, or holds, the writer the session's next run executes on.
     async fn close_run(
         &self,
-        controller: lash_core::ScopedEffectController<'_>,
+        controller: lash_core::ActorContext,
         session: &SessionId,
         run: &lash_core::TurnId,
     ) -> std::result::Result<(), lash_core::engine::ShiftAbort> {

@@ -2,7 +2,6 @@ use crate::support::{
     Arc, EmbedError, LashCore, PluginFactory, ProcessRegistry, Result, StaticPluginFactory,
     StdMutex, ToolProvider, async_trait,
 };
-use lash_core::ProcessExecutionEnvStore;
 use lash_core::facade_support::ProviderHandle;
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicUsize, Ordering};

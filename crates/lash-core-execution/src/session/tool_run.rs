@@ -256,10 +256,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .await
             .map_err(SingletonRunError::into_controller_error)?
             .with_admitted_environment(environment)
-            .with_generation_cuts(
-                scoped.controller().hands_over_turns()
-                    && (self.turn_hands_over() || self.process_id().is_some()),
-            );
+            .with_generation_cuts(false);
             let bodies = run.bodies();
             let (send, mut receive) = channel();
             let mut context = self.clone();

@@ -190,6 +190,9 @@ run_rust_source_guards() {
   step "Substrate port ledger"
   python3 scripts/check-substrate-port-ledger.py
 
+  step "Substrate stub lane tags"
+  python3 scripts/check-substrate-todos.py
+
   step "Dialect boundary guard"
   python3 scripts/check-dialect-boundary.py
 

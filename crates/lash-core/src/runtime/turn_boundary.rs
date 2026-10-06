@@ -1,5 +1,6 @@
 use super::turn_graph_editor::ReadProjectionDiagnostic;
 use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft};
+use crate::ActorContext;
 use crate::TurnId;
 use crate::facade_support::AgentFrameReasonFacadeOps as _;
 use crate::facade_support::SessionGraphFacadeOps;
@@ -428,7 +429,7 @@ impl TurnBoundary {
         ingress_settlement: TurnIngressSettlement,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
         interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
-        turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
+        turn_control_resolver: Option<&ActorContext>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     ) -> Result<bool, StoreError> {
         // Record the outcome before capturing execution state: a second author
@@ -861,7 +862,7 @@ impl TurnBoundary {
         operation: crate::OperationId,
         ingress_settlement: TurnIngressSettlement,
         interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
-        _turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
+        _turn_control_resolver: Option<&ActorContext>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
         shift_commit: Option<ShiftCommit>,

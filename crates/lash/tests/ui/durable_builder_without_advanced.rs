@@ -15,7 +15,7 @@ async fn durable_core_without_advanced(
             .await
             .expect("sqlite store set"),
     );
-    let backend: lash::Backend = lash_conformance::recording_backend_over(stores);
+    let backend: lash::Backend = lash_conformance::backend_over(stores);
     // The RLM factory keeps its Lashlang artifacts in that same backend.
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()

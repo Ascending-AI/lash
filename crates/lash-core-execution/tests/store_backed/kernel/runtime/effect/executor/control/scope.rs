@@ -1,11 +1,9 @@
 mod admitted_scope_tests {
-    use std::sync::Arc;
-
     use crate::support::prelude::*;
-    use crate::{AdmittedScope, RuntimeEffectController, ScopedEffectController};
+    use crate::{ActorContext, AdmittedScope};
 
-    fn shared_controller() -> Arc<dyn RuntimeEffectController> {
-        Arc::new(crate::testing::UnavailableEffectController)
+    fn shared_controller() -> ActorContext {
+        ActorContext::unavailable()
     }
 
     /// Another process is a different opener, so rescope refuses it outright
@@ -52,11 +50,9 @@ mod admitted_scope_tests {
         let successor_ref = successor.id.clone();
         assert_ne!(old_ref, successor_ref, "a minted id is never reused");
 
-        let scoped = ScopedEffectController::shared(
-            shared_controller(),
-            AdmittedScope::process(old_ref.clone()),
-        )
-        .expect("process scope");
+        let scoped = (shared_controller())
+            .scoped(AdmittedScope::process(old_ref.clone()))
+            .expect("process scope");
 
         // Rescoping onto the pin it already carries is still fine — that is
         // the same admission restated, not a repin.
@@ -66,8 +62,7 @@ mod admitted_scope_tests {
 
         let error = scoped
             .rescope(AdmittedScope::process(successor_ref))
-            .err()
-            .expect("another process is a different opener");
+            .expect_err("another process is a different opener");
         assert_eq!(
             error.code,
             crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused

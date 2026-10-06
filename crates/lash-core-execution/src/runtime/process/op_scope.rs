@@ -1,3 +1,4 @@
+use crate::ActorContext;
 /// Passive correlation with the language call that declared a process start.
 #[derive(Clone)]
 pub(crate) struct LanguageCallAttribution {
@@ -16,7 +17,7 @@ pub(crate) type LanguageCallAttributions = std::sync::Arc<
 #[derive(Clone)]
 pub struct ProcessOpScope<'scope> {
     pub parent_invocation: Option<crate::RuntimeInvocation>,
-    pub effect_controller: crate::runtime::ScopedEffectController<'scope>,
+    pub effect_controller: crate::ActorContext,
     pub agent_frame_id: Option<crate::FrameNodeId>,
     pub turn_cancellation: Option<crate::ProcessTurnCancellation>,
     /// The lineage of the process this operation runs inside, when it runs
@@ -26,12 +27,14 @@ pub struct ProcessOpScope<'scope> {
     /// start is a call's declared start (ADR 0116 §3.6).
     pub consumer_hold: Option<crate::ConsumerHold>,
     pub(crate) language_call: Option<std::sync::Arc<LanguageCallAttribution>>,
+    /// The scope this operation runs in; the context itself is `'static`.
+    pub(crate) scope: std::marker::PhantomData<&'scope ()>,
 }
 
 impl<'scope> ProcessOpScope<'scope> {
     /// Constructs a `ProcessOpScope` for store and durable-substrate implementors while persisting
     /// and coordinating durable process execution.
-    pub fn new(scoped_effect_controller: crate::ScopedEffectController<'scope>) -> Self {
+    pub fn new(scoped_effect_controller: crate::ActorContext) -> Self {
         Self {
             parent_invocation: None,
             effect_controller: scoped_effect_controller,
@@ -40,6 +43,7 @@ impl<'scope> ProcessOpScope<'scope> {
             process_lineage: None,
             consumer_hold: None,
             language_call: None,
+            scope: std::marker::PhantomData,
         }
     }
 
@@ -194,8 +198,8 @@ impl<'scope> ProcessOpScope<'scope> {
         self.agent_frame_id.as_ref()
     }
 
-    pub fn controller(&self) -> &dyn crate::RuntimeEffectController {
-        self.effect_controller.controller()
+    pub fn controller(&self) -> &ActorContext {
+        &self.effect_controller
     }
 }
 
@@ -207,11 +211,9 @@ mod controller_tests {
     #[test]
     fn operation_controller_clones_preserve_admission_and_journal_guard() {
         let admitted = crate::AdmittedScope::process(crate::process_id_for_test("operation"));
-        let controller = crate::ScopedEffectController::shared(
-            Arc::new(crate::testing::UnavailableEffectController),
-            admitted.clone(),
-        )
-        .expect("valid process scope");
+        let controller = crate::ActorContext::unavailable()
+            .scoped(admitted.clone())
+            .expect("valid process scope");
         let refusal = crate::RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
             "refused command write",
@@ -228,7 +230,7 @@ mod controller_tests {
             .effect_controller
             .with_journal_guard(Arc::clone(&guard));
         let cloned = guarded.clone();
-        let static_controller = cloned.to_static().expect("shared controller is static");
+        let static_controller = cloned.clone();
         for controller in [guarded.clone(), cloned.clone(), static_controller.clone()] {
             assert_eq!(controller.admitted_scope(), &admitted);
             assert_eq!(controller.admitted_process(), admitted.process_id());
@@ -252,11 +254,11 @@ mod controller_tests {
     #[test]
     fn shared_operation_controller_clones_share_start_and_compaction_ordinals() {
         let operation = ProcessOpScope::new(
-            crate::ScopedEffectController::shared(
-                Arc::new(crate::testing::UnavailableEffectController),
-                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
-            )
-            .expect("valid runtime scope"),
+            crate::ActorContext::unavailable()
+                .scoped(crate::AdmittedScope::runtime_operation(
+                    "test-runtime-effect-controller",
+                ))
+                .expect("valid runtime scope"),
         );
         let clone = operation.clone();
         let first = operation.effect_controller.clone();
@@ -267,10 +269,7 @@ mod controller_tests {
         );
         assert_eq!(first.next_compaction_ordinal(), 0);
         assert_eq!(second.next_compaction_ordinal(), 1);
-        let static_controller = operation
-            .effect_controller
-            .to_static()
-            .expect("shared is static");
+        let static_controller = operation.effect_controller.clone();
         assert_eq!(static_controller.next_compaction_ordinal(), 2);
     }
 }

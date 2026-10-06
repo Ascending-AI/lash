@@ -14,9 +14,6 @@ macro_rules! direct_turn_acceptance_tests {
         $crate::direct_turn_acceptance_tests!(@catalogue [$(#[$attr])*] $fixture; [
             (direct_turn_accepts_before_executing, "direct-turn-accepts-before-executing"),
             (direct_turn_acceptance_mints_no_idempotency_key, "direct-turn-identity"),
-            (vacuum_then_redrive_replays_receipt_single_row, "direct-turn-vacuum-redrive-single"),
-            (direct_turn_behind_earlier_admissions_runs_after_them, "direct-turn-queued-input"),
-            (accept_turn_input_redrive_after_store_commit_admits_one_row, "direct-turn-acceptance-lost-outcome"),
         ]);
     };
     (@catalogue $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

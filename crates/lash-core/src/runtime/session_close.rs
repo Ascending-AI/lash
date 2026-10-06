@@ -160,7 +160,7 @@ pub async fn close_session(
         format!("session-close:{session_id}"),
     );
     let intent = controller
-        .execute_effect(
+        .session_effect(
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::BeginSessionClose {

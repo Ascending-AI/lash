@@ -17,6 +17,7 @@
 //!   administrative compaction the command lane applies, and a storeless
 //!   runtime's direct compaction.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -161,7 +162,7 @@ fn count(texts: &[String], wanted: impl Fn(&str) -> bool) -> usize {
 /// summarizer's provider requests carry.
 pub async fn a_standard_compaction_frame_opens_once_whatever_its_crash(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
@@ -185,7 +186,7 @@ pub async fn a_standard_compaction_frame_opens_once_whatever_its_crash(
 )]
 pub(super) async fn standard_pressure_crash_case(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
@@ -305,7 +306,7 @@ async fn assert_standard_frame_opened_once(
 /// and opens one recovery frame, each exactly once.
 pub async fn an_overflow_recovery_frame_opens_once_whatever_its_crash(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
@@ -329,7 +330,7 @@ pub async fn an_overflow_recovery_frame_opens_once_whatever_its_crash(
 )]
 pub(super) async fn overflow_recovery_crash_case(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
@@ -399,7 +400,7 @@ pub(super) async fn overflow_recovery_crash_case(
 )]
 pub async fn an_overflow_recovery_summarizer_fault_aborts_without_a_record(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -440,11 +441,11 @@ pub async fn an_overflow_recovery_summarizer_fault_aborts_without_a_record(
                 prompt_usage: None,
                 max_context_tokens: Some(200_000),
                 traces: crate::plugin::PluginTraceEmitter::discard(),
-                scoped_effect_controller: crate::ScopedEffectController::shared(
-                    Arc::new(crate::testing::UnavailableEffectController),
-                    crate::AdmittedScope::runtime_operation("recovery-fault-law"),
-                )
-                .expect("scoped faulting completion"),
+                scoped_effect_controller: crate::ActorContext::unavailable()
+                    .scoped(crate::AdmittedScope::runtime_operation(
+                        "recovery-fault-law",
+                    ))
+                    .expect("scoped faulting completion"),
                 direct_completions: crate::DirectCompletionClient::from_llm_fn(move |_, _| {
                     Err(crate::PluginError::Runtime(crate::RuntimeError::new(
                         injected.clone(),
@@ -492,7 +493,7 @@ pub async fn an_overflow_recovery_summarizer_fault_aborts_without_a_record(
 /// before its journal record), and the input runs once, after it.
 pub async fn a_compaction_queued_before_an_input_applies_before_it(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
@@ -517,7 +518,7 @@ pub async fn a_compaction_queued_before_an_input_applies_before_it(
 )]
 pub async fn a_session_deleted_during_an_open_keeps_nothing_of_it(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -575,7 +576,7 @@ pub async fn a_session_deleted_during_an_open_keeps_nothing_of_it(
 )]
 pub async fn a_fork_made_during_an_open_never_sees_its_seed(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -661,7 +662,7 @@ pub async fn a_fork_made_during_an_open_never_sees_its_seed(
 )]
 pub async fn an_empty_pressure_seed_opens_one_frame(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
@@ -723,7 +724,7 @@ pub async fn an_empty_pressure_seed_opens_one_frame(
 )]
 pub async fn a_refused_frame_commit_leaves_nothing_visible(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -778,7 +779,7 @@ pub async fn a_refused_frame_commit_leaves_nothing_visible(
 /// own namespace.
 pub async fn pressure_hooks_sharing_an_id_keep_their_records_apart(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
@@ -855,7 +856,7 @@ async fn live_holds(runtime: &mut crate::LashRuntime, global: &str) -> bool {
 )]
 pub async fn every_open_restarts_the_live_execution_state(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     protocol: Arc<dyn FrameLawProtocol>,

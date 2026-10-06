@@ -89,7 +89,7 @@ impl LashRuntime {
     pub async fn compact_storeless_context(
         &mut self,
         instructions: Option<String>,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        scoped_effect_controller: crate::ActorContext,
     ) -> Result<super::CompactContextOutcome, RuntimeError> {
         if self.is_store_backed() {
             return Err(RuntimeError::new(
@@ -130,7 +130,7 @@ impl LashRuntime {
         instructions: Option<String>,
         completion: crate::QueuedWorkCompletion,
         shift_fence: &crate::store::ShiftFence,
-        run_controller: &crate::ScopedEffectController<'_>,
+        run_controller: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let [batch_id] = completion.batch_ids.as_slice() else {
             return Err(RuntimeError::new(
@@ -141,10 +141,8 @@ impl LashRuntime {
                 ),
             ));
         };
-        let host = Arc::clone(&self.host.core.control.effect_host);
         let controller = super::shift::step_controller(
             run_controller,
-            host.as_ref(),
             crate::AdmittedScope::session_operation(
                 self.state.session_id.clone(),
                 batch_id.as_str(),
@@ -167,7 +165,7 @@ impl LashRuntime {
     async fn run_compaction(
         &mut self,
         instructions: Option<String>,
-        controller: &crate::ScopedEffectController<'_>,
+        controller: &crate::ActorContext,
     ) -> Result<CompactionRun, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
         let ordinal = controller.next_compaction_ordinal();

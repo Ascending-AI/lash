@@ -24,6 +24,7 @@
 //! task whose shift died after its code returned and before its settlement
 //! runs again under a signal the cancel still reaches (FIG-4453).
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -156,7 +157,7 @@ impl crate::plugin::PluginCommand for HostQueueCommand {}
 #[expect(clippy::expect_used, reason = "conformance-law fixture")]
 pub async fn plugin_queued_turns_preserve_reserved_source_key_refusals(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -588,7 +589,7 @@ async fn a_lane_less_write_is_refused(law: &LawSession) {
 )]
 pub async fn a_lane_less_append_names_the_bound_head_owner(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -631,7 +632,7 @@ fn position_of_once(path: &[String], text: &str) -> usize {
 async fn bound_turn_session(
     prefix: &str,
     law_name: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     probe: &HostPluginProbe,
@@ -728,7 +729,7 @@ async fn submit_while_bound(
 /// lands once.
 pub async fn host_append_waits_for_the_bound_turn(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: Option<HostCommandCrash>,
@@ -789,13 +790,13 @@ pub async fn host_append_waits_for_the_bound_turn(
 )]
 pub async fn host_plugin_command_applies_at_the_boundary(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: Option<HostCommandCrash>,
 ) {
     let probe = HostPluginProbe::default();
-    let host_effects = Arc::clone(&effect_host);
+    let host_effects = effect_host.clone();
     let (law, model, hold) = bound_turn_session(
         prefix,
         &format!("host-plugin-command-{crash:?}").to_lowercase(),
@@ -901,7 +902,7 @@ pub async fn host_plugin_command_applies_at_the_boundary(
 )]
 pub async fn host_frame_open_applies_at_the_boundary(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: Option<HostCommandCrash>,
@@ -990,7 +991,7 @@ pub async fn host_frame_open_applies_at_the_boundary(
 )]
 pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1163,7 +1164,7 @@ async fn recorded_host_plugin_namespace(law: &LawSession) -> lash_core::PluginNa
 )]
 pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1329,7 +1330,7 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
 )]
 pub async fn command_cancellation_before_admission_withdraws_it(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1444,7 +1445,7 @@ pub async fn command_cancellation_before_admission_withdraws_it(
 )]
 pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: Option<HostCommandCrash>,
@@ -1457,7 +1458,7 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
             (protocol.answer("answer 2"), 1),
         ],
     });
-    let host_effects = Arc::clone(&effect_host);
+    let host_effects = effect_host.clone();
     let mut law = LawSession::open(
         prefix,
         &format!("host-task-cancel-{crash:?}").to_lowercase(),
@@ -1586,7 +1587,7 @@ const RERUN_TASK_NOTE: &str = "a note the host's plugin task appended after its 
 )]
 pub async fn host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_settlement(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1598,7 +1599,7 @@ pub async fn host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_se
             (protocol.answer("answer 2"), 1),
         ],
     });
-    let host_effects = Arc::clone(&effect_host);
+    let host_effects = effect_host.clone();
     let mut law = LawSession::open(
         prefix,
         "host-task-cancel-rerun",

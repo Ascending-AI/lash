@@ -14,6 +14,7 @@
 //! input, the run that admits it, a queued process wake, a process start, a
 //! signal, a trigger occurrence and a host-submitted tool intent.
 
+use crate::ActorContext;
 use std::sync::Arc;
 
 use lash_core::store::AdmittedHead;
@@ -61,7 +62,7 @@ const SECOND_ANCHOR: u8 = 0xa2;
 /// or typed conflict, and a retained read yields no emission permit.
 pub async fn first_admission_wins_without_changing_business_identity(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

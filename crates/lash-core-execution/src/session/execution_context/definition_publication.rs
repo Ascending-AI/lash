@@ -18,7 +18,7 @@ impl RuntimeExecutionContext<'_> {
         let outcome = self
             .dispatch
             .effect_controller
-            .execute_effect(
+            .process_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::process(

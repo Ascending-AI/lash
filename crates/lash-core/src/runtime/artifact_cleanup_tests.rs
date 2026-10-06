@@ -413,14 +413,6 @@ impl crate::ProcessEngine for Engine {
         ENGINE_KIND
     }
 
-    async fn run(
-        &self,
-        _context: crate::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        unreachable!("cleanup never runs a process")
-    }
-
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
@@ -455,6 +447,49 @@ impl crate::ProcessEngine for Engine {
         self.0
             .acquire(claim, artifact_ref)
             .map_err(PluginError::from)
+    }
+
+    fn state_format(&self) -> crate::EngineStateFormat {
+        crate::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Option<crate::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: crate::EngineState,
+        _event: crate::EngineEvent,
+    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        todo!("L6 (FIG-5175): port Engine to advance")
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &crate::ProcessDefinitionRef,
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+        Ok(crate::ProcessDefinitionResolution::new(
+            crate::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
     }
 }
 

@@ -286,7 +286,6 @@ pub fn obligation_relays(
                     ArtifactCleanupRelay::new(ArtifactCleanupPorts {
                         ledger: backend.artifact_cleanup(),
                         authorities: Arc::new(StoreSetAuthorities {
-                            effect_host: backend.effect_host(),
                             sessions: backend.session_store_factory(),
                             processes: backend.process_registry(),
                             triggers: backend.trigger_store(),

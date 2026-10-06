@@ -1,7 +1,6 @@
 //! Engine-neutral shift values, recorded commands, and observations.
 //!
-//! The shift uses [`crate::RuntimeEffectController`]. Restate records its
-//! effects and cancel races (ADR 0105).
+//! The shift issues its effects through [`crate::ActorContext`].
 
 mod admission;
 mod commands;
@@ -11,10 +10,6 @@ mod control;
 mod ingress;
 mod reconcile;
 mod shift;
-/// The determinism harness every slice that makes the shift deterministic
-/// proves its change with (FIG-3672).
-#[cfg(any(test, feature = "testing"))]
-pub mod testing;
 
 pub use crate::store::{
     ControlIntentId, ControlIntentKind, RunTerminal, RunTerminalCause, RunTerminalKind,

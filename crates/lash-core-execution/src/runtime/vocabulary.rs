@@ -423,13 +423,6 @@ impl TurnActivitySink for NoopTurnActivitySink {
 pub trait DeploymentStore:
     crate::store::RuntimeStore + crate::AttachmentRootSet + crate::store::ControlIntentStore
 {
-    /// Bind the effect host whose scope fences and journal rows
-    /// [`reclaim_retained_evidence`](Self::reclaim_retained_evidence) reads
-    /// and retires. The facade binds the host its backend supplies. Where
-    /// the journal lives is the backend's own wiring, fixed when the
-    /// backend is opened; the binding carries no location.
-    fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>);
-
     /// Count the deployment's turns that are not settled yet: parked turns
     /// and every turn in flight (FIG-3586). `drain_status` reads it, so a
     /// deployment with a parked turn — or one whose claims a crashed driver

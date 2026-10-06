@@ -24,6 +24,7 @@
 //! every process its turns started is then owed its cancel.
 
 use super::*;
+use crate::ActorContext;
 
 const PROBE_TOOL: &str = "ownership_probe";
 const SWITCH_TOOL: &str = "ownership_switch";
@@ -504,7 +505,7 @@ fn committed_run(case: &str, outcome: &ShiftOutcome) -> TurnId {
 )]
 pub async fn every_driver_turn_is_owned_by_its_run(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

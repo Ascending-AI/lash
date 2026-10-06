@@ -154,8 +154,8 @@ impl ShiftAdmissionMaterializer for ShiftAdmissionTemplate {
         let scoped = effect_host
             .scoped(scope.clone())
             .map_err(crate::RuntimeEffectControllerError::from)?;
-        let binding = effect_host
-            .turn_control_binding(&scoped)
+        let binding = scoped
+            .turn_control_binding()
             .await
             .map_err(crate::RuntimeEffectControllerError::from)?;
         let binding_id = binding.binding_id();

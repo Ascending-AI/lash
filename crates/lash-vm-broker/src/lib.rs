@@ -9,6 +9,8 @@
 //! - [`ledger`]: the parent-issued ordinals and grants of a run, and the
 //!   [`Checkpoint`](ledger::Checkpoint) that commits them atomically with the
 //!   VM state they match.
+//! - [`snapshot`]: quiet points, admitted operation identities and the
+//!   [`SnapshotStore`] a VM's snapshots commit to.
 //! - [`identity`]: the one derivation of a code command's `ToolCallId`.
 //! - [`effects`]: the journaled parent work behind every admitted operation.
 //! - [`broker`]: the run loop, worker-loss recovery through the substrate,
@@ -26,6 +28,7 @@ pub mod effects;
 pub mod identity;
 pub mod ledger;
 pub mod session;
+pub mod snapshot;
 pub mod transport;
 
 #[cfg(any(test, feature = "testing"))]
@@ -42,9 +45,14 @@ pub use broker::{
 };
 pub use effects::{ParentEffects, ParentFault, ParkedPerformed, Performed};
 pub use identity::CodeCallIdentities;
+pub use lash_durable::domain::SnapshotRev;
 pub use ledger::{
-    AdmittedCall, AdmittedKind, AdmittedOperation, Checkpoint, CheckpointRefusal, CheckpointStore,
-    LedgerSnapshot, ParentLedger,
+    AdmittedCall, AdmittedKind, AdmittedOperation, Checkpoint, LedgerSnapshot, ParentLedger,
+    QuietPointRefusal,
 };
 pub use session::VmSession;
+pub use snapshot::{
+    BrokerLedger, DurableSnapshotStore, InjectedOutcome, IssuedOperation, OperationId, QuietPoint,
+    SnapshotStore, outcomes_to_inject,
+};
 pub use transport::{CheckoutRefusal, WorkerCheckout, WorkerRead, WorkerSlots, WorkerTransport};

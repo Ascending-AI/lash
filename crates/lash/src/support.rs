@@ -2,7 +2,7 @@ pub(crate) use std::sync::{Arc, Mutex as StdMutex};
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use lash_core::plugin::StaticPluginFactory;
-pub(crate) use lash_core::runtime::{EffectHost, RuntimeSessionState, ScopedEffectController};
+pub(crate) use lash_core::runtime::RuntimeSessionState;
 pub(crate) use lash_core::{
     LiveReplayStore, MessageRole, ProcessHandleView, ProcessWorkWiring, SessionCreationHead,
     SessionListFilter, SessionPolicy, SessionStoreCreateRequest, SessionView, SessionWorkEngine,

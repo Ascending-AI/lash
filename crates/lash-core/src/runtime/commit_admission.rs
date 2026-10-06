@@ -15,14 +15,6 @@ use lash_sansio::{SessionId, sync::MutexExt};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-/// Engine invocations already have an owner for continuation and backpressure
-/// (ADR 0045). Only the native substrate uses the process-local FIFO.
-pub(super) fn requires_local_commit_admission(
-    controller: &dyn crate::RuntimeEffectController,
-) -> bool {
-    !controller.owns_commit_backpressure()
-}
-
 /// Maximum number of waiting attempts retained for one hot session.
 const COMMIT_ADMISSION_MAX_WAITERS: usize = 64;
 

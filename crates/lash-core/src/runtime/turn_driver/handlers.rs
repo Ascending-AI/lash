@@ -461,19 +461,6 @@ impl RuntimeTurnDriver<'_> {
                 "the machine was not waiting on the admitted tools",
             ));
         }
-        if self.segment.allowed
-            && let Some(reason) = self
-                .scoped_effect_controller
-                .controller()
-                .wants_segment_boundary(&crate::SegmentProgress {
-                    effects_executed: self.scoped_effect_controller.effects_executed(),
-                    journaled_bytes_estimate: None,
-                })
-        {
-            return self
-                .end_waiting_for_tool_results(machine, run_offset, reason)
-                .await;
-        }
         Ok(())
     }
 
@@ -556,7 +543,7 @@ impl RuntimeTurnDriver<'_> {
                 )
             })?
             .with_tracing(self.execution_tracing(machine.protocol_iteration()))
-            .with_turn_hand_over(self.cells_hand_over());
+            .with_turn_hand_over(false);
         let poll = context
             .await_tool_run_aggregate(
                 &round.cursor,

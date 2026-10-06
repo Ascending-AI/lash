@@ -118,7 +118,7 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             "Turn {} in sans-IO turn checkpoint benchmark mode. Checkpoint and restore pending effects, then reply with exactly: runtime perf benchmark ok",
             turn_index + 1
         ),
-        RuntimePerfScenario::ScopedEffectController => format!(
+        RuntimePerfScenario::ScopedEffects => format!(
             "Turn {} in scoped effect-controller benchmark mode. Continue the benchmark chat and reply with exactly: runtime perf benchmark ok",
             turn_index + 1
         ),

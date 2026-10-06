@@ -8,6 +8,7 @@
 //! of resolving again, and a definition this worker does not register ends
 //! the attempt unrecorded until a deployment serves it.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -232,7 +233,7 @@ pub(super) async fn head_config(parts: &ShiftParts) -> crate::PersistedSessionCo
 /// past `B`. Four input identities, three runs, each on its own shape.
 pub async fn run_specs_split_runs_in_admission_order(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -299,7 +300,7 @@ pub async fn run_specs_split_runs_in_admission_order(
 )]
 pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -398,7 +399,7 @@ const COMMANDED_TURNS: usize = 7;
 )]
 pub async fn a_config_command_after_a_pinned_run_resolves_over_the_sticky_config(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -507,7 +508,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for CrashBeforeModelCall {
 )]
 pub async fn a_run_resolves_its_spec_once_across_a_crash(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -605,7 +606,7 @@ pub async fn a_run_resolves_its_spec_once_across_a_crash(
 )]
 pub async fn a_missing_definition_retries_unrecorded_until_it_is_deployed(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -775,7 +776,7 @@ async fn enqueue_batch(
 /// running on its shape; the session's own model is never taken.
 pub async fn a_batch_shares_one_spec_that_each_run_resolves_once(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -837,7 +838,7 @@ pub async fn a_batch_shares_one_spec_that_each_run_resolves_once(
 )]
 pub async fn a_batch_keeps_its_turn_lane_place_behind_the_command_lane(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1047,7 +1048,7 @@ async fn runtime_with_switch(
 )]
 pub async fn a_recovered_follow_on_inherits_its_runs_recorded_execution(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1200,7 +1201,7 @@ const REDRIVING_RECOVERIES: u32 = 5;
 )]
 pub async fn a_redriven_switch_owes_its_follow_on_under_the_bound_its_run_resolved(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

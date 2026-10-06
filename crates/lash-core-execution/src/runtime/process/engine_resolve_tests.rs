@@ -1,4 +1,5 @@
 use super::*;
+use crate::ProcessSignature;
 
 const SIGNED_ENGINE_KIND: &str = "signed-engine";
 
@@ -24,14 +25,6 @@ fn declared_signal() -> ProcessEventType {
 impl ProcessEngine for SignedEngine {
     fn kind(&self) -> &'static str {
         SIGNED_ENGINE_KIND
-    }
-
-    async fn run(
-        &self,
-        _context: ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> Result<ProcessRunOutcome, ProcessInfraError> {
-        unreachable!("resolution never runs the process")
     }
 
     fn start_artifacts(
@@ -70,6 +63,39 @@ impl ProcessEngine for SignedEngine {
             authoritative_signature(),
             vec![declared_signal()],
         ))
+    }
+
+    fn state_format(&self) -> crate::EngineStateFormat {
+        crate::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Option<crate::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: crate::EngineState,
+        _event: crate::EngineEvent,
+    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        todo!("L6 (FIG-5175): port SignedEngine to advance")
     }
 }
 

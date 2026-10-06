@@ -88,7 +88,7 @@ pub trait ToolRealizer: Send + Sync {
     async fn realize(
         &self,
         request: RealizationRequest,
-        scoped: crate::ScopedEffectController<'_>,
+        scoped: crate::ActorContext,
     ) -> Result<RealizationReceipt, crate::RuntimeEffectControllerError>;
 }
 

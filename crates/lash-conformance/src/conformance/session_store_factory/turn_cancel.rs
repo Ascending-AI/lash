@@ -1,3 +1,4 @@
+use crate::ActorContext;
 use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -1772,7 +1773,7 @@ pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
 )]
 pub(super) async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
     factory: Arc<dyn crate::store::ConformanceDeployment>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
 ) {
     const OTHER_BINDING_ID: &str = "lash-conformance-turn-cancel-v1-impostor";
     let request = session_store_request(
@@ -1832,7 +1833,7 @@ pub(super) async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
     // dressed as one.
     let authority = crate::TurnCancellationAuthority::new(
         TURN_CANCEL_BINDING_ID,
-        Arc::clone(&effect_host) as Arc<dyn crate::AwaitEventResolver>,
+        effect_host.clone() as ActorContext,
     );
     let resolver = authority.resolver();
     let authorized = crate::TurnCancelClosureAuthorization::new(

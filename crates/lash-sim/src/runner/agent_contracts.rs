@@ -21,19 +21,14 @@ pub(super) type AgentContractRow = FixedContractRow<AgentContractRunner>;
 const CONTRACT_SEED: u64 = 0x5eed_c047;
 
 /// The contract world: a sim engine and the backend its cores run on,
-/// observed when a checkpoint collector is installed, with `effect_layer`
-/// over the backend's host when a boundary test supplies one.
-async fn contract_world(
-    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
-) -> Result<(crate::backend::SimEngine, lash::Backend), FixedScriptRunnerError> {
+/// observed when a checkpoint collector is installed.
+async fn contract_world()
+-> Result<(crate::backend::SimEngine, lash::Backend), FixedScriptRunnerError> {
     let collector = CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| slot.borrow().clone());
     let engine = crate::backend::SimEngine::new(CONTRACT_SEED).await?;
     let mut backend = crate::backend::DecoratedBackend::over_engine(&engine);
     if let Some(collector) = collector {
         backend = backend.observing(collector);
-    }
-    if let Some(layer) = effect_layer {
-        backend = backend.with_effect_layer(layer);
     }
     Ok((engine, backend.into()))
 }
@@ -418,7 +413,7 @@ async fn facade_final_value_execution_inner(
     process_surface: ProcessSurface,
 ) -> Result<Value, FixedScriptRunnerError> {
     let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let (engine, backend) = contract_world(None).await?;
+    let (engine, backend) = contract_world().await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -603,7 +598,6 @@ async fn facade_agent_durable_input_execution() -> Result<Value, FixedScriptRunn
     facade_agent_durable_input_execution_with(
         Arc::clone(&tools),
         tools as Arc<dyn lash_core::ToolProvider>,
-        None,
         &mut key_rx,
     )
     .await
@@ -612,10 +606,9 @@ async fn facade_agent_durable_input_execution() -> Result<Value, FixedScriptRunn
 async fn facade_agent_durable_input_execution_with(
     tools: Arc<ContractDurableInputTools>,
     registered_tools: Arc<dyn lash_core::ToolProvider>,
-    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
     key_rx: &mut tokio::sync::oneshot::Receiver<Result<lash_core::AwaitEventKey, String>>,
 ) -> Result<Value, FixedScriptRunnerError> {
-    let (core, graph_store, engine) = agent_process_contract_core_with_effect_layer(
+    let (core, graph_store, engine) = agent_process_contract_core_with_tools(
         "lash_runtime agent durable input",
         vec![
             r#"<typescript>
@@ -632,7 +625,6 @@ finish({ recovered: true });
 </typescript>"#,
         ],
         Some(registered_tools),
-        effect_layer,
     )
     .await?;
     let session = crate::open_created_session(
@@ -727,52 +719,23 @@ type ContractCore = (
     crate::backend::SimEngine,
 );
 
-async fn agent_process_contract_core_with_effect_layer(
+async fn agent_process_contract_core_with_tools(
     provider_kind: &'static str,
     provider_responses: Vec<&'static str>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
-    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
 ) -> Result<ContractCore, FixedScriptRunnerError> {
-    agent_process_contract_core_with_options_and_effect_layer(
-        provider_kind,
-        provider_responses,
-        tools,
-        false,
-        effect_layer,
-    )
-    .await
+    agent_process_contract_core_with_options(provider_kind, provider_responses, tools, false).await
 }
 
+// Full specification of the simulator's facade-level process harness.
 async fn agent_process_contract_core_with_options(
     provider_kind: &'static str,
     provider_responses: Vec<&'static str>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     install_subagents: bool,
 ) -> Result<ContractCore, FixedScriptRunnerError> {
-    agent_process_contract_core_with_options_and_effect_layer(
-        provider_kind,
-        provider_responses,
-        tools,
-        install_subagents,
-        None,
-    )
-    .await
-}
-
-// Full specification of the simulator's facade-level process harness. An
-// effect layer over the backend's host is injectable so boundary tests can
-// observe the same production execution path without creating a parallel
-// runner.
-#[allow(clippy::too_many_arguments)]
-async fn agent_process_contract_core_with_options_and_effect_layer(
-    provider_kind: &'static str,
-    provider_responses: Vec<&'static str>,
-    tools: Option<Arc<dyn lash_core::ToolProvider>>,
-    install_subagents: bool,
-    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
-) -> Result<ContractCore, FixedScriptRunnerError> {
     let graph_store = Arc::new(lash::tracing::TraceLashlangGraphStore::default());
-    let (engine, backend) = contract_world(effect_layer).await?;
+    let (engine, backend) = contract_world().await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)

@@ -7,6 +7,7 @@
 //! ancestor check refuses the append, the command settles with its refusal
 //! over that head, and none of the append's nodes reach it.
 
+use crate::ActorContext;
 use std::sync::Arc;
 
 use lash_core::engine::ShiftStop;
@@ -146,7 +147,7 @@ async fn settle_without_the_note(
 /// settlement commits the creator's head alone.
 pub async fn an_over_budget_append_on_an_uncommitted_head_leaves_nothing_of_it(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -225,7 +226,7 @@ impl lash_core::plugin::ProtocolSessionPlugin for RefusingAppendProtocol {
 /// out of the head (FIG-4492).
 pub async fn a_protocol_refused_append_on_an_uncommitted_head_leaves_nothing_of_it(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -251,7 +252,7 @@ pub async fn a_protocol_refused_append_on_an_uncommitted_head_leaves_nothing_of_
 /// out of the head (FIG-4492).
 pub async fn an_ancestor_refused_append_on_an_uncommitted_head_leaves_nothing_of_it(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

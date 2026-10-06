@@ -15,6 +15,7 @@
 //! failed with the budget refusal. The settlement's refusal receipt is not
 //! charged, so it lands at a budget of exactly the bare commit's size.
 
+use crate::ActorContext;
 use std::sync::Arc;
 
 use lash_core::engine::{AdmitVerdict, RunOutcome, ShiftAbort, ShiftLoop, ShiftStop};
@@ -234,7 +235,7 @@ async fn assert_lowered_shift_refuses_once(
 /// unsettled and unlost.
 pub async fn a_lowered_budget_refuses_a_stranded_command_once_per_shift(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -252,7 +253,7 @@ pub async fn a_lowered_budget_refuses_a_stranded_command_once_per_shift(
 )]
 pub async fn raising_the_budget_settles_a_stranded_command(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -319,7 +320,7 @@ pub async fn raising_the_budget_settles_a_stranded_command(
 )]
 pub async fn an_over_budget_command_settles_failed_at_its_bare_commits_size(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

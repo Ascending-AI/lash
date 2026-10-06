@@ -10,9 +10,6 @@
 
 use crate::plugin::PluginError;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Weak};
-
-use crate::EffectHost;
 
 use super::ProcessCompletionOutcome;
 use super::events::{
@@ -260,28 +257,6 @@ pub trait ProcessRegistrar: Send + Sync {
         prepared: PreparedProcessRegistration,
         anchor: lash_trace::TraceAnchor,
     ) -> Result<ProcessRegistrationReceipt, PluginError>;
-
-    /// Bind the effect host whose scope-retirement fence this registry lifts
-    /// when a process id is registered again (ADR 0049).
-    ///
-    /// The facade binds the effect host it was built with; a host that wires
-    /// a registry and an effect host together by hand binds them the same
-    /// way. Binding is idempotent and the registry holds the host weakly, so
-    /// a host that also owns the registry does not leak.
-    ///
-    /// Binding runs in both directions. The registry hands the host a
-    /// [`ProcessRegistryBinding`] through [`EffectHost::bind_process_registry`]:
-    /// a probe answering whether a process id is registered, which a host
-    /// whose own fence is a cache of the registry's (the Restate durable-wait
-    /// index) reads through to. Where the process-scope fence lives is the
-    /// backend's wiring, not the binding's: a SQLite backend attaches
-    /// its registry to its journal by location, so the registration
-    /// transaction inserts the process row and deletes the fence row as one
-    /// commit, and the PostgreSQL registry does the same inside its one
-    /// database. A fence the host keeps where the registry cannot reach it is
-    /// lifted through [`EffectHost::reinstate_effect_scope`] after the
-    /// registration write.
-    fn bind_effect_host(&self, effect_host: &Arc<dyn EffectHost>);
 
     /// Attach a durable backend reference to a registered process.
     ///
@@ -1172,68 +1147,3 @@ pub trait ProcessClockRebind: Send + Sync {
 /// positive twin against the in-memory registry double.
 #[allow(dead_code)]
 fn concern_isolation_witness_docs() {}
-
-/// Answers whether a process id is currently registered: the registry's
-/// truth a host reads through to when its own scope fence is only a cache of
-/// the registry's (ADR 0049).
-#[async_trait::async_trait]
-pub trait ProcessRegistrationProbe: Send + Sync {
-    async fn process_is_registered(&self, process_id: &ProcessId) -> Result<bool, PluginError>;
-}
-
-/// What a registry hands the effect host it binds
-/// ([`EffectHost::bind_process_registry`]).
-#[derive(Clone)]
-pub struct ProcessRegistryBinding {
-    /// The registry's registration truth.
-    pub registrations: Arc<dyn ProcessRegistrationProbe>,
-}
-
-impl std::fmt::Debug for ProcessRegistryBinding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProcessRegistryBinding")
-            .finish_non_exhaustive()
-    }
-}
-/// The effect hosts a process registry is bound to.
-///
-/// Shared by every registry backend: [`bind`](Self::bind) is idempotent and
-/// weak. A registration never lifts a scope fence: every process is minted a
-/// new id, so no registration names a pruned process's fenced scope.
-#[derive(Clone, Default)]
-pub struct ProcessScopeFenceHosts {
-    hosts: Arc<std::sync::Mutex<Vec<Weak<dyn EffectHost>>>>,
-}
-
-impl ProcessScopeFenceHosts {
-    /// Bind `effect_host` and hand it the registry's `binding`; binding the
-    /// same host twice keeps one entry, and the host's own binding is
-    /// idempotent.
-    pub fn bind(&self, effect_host: &Arc<dyn EffectHost>, binding: ProcessRegistryBinding) {
-        effect_host.bind_process_registry(binding);
-        let mut hosts = self
-            .hosts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        hosts.retain(|host| host.strong_count() > 0);
-        let weak = Arc::downgrade(effect_host);
-        if hosts.iter().any(|host| Weak::ptr_eq(host, &weak)) {
-            return;
-        }
-        hosts.push(weak);
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.hosts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .iter()
-            .all(|host| host.strong_count() == 0)
-    }
-}
-
-impl std::fmt::Debug for ProcessScopeFenceHosts {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ProcessScopeFenceHosts(..)")
-    }
-}

@@ -149,6 +149,14 @@ table lash_draining_generations
   column generation text not-null
   column marked_at_ms bigint not-null
   primary-key (generation)
+table lash_exec_snapshots
+  column exec_key text not-null
+  column executable_identity text not-null
+  column format_version integer not-null
+  column rev bigint not-null
+  column snapshot_ref text not-null
+  column written_epoch bigint not-null
+  primary-key (exec_key)
 table lash_fleet_format
   column finalize_held_at_ms bigint nullable
   column finalize_hold_reason text nullable
@@ -422,6 +430,16 @@ table lash_release_stamp
   column singleton boolean not-null default
   column written_at_epoch_ms bigint not-null
   primary-key (singleton)
+table lash_run_records
+  column call_id text nullable
+  column kind text not-null
+  column ordinal bigint not-null
+  column owner_key text not-null
+  column record_json text not-null
+  column run_seq bigint not-null
+  column written_epoch bigint not-null
+  unique (owner_key, run_seq, call_id) where (kind = 'x_outcome'::text) and (call_id is not null)
+  primary-key (owner_key, run_seq, ordinal)
 table lash_runtime_turn_commits
   column change_seq bigint not-null
   column committed_at_ms bigint not-null

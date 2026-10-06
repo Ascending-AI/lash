@@ -497,7 +497,7 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) sessions: Arc<dyn SessionStateService>,
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub(crate) processes: Arc<dyn crate::ProcessService>,
-    pub(crate) effect_controller: crate::runtime::ScopedEffectController<'run>,
+    pub(crate) effect_controller: crate::ActorContext,
     pub(crate) runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     pub(crate) runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     pub(crate) cancellation_token: Option<tokio_util::sync::CancellationToken>,
@@ -614,7 +614,7 @@ pub(crate) struct ToolContextBuilder<'run> {
     session_lifecycle: Arc<dyn SessionLifecycleService>,
     session_graph: Arc<dyn SessionGraphService>,
     processes: Arc<dyn crate::ProcessService>,
-    effect_controller: crate::runtime::ScopedEffectController<'run>,
+    effect_controller: crate::ActorContext,
     runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
@@ -794,7 +794,7 @@ impl<'run> ToolContext<'run> {
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),
             processes: Arc::clone(&self.processes),
-            effect_controller: self.effect_controller.to_static()?,
+            effect_controller: self.effect_controller.clone(),
             runtime_dispatch: match self.runtime_dispatch.as_ref() {
                 Some(dispatch) => Some(Arc::new(dispatch.to_static()?)),
                 None => None,
@@ -836,7 +836,7 @@ impl<'run> ToolContext<'run> {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
-        effect_controller: crate::runtime::ScopedEffectController<'run>,
+        effect_controller: crate::ActorContext,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         direct_completions: crate::DirectCompletionClient<'run>,
     ) -> ToolContextBuilder<'run> {
@@ -1494,11 +1494,9 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn tool_context_under_scope(admitted: crate::AdmittedScope) -> ToolContext<'static> {
-        let controller = crate::ScopedEffectController::shared(
-            Arc::new(crate::testing::UnavailableEffectController),
-            admitted,
-        )
-        .expect("the test scope validates");
+        let controller = crate::ActorContext::unavailable()
+            .scoped(admitted)
+            .expect("the test scope validates");
         ToolContext::builder(
             SessionId::from("session-1"),
             Arc::new(crate::testing::MockSessionManager::default()),

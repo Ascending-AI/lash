@@ -71,7 +71,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for PluginCallba
 /// The engine's failure to record or serve the step. A callback's own
 /// failure is the step's recorded answer, in the inner result.
 pub async fn record_plugin_callbacks(
-    controller: &crate::ScopedEffectController<'_>,
+    controller: &crate::ActorContext,
     attribution: crate::RuntimeAttribution,
     step: String,
     phase: RecordedCallbackPhase,
@@ -84,7 +84,7 @@ pub async fn record_plugin_callbacks(
         step,
     );
     let outcome = controller
-        .execute_effect(
+        .shift_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::PluginCallbacks { phase },

@@ -4,7 +4,9 @@ use std::sync::Mutex;
 
 use lash_vm_protocol::FrameEpoch;
 
-use crate::ledger::{Checkpoint, CheckpointRefusal, CheckpointStore};
+use crate::ledger::{Checkpoint, QuietPointRefusal};
+use crate::snapshot::{QuietPoint, SnapshotStore};
+use lash_durable::domain::SnapshotRev;
 
 struct Held {
     latest: Option<Checkpoint>,
@@ -43,14 +45,18 @@ impl MemoryCheckpoints {
 }
 
 #[async_trait::async_trait]
-impl CheckpointStore for MemoryCheckpoints {
-    async fn commit(&self, checkpoint: &Checkpoint) -> Result<(), CheckpointRefusal> {
+impl SnapshotStore for MemoryCheckpoints {
+    async fn commit_quiet_point(
+        &self,
+        point: QuietPoint,
+    ) -> Result<SnapshotRev, QuietPointRefusal> {
+        let checkpoint = &point.checkpoint;
         let mut held = self
             .held
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if checkpoint.frame_epoch != held.frame_epoch {
-            return Err(CheckpointRefusal(format!(
+            return Err(QuietPointRefusal(format!(
                 "the checkpoint belongs to frame {:?}, and the owner is in frame {:?}",
                 checkpoint.frame_epoch, held.frame_epoch
             )));
@@ -59,23 +65,25 @@ impl CheckpointStore for MemoryCheckpoints {
         // again: the write is idempotent, as a durable store's keyed write
         // is.
         if held.latest.as_ref() == Some(checkpoint) {
-            return Ok(());
+            return Ok(revision(&held.commits));
         }
         held.latest = Some(checkpoint.clone());
         held.commits.push(checkpoint.clone());
-        Ok(())
+        Ok(revision(&held.commits))
     }
 
-    async fn latest(&self) -> Result<Option<Checkpoint>, CheckpointRefusal> {
-        Ok(self
+    async fn latest(&self) -> Result<Option<(SnapshotRev, Checkpoint)>, QuietPointRefusal> {
+        let held = self
             .held
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(held
             .latest
-            .clone())
+            .clone()
+            .map(|latest| (revision(&held.commits), latest)))
     }
 
-    async fn open_frame(&self, frame_epoch: FrameEpoch) -> Result<(), CheckpointRefusal> {
+    async fn open_frame(&self, frame_epoch: FrameEpoch) -> Result<(), QuietPointRefusal> {
         let mut held = self
             .held
             .lock()
@@ -86,4 +94,9 @@ impl CheckpointStore for MemoryCheckpoints {
         }
         Ok(())
     }
+}
+
+/// The revision of the latest of `commits`: one per commit, from 1.
+fn revision(commits: &[Checkpoint]) -> SnapshotRev {
+    SnapshotRev(u64::try_from(commits.len()).unwrap_or(u64::MAX))
 }

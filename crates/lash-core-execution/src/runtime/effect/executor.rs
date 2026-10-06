@@ -1,9 +1,8 @@
+use crate::ActorContext;
 use crate::ClockWallTime;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 mod await_event_support;
@@ -18,7 +17,6 @@ mod language_runtime;
 mod plugin_state;
 pub use language_runtime::RUN_SEAL_OPERATION;
 use plugin_state::record_plugin_state;
-mod scoped;
 mod served_only;
 pub use served_only::ServedOnly;
 mod task_panic;
@@ -30,15 +28,12 @@ pub use turn_cancel_wait::{ProcessTurnCancellation, TurnCancelWait};
 
 pub use await_event_support::await_event_scope_not_retirable;
 pub use control::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
-    CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    EffectRetirementGate, ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDriveStep,
-    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RunRecordStep,
-    RuntimeEffectController, ScopeBoundController, ScopedEffectController, SegmentProgress,
-    ServedOnlyRange, TurnCancelClosureOwnerBinding,
+    AwaitEventKey, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
+    CompletionKeyPreparation, EffectJournalIdentity, EffectJournalRetirement, EffectRetirementGate,
+    ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDriveStep, RecordedKeyFence,
+    RefusedWriteRange, Resolution, ResolveOutcome, RunRecordStep, SegmentProgress, ServedOnlyRange,
+    TurnCancelClosureOwnerBinding,
 };
-pub use control::{EffectControllerTaskRequest, EffectControllerTaskRequests};
-pub use control::{EffectTaskController, drive_effect_controller_task, own_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::admitted_scope::AdmittedScope;
 pub use lash_core_store::effect_opener::EffectOpener;
@@ -54,8 +49,6 @@ pub use turn_control_authority::{
 };
 
 use crate::ProcessRegistry;
-use crate::RuntimeError;
-use control::{RemoteLocalExecutionRequest, ScopedEffectControllerInner};
 
 use super::envelope::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
@@ -122,7 +115,7 @@ pub trait ProcessRunner: Send + Sync {
         admitted: AdmittedProcess,
         execution_context: crate::ProcessExecutionContext,
         registry: Arc<dyn ProcessRegistry>,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        scoped_effect_controller: crate::ActorContext,
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError>;
@@ -160,7 +153,7 @@ pub struct ProcessLocalExecution {
     /// session-turn start's default binding.
     pub host_start: Box<crate::runtime::HostStartAdmission>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
-    pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
+    pub effect_controller: Option<ActorContext>,
     /// The attachment referrers a delivered terminal is acquired through
     /// before the receiver records it (ADR 0124). `None` on a host with no
     /// durable attachment store: its terminals deliver nothing to hold.
@@ -203,11 +196,6 @@ struct LocalPreparedToolAttemptEffectRunner<'run> {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     tool_context: crate::ToolContext<'run>,
     completion_key: Option<crate::AwaitEventKey>,
-}
-
-struct RemoteEffectRunner {
-    requests: mpsc::UnboundedSender<RemoteLocalExecutionRequest>,
-    plugins: Option<Arc<crate::PluginSession>>,
 }
 
 #[async_trait::async_trait]
@@ -420,7 +408,8 @@ enum RuntimeEffectLocalExecutorState<'run> {
     Runner(Box<dyn RuntimeEffectLocalRunner + Send + 'run>),
 }
 
-/// Scoped local executor provided to a [`RuntimeEffectController`] for one effect.
+/// Scoped local executor an [`ActorContext`](crate::ActorContext) group method
+/// runs for one effect.
 ///
 /// A controller runs it on a first execution and replays its own recorded
 /// result on a redrive, so local provider/tool/checkpoint work always crosses
@@ -595,10 +584,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
-    pub fn with_process_effect_controller(
-        mut self,
-        controller: Arc<dyn RuntimeEffectController>,
-    ) -> Self {
+    pub fn with_process_effect_controller(mut self, controller: ActorContext) -> Self {
         if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
             ProcessLocalExecution {
                 effect_controller: current,
@@ -1116,112 +1102,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    fn into_remote_execution(
-        self,
-    ) -> (
-        RuntimeEffectLocalExecutor<'static>,
-        Option<(
-            RuntimeEffectLocalExecutor<'run>,
-            mpsc::UnboundedReceiver<RemoteLocalExecutionRequest>,
-        )>,
-    ) {
-        let plugins = self.plugin_state_session();
-        let RuntimeEffectLocalExecutor {
-            state,
-            replay_trace,
-            served_only,
-            issued,
-        } = self;
-        match state {
-            RuntimeEffectLocalExecutorState::Runner(runner) => {
-                let (requests, request_rx) = mpsc::unbounded_channel();
-                (
-                    RuntimeEffectLocalExecutor {
-                        state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
-                            Box::new(RemoteEffectRunner { requests, plugins }),
-                        )),
-                        replay_trace: replay_trace.clone(),
-                        served_only: served_only.clone(),
-                        issued: crate::trace::StepIssue::default(),
-                    },
-                    Some((
-                        RuntimeEffectLocalExecutor {
-                            state: RuntimeEffectLocalExecutorState::Runner(runner),
-                            replay_trace,
-                            served_only: None,
-                            issued,
-                        },
-                        request_rx,
-                    )),
-                )
-            }
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
-                let (requests, request_rx) = mpsc::unbounded_channel();
-                (
-                    RuntimeEffectLocalExecutor {
-                        state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
-                            Box::new(RemoteEffectRunner { requests, plugins }),
-                        )),
-                        replay_trace: replay_trace.clone(),
-                        served_only: served_only.clone(),
-                        issued: crate::trace::StepIssue::default(),
-                    },
-                    Some((
-                        RuntimeEffectLocalExecutor {
-                            state: RuntimeEffectLocalExecutorState::Target(
-                                LocalTarget::OwnedRunner(runner),
-                            ),
-                            replay_trace,
-                            served_only: None,
-                            issued,
-                        },
-                        request_rx,
-                    )),
-                )
-            }
-            RuntimeEffectLocalExecutorState::Target(target) => (
-                RuntimeEffectLocalExecutor {
-                    state: RuntimeEffectLocalExecutorState::Target(target),
-                    replay_trace,
-                    served_only,
-                    issued,
-                },
-                None,
-            ),
-        }
-    }
-
-    async fn execute_forwarded(
-        self,
-        envelope: RuntimeEffectEnvelope,
-        effect_attempt: Option<crate::EffectAttempt>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        // The proxy that forwarded this body already asked the served-only
-        // question and began the body's run.
-        if let Some(refusal) = self.served_only_refusal() {
-            return Err(refusal);
-        }
-        let RuntimeEffectEnvelope {
-            invocation,
-            command,
-        } = envelope;
-        match command {
-            RuntimeEffectCommand::Trigger { command } => {
-                self.execute_trigger(invocation, *command).await
-            }
-            command => {
-                self.run_body(
-                    RuntimeEffectEnvelope {
-                        invocation,
-                        command,
-                    },
-                    effect_attempt,
-                )
-                .await
-            }
-        }
-    }
-
     /// Executes trigger work for effect-host implementors while executing or replaying a runtime
     /// effect.
     pub async fn execute_trigger(
@@ -1330,39 +1210,6 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
     }
 }
 
-#[async_trait::async_trait]
-impl RuntimeEffectLocalRunner for RemoteEffectRunner {
-    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
-        self.plugins.clone()
-    }
-
-    async fn execute(
-        self: Box<Self>,
-        envelope: RuntimeEffectEnvelope,
-        effect_attempt: Option<crate::EffectAttempt>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let (response, response_rx) = oneshot::channel();
-        self.requests
-            .send(RemoteLocalExecutionRequest {
-                envelope,
-                effect_attempt,
-                response,
-            })
-            .map_err(|_| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
-                    "spawned effect local executor is no longer running",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
-                "spawned effect local executor response was dropped",
-            )
-        })?
-    }
-}
-
 async fn execute_local_sleep(
     envelope: RuntimeEffectEnvelope,
     cancellation: CancellationToken,
@@ -1433,6 +1280,7 @@ mod unresolved_execution_env_tests;
 mod task_boundary_tests {
     use super::*;
     use crate::RuntimeEffectInvocation;
+    use tokio::sync::oneshot;
 
     struct TaskIdentityRunner {
         observed: oneshot::Sender<tokio::task::Id>,

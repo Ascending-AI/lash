@@ -1,6 +1,7 @@
 //! Recorded transition preparation and fenced publication for a session run.
 use super::{run::run_step_invocation, shift_abort};
-use crate::ScopedEffectController;
+use crate::ActorContext;
+
 use crate::engine::{Admitted, ShiftAbort};
 use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
@@ -15,7 +16,7 @@ pub(super) enum TransitionBasis<'a> {
 }
 
 pub(super) fn command_transition_request(
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     admitted: &Admitted,
 ) -> Result<crate::plugin::PluginTransitionRequest, ShiftAbort> {
     let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
@@ -34,7 +35,7 @@ impl LashRuntime {
     /// already published at its admission's recorded advanced head.
     pub(super) async fn record_plugin_transition(
         &self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         admitted: &Admitted,
         base: &crate::store::SessionHeadRef,
         target: &crate::store::plugin_writers::PluginAdmission,
@@ -62,7 +63,7 @@ impl LashRuntime {
 
     pub(super) async fn record_command_plugin_transition(
         &self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         admitted: &Admitted,
     ) -> Result<crate::plugin::PluginTransitionRecord, ShiftAbort> {
         self.record_transition_request(
@@ -77,7 +78,7 @@ impl LashRuntime {
 
     async fn record_transition_request(
         &self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         admitted: &Admitted,
         request: crate::plugin::PluginTransitionRequest,
         basis: TransitionBasis<'_>,
@@ -103,7 +104,7 @@ impl LashRuntime {
             tool_source_policy,
         };
         let outcome = controller
-            .execute_effect(
+            .shift_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::TransitionPlugins {

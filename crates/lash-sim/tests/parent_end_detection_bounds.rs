@@ -119,7 +119,7 @@ impl World {
     }
 
     async fn over(stores: lash_sqlite_store::SqliteStoreSet, clock: Arc<TestClock>) -> Self {
-        let backend = lash_conformance::recording_backend_over(Arc::new(stores));
+        let backend = lash_conformance::backend_over(Arc::new(stores));
         let registry = backend.process_registry();
         Self {
             clock,

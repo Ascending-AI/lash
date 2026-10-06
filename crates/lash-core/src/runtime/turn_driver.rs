@@ -1,4 +1,5 @@
 use super::*;
+use crate::ActorContext;
 use crate::runtime::turn_control::ActiveTurnControl;
 
 mod context;
@@ -7,6 +8,7 @@ pub(in crate::runtime) use effects::normalize_plugin_message_attachments;
 mod events;
 mod failures;
 mod handlers;
+pub(crate) mod issue;
 mod lease;
 mod local_effects;
 mod machine;
@@ -34,7 +36,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// machine's emissions and the driver's own terminal events.
     pub(super) recorded_assembly: RecordedTurnAssembly,
     pub(super) host: RuntimeHost,
-    pub(super) scoped_effect_controller: ScopedEffectController<'a>,
+    pub(super) scoped_effect_controller: ActorContext,
     pub(super) session_id: SessionId,
     pub(super) turn_id: crate::TurnId,
     pub(super) turn_index: usize,
@@ -106,6 +108,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) trace: crate::trace::TraceStanding,
     /// The turn's part in its run's segment boundaries (FIG-4739).
     pub(super) segment: TurnSegment,
+    /// The lifetime this value is bound to; the context it carries is `'static`.
+    pub(crate) run: std::marker::PhantomData<&'a ()>,
 }
 
 impl RuntimeTurnDriver<'_> {

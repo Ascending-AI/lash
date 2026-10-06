@@ -328,7 +328,7 @@ fn build_core(
     holds: Option<Arc<HoldRegistry>>,
     compat_server: &Option<OpenAiCompatBenchServer>,
 ) -> Result<lash::LashCore> {
-    let effect_host = backend.effect_host();
+    let effect_host = lash::runtime::ActorContext::detached(backend.clone());
     let provider: lash::provider::ProviderHandle = if let Some(server) = compat_server {
         lash::provider::ProviderHandle::new(
             lash_provider_openai::OpenAiCompatibleProvider::new(
@@ -348,7 +348,7 @@ fn build_core(
     plugins.push(Arc::new(lash::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("latency_tools"),
         lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(
-            crate::runtime_perf::providers::BenchmarkEchoTool::new(Arc::clone(&effect_host)),
+            crate::runtime_perf::providers::BenchmarkEchoTool::new(effect_host.clone()),
         )),
     )));
     lash::LashCore::standard_builder(backend)

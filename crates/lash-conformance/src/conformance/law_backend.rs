@@ -3,52 +3,25 @@
 //! A runtime takes every port from one [`crate::Backend`] (ADR 0102, D2). A
 //! law is handed the backend under test by the embedder and runs its runtime
 //! over that backend's ports. [`LawBackend`] is that backend with the ports a
-//! law substitutes: a testing layer over its effect host, or its own handle on
-//! the same substrate's session catalog or process registry.
+//! law substitutes: its own handle on the same substrate's process registry.
 
 use std::sync::Arc;
 
-use lash_core::engine::{BuildGeneration, EngineGeneration};
-
-/// See the module documentation.
 pub(crate) struct LawBackend {
     layered: crate::testing::runtime_helpers::LayeredBackend,
 }
 
 impl LawBackend {
-    /// Every port of `backend`.
     pub(crate) fn over(backend: &crate::Backend) -> Self {
         Self {
             layered: crate::testing::runtime_helpers::LayeredBackend::over(backend.clone()),
         }
     }
 
-    /// The backend an engine host and one store set make together: every
-    /// storage port is `stores`', the effects journal on `effect_host`, and
-    /// the law supplies its own process work, so the backend runs no process
-    /// or queued work of its own.
-    pub(crate) fn over_stores(
-        stores: Arc<dyn crate::StoreSet>,
-        effect_host: Arc<dyn crate::EffectHost>,
-    ) -> Self {
-        let process_work =
-            crate::ProcessWorkWiring::without_process_work(stores.process_registry());
-        Self::over(&crate::Backend::new(Arc::new(HostOverStores {
-            stores,
-            effect_host,
-            process_work,
-        })))
+    pub(crate) fn over_stores(stores: Arc<dyn crate::StoreSet>) -> Self {
+        Self::over(&crate::Backend::for_testing(stores))
     }
 
-    /// The law's effect host in place of the backend's own: a testing layer
-    /// over it, or another handle on the same substrate.
-    pub(crate) fn with_effect_host(self, effect_host: Arc<dyn crate::EffectHost>) -> Self {
-        Self {
-            layered: self.layered.map_effect_host(|_| effect_host),
-        }
-    }
-
-    /// The law's process registry in place of the backend's own.
     pub(crate) fn with_process_registry(
         self,
         process_registry: Arc<dyn crate::ProcessRegistry>,
@@ -62,7 +35,6 @@ impl LawBackend {
         self.layered.into_backend()
     }
 
-    /// A runtime host config over this backend.
     pub(crate) fn host_config(
         self,
         commit_budget: crate::CommitBudget,
@@ -72,48 +44,6 @@ impl LawBackend {
     }
 }
 
-/// An effect host over one store set, running no process or session work of
-/// its own.
-struct HostOverStores {
-    stores: Arc<dyn crate::StoreSet>,
-    effect_host: Arc<dyn crate::EffectHost>,
-    process_work: crate::ProcessWorkWiring,
-}
-
-impl crate::EffectEngine for HostOverStores {
-    fn stores(&self) -> Arc<dyn crate::StoreSet> {
-        Arc::clone(&self.stores)
-    }
-
-    fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
-        Arc::clone(&self.effect_host)
-    }
-
-    fn generation(&self) -> &EngineGeneration {
-        // A law engine serves no Restate journals, so nothing routes it by
-        // generation; a fixed value keeps the trait honest.
-        static GENERATION: std::sync::OnceLock<EngineGeneration> = std::sync::OnceLock::new();
-        GENERATION
-            .get_or_init(|| EngineGeneration::fixed(BuildGeneration::for_test("host-over-stores")))
-    }
-
-    fn process_work(&self) -> crate::ProcessWorkWiring {
-        self.process_work.clone()
-    }
-
-    fn session_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
-        Arc::new(crate::NoSessionWork::new())
-    }
-
-    fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry> {
-        Arc::new(crate::store::fleet_finalize::NoDeployments)
-    }
-}
-
-/// `stores`' session catalog with `session_id` admitted as a fresh root:
-/// where a law's runtime commits, on the substrate under test. The admission
-/// writes the canonical test policy as the created head (FIG-4553): it is
-/// what the law's runtime opens, so a later open adopts exactly it.
 pub(crate) async fn law_session_store(
     stores: &dyn crate::StoreSet,
     session_id: &crate::SessionId,
@@ -158,41 +88,17 @@ pub(crate) async fn law_session_store_with_config(
 /// embedder whose substrate is storage only: the law's runtime reaches every
 /// storage port of `stores`, executes no session work, and runs its effects on
 /// the host the embedder supplies.
-pub fn backend_over(
-    stores: Arc<dyn crate::StoreSet>,
-    effect_host: Arc<dyn crate::EffectHost>,
-) -> crate::Backend {
-    LawBackend::over_stores(stores, effect_host).into_backend()
+pub fn backend_over(stores: Arc<dyn crate::StoreSet>) -> crate::Backend {
+    LawBackend::over_stores(stores).into_backend()
 }
 
-/// [`backend_over`] with the recording double as its effect host: for a
-/// storage law that reaches a backend's storage ports and runs no effect.
-pub fn recording_backend_over(stores: Arc<dyn crate::StoreSet>) -> crate::Backend {
-    let effect_host = crate::RecordingEffectHost::default();
-    backend_over(stores, Arc::new(effect_host))
-}
-
-/// The backend of a store law's runtime: a law over one session store that
-/// builds a runtime only to reach the store through its facade (append, park,
-/// rematerialize) and runs no effect, writes no attachment and publishes no
-/// execution environment.
-///
-/// The law's substrate is the store it was handed, so the runtime is given no
-/// second one. Its effect host is the recording double, whose controllers
-/// journal nothing a store answers from; its attachment and process-exec-env
-/// ports refuse every write; and a port that would name a second substrate
-/// (a session catalog, a process registry, a trigger store, a
-/// process-definition registry) is refused outright, so a law whose runtime
-/// reaches one fails loudly instead of certifying the wrong store.
 pub(crate) struct StoreLawBackend {
-    effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<StoreLawStores>,
 }
 
 impl StoreLawBackend {
     pub(crate) fn new() -> Self {
         Self {
-            effect_host: Arc::new(crate::RecordingEffectHost::default()),
             stores: Arc::new(StoreLawStores {
                 binding: crate::StoreBindingId::new("conformance-store-law"),
                 clock: Arc::new(crate::facade_support::SystemClock),
@@ -201,10 +107,16 @@ impl StoreLawBackend {
     }
 
     pub(crate) fn into_backend(self) -> crate::Backend {
-        crate::Backend::new(Arc::new(self))
+        crate::Backend::for_testing(self.stores)
     }
 
-    /// A runtime host config over this backend.
+    /// A store set whose every port panics: what a law reaches only for
+    /// a backend it never runs.
+    #[cfg(test)]
+    pub(crate) fn stores() -> Arc<dyn crate::StoreSet> {
+        Self::new().stores
+    }
+
     pub(crate) fn host_config(
         self,
         commit_budget: crate::CommitBudget,
@@ -214,43 +126,6 @@ impl StoreLawBackend {
     }
 }
 
-impl crate::EffectEngine for StoreLawBackend {
-    fn stores(&self) -> Arc<dyn crate::StoreSet> {
-        Arc::clone(&self.stores) as Arc<dyn crate::StoreSet>
-    }
-
-    fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
-        Arc::clone(&self.effect_host)
-    }
-
-    fn generation(&self) -> &EngineGeneration {
-        // A store law runs no engine-served journals; a fixed value keeps the
-        // trait honest.
-        static GENERATION: std::sync::OnceLock<EngineGeneration> = std::sync::OnceLock::new();
-        GENERATION
-            .get_or_init(|| EngineGeneration::fixed(BuildGeneration::for_test("store-law-backend")))
-    }
-
-    /// A store law's runtime runs no processes, and its registry is refused
-    /// like every port that would name a second substrate.
-    fn process_work(&self) -> crate::ProcessWorkWiring {
-        crate::ProcessWorkWiring::without_process_work(crate::StoreSet::process_registry(
-            self.stores.as_ref(),
-        ))
-    }
-
-    fn session_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
-        Arc::new(crate::NoSessionWork::new())
-    }
-
-    fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry> {
-        Arc::new(crate::store::fleet_finalize::NoDeployments)
-    }
-}
-
-/// The store set of a store law's runtime: its attachment and
-/// process-exec-env ports refuse every write, and a port that would name a
-/// second substrate is refused outright.
 struct StoreLawStores {
     binding: crate::StoreBindingId,
     clock: Arc<dyn crate::Clock>,
@@ -263,6 +138,10 @@ impl StoreLawStores {
 }
 
 impl crate::StoreSet for StoreLawStores {
+    fn durable_store(&self) -> Arc<dyn crate::DurableStore> {
+        Self::no_second_substrate("durable store")
+    }
+
     fn worker_recovery(&self) -> Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore> {
         Self::no_second_substrate("worker recovery accounting")
     }

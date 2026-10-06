@@ -58,6 +58,7 @@
 //! [`StandardFrameLawProtocol`] is the standard protocol's; a protocol crate
 //! registers its own.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -338,7 +339,7 @@ struct ThresholdCompaction {
 async fn summarize(
     session_id: &SessionId,
     policy: &crate::SessionPolicy,
-    scoped_effect_controller: &crate::ScopedEffectController<'_>,
+    scoped_effect_controller: &crate::ActorContext,
     direct_completions: &crate::DirectCompletionClient<'_>,
 ) -> Result<crate::SessionAppendNode, crate::plugin::ContextError> {
     let turn_id = scoped_effect_controller
@@ -1064,19 +1065,17 @@ impl LawSession {
     async fn open(
         prefix: &str,
         law: &str,
-        effect_host: Arc<dyn crate::EffectHost>,
+        _effect_host: ActorContext,
         stores: Arc<dyn crate::StoreSet>,
         runner: Arc<dyn crate::ConformanceTurnRunner>,
         protocol: Arc<dyn FrameLawProtocol>,
         provider: crate::ProviderHandle,
     ) -> Self {
         let session_id = SessionId::fixture(format!("{prefix}-{law}"));
-        let mut host =
-            crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
-                .host_config(
-                    crate::CommitBudget::bounded(1024 * 1024, 512),
-                    crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
-                );
+        let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
+        );
         host.providers.models = crate::testing::standard_test_llm_profiles(provider);
         // The created head records what a creator on this plugin set resolves:
         // the canonical test policy and every installed owner's namespace —
@@ -1338,7 +1337,7 @@ impl LawSession {
 )]
 pub async fn a_pressure_frame_opens_once_whatever_its_crash(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     protocol: Arc<dyn FrameLawProtocol>,
@@ -1433,7 +1432,7 @@ pub async fn a_pressure_frame_opens_once_whatever_its_crash(
 )]
 pub async fn a_pressure_frame_then_continue_as_commits_both_frames_once(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     protocol: Arc<dyn FrameLawProtocol>,
@@ -1521,7 +1520,7 @@ pub async fn a_pressure_frame_then_continue_as_commits_both_frames_once(
 )]
 pub async fn a_pressure_frame_restarts_the_live_execution_state(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     protocol: Arc<dyn FrameLawProtocol>,
@@ -1576,7 +1575,7 @@ pub async fn a_pressure_frame_restarts_the_live_execution_state(
 /// command is never applied again (FIG-4201).
 pub async fn a_compaction_frame_opens_once_whatever_its_crash(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,

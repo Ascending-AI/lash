@@ -34,6 +34,7 @@
 //! runs on the tier's process workflow, served by a worker whose engine
 //! records each process that ran.
 
+use crate::ActorContext;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -42,8 +43,8 @@ use pretty_assertions::assert_eq;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    ConformanceTurnAttempt, ConformanceTurnEnd, ConformanceTurnRunner, ProcessAwaitOutput,
-    ProcessId, ScopedEffectController, TriggerDeliveryEmitOutcome, TriggerEmitReport,
+    ConformanceTurnAttempt, ConformanceTurnEnd, ConformanceTurnRunner, ProcessId,
+    TriggerDeliveryEmitOutcome, TriggerEmitReport,
 };
 
 /// The engine kind the law's subscription targets.
@@ -74,7 +75,7 @@ impl LawRig {
         prefix: &str,
         law: &str,
         source_capture: crate::TriggerSourceCapture,
-        effect_host: Arc<dyn crate::EffectHost>,
+        _effect_host: ActorContext,
         stores: Arc<dyn crate::StoreSet>,
         runner: &dyn ConformanceTurnRunner,
     ) -> Self {
@@ -119,11 +120,10 @@ impl LawRig {
         // The tier's process workflow serves every process the deliveries
         // start with a worker whose one engine records the process it ran.
         let increments = Arc::new(Increments::default());
-        let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), effect_host)
-            .host_config(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            );
+        let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
         host.process_engines = host.process_engines.clone().with_registration(
             crate::ProcessEngineRegistration::accepting(Arc::new(IncrementEngine {
                 increments: Arc::clone(&increments),
@@ -347,7 +347,7 @@ impl LawRig {
 )]
 pub async fn bound_trigger_duplicate_after_child_prune_returns_original_process(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn ConformanceTurnRunner>,
 ) {
@@ -489,7 +489,7 @@ pub async fn bound_trigger_duplicate_after_child_prune_returns_original_process(
 )]
 pub async fn trigger_emission_held_across_a_bind_and_prune_returns_the_bound_process(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn ConformanceTurnRunner>,
 ) {
@@ -653,7 +653,7 @@ fn crashing_emit_attempt(
     emitted: CancellationToken,
     crash: CancellationToken,
 ) -> ConformanceTurnAttempt {
-    Arc::new(move |scoped: ScopedEffectController<'_>| {
+    Arc::new(move |scoped: ActorContext| {
         let router = Arc::clone(&router);
         let request = request.clone();
         let reports = Arc::clone(&reports);
@@ -683,7 +683,7 @@ fn emit_attempt(
     reports: Arc<Reports>,
     marker: Option<Arc<JournalMarker>>,
 ) -> ConformanceTurnAttempt {
-    Arc::new(move |scoped: ScopedEffectController<'_>| {
+    Arc::new(move |scoped: ActorContext| {
         let router = Arc::clone(&router);
         let request = request.clone();
         let reports = Arc::clone(&reports);
@@ -714,7 +714,7 @@ impl JournalMarker {
         clippy::expect_used,
         reason = "conformance-law fixture: a replay that cannot serve the step is the law's failure"
     )]
-    async fn record(&self, scoped: &ScopedEffectController<'_>) {
+    async fn record(&self, scoped: &ActorContext) {
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 scoped.execution_scope().clone(),
@@ -725,7 +725,7 @@ impl JournalMarker {
             "bound-trigger-journal-marker",
         );
         scoped
-            .execute_effect(
+            .tool_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::Trigger {
@@ -892,6 +892,10 @@ impl Increments {
 /// The subscription's target: each process it runs performs one external
 /// increment and completes.
 struct IncrementEngine {
+    #[expect(
+        dead_code,
+        reason = "L6 (FIG-5175): its advance performs the increment"
+    )]
     increments: Arc<Increments>,
 }
 
@@ -899,29 +903,6 @@ struct IncrementEngine {
 impl crate::ProcessEngine for IncrementEngine {
     fn kind(&self) -> &'static str {
         INCREMENT_KIND
-    }
-
-    async fn run(
-        &self,
-        context: crate::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        {
-            let mut ran = self
-                .increments
-                .0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            if !ran.contains(context.process_id()) {
-                ran.push(context.process_id().clone());
-            }
-        }
-        Ok(
-            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!({ "incremented": 1 }),
-            ))
-            .into(),
-        )
     }
 
     fn start_artifacts(
@@ -944,6 +925,49 @@ impl crate::ProcessEngine for IncrementEngine {
         _artifact_ref: &str,
     ) -> Result<(), crate::PluginError> {
         Ok(())
+    }
+
+    fn state_format(&self) -> crate::EngineStateFormat {
+        crate::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Option<crate::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: crate::EngineState,
+        _event: crate::EngineEvent,
+    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        todo!("L6 (FIG-5175): port IncrementEngine to advance")
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &crate::ProcessDefinitionRef,
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+        Ok(crate::ProcessDefinitionResolution::new(
+            crate::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
     }
 }
 

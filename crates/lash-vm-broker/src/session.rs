@@ -21,13 +21,14 @@ use std::time::Duration;
 use lash_vm_protocol::FrameEpoch;
 
 use crate::broker::FrameFence;
-use crate::ledger::{CheckpointRefusal, CheckpointStore};
+use crate::ledger::QuietPointRefusal;
+use crate::snapshot::SnapshotStore;
 
 /// Why a frame did not open.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum FrameOpenFailure {
     #[error("{0}")]
-    Reset(CheckpointRefusal),
+    Reset(QuietPointRefusal),
     #[error("a run of an earlier frame was still live after {0:?}")]
     RetireTimedOut(Duration),
 }
@@ -59,7 +60,7 @@ impl VmSession {
     pub async fn open_frame(
         &self,
         epoch: FrameEpoch,
-        checkpoints: &dyn CheckpointStore,
+        checkpoints: &dyn SnapshotStore,
         retire: Duration,
     ) -> Result<(), FrameOpenFailure> {
         self.frames.advance(epoch);

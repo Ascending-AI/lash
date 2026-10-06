@@ -16,6 +16,7 @@
 //! `ToolCallId` an attempt reads from `AttemptContext::call_id()` (ADR 0117),
 //! beside its attempt number.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -38,7 +39,7 @@ pub struct ToolCallIdentityTier {
     /// Distinguishes this tier's sessions from every other tier's, and every
     /// run's from the last on a tier whose state outlives a run.
     pub prefix: String,
-    pub effect_host: Arc<dyn crate::EffectHost>,
+    pub effect_host: ActorContext,
     pub stores: Arc<dyn crate::StoreSet>,
     /// Runs each turn, and crashes and redrives it.
     pub runner: Arc<dyn crate::ConformanceTurnRunner>,
@@ -235,7 +236,7 @@ fn probe_definition(name: &str) -> crate::ToolDefinition {
 /// The probe tools: [`PROBE`] and [`DEFERRED`].
 struct IdentityProbes {
     witness: Arc<Witness>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
 }
 
 impl IdentityProbes {
@@ -261,14 +262,13 @@ impl IdentityProbes {
         });
         // The call resolves its own key with its own label: a call that reads
         // another label consumed another call's completion.
-        let resolver = Arc::clone(&self.effect_host);
+        let resolver = self.effect_host.clone();
         let witness = Arc::clone(&self.witness);
         crate::task::spawn(async move {
             if args.hold {
                 witness.gate.passed().await;
             }
             let _ = resolver
-                .await_event_resolver()
                 .resolve_await_event(
                     &key,
                     crate::Resolution::Ok(serde_json::json!({ "label": args.label })),
@@ -598,7 +598,7 @@ impl World {
     pub(crate) async fn shift(
         &self,
         turn: &ScriptedTurn,
-        scope: crate::ScopedEffectController<'_>,
+        scope: crate::ActorContext,
         phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
     ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
         let mut runtime = self.runtime(phase_probe).await;
@@ -701,10 +701,7 @@ impl World {
         crate::RuntimeHostConfig,
         Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     ) {
-        let mut law_backend = crate::LawBackend::over_stores(
-            Arc::clone(&self.tier.stores),
-            Arc::clone(&self.tier.effect_host),
-        );
+        let mut law_backend = crate::LawBackend::over_stores(Arc::clone(&self.tier.stores));
         if let Some(registry) = &self.process_registry {
             law_backend = law_backend.with_process_registry(Arc::clone(registry));
         }
@@ -716,7 +713,7 @@ impl World {
             crate::testing::standard_test_llm_profiles(self.model().into_handle());
         let probes: Arc<dyn crate::ToolProvider> = Arc::new(IdentityProbes {
             witness: Arc::clone(&self.witness),
-            effect_host: Arc::clone(&self.tier.effect_host),
+            effect_host: self.tier.effect_host.clone(),
         });
         let protocol = match &self.protocol {
             Protocol::Standard => crate::testing::test_standard_protocol_factories(),

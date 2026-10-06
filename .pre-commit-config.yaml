@@ -96,3 +96,12 @@ repos:
         entry: python3 scripts/check-substrate-port-ledger.py
         files: '^(\.pre-commit-config\.yaml|docs/testing/substrate-port-ledger\.toml|(crates|examples|runbooks)/.*(\.rs|Cargo\.toml)|scripts/(check-substrate-port-ledger|test_check_substrate_port_ledger)\.py)$'
         pass_filenames: false
+
+      # Mirrors CI Lint "Check substrate stub lane tags": every substrate
+      # `todo!`/`unimplemented!` names the lane that fills it (I0, FIG-5194).
+      - id: substrate-todos
+        name: substrate stub lane tags
+        language: system
+        entry: python3 scripts/check-substrate-todos.py
+        files: '^(\.pre-commit-config\.yaml|crates/.*\.rs|scripts/(check-substrate-todos|test_check_substrate_todos)\.py)$'
+        pass_filenames: false

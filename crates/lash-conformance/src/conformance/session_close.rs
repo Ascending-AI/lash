@@ -1,5 +1,6 @@
 //! L-D1 through L-D4: the recorded session close and its retained tombstone.
 
+use crate::ActorContext;
 use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -76,7 +77,7 @@ impl ScopeCloseSink for CloseSink {
 }
 
 pub(super) fn administration(
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: &Arc<dyn StoreSet>,
     scopes: Arc<dyn ScopeCloseSink>,
 ) -> SessionAdministration {
@@ -140,20 +141,20 @@ pub(super) async fn session(
     (id, store)
 }
 
-struct HandlerExecution<'a> {
+struct HandlerExecution {
     admin: SessionAdministration,
-    scoped: lash_core::ScopedEffectController<'a>,
+    scoped: lash_core::ActorContext,
 }
 
-impl SessionDeleteExecution for HandlerExecution<'_> {
+impl SessionDeleteExecution for HandlerExecution {
     fn administration(&self) -> &SessionAdministration {
         &self.admin
     }
 
-    fn scoped<'a>(
-        &'a self,
+    fn scoped(
+        &self,
         _: lash_core::AdmittedScope,
-    ) -> Result<lash_core::ScopedEffectController<'a>, lash_core::RuntimeError> {
+    ) -> Result<lash_core::ActorContext, lash_core::RuntimeError> {
         Ok(self.scoped.clone())
     }
 }
@@ -265,7 +266,7 @@ async fn close_until_crash(
 )]
 pub async fn session_delete_closes_active_and_parked_runs_as_session_deleted(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -398,7 +399,7 @@ pub(super) async fn pin_a_turn_cancel_closure(store: &dyn crate::RuntimeStore, i
 )]
 pub async fn a_refused_deletion_closes_nothing(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -442,7 +443,7 @@ pub async fn a_refused_deletion_closes_nothing(
 )]
 pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_deletion(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -523,7 +524,7 @@ pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_del
 )]
 pub async fn a_run_commit_racing_a_close_is_refused_stale_fence(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -651,7 +652,7 @@ async fn close_row(
 )]
 pub async fn session_delete_writes_exactly_one_close_row_via_its_intent(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -755,7 +756,7 @@ impl ScopeCloseSink for CrashingRegistryClose {
 )]
 pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_tombstone_kept(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -909,7 +910,7 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
 )]
 pub async fn a_deletion_retried_after_its_close_is_not_refused_by_a_pin_the_close_superseded(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {

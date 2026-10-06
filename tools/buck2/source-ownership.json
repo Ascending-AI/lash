@@ -74,15 +74,15 @@
         "tests/runtime_turns.rs",
         "tests/runtime_support/**/*.rs",
         "tests/runtime/tests/turns.rs",
-        "tests/runtime/tests/turns/**/*.rs",
-        "tests/runtime/tests/commit_placement.rs"
+        "tests/runtime/tests/turns/**/*.rs"
       ]
     }
   },
   "crates/lash-core-execution": {
     "library_test_sources": [
       "src/plugin/state/tests.rs",
-      "src/runtime/effect/executor/control/tests.rs",
+      "src/runtime/actor/journal_tests.rs",
+      "src/runtime/effect/executor/control/journal_identity_tests.rs",
       "src/runtime/process/engine_resolve_tests.rs",
       "src/runtime/process/model_filter_tests.rs",
       "src/runtime/process/tests.rs",

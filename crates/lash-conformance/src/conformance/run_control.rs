@@ -4,6 +4,7 @@
     reason = "law preconditions and outcomes are assertions"
 )]
 use super::shift_admission::{ShiftParts, on_tier};
+use crate::ActorContext;
 use lash_core::engine::*;
 use lash_core::store::*;
 use lash_core::testing::RuntimeStoreTestShiftExt as _;
@@ -244,7 +245,7 @@ impl AdmittedRun {
     async fn new(
         prefix: &str,
         name: &str,
-        host: &Arc<dyn crate::EffectHost>,
+        host: &ActorContext,
         stores: &Arc<dyn crate::StoreSet>,
     ) -> Self {
         let parts = ShiftParts::new(prefix, name, host, stores, 8).await;
@@ -308,7 +309,7 @@ impl Fixture {
     async fn new(
         prefix: &str,
         name: &str,
-        host: &Arc<dyn crate::EffectHost>,
+        host: &ActorContext,
         stores: &Arc<dyn crate::StoreSet>,
     ) -> Self {
         let admitted = AdmittedRun::new(prefix, name, host, stores).await;
@@ -591,7 +592,7 @@ fn hold_the_second_park_probe(f: &mut Fixture, script: &Script) -> Arc<Gate> {
 
 pub async fn a_terminal_run_never_reparks(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -648,7 +649,7 @@ async fn input_holder(f: &Fixture) -> Option<TurnId> {
 )]
 pub async fn no_row_stays_bound_after_a_runs_verb_close_or_lost_end(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -705,7 +706,7 @@ pub async fn no_row_stays_bound_after_a_runs_verb_close_or_lost_end(
 )]
 pub async fn a_refused_run_ends_once_and_its_next_input_admits_a_new_run(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -891,7 +892,7 @@ pub async fn a_refused_run_ends_once_and_its_next_input_admits_a_new_run(
 
 pub async fn cancel_of_a_parked_run_writes_cancelled_settles_its_input_and_drains_the_next(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -954,7 +955,7 @@ pub async fn cancel_of_a_parked_run_writes_cancelled_settles_its_input_and_drain
 
 pub async fn fork_releases_the_old_owner_before_the_new_run_executes_in_original_order_on_a_fresh_journal(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1048,7 +1049,7 @@ pub async fn fork_releases_the_old_owner_before_the_new_run_executes_in_original
 
 pub async fn verbs_are_park_id_cas(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1083,7 +1084,7 @@ pub async fn verbs_are_park_id_cas(
 
 pub async fn redrive_under_the_same_build_reparks_the_same_park_with_attempts_plus_one(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1113,7 +1114,7 @@ pub async fn redrive_under_the_same_build_reparks_the_same_park_with_attempts_pl
 
 pub async fn cancel_or_fork_of_a_redriving_run_is_refused(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1130,7 +1131,7 @@ pub async fn cancel_or_fork_of_a_redriving_run_is_refused(
 
 pub async fn an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1170,7 +1171,7 @@ pub async fn an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it(
 
 pub async fn engine_refusals_are_retained_and_listed(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1236,7 +1237,7 @@ pub async fn engine_refusals_are_retained_and_listed(
 
 pub async fn sends_behind_a_parked_run_commit_but_are_not_admitted(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1261,7 +1262,7 @@ pub async fn sends_behind_a_parked_run_commit_but_are_not_admitted(
 
 pub async fn redrive_under_a_restored_build_completes_once_and_clears_the_park(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1298,7 +1299,7 @@ pub async fn redrive_under_a_restored_build_completes_once_and_clears_the_park(
 
 pub async fn a_stale_redrive_is_fenced_by_a_later_cancel(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1396,7 +1397,7 @@ pub async fn a_stale_redrive_is_fenced_by_a_later_cancel(
 
 pub async fn cancel_fork_and_close_raise_the_shift_epoch_and_redrive_does_not(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1420,7 +1421,7 @@ pub async fn cancel_fork_and_close_raise_the_shift_epoch_and_redrive_does_not(
 
 pub async fn an_exhausted_run_parks_engine_retry_exhausted_via_reconcile_idempotently_with_no_evidence(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1490,7 +1491,7 @@ pub async fn an_exhausted_run_parks_engine_retry_exhausted_via_reconcile_idempot
 
 pub async fn a_parked_runs_fence_stays_current_until_a_verb(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1514,7 +1515,7 @@ pub async fn a_parked_runs_fence_stays_current_until_a_verb(
 
 pub async fn a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1583,7 +1584,7 @@ pub async fn a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_
 /// the run a second time: a store-terminal run is never resumed.
 pub async fn a_redrive_the_run_ran_past_is_never_applied_again(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1640,7 +1641,7 @@ pub async fn a_redrive_the_run_ran_past_is_never_applied_again(
 /// the run executes.
 pub async fn a_stale_paused_listing_never_reparks_a_resumed_run(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1715,7 +1716,7 @@ pub async fn a_stale_paused_listing_never_reparks_a_resumed_run(
 /// on through its own follow-on shift.
 pub async fn a_parked_session_is_asked_to_work_only_through_its_ingress_obligation(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1807,7 +1808,7 @@ pub async fn a_parked_session_is_asked_to_work_only_through_its_ingress_obligati
 /// applies at its boundary, and the send lands behind both.
 pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1967,7 +1968,7 @@ impl crate::Clock for ManualClock {
 /// admitting, and the run scope's own recovery owner closes the scope.
 pub async fn a_failing_child_cancel_never_wedges_its_runs_cancel_or_fork(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -2025,7 +2026,7 @@ pub async fn a_failing_child_cancel_never_wedges_its_runs_cancel_or_fork(
 /// delivers through the relay too.
 pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -2219,7 +2220,7 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
 /// intent owed again, and its next delivery completes it.
 pub async fn an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -2332,7 +2333,7 @@ pub async fn an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and
 /// again and only then delivers it.
 pub async fn a_refused_follow_on_shift_keeps_the_intents_obligation_due(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

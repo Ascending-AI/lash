@@ -206,7 +206,6 @@ impl SqliteStoreSet {
                 &database,
                 options.store,
                 Arc::clone(&clock),
-                None,
                 lash_core_execution::FleetFormat::writable(),
                 #[cfg(feature = "testing")]
                 options.pauses.clone(),
@@ -404,6 +403,10 @@ impl SqliteStoreSet {
 }
 
 impl lash_core_execution::StoreSet for SqliteStoreSet {
+    fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
+        Arc::new(SqliteStoreSet::durable_store(self))
+    }
+
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
         &self.inner.binding
     }

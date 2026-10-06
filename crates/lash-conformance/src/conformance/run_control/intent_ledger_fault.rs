@@ -5,6 +5,7 @@
     reason = "law preconditions and outcomes are assertions"
 )]
 use super::{Fixture, ManualClock, shift};
+use crate::ActorContext;
 use lash_core::engine::*;
 use lash_core::store::*;
 use lash_core::testing::Script;
@@ -22,7 +23,7 @@ use std::sync::atomic::Ordering;
 /// next run, and re-arming the obligation makes the intent owed again.
 pub async fn a_store_fault_in_an_intents_delivery_stalls_its_obligation_and_never_wedges_its_session(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -158,7 +159,7 @@ pub async fn a_store_fault_in_an_intents_delivery_stalls_its_obligation_and_neve
 /// so it is owed again and its next delivery completes it.
 pub async fn re_arming_a_refused_intent_makes_it_owed_again_and_its_delivery_completes_it(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

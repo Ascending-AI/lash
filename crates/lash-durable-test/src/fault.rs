@@ -3,17 +3,24 @@
 //!
 //! Every write a node makes goes through its fault store: the store numbers
 //! it under its label, records it, and applies the [`Fault`] a rule gives
-//! it. Reads (`now`, `begin`, `actor`, `owned`) pass through, but a paused
-//! or dead node makes none, as a stopped process could not.
+//! it. An owner commit's domain rows travel inside its transaction, so a cut
+//! at a label cuts them with it. Reads (`now`, `begin`, `actor`, `owned` and
+//! the domain [`DurableReads`]) pass through, but a paused or dead node makes
+//! none, as a stopped process could not.
 
 use crate::clock::SimClock;
 use crate::life::NodeLife;
 use crate::script::{Entry, Fault, Shared, Stored, WriteKind};
+use lash_durable::domain::{
+    ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
+    SnapshotRow, TurnRow, WaitId, WaitRow,
+};
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
-    DurableInstant, DurableStore, Epoch, HeartbeatOutcome, MailCommit, MailTx, NodeLease, NodeSpec,
-    Reaped, StoreFailure, StoreFailureKind,
+    DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit, MailTx,
+    NodeLease, NodeSpec, Reaped, StoreFailure, StoreFailureKind,
 };
+use lash_sansio::{ProcessId, SessionId};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -355,6 +362,54 @@ impl DurableStore for FaultStore {
         self.read(self.inner.actor(actor)).await
     }
 }
+
+#[async_trait::async_trait]
+impl DurableReads for FaultStore {
+    async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError> {
+        self.read(self.inner.turn(session)).await
+    }
+
+    async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {
+        self.read(self.inner.run_records(owner)).await
+    }
+
+    async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
+        self.read(self.inner.snapshot(exec)).await
+    }
+
+    async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {
+        self.read(self.inner.pending_waits(owner)).await
+    }
+
+    async fn wait(&self, id: &WaitId) -> Result<Option<WaitRow>, DurableError> {
+        self.read(self.inner.wait(id)).await
+    }
+
+    async fn process(&self, process: &ProcessId) -> Result<Option<ProcessActorRow>, DurableError> {
+        self.read(self.inner.process(process)).await
+    }
+
+    async fn live_until_descendants(
+        &self,
+        scope: &ScopeKey,
+        limit: usize,
+    ) -> Result<Vec<ProcessId>, DurableError> {
+        self.read(self.inner.live_until_descendants(scope, limit))
+            .await
+    }
+
+    async fn park_events(
+        &self,
+        after: Option<ParkEventSeq>,
+        limit: usize,
+    ) -> Result<Vec<ParkEventRow>, DurableError> {
+        self.read(self.inner.park_events(after, limit)).await
+    }
+}
+
+#[cfg(test)]
+#[path = "fault_domain_tests.rs"]
+mod domain_tests;
 
 #[cfg(test)]
 mod tests {

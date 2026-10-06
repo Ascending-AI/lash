@@ -17,6 +17,7 @@
 //! supplies them as plugin factories — the same way producers from higher
 //! crates reach the tool-batch parallelism law.
 
+use crate::ActorContext;
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
@@ -196,7 +197,7 @@ fn literal_outputs(turn: &crate::AssembledTurn) -> Vec<(String, serde_json::Valu
 )]
 pub async fn public_migrated_tools_redrive_to_literal_outcomes(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    _effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     plugins: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
@@ -219,11 +220,10 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         .id;
 
     let (model, model_calls) = migrated_model(prefix, &target);
-    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     let echo: Arc<dyn crate::ToolProvider> = Arc::new(crate::testing::FixtureTools);
     let factories = plugins

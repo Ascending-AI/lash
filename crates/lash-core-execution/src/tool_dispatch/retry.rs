@@ -357,11 +357,11 @@ mod panic_tests {
             processes: Arc::new(crate::UnavailableProcessService),
             trigger_router: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: crate::runtime::ScopedEffectController::shared(
-                Arc::new(crate::testing::UnavailableEffectController),
-                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
-            )
-            .expect("valid test runtime scope"),
+            effect_controller: crate::ActorContext::unavailable()
+                .scoped(crate::AdmittedScope::runtime_operation(
+                    "test-runtime-effect-controller",
+                ))
+                .expect("valid test runtime scope"),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),

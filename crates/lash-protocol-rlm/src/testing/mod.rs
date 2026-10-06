@@ -28,7 +28,7 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
 /// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
 /// double: for a test that needs a `Backend` value but runs no effect.
 pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
-    lash_conformance::recording_backend_over(sqlite_memory_store_set().await)
+    lash_conformance::backend_over(sqlite_memory_store_set().await)
 }
 
 thread_local! {

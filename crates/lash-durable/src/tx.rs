@@ -5,6 +5,7 @@
 //! one in a single transaction when it is committed, so a transaction is
 //! never held open across an `.await` in the caller's code.
 
+use crate::domain::{DomainWrite, MailDomainWrite};
 use crate::ids::{ActorKey, DurableInstant, Epoch, FormatSet, MailKind, MailSeq, StateRevision};
 
 /// One mail row as the owner reads it.
@@ -40,8 +41,9 @@ pub enum Release {
 /// fenced read; it carries the actor's mailbox position and pending mail as
 /// of that read. [`DurableStore::commit`](crate::DurableStore::commit)
 /// applies it in one transaction whose first statement re-checks the epoch
-/// and bumps the actor's state revision; then the acknowledgement, then the
-/// release.
+/// and bumps the actor's state revision; then its [`DomainWrite`]s in the
+/// order recorded, then the acknowledgement, then the release. A refused
+/// domain write rolls all of it back.
 #[derive(Clone, Debug)]
 pub struct ActorTx {
     actor: ActorKey,
@@ -50,6 +52,7 @@ pub struct ActorTx {
     acked: MailSeq,
     seen: MailSeq,
     mail: Vec<Mail>,
+    domain: Vec<DomainWrite>,
     ack: Option<MailSeq>,
     release: Option<Release>,
 }
@@ -84,6 +87,7 @@ impl ActorTx {
             acked: read.acked,
             seen: read.seen,
             mail: read.mail,
+            domain: Vec::new(),
             ack: None,
             release: None,
         }
@@ -125,6 +129,25 @@ impl ActorTx {
     #[must_use]
     pub fn mail(&self) -> &[Mail] {
         &self.mail
+    }
+
+    /// The domain rows this transaction writes, in order.
+    #[must_use]
+    pub fn domain(&self) -> &[DomainWrite] {
+        &self.domain
+    }
+
+    /// Write `write` when this transaction commits, after the fence and the
+    /// writes recorded before it.
+    pub fn write(&mut self, write: DomainWrite) -> &mut Self {
+        self.domain.push(write);
+        self
+    }
+
+    /// Take the domain rows out of this transaction, for a decorator that
+    /// applies them itself in the same database transaction.
+    pub fn take_domain(&mut self) -> Vec<DomainWrite> {
+        std::mem::take(&mut self.domain)
     }
 
     /// The position this transaction acknowledges through, if any.
@@ -186,6 +209,9 @@ pub enum MailWrite {
         /// The actor.
         actor: ActorKey,
     },
+    /// A conditional domain write; answered in
+    /// [`MailCommit::answers`](crate::MailCommit::answers).
+    Domain(MailDomainWrite),
 }
 
 /// A non-owner's transaction: it creates actors, appends mail and wakes,
@@ -232,6 +258,13 @@ impl MailTx {
     /// Wake `actor` without mail.
     pub fn wake(&mut self, actor: ActorKey) -> &mut Self {
         self.writes.push(MailWrite::Wake { actor });
+        self
+    }
+
+    /// Make the conditional domain write `write` in its place among this
+    /// transaction's writes.
+    pub fn write(&mut self, write: MailDomainWrite) -> &mut Self {
+        self.writes.push(MailWrite::Domain(write));
         self
     }
 }

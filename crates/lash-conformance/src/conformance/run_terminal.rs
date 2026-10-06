@@ -13,6 +13,7 @@
 //!   once across a crash between the two — inside the close, or at the
 //!   report handover before it (FIG-3979) — and never for a parked run.
 
+use crate::ActorContext;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -124,7 +125,7 @@ async fn shift(
 )]
 pub async fn a_committed_run_answers_its_terminal_by_run(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -185,7 +186,7 @@ pub async fn a_committed_run_answers_its_terminal_by_run(
 )]
 pub async fn a_host_id_naming_a_terminal_run_is_answered_not_rerun(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -266,7 +267,7 @@ pub async fn a_host_id_naming_a_terminal_run_is_answered_not_rerun(
 )]
 pub async fn a_run_whose_admission_a_successor_sealed_commits_nothing(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -426,7 +427,7 @@ impl ScopeCloseSink for CrashingRegistryScopeClose {
 /// One shift of the law's session for `request`, as the tier runs it.
 fn work_once<'a>(
     mut runtime: crate::LashRuntime,
-    scope: crate::ScopedEffectController<'a>,
+    scope: crate::ActorContext,
     request: lash_core::engine::ShiftRequest,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
     Box::pin(async move {
@@ -649,7 +650,7 @@ async fn owes_cancel(
 )]
 pub async fn run_scope_close_runs_after_terminal_evidence_at_least_once_never_for_parked(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -871,7 +872,7 @@ impl lash_core::shift::RunSettledSink for CrashingHandover {
 )]
 pub async fn a_run_crashed_at_its_report_handover_still_closes_its_scope(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1002,7 +1003,7 @@ pub async fn a_run_crashed_at_its_report_handover_still_closes_its_scope(
 )]
 pub async fn a_command_runs_redrive_replays_its_recorded_outcome(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1114,7 +1115,7 @@ pub async fn a_command_runs_redrive_replays_its_recorded_outcome(
 )]
 pub async fn a_run_end_closes_its_turn_scope_in_the_process_registry(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -1199,7 +1200,7 @@ pub async fn a_run_end_closes_its_turn_scope_in_the_process_registry(
 )]
 pub async fn a_joined_inputs_turn_scope_closes_with_its_admitting_run(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

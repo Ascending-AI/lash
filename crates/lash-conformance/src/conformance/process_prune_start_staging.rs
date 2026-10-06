@@ -571,19 +571,6 @@ impl crate::ProcessEngine for ModuleNamingEngine {
         MODULE_NAMING_ENGINE
     }
 
-    async fn run(
-        &self,
-        _context: crate::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        Ok(
-            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::Value::Null,
-            ))
-            .into(),
-        )
-    }
-
     fn start_artifacts(
         &self,
         payload: &serde_json::Value,
@@ -613,6 +600,49 @@ impl crate::ProcessEngine for ModuleNamingEngine {
         Err(crate::PluginError::Session(format!(
             "the engine stores no artifact `{artifact_ref}`"
         )))
+    }
+
+    fn state_format(&self) -> crate::EngineStateFormat {
+        crate::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Option<crate::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: crate::EngineState,
+        _event: crate::EngineEvent,
+    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        todo!("L6 (FIG-5175): port ModuleNamingEngine to advance")
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &crate::ProcessDefinitionRef,
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+        Ok(crate::ProcessDefinitionResolution::new(
+            crate::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
     }
 }
 

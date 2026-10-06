@@ -6,6 +6,7 @@
 //! included; the frame cleanup that delete arms outlives a claimant that
 //! dies inside it.
 
+use crate::ActorContext;
 use crate::conformance::DeploymentViewExt as _;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -76,7 +77,7 @@ async fn arm(stores: &Arc<dyn StoreSet>, key: ObligationKey, now_ms: u64) -> Obl
 )]
 pub async fn a_close_acknowledgement_arms_the_session_delete_obligation(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -85,7 +86,7 @@ pub async fn a_close_acknowledgement_arms_the_session_delete_obligation(
 
     let (retained, _) = session(&stores, prefix, "delete-arm-retained").await;
     let failing = administration(
-        Arc::clone(&host),
+        host.clone(),
         &stores,
         CloseSink::new(Arc::clone(&factory), 1),
     );
@@ -147,7 +148,7 @@ pub async fn a_close_acknowledgement_arms_the_session_delete_obligation(
 )]
 pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
     prefix: &str,
-    _host: Arc<dyn crate::EffectHost>,
+    _host: ActorContext,
     stores: Arc<dyn StoreSet>,
     _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -307,7 +308,7 @@ pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
 )]
 pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -413,7 +414,7 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
 )]
 pub async fn the_physical_delete_retires_the_closure_pins_its_close_superseded(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -507,7 +508,7 @@ impl ObligationRelay for DyingPass {
 )]
 pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_settled(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn StoreSet>,
     _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
@@ -560,7 +561,7 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
         .expect("read the delete obligation")
         .expect("the acknowledgement armed the delete");
     let admin = administration(
-        Arc::clone(&host),
+        host.clone(),
         &stores,
         CloseSink::new(Arc::clone(&factory), 0),
     );
@@ -576,7 +577,6 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
     let relay = Arc::new(ArtifactCleanupRelay::new(ArtifactCleanupPorts {
         ledger: stores.artifact_cleanup(),
         authorities: Arc::new(StoreSetAuthorities {
-            effect_host: host,
             sessions: stores.session_store_factory(),
             processes: stores.process_registry(),
             triggers: stores.trigger_store(),

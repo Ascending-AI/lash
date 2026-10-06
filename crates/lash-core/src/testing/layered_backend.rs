@@ -1,19 +1,19 @@
 //! A test backend that decorates the ports of one backend.
 //!
-//! A runtime takes every store port and its effect host from one
-//! [`Backend`](crate::Backend) (ADR 0104, B2). A test that records or faults
-//! a port does not hand the runtime a second port beside the backend; it
-//! layers a decorator over the backend's own port, and [`LayeredBackend`]
-//! builds the backend whose engine and store set answer with the decorated
-//! port and with the inner backend's for every other.
+//! A runtime takes every store port from one [`Backend`](crate::Backend)
+//! (ADR 0104, B2). A test that records or faults a port does not hand the
+//! runtime a second port beside the backend; it layers a decorator over the
+//! backend's own port, and [`LayeredBackend`] builds the backend whose store
+//! set answers with the decorated port and with the inner backend's for
+//! every other. (Its engine half went with the effect engine in I0,
+//! FIG-5194.)
 
 use std::sync::Arc;
 
-use crate::engine::EngineGeneration;
 use crate::{
-    AttachmentStore, Backend, Clock, DeploymentStore, EffectEngine, EffectHost,
-    ModuleArtifactStore, ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry,
-    ProcessWorkWiring, StoreBindingId, StoreSet, TriggerStore,
+    AttachmentStore, Backend, Clock, DeploymentStore, ModuleArtifactStore,
+    ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry, StoreBindingId, StoreSet,
+    TriggerStore,
 };
 
 /// A decorator of one obligation kind's ledger.
@@ -33,7 +33,6 @@ pub struct LayeredBackend {
     inner: Backend,
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<dyn DeploymentStore>,
-    effect_host: Arc<dyn EffectHost>,
     process_registry: Arc<dyn ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
@@ -42,8 +41,6 @@ pub struct LayeredBackend {
     obligation_ledgers: Option<ObligationLedgerLayer>,
     artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
     worker_recovery: Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
-    process_work: ProcessWorkWiring,
-    session_work: Arc<dyn crate::SessionWorkEngine>,
 }
 
 impl LayeredBackend {
@@ -52,7 +49,6 @@ impl LayeredBackend {
         Self {
             clock: inner.clock(),
             session_store_factory: inner.session_store_factory(),
-            effect_host: inner.effect_host(),
             process_registry: inner.process_registry(),
             trigger_store: inner.trigger_store(),
             process_env_store: inner.process_env_store(),
@@ -61,8 +57,6 @@ impl LayeredBackend {
             obligation_ledgers: None,
             artifact_cleanup: inner.artifact_cleanup(),
             worker_recovery: inner.worker_recovery(),
-            process_work: inner.process_work(),
-            session_work: inner.session_work(),
             inner,
         }
     }
@@ -93,37 +87,12 @@ impl LayeredBackend {
         self
     }
 
-    /// Replace the effect host with `layer` over it.
-    pub fn map_effect_host(
-        mut self,
-        layer: impl FnOnce(Arc<dyn EffectHost>) -> Arc<dyn EffectHost>,
-    ) -> Self {
-        self.effect_host = layer(self.effect_host);
-        self
-    }
-
     /// Replace the process registry with `layer` over it.
-    ///
-    /// Refuses when the engine runs its own processes: the backend then
-    /// answers [`Backend::process_registry`] with the process-work wiring's
-    /// registry rather than the store set's, and the layer would be dropped
-    /// without a word. Decorate the store set before the engine is built, or
-    /// build the wiring over the decorated registry with
-    /// [`Self::wire_process_work`].
     pub fn map_process_registry(
         mut self,
         layer: impl FnOnce(Arc<dyn ProcessRegistry>) -> Arc<dyn ProcessRegistry>,
     ) -> Self {
-        assert!(
-            !self.process_work.runs_processes(),
-            "map_process_registry cannot decorate this backend's process \
-             registry: its engine runs its own processes over the registry it \
-             was built with, so the layer would not reach them — decorate the \
-             store set before the engine is built, or use wire_process_work"
-        );
         self.process_registry = layer(self.process_registry);
-        self.process_work =
-            ProcessWorkWiring::without_process_work(Arc::clone(&self.process_registry));
         self
     }
 
@@ -163,37 +132,6 @@ impl LayeredBackend {
         self
     }
 
-    /// Execute the backend's processes through `wire`, which receives the
-    /// (possibly decorated) registry the wiring must be built over.
-    pub fn wire_process_work(
-        mut self,
-        wire: impl FnOnce(Arc<dyn ProcessRegistry>) -> ProcessWorkWiring,
-    ) -> Self {
-        let wiring = wire(Arc::clone(&self.process_registry));
-        self.process_registry = Arc::clone(wiring.registry());
-        self.process_work = wiring;
-        self
-    }
-
-    /// Replace the process-work port with `layer` over it, keeping its
-    /// watched registry.
-    pub fn map_process_work_port(
-        mut self,
-        layer: impl FnOnce(Arc<dyn crate::ProcessWorkSubstrate>) -> Arc<dyn crate::ProcessWorkSubstrate>,
-    ) -> Self {
-        self.process_work = ProcessWorkWiring::new(
-            self.process_work.watched().clone(),
-            layer(Arc::clone(self.process_work.port())),
-        );
-        self
-    }
-
-    /// Execute the backend's sessions on `session_work` (`None`: in process).
-    pub fn with_session_work(mut self, session_work: Arc<dyn crate::SessionWorkEngine>) -> Self {
-        self.session_work = session_work;
-        self
-    }
-
     /// Answer every obligation kind's ledger with `layer` over the inner
     /// store set's ledger of that kind. The layer runs on each ledger read,
     /// so a recorder it installs keeps its state outside the ledger.
@@ -230,14 +168,7 @@ impl LayeredBackend {
             artifact_cleanup: self.artifact_cleanup,
             worker_recovery: self.worker_recovery,
         });
-        Backend::new(Arc::new(LayeredEngine {
-            stores,
-            effect_host: self.effect_host,
-            generation: self.inner.engine().generation().clone(),
-            deployment_registry: self.inner.deployment_registry(),
-            process_work: self.process_work,
-            session_work: self.session_work,
-        }))
+        self.inner.over_stores(stores)
     }
 }
 
@@ -372,45 +303,6 @@ impl LayeredStores {
     }
 }
 
-struct LayeredEngine {
-    stores: Arc<LayeredStoreSet>,
-    effect_host: Arc<dyn EffectHost>,
-    generation: EngineGeneration,
-    /// The inner engine's retirement evidence: the layered backend decorates
-    /// store ports, never the engine's deployments.
-    deployment_registry: Arc<dyn crate::store::fleet_finalize::DeploymentRegistry>,
-    process_work: ProcessWorkWiring,
-    session_work: Arc<dyn crate::SessionWorkEngine>,
-}
-
-impl EffectEngine for LayeredEngine {
-    fn stores(&self) -> Arc<dyn StoreSet> {
-        Arc::clone(&self.stores) as Arc<dyn StoreSet>
-    }
-
-    fn effect_host(&self) -> Arc<dyn EffectHost> {
-        Arc::clone(&self.effect_host)
-    }
-
-    fn generation(&self) -> &EngineGeneration {
-        // The layered backend is the inner backend's substrate with decorated
-        // ports: it shares the inner build's generation, not one of its own.
-        &self.generation
-    }
-
-    fn process_work(&self) -> ProcessWorkWiring {
-        self.process_work.clone()
-    }
-
-    fn session_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
-        Arc::clone(&self.session_work)
-    }
-
-    fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry> {
-        Arc::clone(&self.deployment_registry)
-    }
-}
-
 #[derive(Clone)]
 struct LayeredStoreSet {
     inner: Arc<dyn StoreSet>,
@@ -430,6 +322,10 @@ struct LayeredStoreSet {
 }
 
 impl StoreSet for LayeredStoreSet {
+    fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
+        self.inner.durable_store()
+    }
+
     fn binding_identity(&self) -> &StoreBindingId {
         &self.binding
     }
@@ -512,28 +408,5 @@ impl StoreSet for LayeredStoreSet {
 
     fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger> {
         Arc::clone(&self.artifact_cleanup)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A backend whose engine runs its own processes answers
-    /// [`Backend::process_registry`] with the process-work wiring's registry,
-    /// not the store set's, so a layer over the store-set registry would be
-    /// silently dropped. `map_process_registry` refuses that combination.
-    #[tokio::test]
-    #[should_panic(expected = "map_process_registry cannot decorate")]
-    async fn map_process_registry_refuses_an_engine_with_its_own_process_work() {
-        let engine_executed =
-            LayeredBackend::over(crate::testing::sqlite_recording_backend().await)
-                .wire_process_work(crate::testing::process_work_wiring_for_registry)
-                .into_backend();
-        assert!(
-            engine_executed.process_work().runs_processes(),
-            "the fixture's engine runs its own processes"
-        );
-        let _ = LayeredBackend::over(engine_executed).map_process_registry(|registry| registry);
     }
 }

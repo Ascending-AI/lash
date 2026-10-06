@@ -1,5 +1,6 @@
 //! Binding, launch recovery and discharge of admitted process starts.
 use super::*;
+use crate::ActorContext;
 use crate::runtime::process::{DeclaredStartPhase, StartCancelDecision, StartKey};
 use crate::tool_dispatch::{RunStartPrepared, RunStepHandle, StartLaunch};
 
@@ -238,7 +239,7 @@ pub(super) async fn launch_start(
 /// Issue once in the declare frame, through the same body/result bridge as X.
 /// Launch, the gate read and discharge effects all belong to this VM run.
 pub(super) fn issue_prepare<'a>(
-    scoped: &'a ScopedEffectController<'a>,
+    scoped: &'a ActorContext,
     call_id: ToolCallId,
     obligation: DeclaredStartObligation,
     handlers: Handlers<'a>,
@@ -246,7 +247,7 @@ pub(super) fn issue_prepare<'a>(
 ) -> Result<RunStepHandle<'a, RunStartPrepared>, SingletonRunError> {
     scoped.admit_journal_write()?;
     let name = record_name(&call_id, "start:prepare");
-    Ok(scoped.controller().start_run_prepare(
+    Ok(scoped.start_run_prepare(
         name,
         Box::pin(async move {
             let handlers = handlers.get();

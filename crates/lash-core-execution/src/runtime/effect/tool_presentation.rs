@@ -43,7 +43,7 @@ pub(crate) async fn record_tool_presentation_plan(
         },
     );
     let recorded = controller
-        .execute_effect(
+        .vm_effect(
             envelope,
             super::RuntimeEffectLocalExecutor::language_runtime_value_with(move |_| async move {
                 plugins

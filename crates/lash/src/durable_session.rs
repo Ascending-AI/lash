@@ -57,7 +57,8 @@
 //! default.
 
 use crate::core::ResolvedQueuedWork;
-use crate::support::{Arc, DeploymentStore, EffectHost, EmbedError, Result, TurnInput};
+use crate::support::{Arc, DeploymentStore, EmbedError, Result, TurnInput};
+use lash_core::ActorContext;
 use lash_core::LiveReplayStore;
 use lash_core::facade_support::DurableSessionOps;
 use lash_core::runtime::{
@@ -94,7 +95,7 @@ pub struct DurableSession {
     /// handle waits on, the effect host its terminal reads and cancels go
     /// through, and the live replay its events come from.
     work: Arc<ResolvedQueuedWork>,
-    effect_host: Arc<dyn EffectHost>,
+    effect_host: ActorContext,
     live_replay_store: Arc<dyn LiveReplayStore>,
     /// The host's models a [`send`](Self::send) checks a per-run model key
     /// against before the input is accepted (FIG-3877).
@@ -160,7 +161,7 @@ impl DurableSession {
         catalog: Arc<dyn DeploymentStore>,
         work: Arc<ResolvedQueuedWork>,
         ingress: lash_core::shift::IngressRelay,
-        effect_host: Arc<dyn EffectHost>,
+        effect_host: ActorContext,
         live_replay_store: Arc<dyn LiveReplayStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
         trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
@@ -196,7 +197,7 @@ impl DurableSession {
         store: lash_core::store::SessionStore,
         work: Arc<ResolvedQueuedWork>,
         ingress: lash_core::shift::IngressRelay,
-        effect_host: Arc<dyn EffectHost>,
+        effect_host: ActorContext,
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn DeploymentStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
@@ -230,7 +231,7 @@ impl DurableSession {
             store: self.store().await?.clone(),
             ops: self.ops.clone(),
             work: self.work.clone(),
-            effect_host: Arc::clone(&self.effect_host),
+            effect_host: self.effect_host.clone(),
             live_replay_store: Arc::clone(&self.live_replay_store),
             models: Arc::clone(&self.models),
         })

@@ -104,6 +104,10 @@ pub(in crate::runtime) struct CurrentOwnerCapability {
     plugins: Arc<crate::PluginSession>,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
     runtime_lease_executor_id: String,
+    #[expect(
+        dead_code,
+        reason = "L6 (FIG-5175): the engine process drive reads it; ProcessEngine::run, its only reader, is deleted (I0)"
+    )]
     turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
 }
 
@@ -177,6 +181,10 @@ impl CurrentOwnerCapability {
 
     /// The runtime store of the session these services resolve; a process
     /// runtime has none.
+    #[expect(
+        dead_code,
+        reason = "L6 (FIG-5175): the engine process drive reads it; ProcessEngine::run, its only reader, is deleted (I0)"
+    )]
     pub(in crate::runtime) fn session_runtime_store(&self) -> Option<Arc<dyn crate::RuntimeStore>> {
         self.session()
             .and_then(|session| session.store.as_ref())
@@ -185,6 +193,13 @@ impl CurrentOwnerCapability {
 
     /// Who a dispatch built from these services runs for: the session on its
     /// current agent frame, or the process.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "L6 (FIG-5175): the engine process drive reads it; ProcessEngine::run, its only reader, is deleted (I0)"
+        )
+    )]
     pub(in crate::runtime) fn execution_owner(
         &self,
     ) -> Result<crate::ExecutionOwner, crate::PluginError> {
@@ -481,7 +496,7 @@ impl RuntimeSessionServices {
 
     pub fn direct_completion_client<'run>(
         self: &Arc<Self>,
-        effect_controller: crate::runtime::ScopedEffectController<'run>,
+        effect_controller: crate::ActorContext,
         turn_id: Option<TurnId>,
     ) -> DirectCompletionClient<'run> {
         lash_core_execution::core_internal::runtime_direct_completion_client(

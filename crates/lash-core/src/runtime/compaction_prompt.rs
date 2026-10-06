@@ -9,13 +9,13 @@
 //! never renders again, so a prompt command or a redeploy in between cannot
 //! change what an already-journaled summarizer call was sent.
 
+use crate::ActorContext;
 use std::sync::Arc;
 
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::{
     EffectAddress, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeErrorCode,
-    ScopedEffectController,
 };
 
 /// What one compaction prompt renders from: recorded data only.
@@ -51,7 +51,7 @@ impl CompactionPromptKey<'_> {
 /// `controller`, or serve the text its first execution recorded. `None` when
 /// the render is empty.
 pub(in crate::runtime) async fn recorded_compaction_prompt(
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     key: CompactionPromptKey<'_>,
     input: CompactionPromptInput,
 ) -> Result<Option<Arc<str>>, RuntimeEffectControllerError> {
@@ -63,7 +63,7 @@ pub(in crate::runtime) async fn recorded_compaction_prompt(
         replay_key,
     );
     controller
-        .execute_effect(
+        .turn_effect(
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::RenderCompactionPrompt {

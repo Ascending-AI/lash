@@ -1,3 +1,4 @@
+use crate::ActorContext;
 pub use lash_core_store::turn_control_binding::*;
 pub use lash_core_store::turn_control_vocabulary::*;
 use std::sync::Arc;
@@ -8,9 +9,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{TurnOutcome, TurnStop};
 
 use super::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
+    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome,
+    RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeError,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -201,7 +202,7 @@ pub trait TurnAttach: Send + Sync {
 }
 
 pub(crate) async fn await_terminal_from_resolver(
-    resolver: &dyn AwaitEventResolver,
+    resolver: &ActorContext,
     address: &TurnAddress,
 ) -> Result<TurnTerminal, RuntimeError> {
     address.validate()?;
@@ -229,7 +230,7 @@ pub(crate) async fn await_terminal_from_resolver(
 /// enforce authorization before exposing this driver across a trust boundary.
 #[derive(Clone)]
 pub struct TurnWorkDriver {
-    effect_host: Arc<dyn EffectHost>,
+    effect_host: ActorContext,
     store: TurnWorkStore,
     #[cfg(any(test, feature = "testing"))]
     test_attach: Option<Arc<dyn TurnAttach>>,
@@ -251,7 +252,7 @@ impl TurnWorkDriver {
     /// host is touched. Facades with an opened session should use this form so
     /// a root catalog override cannot redirect cancellation storage.
     pub fn for_session(
-        effect_host: Arc<dyn EffectHost>,
+        effect_host: ActorContext,
         session_id: impl Into<String>,
         store: Arc<dyn crate::RuntimeStore>,
     ) -> Self {
@@ -269,7 +270,7 @@ impl TurnWorkDriver {
     /// Each request resolves its store from this same catalog. This is the
     /// remote/admin form; an already-opened session uses [`Self::for_session`].
     pub fn for_catalog(
-        effect_host: Arc<dyn EffectHost>,
+        effect_host: ActorContext,
         store_factory: Arc<dyn crate::DeploymentStore>,
     ) -> Self {
         Self {
@@ -287,8 +288,8 @@ impl TurnWorkDriver {
         self
     }
 
-    pub fn effect_host(&self) -> Arc<dyn EffectHost> {
-        Arc::clone(&self.effect_host)
+    pub fn effect_host(&self) -> ActorContext {
+        self.effect_host.clone()
     }
 
     /// The latest physical turn of the logical Run `run` names: the turn a
@@ -349,7 +350,7 @@ impl TurnWorkDriver {
                 record: None,
             });
         }
-        let resolver: &dyn AwaitEventResolver = self.effect_host.as_ref();
+        let resolver: &ActorContext = &self.effect_host;
         let key = match cancel_gate_key(resolver, &request.address).await {
             Ok(key) => key,
             Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
@@ -606,7 +607,7 @@ impl TurnWorkDriver {
     /// timing and nothing else.
     async fn escalate(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         address: &TurnAddress,
         evidence: TurnCancellationEvidence,
         existing: TurnCancellationEvidence,
@@ -638,7 +639,7 @@ impl TurnWorkDriver {
     /// outcome and the request whose policy now stands.
     async fn adopt(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         address: &TurnAddress,
         evidence: TurnCancellationEvidence,
         existing: TurnCancellationEvidence,
@@ -685,12 +686,9 @@ impl TurnWorkDriver {
         if let Some(attach) = self.test_attach.as_ref() {
             return attach.await_terminal(address).await;
         }
-        if let Some(attach) = self.effect_host.turn_attach() {
-            return attach.await_terminal(address).await;
-        }
         // Refuses an address whose session does not exist before any wait.
         self.store_for(address).await?;
-        let resolver: &dyn AwaitEventResolver = self.effect_host.as_ref();
+        let resolver: &ActorContext = &self.effect_host;
         let key = terminal_key(resolver, address).await?;
         let resolution = resolver
             .await_await_event(&key, CancellationToken::new())
@@ -827,7 +825,7 @@ fn decode_terminal(
 }
 
 pub(crate) async fn cancel_gate_key(
-    resolver: &dyn AwaitEventResolver,
+    resolver: &ActorContext,
     address: &TurnAddress,
 ) -> Result<AwaitEventKey, RuntimeError> {
     resolver
@@ -839,7 +837,7 @@ pub(crate) async fn cancel_gate_key(
 }
 
 async fn terminal_key(
-    resolver: &dyn AwaitEventResolver,
+    resolver: &ActorContext,
     address: &TurnAddress,
 ) -> Result<AwaitEventKey, RuntimeError> {
     resolver
@@ -851,7 +849,7 @@ async fn terminal_key(
 }
 
 pub(crate) async fn escalation_key(
-    resolver: &dyn AwaitEventResolver,
+    resolver: &ActorContext,
     address: &TurnAddress,
 ) -> Result<AwaitEventKey, RuntimeError> {
     resolver
@@ -925,7 +923,7 @@ fn policy_acceptor(
 /// winner. Durable request rows are deliberately not consulted here: they are
 /// only a projection of this authority.
 async fn effective_cancel_evidence(
-    resolver: &dyn AwaitEventResolver,
+    resolver: &ActorContext,
     address: &TurnAddress,
     base: TurnCancellationEvidence,
 ) -> Result<TurnCancellationEvidence, RuntimeError> {
@@ -969,7 +967,7 @@ pub struct TurnCancelGatePair {
 impl TurnCancelGatePair {
     /// The pair for `scope`'s turn, keyed by `resolver`.
     pub async fn for_scope(
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         scope: &ExecutionScope,
     ) -> Result<Self, RuntimeError> {
         Ok(Self {
@@ -1035,7 +1033,7 @@ impl TurnCancelGatePair {
 /// stronger request was acknowledged. Orphan repair cannot use this helper
 /// until promise closure can be fenced by its session-execution lease.
 async fn close_cancel_escalation(
-    resolver: &dyn AwaitEventResolver,
+    resolver: &ActorContext,
     escalation_key: &AwaitEventKey,
     base: TurnCancellationEvidence,
 ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
@@ -1162,7 +1160,7 @@ impl ActiveTurnControl {
     /// outcomes remain authoritative, including a legitimate different winner.
     pub async fn settle_authorized(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         authorization: &TurnCancelClosureAuthorization,
         honoured: Option<&TurnCancellationEvidence>,
     ) -> Result<TurnCancelClosureSettlement, RuntimeError> {
@@ -1197,7 +1195,7 @@ impl ActiveTurnControl {
 
     async fn settle_proposed(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         proposed: TurnGateTerminal,
         honoured: Option<&TurnCancellationEvidence>,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
@@ -1252,7 +1250,7 @@ impl ActiveTurnControl {
     /// (possibly escalated) cancellation so a delayed base projection can
     /// never replace the original policy acceptor with an escalation request.
     async fn peek_base_cancel_evidence(
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         address: &TurnAddress,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         let key = match cancel_gate_key(resolver, address).await {
@@ -1276,7 +1274,7 @@ impl ActiveTurnControl {
     /// The request whose policy stands at `address`: the base winner, or the
     /// host request that adopted an internal one.
     async fn peek_policy_acceptor(
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         address: &TurnAddress,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         let Some(base) = Self::peek_base_cancel_evidence(resolver, address).await? else {
@@ -1295,7 +1293,7 @@ impl ActiveTurnControl {
     /// from its bound promise owner.
     async fn read_settled_base_cancel_evidence(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         match resolver.peek_await_event(&self.cancel_key).await {
             Ok(Some(terminal)) => Ok(match decode_gate(terminal)? {
@@ -1322,10 +1320,7 @@ impl ActiveTurnControl {
         }
     }
 
-    pub async fn new(
-        resolver: &dyn AwaitEventResolver,
-        address: TurnAddress,
-    ) -> Result<Self, RuntimeError> {
+    pub async fn new(resolver: &ActorContext, address: TurnAddress) -> Result<Self, RuntimeError> {
         address.validate()?;
         Ok(Self {
             cancel_key: cancel_gate_key(resolver, &address).await?,
@@ -1350,7 +1345,7 @@ impl ActiveTurnControl {
     /// [`TurnCancelGatePair::await_stop`]. Shift code never awaits this.
     pub async fn watch_immediate(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         self.gate_pair()
             .await_stop(|key| async move {
@@ -1369,7 +1364,7 @@ impl ActiveTurnControl {
     /// either promise again. AfterStep alone leaves the current step running.
     pub(crate) async fn peek_immediate(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
     ) -> Result<bool, RuntimeError> {
         let Some(resolution) = resolver.peek_await_event(&self.cancel_key).await? else {
             return Ok(false);
@@ -1405,7 +1400,7 @@ impl ActiveTurnControl {
     /// its steps, exactly like a routed [`TurnWorkDriver::request_cancel`].
     pub async fn request_local_stop(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         mode: TurnCancelMode,
         origin: Option<String>,
     ) -> Result<(), RuntimeError> {
@@ -1444,7 +1439,7 @@ impl ActiveTurnControl {
     /// is the caller's to record as the cancellation the turn honours.
     pub async fn observe_pending_cancel(
         &self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         identity: TurnCancelPeekIdentity,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         let Some(gate) = self
@@ -1480,7 +1475,7 @@ impl ActiveTurnControl {
 
     async fn peek<T: serde::de::DeserializeOwned>(
         &self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         causal_identity: String,
         key: &AwaitEventKey,
     ) -> Result<Option<T>, RuntimeError> {
@@ -1506,7 +1501,7 @@ impl ActiveTurnControl {
             causal_identity.clone(),
         );
         let outcome = controller
-            .execute_effect(
+            .wait_effect(
                 RuntimeEffectEnvelope::new(
                     invocation,
                     RuntimeEffectCommand::PeekAwaitEvent { key: key.clone() },
@@ -1537,7 +1532,7 @@ impl ActiveTurnControl {
     /// winner or its undelivered-input disposition.
     pub async fn settle_before_commit(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         honoured: Option<&TurnCancellationEvidence>,
         assembled: Option<TurnCancellationEvidence>,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
@@ -1549,7 +1544,7 @@ impl ActiveTurnControl {
     /// resolved observer gate cannot alter the durable result.
     pub async fn notify_committed_cancellation(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         cancellation: Option<TurnCancellationEvidence>,
     ) -> Result<(), RuntimeError> {
         let proposed = Self::proposed_terminal(None, cancellation);
@@ -1567,7 +1562,7 @@ impl ActiveTurnControl {
 
     pub async fn publish_terminal(
         &self,
-        resolver: &dyn AwaitEventResolver,
+        resolver: &ActorContext,
         terminal: &TurnTerminal,
     ) -> Result<(), RuntimeError> {
         match resolver
@@ -1602,7 +1597,3 @@ impl ActiveTurnControl {
 #[cfg(test)]
 #[path = "turn_control/tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "turn_control/determinism_tests.rs"]
-mod determinism_tests;

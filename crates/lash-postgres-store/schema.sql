@@ -1341,3 +1341,34 @@ CREATE TABLE IF NOT EXISTS lash_actor_mail (
     appended_at_ms BIGINT NOT NULL,
     PRIMARY KEY (actor_key, seq)
 );
+
+-- Run records (I0, FIG-5194; statements: V0, then L4): the RunLedger
+-- records as rows, keyed by (owner, run, ordinal), the second fence. An
+-- execution's start commits before its body runs; one outcome per call.
+CREATE TABLE IF NOT EXISTS lash_run_records (
+    owner_key TEXT COLLATE "C" NOT NULL,
+    run_seq BIGINT NOT NULL,
+    ordinal BIGINT NOT NULL,
+    kind TEXT NOT NULL CONSTRAINT ck_run_records_kind
+        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'decide', 'present', 'retry')),
+    call_id TEXT,
+    record_json TEXT NOT NULL,
+    written_epoch BIGINT NOT NULL,
+    PRIMARY KEY (owner_key, run_seq, ordinal)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_run_records_outcome
+    ON lash_run_records (owner_key, run_seq, call_id)
+    WHERE kind = 'x_outcome' AND call_id IS NOT NULL;
+
+-- VM snapshots (I0, FIG-5194; statements: V0, then L7): the latest snapshot
+-- of each code cell ('c/...') and lashlang process ('p/...'),
+-- compare-and-set on rev.
+CREATE TABLE IF NOT EXISTS lash_exec_snapshots (
+    exec_key TEXT COLLATE "C" PRIMARY KEY,
+    rev BIGINT NOT NULL CONSTRAINT ck_exec_snapshots_rev CHECK (rev >= 1),
+    snapshot_ref TEXT NOT NULL,
+    executable_identity TEXT NOT NULL,
+    format_version INTEGER NOT NULL,
+    written_epoch BIGINT NOT NULL
+);

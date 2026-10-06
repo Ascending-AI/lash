@@ -4,7 +4,6 @@ use lash_core::JsonSchema;
 use lash_core::*;
 mod conformance;
 pub use conformance::*;
-mod effect_host_macros;
 mod interleave;
 use lash_core::attachments::*;
 use lash_core::facade_support::*;
@@ -17,6 +16,8 @@ use lash_core::testing::conformance_support::default_queued_drain_policy;
 /// keys back, exactly as lash's own start paths do.
 const DERIVED_START_KEYS: lash_core::core_internal::StartKeyDerivation =
     lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS;
+#[cfg(test)]
+mod backend_assembly_tests;
 #[cfg(test)]
 mod file_attachment_store_tests;
 #[cfg(feature = "lashlang")]

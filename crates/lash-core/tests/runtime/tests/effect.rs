@@ -4,11 +4,6 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use crate::runtime_support::effect_controller_doubles as controller_doubles;
-pub(crate) use crate::runtime_support::effect_controller_doubles::*;
-pub(crate) use crate::runtime_support::effect_recording_authority::*;
-pub(in crate::runtime::tests) use controller_doubles::RejectingEffectController;
-use controller_doubles::{StrictReplayJournal, WrongOutcomeEffectController};
 use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_core::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, LlmToolChoice,
@@ -19,10 +14,7 @@ use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 mod fig1127;
 
-mod fig2471;
-use crate::runtime_support::effect_recording_authority as recording_authority;
 mod response_settlement;
-pub(super) use recording_authority::layered_effect_host;
 
 const SEED: u64 = 0x5_e100;
 

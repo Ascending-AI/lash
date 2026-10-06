@@ -1,6 +1,7 @@
 //! Physical capture and adoption use the shared K6 codec.
 
 use super::*;
+use crate::ActorContext;
 use crate::tool_run::CompletionSource;
 
 impl RunCoordinator<'_> {
@@ -209,7 +210,7 @@ impl<'a> RunCoordinator<'a> {
     /// # Errors
     /// A typed owner, segment, receipt, binding or retained-material refusal.
     pub async fn adopt(
-        scoped: &'a ScopedEffectController<'a>,
+        scoped: &'a ActorContext,
         owner: EffectOpener,
         successor: SegmentOrdinal,
         available: Vec<PluginRevision>,
@@ -241,7 +242,7 @@ impl<'a> RunCoordinator<'a> {
                 &name,
             );
             let outcome = scoped
-                .execute_effect(
+                .tool_effect(
                     crate::RuntimeEffectEnvelope::new(
                         invocation,
                         crate::RuntimeEffectCommand::RestoreRunMaterial {
@@ -528,16 +529,14 @@ impl<'a> RunCoordinator<'a> {
 // Admission and consumption borrow their existing SDK record. Only a fresh
 // callback reads authority, and only an accepted mark replaces the frame result.
 pub(super) async fn generation_cut_entry(
-    controller: &dyn crate::RuntimeEffectController,
+    _controller: &ActorContext,
     enabled: bool,
     mut record: RunRecord,
 ) -> Result<Option<RunJournalEntry>, String> {
-    if enabled
-        && let Some(reason) = controller
-            .peek_run_cut()
-            .await
-            .map_err(|error| error.to_string())?
-    {
+    // `peek_run_cut` folded to `None` (I0, FIG-5194): no host cuts a Run.
+    // L4 (FIG-5174) deletes this plumbing with the run coordinator's journal.
+    let cut: Option<crate::BoundaryReason> = None;
+    if enabled && let Some(reason) = cut {
         record.events = vec![RunEvent::CutChecked { reason }];
         record.trace = None;
         return Ok(Some(RunJournalEntry {

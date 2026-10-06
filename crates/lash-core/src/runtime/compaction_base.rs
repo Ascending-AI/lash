@@ -12,13 +12,14 @@
 //! step tells them apart: a repeated compaction is the run's next
 //! compaction, which records a base of its own.
 
+use crate::ActorContext;
 use crate::runtime::LashRuntime;
 use crate::runtime::effect::CompactionBase;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::{
     EffectAddress, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeError,
-    RuntimeErrorCode, ScopedEffectController,
+    RuntimeErrorCode,
 };
 
 /// The replay key of the base the run's `ordinal`th compaction records.
@@ -37,7 +38,7 @@ impl LashRuntime {
     /// store does not answer with.
     pub(in crate::runtime) async fn adopt_recorded_compaction_base(
         &mut self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         ordinal: u32,
     ) -> Result<CompactionBase, RuntimeError> {
         let session_id = self.state.session_id.clone();
@@ -61,7 +62,7 @@ impl LashRuntime {
             },
         };
         let base = controller
-            .execute_effect(
+            .turn_effect(
                 RuntimeEffectEnvelope::new(
                     invocation,
                     RuntimeEffectCommand::RecordCompactionBase {

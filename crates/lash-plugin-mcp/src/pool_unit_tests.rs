@@ -1742,8 +1742,7 @@ async fn mcp_law_tool_error_preserves_cause_and_attachment_roots() {
             lash_core::facade_support::FileAttachmentStore::new(root.path()),
         )),
     );
-    let controller: Arc<dyn lash_core::RuntimeEffectController> =
-        Arc::new(lash_core::testing::UnavailableEffectController);
+    let controller = lash_core::ActorContext::unavailable();
     let dispatch = lash_core::testing::TestExecutionContextBuilder::over_controller(controller)
         .attachment_store(store)
         .build()

@@ -22,19 +22,35 @@
 //! PostgreSQL, the store's injected clock on SQLite. No instant a caller
 //! computes is ever stored.
 //!
+//! Runtime lanes add their own rows to these commits through [`domain`]:
+//! [`DomainWrite`]s on an owner commit, [`MailDomainWrite`]s on a mailbox
+//! commit, and [`DurableReads`] to read them back.
+//!
 //! The SQL lives in one module per dialect, in the store crates that
 //! implement [`DurableStore`]; this crate holds none.
 
 mod config;
+mod dispatch;
+pub mod domain;
+mod dues;
+mod durable_config;
 mod error;
 mod ids;
+mod labels;
 #[cfg(feature = "testing")]
 pub mod laws;
 mod port;
+mod probe;
 pub mod runner;
 mod tx;
 
 pub use config::{LeaseConfig, LeaseConfigError, LeaseSettings};
+pub use dispatch::ActorDispatch;
+pub use domain::{DomainRefusal, DomainWrite, DurableReads, MailAnswer, MailDomainWrite};
+pub use dues::{DueSource, Dues};
+pub use durable_config::{
+    DurableConfig, DurableConfigError, DurableSettings, GroupCommit, Notifier,
+};
 pub use error::{DurableError, Fenced, MailRefusal, StoreFailure, StoreFailureKind};
 pub use ids::{
     ActorKey, ActorKeyError, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, FormatSet,
@@ -44,4 +60,5 @@ pub use port::{
     ActorCommit, ActorSnapshot, ActorState, ClaimCause, Claimed, DurableStore, HeartbeatOutcome,
     MailCommit, NodeLease, NodeSpec, Owner, Reaped, Woken,
 };
+pub use probe::{DurableProbe, NoProbe};
 pub use tx::{ActorTx, Mail, MailTx, MailWrite, OpenedActor, Release};

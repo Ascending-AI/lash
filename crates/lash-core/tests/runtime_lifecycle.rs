@@ -42,10 +42,7 @@ mod runtime {
         pub(crate) use std::sync::Mutex as StdMutex;
         pub(crate) use tokio::sync::mpsc;
 
-        pub(crate) mod effect {
-            pub(crate) use crate::runtime_support::effect_controller_doubles::*;
-            pub(crate) use crate::runtime_support::effect_recording_authority::*;
-        }
+        pub(crate) mod effect {}
 
         pub(crate) use crate::runtime_support::{durable_state, session_view};
         pub(crate) use crate::runtime_support::{

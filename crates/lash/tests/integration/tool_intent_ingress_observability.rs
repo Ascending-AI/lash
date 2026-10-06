@@ -16,7 +16,7 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open a memory store set");
-    let backend = lash_conformance::recording_backend_over(Arc::new(stores));
+    let backend = lash_conformance::backend_over(Arc::new(stores));
     let registry = backend.process_registry();
     let mut targets = Vec::new();
     for _ in 0..2 {

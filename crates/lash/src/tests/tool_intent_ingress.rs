@@ -1,34 +1,29 @@
 use super::*;
+
 use lash_core::ProcessEventLogTestSupport as _;
+
 use lash_sansio::ProcessId;
+
 use lash_sansio::SessionId;
 
 const SESSION: &str = "intent-ingress-session";
+
 const SCOPE: &str = "intent-ingress-turn";
+
 const EVENT: &str = "intent.ingress.realized";
+
 const SIGNAL: &str = "ingress-signal";
 
-/// The controller-owned (ordinal-addressed) tier: a backend whose
-/// effect host is a [`KeyJournalController`].
 /// The core, its registry, and the id of the fixture process every emit,
 /// signal and cancel intent targets.
 async fn ingress_core(
     backend: lash_core::Backend,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
-    ingress_core_with_effect_host(backend, Arc::new(KeyJournalController::default())).await
-}
-
-/// `backend` with its effect host replaced by `effect_host`.
-async fn ingress_core_with_effect_host(
-    backend: lash_core::Backend,
-    effect_host: Arc<dyn lash_core::EffectHost>,
-) -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
-    ingress_core_over(backend, Some(effect_host), None).await
+    ingress_core_over(backend, None).await
 }
 
 async fn ingress_core_over(
     backend: lash_core::Backend,
-    effect_host: Option<Arc<dyn lash_core::EffectHost>>,
     process_env_store: Option<Arc<dyn lash_core::ProcessExecutionEnvStore>>,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
@@ -57,7 +52,6 @@ async fn ingress_core_over(
         .id;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
         backend,
-        effect_host,
         process_env_store,
     )))
     .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
@@ -115,57 +109,17 @@ async fn registered_process_count(registry: &Arc<dyn ProcessRegistry>) -> Result
         .len())
 }
 
-/// `backend`, with its effect host and process-env store replaced where
-/// the test names its own.
+/// `backend`, with its process-env store replaced where the test names its
+/// own.
 fn ingress_backend(
     backend: lash_core::Backend,
-    effect_host: Option<Arc<dyn lash_core::EffectHost>>,
     process_env_store: Option<Arc<dyn lash_core::ProcessExecutionEnvStore>>,
 ) -> lash_core::Backend {
     let mut decorated = DecoratedBackend::over(backend);
-    if let Some(effect_host) = effect_host {
-        decorated = decorated.effect_host(move |_| effect_host);
-    }
     if let Some(process_env_store) = process_env_store {
         decorated = decorated.process_env_store(move |_| process_env_store);
     }
     decorated.into()
-}
-
-/// A second invocation over `first`'s durable backend with a fresh
-/// [`KeyJournalController`]: a fresh effect journal, which is exactly what a
-/// redelivered submission gets.
-async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
-        first.backend().clone(),
-        Some(Arc::new(KeyJournalController::default())),
-        None,
-    )))
-    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-    .plugin(lash_core::testing::process_engine_plugin_fixture())
-    .build(crate::testing::runtime_lease_owner())?;
-    core.host_artifacts()
-        .publish_process_env(
-            &lash_core::HostArtifactPin::mint(),
-            &lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::AdmittedPluginConfig::default(),
-                lash_core::SessionPolicy {
-                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-                    ..lash_core::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                    )
-                },
-            ),
-        )
-        .await?;
-    let _session = core
-        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
-    Ok(core)
 }
 
 /// Registers the subscription a submitted occurrence must reserve a delivery
@@ -220,7 +174,6 @@ async fn register_ingress_trigger_subscription(
 
 async fn ingress_core_with_trigger_store(
     backend: lash_core::Backend,
-    effect_host: Arc<dyn lash_core::EffectHost>,
 ) -> Result<(
     LashCore,
     Arc<dyn lash_core::TriggerStore>,
@@ -232,14 +185,11 @@ async fn ingress_core_with_trigger_store(
         register_ingress_trigger_subscription(store.as_ref(), backend.process_env_store().as_ref())
             .await?;
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
-        backend,
-        Some(effect_host),
-        None,
-    )))
-    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-    .plugin(lash_core::testing::process_engine_plugin_fixture())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core =
+        explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(backend, None)))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(lash_core::testing::process_engine_plugin_fixture())
+            .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
@@ -395,7 +345,7 @@ async fn host_register_trigger_realizes_and_fires_in_sqlite() -> Result<()> {
             .expect("open SQLite store set"),
     );
     Box::pin(host_register_trigger_realizes_and_fires(
-        lash_conformance::recording_backend_over(stores),
+        lash_conformance::backend_over(stores),
     ))
     .await
 }
@@ -418,7 +368,7 @@ async fn host_register_trigger_realizes_and_fires_in_postgres() -> Result<()> {
         )),
     ));
     Box::pin(host_register_trigger_realizes_and_fires(
-        lash_conformance::recording_backend_over(stores),
+        lash_conformance::backend_over(stores),
     ))
     .await
 }
@@ -428,8 +378,7 @@ async fn host_register_trigger_realizes_and_fires_in_postgres() -> Result<()> {
 #[tokio::test]
 async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
-    let (core, store, subscription, _) =
-        ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
+    let (core, store, subscription, _) = ingress_core_with_trigger_store(backend).await?;
     let ingress = core.tool_intents(
         crate::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, SCOPE),
@@ -533,14 +482,11 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
         ),
     )
     .await?;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
-        backend,
-        Some(Arc::new(KeyJournalController::default())),
-        None,
-    )))
-    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-    .plugin(lash_core::testing::process_engine_plugin_fixture())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core =
+        explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(backend, None)))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(lash_core::testing::process_engine_plugin_fixture())
+            .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
@@ -661,8 +607,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
 async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_exactly_once()
 -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
-    let (core, store, _subscription, _) =
-        ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
+    let (core, store, _subscription, _) = ingress_core_with_trigger_store(backend).await?;
     let ingress = core.tool_intents(
         crate::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, SCOPE),
@@ -750,8 +695,7 @@ async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_e
 #[tokio::test]
 async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
-    let (core, store, _, _) =
-        ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
+    let (core, store, _, _) = ingress_core_with_trigger_store(backend).await?;
     let ingress = core.tool_intents(
         crate::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, SCOPE),
@@ -787,304 +731,6 @@ async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Resul
     Ok(())
 }
 
-/// The backend's process-env store, counting publications and optionally failing acquisitions.
-struct ProbeProcessEnvStore {
-    puts: std::sync::atomic::AtomicUsize,
-    fail_acquire: std::sync::atomic::AtomicBool,
-    inner: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-}
-
-impl ProbeProcessEnvStore {
-    fn over(inner: Arc<dyn lash_core::ProcessExecutionEnvStore>) -> Self {
-        Self {
-            puts: std::sync::atomic::AtomicUsize::new(0),
-            fail_acquire: std::sync::atomic::AtomicBool::new(false),
-            inner,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
-    async fn publish_process_execution_env(
-        &self,
-        claim: &lash_core::ReferrerClaim,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-        bytes: &[u8],
-    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
-        self.puts.fetch_add(1, Ordering::SeqCst);
-        self.inner
-            .publish_process_execution_env(claim, env_ref, bytes)
-            .await
-    }
-
-    async fn acquire_process_execution_env(
-        &self,
-        claim: &lash_core::ReferrerClaim,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
-        if self.fail_acquire.load(Ordering::SeqCst) {
-            return Err(lash_core::ArtifactStoreError::Backend(
-                "injected process env acquisition failure".to_string(),
-            ));
-        }
-        self.inner
-            .acquire_process_execution_env(claim, env_ref)
-            .await
-    }
-
-    async fn end_process_env_referrer(
-        &self,
-        cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
-        self.inner.end_process_env_referrer(cleanup).await
-    }
-
-    async fn get_process_execution_env(
-        &self,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
-        self.inner.get_process_execution_env(env_ref).await
-    }
-}
-
-/// A controller-owned tier: its journal is the `recorded` map, keyed by replay
-/// key, and each first execution runs locally. Clones share the journal, so
-/// a static scoped controller journals into the same map.
-#[derive(Clone, Default)]
-struct KeyJournalController {
-    recorded:
-        Arc<std::sync::Mutex<std::collections::HashMap<String, lash_core::RuntimeEffectOutcome>>>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for KeyJournalController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some("key-journal-controller".to_string())
-    }
-
-    async fn prepare_completion_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> std::result::Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
-        if !may_defer {
-            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
-        }
-        lash_core::AwaitEventResolver::await_event_key(self, scope, wait)
-            .await
-            .map(lash_core::CompletionKeyPreparation::Issued)
-    }
-
-    /// A controller-owned tier is its own durable-promise authority, the way
-    /// the Restate boundary is: the key is derived from the scope and the wait
-    /// identity, so a redelivered invocation derives the same key rather than
-    /// minting a second wait.
-    async fn await_event_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        let key_id = lash_core::facade_support::await_event_identity::derive_key_id(scope, &wait)?;
-        Ok(lash_core::AwaitEventKey {
-            scope: scope.clone(),
-            wait,
-            key_id,
-            signature: "key-journal-controller".to_string(),
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::EffectHost for KeyJournalController {
-    async fn journal_replay(
-        &self,
-        _journal: &lash_sansio::EffectJournalIdentity,
-    ) -> std::result::Result<lash_core::JournalReplay, lash_core::RuntimeError> {
-        Ok(lash_core::JournalReplay::MayReplay)
-    }
-
-    fn turn_control_binding_id(&self) -> String {
-        "key-journal-controller".to_string()
-    }
-
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
-        self
-    }
-
-    fn scoped<'run>(
-        &'run self,
-        scope: lash_core::AdmittedScope,
-    ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
-        lash_core::ScopedEffectController::borrowed(self, scope)
-    }
-
-    fn scoped_static(
-        &self,
-        scope: lash_core::AdmittedScope,
-    ) -> std::result::Result<
-        Option<lash_core::ScopedEffectController<'static>>,
-        lash_core::RuntimeError,
-    > {
-        Ok(Some(lash_core::ScopedEffectController::shared(
-            Arc::new(self.clone()),
-            scope,
-        )?))
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for KeyJournalController {
-    async fn execute_effect(
-        &self,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
-    {
-        let replay_key = envelope.invocation.effect_replay_key().to_owned();
-        if let Some(recorded) = self
-            .recorded
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&replay_key)
-            .cloned()
-        {
-            return Ok(recorded);
-        }
-        let outcome = lash_core::testing::execute_effect_locally(envelope, local_executor).await?;
-        self.recorded
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(replay_key, outcome.clone());
-        Ok(outcome)
-    }
-}
-
-/// A controller-owned tier that parks its first admission forever, as a
-/// crash between admission and realization would, and journals one outcome.
-/// Clones share its state, so a static scoped controller is the same tier.
-#[derive(Clone, Default)]
-struct AdmissionCrashController {
-    admitted: Arc<tokio::sync::Notify>,
-    admission: Arc<std::sync::Mutex<Option<MockEffectAdmission>>>,
-    realizations: Arc<std::sync::atomic::AtomicUsize>,
-    recorded: Arc<std::sync::Mutex<Option<lash_core::RuntimeEffectOutcome>>>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct MockEffectAdmission {
-    replay_key: String,
-    envelope_hash: String,
-}
-
-impl lash_core::AwaitEventResolver for AdmissionCrashController {
-    /// A mock admission host mints keys under no durable authority.
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        None
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::EffectHost for AdmissionCrashController {
-    async fn journal_replay(
-        &self,
-        _journal: &lash_sansio::EffectJournalIdentity,
-    ) -> std::result::Result<lash_core::JournalReplay, lash_core::RuntimeError> {
-        Ok(lash_core::JournalReplay::MayReplay)
-    }
-
-    fn turn_control_binding_id(&self) -> String {
-        "admission-crash-controller".to_string()
-    }
-
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
-        self
-    }
-
-    fn scoped<'run>(
-        &'run self,
-        scope: lash_core::AdmittedScope,
-    ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
-        lash_core::ScopedEffectController::borrowed(self, scope)
-    }
-
-    fn scoped_static(
-        &self,
-        scope: lash_core::AdmittedScope,
-    ) -> std::result::Result<
-        Option<lash_core::ScopedEffectController<'static>>,
-        lash_core::RuntimeError,
-    > {
-        Ok(Some(lash_core::ScopedEffectController::shared(
-            Arc::new(self.clone()),
-            scope,
-        )?))
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for AdmissionCrashController {
-    async fn execute_effect(
-        &self,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
-    {
-        let replay_key = envelope.invocation.effect_replay_key().to_string();
-        let envelope_hash = envelope.stable_hash()?;
-        let submitted_admission = MockEffectAdmission {
-            replay_key,
-            envelope_hash,
-        };
-        let first_admission = {
-            let mut admission = self
-                .admission
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            match admission.as_ref() {
-                None => {
-                    *admission = Some(submitted_admission.clone());
-                    true
-                }
-                Some(recorded) if recorded == &submitted_admission => false,
-                Some(recorded) => {
-                    return Err(lash_core::RuntimeEffectControllerError::foreign(
-                        "test_admission_envelope_hash_conflict",
-                        lash_core::TurnFailureCause::Outcome,
-                        format!(
-                            "replay key `{}` was admitted with envelope hash `{}` but redriven with `{}`",
-                            recorded.replay_key,
-                            recorded.envelope_hash,
-                            submitted_admission.envelope_hash,
-                        ),
-                    ));
-                }
-            }
-        };
-        if let Some(recorded) = self
-            .recorded
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-        {
-            return Ok(recorded);
-        }
-        if first_admission {
-            self.admitted.notify_one();
-            std::future::pending::<()>().await;
-        }
-        self.realizations
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let outcome = lash_core::testing::execute_effect_locally(envelope, local_executor).await?;
-        *self
-            .recorded
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(outcome.clone());
-        Ok(outcome)
-    }
-}
-
 fn emit_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
         owner: crate::RuntimeOwner::Session(session_id.clone()),
@@ -1100,21 +746,6 @@ fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
         owner: crate::RuntimeOwner::Session(session_id.clone()),
         declaration: lash_core::ProcessStartDeclaration::new(
             lash_core::testing::held_engine_input(serde_json::Value::Null),
-            lash_core::ProcessOriginator::host(),
-            lash_core::Lifetime::Detached,
-        )
-        .with_env_ref(session_env_ref()),
-    }))
-}
-
-fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
-    lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        owner: crate::RuntimeOwner::Session(session_id.clone()),
-        declaration: lash_core::ProcessStartDeclaration::new(
-            lash_core::ProcessInput::Engine {
-                kind: "testing-fixture".to_string(),
-                payload: serde_json::Value::Null,
-            },
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )
@@ -1338,59 +969,6 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
             .count(),
         0,
         "the refused submission must not cancel the process"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -> Result<()> {
-    let controller = Arc::new(KeyJournalController::default());
-    let (core, registry, process) = ingress_core_with_effect_host(
-        sqlite_memory_store_backend().await,
-        Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
-    )
-    .await?;
-    let ingress = core.tool_intents(
-        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
-        lash_core::ExecutionScope::turn(SESSION, SCOPE),
-    )?;
-    let key = ingress
-        .key("seeded-outside-protocol", 0)
-        .expect("a host submission handle");
-    controller
-        .recorded
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(
-            key.identity().replay_key.clone(),
-            lash_core::RuntimeEffectOutcome::Process {
-                result: lash_core::ProcessEffectOutcome::List {
-                    entries: Vec::new(),
-                },
-            },
-        );
-
-    let outcome = ingress
-        .submit(key, emit_intent(&SessionId::from(SESSION), &process))
-        .await;
-    assert!(matches!(
-        outcome,
-        crate::tools::ToolIntentIngressOutcome::Refused {
-            refusal:
-                crate::tools::ToolIntentIngressRefusal::RecordedOutcomeOutsideIntentProtocol {
-                    recorded,
-                }
-        } if recorded == "list"
-    ));
-    assert_eq!(
-        registry
-            .full_event_window(&process, 0)
-            .await?
-            .iter()
-            .filter(|event| event.event_type == EVENT)
-            .count(),
-        0,
-        "a seeded non-protocol outcome cannot fabricate an intent realization"
     );
     Ok(())
 }
@@ -1636,179 +1214,6 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
     }
 }
 
-#[tokio::test]
-async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<()> {
-    let controller = Arc::new(AdmissionCrashController::default());
-    let (core, registry, process) = ingress_core_with_effect_host(
-        sqlite_memory_store_backend().await,
-        Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
-    )
-    .await?;
-    let ingress = core.tool_intents(
-        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
-        lash_core::ExecutionScope::turn(SESSION, SCOPE),
-    )?;
-    let key = ingress
-        .key("crash-redrive-call", 0)
-        .expect("a host submission handle");
-    let expected_admission = key.identity().replay_key.clone();
-
-    let crashed_ingress = ingress.clone();
-    let crashed_key = key.clone();
-    let crashed_intent = emit_intent(&SessionId::from(SESSION), &process);
-    let crashed =
-        tokio::spawn(async move { crashed_ingress.submit(crashed_key, crashed_intent).await });
-    controller.admitted.notified().await;
-    assert_eq!(
-        controller
-            .admission
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .map(|admission| admission.replay_key.as_str()),
-        Some(expected_admission.as_str()),
-        "the mock durably records journal admission before the crash window"
-    );
-    crashed.abort();
-    assert!(
-        crashed
-            .await
-            .expect_err("injected crash aborts submit")
-            .is_cancelled()
-    );
-    assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
-
-    let mut conflicting_redrive = emit_intent(&SessionId::from(SESSION), &process);
-    let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting_redrive else {
-        unreachable!("fixture is an event intent")
-    };
-    intent.payload = serde_json::json!({"law": "conflicting-redrive-payload"});
-    let redriven = ingress.submit(key.clone(), conflicting_redrive).await;
-    // The first delivery's ledger claim bound the identity to its content,
-    // so a redrive with different content is refused at admission.
-    assert!(
-        matches!(
-            &redriven,
-            crate::tools::ToolIntentIngressOutcome::Refused {
-                refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
-                    kind: lash_core::ToolIntentKind::EmitProcessEvent,
-                },
-            }
-        ),
-        "a conflicting redrive must be refused as a duplicate identity: {redriven:?}"
-    );
-    assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        registry
-            .full_event_window(&process, 0)
-            .await?
-            .iter()
-            .filter(|event| event.event_type == EVENT)
-            .count(),
-        0,
-        "the redrive cannot replace the admitted command"
-    );
-
-    let matching_redrive = ingress
-        .submit(key, emit_intent(&SessionId::from(SESSION), &process))
-        .await;
-    assert!(
-        matches!(
-            &matching_redrive,
-            crate::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed { .. },
-                replayed: false,
-            }
-        ),
-        "the admitted command remains redrivable: {matching_redrive:?}"
-    );
-    assert_eq!(controller.realizations.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        registry
-            .full_event_window(&process, 0)
-            .await?
-            .iter()
-            .filter(|event| event.event_type == EVENT)
-            .count(),
-        1,
-        "the originally admitted command realizes exactly once"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_digest_only_start_redrives_without_republishing_its_environment() -> Result<()> {
-    let controller = Arc::new(AdmissionCrashController::default());
-    let backend = sqlite_memory_store_backend().await;
-    let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
-    let (core, registry, _process) = ingress_core_over(
-        backend,
-        Some(Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>),
-        Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
-    )
-    .await?;
-    let ingress = core.tool_intents(
-        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
-        lash_core::ExecutionScope::turn(SESSION, SCOPE),
-    )?;
-    let key = ingress
-        .key("start-env-crash-redrive", 0)
-        .expect("a host submission handle");
-
-    let crashed_ingress = ingress.clone();
-    let crashed_key = key.clone();
-    let crashed = tokio::spawn(async move {
-        crashed_ingress
-            .submit(
-                crashed_key,
-                start_intent_with_env(&SessionId::from(SESSION)),
-            )
-            .await
-    });
-    controller.admitted.notified().await;
-    assert_eq!(
-        env_store.puts.load(Ordering::SeqCst),
-        1,
-        "the host published the environment once before submitting its digest"
-    );
-    crashed.abort();
-    assert!(crashed.await.expect_err("injected crash").is_cancelled());
-
-    let redriven = ingress
-        .submit(key, start_intent_with_env(&SessionId::from(SESSION)))
-        .await;
-    assert!(
-        matches!(
-            &redriven,
-            crate::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    realized: lash_core::ToolIntentRealized::StartProcess(_),
-                    ..
-                },
-                replayed: false,
-            }
-        ),
-        "matching start redrive must complete the admitted command: {redriven:?}"
-    );
-    assert_eq!(env_store.puts.load(Ordering::SeqCst), 1);
-    let started = registry
-        .get_process(&started_process_id(&redriven))
-        .await?
-        .expect("redrive registers the process");
-    let env_ref = started
-        .env_ref
-        .expect("registered process keeps the env ref");
-    assert!(
-        env_store
-            .get_process_execution_env(&env_ref)
-            .await
-            .map_err(lash_core::PluginError::from)?
-            .is_some(),
-        "the redriven process environment is usable"
-    );
-    Ok(())
-}
-
 #[test]
 fn ingress_start_without_lifetime_is_refused_before_submission() {
     let mut payload =
@@ -1867,17 +1272,53 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
         unreachable!("the ingress engine stores no artifacts")
     }
 
-    async fn run(
+    fn state_format(&self) -> lash_core::EngineStateFormat {
+        lash_core::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
         &self,
-        _context: lash_core::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> std::result::Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        Ok(
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::json!({"ingress_engine": "ran"}),
-            ))
-            .into(),
-        )
+        _payload: &serde_json::Value,
+    ) -> Option<lash_core::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &lash_core::ProcessExecutionEnvSpec,
+    ) -> std::result::Result<Option<serde_json::Value>, lash_core::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: lash_core::EngineState,
+        _event: lash_core::EngineEvent,
+    ) -> std::result::Result<
+        (lash_core::EngineState, lash_core::EngineAction),
+        lash_core::ProcessInfraError,
+    > {
+        todo!("L6 (FIG-5175): port IngressAdmissionEngine to advance")
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &lash_core::ProcessDefinitionRef,
+    ) -> std::result::Result<
+        lash_core::ProcessDefinitionResolution,
+        lash_core::ProcessDefinitionRefusal,
+    > {
+        Ok(lash_core::ProcessDefinitionResolution::new(
+            lash_core::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
     }
 }
 
@@ -2251,10 +1692,4 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
     Ok(())
 }
 
-mod redelivery;
-
-mod replay_after_advance;
-
 mod engine_owned;
-
-mod reclaimed_emission;

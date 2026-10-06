@@ -25,5 +25,5 @@ pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteSt
 /// records: for a test that needs a backend value but runs no effect.
 pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
     let stores = sqlite_memory_store_set().await;
-    lash_conformance::recording_backend_over(stores)
+    lash_conformance::backend_over(stores)
 }

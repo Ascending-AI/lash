@@ -1,3 +1,4 @@
+use crate::ActorContext;
 use crate::ProcessEventLogTestSupport as _;
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
@@ -73,7 +74,7 @@ impl crate::ToolProvider for SignalIntentProvider {
 )]
 pub async fn public_signal_intent_wakes_parked_process(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     turn_runner: Arc<dyn crate::ConformanceTurnRunner>,
@@ -133,7 +134,7 @@ pub async fn public_signal_intent_wakes_parked_process(
         )
         .await
         .expect("mint durable process-signal wait");
-    let wait_host = Arc::clone(&effect_host);
+    let wait_host = effect_host.clone();
     let wait = crate::task::spawn(async move {
         wait_host
             .await_await_event(&wake_key, tokio_util::sync::CancellationToken::new())
@@ -188,11 +189,10 @@ pub async fn public_signal_intent_wakes_parked_process(
     // The call's signal intent realizes in its own invocation on the
     // deployment's process worker (FIG-4987), so the tier serves it with this
     // law's worker.
-    let worker_host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let worker_host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     let watched = crate::facade_support::watch_process_registry(stores.process_registry());
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::new(
@@ -222,7 +222,7 @@ pub async fn public_signal_intent_wakes_parked_process(
     input.trace_turn_id = Some(turn_id);
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     let turn_parts = (
-        Arc::clone(&effect_host),
+        effect_host.clone(),
         Arc::clone(&stores),
         session_id.clone(),
         tier_process_work,
@@ -231,18 +231,17 @@ pub async fn public_signal_intent_wakes_parked_process(
         .run_turn(
             admitted,
             Arc::new(move |turn_scope| {
-                let (effect_host, stores, session_id, process_work) = turn_parts.clone();
+                let (_effect_host, stores, session_id, process_work) = turn_parts.clone();
                 let store = Arc::clone(&store);
                 let model = model.clone();
                 let tool_plugin = Arc::clone(&tool_plugin);
                 let input = input.clone();
                 let turn_tx = turn_tx.clone();
                 Box::pin(async move {
-                    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), effect_host)
-                        .host_config(
-                            crate::CommitBudget::bounded(1024 * 1024, 512),
-                            crate::QueuedWorkBatchingConfig::new(1),
-                        );
+                    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+                        crate::CommitBudget::bounded(1024 * 1024, 512),
+                        crate::QueuedWorkBatchingConfig::new(1),
+                    );
                     host.providers.models =
                         crate::testing::standard_test_llm_profiles(model.into_handle());
                     let policy = crate::testing::mock_session_policy();

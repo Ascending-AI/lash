@@ -8,7 +8,7 @@ use super::ToolDispatchContext;
 /// a [`ToolDispatchContext`] so a realization that runs outside the Run's own
 /// invocation (ADR 0130) can supply them from its request.
 pub struct IntentRealizationContext<'run> {
-    pub effect_controller: crate::runtime::ScopedEffectController<'run>,
+    pub effect_controller: crate::ActorContext,
     pub owner: crate::ExecutionOwner,
     pub processes: Arc<dyn crate::ProcessService>,
     pub trigger_router: Option<crate::TriggerRouter>,
@@ -16,6 +16,8 @@ pub struct IntentRealizationContext<'run> {
     pub parent_invocation: Option<crate::RuntimeInvocation>,
     pub process_lineage: Option<crate::ProcessLineage>,
     pub process_originator: Option<crate::ProcessOriginator>,
+    /// The run this context serves; the context itself is `'static`.
+    pub run: std::marker::PhantomData<&'run ()>,
 }
 
 impl<'run> ToolDispatchContext<'run> {
@@ -31,6 +33,7 @@ impl<'run> ToolDispatchContext<'run> {
             parent_invocation: context.parent_invocation.clone(),
             process_lineage: context.process_lineage.clone(),
             process_originator: context.process_originator.clone(),
+            run: std::marker::PhantomData,
         }
     }
 }
@@ -619,7 +622,7 @@ async fn realize_definition(
     ));
     let claim = crate::session::execution_claim_of(scoped.execution_scope())?;
     let result = scoped
-        .execute_effect(
+        .process_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::process(command),
@@ -679,7 +682,7 @@ async fn register_recorded_trigger(
             creator,
         ));
     let outcome = scoped
-        .execute_effect(
+        .tool_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::Trigger {

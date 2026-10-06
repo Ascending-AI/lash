@@ -996,11 +996,9 @@ fn process_graph_replay_uses_the_shared_runtime_without_exporting_again() {
     assert_eq!(emitted.len(), 1);
     assert_eq!(emitted[0].timestamp.timestamp_millis(), 1_700_000_000_123);
     assert_eq!(trace.tracing.trace_scope(), Some(&scope));
-    let controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::testing::UnavailableEffectController),
-        lash_core::AdmittedScope::process(trace.process_id.clone()),
-    )
-    .expect("the process controller");
+    let controller = lash_core::ActorContext::unavailable()
+        .scoped(lash_core::AdmittedScope::process(trace.process_id.clone()))
+        .expect("the process controller");
     graphs.clear();
     trace.tracing = lash_core::plugin::PluginExecutionTrace::new(
         runtime.shift(Some(scope.clone()), &controller),

@@ -87,7 +87,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self,
         envelope: RuntimeEffectEnvelope,
         effect_attempt: Option<crate::EffectAttempt>,
-        controller: &crate::ScopedEffectController<'_>,
+        controller: &crate::ActorContext,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         if let Some(refusal) = self.served_only_refusal() {
             return Err(refusal);
@@ -97,7 +97,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         // transport observation, with the same attempt fault latch.
         let executor = self.issued_under(
             controller.frontier().clone(),
-            controller.controller().attempt_observation(),
+            None,
             controller.trace_scope().cloned(),
         );
         let outcome = Box::pin(executor.run_body(envelope, effect_attempt.clone())).await;

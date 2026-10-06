@@ -28,5 +28,6 @@ workspace = true
 async-trait = { workspace = true }
 futures-util = { workspace = true, optional = true }
 lash-core-ids = { workspace = true }
+lash-sansio = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }

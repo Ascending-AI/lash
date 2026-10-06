@@ -1,6 +1,7 @@
 use crate::support::{
-    Arc, DeploymentStore, EffectHost, ProcessWorkWiring, RuntimeEnvironment, SessionWorkEngine,
+    Arc, DeploymentStore, ProcessWorkWiring, RuntimeEnvironment, SessionWorkEngine,
 };
+use lash_core::ActorContext;
 use lash_sansio::SessionId;
 
 /// Immutable owner-issued capabilities for one successfully opened session.
@@ -13,7 +14,7 @@ use lash_sansio::SessionId;
 pub(crate) struct BoundSession {
     session_id: SessionId,
     store: lash_core::store::SessionStore,
-    effect_host: Arc<dyn EffectHost>,
+    effect_host: ActorContext,
     process: ProcessWorkWiring,
     work: Arc<crate::core::ResolvedQueuedWork>,
     /// The owner core's open sessions: the core whose `SessionShifts` serves `work`
@@ -49,7 +50,7 @@ impl BoundSession {
         Self {
             session_id,
             store,
-            effect_host: Arc::clone(&env.core.control.effect_host),
+            effect_host: env.core.control.effect_host.clone(),
             process,
             work,
             residents,
@@ -70,8 +71,8 @@ impl BoundSession {
         self.store.clone()
     }
 
-    pub(crate) fn effect_host(&self) -> Arc<dyn EffectHost> {
-        Arc::clone(&self.effect_host)
+    pub(crate) fn effect_host(&self) -> ActorContext {
+        self.effect_host.clone()
     }
 
     pub(crate) fn process(&self) -> &ProcessWorkWiring {

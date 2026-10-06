@@ -1,4 +1,5 @@
 use super::*;
+use crate::ActorContext;
 use pretty_assertions::assert_eq;
 
 #[expect(
@@ -7,7 +8,7 @@ use pretty_assertions::assert_eq;
 )]
 pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
     factory: Arc<dyn crate::store::ConformanceDeployment>,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
 ) {
     let source_id = SessionId::from("fork-isolated-source");
     let fork_id = SessionId::from("fork-isolated-branch");
@@ -171,7 +172,7 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
 pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
     factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    _host: Arc<dyn crate::EffectHost>,
+    _host: ActorContext,
 ) {
     let id = SessionId::from("reclaim-race-source");
     let source = factory

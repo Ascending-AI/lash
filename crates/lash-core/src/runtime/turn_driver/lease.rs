@@ -45,49 +45,15 @@ impl<'run> RuntimeTurnDriver<'run> {
             }
             _ => scoped_effect_controller,
         };
-        let outcome = if let Some(task_controller) = scoped_effect_controller.to_static() {
-            let local_executor = super::local_effects::turn_effect_executor(
-                self,
-                machine,
-                event_tx.clone(),
-                task_controller,
-                envelope.invocation.effect_replay_key(),
-            );
-            scoped_effect_controller
-                .execute_effect(envelope, local_executor)
-                .await
-        } else {
-            let (task_controller, task_requests) =
-                crate::runtime::effect::EffectTaskController::scoped(
-                    scoped_effect_controller.controller(),
-                    scoped_effect_controller.admitted_scope().clone(),
-                )
-                .map_err(RuntimeEffectControllerError::from)?;
-            // The proxy issues this same shift's steps: one frontier.
-            let task_controller = task_controller.in_drive_of(&scoped_effect_controller);
-            let local_executor = super::local_effects::turn_effect_executor(
-                self,
-                machine,
-                event_tx.clone(),
-                task_controller,
-                envelope.invocation.effect_replay_key(),
-            );
-            let local_executor =
-                scoped_effect_controller.guard_local_executor(&envelope, local_executor)?;
-            let publication = lash_core_execution::core_internal::EffectPublication::begin(
-                Arc::clone(self.session.plugins()),
-                envelope.invocation.address().clone(),
-            );
-            crate::runtime::effect::drive_effect_controller_task(
-                scoped_effect_controller.controller(),
-                scoped_effect_controller.execution_scope().clone(),
-                envelope,
-                local_executor,
-                task_requests,
-            )
-            .await
-            .and_then(|outcome| publication.publish(outcome))
-        };
+        let local_executor = super::local_effects::turn_effect_executor(
+            self,
+            machine,
+            event_tx.clone(),
+            scoped_effect_controller.clone(),
+            envelope.invocation.effect_replay_key(),
+        );
+        let outcome =
+            super::issue::issue_effect(&scoped_effect_controller, envelope, local_executor).await;
         decode(outcome?)
     }
 }

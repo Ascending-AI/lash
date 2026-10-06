@@ -1,3 +1,4 @@
+use crate::ActorContext;
 use crate::SessionId;
 use lash_trace::TraceSink;
 use std::sync::Arc;
@@ -6,8 +7,8 @@ use super::process::{
     ArtifactReferrerPorts, ProcessEngineRegistry, ProcessExecutionEnvStore, ProcessRegistry,
 };
 use super::{
-    DeploymentStore, EffectHost, NoSessionWork, ProcessWorkSubstrate, ProcessWorkWiring,
-    SessionWorkEngine, TerminationPolicy,
+    DeploymentStore, NoSessionWork, ProcessWorkSubstrate, ProcessWorkWiring, SessionWorkEngine,
+    TerminationPolicy,
 };
 
 struct BackendWaitReceipts {
@@ -236,7 +237,7 @@ impl Default for DeltaCoalescing {
 
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
-    pub effect_host: Arc<dyn EffectHost>,
+    pub effect_host: ActorContext,
     /// Live restoration of captured provider routes for new trigger starts,
     /// shared by immediate delivery and recovery. Never journaled as wiring.
     pub trigger_route_restorer: Option<Arc<dyn crate::TriggerRouteRestorer>>,
@@ -327,7 +328,7 @@ impl RuntimeHostConfig {
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
     ) -> Self {
-        let effect_host = backend.effect_host();
+        let effect_host = crate::ActorContext::detached(backend.clone());
         let attachment_store = backend.attachment_store();
         let process_env_store = backend.process_env_store();
         let turn_prelude_store = backend.turn_prelude_store();
@@ -393,7 +394,7 @@ impl RuntimeHostConfig {
         self.durability.turn_prelude_store = backend.turn_prelude_store();
         let mut config = self
             .with_process_env_store(backend.process_env_store())
-            .with_effect_host(backend.effect_host())
+            .with_effect_host(crate::ActorContext::detached(backend.clone()))
             .with_clock(backend.clock());
         config.process_engines = config
             .process_engines
@@ -487,7 +488,7 @@ impl RuntimeHostConfig {
     }
 
     /// Replace the effect host.
-    pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
+    pub fn with_effect_host(mut self, effect_host: ActorContext) -> Self {
         self.control.effect_host = effect_host;
         self
     }

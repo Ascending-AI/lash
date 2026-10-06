@@ -1212,8 +1212,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         // beside the journaled registration and is no part of its identity.
         let mut registration = obligation.registration.clone();
         let scoped = &self.context.dispatch().effect_controller;
-        if let Some(observer) = scoped.controller().run_record_observer()
-            && let Some(scope) = observer.tool_scope(&obligation.call_id).await
+        if let Some(scope) = scoped
+            .run_record_observer()
+            .tool_scope(&obligation.call_id)
+            .await
         {
             registration = registration
                 .with_trace(lash_trace::TraceScopeOffer::caused_by(scope.parent_cause()));
@@ -1293,10 +1295,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         }
         let scoped = &self.context.dispatch().effect_controller;
         scoped.admit_journal_write()?;
-        scoped
-            .controller()
-            .attach_run_process_terminal(source.clone())
-            .await
+        scoped.attach_run_process_terminal(source.clone()).await
     }
     async fn discharge_start(
         &self,

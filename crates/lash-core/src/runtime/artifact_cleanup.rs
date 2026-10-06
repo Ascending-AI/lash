@@ -11,6 +11,7 @@
 //! the row, because it means an invariant was broken and nobody may paper
 //! over it.
 
+use crate::JournalReplay;
 use std::sync::Arc;
 
 use super::shift::relay::{
@@ -21,12 +22,11 @@ use crate::store::{
 };
 use crate::{
     ArtifactCarry, ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreError,
-    ArtifactStoreId, EffectHost, JournalReplay, ModuleArtifactStore, PluginError,
-    ProcessDefinitionDraft, ProcessDefinitionId, ProcessDefinitionStore, ProcessEngineRegistry,
-    ProcessExecutionEnvRef, ProcessExecutionEnvStore, ProcessId, ProcessInput, ProcessRegistry,
-    ReferrerClaim, ReferrerGuard, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey,
-    SubscriptionRevisionId, TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionLifecycle,
-    artifact_referrer_ended,
+    ArtifactStoreId, ModuleArtifactStore, PluginError, ProcessDefinitionDraft, ProcessDefinitionId,
+    ProcessDefinitionStore, ProcessEngineRegistry, ProcessExecutionEnvRef,
+    ProcessExecutionEnvStore, ProcessId, ProcessInput, ProcessRegistry, ReferrerClaim,
+    ReferrerGuard, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey, SubscriptionRevisionId,
+    TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionLifecycle, artifact_referrer_ended,
 };
 
 /// The record a start key registered, as a start's guard carries onto it.
@@ -71,9 +71,8 @@ pub trait ArtifactCleanupAuthorities: Send + Sync {
     ) -> Result<SubscriptionRevisionStanding, String>;
 }
 
-/// The authorities of one store set and its engine.
+/// The authorities of one store set.
 pub struct StoreSetAuthorities {
-    pub effect_host: Arc<dyn EffectHost>,
     pub sessions: Arc<dyn crate::DeploymentStore>,
     pub processes: Arc<dyn ProcessRegistry>,
     pub triggers: Arc<dyn TriggerStore>,
@@ -81,14 +80,12 @@ pub struct StoreSetAuthorities {
 
 #[async_trait::async_trait]
 impl ArtifactCleanupAuthorities for StoreSetAuthorities {
+    /// No backend journals effects (ADR 0132): nothing replays or appends.
     async fn journal_replay(
         &self,
-        journal: &lash_sansio::EffectJournalIdentity,
+        _journal: &lash_sansio::EffectJournalIdentity,
     ) -> Result<JournalReplay, String> {
-        self.effect_host
-            .journal_replay(journal)
-            .await
-            .map_err(|error| error.to_string())
+        Ok(JournalReplay::Settled)
     }
 
     async fn frame_is_retained(&self, frame: &crate::FrameEnvironmentId) -> Result<bool, String> {

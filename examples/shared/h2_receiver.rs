@@ -15,7 +15,7 @@ use lash::process::{
     ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventType, ProcessInput,
     ProcessOriginator, ProcessStartReceipt, ProcessStartRequest,
 };
-use lash::runtime::ScopedEffectController;
+
 use serde::{Deserialize, Serialize};
 
 /// The kind of [`ReceiverEngine`].
@@ -40,18 +40,53 @@ impl ProcessEngine for ReceiverEngine {
         RECEIVER_ENGINE_KIND
     }
 
-    async fn run(
+    fn state_format(&self) -> lash::plugins::EngineStateFormat {
+        lash::plugins::EngineStateFormat {
+            kind: RECEIVER_ENGINE_KIND.to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
         &self,
-        context: ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> std::result::Result<ProcessRunOutcome, ProcessInfraError> {
-        context.cancellation_token().cancelled().await;
-        Ok(
-            ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::cancelled(
-                lash::tools::ToolCancellation::runtime("the receiver was cancelled"),
-            ))
-            .into(),
-        )
+        _payload: &serde_json::Value,
+    ) -> Option<lash::plugins::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env: &lash::process::ProcessExecutionEnvSpec,
+    ) -> std::result::Result<Option<serde_json::Value>, PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: lash::plugins::EngineState,
+        _event: lash::plugins::EngineEvent,
+    ) -> std::result::Result<
+        (lash::plugins::EngineState, lash::plugins::EngineAction),
+        ProcessInfraError,
+    > {
+        todo!("L6 (FIG-5175): port ReceiverEngine to advance: run until cancelled")
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &lash::process::ProcessDefinitionRef,
+    ) -> std::result::Result<
+        lash::process::ProcessDefinitionResolution,
+        lash::process::ProcessDefinitionRefusal,
+    > {
+        Ok(lash::process::ProcessDefinitionResolution::new(
+            lash::process::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
     }
 
     fn start_artifacts(
@@ -126,7 +161,7 @@ pub async fn register_receiver(
     core: &lash::LashCore,
     session: &lash::SessionId,
     event_type: &str,
-    scoped: ScopedEffectController<'_>,
+    scoped: lash::runtime::ActorContext,
 ) -> Result<ProcessStartReceipt> {
     // The receiver runs under an execution environment the host publishes; a
     // host pin keeps it alive for the process (ADR 0113).

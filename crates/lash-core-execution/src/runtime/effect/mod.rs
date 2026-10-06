@@ -3,8 +3,6 @@ pub use recorded_keys::{RecordedKeyRange, RecordedKeys};
 mod envelope;
 #[doc(hidden)]
 pub mod executor;
-#[cfg(any(test, feature = "testing"))]
-mod layered_host;
 mod llm_outcome;
 pub mod scope_status;
 use lash_core_store::effect_identity as identity_types;
@@ -39,14 +37,13 @@ pub use envelope::{
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
-    AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
-    CommandJournalGuard, CompletionKeyPreparation, EffectHost, EffectJournalIdentity,
-    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, JournalReplay, ProcessDefinitionLocalExecution, ProcessDriveStep,
-    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence,
-    RefusedWriteRange, Resolution, ResolveOutcome, RunRecordStep, RuntimeAwaitEventOptions,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
-    RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    AdmittedScope, AwaitEventKey, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
+    CompletionKeyPreparation, EffectJournalIdentity, EffectJournalRetirement, EffectOpener,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, JournalReplay,
+    ProcessDefinitionLocalExecution, ProcessDriveStep, ProcessLocalExecution,
+    ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence, RefusedWriteRange,
+    Resolution, ResolveOutcome, RunRecordStep, RuntimeAwaitEventOptions,
+    RuntimeEffectControllerError, RuntimeEffectLocalExecutor, RuntimeSleepOptions, SegmentProgress,
     ServedOnlyRange, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
     TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
     TurnControlBindingIdError, turn_control_binding_id_for_scope,
@@ -56,8 +53,6 @@ pub use identity_types::{
 };
 pub use lash_sansio::RunAggregateWakePolicy;
 pub use lash_sansio::{CausalRef, EffectAddress};
-#[cfg(any(test, feature = "testing"))]
-pub use layered_host::{EffectLayer, LayeredEffectHost};
 pub use llm_outcome::{
     AssistantResponsePlan, AssistantStreamHookState, LlmStreamRecord, RuntimeLlmCallOutcome,
 };
@@ -66,11 +61,7 @@ pub use validation::{
     validate_replayed_effect_envelope,
 };
 
-pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner, ServedOnly};
-pub use executor::{
-    EffectControllerTaskRequests, EffectTaskController, drive_effect_controller_task,
-    own_effect_controller_task,
-};
+pub use executor::{AdmittedProcess, ProcessRunner, ServedOnly};
 pub use executor::{RUN_SEAL_OPERATION, TurnCancelWait};
 pub use outcome::{
     LlmTraceFailure, direct_trace_context, emit_llm_trace_completed, emit_llm_trace_failed,

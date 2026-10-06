@@ -509,7 +509,7 @@ impl TriggerRouter {
     pub async fn emit_recorded(
         &self,
         request: TriggerOccurrenceRequest,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<TriggerEmitReport, PluginError> {
         self.emit_recorded_reporting_realization(request, effect_controller)
             .await
@@ -530,7 +530,7 @@ impl TriggerRouter {
     pub async fn emit_recorded_reporting_realization(
         &self,
         request: TriggerOccurrenceRequest,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<(TriggerEmitReport, crate::StoreRealization), PluginError> {
         let (report, realization) = self
             .emit_reporting_realization(request, effect_controller)
@@ -556,7 +556,7 @@ impl TriggerRouter {
     pub async fn emit(
         &self,
         request: TriggerOccurrenceRequest,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<TriggerEmitReport, PluginError> {
         self.emit_reporting_realization(request, effect_controller)
             .await
@@ -568,7 +568,7 @@ impl TriggerRouter {
     pub async fn emit_reporting_realization(
         &self,
         request: TriggerOccurrenceRequest,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<(TriggerEmitReport, crate::StoreRealization), PluginError> {
         let TriggerIngressReceipt {
             occurrence,
@@ -653,7 +653,7 @@ impl TriggerRouter {
     async fn ingest_occurrence(
         &self,
         request: TriggerOccurrenceRequest,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<TriggerIngressReceipt, PluginError> {
         validate_trigger_occurrence_request(&request)?;
         let effect_id = format!("trigger-ingest:{}", deterministic_occurrence_id(&request));
@@ -672,7 +672,7 @@ impl TriggerRouter {
             effect_id,
         );
         Ok(effect_controller
-            .execute_effect(
+            .tool_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::IngestTriggerOccurrence {
@@ -701,7 +701,7 @@ impl TriggerRouter {
         reservation: &TriggerDeliveryReservation,
         process_id: ProcessId,
         process_registry: Arc<dyn crate::ProcessRegistry>,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<ProcessId, crate::RuntimeEffectControllerError> {
         self.record_binding(
             reservation,
@@ -732,7 +732,7 @@ impl TriggerRouter {
     async fn admit_bound_delivery(
         &self,
         reservation: &TriggerDeliveryReservation,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<ProcessId, crate::RuntimeEffectControllerError> {
         self.record_binding(
             reservation,
@@ -754,7 +754,7 @@ impl TriggerRouter {
         reservation: &TriggerDeliveryReservation,
         replay_prefix: &str,
         runner: Box<dyn crate::runtime::effect::executor::RuntimeEffectLocalRunner>,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<ProcessId, crate::RuntimeEffectControllerError> {
         let subscription = &reservation.subscription;
         let occurrence = &reservation.occurrence;
@@ -775,7 +775,7 @@ impl TriggerRouter {
         )
         .with_caused_by(Some(delivery_causal_ref(reservation)));
         effect_controller
-            .execute_effect(
+            .tool_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::AdmitTriggerDelivery {
@@ -794,7 +794,7 @@ impl TriggerRouter {
         &self,
         reservation: &TriggerDeliveryReservation,
         process_registry: Arc<dyn crate::ProcessRegistry>,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<ProcessId, PluginError> {
         self.start_delivery_steps(reservation, process_registry, effect_controller)
             .await
@@ -807,7 +807,7 @@ impl TriggerRouter {
         &self,
         reservation: &TriggerDeliveryReservation,
         process_registry: Arc<dyn crate::ProcessRegistry>,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<ProcessId, DeliveryStartFault> {
         let DeliveryStart {
             command,
@@ -841,7 +841,7 @@ impl TriggerRouter {
         )
         .with_caused_by(Some(causal_ref));
         let outcome = match effect_controller
-            .execute_effect(
+            .process_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::process(command),

@@ -1,5 +1,6 @@
 //! Retained command receipts answer their first result after the head advances.
 use super::*;
+use crate::ActorContext;
 use pretty_assertions::assert_eq;
 
 #[derive(Clone, Copy)]
@@ -116,7 +117,7 @@ fn config_outcome(settlement: crate::SessionCommandSettlement) -> crate::ConfigT
 #[expect(clippy::expect_used, reason = "conformance fixture results")]
 async fn command_law(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     law: Law,
@@ -296,7 +297,7 @@ macro_rules! law {
     ($name:ident, $mode:ident) => {
         pub async fn $name(
             prefix: &str,
-            effect_host: Arc<dyn crate::EffectHost>,
+            effect_host: ActorContext,
             stores: Arc<dyn crate::StoreSet>,
             runner: Arc<dyn crate::ConformanceTurnRunner>,
         ) {

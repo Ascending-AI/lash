@@ -192,10 +192,6 @@ macro_rules! delegate_process_registrar {
                 $registration_hook
             }
 
-            fn bind_effect_host(&self, effect_host: &std::sync::Arc<dyn $crate::EffectHost>) {
-                self.$inner.bind_effect_host(effect_host);
-            }
-
             async fn set_external_ref(
                 &self,
                 process_id: &$crate::ProcessId,

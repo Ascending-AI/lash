@@ -218,7 +218,7 @@ impl LashRuntime {
         transaction: crate::ConfigTransactionRecord,
         completion: crate::QueuedWorkCompletion,
         shift_fence: &crate::store::ShiftFence,
-        run_controller: &crate::ScopedEffectController<'_>,
+        run_controller: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let [batch_id] = completion.batch_ids.as_slice() else {
             return Err(RuntimeError::new(
@@ -252,10 +252,8 @@ impl LashRuntime {
         // transaction resolves over the sticky config under it and
         // publishes onto it, never the run's overrides.
         self.uninstall_run_view()?;
-        let host = Arc::clone(&self.host.core.control.effect_host);
         let controller = super::shift::step_controller(
             run_controller,
-            host.as_ref(),
             crate::AdmittedScope::session_operation(
                 self.state.session_id.clone(),
                 batch_id.as_str(),
@@ -299,7 +297,7 @@ impl LashRuntime {
     /// on `controller`, and return the recorded resolution.
     async fn resolve_config_transaction(
         &mut self,
-        controller: &crate::ScopedEffectController<'_>,
+        controller: &crate::ActorContext,
         transaction: &crate::ConfigTransactionRecord,
     ) -> Result<crate::ConfigResolution, RuntimeError> {
         let session_id = self.state.session_id.clone();
@@ -327,7 +325,7 @@ impl LashRuntime {
             models: Arc::clone(&self.host.core.providers.models),
         };
         controller
-            .execute_effect(
+            .session_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::ResolveConfigTransaction {

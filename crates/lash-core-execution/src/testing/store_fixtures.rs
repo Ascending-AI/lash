@@ -52,8 +52,7 @@ pub async fn authorize_completion_deferral_for_test(
         .await
         .map_err(store_error)?;
     let control =
-        crate::runtime::turn_control::ActiveTurnControl::new(resolver.as_ref(), address.clone())
-            .await?;
+        crate::runtime::turn_control::ActiveTurnControl::new(&resolver, address.clone()).await?;
     let observed = store
         .turn_cancel_request_intent(&address)
         .await
@@ -76,7 +75,7 @@ pub async fn authorize_completion_deferral_for_test(
         .await
         .map_err(store_error)?;
     let settlement = control
-        .settle_authorized(resolver.as_ref(), &authorization, None)
+        .settle_authorized(&resolver, &authorization, None)
         .await?;
     let mut commit = commit.closing_interrupted_turn(settlement, observed);
     commit.shift_fence = Some(Box::new(fence.clone()));

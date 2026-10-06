@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Keep the durability engine's SQL in its modules (ruling #74, FIG-5163).
 
-The engine's tables (`nodes`, `actors`, `actor_mail`; `lash_`-prefixed on
-PostgreSQL) are written by one neutral statement set and one module per
-dialect. This check fails when:
+The engine's tables (`nodes`, `actors`, `actor_mail`, and the domain tables
+the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
+`waits`, `park_events`; `lash_`-prefixed on PostgreSQL) are written by one
+neutral statement set and one module per dialect. Since I0 (FIG-5194) each
+of those is a directory: the core in `durable/mod.rs` and one file per
+domain (`turns`, `run_records`, `snapshots`, `waits`, `processes`,
+`session_close`, `park_events`), each owned by its lane. This check fails
+when:
 
 - SQL naming an engine table appears in any tracked Rust or SQL file outside
   those modules and the PostgreSQL schema artifacts; a second writer or reader
@@ -26,21 +31,35 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-NEUTRAL = "crates/lash-store-sql/src/durable.rs"
-DIALECTS = (
-    "crates/lash-sqlite-store/src/durable.rs",
-    "crates/lash-postgres-store/src/postgres/durable.rs",
+DOMAINS = (
+    "mod",
+    "turns",
+    "run_records",
+    "snapshots",
+    "waits",
+    "processes",
+    "session_close",
+    "park_events",
 )
+NEUTRAL_DIR = "crates/lash-store-sql/src/durable"
+DIALECT_DIRS = (
+    "crates/lash-sqlite-store/src/durable",
+    "crates/lash-postgres-store/src/postgres/durable",
+)
+NEUTRAL = tuple(f"{NEUTRAL_DIR}/{domain}.rs" for domain in DOMAINS)
+DIALECTS = tuple(f"{root}/{domain}.rs" for root in DIALECT_DIRS for domain in DOMAINS)
 ALLOWED = {
-    NEUTRAL,
+    *NEUTRAL,
     *DIALECTS,
     "crates/lash-postgres-store/schema.sql",
     "crates/lash-postgres-store/teardown.sql",
 }
 
+TABLES = ("nodes", "actors", "actor_mail", "run_records", "exec_snapshots", "waits", "park_events")
+
 ENGINE_SQL = re.compile(
     r"\b(?:FROM|INTO|UPDATE|JOIN|REFERENCES|ON|TABLE(?:\s+IF\s+(?:NOT\s+)?EXISTS)?)"
-    r"\s+(?:main\.)?(?:lash_)?(?:nodes|actors|actor_mail)\b"
+    r"\s+(?:main\.)?(?:lash_)?(?:" + "|".join(TABLES) + r")\b"
 )
 
 STATEMENT = re.compile(r'^\s*\w+\s*=\s*"((?:[^"\\]|\\.)*)";', re.MULTILINE | re.DOTALL)
@@ -55,6 +74,17 @@ def tracked(root: Path) -> list[str]:
         text=True,
     ).stdout
     return [path for path in listed.split("\0") if path]
+
+
+def unknown_files(root: Path) -> list[str]:
+    """A file in an engine directory that is not one of its domains."""
+    findings = []
+    for directory in (NEUTRAL_DIR, *DIALECT_DIRS):
+        for path in sorted((root / directory).glob("*.rs")):
+            relative = path.relative_to(root).as_posix()
+            if relative not in ALLOWED:
+                findings.append(f"{relative}: not a durable domain module; the domains are {DOMAINS}")
+    return findings
 
 
 def stray_sql(root: Path) -> list[str]:
@@ -73,25 +103,29 @@ def stray_sql(root: Path) -> list[str]:
 
 
 def normalized(statement: str) -> str:
-    return " ".join(re.sub(r"\blash_(nodes|actors|actor_mail)\b", r"\1", statement).split())
+    return " ".join(re.sub(r"\blash_(" + "|".join(TABLES) + r")\b", r"\1", statement).split())
 
 
 def mirrored(root: Path) -> list[str]:
     seen: dict[str, str] = {}
     findings = []
     for path in DIALECTS:
-        text = (root / path).read_text()
+        dialect = next(directory for directory in DIALECT_DIRS if path.startswith(directory))
+        try:
+            text = (root / path).read_text()
+        except OSError:
+            continue
         for statement in {normalized(match.group(1)) for match in STATEMENT.finditer(text)}:
-            if statement in seen and seen[statement] != path:
+            if statement in seen and not seen[statement].startswith(dialect):
                 findings.append(
-                    f"{path}: statement also in {seen[statement]}; put it in {NEUTRAL}: {statement[:80]}"
+                    f"{path}: statement also in {seen[statement]}; put it in {NEUTRAL_DIR}: {statement[:80]}"
                 )
             seen.setdefault(statement, path)
     return findings
 
 
 def main() -> int:
-    findings = stray_sql(ROOT) + mirrored(ROOT)
+    findings = unknown_files(ROOT) + stray_sql(ROOT) + mirrored(ROOT)
     if findings:
         print("durability engine SQL outside its modules:", file=sys.stderr)
         print("\n".join(f"  {finding}" for finding in findings), file=sys.stderr)

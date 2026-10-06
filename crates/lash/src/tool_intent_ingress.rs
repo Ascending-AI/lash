@@ -1,6 +1,5 @@
 //! Host front-door admission for durable tool intents.
 
-use lash_core::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use tracing::Instrument;
@@ -1050,7 +1049,7 @@ impl ToolIntentIngress {
             identity.clone(),
         ));
         let outcome = scoped
-            .execute_effect(
+            .tool_effect(
                 lash_core::RuntimeEffectEnvelope::new(
                     invocation,
                     lash_core::RuntimeEffectCommand::Trigger {
@@ -1220,7 +1219,7 @@ impl ToolIntentIngress {
             .with_process_outcome_observer(outcome_observer)
         };
         let outcome = scoped
-            .execute_process_effect(
+            .process_effect(
                 lash_core::RuntimeEffectEnvelope::new(
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),

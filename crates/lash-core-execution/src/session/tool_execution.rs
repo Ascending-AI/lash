@@ -597,7 +597,7 @@ impl RuntimeExecutionContext<'_> {
                 presentation_replay_key.clone(),
             ) {
                 Ok(address) => scoped
-                    .execute_effect(
+                    .tool_effect(
                         crate::RuntimeEffectEnvelope::new(
                             crate::RuntimeEffectInvocation::new(
                                 address,

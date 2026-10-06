@@ -12,6 +12,7 @@
 //! offered at its default maximum, and with it withheld — because this crate
 //! does not construct protocols.
 
+use crate::ActorContext;
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
 use std::sync::{Arc, Mutex};
@@ -243,7 +244,6 @@ fn members(tool: &str, values: &[&str]) -> serde_json::Value {
 /// from these and reaches the same journaled commands.
 #[derive(Clone)]
 struct SugarTurn {
-    host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
     session_id: SessionId,
     turn_id: TurnId,
@@ -251,16 +251,13 @@ struct SugarTurn {
     witness: Arc<Witness>,
     script: Vec<crate::LlmResponse>,
     on_call: Arc<dyn Fn(usize) + Send + Sync>,
-    /// A layer over the turn's own scope, for a law that counts the groups
-    /// the turn opens.
-    layer: Option<Arc<dyn crate::testing::EffectLayer>>,
 }
 
 impl SugarTurn {
     fn new(
         prefix: &str,
         name: &str,
-        host: &Arc<dyn crate::EffectHost>,
+        _host: &ActorContext,
         stores: &Arc<dyn crate::StoreSet>,
         factories: &[Arc<dyn crate::facade_support::PluginFactory>],
         script: Vec<crate::LlmResponse>,
@@ -268,7 +265,6 @@ impl SugarTurn {
         let session_id = SessionId::fixture(format!("{prefix}-batch-sugar-{name}"));
         let witness = Arc::new(Witness::default());
         Self {
-            host: Arc::clone(host),
             stores: Arc::clone(stores),
             turn_id: TurnId::fixture(format!("{session_id}-turn")),
             session_id,
@@ -276,7 +272,6 @@ impl SugarTurn {
             witness,
             script,
             on_call: Arc::new(|_| {}),
-            layer: None,
         }
     }
 
@@ -290,14 +285,12 @@ impl SugarTurn {
     )]
     async fn shift(
         &self,
-        scope: crate::ScopedEffectController<'_>,
+        scope: crate::ActorContext,
     ) -> Option<Result<crate::AssembledTurn, crate::RuntimeError>> {
-        let mut config =
-            crate::LawBackend::over_stores(Arc::clone(&self.stores), Arc::clone(&self.host))
-                .host_config(
-                    crate::CommitBudget::bounded(1024 * 1024, 512),
-                    crate::QueuedWorkBatchingConfig::new(1),
-                );
+        let mut config = crate::LawBackend::over_stores(Arc::clone(&self.stores)).host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
         config.providers.models = crate::testing::standard_test_llm_profiles(
             scripted_model(self.script.clone(), Arc::clone(&self.on_call)).into_handle(),
         );
@@ -335,13 +328,6 @@ impl SugarTurn {
         )
         .await
         .expect("build the batch sugar conformance runtime");
-        let scope = match &self.layer {
-            Some(layer) => {
-                crate::testing::LayeredEffectHost::layer_scoped(scope, Arc::clone(layer))
-                    .expect("layer the law turn's scope")
-            }
-            None => scope,
-        };
         let options = crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope);
         let mut input = crate::TurnInput::text("run the batch sugar law");
         input.trace_turn_id = Some(self.turn_id.clone());
@@ -527,7 +513,7 @@ fn assert_no_member_is_a_call(context: &str, turn: &crate::AssembledTurn) {
 /// `batch` is an unknown tool.
 pub async fn batch_admission_and_identity_contract(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     factories: BatchSugarFactories,
@@ -733,7 +719,7 @@ pub async fn batch_admission_and_identity_contract(
 /// ToolInvocation child group.
 pub async fn standard_rounds_and_batches_use_the_run(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     factories: BatchSugarFactories,
@@ -815,7 +801,7 @@ pub async fn standard_rounds_and_batches_use_the_run(
 /// call.
 pub async fn batch_folds_to_one_transcript_call(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     factories: BatchSugarFactories,

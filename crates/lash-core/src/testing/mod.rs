@@ -22,16 +22,16 @@ pub use lash_core_execution::testing::{
     ScriptedError, StoreOp,
 };
 pub use lash_core_execution::testing::{
-    EffectLayer, EmptyToolProvider, FIXTURE_ECHO_TOOL, FixtureProcessEngine, FixtureTools,
-    HELD_PROCESS_ENGINE_KIND, HeldProcessEngine, LayeredEffectHost, MockSessionManager,
-    NonTerminalPagePause, NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
+    EmptyToolProvider, FIXTURE_ECHO_TOOL, FixtureProcessEngine, FixtureTools,
+    HELD_PROCESS_ENGINE_KIND, HeldProcessEngine, MockSessionManager, NonTerminalPagePause,
+    NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
     RuntimeCommitBudgetMeasurement, TestClock, TestExecutionContextBuilder, TestExecutionPorts,
     TestProvider, TestProviderBuilder, ToolCallFixture, TriggerDeliveryPinReleaseLoss,
-    UnavailableEffectController, UnavailableProcessExecutionEnvStore, UnavailableTurnPreludeStore,
-    attempt_sentinel, behavior_transcript, cancelled_code_execution_context,
-    code_execution_context, code_execution_context_for_process, code_execution_context_stopped,
-    code_execution_context_stopped_on, code_execution_context_with_invocation,
-    code_execution_context_with_process_dependencies, code_execution_context_with_tool_catalog,
+    UnavailableProcessExecutionEnvStore, UnavailableTurnPreludeStore, behavior_transcript,
+    cancelled_code_execution_context, code_execution_context, code_execution_context_for_process,
+    code_execution_context_stopped, code_execution_context_stopped_on,
+    code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
+    code_execution_context_with_tool_catalog,
     code_execution_context_with_tool_provider_and_catalog,
     code_execution_context_with_tool_provider_catalog_and_invocation,
     code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
@@ -108,7 +108,7 @@ pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteStoreSet
 /// [`sqlite_memory_backend`] behind a recording test effect host.
 #[cfg(test)]
 pub(crate) async fn sqlite_recording_backend() -> crate::Backend {
-    lash_conformance::recording_backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
+    lash_conformance::backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
 }
 
 #[cfg(test)]
@@ -136,7 +136,7 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
 /// double: for a test that needs a `Backend` value but runs no effect.
 #[cfg(test)]
 pub(crate) async fn sqlite_memory_store_backend() -> crate::Backend {
-    lash_conformance::recording_backend_over(sqlite_memory_store_set().await)
+    lash_conformance::backend_over(sqlite_memory_store_set().await)
 }
 
 /// A [`runtime_helpers::RecordingStore`] over a fresh, unbound store of a

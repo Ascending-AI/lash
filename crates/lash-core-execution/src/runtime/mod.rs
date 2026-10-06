@@ -1,5 +1,6 @@
 use crate::TurnId;
 pub use lash_core_store::turn_input_vocabulary::*;
+pub mod actor;
 pub mod attachment_delivery;
 pub mod causal;
 pub(crate) use lash_core_ids::clock;
@@ -59,23 +60,22 @@ pub use effect::await_event_identity;
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
-    CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointAdmittedSet, CommandJournalGuard,
-    CompletionKeyPreparation, EffectAddress, EffectHost, EffectJournalIdentity,
-    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, JournalReplay, LlmRequestSpec, LlmStreamRecord, PresentationBinding,
-    ProcessCommand, ProcessDriveStep, ProcessEffectOutcome, ProcessListSelection,
-    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence,
-    RecordedKeyRange, RecordedKeys, RefusedWriteRange, Resolution, ResolveOutcome,
-    RunAggregateWakePolicy, RunRecordStep, RuntimeAssistantResponseHooksOutcome,
+    AwaitEventKey, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
+    CausalRef, CheckpointAdmittedSet, CommandJournalGuard, CompletionKeyPreparation, EffectAddress,
+    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
+    ExecutionScope, ExternalCompletionError, JournalReplay, LlmRequestSpec, LlmStreamRecord,
+    PresentationBinding, ProcessCommand, ProcessDriveStep, ProcessEffectOutcome,
+    ProcessListSelection, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
+    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RefusedWriteRange, Resolution,
+    ResolveOutcome, RunAggregateWakePolicy, RunRecordStep, RuntimeAssistantResponseHooksOutcome,
     RuntimeAttribution, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnly,
-    ServedOnlyRange, SleepSpec, TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_PRESENTATION_VERSION,
-    ToolAttemptCapture, ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
+    RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
+    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_PRESENTATION_VERSION, ToolAttemptCapture,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
     TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
     TurnPreludeRef, TurnPreludeStore, turn_control_binding_id_for_scope,
@@ -92,9 +92,10 @@ pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry,
-    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, DefinitionAcquisition, HandleId,
-    InvalidProcessDefinitionId, InvalidStartKey, Lifetime, LifetimeDecision, LifetimePolicy,
-    MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, DefinitionAcquisition, EngineAction,
+    EngineEvent, EngineState, EngineStateFormat, HandleId, HostWaitKind,
+    InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime, LifetimeDecision,
+    LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess,
     ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
     ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndApplication, ParentEndPlan,
@@ -119,10 +120,9 @@ pub use process::{
     ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
     ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeNotRetained,
     ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar,
-    ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationProbe,
-    ProcessRegistrationReceipt, ProcessRegistrationRefusal, ProcessRegistry,
-    ProcessRegistryBinding, ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention,
-    ProcessRunOutcome, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService,
+    ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
+    ProcessRegistrationRefusal, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
+    ProcessRetention, ProcessRunOutcome, ProcessSegmentKey, ProcessService,
     ProcessSessionDeleteReport, ProcessSignal, ProcessSignalIdentity, ProcessSignalWaitBinding,
     ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions,
     ProcessStartOutcome, ProcessStartPlan, ProcessStartReceipt, ProcessStartRegistration,
@@ -135,14 +135,14 @@ pub use process::{
     RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
     ScopeStorageError, SegmentHandover, SegmentHandoverCommit, SegmentStartMarker, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
-    StoreRealization, TerminalProcessStatus, TriggerDeliveryBinding, UnavailableProcessService,
-    WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry, WeakProcessEngineRegistry,
-    abandoned_consumer_refusal, admitted_signal_wait, allocate_process_event_sequence,
-    apply_parent_end_plan, apply_process_event_projection, artifact_referrer_ended,
-    check_retained_start, check_trigger_delivery_start, current_epoch_ms, end_parent_scope,
-    end_session_runs, fold_process_record, lifetime, load_process_execution_env,
+    StepName, StepRequest, StoreRealization, TerminalProcessStatus, TriggerDeliveryBinding,
+    UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle,
+    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry,
+    WeakProcessEngineRegistry, abandoned_consumer_refusal, admitted_signal_wait,
+    allocate_process_event_sequence, apply_parent_end_plan, apply_process_event_projection,
+    artifact_referrer_ended, check_retained_start, check_trigger_delivery_start, current_epoch_ms,
+    end_parent_scope, end_session_runs, fold_process_record, lifetime, load_process_execution_env,
     materialize_process_event_semantics, mint_process_id, parent_end_delivery_key,
     parent_end_requester, prepare_process_event_append, prepare_process_registration,
     prepare_process_start, prepare_process_transition, process_child_session_id,
@@ -198,8 +198,8 @@ pub use turn_queue::{
 };
 
 pub use work::{
-    NoProcessWork, NoSessionWork, ProcessRegistryAwaiter, ProcessTerminalWait,
-    ProcessWorkSubstrate, ProcessWorkWiring, SessionShifts, SessionWorkEngine,
+    DurableProcessWork, DurableSessionWork, NoProcessWork, NoSessionWork, ProcessRegistryAwaiter,
+    ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring, SessionShifts, SessionWorkEngine,
     WakeDeliveryDriveReport, WakeDeliveryDriver, WorkCadenceError, WorkCadencePolicy,
 };
 

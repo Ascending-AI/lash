@@ -138,7 +138,7 @@ impl crate::runtime::effect::ProcessRunner for ProcessRuntimeContext {
         admitted: crate::runtime::effect::AdmittedProcess,
         execution_context: crate::ProcessExecutionContext,
         registry: Arc<dyn crate::ProcessRegistry>,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        scoped_effect_controller: crate::ActorContext,
         cancellation: tokio_util::sync::CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {

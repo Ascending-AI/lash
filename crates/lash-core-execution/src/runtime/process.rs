@@ -5,6 +5,7 @@ mod definition_ref;
 mod definition_store;
 mod effect_summary;
 mod engine;
+pub mod engine_state;
 mod events;
 #[cfg(test)]
 mod guarded_surface_tests;
@@ -63,6 +64,10 @@ pub use engine::{
     ProcessEngineProcessContext, ProcessEngineRegistration, ProcessEngineRegistry,
     ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError,
     ProcessRunOutcome, SegmentHandover, WeakProcessEngineRegistry,
+};
+pub use engine_state::{
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName, StepName,
+    StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
@@ -124,9 +129,8 @@ pub use registry::{
 pub use registry::{
     DEFAULT_WAKE_DELIVERY_EXPIRY_MS, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage,
     ParentEndPlan, ProcessClockRebind, ProcessContinuationStore, ProcessEventLog, ProcessLifecycle,
-    ProcessObserverRegistry, ProcessPruneReport, ProcessQuery, ProcessRegistrar,
-    ProcessRegistrationProbe, ProcessRegistry, ProcessRegistryBinding, ProcessRegistryCursor,
-    ProcessRetention, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessTerminalPublication,
+    ProcessObserverRegistry, ProcessPruneReport, ProcessQuery, ProcessRegistrar, ProcessRegistry,
+    ProcessRegistryCursor, ProcessRetention, ProcessSegmentKey, ProcessTerminalPublication,
     ProcessToolIntents, ProcessWakeOutbox, ProjectionWatermark, SegmentHandoverCommit,
     SegmentStartMarker, WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,

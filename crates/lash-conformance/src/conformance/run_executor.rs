@@ -15,6 +15,7 @@
 //! acceptor as a child session's turn under its turn scope, and the relay's
 //! ask as the engine's admission and run of the run.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -132,7 +133,7 @@ impl Fixture {
     async fn new(
         prefix: &str,
         law: &str,
-        host: &Arc<dyn crate::EffectHost>,
+        host: &ActorContext,
         stores: &Arc<dyn crate::StoreSet>,
         hold_model: bool,
     ) -> Self {
@@ -398,7 +399,7 @@ impl Fixture {
 )]
 pub async fn a_run_recorded_under_one_executor_is_never_admitted_by_another(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -510,7 +511,7 @@ pub async fn a_run_recorded_under_one_executor_is_never_admitted_by_another(
 )]
 pub async fn a_lost_acceptors_run_is_executed_once_by_the_sessions_shift(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -589,7 +590,7 @@ pub async fn a_lost_acceptors_run_is_executed_once_by_the_sessions_shift(
 )]
 pub async fn admit_run_refuses_another_engine_held_executor(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -716,7 +717,7 @@ const ANSWER: &str = "answered by the run's one executor";
 )]
 pub async fn a_refused_acceptor_adopts_the_outcome_its_runs_executor_recorded(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -795,7 +796,7 @@ pub async fn a_refused_acceptor_adopts_the_outcome_its_runs_executor_recorded(
 )]
 pub async fn a_parent_turn_acceptors_run_is_closed_to_a_later_drive(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

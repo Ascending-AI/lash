@@ -1,3 +1,4 @@
+use crate::ActorContext;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -49,7 +50,7 @@ impl RuntimeExecutionContext<'_> {
             return Ok(true);
         }
         if let (Some(control), Some(host)) = (&self.turn_cancel.control, &self.turn_cancel.host) {
-            return control.peek_immediate(host.await_event_resolver()).await;
+            return control.peek_immediate(host).await;
         }
         // A turn answered from its gate above; the stop it lends is never
         // authority. A process has no turn gate: its own lent stop, which only
@@ -104,7 +105,7 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
         self,
         honoured: bool,
         control: Arc<crate::runtime::turn_control::ActiveTurnControl>,
-        host: Arc<dyn crate::EffectHost>,
+        host: ActorContext,
         lent: CancellationToken,
     ) -> Self;
 
@@ -217,7 +218,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         mut self,
         honoured: bool,
         control: Arc<crate::runtime::turn_control::ActiveTurnControl>,
-        host: Arc<dyn crate::EffectHost>,
+        host: ActorContext,
         lent: CancellationToken,
     ) -> Self {
         // A tool this execution runs in process cooperates through the same
@@ -265,7 +266,7 @@ impl RuntimeExecutionContext<'_> {
             return Ok(false);
         };
         control
-            .inline_stop_requested(host.await_event_resolver())
+            .inline_stop_requested(host)
             .await
             .map_err(Into::into)
     }

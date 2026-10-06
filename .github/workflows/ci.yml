@@ -1314,6 +1314,9 @@ jobs:
       - name: Check substrate port ledger
         run: python3 scripts/check-substrate-port-ledger.py
 
+      - name: Check substrate stub lane tags
+        run: python3 scripts/check-substrate-todos.py
+
       - name: Check history readers
         run: bash scripts/check-history-readers.sh
 

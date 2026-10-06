@@ -44,7 +44,7 @@ impl ProcessTurnCancellation {
 /// `ProcessOpScope::with_turn_cancellation`), and it is produced by a single
 /// accessor on the execution that owns the observation decision
 /// (`RuntimeExecutionContext::turn_cancel_wait`, or
-/// `ScopedEffectController::turn_cancel_wait` where no execution context
+/// `ActorContext::turn_cancel_wait` where no execution context
 /// exists).
 #[derive(Clone)]
 pub struct TurnCancelWait {

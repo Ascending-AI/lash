@@ -71,7 +71,7 @@ pub struct TurnTransformContext<'run> {
     pub prompt_usage: Option<crate::TokenUsage>,
     pub max_context_tokens: Option<usize>,
     pub traces: PluginTraceEmitter,
-    pub scoped_effect_controller: crate::ScopedEffectController<'run>,
+    pub scoped_effect_controller: crate::ActorContext,
     pub direct_completions: crate::DirectCompletionClient<'run>,
 }
 
@@ -88,7 +88,7 @@ pub struct CompactionContext<'run> {
     pub instructions: Option<String>,
     pub state: SessionReadView,
     pub traces: PluginTraceEmitter,
-    pub scoped_effect_controller: crate::ScopedEffectController<'run>,
+    pub scoped_effect_controller: crate::ActorContext,
     pub direct_completions: crate::DirectCompletionClient<'run>,
     /// The system prompt the compaction completion carries: the session's
     /// protocol plugin rendered it from recorded config, without tools or
@@ -119,7 +119,7 @@ pub struct ContextPressureContext<'run> {
     /// The context window the turn's model runs under.
     pub max_context_tokens: Option<usize>,
     pub traces: PluginTraceEmitter,
-    pub scoped_effect_controller: crate::ScopedEffectController<'run>,
+    pub scoped_effect_controller: crate::ActorContext,
     pub direct_completions: crate::DirectCompletionClient<'run>,
     /// The system prompt a summarizer completion carries: the session's
     /// protocol plugin renders it from recorded config, without tools or

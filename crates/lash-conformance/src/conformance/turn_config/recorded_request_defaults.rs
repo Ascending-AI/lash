@@ -3,6 +3,7 @@
 //! a run's model call carries the defaults the run recorded, never those of
 //! the worker that runs it.
 use super::*;
+use crate::ActorContext;
 use pretty_assertions::assert_eq;
 
 /// The request defaults the run records: the crashing execution's binding.
@@ -77,7 +78,7 @@ fn policy_with_request_defaults(
 )]
 pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_run_recorded(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

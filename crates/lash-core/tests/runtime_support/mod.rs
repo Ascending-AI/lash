@@ -7,9 +7,6 @@
 
 pub(crate) use crate::runtime::tests::*;
 
-pub(crate) mod effect_controller_doubles;
-pub(crate) mod effect_recording_authority;
-
 std::thread_local! {
     /// The SQLite store sets the running test opened. A memory store set's
     /// databases live while any handle does, and its stores reach sibling
@@ -22,7 +19,7 @@ std::thread_local! {
 /// A fresh SQLite memory store set behind a recording effect host, held for
 /// the running test.
 pub(crate) async fn sqlite_recording_backend() -> lash_core::Backend {
-    lash_conformance::recording_backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
+    lash_conformance::backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
 }
 
 /// [`sqlite_recording_backend`] on `clock`: its storage ports read and wait on `clock`.
@@ -33,7 +30,7 @@ pub(crate) async fn sqlite_recording_backend_with_clock(
         .await
         .expect("open a clocked SQLite memory backend");
     TEST_BACKENDS.with(|held| held.borrow_mut().push(backend.clone()));
-    lash_conformance::recording_backend_over(std::sync::Arc::new(backend))
+    lash_conformance::backend_over(std::sync::Arc::new(backend))
 }
 
 /// [`sqlite_recording_backend`] as its concrete SQLite type.
@@ -84,7 +81,7 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
 /// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
 /// double: for a test that needs a `Backend` value but runs no effect.
 pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
-    lash_conformance::recording_backend_over(sqlite_memory_store_set().await)
+    lash_conformance::backend_over(sqlite_memory_store_set().await)
 }
 
 /// `backend`'s session catalog as a runtime store: every session a test
@@ -157,7 +154,7 @@ pub(crate) async fn reopened_backend(backend: &lash_core::Backend) -> lash_core:
         .expect("a reopen names a memory backend this test opened");
     let reopened = sqlite.reopen().await.expect("reopen the memory backend");
     TEST_BACKENDS.with(|held| held.borrow_mut().push(reopened.clone()));
-    lash_conformance::recording_backend_over(std::sync::Arc::new(reopened))
+    lash_conformance::backend_over(std::sync::Arc::new(reopened))
 }
 
 /// The view of `session_id` on `store`, a catalog store the test admitted

@@ -25,6 +25,7 @@ impl LashRuntime {
         context: TurnPrepareContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let TurnPrepareContext {
+            run: std::marker::PhantomData,
             mut input,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
@@ -69,6 +70,7 @@ impl LashRuntime {
                 _ => None,
             };
         Box::pin(self.stream_turn_inner(TurnPrepareContext {
+            run: std::marker::PhantomData,
             input: input.clone(),
             sinks: TurnSinks { observer },
             scoped_effect_controller,
@@ -165,7 +167,7 @@ impl LashRuntime {
             &trace_turn_id,
         );
         let accepted = scoped_effect_controller
-            .execute_effect(
+            .shift_effect(
                 crate::RuntimeEffectEnvelope::new(
                     acceptance_invocation.clone(),
                     crate::RuntimeEffectCommand::AcceptTurnInput {
@@ -490,10 +492,9 @@ mod process_invocation_correlation_tests {
     use super::*;
 
     fn invocation_id(input: &TurnInput) -> Option<String> {
-        crate::testing::TestExecutionContextBuilder::over_controller(std::sync::Arc::new(
-            crate::testing::UnavailableEffectController,
+        crate::testing::TestExecutionContextBuilder::over_controller(
+            crate::ActorContext::unavailable(),
         )
-            as std::sync::Arc<dyn crate::RuntimeEffectController>)
         .turn_context(input.turn_context.clone())
         .build()
         .into_runtime()

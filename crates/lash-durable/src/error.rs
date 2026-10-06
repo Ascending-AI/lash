@@ -1,5 +1,6 @@
 //! The port's typed refusals.
 
+use crate::domain::DomainRefusal;
 use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
 
 /// A transaction refused because its epoch is not the actor's current one.
@@ -88,6 +89,10 @@ pub enum DurableError {
         /// The commit.
         label: CommitLabel,
     },
+    /// A conditional domain write refused: the whole commit rolled back,
+    /// nothing written.
+    #[error(transparent)]
+    Domain(DomainRefusal),
     /// The store failed.
     #[error(transparent)]
     Store(StoreFailure),

@@ -712,9 +712,6 @@ impl DeploymentStore for Integrator {
         unreachable!("external signature witness")
     }
 
-    fn bind_effect_host(&self, effect_host: &Arc<dyn EffectHost>) {
-        unreachable!("external signature witness")
-    }
     async fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError> {
         unreachable!("external signature witness")
     }

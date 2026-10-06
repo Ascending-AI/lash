@@ -329,7 +329,7 @@ impl TerminalWait {
             return;
         }
         let driver = TurnWorkDriver::for_session(
-            std::sync::Arc::clone(&ctx.parts.effect_host),
+            ctx.parts.effect_host.clone(),
             ctx.parts.session_id.to_string(),
             std::sync::Arc::clone(ctx.parts.store.store()),
         );

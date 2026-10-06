@@ -405,11 +405,9 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
             // The effect host that owns the turn-control promises the
             // deferrals settle: the in-process lane's durable host.
             let engine = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
-            let host = engine.effect_host();
-            let turn_control = lash_core::TurnCancellationAuthority::new(
-                host.turn_control_binding_id(),
-                host as Arc<dyn lash_core::AwaitEventResolver>,
-            );
+            let host = lash::runtime::ActorContext::detached(engine.clone());
+            let turn_control =
+                lash_core::TurnCancellationAuthority::new(host.turn_control_binding_id(), host);
             Ok((store, commit_state, engine, turn_control))
         })
         .await?;

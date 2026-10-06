@@ -9,6 +9,7 @@
 //! crate-private function is reached through a wrapper here; a type or
 //! function already declared `pub` inside a private module is re-exported.
 
+use crate::ActorContext;
 // The crate-root short paths (`crate::X`) the relocated tests used in-crate
 // that the root re-exports only to the crate. Each item is already public at
 // its own path; these re-exports keep the short path the tests were written
@@ -42,16 +43,6 @@ pub async fn work_item_from_record(
 /// wait against.
 pub fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> crate::Resolution {
     crate::runtime::effect::executor::process_terminal_resolution(output)
-}
-
-/// `EffectControllerTaskRequest::into_future`: serves one proxied request
-/// against `controller`, the way the task that owns the proxy executes it; the
-/// queued-lane round-trip law is that task.
-pub async fn serve_effect_controller_task_request(
-    request: crate::runtime::effect::executor::EffectControllerTaskRequest,
-    controller: &dyn crate::RuntimeEffectController,
-) {
-    request.into_future(controller).await;
 }
 
 /// A read-only view of `plugin_id`'s namespace over a session's published
@@ -210,7 +201,7 @@ pub async fn emit_tool_call_started(
 /// The turn's cancellation-escalation await-event key, so a test can peek or
 /// forge the escalation row a host journals.
 pub async fn turn_escalation_key(
-    resolver: &dyn crate::AwaitEventResolver,
+    resolver: &ActorContext,
     address: &crate::runtime::TurnAddress,
 ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
     crate::runtime::turn_control::escalation_key(resolver, address).await
@@ -218,7 +209,7 @@ pub async fn turn_escalation_key(
 
 /// The turn's base cancellation-gate await-event key.
 pub async fn turn_cancel_gate_key(
-    resolver: &dyn crate::AwaitEventResolver,
+    resolver: &ActorContext,
     address: &crate::runtime::TurnAddress,
 ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
     crate::runtime::turn_control::cancel_gate_key(resolver, address).await

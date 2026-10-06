@@ -112,6 +112,10 @@ impl PostgresStoreSet {
 }
 
 impl lash_core_execution::StoreSet for PostgresStoreSet {
+    fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
+        Arc::new(self.inner.storage.durable_store())
+    }
+
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
         &self.inner.binding
     }

@@ -2,6 +2,7 @@
 //! whether an open run ends.
 
 use super::{Fixture, ShiftParts};
+use crate::ActorContext;
 use lash_core::engine::*;
 use lash_sansio::TurnId;
 use std::sync::Arc;
@@ -18,7 +19,7 @@ use std::sync::Arc;
 )]
 pub async fn a_run_with_no_engine_execution_ends_only_once_it_started(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1018 rows over 648 files, 3079 laws.
-# By class: mechanical 135, semantic 99, delete 538, replace 246.
-# By lane: L1b 11, L9b 61, L9c 243, L9d 70, L9e 91, L9f 104, L9g 64, L9h 84, L11 82, L8 24, L10a 184.
-# By status: todo 454, ported 31, deleted 533.
+# 1062 rows over 673 files, 3166 laws.
+# By class: mechanical 133, semantic 99, delete 557, replace 273.
+# By lane: L1b 11, L9b 59, L9c 240, L9d 70, L9e 91, L9f 104, L9g 64, L9h 84, L11 82, L8 24, L10a 184, I0 49.
+# By status: todo 451, ported 31, deleted 580.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/restate-postgres-workers/README.md
@@ -609,6 +609,30 @@ law = "a node claims only actors whose durable formats it decodes; 1.0 decode-an
 owner = "L9f"
 law = "lash-sim's crash matrix cuts every commit label and its invariants hold in every cell (design-opus §7.2)"
 
+[planned."ACCEPT1"]
+owner = "L3"
+law = "a direct turn's acceptance commits once: a redrive after the acceptance commit or a vacuum admits one row, and a direct turn behind earlier admissions runs after them"
+
+[planned."WAKE1"]
+owner = "L3s"
+law = "a send or cancel against an absent or deleted session wakes no session actor and creates nothing; one send to a live session wakes it once"
+
+[planned."PARK-FAULT"]
+owner = "L6"
+law = "a live fault at an actor's surface install or checkpoint admission parks the actor with a typed park event, and the activation after the fault clears completes it once"
+
+[planned."INTENT1"]
+owner = "L4"
+law = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
+
+[planned."SIGNAL1"]
+owner = "L6"
+law = "signals reach a process engine's advance as events in mailbox order per sender, and a redelivered signal is one event: it never resolves a later wait"
+
+[planned."DEFER1"]
+owner = "L7"
+law = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs"
 test = "*"
@@ -1058,14 +1082,14 @@ test = "*"
 area = "effect-seam"
 needs = ["turn"]
 class = "delete"
-lane = "L9c"
+lane = "I0"
 laws = [
   "durable_journaled_engine_commits_bypass_local_admission",
   "commit_admission_ownership_survives_controller_wrappers",
 ]
 disposition = "subject-deleted"
-status = "todo"
-note = "journaled-engine commit placement and controller wrappers (the effect seam is concrete in 1.0)"
+status = "deleted"
+note = "deleted by I0 (FIG-5194): the law pinned owns_commit_backpressure through EffectLayer wrappers; the method folded to its constant false (S1 rule 2)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect.rs"
@@ -1170,14 +1194,15 @@ path = "crates/lash-core/tests/runtime/tests/effect/fig2471.rs"
 test = "*"
 area = "turn-cancel"
 needs = ["turn"]
-class = "mechanical"
-lane = "L9b"
+class = "delete"
+lane = "I0"
 laws = [
   "turn_control_default_binding_external_cancel_stops_local_turn",
   "turn_control_default_binding_active_gate_recognizes_host_cancel",
 ]
-disposition = "port"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by I0 (FIG-5194): the file held only DefaultBindingHost, an EffectHost double whose tests FIG-5190 deleted"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect/response_settlement.rs"
@@ -1751,13 +1776,14 @@ path = "crates/lash-core/tests/runtime_support/effect_recording_authority.rs"
 test = "*"
 area = "support"
 needs = ["turn"]
-class = "mechanical"
-lane = "L9b"
+class = "delete"
+lane = "I0"
 laws = [
   "(no test functions) defines: layered_effect_host, backend_with_effect_layer, runtime_host_config_with_effect_layer, layered_scope, scoped_test_turn, host_with_effect_recorder, layered_controller, layered_operation_controller",
 ]
-disposition = "port"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by I0 (FIG-5194): layered-host helpers over the deleted EffectLayer seam"
 
 [[row]]
 path = "crates/lash-core/tests/runtime_support/mod.rs"
@@ -16017,45 +16043,6 @@ status = "deleted"
 note = "FIG-5190 deleted the runbook: its companions roll Restate deployments. Its successor is L11 (FIG-5187), drain by release."
 
 [[row]]
-path = "crates/lash-core-execution/src/replay_read_gate.rs"
-test = "*"
-area = "lash-core-execution"
-needs = ["turn"]
-class = "mechanical"
-lane = "L9c"
-laws = [
-  "replay_paths_read_store_state_only_inside_recorded_steps",
-  "the_store_surface_classifies_every_trait_method",
-  "the_host_services_classify_every_trait_method",
-  "a_planted_read_before_the_journaled_command_fails",
-  "a_read_inside_the_recorded_step_passes",
-  "a_helper_called_outside_a_step_carries_the_replay_path",
-  "a_helper_called_only_inside_steps_passes",
-  "reads_off_every_replay_path_and_in_test_code_pass",
-  "law",
-  "a_host_service_call_outside_a_recorded_step_fails",
-  "host_service_closure_parameters_are_followed",
-  "host_service_match_arm_bindings_are_followed",
-  "a_host_service_call_inside_a_step_or_of_another_type_passes",
-  "a_same_named_method_on_another_receiver_is_no_service_call",
-  "a_method_of_a_controller_owning_type_is_a_replay_path",
-  "a_type_holding_an_aliased_controller_is_a_replay_path",
-  "a_controller_associated_type_does_not_seed_an_unrelated_target",
-  "a_method_on_another_receiver_carries_no_replay_path_by_name",
-  "a_continued_string_keeps_hit_lines_exact",
-  "literals_comments_and_lifetimes_do_not_confuse_the_tree",
-  "pins_match_by_text_and_count_and_go_stale",
-  "the_real_tree_fails_with_a_facade_read_planted_before_its_command",
-  "the_real_tree_passes_with_no_ticket_pins",
-  "the_real_tree_fails_with_an_unrecorded_route_restore_before_the_delivery_start",
-  "the_real_tree_passes_with_an_unrelated_restore_before_the_delivery_start",
-  "a_wrapper_that_runs_its_future_outside_the_step_fails",
-]
-disposition = "port"
-status = "ported"
-note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
-
-[[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
 test = "*"
 area = "lash-core-execution"
@@ -16064,36 +16051,6 @@ class = "mechanical"
 lane = "L9c"
 laws = [
   "keyed_registrations_refuse_duplicates_and_unpaired_stream_state",
-]
-disposition = "port"
-status = "ported"
-note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
-
-[[row]]
-path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/intent_laws.rs"
-test = "*"
-area = "lash-core-execution"
-needs = ["turn"]
-class = "mechanical"
-lane = "L9c"
-laws = [
-  "crash_redrive_of_a_start_declaration_converges_on_one_process",
-  "crash_after_result_commit_redrives_the_recorded_intent_batch",
-  "crash_mid_drain_redrives_the_committed_prefix_and_finishes_the_suffix",
-  "crash_mid_intent_replays_the_command_committed_before_its_reply",
-  "public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation",
-  "tool_intent_outcome_replay_is_scoped_to_its_minting_emission",
-  "refusal_after_success_preserves_the_committed_prefix_and_replays_typed_evidence",
-  "an_undeclared_intent_refuses_the_outcome_before_anything_is_realized",
-  "ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code",
-  "register_trigger_intent_refuses_foreign_authority_before_installing",
-  "crash_after_result_commit_emits_the_recorded_trigger_exactly_once",
-  "recorded_trigger_refuses_when_a_delivery_does_not_start",
-  "public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emission",
-  "recorded_trigger_occurrence_identity_follows_the_declaration_replay_key",
-  "cold_public_coordinator_refuses_v1_trigger_batch_before_store_ingress",
-  "crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_outcome",
-  "an_attempt_holds_its_large_captured_environment_before_realizing_a_start",
 ]
 disposition = "port"
 status = "ported"
@@ -16684,3 +16641,759 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "FIG-5190 deleted every test of this file (each has its own row): all of them needed an engine. The emptied file went with them."
+
+# Tests deleted by I0 (FIG-5194): their subject was the effect-host seam the collapse removed (S1).
+
+[[row]]
+path = "crates/lash-core-execution/src/engine/testing/tests.rs"
+test = "*"
+area = "determinism-harness"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "the determinism harness over LocalTestCx (a RuntimeEffectController): cold, separate-worker and perturbed replays agree",
+  "stray wakes and non-operation awaits fail a run",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "ADR 0132 has no replay; the harness's LocalTestCx implemented the deleted controller trait. Replay freedom is NR-1..4 (planned:NR-1)"
+
+[[row]]
+path = "crates/lash-core-execution/src/runtime/turn_control/determinism_tests.rs"
+test = "*"
+area = "turn-control"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "turn-control's replay determinism over LocalTestCx: a cancel in a replay window takes the recorded path",
+  "an escalated after-step stops at the next checkpoint",
+  "a live-gate read diverges on replay",
+  "a base-gate escalation promise fails decode typed",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "replay windows and recorded cancel paths are gone; turn cancel is mail (L3, FIG-5172)"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_boundary/recorded_assembly/tests.rs"
+test = "*"
+area = "turn-boundary"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "commit_content_repeats_under_perturbed_scheduling_and_a_stalled_host",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "replay determinism of commit content; a turn commits once under its epoch (V0, FIG-5170); only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_driver/effects.rs"
+test = "*"
+area = "turn-driver"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "a_failed_terminal_checkpoint_hands_back_its_admitted_rows_on_every_replay",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "no replay; checkpoint rows are V0's turn phase writes; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core-execution/src/runtime/effect/executor/control/tests.rs"
+test = "*"
+area = "effect-controller"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "scoped_controller_refuses_wrong_scope_before_controller_or_local_execution",
+  "task_proxy_refuses_wrong_scope_before_handoff",
+  "the_shift_loop_polls_each_request_once_per_task_poll",
+  "an_operation_owner_drains_issued_work_and_admits_none_after_completion",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the scoped controller is deleted; ActorContext's per-group methods are V0..L7 stubs; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core/src/testing/layered_backend.rs"
+test = "*"
+area = "test-backend"
+needs = ["process"]
+class = "delete"
+lane = "I0"
+laws = [
+  "map_process_registry_refuses_an_engine_with_its_own_process_work",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the engine half of LayeredBackend (LayeredEngine, process-work wiring) is deleted with EffectEngine; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/effect_host.rs"
+test = "*"
+area = "effect-host-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "effect_host",
+  "effect_host_await_events_with_active_wait_witness",
+  "effect_controller_segmentation_vector",
+  "effect_controller_code_cell_replays_by_reexecution",
+  "effect_controller_journaled_effect_replay",
+  "effect_controller_replay_mismatch_diagnostics",
+  "effect_host_registered_wait_rejects_quiescent_retirement",
+  "effect_controller_concurrent_replay_deterministic",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the effect-host conformance suite proves EffectHost/RuntimeEffectController implementations, deleted in I0; only lash-restate instantiated it"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/effect_host/outstanding_waits.rs"
+test = "*"
+area = "effect-host-conformance"
+needs = ["wait"]
+class = "delete"
+lane = "I0"
+laws = [
+  "effect_host_lists_registered_unresolved_waits",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the effect-host conformance suite proves EffectHost/RuntimeEffectController implementations, deleted in I0; only lash-restate instantiated it"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/effect_host/response_derivation.rs"
+test = "*"
+area = "effect-host-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "effect_controller_response_derivation_terminals",
+  "attempt_history_terminal_variants_survive_result_replay",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the effect-host conformance suite proves EffectHost/RuntimeEffectController implementations, deleted in I0; only lash-restate instantiated it"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/await_event_cold.rs"
+test = "*"
+area = "await-events"
+needs = ["wait"]
+class = "delete"
+lane = "I0"
+laws = [
+  "effect_host_await_events_cold_instance_with_active_wait_witness",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "await-event keys over the effect host (AwaitEventResolver), deleted in I0; host-resolvable waits are pinned wait rows (L5, FIG-5173)"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_crash_matrix.rs"
+test = "*"
+area = "turn-crash-matrix"
+needs = ["turn"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a_checkpoint_admission_crashed_before_its_record_redelivers_its_rows",
+  "a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles_nothing_twice",
+  "direct_turn_acceptance_crash_after_store_commit_admits_one_row",
+  "turn_crash_after_commit_redrive_replays_the_committed_receipt",
+  "turn_crash_matrix_error_return_fail_stop",
+  "turn_crash_matrix_level_1",
+  "turn_crash_trace_drift_check",
+]
+disposition = "replaced-by:planned:MATRIX"
+status = "deleted"
+owed = "lash-sim's crash matrix cuts every commit label and its invariants hold in every cell"
+note = "the conformance crash matrix cut turns at the effect seam through an EffectLayer over the effect host, deleted in I0; L9f rebuilds the crash matrix on FaultStore commit labels"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/live_fault_park.rs"
+test = "*"
+area = "live-fault-park"
+needs = ["turn"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a_live_fault_installing_a_recorded_tool_surface_parks_the_run",
+  "a_store_fault_at_checkpoint_admission_parks_the_run",
+]
+disposition = "replaced-by:planned:PARK-FAULT"
+status = "deleted"
+owed = "a live fault at an actor's surface install or checkpoint admission parks the actor with a typed park event, and the activation after the fault clears completes it once"
+note = "the live-fault park suite injected faults through an EffectLayer, deleted in I0; a live fault parks an actor as a ParkEvent (L3/L9c)"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/model_call_drift_park.rs"
+test = "*"
+area = "model-call-drift"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "model_call_drift_parks_then_completes_once_restored",
+  "runtime_shift_cold_replay_ignores_live_input_and_hook_drift",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "model-call envelope drift is a journal-replay mismatch; there is no replay (ADR 0132), and the layer it used is deleted"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/direct_turn_acceptance.rs"
+test = "*"
+area = "turn-acceptance"
+needs = ["turn"]
+class = "replace"
+lane = "I0"
+laws = [
+  "vacuum_then_redrive_replays_receipt_single_row",
+  "direct_turn_behind_earlier_admissions_runs_after_them",
+  "accept_turn_input_redrive_after_store_commit_admits_one_row",
+]
+disposition = "replaced-by:planned:ACCEPT1"
+status = "deleted"
+owed = "a direct turn's acceptance commits once: a redrive after the acceptance commit or a vacuum admits one row, and a direct turn behind earlier admissions runs after them"
+note = "observed through a journal EffectLayer, deleted in I0; turn acceptance is a turn.accept write (L3), re-proved by L9c; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/queue_observation.rs"
+test = "*"
+area = "session-wake"
+needs = ["turn"]
+class = "replace"
+lane = "I0"
+laws = [
+  "absent_or_deleted_durable_operations_emit_no_driver_wake",
+]
+disposition = "replaced-by:planned:WAKE1"
+status = "deleted"
+owed = "a send or cancel against an absent or deleted session wakes no session actor and creates nothing; one send to a live session wakes it once"
+note = "it counted wakes through the backend engine's session work (EffectEngine::session_work), deleted in I0; wakes are Backend::wake_session (L3s, FIG-5196); only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-plugin-mcp/src/naming_cell_tests.rs"
+test = "*"
+area = "cell-bindings"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "a_recorded_bare_binding_survives_collision_rename_and_foreign_occupant",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "its double implemented RuntimeEffectController (deleted in I0) to serve a journaled binding set on redrive; there is no replay (ADR 0132), and the binding judgement itself stays pinned by lash-lashlang-runtime cell_bindings_tests; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/intent_laws.rs"
+test = "*"
+area = "tool-intents"
+needs = ["turn", "process"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a crash redrive of a start declaration converges on one process, at every pause point of the replaying controller",
+  "a redrive is byte stable after a live terminal mutation, and an intent's outcome replay is scoped to its minting emission",
+  "a refusal after a success keeps the committed prefix and replays typed evidence",
+  "an undeclared intent, or a trigger intent under a foreign authority, is refused before anything is realized, with its typed code",
+  "a recorded trigger emits exactly once across a crash after its result commit, and refuses when its delivery does not start",
+  "an attempt holds its large captured environment before realizing a start",
+  "crash_redrive_of_a_start_declaration_converges_on_one_process",
+  "crash_after_result_commit_redrives_the_recorded_intent_batch",
+  "crash_mid_drain_redrives_the_committed_prefix_and_finishes_the_suffix",
+  "crash_mid_intent_replays_the_command_committed_before_its_reply",
+  "public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation",
+  "tool_intent_outcome_replay_is_scoped_to_its_minting_emission",
+  "refusal_after_success_preserves_the_committed_prefix_and_replays_typed_evidence",
+  "an_undeclared_intent_refuses_the_outcome_before_anything_is_realized",
+  "ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code",
+  "register_trigger_intent_refuses_foreign_authority_before_installing",
+  "crash_after_result_commit_emits_the_recorded_trigger_exactly_once",
+  "recorded_trigger_refuses_when_a_delivery_does_not_start",
+  "public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emission",
+  "recorded_trigger_occurrence_identity_follows_the_declaration_replay_key",
+  "cold_public_coordinator_refuses_v1_trigger_batch_before_store_ingress",
+  "crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_outcome",
+  "an_attempt_holds_its_large_captured_environment_before_realizing_a_start",
+]
+disposition = "replaced-by:planned:INTENT1"
+status = "deleted"
+owed = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
+note = "every law ran over IntentReplayController, a replaying RuntimeEffectController double; ADR 0132 replays nothing, and intents become L4's StoreLocalEffect (S4)"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs"
+test = "a_local_signal_redelivered_after_its_wait_advances_resolves_only_its_admitted_wait"
+area = "processes"
+needs = ["process"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a signal redelivered after its process's wait advanced resolves only the wait its first append selected (FIG-4298)",
+]
+disposition = "replaced-by:planned:SIGNAL1"
+status = "deleted"
+owed = "signals reach a process engine's advance as events in mailbox order per sender, and a redelivered signal is one event: it never resolves a later wait"
+note = "the law observed resolutions through SignalResolutions, an AwaitEventResolver double; signal waits become events to advance (S6)"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/session/fig790_tests.rs"
+test = "*"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "I0"
+laws = [
+  "a process await already cancelled, or cancelled mid-await, emits exactly one await effect (FIG-790)",
+  "a process await in a deleted session latches a typed enclosing effect abort",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "both laws counted and failed effects through RuntimeEffectController doubles; no effect is issued or journaled under ADR 0132, and a process await is L5's await_process (S5)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/retired_shift.rs"
+test = "*"
+area = "shift"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "a retired session's shift admission step records the retirement, and a redrive decodes the recorded retirement instead of running the body again (FIG-3822)",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the law counted journaled AdmitShift steps through a strict-replay RecordingEffectController layer; nothing is journaled or redriven under ADR 0132, and the shift is L3s's session mail drain (S3)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "not_available_surfaces_clean_link_error_and_is_recorded"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "not_available_surfaces_clean_link_error_and_is_recorded",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "resolves_unknown_paths_in_one_record_filtered_batch"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "resolves_unknown_paths_in_one_record_filtered_batch",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "excludes_recorded_paths_from_a_non_empty_batch"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "excludes_recorded_paths_from_a_non_empty_batch",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "recorded_unavailable_masks_a_new_ambient_binding"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "recorded_unavailable_masks_a_new_ambient_binding",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "recorded_grant_replaces_a_changed_ambient_binding"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "recorded_grant_replaces_a_changed_ambient_binding",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "recorded_grant_still_obeys_unrelated_ambient_module_collisions"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "recorded_grant_still_obeys_unrelated_ambient_module_collisions",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "fault_after_resolver_return_allows_side_effect_free_rediscovery"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "fault_after_resolver_return_allows_side_effect_free_rediscovery",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "fault_after_durable_record_replays_without_resolving"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "fault_after_durable_record_replays_without_resolving",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "journal_replay_masks_changed_ambient_before_live_lookup"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "journal_replay_masks_changed_ambient_before_live_lookup",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "journal_replay_masks_changed_surface_before_catalog_merge"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "journal_replay_masks_changed_surface_before_catalog_merge",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "journal_replay_preserves_unrelated_surface_catalog_collision"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "journal_replay_preserves_unrelated_surface_catalog_collision",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "fault_before_registration_retries_captured_route_without_resolving"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "fault_before_registration_retries_captured_route_without_resolving",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "revoked_route_refuses_without_replacing_the_journaled_grant"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "revoked_route_refuses_without_replacing_the_journaled_grant",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "independent_link_can_accept_a_new_ambient_binding"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "independent_link_can_accept_a_new_ambient_binding",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "deferred_record_refuses_a_different_admitted_link_address"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "deferred_record_refuses_a_different_admitted_link_address",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred/tests/journal_replay.rs"
+test = "*"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a recorded unavailable masks an incompatible surface before environment validation",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer (deleted with the EffectLayer seam)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred/tests/runtime_built_in.rs"
+test = "*"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a runtime built-in survives an empty deferred resolution and pre-merge masking",
+  "a retained negative masks duplicate catalog claimants before live validation",
+]
+disposition = "replaced-by:planned:DEFER1"
+status = "deleted"
+owed = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
+note = "ran through FaultJournalLayer (deleted with the EffectLayer seam)"
+
+[[row]]
+path = "crates/lash/src/tests/tool_intent_ingress.rs"
+test = "recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal"
+area = "tool-intents"
+needs = ["process"]
+class = "delete"
+lane = "I0"
+laws = [
+  "an outcome recorded in the effect journal outside the intent protocol is a typed ingress refusal",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the law planted a recorded outcome in KeyJournalController, an EffectHost double; no effect journal exists under ADR 0132"
+
+[[row]]
+path = "crates/lash/src/tests/tool_intent_ingress.rs"
+test = "crash_after_admission_redrives_to_exactly_one_realization"
+area = "tool-intents"
+needs = ["process"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a crash after a host submission's admission redrives to exactly one realization",
+  "a digest-only start redrives without republishing its environment",
+]
+disposition = "replaced-by:planned:INTENT1"
+status = "deleted"
+owed = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
+note = "both laws crashed an AdmissionCrashController (an EffectHost double) mid-admission; also covers a_digest_only_start_redrives_without_republishing_its_environment"
+
+[[row]]
+path = "crates/lash/src/tests/tool_intent_ingress/redelivery.rs"
+test = "*"
+area = "tool-intents"
+needs = ["process"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a redelivered start realizes one process, and a changed declaration returns it",
+  "a redelivered event or signal appends once and refuses a changed payload",
+  "a redelivered cancel requests the same cancellation once; a redelivered trigger ingests once and refuses a changed payload",
+  "a host submission names its call by its handle across redelivery",
+]
+disposition = "replaced-by:planned:INTENT1"
+status = "deleted"
+owed = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
+note = "every law redelivered onto a fresh KeyJournalController (an EffectHost double) to model a fresh effect journal"
+
+[[row]]
+path = "crates/lash/src/tests/tool_intent_ingress/replay_after_advance.rs"
+test = "*"
+area = "tool-intents"
+needs = ["process"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a trigger, start, signal or cancel redelivered after its delivery, process or session was pruned or deleted answers the recorded outcome",
+]
+disposition = "replaced-by:planned:INTENT1"
+status = "deleted"
+owed = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
+note = "every law redelivered onto a fresh KeyJournalController (an EffectHost double)"
+
+[[row]]
+path = "crates/lash/src/tests/tool_intent_ingress/reclaimed_emission.rs"
+test = "*"
+area = "tool-intents"
+needs = ["process"]
+class = "replace"
+lane = "I0"
+laws = [
+  "a redelivered trigger emission never writes a reclaimed occurrence or delivery back, on SQLite memory, SQLite file and PostgreSQL (FIG-4513)",
+]
+disposition = "replaced-by:planned:INTENT1"
+status = "deleted"
+owed = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
+note = "the law stopped the first delivery with StopAfterBind, an EffectLayer over a LayeredEffectHost (both deleted)"
+
+[[row]]
+path = "crates/lash/src/tests/tool_intent_ingress/engine_owned.rs"
+test = "a_journaling_host_retains_every_outcome_in_the_submission_ledger"
+area = "tool-intents"
+needs = ["process"]
+class = "delete"
+lane = "I0"
+laws = [
+  "a journaling host retains every outcome in the submission ledger",
+]
+disposition = "covered-by:crates/lash/src/tests/tool_intent_ingress/engine_owned.rs::a_host_that_journals_nothing_retains_every_outcome_in_the_submission_ledger"
+status = "deleted"
+note = "no host journals any more; the non-journaling twin pins the same ledger law"
+
+[[row]]
+path = "crates/lash-core-execution/src/replay_read_gate.rs"
+test = "*"
+area = "lash-core-execution"
+needs = ["turn"]
+class = "delete"
+lane = "I0"
+laws = [
+  "on a replay path (a fn naming a controller or journal context), every store read or live host-service call sits inside a recorded step's span or is pinned with its class (FIG-4324, ADR 0105 §1)",
+  "the store and host-service surfaces classify every trait method; the source scanner follows helpers, wrappers, aliases, closures and match arms",
+  "replay_paths_read_store_state_only_inside_recorded_steps",
+  "the_store_surface_classifies_every_trait_method",
+  "the_host_services_classify_every_trait_method",
+  "a_planted_read_before_the_journaled_command_fails",
+  "a_read_inside_the_recorded_step_passes",
+  "a_helper_called_outside_a_step_carries_the_replay_path",
+  "a_helper_called_only_inside_steps_passes",
+  "reads_off_every_replay_path_and_in_test_code_pass",
+  "law",
+  "a_host_service_call_outside_a_recorded_step_fails",
+  "host_service_closure_parameters_are_followed",
+  "host_service_match_arm_bindings_are_followed",
+  "a_host_service_call_inside_a_step_or_of_another_type_passes",
+  "a_same_named_method_on_another_receiver_is_no_service_call",
+  "a_method_of_a_controller_owning_type_is_a_replay_path",
+  "a_type_holding_an_aliased_controller_is_a_replay_path",
+  "a_controller_associated_type_does_not_seed_an_unrelated_target",
+  "a_method_on_another_receiver_carries_no_replay_path_by_name",
+  "a_continued_string_keeps_hit_lines_exact",
+  "literals_comments_and_lifetimes_do_not_confuse_the_tree",
+  "pins_match_by_text_and_count_and_go_stale",
+  "the_real_tree_fails_with_a_facade_read_planted_before_its_command",
+  "the_real_tree_passes_with_no_ticket_pins",
+  "the_real_tree_fails_with_an_unrecorded_route_restore_before_the_delivery_start",
+  "the_real_tree_passes_with_an_unrelated_restore_before_the_delivery_start",
+  "a_wrapper_that_runs_its_future_outside_the_step_fails",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "ADR 0132 has no replay path and no recorded step: nothing re-runs against a recorded history, so the gate's subject is gone with RuntimeEffectController and EffectHost. Replay freedom is NR-1..4 (planned:NR-1)"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/deferred.rs"
+test = "*"
+area = "lashlang-deferred"
+needs = ["cell"]
+class = "mechanical"
+lane = "I0"
+laws = [
+  "deferred_link_identity_ignores_descriptive_label_and_attribution",
+  "deferred_grant_imports_declared_schema_types",
+  "route_restore_failures_map_to_bounded_retry_policy",
+]
+disposition = "port"
+status = "ported"
+note = "I0 (FIG-5194) deleted the journal-layer tests of this file (their own rows); the plain unit tests left run without a host"
+
+[[row]]
+path = "crates/lash/src/tests/tool_intent_ingress/engine_owned.rs"
+test = "*"
+area = "tool-intents"
+needs = ["process"]
+class = "mechanical"
+lane = "I0"
+laws = [
+  "a_host_that_journals_nothing_retains_every_outcome_in_the_submission_ledger",
+  "a_host_that_journals_nothing_binds_a_cancel_identity_to_its_first_target",
+  "a_host_that_journals_nothing_answers_a_resubmitted_identity_with_its_first_outcome",
+]
+disposition = "port"
+status = "ported"
+note = "I0 (FIG-5194) deleted the journaling-host twin (its own row); the rest run on the backend's own context"

@@ -1,6 +1,7 @@
 //! Execution of the root's recorded composition and head verdict. Plugin
 //! transitions and turns follow admission; they cannot select new root work.
 
+use crate::ActorContext;
 use std::sync::Arc;
 
 use super::plugin_transition::TransitionBasis;
@@ -11,9 +12,7 @@ use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::runtime::logical_turn::{LogicalTurnAdmissions, LogicalTurnStart};
 use crate::runtime::turn_loop::TurnStopwatch;
 use crate::store::{AdmittedHead, FollowOnRecoveryAnswer, RunAdmissionAnswer};
-use crate::{
-    RuntimeError, RuntimeErrorCode, ScopedEffectController, SessionError, TurnId, TurnInput,
-};
+use crate::{RuntimeError, RuntimeErrorCode, SessionError, TurnId, TurnInput};
 use lash_core_execution::runtime::effect::AdmittedHeadVerdict;
 
 impl LashRuntime {
@@ -26,7 +25,7 @@ impl LashRuntime {
     )]
     pub(super) async fn execute_run(
         &mut self,
-        run_controller: &ScopedEffectController<'_>,
+        run_controller: &ActorContext,
         admitted: &Admitted,
         head: &AdmittedHead,
         sinks: &ShiftSinks<'_>,
@@ -221,7 +220,7 @@ impl LashRuntime {
     /// nothing, leaving the lane to that admission.
     pub(super) async fn execute_commands_run(
         &mut self,
-        run_controller: &ScopedEffectController<'_>,
+        run_controller: &ActorContext,
         admitted: &Admitted,
         fence: &crate::store::ShiftFence,
     ) -> Result<ExecutedRun, ShiftAbort> {
@@ -330,7 +329,7 @@ impl LashRuntime {
     /// terminal, which arms its scope close.
     pub(super) async fn execute_operation_run(
         &mut self,
-        run_controller: &ScopedEffectController<'_>,
+        run_controller: &ActorContext,
         admitted: &Admitted,
         operation: &crate::BatchId,
         fence: &crate::store::ShiftFence,
@@ -431,7 +430,7 @@ impl LashRuntime {
     /// ([`execute_headless_follow_on_run`]).
     pub(super) async fn execute_follow_on_run(
         &mut self,
-        run_controller: &ScopedEffectController<'_>,
+        run_controller: &ActorContext,
         admitted: &Admitted,
         follow_on: &FollowOnWork<'_>,
         sinks: &ShiftSinks<'_>,
@@ -567,11 +566,9 @@ impl LashRuntime {
         // contract 4): its effects and process starts are owned by the run
         // whose evidence its final commit writes and whose scope that
         // evidence closes. The recovery run owns only its own steps.
-        let host = Arc::clone(&self.host.core.control.effect_host);
         let logical_run = crate::store::PhysicalTurn::split_turn_id(follow_on.turn).0;
         let turn_controller = super::step_controller(
             run_controller,
-            host.as_ref(),
             shift_run_scope(admitted.session(), &logical_run),
         )
         .map_err(ShiftAbort::Refused)?;
@@ -708,7 +705,7 @@ impl LashRuntime {
 /// recorded, so the run executes exactly the rows its journal was written
 /// for.
 pub(super) fn run_step_invocation(
-    run_controller: &ScopedEffectController<'_>,
+    run_controller: &ActorContext,
     admitted: &Admitted,
     step: &str,
 ) -> Result<crate::RuntimeEffectInvocation, ShiftAbort> {
@@ -736,14 +733,14 @@ pub(super) struct FollowOnWork<'a> {
 /// the shift could not address; the inner one is the step's answer that is
 /// not a decision: its recorded retirement, or a fault its attempt met.
 async fn execute_follow_on_recovery(
-    run_controller: &ScopedEffectController<'_>,
+    run_controller: &ActorContext,
     admitted: &Admitted,
     follow_on: &FollowOnWork<'_>,
     runner: crate::RuntimeEffectLocalExecutor<'_>,
 ) -> Result<Result<FollowOnRecoveryAnswer, RuntimeError>, ShiftAbort> {
     let invocation = run_step_invocation(run_controller, admitted, "shift-follow-on")?;
     Ok(run_controller
-        .execute_effect(
+        .turn_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::RecoverFollowOn {
@@ -950,7 +947,7 @@ impl HeadlessRun {
 ///   the run's turn after them, and that turn cannot replay without the
 ///   session's head ([`HeadlessRun::past_its_steps`]).
 pub(super) async fn execute_headless_run(
-    run_controller: &ScopedEffectController<'_>,
+    run_controller: &ActorContext,
     admitted: &Admitted,
     _head: &AdmittedHead,
     headless: HeadlessRun,
@@ -980,7 +977,7 @@ pub(super) async fn execute_headless_run(
     };
     let id = request.id.clone();
     run_controller
-        .execute_effect(
+        .shift_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::TransitionPlugins {
@@ -1002,7 +999,7 @@ pub(super) async fn execute_headless_run(
 }
 
 pub(super) async fn execute_headless_command_transition(
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     admitted: &Admitted,
     headless: HeadlessRun,
 ) -> Result<(), ShiftAbort> {
@@ -1010,7 +1007,7 @@ pub(super) async fn execute_headless_command_transition(
     let request = super::plugin_transition::command_transition_request(controller, admitted)?;
     let id = request.id.clone();
     controller
-        .execute_effect(
+        .shift_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::TransitionPlugins {
@@ -1049,7 +1046,7 @@ pub(super) async fn execute_headless_command_transition(
 /// - a recorded compaction journaled its apply after the read, which cannot
 ///   replay without the session's head ([`HeadlessRun::past_its_steps`]).
 pub(super) async fn execute_headless_commands_run(
-    run_controller: &ScopedEffectController<'_>,
+    run_controller: &ActorContext,
     admitted: &Admitted,
     headless: HeadlessRun,
 ) -> Result<RunOutcome, ShiftAbort> {
@@ -1108,7 +1105,7 @@ pub(super) async fn execute_headless_commands_run(
 /// an earlier attempt ran the task's journaled work after it, which cannot
 /// replay without the session's head ([`HeadlessRun::past_its_steps`]).
 pub(super) async fn execute_headless_operation_run(
-    run_controller: &ScopedEffectController<'_>,
+    run_controller: &ActorContext,
     admitted: &Admitted,
     headless: HeadlessRun,
 ) -> Result<RunOutcome, ShiftAbort> {
@@ -1150,7 +1147,7 @@ pub(super) async fn execute_headless_operation_run(
 ///   follow-on's turn after it, which cannot replay without the session's
 ///   head ([`HeadlessRun::past_its_steps`]).
 pub(super) async fn execute_headless_follow_on_run(
-    run_controller: &ScopedEffectController<'_>,
+    run_controller: &ActorContext,
     admitted: &Admitted,
     follow_on: &FollowOnWork<'_>,
     headless: HeadlessRun,

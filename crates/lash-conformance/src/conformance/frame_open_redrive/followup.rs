@@ -4,6 +4,7 @@
 //! bound turn holds its pressure frame.
 
 use super::*;
+use crate::ActorContext;
 use pretty_assertions::assert_eq;
 
 pub(super) struct CompactorCrash {
@@ -36,7 +37,7 @@ impl lash_core::facade_support::TraceSink for CompactorCrash {
 /// queued behind the compaction runs in the same shift, after it.
 pub(super) async fn compaction_crash_case(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
@@ -67,7 +68,7 @@ pub(super) async fn compaction_crash_case(
 )]
 pub(super) async fn compaction_crash_case_under(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
@@ -204,7 +205,7 @@ pub(super) async fn compaction_crash_case_under(
 /// Each case opens exactly once.
 pub async fn compact_with_production_compactor_crash_matrix(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -217,7 +218,7 @@ pub async fn compact_with_production_compactor_crash_matrix(
         let case = format!("{prefix}-production-admin");
         compaction_crash_case(
             &case,
-            Arc::clone(&effect_host),
+            effect_host.clone(),
             Arc::clone(&stores),
             Arc::clone(&runner),
             crash,
@@ -292,7 +293,7 @@ impl BoundTurnCrash {
 )]
 pub async fn an_administrative_compaction_waits_for_the_bound_turn(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     protocol: Arc<dyn FrameLawProtocol>,

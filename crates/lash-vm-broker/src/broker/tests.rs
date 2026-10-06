@@ -18,6 +18,7 @@ use crate::authority::{
     OperationRequestCodec, ToolRoute, decode_value, encode_value,
 };
 use crate::identity::CodeCallIdentities;
+use crate::snapshot::SnapshotStore;
 use crate::testing::{
     FAKE_VM_CONTRACT, FakeWorkerPool, Fault, MemoryCheckpoints, ScriptedProgram, Step,
 };
@@ -618,7 +619,12 @@ async fn opening_a_frame_retires_the_old_frames_state() {
     let end = broker
         .run(
             RunStart {
-                from: fixture.checkpoints.latest().await.expect("reads"),
+                from: fixture
+                    .checkpoints
+                    .latest()
+                    .await
+                    .expect("reads")
+                    .map(|(_, checkpoint)| checkpoint),
                 ..start(&read)
             },
             &CancellationToken::new(),

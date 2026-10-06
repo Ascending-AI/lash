@@ -1,4 +1,5 @@
 use super::*;
+use crate::ActorContext;
 use lash_core::store::IngressSettlement;
 use pretty_assertions::assert_eq;
 
@@ -701,11 +702,11 @@ pub async fn accepted_turn_input_released_by_its_run_terminal_is_cancelled_and_v
 )]
 pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     store: Arc<dyn RuntimeStore>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
 ) {
     let authority = crate::TurnCancellationAuthority::new(
         effect_host.turn_control_binding_id(),
-        effect_host as Arc<dyn crate::AwaitEventResolver>,
+        effect_host as ActorContext,
     );
     let turn_id = "cancel-active-turn";
     let lease =
@@ -823,11 +824,11 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
 )]
 pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     store: Arc<dyn RuntimeStore>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
 ) {
     let authority = crate::TurnCancellationAuthority::new(
         effect_host.turn_control_binding_id(),
-        effect_host as Arc<dyn crate::AwaitEventResolver>,
+        effect_host as ActorContext,
     );
     let turn_id = "active-turn-1";
     let lease =
@@ -1248,11 +1249,11 @@ fn assert_source_key_conflict(
 )]
 pub async fn identical_retry_after_defer_is_existing_not_conflict(
     store: Arc<dyn RuntimeStore>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
 ) {
     let authority = crate::TurnCancellationAuthority::new(
         effect_host.turn_control_binding_id(),
-        effect_host as Arc<dyn crate::AwaitEventResolver>,
+        effect_host as ActorContext,
     );
     let session_id = SessionId::from("root");
     let ended_turn = "fig3544-ended-turn";

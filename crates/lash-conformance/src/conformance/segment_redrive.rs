@@ -39,6 +39,7 @@
 //! process that would once have been re-runnable and still expects the
 //! refusal.
 
+use crate::ActorContext;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -52,7 +53,7 @@ use crate::{
     ConformanceCrash, ConformanceTurnAttempt, ConformanceTurnEnd, EffectAddress, ExecutionScope,
     ProcessAwaitOutput, ProcessRegistration, RuntimeAttribution, RuntimeEffectCommand,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController, SegmentRecovery,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, SegmentRecovery,
 };
 
 /// How long the law waits for a child it started to settle.
@@ -392,7 +393,7 @@ impl Scenario {
     /// suspension; only the effect executor counts as another run.
     fn child_body(&self) -> ConformanceTurnAttempt {
         let scenario = self.clone();
-        Arc::new(move |scoped: ScopedEffectController<'_>| {
+        Arc::new(move |scoped: ActorContext| {
             let scenario = scenario.clone();
             Box::pin(async move {
                 let scope = scoped.execution_scope().clone();
@@ -428,7 +429,7 @@ impl Scenario {
                     },
                 );
                 let outcome = scoped
-                    .execute_effect(envelope, scenario.tool_executor(CHILD, None))
+                    .tool_effect(envelope, scenario.tool_executor(CHILD, None))
                     .await
                     .unwrap_or_else(|error| {
                         panic!("the child's journaled effect completes: {error}")
@@ -561,7 +562,7 @@ async fn segment_body(
     scenario: Scenario,
     phase: Phase,
     crash: Option<ConformanceCrash>,
-    scoped: ScopedEffectController<'_>,
+    scoped: ActorContext,
 ) -> ConformanceTurnEnd {
     if phase == Phase::Recovery {
         scenario
@@ -575,7 +576,7 @@ async fn segment_body(
     match scenario.kind {
         EffectKind::ToolCall => {
             let outcome = scoped
-                .execute_effect(
+                .tool_effect(
                     scenario.tool_envelope(TOOL),
                     scenario.tool_executor(TOOL, unrecorded_crash),
                 )
@@ -588,7 +589,7 @@ async fn segment_body(
         }
         EffectKind::Trigger => {
             let outcome = scoped
-                .execute_effect(
+                .tool_effect(
                     scenario.trigger_envelope(),
                     scenario.trigger_executor(unrecorded_crash),
                 )
@@ -618,7 +619,7 @@ async fn segment_body(
             }
             let registry: Arc<dyn crate::ProcessRegistry> = Arc::new(registry);
             let outcome = scoped
-                .execute_effect(
+                .process_effect(
                     scenario.start_envelope(),
                     RuntimeEffectLocalExecutor::processes(
                         Arc::clone(&registry),
@@ -661,7 +662,7 @@ fn body(
     crash: Option<ConformanceCrash>,
 ) -> ConformanceTurnAttempt {
     let scenario = scenario.clone();
-    Arc::new(move |scoped: ScopedEffectController<'_>| {
+    Arc::new(move |scoped: ActorContext| {
         Box::pin(segment_body(scenario.clone(), phase, crash.clone(), scoped))
     })
 }

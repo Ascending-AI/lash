@@ -7,6 +7,7 @@
 //! post-commit delivery cannot start before adoption.
 
 use super::*;
+use crate::ActorContext;
 use crate::TurnId;
 use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
@@ -84,7 +85,7 @@ struct TurnCommitRequest<'commit, 'run> {
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
-    turn_control_resolver: &'commit dyn crate::AwaitEventResolver,
+    turn_control_resolver: &'commit ActorContext,
     admissions: &'commit LogicalTurnAdmissions,
     opener: Option<crate::runtime::turn_driver::OpenerForCommit<'run>>,
     attachment_store: &'commit crate::RuntimeAttachmentStore,
@@ -93,8 +94,7 @@ struct TurnCommitRequest<'commit, 'run> {
 
 /// The local commit-admission handles: only the head-advancing attempt uses
 /// them, and they are dropped when the store needs no admission.
-struct TurnCommitAdmission<'admission> {
-    effect_controller: &'admission dyn crate::RuntimeEffectController,
+struct TurnCommitAdmission {
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
 }
 
@@ -106,20 +106,15 @@ impl PreparedTurn {
     async fn commit(
         self,
         request: TurnCommitRequest<'_, '_>,
-        admission: TurnCommitAdmission<'_>,
+        admission: TurnCommitAdmission,
     ) -> Result<CommittedTurn, crate::StoreError> {
-        let TurnCommitAdmission {
-            effect_controller,
-            turn_phase_probe,
-        } = admission;
+        let TurnCommitAdmission { turn_phase_probe } = admission;
         let has_durable_store = request
             .session
             .as_deref()
             .and_then(Session::history_store)
             .is_some();
-        if !has_durable_store
-            || !super::commit_admission::requires_local_commit_admission(effect_controller)
-        {
+        if !has_durable_store {
             return Box::pin(self.commit_after_admission(request)).await;
         }
         let session_id = self.turn_pipeline.state().session_id.clone();
@@ -273,7 +268,7 @@ pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
     pub(in crate::runtime) finish: TurnFinishInput,
     pub(in crate::runtime) opener: Option<crate::runtime::turn_driver::OpenerForCommit<'run>>,
     pub(in crate::runtime) admissions: &'commit LogicalTurnAdmissions,
-    pub(in crate::runtime) scoped_effect_controller: &'commit ScopedEffectController<'run>,
+    pub(in crate::runtime) scoped_effect_controller: &'commit ActorContext,
     /// The cancellation the turn recorded honouring, if any: a journaled
     /// peek's answer, never a live token (FIG-3672 P9).
     pub(in crate::runtime) honoured_cancel: Option<crate::TurnCancellationEvidence>,
@@ -291,7 +286,7 @@ pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
     pub(super) driver: TurnDriverRemainder,
     pub(super) opener: crate::runtime::turn_driver::OpenerForCommit<'run>,
     pub(super) cancellation_messages: crate::MessageSequence,
-    pub(super) finish_scoped_effect_controller: &'cancel ScopedEffectController<'run>,
+    pub(super) finish_scoped_effect_controller: &'cancel ActorContext,
     pub(super) shift_fence: Option<&'cancel ShiftFence>,
     pub(super) turn_control: &'cancel ActiveTurnControl,
     pub(super) turn_index: usize,
@@ -310,9 +305,11 @@ pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
     /// follow-on that never ran still answers its task (ADR 0101 §3).
     pub(in crate::runtime) delivered_task: Option<String>,
     pub(in crate::runtime) sinks: TurnSinks<'error>,
-    pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
+    pub(in crate::runtime) scoped_effect_controller: ActorContext,
     pub(in crate::runtime) admissions: LogicalTurnAdmissions,
     pub(in crate::runtime) shift_fence: Option<&'error ShiftFence>,
+    /// The lifetime this value is bound to; the context it carries is `'static`.
+    pub(crate) run: std::marker::PhantomData<&'run ()>,
 }
 
 impl LashRuntime {
@@ -326,8 +323,7 @@ impl LashRuntime {
     ) -> Result<(), RuntimeError> {
         self.uninstall_run_view()?;
         let controller = opts.scoped_effect_controller();
-        let binding =
-            turn_control_binding(self.host.core.control.effect_host.as_ref(), &controller).await?;
+        let binding = turn_control_binding(&controller).await?;
         let control = ActiveTurnControl::new(
             binding.resolver(),
             TurnAddress::new(&self.state.session_id, &run),
@@ -378,7 +374,7 @@ impl LashRuntime {
         &self,
         pipeline: &TurnBoundary,
         turn: &TurnId,
-        controller: &ScopedEffectController<'run>,
+        controller: &ActorContext,
         fence: Option<&ShiftFence>,
     ) -> Result<Option<crate::runtime::turn_driver::OpenerForCommit<'run>>, RuntimeError> {
         let Some(continuation) = pipeline
@@ -508,9 +504,7 @@ impl LashRuntime {
             turn_control,
             observer,
         } = context;
-        let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-        let turn_control_binding =
-            turn_control_binding(turn_control_host.as_ref(), scoped_effect_controller).await?;
+        let turn_control_binding = turn_control_binding(scoped_effect_controller).await?;
         let turn_control_resolver = turn_control_binding.resolver();
         let turn_control_binding_id = turn_control_binding.binding_id().to_string();
         let TurnFinishInput {
@@ -885,7 +879,6 @@ impl LashRuntime {
                     attachment_source_policy: self.host.core.attachment_source_policy.as_ref(),
                 },
                 TurnCommitAdmission {
-                    effect_controller: scoped_effect_controller.controller(),
                     turn_phase_probe: self.turn_phase_probe.clone(),
                 },
             ),
@@ -1089,6 +1082,7 @@ impl LashRuntime {
         context: LogicalTurnErrorContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let LogicalTurnErrorContext {
+            run: std::marker::PhantomData,
             code,
             message,
             trace_turn_id,
@@ -1101,9 +1095,7 @@ impl LashRuntime {
         // A recovered follow-on's terminal commits at the index its run's
         // decision recorded, on the head it adopted (FIG-4380).
         let admitted_turn_index = self.admitted_turn_index.take();
-        let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-        let turn_control_binding =
-            turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
+        let turn_control_binding = turn_control_binding(&scoped_effect_controller).await?;
         let turn_control_resolver = turn_control_binding.resolver();
         let turn_control = Arc::new(
             ActiveTurnControl::new(

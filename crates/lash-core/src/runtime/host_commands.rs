@@ -218,11 +218,10 @@ impl LashRuntime {
         args: serde_json::Value,
         completion: crate::QueuedWorkCompletion,
         shift_fence: &crate::store::ShiftFence,
-        run_controller: &crate::ScopedEffectController<'_>,
+        run_controller: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
-        let host = Arc::clone(&self.host.core.control.effect_host);
         let task = match operation {
             HostPluginOperation::Command => None,
             HostPluginOperation::Task => {
@@ -232,7 +231,6 @@ impl LashRuntime {
                 };
                 let controller = super::shift::step_controller(
                     run_controller,
-                    host.as_ref(),
                     operation.opener().admitted_scope(),
                 )?;
                 let signal = PluginTaskCancelSignal::open(
@@ -342,10 +340,7 @@ impl LashRuntime {
         args: serde_json::Value,
         batch_id: &crate::BatchId,
         shift_fence: &crate::store::ShiftFence,
-        task: Option<(
-            &crate::ScopedEffectController<'_>,
-            Option<&PluginTaskCancelSignal>,
-        )>,
+        task: Option<(&crate::ActorContext, Option<&PluginTaskCancelSignal>)>,
     ) -> Result<
         Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError>,
         RuntimeError,
@@ -383,37 +378,26 @@ impl LashRuntime {
                     .await
             }
             Some((operation_controller, cancel_signal)) => {
-                // The task's effects are journaled under the command's own
-                // scope by the operation run's invocation, which owns them:
-                // it serves every effect the task issues, and returns only
-                // once the task returned and its issued work drained (K8).
-                // A redrive of the unsettled command replays them.
+                // The task's effects run under the command's own scope.
                 let stop = tokio_util::sync::CancellationToken::new();
-                let ran = lash_core_execution::runtime::effect::own_effect_controller_task(
-                    operation_controller.controller(),
-                    operation_controller.admitted_scope().clone(),
-                    |controller| {
-                        let task = plugins.run_plugin_task(
-                            name,
-                            args,
-                            Some(session_id.clone()),
-                            true,
-                            services.state_service(),
-                            services.lifecycle_service(),
-                            services.graph_service(),
-                            services.process_service(),
-                            controller,
-                            stop.clone(),
-                        );
-                        async {
-                            match cancel_signal {
-                                Some(signal) => run_until_returned(task, signal.watch(&stop)).await,
-                                None => task.await,
-                            }
-                        }
-                    },
-                )
-                .await?;
+                let ran = {
+                    let task = plugins.run_plugin_task(
+                        name,
+                        args,
+                        Some(session_id.clone()),
+                        true,
+                        services.state_service(),
+                        services.lifecycle_service(),
+                        services.graph_service(),
+                        services.process_service(),
+                        operation_controller.clone(),
+                        stop.clone(),
+                    );
+                    match cancel_signal {
+                        Some(signal) => run_until_returned(task, signal.watch(&stop)).await,
+                        None => task.await,
+                    }
+                };
                 // The task's code returned: a cancel requested by now settles
                 // nothing of it. Record the decision in the operation's own
                 // journal before committing, so redrive keeps that outcome.

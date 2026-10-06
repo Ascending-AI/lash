@@ -1,4 +1,5 @@
 use super::*;
+use crate::ActorContext;
 use crate::SessionId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
@@ -499,8 +500,8 @@ impl LashRuntime {
         .with_policy(self.host.core.control.relay_policy())
     }
 
-    pub fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
-        Arc::clone(&self.host.core.control.effect_host)
+    pub fn effect_host(&self) -> ActorContext {
+        self.host.core.control.effect_host.clone()
     }
 
     pub async fn enqueue_turn_input(
@@ -823,7 +824,7 @@ impl LashRuntime {
         &mut self,
         shift_fence: &crate::store::ShiftFence,
         cancellation: tokio_util::sync::CancellationToken,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         self.drain_next_session_command_fenced(
             shift_fence,
@@ -860,7 +861,7 @@ impl LashRuntime {
         &mut self,
         shift_fence: &crate::store::ShiftFence,
         cancellation: tokio_util::sync::CancellationToken,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
         lane: CommandRunLane<'_>,
     ) -> Result<Option<crate::SessionCommandReceipt>, CommandDrainStop> {
         loop {
@@ -1004,7 +1005,7 @@ impl LashRuntime {
         completion: crate::QueuedWorkCompletion,
         shift_fence: &crate::store::ShiftFence,
         cancellation: tokio_util::sync::CancellationToken,
-        effect_controller: &crate::ScopedEffectController<'_>,
+        effect_controller: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         // Compaction and host commands apply alone, under their own scope,
         // in the commit that settles them (FIG-4201, FIG-4202).
@@ -1093,11 +1094,8 @@ impl LashRuntime {
             }
             _ => {}
         }
-        let effect_controller = effect_controller.controller();
         let has_durable_store = self.services.store.is_some();
-        if !has_durable_store
-            || !super::commit_admission::requires_local_commit_admission(effect_controller)
-        {
+        if !has_durable_store {
             return self
                 .apply_session_command_after_admission(commands, Some((completion, shift_fence)))
                 .await;
@@ -1316,7 +1314,7 @@ impl CommandDrainStop {
 /// passed. The live lane would skip the settled command and run the run's
 /// next steps where its journal holds the compaction's.
 pub(in crate::runtime) async fn execute_session_command_run_read(
-    controller: &crate::ScopedEffectController<'_>,
+    controller: &crate::ActorContext,
     session_id: &SessionId,
     runner: crate::RuntimeEffectLocalExecutor<'_>,
 ) -> Result<Vec<crate::QueuedWorkBatch>, RuntimeError> {
@@ -1330,7 +1328,7 @@ pub(in crate::runtime) async fn execute_session_command_run_read(
         format!("session-command-run:{ordinal}"),
     );
     controller
-        .execute_effect(
+        .session_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::ReadSessionCommandRun {

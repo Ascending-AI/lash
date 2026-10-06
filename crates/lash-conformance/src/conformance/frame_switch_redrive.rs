@@ -18,6 +18,7 @@
 //! answer, ask the model once per frame in total, run its tool once, and
 //! commit its plugin transition and each physical turn once.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -177,7 +178,7 @@ fn attempt(
 )]
 pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_its_admitted_head(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    _effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -212,11 +213,10 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
             }
         })
         .build();
-    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     store

@@ -126,7 +126,6 @@ pub async fn coordinate_tool_invocation<'run>(
     for attempt in 1..=max_attempts {
         let prepared_key = context
             .effect_controller
-            .controller()
             .prepare_completion_key(
                 context.effect_controller.execution_scope(),
                 crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
@@ -150,7 +149,7 @@ pub async fn coordinate_tool_invocation<'run>(
         let invocation = lineage.attempt_invocation(context, &call, attempt);
         let outcome = context
             .effect_controller
-            .execute_effect(
+            .tool_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation.clone(),
                     crate::RuntimeEffectCommand::ToolAttempt {
@@ -864,7 +863,7 @@ async fn sleep_before_retry(
 ) -> Result<(), crate::RuntimeEffectControllerError> {
     let outcome = context
         .effect_controller
-        .execute_effect(
+        .wait_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::Sleep {

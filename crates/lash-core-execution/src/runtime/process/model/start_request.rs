@@ -224,10 +224,7 @@ impl ProcessStartRequest {
     /// family lash derives for its own start paths: a host mints only host
     /// keys, so a host rail never adopts a tool intent's or a trigger
     /// delivery's process.
-    pub fn keyed_in(
-        self,
-        scope: &crate::ScopedEffectController<'_>,
-    ) -> Result<Self, crate::PluginError> {
+    pub fn keyed_in(self, scope: &crate::ActorContext) -> Result<Self, crate::PluginError> {
         match &self.start_key {
             Some(start_key) if start_key.is_host_supplied() => Ok(self),
             Some(_) => Err(crate::PluginError::Runtime(crate::RuntimeError::new(

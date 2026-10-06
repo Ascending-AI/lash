@@ -1,12 +1,10 @@
 //! Scope-status vocabulary shared by every effect-engine substrate.
 //!
-//! Retirement and admission refusals are part of the [`EffectHost`]
-//! contract, not of any one journal implementation, so they live here rather
+//! Retirement and admission refusals are part of the effect contract, not
+//! of any one journal implementation, so they live here rather
 //! than inside a driver body. Callers that gate scope deletion on quiescence
 //! report [`scope_not_quiescent`]; every admission path reports
 //! [`scope_retired`] for a scope whose retirement tombstone exists.
-//!
-//! [`EffectHost`]: super::executor::EffectHost
 
 use crate::{RuntimeEffectControllerError, RuntimeError, RuntimeErrorCode};
 

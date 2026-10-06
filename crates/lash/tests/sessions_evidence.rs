@@ -192,10 +192,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::runtime::AssembledTurn| {
         let _ = &value.state;
     });
-    // W0069: lash::runtime::AwaitEventResolver [trait]
-    fn trait_witness_0069<T: lash::runtime::AwaitEventResolver>() {}
-    // W0072: lash::runtime::RuntimeEffectController [trait]
-    fn trait_witness_0072<T: lash::runtime::RuntimeEffectController>() {}
     // W0073: lash::runtime::RuntimeEffectControllerError [struct]
     type_witness::<lash::runtime::RuntimeEffectControllerError>();
     // W0074: lash::runtime::RuntimeEffectEnvelope [struct]
@@ -561,13 +557,6 @@ fn drain_area_witnesses() {
         matches!(
             value,
             lash::runtime::RuntimeErrorCode::EngineTurnTerminalInvalidResolution
-        )
-    });
-    // W0172: lash::runtime::RuntimeErrorCode::RuntimeEffectControllerTaskClosed [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::RuntimeEffectControllerTaskClosed
         )
     });
     // W0174: lash::runtime::RuntimeErrorCode::SessionCommandRun [variant]
@@ -1015,8 +1004,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash_core::test_support::RuntimeServices| {
         let _ = &value.process_env_store;
     });
-    // W0313: lash_core::facade_support::ScopedEffectControllerFacadeOps [trait]
-    fn trait_witness_0313<T: lash_core::facade_support::ScopedEffectControllerFacadeOps>() {}
     // W0340: lash_core::test_support::SessionObservedProcessOutcome::NoLongerRetained::pruned_at_ms [field]
     field_witness(
         |value: &lash_core::test_support::SessionObservedProcessOutcome| {

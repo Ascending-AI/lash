@@ -1,3 +1,4 @@
+use crate::ActorContext;
 use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
@@ -10,23 +11,19 @@ pub enum TestSessionHostMode {
     Shared(Arc<MockSessionManager>),
 }
 
-pub enum TestEffectController<'run> {
-    Shared(Arc<dyn crate::RuntimeEffectController>),
-    Borrowed(crate::ScopedEffectController<'run>),
-    /// The controller the ports' host lent one execution: it must admit the
+pub enum TestEffectController {
+    /// A context the build re-scopes to the scope the context claims.
+    Shared(ActorContext),
+    /// A context used under the scope it already carries.
+    Borrowed(ActorContext),
+    /// The context the ports' host lent one execution: it must admit the
     /// scope the context claims.
-    Lent(crate::ScopedEffectController<'run>),
+    Lent(ActorContext),
 }
 
-impl From<Arc<dyn crate::RuntimeEffectController>> for TestEffectController<'_> {
-    fn from(controller: Arc<dyn crate::RuntimeEffectController>) -> Self {
+impl From<ActorContext> for TestEffectController {
+    fn from(controller: ActorContext) -> Self {
         Self::Shared(controller)
-    }
-}
-
-impl<'run> From<crate::ScopedEffectController<'run>> for TestEffectController<'run> {
-    fn from(controller: crate::ScopedEffectController<'run>) -> Self {
-        Self::Borrowed(controller)
     }
 }
 
@@ -39,8 +36,8 @@ impl<'run> From<crate::ScopedEffectController<'run>> for TestEffectController<'r
 /// takes [`TestExecutionPorts::of`]; a conformance tier that proves a host
 /// without one names each port it runs the law over.
 #[derive(Clone)]
-pub struct TestExecutionPorts<'run> {
-    pub effect_host: Arc<dyn crate::EffectHost>,
+pub struct TestExecutionPorts {
+    pub effect_host: ActorContext,
     pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     pub artifact_ports: Option<crate::runtime::ArtifactReferrerPorts>,
     pub process_engines: crate::ProcessEngineRegistry,
@@ -54,10 +51,10 @@ pub struct TestExecutionPorts<'run> {
     /// it opens that execution, lends its controller here, and closes it once
     /// the context is gone: the borrow keeps the context from outliving it.
     /// `None` takes the host's own controller.
-    pub lent_controller: Option<crate::ScopedEffectController<'run>>,
+    pub lent_controller: Option<crate::ActorContext>,
 }
 
-impl<'run> TestExecutionPorts<'run> {
+impl TestExecutionPorts {
     /// Every port from one backend, on its clock.
     pub fn of(backend: &crate::Backend) -> Self {
         Self::from(backend)
@@ -69,7 +66,7 @@ impl<'run> TestExecutionPorts<'run> {
     /// The controller's admitted scope is the scope the context claims: the
     /// default test turn of the builder's session, or the scope of the parent
     /// invocation the fixture installs. The build refuses a disagreement.
-    pub fn lent(backend: &crate::Backend, controller: crate::ScopedEffectController<'run>) -> Self {
+    pub fn lent(backend: &crate::Backend, controller: crate::ActorContext) -> Self {
         Self {
             lent_controller: Some(controller),
             ..Self::from(backend)
@@ -99,7 +96,7 @@ impl<'run> TestExecutionPorts<'run> {
     /// supplies beside it, no attachment port (puts are refused), and the
     /// system clock.
     pub fn over_host(
-        effect_host: Arc<dyn crate::EffectHost>,
+        effect_host: ActorContext,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     ) -> Self {
         Self {
@@ -114,10 +111,10 @@ impl<'run> TestExecutionPorts<'run> {
     }
 }
 
-impl From<&crate::Backend> for TestExecutionPorts<'_> {
+impl From<&crate::Backend> for TestExecutionPorts {
     fn from(backend: &crate::Backend) -> Self {
         Self {
-            effect_host: backend.effect_host(),
+            effect_host: ActorContext::detached(backend.clone()),
             process_env_store: backend.process_env_store(),
             artifact_ports: Some(crate::runtime::ArtifactReferrerPorts::of_backend(backend)),
             process_engines: crate::ProcessEngineRegistry::new(),
@@ -146,11 +143,11 @@ pub struct TestExecutionContextBuilder<'run> {
     /// overrides it, its controller, scoped to the context's admitted scope,
     /// serves them. `None` for a context built
     /// [`over_controller`](TestExecutionContextBuilder::over_controller).
-    effect_host: Option<Arc<dyn crate::EffectHost>>,
+    effect_host: Option<ActorContext>,
     /// A controller that serves the context's effects in place of the host's
     /// own: a fixture that already holds a scoped controller over the host's
     /// journal, or a foreign one it is proving.
-    effect_controller: Option<TestEffectController<'run>>,
+    effect_controller: Option<TestEffectController>,
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
     runtime_parent_invocation: Option<crate::RuntimeInvocation>,
     /// Which cell of the turn this context executes.
@@ -190,7 +187,7 @@ pub struct BuiltTestExecutionContext<'run> {
 impl<'run> TestExecutionContextBuilder<'run> {
     /// A builder over `ports`: the controller the host lent them, else the
     /// host's own, serves the context's effects.
-    pub fn new(ports: TestExecutionPorts<'run>) -> Self {
+    pub fn new(ports: TestExecutionPorts) -> Self {
         let TestExecutionPorts {
             effect_host,
             process_env_store,
@@ -212,8 +209,8 @@ impl<'run> TestExecutionContextBuilder<'run> {
     }
 
     fn assemble(
-        effect_host: Option<Arc<dyn crate::EffectHost>>,
-        effect_controller: Option<TestEffectController<'run>>,
+        effect_host: Option<ActorContext>,
+        effect_controller: Option<TestEffectController>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
         artifact_ports: Option<crate::runtime::ArtifactReferrerPorts>,
         process_engines: crate::ProcessEngineRegistry,
@@ -266,7 +263,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
     /// test of the context's own logic over a fake or recording controller;
     /// a test that journals, publishes environments or stores attachments
     /// builds its context over a backend.
-    pub fn over_controller(effect_controller: impl Into<TestEffectController<'run>>) -> Self {
+    pub fn over_controller(effect_controller: impl Into<TestEffectController>) -> Self {
         Self::assemble(
             None,
             Some(effect_controller.into()),
@@ -349,20 +346,14 @@ impl<'run> TestExecutionContextBuilder<'run> {
 
     /// Serves the context's effects through `effect_controller`, admitted
     /// under the context's scope, instead of the host's own controller.
-    pub fn shared_effect_controller(
-        mut self,
-        effect_controller: Arc<dyn crate::RuntimeEffectController>,
-    ) -> Self {
+    pub fn shared_effect_controller(mut self, effect_controller: ActorContext) -> Self {
         self.effect_controller = Some(TestEffectController::Shared(effect_controller));
         self
     }
 
     /// Serves the context's effects through an already scoped controller
     /// instead of the host's own.
-    pub fn borrowed_effect_controller(
-        mut self,
-        effect_controller: crate::ScopedEffectController<'run>,
-    ) -> Self {
+    pub fn borrowed_effect_controller(mut self, effect_controller: crate::ActorContext) -> Self {
         self.effect_controller = Some(TestEffectController::Borrowed(effect_controller));
         self
     }
@@ -509,16 +500,11 @@ impl<'run> TestExecutionContextBuilder<'run> {
             None => effect_host
                 .as_ref()
                 .expect("a builder with no host is built over a controller")
-                .scoped_static(default_admitted())
-                .expect("the supplied host binds the fixture's admitted scope")
-                .expect("the supplied host lends a static controller"),
-            Some(TestEffectController::Shared(effect_controller)) => {
-                crate::runtime::ScopedEffectController::shared(
-                    effect_controller,
-                    default_admitted(),
-                )
-                .expect("valid fixture scope")
-            }
+                .scoped(default_admitted())
+                .expect("the supplied host binds the fixture's admitted scope"),
+            Some(TestEffectController::Shared(effect_controller)) => (effect_controller)
+                .scoped(default_admitted())
+                .expect("valid fixture scope"),
             Some(TestEffectController::Borrowed(effect_controller)) => effect_controller,
             Some(TestEffectController::Lent(effect_controller)) => {
                 let claimed = default_admitted();

@@ -94,7 +94,7 @@ pub(crate) enum RuntimePerfScenario {
     ProcessListStress,
     EmbedStandard,
     EmbedRlm,
-    ScopedEffectController,
+    ScopedEffects,
     StoreReopen,
     SqliteStoreReopen,
     TurnCheckpoint,
@@ -547,7 +547,7 @@ impl RuntimePerfScenario {
             "Measures embedded facade behavior for an RLM agent flow."
         ),
         runtime_perf_metadata!(
-            ScopedEffectController,
+            ScopedEffects,
             "scoped_effect_controller",
             Standard,
             RuntimeScenario,

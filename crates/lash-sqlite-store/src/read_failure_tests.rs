@@ -298,7 +298,6 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
             &crate::location::DatabaseLocation::standalone_file(&path),
             StoreOptions::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
-            None,
             lash_core_execution::FleetFormat::writable(),
             Some(pauses.clone()),
         )

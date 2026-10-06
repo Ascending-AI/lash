@@ -1,18 +1,14 @@
-//! One admission contract for every effect host (FIG-4225).
+//! One admission contract for tool intents (FIG-4225).
 //!
-//! Tool-intent admission is owned by the engine: its effect journal replays a
-//! repeated identity, and the durable key each shape lands on fences a
-//! redelivery the journal cannot see. The facade adds only two things beside
-//! it: it binds a cancel identity to the target it first named, and it
-//! retains every outcome in the durable submission ledger. A host that
-//! journals nothing (the recording conformance host) runs the same contract,
-//! so the laws below hold on it exactly as on a journaling host.
+//! The durable key each intent shape lands on fences a redelivery. The facade
+//! adds two things beside it: it binds a cancel identity to the target it
+//! first named, and it retains every outcome in the durable submission
+//! ledger. No effect is journaled (ADR 0132).
 
 use super::*;
 
-/// The recording conformance host: it journals no effect.
 async fn recording_ingress_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
-    ingress_core_over(sqlite_memory_store_backend().await, None, None).await
+    ingress_core(sqlite_memory_store_backend().await).await
 }
 
 fn ingress_of(core: &LashCore) -> Result<crate::tools::ToolIntentIngress> {
@@ -74,12 +70,6 @@ async fn assert_ledger_retains_the_outcome(
         "the ledger retains the outcome the submission answered"
     );
     Ok(())
-}
-
-#[tokio::test]
-async fn a_journaling_host_retains_every_outcome_in_the_submission_ledger() -> Result<()> {
-    let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
-    assert_ledger_retains_the_outcome(&core, &registry, &process).await
 }
 
 #[tokio::test]

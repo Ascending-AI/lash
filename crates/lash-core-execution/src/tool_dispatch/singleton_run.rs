@@ -7,7 +7,7 @@
 //! carries them (F01-F03). The route opens no child invocation, makes no
 //! group call and acquires no per-call environment: every record is one
 //! journaled step of the caller's own handler, through
-//! [`RuntimeEffectController::record_run_record`].
+//! [`ActorContext::record_run_record`].
 //!
 //! Each record's step runs once. A replay serves the journaled record without
 //! running its step, so a recorded attempt never re-executes its body, a
@@ -46,7 +46,7 @@
 //! then follows the decision V's record carried. No task outlives the drain,
 //! and the start holds the process only until its launch is durable.
 //!
-//! [`RuntimeEffectController::record_run_record`]: crate::RuntimeEffectController::record_run_record
+//! [`ActorContext::record_run_record`]: crate::ActorContext::record_run_record
 //!
 //! An isolated declaration binds its registered implementation and canonical
 //! start in admission. Its attempt records that binding without calling

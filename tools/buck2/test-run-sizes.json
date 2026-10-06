@@ -271,7 +271,7 @@
     "peak_bytes": 20762624,
     "samples": 25
   },
-  "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_b4120f6a": {
+  "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_e5ec9930": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.68,
@@ -287,7 +287,7 @@
     "peak_bytes": 20418560,
     "samples": 9
   },
-  "//crates/lash-llm-transport:property__test__fv_b4120f6a": {
+  "//crates/lash-llm-transport:property__test__fv_e5ec9930": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.66,
@@ -335,7 +335,7 @@
     "peak_bytes": 343969792,
     "samples": 324
   },
-  "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_4ec2a33f": {
+  "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_77a18395": {
     "cpu_count": 3,
     "memory_kb": 524288,
     "p95_cores": 2.37,
@@ -343,7 +343,7 @@
     "peak_bytes": 249344000,
     "samples": 14
   },
-  "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_5d31148f": {
+  "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_fd536482": {
     "cpu_count": 3,
     "memory_kb": 524288,
     "p95_cores": 2.41,
@@ -359,7 +359,7 @@
     "peak_bytes": 17727488,
     "samples": 147
   },
-  "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test__fv_f3cd1cc1": {
+  "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test__fv_8e808863": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.72,
@@ -559,7 +559,7 @@
     "peak_bytes": 18063360,
     "samples": 5
   },
-  "//crates/lash-provider-anthropic:charge_safety__test__fv_56f11ca5": {
+  "//crates/lash-provider-anthropic:charge_safety__test__fv_9b43ea1a": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
@@ -575,7 +575,7 @@
     "peak_bytes": 15450112,
     "samples": 3
   },
-  "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_56f11ca5": {
+  "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_9b43ea1a": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.92,
@@ -623,7 +623,7 @@
     "peak_bytes": 36495360,
     "samples": 171
   },
-  "//crates/lash-provider-google:lash-provider-google__unit_test__fv_85163474": {
+  "//crates/lash-provider-google:lash-provider-google__unit_test__fv_18c2c862": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.05,
@@ -639,7 +639,7 @@
     "peak_bytes": 77979648,
     "samples": 208
   },
-  "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_4fa796d0": {
+  "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_e0384a6a": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.03,
@@ -727,7 +727,7 @@
     "peak_bytes": 20152320,
     "samples": 8
   },
-  "//crates/lash-remote-protocol:decode_limits__test__fv_9e949e37": {
+  "//crates/lash-remote-protocol:decode_limits__test__fv_a5da32ff": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.75,
@@ -743,7 +743,7 @@
     "peak_bytes": 23543808,
     "samples": 188
   },
-  "//crates/lash-remote-protocol:lash-remote-protocol__unit_test__fv_12d89d2a": {
+  "//crates/lash-remote-protocol:lash-remote-protocol__unit_test__fv_47902ce4": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.89,
@@ -759,7 +759,7 @@
     "peak_bytes": 20115456,
     "samples": 9
   },
-  "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test__fv_12d89d2a": {
+  "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test__fv_47902ce4": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.84,
@@ -1199,7 +1199,7 @@
     "peak_bytes": 93216768,
     "samples": 232
   },
-  "//crates/lash-vm-worker:pool_laws__test__fv_ac5ff664": {
+  "//crates/lash-vm-worker:pool_laws__test__fv_a94bb659": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.06,
@@ -1407,7 +1407,7 @@
     "peak_bytes": 34566144,
     "samples": 90
   },
-  "//crates/lashlang:lashlang__unit_test__fv_b81ca3f5": {
+  "//crates/lashlang:lashlang__unit_test__fv_fc3b3750": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.97,

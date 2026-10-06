@@ -4,6 +4,7 @@
 //! Execution consumes that recorded receipt; retries never select at a
 //! position the root journal already answered.
 
+use crate::ActorContext;
 mod admission;
 mod materializer;
 pub use materializer::{ShiftAdmissionMaterializer, ShiftAdmissionTemplate};
@@ -48,8 +49,7 @@ use crate::runtime::LashRuntime;
 use crate::{
     AgentFrameRun, EffectAddress, EventSink, LocalTurnStop, RuntimeAttribution,
     RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectInvocation, RuntimeError, RuntimeErrorCode, ScopedEffectController,
-    TurnActivitySink, TurnId,
+    RuntimeEffectInvocation, RuntimeError, RuntimeErrorCode, TurnActivitySink, TurnId,
 };
 
 /// Where the turns of a shift publish, and the host-local stop they honour.
@@ -277,7 +277,7 @@ pub(crate) struct ShiftLoopEnd {
 /// [`shift_run_scope`](crate::engine::shift_run_scope).
 pub async fn work_session(
     runtime: &mut LashRuntime,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     request: &ShiftRequest,
 ) -> Result<ShiftOutcome, ShiftAbort> {
     work_session_with(runtime, controller, request, ShiftSinks::default()).await
@@ -287,7 +287,7 @@ pub async fn work_session(
 #[doc(hidden)]
 pub async fn work_session_with(
     runtime: &mut LashRuntime,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     request: &ShiftRequest,
     sinks: ShiftSinks<'_>,
 ) -> Result<ShiftOutcome, ShiftAbort> {
@@ -326,7 +326,7 @@ pub async fn work_session_with(
 /// (FIG-4765).
 pub async fn admit_shift(
     runtime: &mut LashRuntime,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     request: &ShiftRequest,
     ordinal: u32,
     draining: Option<&crate::engine::BuildGeneration>,
@@ -355,7 +355,7 @@ pub async fn admit_shift_on_store(
         crate::store::SessionStore,
         Arc<dyn ShiftAdmissionMaterializer>,
     ),
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     request: &ShiftRequest,
     admitting_generation: &crate::engine::BuildGeneration,
     ordinal: u32,
@@ -394,7 +394,7 @@ async fn admit_on_store(
         crate::store::SessionStore,
         Arc<dyn ShiftAdmissionMaterializer>,
     ),
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     request: &ShiftRequest,
     authority: AdmissionAuthority<'_>,
     ordinal: u32,
@@ -409,9 +409,7 @@ async fn admit_on_store(
     // the same step when the engine could not open a store for the retired
     // session at all (FIG-3630, ADR 0104 O1).
     let scope = shift_admission_scope(&request.session, &request.request);
-    let admission_controller =
-        step_controller(controller, host.control.effect_host.as_ref(), scope)
-            .map_err(ShiftAbort::Refused)?;
+    let admission_controller = step_controller(controller, scope).map_err(ShiftAbort::Refused)?;
     emit_admission_step(
         &admission_controller,
         request,
@@ -447,7 +445,7 @@ struct AdmissionStore {
 /// deleted, or closed past admission — in which case the step's recorded
 /// body is the retirement itself (FIG-3630).
 async fn emit_admission_step(
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     request: &ShiftRequest,
     authority: AdmissionAuthority<'_>,
     ordinal: u32,
@@ -476,7 +474,7 @@ async fn emit_admission_step(
         format!("shift-run-start-{ordinal}"),
     );
     let run_start = controller
-        .execute_effect(
+        .shift_effect(
             RuntimeEffectEnvelope::new(
                 start,
                 RuntimeEffectCommand::DrawRunStart {
@@ -509,7 +507,7 @@ async fn emit_admission_step(
         None => (None, None, crate::trace::TraceRuntime::default()),
     };
     controller
-        .execute_effect(
+        .shift_effect(
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::AdmitShift {
@@ -562,7 +560,7 @@ async fn emit_admission_step(
 /// [`shift_admission_scope`](crate::engine::shift_admission_scope).
 #[doc(hidden)]
 pub async fn admit_shift_retired(
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     request: &ShiftRequest,
     admitting_generation: &crate::engine::BuildGeneration,
     ordinal: u32,
@@ -602,7 +600,7 @@ pub async fn admit_shift_retired(
 /// [`shift_run_scope`](crate::engine::shift_run_scope).
 #[doc(hidden)]
 pub async fn execute_admitted_run_retired(
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     admitted: Admitted,
 ) -> Result<RunOutcome, ShiftAbort> {
     let verdict = recorded_seal(&admitted)?;
@@ -673,7 +671,7 @@ pub async fn execute_admitted_run_retired(
 /// that ended, its recorded scope close in the same journal.
 pub async fn execute_admitted_run(
     runtime: &mut LashRuntime,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     admitted: Admitted,
 ) -> Result<RunOutcome, ShiftAbort> {
     execute_admitted_run_with(runtime, controller, admitted, ShiftSinks::default()).await
@@ -683,7 +681,7 @@ pub async fn execute_admitted_run(
 #[doc(hidden)]
 pub async fn execute_admitted_run_with(
     runtime: &mut LashRuntime,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     admitted: Admitted,
     sinks: ShiftSinks<'_>,
 ) -> Result<RunOutcome, ShiftAbort> {
@@ -702,7 +700,7 @@ pub async fn execute_admitted_run_with(
 #[doc(hidden)]
 pub async fn execute_admitted_run_owing_close(
     runtime: &mut LashRuntime,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     admitted: Admitted,
     sinks: ShiftSinks<'_>,
 ) -> crate::engine::RunEnd {
@@ -728,7 +726,7 @@ pub async fn execute_admitted_run_owing_close(
 #[doc(hidden)]
 pub async fn close_admitted_run(
     host: &crate::RuntimeHostConfig,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     session: &crate::SessionId,
     run: &TurnId,
 ) -> Result<(), ShiftAbort> {
@@ -774,7 +772,7 @@ impl From<ExecutedRun> for RunReport {
 #[doc(hidden)]
 pub async fn execute_admitted_run_reporting(
     runtime: &mut LashRuntime,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     admitted: Admitted,
     sinks: ShiftSinks<'_>,
 ) -> Result<RunReport, ShiftAbort> {
@@ -814,23 +812,16 @@ pub(crate) fn engine_retries(error: &RuntimeError) -> bool {
         && error.code != RuntimeErrorCode::StoreCommitSuperseded
 }
 
-/// A controller for one step of a shift under `admitted`: the shift's own
-/// controller when it already serves that scope, a rescope of it when it can
-/// build itself for another scope, and otherwise one the runtime's effect
-/// host lends for the scope. A host never lends a shift its handler's
-/// controller: the engine's session shift is the only executor (D5).
-pub(crate) fn step_controller<'a>(
-    controller: &ScopedEffectController<'a>,
-    host: &'a dyn crate::EffectHost,
+/// The context for one step of a shift under `admitted`: the shift's own
+/// when it already serves that scope, else a rescope of it.
+pub(crate) fn step_controller(
+    controller: &ActorContext,
     admitted: crate::AdmittedScope,
-) -> Result<ScopedEffectController<'a>, RuntimeError> {
+) -> Result<ActorContext, RuntimeError> {
     if controller.execution_scope() == admitted.scope() {
         return Ok(controller.clone());
     }
-    if controller.is_scope_bound() {
-        return controller.rescope(admitted);
-    }
-    host.scoped(admitted)
+    controller.rescope(admitted)
 }
 
 fn controller_abort(run: Option<&TurnId>, error: RuntimeEffectControllerError) -> ShiftAbort {
@@ -900,7 +891,7 @@ impl LashRuntime {
     /// A follow-on recovery is run or declined as `follow_on` says.
     pub(crate) async fn work_until(
         &mut self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         request: &ShiftRequest,
         sinks: &ShiftSinks<'_>,
         live: Option<(&crate::InputId, &crate::TurnInput)>,
@@ -1011,7 +1002,7 @@ impl LashRuntime {
 
     pub(crate) async fn admit_shift_step(
         &mut self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         request: &ShiftRequest,
         ordinal: u32,
         draining: Option<&crate::engine::BuildGeneration>,
@@ -1030,13 +1021,12 @@ impl LashRuntime {
         // session; the run's recorded admission, taken under the lease on a
         // head refreshed there, is the head the run executes on (FIG-3682).
         let store = self.shift_store()?;
-        let admitting_generation = self
-            .host
-            .core
-            .backend()
-            .build_generation()
-            .map_err(|error| ShiftAbort::Refused(error.into()))?
-            .clone();
+        // No engine binds a build generation any more (I0, FIG-5194): a
+        // shift admission refuses as on an unbound backend until L3s
+        // (FIG-5196) replaces shift admission with the actor claim.
+        let admitting_generation: crate::engine::BuildGeneration =
+            Err(crate::engine::GenerationUnbound)
+                .map_err(|error| ShiftAbort::Refused(error.into()))?;
         Box::pin(admit_on_store(
             &self.host.core,
             (
@@ -1074,7 +1064,7 @@ impl LashRuntime {
     /// (FIG-4018, FIG-4200).
     async fn execute_engine_run(
         &mut self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         admitted: Admitted,
         sinks: &ShiftSinks<'_>,
         close: RunClose<'_>,
@@ -1221,7 +1211,7 @@ impl LashRuntime {
     /// the run's admission records (FIG-4403).
     pub(crate) async fn execute_admitted_run_step(
         &mut self,
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         admitted: Admitted,
         sinks: &ShiftSinks<'_>,
         live: Option<(&crate::InputId, &crate::TurnInput)>,
@@ -1238,9 +1228,8 @@ impl LashRuntime {
             | crate::ExecutionScope::RuntimeOperation { .. } => controller.admitted_scope().clone(),
             _ => shift_run_scope(admitted.session(), &run),
         };
-        let host = Arc::clone(&self.host.core.control.effect_host);
-        let run_controller = step_controller(controller, host.as_ref(), scope.clone())
-            .map_err(ShiftAbort::Refused)?;
+        let run_controller =
+            step_controller(controller, scope.clone()).map_err(ShiftAbort::Refused)?;
         let marked = recorded_seal(&admitted)?;
         let fence = match marked {
             crate::engine::SealVerdict::Sealed(fence) => fence,
@@ -1398,7 +1387,7 @@ pub(crate) enum RunClose<'o> {
 async fn emit_close_step(
     host: &crate::RuntimeHostConfig,
     terminals: Arc<dyn crate::store::RuntimeStore>,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     session: &crate::SessionId,
     run: &TurnId,
 ) -> Result<(), ShiftAbort> {
@@ -1412,7 +1401,7 @@ async fn emit_close_step(
         format!("{run}.shift-close"),
     );
     controller
-        .execute_effect(
+        .session_effect(
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::CloseRunScope { run: run.clone() },

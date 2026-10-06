@@ -109,7 +109,7 @@ where
 
 /// An `echo_tool` whose Run-owned Deferred source is resolved out of band.
 struct PendingEchoTool {
-    resolver: Arc<dyn lash_core::EffectHost>,
+    resolver: ActorContext,
 }
 
 #[async_trait::async_trait]
@@ -127,7 +127,7 @@ impl lash_core::ToolProvider for PendingEchoTool {
             .context
             .completion_key()
             .expect("the owning Run supplies the call's completion key");
-        let resolver = Arc::clone(&self.resolver);
+        let resolver = self.resolver.clone();
         let value = call
             .args
             .get("value")
@@ -136,7 +136,6 @@ impl lash_core::ToolProvider for PendingEchoTool {
             .to_string();
         tokio::task::yield_now().await;
         let _ = resolver
-            .await_event_resolver()
             .resolve_await_event(
                 &key,
                 lash_core::Resolution::Ok(serde_json::json!({

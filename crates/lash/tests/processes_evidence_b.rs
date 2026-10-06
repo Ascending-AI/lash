@@ -67,30 +67,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::process::SessionScopeId::new(String::new());
     // W0348: lash::process::WakeDeliveryDriver::drive_pending_once_with_delivery_policy [function]
     let _ = lash::process::WakeDeliveryDriver::drive_pending_once_with_delivery_policy;
-    // W0351: lash::runtime::AwaitEventResolver::await_await_event [function]
-    fn meth_0351<T: lash::runtime::AwaitEventResolver>(_: &T) {
-        let _ = T::await_await_event;
-    }
-    // W0352: lash::runtime::AwaitEventResolver::await_event_key [function]
-    fn meth_0352<T: lash::runtime::AwaitEventResolver>(_: &T) {
-        let _ = T::await_event_key;
-    }
-    // W0353: lash::runtime::AwaitEventResolver::cancel_await_events_for_session [function]
-    fn meth_0353<T: lash::runtime::AwaitEventResolver>(_: &T) {
-        let _ = T::cancel_await_events_for_session;
-    }
-    // W0355: lash::runtime::AwaitEventResolver::peek_await_event [function]
-    fn meth_0355<T: lash::runtime::AwaitEventResolver>(_: &T) {
-        let _ = T::peek_await_event;
-    }
-    // W0356: lash::runtime::AwaitEventResolver::resolve_await_event [function]
-    fn meth_0356<T: lash::runtime::AwaitEventResolver>(_: &T) {
-        let _ = T::resolve_await_event;
-    }
-    // W0357: lash::runtime::AwaitEventResolver::revoke_await_events_for_session [function]
-    fn meth_0357<T: lash::runtime::AwaitEventResolver>(_: &T) {
-        let _ = T::revoke_await_events_for_session;
-    }
     // W0358: lash::runtime::ExecutionScope::Process [variant]
     variant_witness(|value: &lash::runtime::ExecutionScope| {
         matches!(value, lash::runtime::ExecutionScope::Process { .. })
@@ -390,10 +366,6 @@ fn processes_area_witnesses_b() {
     fn meth_0452<T: lash::plugins::ProcessEngine>(_: &T) {
         let _ = T::kind;
     }
-    // W0453: lash::plugins::ProcessEngine::run [function]
-    fn meth_0453<T: lash::plugins::ProcessEngine>(_: &T) {
-        let _ = T::run;
-    }
     // W0455: lash::plugins::ProcessEngineContributionContext [struct]
     type_witness::<lash::plugins::ProcessEngineContributionContext>();
     // W0456: lash::plugins::ProcessEngineContributionContext::extensions [function]
@@ -408,8 +380,6 @@ fn processes_area_witnesses_b() {
     type_witness::<lash::plugins::ProcessEngineRunContext>();
     // W0461: lash::plugins::ProcessEngineRunContext::cancellation_token [function]
     let _ = lash::plugins::ProcessEngineRunContext::cancellation_token;
-    // W0462: lash::plugins::ProcessEngineRunContext::effect_controller [function]
-    let _ = lash::plugins::ProcessEngineRunContext::effect_controller;
     // W0463: lash::plugins::ProcessEngineRunContext::execution_context [function]
     let _ = lash::plugins::ProcessEngineRunContext::execution_context;
     // W0464: lash::plugins::ProcessEngineRunContext::into_runtime_context [function]
@@ -426,8 +396,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessEngineRunContext::registration;
     // W0471: lash::plugins::ProcessEngineRunContext::resolved_tool_catalog [function]
     let _ = lash::plugins::ProcessEngineRunContext::resolved_tool_catalog;
-    // W0472: lash::plugins::ProcessEngineRunContext::scoped_effect_controller [function]
-    let _ = lash::plugins::ProcessEngineRunContext::scoped_effect_controller;
     // W0473: lash::plugins::ProcessEngineRunContext::process_id [function]
     let _ = lash::plugins::ProcessEngineRunContext::process_id;
     // W0474: lash::plugins::ProcessEngineRunContext::session_store_factory [function]
@@ -830,8 +798,6 @@ fn processes_area_witnesses_b() {
     });
     // W0616: lash::plugins::ProcessEngineProcessContext [struct]
     type_witness::<lash::plugins::ProcessEngineProcessContext>();
-    // W0617: lash::plugins::ProcessEngineProcessContext::await_terminal [function]
-    let _ = lash::plugins::ProcessEngineProcessContext::await_terminal;
     // W0618: lash::plugins::ProcessEngineProcessContext::clear_wait [function]
     let _ = lash::plugins::ProcessEngineProcessContext::clear_wait;
     // W0619: lash::plugins::ProcessEngineProcessContext::emit [function]

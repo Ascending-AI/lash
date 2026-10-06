@@ -3,7 +3,7 @@ use super::*;
 #[expect(clippy::expect_used, reason = "process host law fixture")]
 pub(crate) async fn process_event_host_failure_stops_execution(
     backend: &lash_core::Backend,
-    scoped: lash_core::ScopedEffectController<'_>,
+    scoped: lash_core::ActorContext,
 ) {
     use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
     let registration = lash_core::ProcessRegistration::new(

@@ -23,6 +23,7 @@
 //! its first execution's commit only when adopting the admitted head also
 //! restores the executor at that head (FIG-3684).
 
+use crate::ActorContext;
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
@@ -244,7 +245,7 @@ fn attempt(
 )]
 pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    _effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -268,11 +269,10 @@ pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
             }
         })
         .build();
-    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     let receipts = Arc::new(super::frame_open_redrive::receipts::CommitReceipts::new(
         crate::conformance::law_session_store(stores.as_ref(), &session_id).await,

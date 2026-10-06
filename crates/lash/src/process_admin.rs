@@ -10,8 +10,9 @@
 //! this surface pre-filtered by a session's observer edge; it lives in `admin` because it
 //! wraps a [`SessionAdmin`](crate::admin::SessionAdmin).
 
-use crate::support::{Arc, EmbedError, LashCore, Result, ScopedEffectController};
-use lash_core::facade_support::ScopedEffectControllerFacadeOps;
+use crate::support::{Arc, EmbedError, LashCore, Result};
+use lash_core::ActorContext;
+
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
@@ -360,7 +361,7 @@ impl Processes {
     async fn run_command(
         &self,
         command: lash_core::ProcessCommand,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessEffectOutcome> {
         self.execute_command(command, scoped_effect_controller, None)
             .await
@@ -370,7 +371,7 @@ impl Processes {
     async fn execute_command(
         &self,
         command: lash_core::ProcessCommand,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
         session_turn_admission: Option<lash_core::runtime::SessionTurnAdmission>,
     ) -> std::result::Result<lash_core::ProcessEffectOutcome, lash_core::RuntimeEffectControllerError>
     {
@@ -379,7 +380,7 @@ impl Processes {
         let invocation =
             Self::process_invocation(&command, scoped_effect_controller.execution_scope());
         let outcome = scoped_effect_controller
-            .execute_process_effect(
+            .process_effect(
                 lash_core::RuntimeEffectEnvelope::new(
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),
@@ -600,7 +601,7 @@ impl Processes {
     pub async fn start(
         &self,
         request: lash_core::ProcessStartRequest,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessStartReceipt> {
         // The caller's context is snapshotted here, before the first await,
         // unless the request states its own: a detached host start links
@@ -837,7 +838,7 @@ impl Processes {
     pub async fn cancel(
         &self,
         process_id: &ProcessId,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessCancelReceipt> {
         #[expect(
             clippy::expect_used,
@@ -873,7 +874,7 @@ impl Processes {
     pub async fn signal(
         &self,
         signal: lash_core::ProcessSignal,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessEvent> {
         // The producer's context is snapshotted here, before the first
         // await, unless the signal states its own.
@@ -914,7 +915,7 @@ impl Processes {
     /// session-scoped stop use [`SessionProcessAdmin::cancel_all`](crate::admin::SessionProcessAdmin::cancel_all).
     pub async fn cancel_all(
         &self,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
         let outcome = self
             .run_command(
@@ -1062,34 +1063,6 @@ impl Processes {
                 .store_factory
                 .retire_turn_cancel_closure_scope(&process_scope)
                 .await?;
-            // The process journal: nothing can replay it once the row is
-            // gone (FIG-2500). The retirement also retires the scope's
-            // await-event promises and leaves the scope fence (FIG-2499). The
-            // registry's verdict is the unreachability proof, so the
-            // owner-terminal gate applies and in-flight rows go with the rest.
-            let retirements = [lash_core::EffectJournalRetirement::for_scope(
-                &process_scope,
-            )];
-            for retirement in retirements.into_iter().flatten() {
-                if let Err(err) = self
-                    .core
-                    .env
-                    .core
-                    .control
-                    .effect_host
-                    .retire_effect_journal(retirement)
-                    .await
-                {
-                    tracing::warn!(
-                        failure_stage = "retire_process_effect_journal",
-                        cutoff_epoch_ms,
-                        process_id = %process_id,
-                        error = %err,
-                        "process retention failed"
-                    );
-                    return Err(err.into());
-                }
-            }
         }
         let mut report = match registry
             .prune_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)

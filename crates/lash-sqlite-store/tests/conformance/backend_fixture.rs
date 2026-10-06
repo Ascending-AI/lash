@@ -130,7 +130,7 @@ impl TestBackend {
     /// [`Backend`](lash_core_execution::Backend) a storage law's runtime runs
     /// over.
     pub(crate) fn as_backend(&self) -> lash_core_execution::Backend {
-        lash_conformance::recording_backend_over(Arc::new(self.stores.clone()))
+        lash_conformance::backend_over(Arc::new(self.stores.clone()))
     }
 
     /// [`Self::open`] from synchronous fixture code.

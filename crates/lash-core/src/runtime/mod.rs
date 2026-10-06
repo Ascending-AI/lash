@@ -1,3 +1,4 @@
+use crate::ActorContext;
 pub use lash_core_store::turn_input_vocabulary::*;
 #[cfg(feature = "testing")]
 pub mod assembly;
@@ -53,6 +54,7 @@ pub use lash_core_store::input_normalization as io;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::input_normalization as io;
 pub mod artifact_cleanup;
+pub mod durable;
 mod durable_queue;
 mod lifecycle;
 pub mod process_start;
@@ -213,22 +215,21 @@ pub use effect::{
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
-    CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointAdmittedSet, CommandJournalGuard,
-    CompletionKeyPreparation, EffectAddress, EffectHost, EffectJournalIdentity,
-    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, JournalReplay, LlmRequestSpec, LlmStreamRecord, ProcessCommand,
-    ProcessDriveStep, ProcessEffectOutcome, ProcessListSelection, ProcessLocalExecution,
-    ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence, RecordedKeyRange,
-    RecordedKeys, RefusedWriteRange, Resolution, ResolveOutcome, RunAggregateWakePolicy,
-    RunRecordStep, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
-    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    AwaitEventKey, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
+    CausalRef, CheckpointAdmittedSet, CommandJournalGuard, CompletionKeyPreparation, EffectAddress,
+    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
+    ExecutionScope, ExternalCompletionError, JournalReplay, LlmRequestSpec, LlmStreamRecord,
+    ProcessCommand, ProcessDriveStep, ProcessEffectOutcome, ProcessListSelection,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence,
+    RecordedKeyRange, RecordedKeys, RefusedWriteRange, Resolution, ResolveOutcome,
+    RunAggregateWakePolicy, RunRecordStep, RuntimeAssistantResponseHooksOutcome,
+    RuntimeAttribution, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnly,
-    ServedOnlyRange, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
+    RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
     TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
     TurnPreludeRef, TurnPreludeStore, turn_control_binding_id_for_scope,
@@ -250,8 +251,8 @@ use io::normalize_input_items;
 pub use lash_core_execution::runtime::DirectCompletionClient;
 pub use lash_core_execution::runtime::EffectOpenerError;
 pub use lash_core_execution::runtime::work::{
-    NoProcessWork, NoSessionWork, ProcessRegistryAwaiter, ProcessTerminalWait,
-    ProcessWorkSubstrate, ProcessWorkWiring, SessionShifts, SessionWorkEngine,
+    DurableProcessWork, DurableSessionWork, NoProcessWork, NoSessionWork, ProcessRegistryAwaiter,
+    ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring, SessionShifts, SessionWorkEngine,
     WakeDeliveryDriveReport, WakeDeliveryDriver, WorkCadenceError, WorkCadencePolicy,
 };
 /// The trace handle a host config carries.
@@ -272,9 +273,10 @@ pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry,
-    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, DefinitionAcquisition, HandleId,
-    InvalidProcessDefinitionId, InvalidStartKey, Lifetime, LifetimeDecision, LifetimePolicy,
-    MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, DefinitionAcquisition, EngineAction,
+    EngineEvent, EngineState, EngineStateFormat, HandleId, HostWaitKind,
+    InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime, LifetimeDecision,
+    LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess,
     ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
     ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState,
     PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
@@ -303,10 +305,9 @@ pub use process::{
     ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
     ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeNotRetained,
     ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar,
-    ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationProbe,
-    ProcessRegistrationReceipt, ProcessRegistrationRefusal, ProcessRegistry,
-    ProcessRegistryBinding, ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention,
-    ProcessRunOutcome, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService,
+    ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
+    ProcessRegistrationRefusal, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
+    ProcessRetention, ProcessRunOutcome, ProcessSegmentKey, ProcessService,
     ProcessSessionDeleteReport, ProcessSignal, ProcessSignalIdentity, ProcessSignalWaitBinding,
     ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions,
     ProcessStartOutcome, ProcessStartPlan, ProcessStartReceipt, ProcessStartRegistration,
@@ -319,7 +320,7 @@ pub use process::{
     RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
     ScopeStorageError, SegmentHandover, SegmentHandoverCommit, SegmentStartMarker, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
-    StoreRealization, TerminalProcessStatus, UnavailableProcessService,
+    StepName, StepRequest, StoreRealization, TerminalProcessStatus, UnavailableProcessService,
     WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry, WeakProcessEngineRegistry,
@@ -432,7 +433,7 @@ pub use queued_options::{QueuedEffectSource, QueuedTurnOptions};
 pub struct TurnOptions<'a> {
     events: Option<&'a dyn EventSink>,
     turn_events: Option<&'a dyn TurnActivitySink>,
-    scoped_effect_controller: ScopedEffectController<'a>,
+    scoped_effect_controller: ActorContext,
     local_stop: LocalTurnStop,
 }
 
@@ -440,10 +441,7 @@ impl<'a> TurnOptions<'a> {
     /// `cancel` is a host-local stop lever for the turn: firing it asks the
     /// turn to stop now, delivered as a durable request on the turn's gate
     /// (see [`LocalTurnStop`]). The shift itself never reads it.
-    pub fn new(
-        cancel: CancellationToken,
-        scoped_effect_controller: ScopedEffectController<'a>,
-    ) -> Self {
+    pub fn new(cancel: CancellationToken, scoped_effect_controller: ActorContext) -> Self {
         Self {
             events: None,
             turn_events: None,
@@ -485,7 +483,7 @@ impl<'a> TurnOptions<'a> {
         self.scoped_effect_controller.scope_id()
     }
 
-    pub(crate) fn scoped_effect_controller(&self) -> ScopedEffectController<'a> {
+    pub(crate) fn scoped_effect_controller(&self) -> ActorContext {
         self.scoped_effect_controller.clone()
     }
 }

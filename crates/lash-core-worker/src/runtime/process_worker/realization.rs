@@ -5,7 +5,7 @@ impl lash_core::tool_dispatch::ToolRealizer for DurableProcessWorker {
     async fn realize(
         &self,
         request: lash_core::tool_dispatch::RealizationRequest,
-        scoped: crate::ScopedEffectController<'_>,
+        scoped: crate::ActorContext,
     ) -> Result<lash_core::tool_dispatch::RealizationReceipt, crate::RuntimeEffectControllerError>
     {
         Box::pin(lash_core::core_internal::realize_tool_intents(

@@ -89,7 +89,7 @@ impl RuntimeTurnDriver<'_> {
                 error.into_turn_failure(RuntimeErrorCode::ToolCatalogResolutionFailed)
             })?
             .with_tracing(self.execution_tracing(0))
-            .with_turn_hand_over(self.cells_hand_over());
+            .with_turn_hand_over(false);
         let result = context
             .drive_tool_run(None, |owned| {
                 self.tool_run_owner = owned.tool_run_owner();
@@ -178,12 +178,6 @@ impl RuntimeTurnDriver<'_> {
                     return Ok((messages, protocol_iteration));
                 }
                 Effect::LlmCall { id, request } => {
-                    if self
-                        .end_at_segment_boundary(&mut machine, run_offset)
-                        .await?
-                    {
-                        continue;
-                    }
                     self.protocol_reply
                         .mark_model_call(machine.messages().iter());
                     Box::pin(self.handle_llm_call_effect(&mut machine, id, request, &event_tx))

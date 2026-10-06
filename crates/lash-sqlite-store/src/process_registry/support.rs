@@ -354,7 +354,6 @@ impl SqliteProcessRegistry {
             conn,
             clock,
             wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
-            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             location,
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
         }
@@ -854,30 +853,5 @@ pub(crate) fn tx_outcome<T>(
     match result {
         Ok(value) => TxOutcome::Commit(Ok(value)),
         Err(err) => TxOutcome::Rollback(Err(err)),
-    }
-}
-
-/// This registry's registration truth for a bound effect host (ADR 0049).
-pub(super) struct SqliteRegistrationProbe {
-    pub(super) conn: SqliteConnection,
-}
-
-#[async_trait::async_trait]
-impl lash_core_execution::ProcessRegistrationProbe for SqliteRegistrationProbe {
-    async fn process_is_registered(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<bool, lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        self.conn
-            .call(move |connection| {
-                connection.query_row(
-                    process_sql().process.exists_by_id.sql(),
-                    params![process_id.as_str()],
-                    |row| row.get(0),
-                )
-            })
-            .await
-            .map_err(process_sqlite_error)
     }
 }

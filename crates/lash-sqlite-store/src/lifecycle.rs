@@ -62,7 +62,6 @@ impl SqliteStore {
             &DatabaseLocation::standalone_file(path),
             options,
             clock,
-            None,
             lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             None,
@@ -133,7 +132,6 @@ impl SqliteStore {
             &DatabaseLocation::in_backend(&location, None),
             options,
             clock,
-            None,
             lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             None,
@@ -160,7 +158,6 @@ impl SqliteStore {
             &DatabaseLocation::standalone_file(path),
             StoreOptions::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
-            None,
             writable,
             None,
         )
@@ -179,7 +176,6 @@ impl SqliteStore {
         core: &DatabaseLocation,
         options: StoreOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
-        turn_cancel_closure_owner: Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>,
         writable: lash_core_execution::compat::VersionRange,
         #[cfg(feature = "testing")] pauses: Option<crate::testing::SqlitePauses>,
     ) -> tokio_rusqlite::Result<Self> {
@@ -198,7 +194,6 @@ impl SqliteStore {
         Ok(Self {
             conn,
             location: core.clone(),
-            turn_cancel_closure_owner: Mutex::new(turn_cancel_closure_owner),
             readers,
             next_reader: AtomicU64::new(0),
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
@@ -225,7 +220,6 @@ impl SqliteStore {
         Ok(Self {
             conn,
             location: core.clone(),
-            turn_cancel_closure_owner: Mutex::new(None),
             readers,
             next_reader: AtomicU64::new(0),
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),

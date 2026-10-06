@@ -233,11 +233,23 @@ impl ProcessEngine for Integrator {
     ) -> Option<ExecutableGeneration> {
         unreachable!("external signature witness")
     }
-    async fn run(
+    fn state_format(&self) -> EngineStateFormat {
+        unreachable!("external signature witness")
+    }
+    fn cancel_grace(&self) -> std::time::Duration {
+        unreachable!("external signature witness")
+    }
+    fn creation_config(
         &self,
-        context: ProcessEngineRunContext<'_>,
-        payload: lash::messages::JsonValue,
-    ) -> Result<ProcessRunOutcome, ProcessInfraError> {
+        env: &ProcessExecutionEnvSpec,
+    ) -> Result<Option<lash::messages::JsonValue>, PluginError> {
+        unreachable!("external signature witness")
+    }
+    fn advance(
+        &self,
+        state: EngineState,
+        event: EngineEvent,
+    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
         unreachable!("external signature witness")
     }
     fn start_artifacts(
@@ -263,211 +275,6 @@ impl ProcessEngine for Integrator {
         &self,
         reference: &ProcessDefinitionRef,
     ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
-        unreachable!("external signature witness")
-    }
-}
-
-#[lash::async_trait]
-impl AwaitEventResolver for Integrator {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        unreachable!("external signature witness")
-    }
-    async fn prepare_completion_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<CompletionKeyPreparation, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn await_event_key(
-        &self,
-        _scope: &ExecutionScope,
-        _wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn resolve_await_event(
-        &self,
-        _key: &AwaitEventKey,
-        _resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn publish_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<Option<ResolveOutcome>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn peek_await_event(
-        &self,
-        _key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn await_await_event(
-        &self,
-        _key: &AwaitEventKey,
-        _cancel: CancellationToken,
-    ) -> Result<Resolution, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn revoke_await_events_for_session(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn cancel_await_events_for_session(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn retire_await_events_for_scope(
-        &self,
-        _scope: &ExecutionScope,
-    ) -> Result<(), RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn retire_await_events_for_scope_if_quiescent(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<bool, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn reinstate_await_event_scope(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<(), RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn await_event_scope_is_retired(
-        &self,
-        _scope: &ExecutionScope,
-    ) -> Result<bool, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-}
-
-#[lash::async_trait]
-impl EffectHost for Integrator {
-    fn turn_control_binding_id(&self) -> String {
-        unreachable!("external signature witness")
-    }
-    async fn retire_closed_run_waits(
-        &self,
-        _session_id: &SessionId,
-        _run: &TurnId,
-        _committed_turn: Option<&TurnId>,
-    ) -> Result<(), RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_outstanding_await_event_keys(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    fn turn_attach(&self) -> Option<Arc<dyn TurnAttach>> {
-        unreachable!("external signature witness")
-    }
-    fn scoped<'run>(
-        &'run self,
-        admitted: AdmittedScope,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    fn scoped_static(
-        &self,
-        _admitted: AdmittedScope,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    fn route_handler_child_controller<'run>(
-        &self,
-        controller: ScopedEffectController<'run>,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    fn await_event_resolver(&self) -> &dyn AwaitEventResolver {
-        unreachable!("external signature witness")
-    }
-    async fn turn_control_binding<'a>(
-        &'a self,
-        scoped: &'a ScopedEffectController<'_>,
-    ) -> Result<TurnControlBinding<'a>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn retire_effect_journal(
-        &self,
-        _retirement: EffectJournalRetirement,
-    ) -> Result<usize, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn journal_replay(
-        &self,
-        journal: &EffectJournalIdentity,
-    ) -> Result<JournalReplay, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    fn bind_process_registry(&self, _binding: ProcessRegistryBinding) {
-        unreachable!("external signature witness")
-    }
-    async fn register_turn_cancel_closure_participant(
-        &self,
-        _participant_id: &str,
-        scope: &ExecutionScope,
-    ) -> Result<(), RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn release_turn_cancel_closure_participant(
-        &self,
-        _participant_id: &str,
-        scope: &ExecutionScope,
-    ) -> Result<(), RuntimeError> {
-        unreachable!("external signature witness")
-    }
-}
-
-#[lash::async_trait]
-impl RuntimeEffectController for Integrator {
-    fn owns_commit_backpressure(&self) -> bool {
-        unreachable!("external signature witness")
-    }
-    fn wants_segment_boundary(&self, _progress: &SegmentProgress) -> Option<BoundaryReason> {
-        unreachable!("external signature witness")
-    }
-    async fn observe_process_cancel(
-        &self,
-        lent_stop: &CancellationToken,
-    ) -> Result<bool, RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    async fn record_process_drive_step(
-        &self,
-        name: String,
-        step: ProcessDriveStep<'_>,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    async fn record_run_record(
-        &self,
-        name: String,
-        step: RunRecordStep<'_>,
-    ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    async fn execute_effect(
-        &self,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         unreachable!("external signature witness")
     }
 }
@@ -880,9 +687,6 @@ impl ProcessRegistrar for Integrator {
     ) -> Result<ProcessRegistrationReceipt, PluginError> {
         unreachable!("external signature witness")
     }
-    fn bind_effect_host(&self, effect_host: &Arc<dyn EffectHost>) {
-        unreachable!("external signature witness")
-    }
     async fn set_external_ref(
         &self,
         process_id: &ProcessId,
@@ -1291,7 +1095,7 @@ impl FleetFormatStore for Integrator {
 
 /// A host's generic aggregate requires only its admitted journal controller.
 pub async fn generic_aggregate_witness(
-    scoped: &ScopedEffectController<'_>,
+    scoped: &ActorContext,
 ) -> Result<(), lash::plugins::SingletonRunError> {
     let plan = lash::plugins::AggregatePlan {
         key: "integrator-timers".to_owned(),

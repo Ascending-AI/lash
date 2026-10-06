@@ -1,5 +1,6 @@
 //! Shared foreground-turn control conformance.
 
+use crate::ActorContext;
 use crate::admit;
 use std::sync::Arc;
 
@@ -8,9 +9,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::conformance::durable_turn_address;
 use crate::{
-    AwaitEventKey, AwaitEventWaitIdentity, EffectHost, ExecutionScope, Resolution, TurnAddress,
-    TurnCancelMode, TurnCancelOutcome, TurnCancelRequest, TurnCancellationEvidence, TurnStop,
-    TurnTerminal, TurnWorkDriver,
+    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, TurnAddress, TurnCancelMode,
+    TurnCancelOutcome, TurnCancelRequest, TurnCancellationEvidence, TurnStop, TurnTerminal,
+    TurnWorkDriver,
 };
 use lash_core::testing::conformance_support::{ActiveTurnControl, TurnCancelPeekIdentity};
 use pretty_assertions::assert_eq;
@@ -28,32 +29,32 @@ fn request(address: TurnAddress, request_id: &str) -> TurnCancelRequest {
 }
 
 async fn driver_for_session(
-    host: Arc<dyn EffectHost>,
+    host: ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
     address: &TurnAddress,
-) -> (Arc<dyn EffectHost>, TurnWorkDriver) {
+) -> (ActorContext, TurnWorkDriver) {
     let store = super::law_session_store(stores.as_ref(), &address.session_id).await;
     super::admit_conformance_session(&store, &address.session_id).await;
-    let driver = TurnWorkDriver::for_session(Arc::clone(&host), address.session_id.clone(), store);
+    let driver = TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store);
     (host, driver)
 }
 
 /// Run the exact-address, replay, terminal, sweep, and revocation contract for
 /// a keyed-promise adapter.
 pub async fn turn_work_driver<RegistrationBarrier, RegistrationBarrierFuture>(
-    host: Arc<dyn EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     registration_barrier: RegistrationBarrier,
 ) where
     RegistrationBarrier:
-        FnOnce(Arc<dyn EffectHost>, SessionId, AwaitEventKey) -> RegistrationBarrierFuture,
+        FnOnce(ActorContext, SessionId, AwaitEventKey) -> RegistrationBarrierFuture,
     RegistrationBarrierFuture: std::future::Future<Output = ()>,
 {
-    cancel_before_start_duplicate_replay_and_terminal_attach(Arc::clone(&host), &stores).await;
-    completion_seal_vs_cancel_is_first_writer_wins(Arc::clone(&host), &stores).await;
-    exact_scope_and_session_sweep_isolation(Arc::clone(&host), &stores, registration_barrier).await;
-    after_step_request_defers_until_immediate_escalates_it(Arc::clone(&host), &stores).await;
-    after_step_request_is_honoured_at_the_step_boundary(Arc::clone(&host), &stores).await;
+    cancel_before_start_duplicate_replay_and_terminal_attach(host.clone(), &stores).await;
+    completion_seal_vs_cancel_is_first_writer_wins(host.clone(), &stores).await;
+    exact_scope_and_session_sweep_isolation(host.clone(), &stores, registration_barrier).await;
+    after_step_request_defers_until_immediate_escalates_it(host.clone(), &stores).await;
+    after_step_request_is_honoured_at_the_step_boundary(host.clone(), &stores).await;
     session_deletion_revokes_control_promises(host, &stores).await;
 }
 
@@ -66,7 +67,7 @@ pub async fn turn_work_driver<RegistrationBarrier, RegistrationBarrierFuture>(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn after_step_request_defers_until_immediate_escalates_it(
-    host: Arc<dyn EffectHost>,
+    host: ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
 ) {
     let address = address("escalation");
@@ -74,7 +75,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(
     let peek = host
         .scoped(admit(address.execution_scope()))
         .expect("scoped peek controller");
-    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+    let active = ActiveTurnControl::new(&host, address.clone())
         .await
         .expect("active control");
     let stop = driver
@@ -139,7 +140,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(
         .expect("peek after escalation");
     assert_eq!(observed, Some(abort_evidence.clone()));
     let settled = active
-        .settle_before_commit(host.as_ref(), observed.as_ref(), None)
+        .settle_before_commit(&host, observed.as_ref(), None)
         .await
         .expect("settle")
         .expect("escalated abort is what commits");
@@ -148,7 +149,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(
         stop: Some(TurnStop::Cancelled { evidence: settled }),
     };
     active
-        .publish_terminal(host.as_ref(), &terminal)
+        .publish_terminal(&host, &terminal)
         .await
         .expect("publish terminal");
     match driver
@@ -162,7 +163,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(
         other => panic!("attached terminal does not name the escalated abort: {other:?}"),
     }
     // A recreated owner sees the escalated abort, not the superseded stop.
-    let recovered = ActiveTurnControl::new(host.as_ref(), address.clone())
+    let recovered = ActiveTurnControl::new(&host, address.clone())
         .await
         .expect("recreate active control");
     let observed = recovered
@@ -182,7 +183,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn after_step_request_is_honoured_at_the_step_boundary(
-    host: Arc<dyn EffectHost>,
+    host: ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
 ) {
     let address = address("boundary");
@@ -190,7 +191,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(
     let peek = host
         .scoped(admit(address.execution_scope()))
         .expect("scoped peek controller");
-    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+    let active = ActiveTurnControl::new(&host, address.clone())
         .await
         .expect("active control");
     let requested = match driver
@@ -233,7 +234,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(
         }
     );
     let settled = active
-        .settle_before_commit(host.as_ref(), Some(&honoured), None)
+        .settle_before_commit(&host, Some(&honoured), None)
         .await
         .expect("settle")
         .expect("honoured stop commits");
@@ -242,13 +243,13 @@ async fn after_step_request_is_honoured_at_the_step_boundary(
         stop: Some(TurnStop::Cancelled { evidence: settled }),
     };
     active
-        .publish_terminal(host.as_ref(), &terminal)
+        .publish_terminal(&host, &terminal)
         .await
         .expect("publish terminal");
 
     // Crash between request and honour: the next owner honours the same
     // request at the same boundary identity, or at its start gate.
-    let recovered = ActiveTurnControl::new(host.as_ref(), address.clone())
+    let recovered = ActiveTurnControl::new(&host, address.clone())
         .await
         .expect("recreate active control");
     let again = recovered
@@ -262,7 +263,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(
         .expect("peek at the boundary again")
         .expect("durable request survives owner loss");
     assert_eq!(again, honoured);
-    let before_start = ActiveTurnControl::new(host.as_ref(), address.clone())
+    let before_start = ActiveTurnControl::new(&host, address.clone())
         .await
         .expect("recreate active control");
     let refused = before_start
@@ -279,7 +280,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn cancel_before_start_duplicate_replay_and_terminal_attach(
-    host: Arc<dyn EffectHost>,
+    host: ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
 ) {
     let address = address("before-start");
@@ -308,11 +309,11 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
     // Recreating this bridge models a new owner after lease loss. The durable
     // cancellation remains visible; the session-head CAS and any re-claimed
     // batch ownership decide whether an old owner's final commit can land.
-    let recovered = ActiveTurnControl::new(host.as_ref(), address.clone())
+    let recovered = ActiveTurnControl::new(&host, address.clone())
         .await
         .expect("recreate active control");
     let observed = recovered
-        .settle_before_commit(host.as_ref(), None, None)
+        .settle_before_commit(&host, None, None)
         .await
         .expect("settle recovered turn")
         .expect("pending cancellation survives replay");
@@ -322,7 +323,7 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
         stop: Some(TurnStop::Cancelled { evidence: observed }),
     };
     recovered
-        .publish_terminal(host.as_ref(), &terminal)
+        .publish_terminal(&host, &terminal)
         .await
         .expect("publish terminal");
     let attached = driver
@@ -345,7 +346,7 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
     // Terminal publication is idempotent and first-writer-wins too. A stale
     // owner cannot replace the recovered owner's authoritative cancellation.
     recovered
-        .publish_terminal(host.as_ref(), &TurnTerminal::Committed { stop: None })
+        .publish_terminal(&host, &TurnTerminal::Committed { stop: None })
         .await
         .expect("duplicate terminal publication is idempotent");
     let attached_again = driver
@@ -371,16 +372,16 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn completion_seal_vs_cancel_is_first_writer_wins(
-    host: Arc<dyn EffectHost>,
+    host: ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
 ) {
     let address = address("race");
     let (host, driver) = driver_for_session(host, stores, &address).await;
-    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+    let active = ActiveTurnControl::new(&host, address.clone())
         .await
         .expect("active control");
     let (seal, cancel) = tokio::join!(
-        active.settle_before_commit(host.as_ref(), None, None),
+        active.settle_before_commit(&host, None, None),
         driver.request_cancel(request(address.clone(), "race-request")),
     );
     let terminal = match (seal.expect("seal"), cancel.expect("cancel").outcome) {
@@ -394,7 +395,7 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(
         other => panic!("inconsistent gate race result: {other:?}"),
     };
     active
-        .publish_terminal(host.as_ref(), &terminal)
+        .publish_terminal(&host, &terminal)
         .await
         .expect("publish race terminal");
     let attached = driver
@@ -430,12 +431,12 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, RegistrationBarrierFuture>(
-    host: Arc<dyn EffectHost>,
+    host: ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
     registration_barrier: RegistrationBarrier,
 ) where
     RegistrationBarrier:
-        FnOnce(Arc<dyn EffectHost>, SessionId, AwaitEventKey) -> RegistrationBarrierFuture,
+        FnOnce(ActorContext, SessionId, AwaitEventKey) -> RegistrationBarrierFuture,
     RegistrationBarrierFuture: std::future::Future<Output = ()>,
 {
     let address_a = address("scope");
@@ -444,17 +445,14 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
     let address_future = TurnAddress::new(&address_a.session_id, "turn-future");
 
     let active = Arc::new(
-        ActiveTurnControl::new(host.as_ref(), address_a.clone())
+        ActiveTurnControl::new(&host, address_a.clone())
             .await
             .expect("active control"),
     );
-    let waiter_host = Arc::clone(&host);
+    let waiter_host = host.clone();
     let waiter_active = Arc::clone(&active);
-    let cancel_wait = crate::task::spawn(async move {
-        waiter_active
-            .watch_immediate(waiter_host.await_event_resolver())
-            .await
-    });
+    let cancel_wait =
+        crate::task::spawn(async move { waiter_active.watch_immediate(&waiter_host).await });
     tokio::task::yield_now().await;
 
     let tool_key = host
@@ -464,14 +462,14 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
         )
         .await
         .expect("tool key");
-    let tool_host = Arc::clone(&host);
+    let tool_host = host.clone();
     let waiter_tool_key = tool_key.clone();
     let tool_wait = crate::task::spawn(async move {
         tool_host
             .await_await_event(&waiter_tool_key, CancellationToken::new())
             .await
     });
-    registration_barrier(Arc::clone(&host), address_a.session_id.clone(), tool_key).await;
+    registration_barrier(host.clone(), address_a.session_id.clone(), tool_key).await;
     host.cancel_await_events_for_session(&address_a.session_id)
         .await
         .expect("cancel durable waits");
@@ -525,12 +523,12 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_deletion_revokes_control_promises(
-    host: Arc<dyn EffectHost>,
+    host: ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
 ) {
     let address = address("revoke");
     let (host, driver) = driver_for_session(host, stores, &address).await;
-    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+    let active = ActiveTurnControl::new(&host, address.clone())
         .await
         .expect("create reserved control promises");
     let waiter_driver = driver.clone();
@@ -555,7 +553,7 @@ async fn session_deletion_revokes_control_promises(
     );
     assert!(
         active
-            .settle_before_commit(host.as_ref(), None, None)
+            .settle_before_commit(&host, None, None)
             .await
             .is_err(),
         "session deletion left the reserved cancellation gate live"

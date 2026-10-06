@@ -7,11 +7,7 @@
 //!
 //! Reopen and recovery laws use distinct outer handles over one substrate.
 //! The runtime-persistence recovery laws certify store behavior only across
-//! admission, checkpoint, commit, and settlement boundaries. The distinct
-//! [`turn_crash_matrix_level_1`] suite executes a real scripted turn through
-//! conformance-owned store, provider, and effect-controller decorators; its
-//! golden trace generates the crash points and its outcome table supplies the
-//! recovery oracle. Each backend tier supplies its crash and redrive runner.
+//! admission, checkpoint, commit, and settlement boundaries.
 //!
 //! Each generated test constructs its own backend fixture and reports the violated law
 //! independently.
@@ -37,23 +33,20 @@ mod attachment_read_budgets;
 mod attachment_store;
 pub mod material_retention;
 pub use attachment_read_budgets::*;
-mod await_event_cold;
 mod bound_trigger_duplicate;
 mod law_backend;
+pub use law_backend::backend_over;
 pub(crate) use law_backend::{
     LawBackend, StoreLawBackend, law_session_store, law_session_store_with_config,
 };
-pub use law_backend::{backend_over, recording_backend_over};
 mod admission_support;
 mod admitted_head_redrive;
 mod cancelled_turn_withheld_input;
-mod cell_binding_drift;
 mod declared_start;
 mod definitions;
 mod deployment_view;
 mod direct_turn_acceptance;
 use deployment_view::DeploymentViewExt;
-mod effect_host;
 mod fence_integrity;
 mod fleet_format;
 mod frame_open_redrive;
@@ -62,10 +55,8 @@ mod generation_drain;
 mod helpers;
 mod hostile_input;
 mod lineage;
-mod live_fault_park;
 mod live_replay;
 mod migrated_tools_redrive;
-mod model_call_drift_park;
 mod obligation_relay;
 mod observer_intent;
 mod plugin_state;
@@ -141,7 +132,6 @@ mod tool_intent_runtime;
 mod trigger_store;
 mod turn_config;
 mod turn_control;
-mod turn_crash_matrix;
 mod turn_park_feed;
 mod turn_runner;
 mod vm_broker;
@@ -155,7 +145,6 @@ pub use artifact_referrers::*;
 pub use artifact_store::*;
 
 pub use attachment_store::*;
-pub use await_event_cold::*;
 pub use batch_sugar::*;
 pub use cancelled_turn_withheld_input::*;
 pub use declared_start::{
@@ -163,7 +152,6 @@ pub use declared_start::{
 };
 pub use definitions::*;
 pub use direct_turn_acceptance::*;
-pub use effect_host::*;
 pub use fence_integrity::*;
 pub use fleet_format::{FleetFormatDeployment, fleet_format_conformance};
 pub use frame_open_redrive::*;
@@ -171,10 +159,8 @@ pub use frame_switch_redrive::*;
 pub use generation_drain::*;
 pub use helpers::*;
 pub use lineage::*;
-pub use live_fault_park::*;
 pub use live_replay::*;
 pub use migrated_tools_redrive::*;
-pub use model_call_drift_park::*;
 pub use obligation_relay::*;
 pub use observer_intent::*;
 pub use plugin_state::plugin_state_boundary_trace;
@@ -216,7 +202,6 @@ pub use tool_intent_retention::*;
 pub use tool_intent_runtime::*;
 pub use trigger_store::*;
 pub use turn_control::*;
-pub use turn_crash_matrix::*;
 pub use turn_park_feed::*;
 pub use turn_runner::*;
 pub use wake_delivery::*;

@@ -10,6 +10,7 @@
 //! journaled peek, or through a recorded step whose body observed it. Replay
 //! reads the same record, whatever the process-local handle did.
 
+use crate::ActorContext;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,7 +22,6 @@ use super::{
     TurnCancellationEvidence,
 };
 use crate::RuntimeEffectControllerError;
-use crate::runtime::EffectHost;
 
 /// A host-local request to stop the turn it was handed to.
 ///
@@ -110,11 +110,11 @@ impl LocalTurnStop {
     pub async fn forward_to(
         &self,
         control: Arc<ActiveTurnControl>,
-        host: Arc<dyn EffectHost>,
+        host: ActorContext,
         store: Option<crate::SessionStore>,
     ) -> StopDeliveryGuard {
         if let Some(mode) = self.requested() {
-            deliver_bounded(&control, host.as_ref(), store.as_ref(), mode, self.origin()).await;
+            deliver_bounded(&control, &host, store.as_ref(), mode, self.origin()).await;
         }
         let stop = self.clone();
         let done = CancellationToken::new();
@@ -123,7 +123,7 @@ impl LocalTurnStop {
             tokio::select! {
                 biased;
                 () = finished.cancelled() => {}
-                () = stop.forward(&control, host.as_ref(), store.as_ref()) => {}
+                () = stop.forward(&control, &host, store.as_ref()) => {}
             }
         });
         StopDeliveryGuard {
@@ -135,7 +135,7 @@ impl LocalTurnStop {
     async fn forward(
         &self,
         control: &ActiveTurnControl,
-        host: &dyn EffectHost,
+        host: &ActorContext,
         store: Option<&crate::SessionStore>,
     ) {
         tokio::select! {
@@ -169,7 +169,7 @@ const GATE_RETRY_MAX: Duration = Duration::from_secs(1);
 /// never given up on while the turn it addresses can still honour it.
 async fn deliver(
     control: &ActiveTurnControl,
-    host: &dyn EffectHost,
+    host: &ActorContext,
     store: Option<&crate::SessionStore>,
     mode: TurnCancelMode,
     origin: Option<String>,
@@ -181,7 +181,7 @@ async fn deliver(
 /// turn starts: the forwarding task behind the guard keeps retrying after it.
 async fn deliver_bounded(
     control: &ActiveTurnControl,
-    host: &dyn EffectHost,
+    host: &ActorContext,
     store: Option<&crate::SessionStore>,
     mode: TurnCancelMode,
     origin: Option<String>,
@@ -199,7 +199,7 @@ async fn deliver_bounded(
 
 async fn deliver_within(
     control: &ActiveTurnControl,
-    host: &dyn EffectHost,
+    host: &ActorContext,
     store: Option<&crate::SessionStore>,
     mode: TurnCancelMode,
     origin: Option<String>,
@@ -228,9 +228,7 @@ async fn deliver_within(
                         RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, error.to_string())
                     })?;
             }
-            control
-                .request_local_stop(host.await_event_resolver(), mode, origin.clone())
-                .await
+            control.request_local_stop(host, mode, origin.clone()).await
         };
         let Err(error) = delivery.await else {
             return;
@@ -381,7 +379,7 @@ impl ActiveTurnControl {
     /// The answer is retained in that attempt's X; shift replay never reads here.
     pub(crate) async fn inline_stop_requested(
         &self,
-        resolver: &dyn crate::AwaitEventResolver,
+        resolver: &ActorContext,
     ) -> Result<bool, RuntimeError> {
         let Some(base) = Self::peek_base_cancel_evidence(resolver, self.address()).await? else {
             return Ok(false);
@@ -407,7 +405,7 @@ impl ActiveTurnControl {
     /// engine never records, so the attempt ends and the step runs again.
     pub async fn run_step_body<T, F, Fut>(
         &self,
-        host: &Arc<dyn EffectHost>,
+        host: &ActorContext,
         honoured: bool,
         body: F,
     ) -> Result<T, RuntimeEffectControllerError>
@@ -426,7 +424,7 @@ impl ActiveTurnControl {
     /// honours a request at its next journaled peek.
     pub async fn run_recorded_step_body<T, F, Fut>(
         &self,
-        host: &Arc<dyn EffectHost>,
+        host: &ActorContext,
         honoured: bool,
         body: F,
     ) -> T
@@ -445,7 +443,7 @@ impl ActiveTurnControl {
 
     async fn run_step_body_with<T, F, Fut>(
         &self,
-        host: &Arc<dyn EffectHost>,
+        host: &ActorContext,
         honoured: bool,
         on_loss: WatchLoss,
         body: F,
@@ -459,7 +457,7 @@ impl ActiveTurnControl {
             stop.cancel();
             return Ok(body(stop).await);
         }
-        let resolver = host.await_event_resolver();
+        let resolver = host;
         let pair = self.gate_pair();
         let watch = pair.await_stop_retrying(|key| async move {
             // Never a fired token: firing the waiter's token would resolve

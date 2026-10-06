@@ -2,6 +2,7 @@
 //! (FIG-4716).
 
 use super::*;
+use crate::ActorContext;
 use crate::interleave::Explorer;
 use lash_core::testing::{Outcome, Phase};
 
@@ -21,7 +22,7 @@ enum Raced {
 /// behind it.
 pub async fn every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of_the_redrive(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

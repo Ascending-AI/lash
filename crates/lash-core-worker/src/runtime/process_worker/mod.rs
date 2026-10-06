@@ -196,19 +196,10 @@ impl DurableProcessWorker {
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        scoped_effect_controller: crate::ActorContext,
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
-        // The substrate's handler minted this controller from its own context;
-        // it crosses this worker's effect host's stack here, once (FIG-3738).
-        let scoped_effect_controller = self
-            .config
-            .runtime_host
-            .backend()
-            .effect_host()
-            .route_handler_child_controller(scoped_effect_controller)
-            .map_err(PluginError::Runtime)?;
         let current = self
             .config
             .process_registry()
@@ -236,7 +227,7 @@ impl DurableProcessWorker {
         current: ProcessRecord,
         execution_context: ProcessExecutionContext,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        scoped_effect_controller: crate::ActorContext,
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
@@ -467,7 +458,7 @@ impl DurableProcessWorker {
             Some(request.requester.clone()),
         );
         crate::TurnWorkDriver::for_catalog(
-            Arc::clone(&self.config.runtime_host.control.effect_host),
+            self.config.runtime_host.control.effect_host.clone(),
             self.config.session_store_factory(),
         )
         .request_cancel(turn_request)

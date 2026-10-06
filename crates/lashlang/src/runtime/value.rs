@@ -740,6 +740,38 @@ enum ProjectedKind {
     Custom(Arc<dyn ProjectedHostDescriptor>),
 }
 
+/// A projection type: the name its provider is registered under.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ProjectionType(Arc<str>);
+
+impl ProjectionType {
+    /// Name a projection type.
+    pub fn new(name: impl Into<Arc<str>>) -> Self {
+        Self(name.into())
+    }
+
+    /// The type's name.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A projection value's resource, as the VM holds it: plain data that
+/// snapshots with the heap and pins no node (ADR 0132 §9). Reads go to the
+/// provider registered for `projection` on whichever node runs the actor. A
+/// provider that must answer identically after failover sets `revision`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceRef {
+    /// The provider's projection type.
+    pub projection: ProjectionType,
+    /// The resource within the provider.
+    pub id: String,
+    /// The revision or snapshot id reads are pinned to, if any.
+    pub revision: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ProjectedReadRequest {
     Len,

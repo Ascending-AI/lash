@@ -71,7 +71,7 @@ pub struct ToolDispatchContext<'run> {
     pub trigger_router: Option<crate::TriggerRouter>,
     /// The engines a definition resolves against.
     pub process_engines: crate::ProcessEngineRegistry,
-    pub effect_controller: crate::runtime::ScopedEffectController<'run>,
+    pub effect_controller: crate::ActorContext,
     pub direct_completions: crate::DirectCompletionClient<'run>,
     pub parent_invocation: Option<crate::RuntimeInvocation>,
     /// The resolved key one call's observation lanes are emitted under
@@ -210,7 +210,7 @@ impl<'run> ToolDispatchContext<'run> {
             processes: Arc::clone(&self.processes),
             trigger_router: self.trigger_router.clone(),
             process_engines: self.process_engines.clone(),
-            effect_controller: self.effect_controller.to_static()?,
+            effect_controller: self.effect_controller.clone(),
             direct_completions: self.direct_completions.to_static()?,
             parent_invocation: self.parent_invocation.clone(),
             observation_call_key: self.observation_call_key.clone(),

@@ -29,6 +29,7 @@
 //! second frame or bills a second summary.
 
 use super::*;
+use crate::ActorContext;
 
 /// The writes one context-pressure hook's decision names, all derived from
 /// the turn and the hook.
@@ -108,8 +109,10 @@ pub(super) struct ContextPressureOutcome {
 pub(super) struct ContextPressureStep<'a, 'run> {
     pub(super) trace_turn_id: &'a TurnId,
     pub(super) previous_prompt_usage: Option<crate::TokenUsage>,
-    pub(super) scoped_effect_controller: &'a ScopedEffectController<'run>,
+    pub(super) scoped_effect_controller: &'a ActorContext,
     pub(super) shift_fence: Option<&'a ShiftFence>,
+    /// The lifetime this value is bound to; the context it carries is `'static`.
+    pub(crate) run: std::marker::PhantomData<&'run ()>,
 }
 
 impl LashRuntime {
@@ -119,6 +122,7 @@ impl LashRuntime {
         step: ContextPressureStep<'_, '_>,
     ) -> Result<ContextPressureOutcome, RuntimeError> {
         let ContextPressureStep {
+            run: std::marker::PhantomData,
             trace_turn_id,
             previous_prompt_usage,
             scoped_effect_controller,
@@ -277,7 +281,7 @@ impl LashRuntime {
         records: Vec<(String, Vec<crate::SessionAppendNode>)>,
         task: String,
         seed: Vec<crate::SessionAppendNode>,
-        committing: &ScopedEffectController<'_>,
+        committing: &ActorContext,
         shift_fence: Option<&ShiftFence>,
     ) -> Result<(), RuntimeError> {
         let opened = match self.open_context_pressure_frame(write, records, seed).await {

@@ -50,8 +50,8 @@ use crate::store::{
     ObligationKind, ObligationLedger, ObligationState, SessionBlobReclaimReport, StoreError,
 };
 use crate::{
-    EffectJournalRetirement, ProcessSessionDeleteReport, RuntimeErrorCode, SessionAdministration,
-    SessionDeleteContext, SessionId,
+    ProcessSessionDeleteReport, RuntimeErrorCode, SessionAdministration, SessionDeleteContext,
+    SessionId,
 };
 
 /// The store set a session's delete runs its obligation through: its
@@ -115,9 +115,6 @@ pub enum SessionDeleteFailure {
     /// The effect host did not revoke the session's durable waits.
     #[error("durable waits: {source}")]
     Waits { source: Box<crate::RuntimeError> },
-    /// The effect host did not retire the session's effect journal.
-    #[error("effect journal: {source}")]
-    Journal { source: Box<crate::RuntimeError> },
     /// The session's storage delete stopped, with the reclaim counters it
     /// witnessed before it did (ADR 0067).
     #[error("storage: {0}")]
@@ -131,7 +128,7 @@ impl SessionDeleteFailure {
         match self {
             Self::Process { source } | Self::Triggers { source } => source.is_retryable(),
             // An undelivered drain is delivery still in flight.
-            Self::Waits { source } | Self::Journal { source } => source.is_retryable(),
+            Self::Waits { source } => source.is_retryable(),
             Self::Storage(_) => false,
         }
     }
@@ -139,7 +136,7 @@ impl SessionDeleteFailure {
     /// The typed code of the step that stopped the delete.
     pub fn code(&self) -> RuntimeErrorCode {
         match self {
-            Self::Waits { source } | Self::Journal { source } => source.code.clone(),
+            Self::Waits { source } => source.code.clone(),
             Self::Process { source } | Self::Triggers { source } => {
                 crate::shift::relay::plugin_delivery_error((**source).clone()).code
             }
@@ -154,7 +151,7 @@ impl SessionDeleteFailure {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::Process { source } | Self::Triggers { source } => source.is_terminal(),
-            Self::Waits { source } | Self::Journal { source } => source.is_terminal(),
+            Self::Waits { source } => source.is_terminal(),
             Self::Storage(_) => false,
         }
     }
@@ -359,11 +356,6 @@ pub async fn physically_delete(
     host.revoke_await_events_for_session(session_id)
         .await
         .map_err(|source| SessionDeleteFailure::Waits {
-            source: Box::new(source),
-        })?;
-    host.retire_effect_journal(EffectJournalRetirement::session(session_id))
-        .await
-        .map_err(|source| SessionDeleteFailure::Journal {
             source: Box::new(source),
         })?;
     let storage = administration

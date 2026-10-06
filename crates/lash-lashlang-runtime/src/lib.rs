@@ -1314,19 +1314,6 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             .map_err(|error| lash_core::PluginError::Registration(error.to_string()))
     }
 
-    async fn run(
-        &self,
-        context: lash_core::ProcessEngineRunContext<'_>,
-        payload: serde_json::Value,
-    ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        Box::pin(process::run_lashlang_process(
-            self.clone(),
-            context,
-            payload,
-        ))
-        .await
-    }
-
     async fn resolve(
         &self,
         reference: &lash_core::ProcessDefinitionRef,
@@ -1439,6 +1426,26 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             "the lashlang engine keeps no engine artifact store; `{artifact_ref}` belongs to the \
              module port"
         )))
+    }
+
+    fn state_format(&self) -> lash_core::EngineStateFormat {
+        lash_core::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn advance(
+        &self,
+        _state: lash_core::EngineState,
+        _event: lash_core::EngineEvent,
+    ) -> Result<(lash_core::EngineState, lash_core::EngineAction), lash_core::ProcessInfraError>
+    {
+        todo!("L6 (FIG-5175): port LashlangProcessEngine to advance")
     }
 }
 

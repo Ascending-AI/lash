@@ -12,7 +12,7 @@ use std::result::Result;
 use std::sync::Arc;
 
 use crate::e2e_tools::ReceiverHold;
-use lash::durability::{EffectHost, PreparedProcessRegistration, RuntimeReplayAttribution};
+use lash::durability::{PreparedProcessRegistration, RuntimeReplayAttribution};
 use lash::persistence::*;
 use lash::plugins::PluginError;
 use lash::process::*;
@@ -47,6 +47,9 @@ impl lash::StoreSet for ReceiverHoldStores {
         self.inner.attachment_referrers()
     }
 
+    fn durable_store(&self) -> Arc<dyn lash::durable::DurableStore> {
+        self.inner.durable_store()
+    }
     fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
         Arc::clone(&self.registry)
     }
@@ -266,9 +269,6 @@ impl ProcessRegistrar for ReceiverHoldRegistry {
         self.inner
             .register_process_reporting_outcome(registration, observers)
             .await
-    }
-    fn bind_effect_host(&self, effect_host: &Arc<dyn EffectHost>) {
-        self.inner.bind_effect_host(effect_host)
     }
     async fn set_external_ref(
         &self,

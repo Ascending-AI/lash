@@ -100,11 +100,11 @@ fn test_execution_context_with_env_store(
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
         process_engines: crate::ProcessEngineRegistry::default(),
-        effect_controller: crate::runtime::ScopedEffectController::shared(
-            Arc::new(crate::testing::UnavailableEffectController),
-            crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
-        )
-        .expect("valid test runtime scope"),
+        effect_controller: crate::ActorContext::unavailable()
+            .scoped(crate::AdmittedScope::runtime_operation(
+                "test-runtime-effect-controller",
+            ))
+            .expect("valid test runtime scope"),
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -243,11 +243,9 @@ fn scoped_context(
     session_id: &str,
     admitted: crate::AdmittedScope,
 ) -> RuntimeExecutionContext<'static> {
-    let controller = crate::ScopedEffectController::shared(
-        Arc::new(crate::testing::UnavailableEffectController),
-        admitted,
-    )
-    .expect("the test scope validates");
+    let controller = crate::ActorContext::unavailable()
+        .scoped(admitted)
+        .expect("the test scope validates");
     crate::testing::TestExecutionContextBuilder::over_controller(controller)
         .session_id(lash_sansio::SessionId::fixture(session_id))
         .plugin_factories(vec![])

@@ -1,6 +1,5 @@
-use std::sync::Arc;
+use crate::ActorContext;
 
-use super::control::AwaitEventResolver;
 use crate::RuntimeError;
 
 /// A reopenable authority for the reserved turn-cancellation promises.
@@ -10,10 +9,10 @@ use crate::RuntimeError;
 #[derive(Clone)]
 pub struct TurnCancellationAuthority {
     binding_id: String,
-    resolver: Arc<dyn AwaitEventResolver>,
+    resolver: ActorContext,
 }
 impl TurnCancellationAuthority {
-    pub fn new(binding_id: impl Into<String>, resolver: Arc<dyn AwaitEventResolver>) -> Self {
+    pub fn new(binding_id: impl Into<String>, resolver: ActorContext) -> Self {
         Self {
             binding_id: binding_id.into(),
             resolver,
@@ -24,8 +23,8 @@ impl TurnCancellationAuthority {
         &self.binding_id
     }
 
-    pub fn resolver(&self) -> Arc<dyn AwaitEventResolver> {
-        Arc::clone(&self.resolver)
+    pub fn resolver(&self) -> ActorContext {
+        self.resolver.clone()
     }
 
     /// Finish one exact closure operation previously authorized by the store.
@@ -53,7 +52,7 @@ impl TurnCancellationAuthority {
             ));
         }
         let control = match crate::runtime::turn_control::ActiveTurnControl::new(
-            self.resolver.as_ref(),
+            &self.resolver,
             authorization.address(),
         )
         .await
@@ -72,19 +71,17 @@ impl TurnCancellationAuthority {
             Err(error) => return Err(error),
         };
         control
-            .settle_authorized(self.resolver.as_ref(), authorization, None)
+            .settle_authorized(&self.resolver, authorization, None)
             .await
     }
 }
 
-/// How turn-control promises are addressed for one turn. Exhaustive: there is
-/// no third arrangement, and no field is optional.
+/// How turn-control promises are addressed for one turn: through the
+/// resolver that owns the reserved promises. The dedicated transport
+/// (Restate ingress) is gone with `turn_attach`, folded to `None` (I0).
 pub enum TurnControlAttachment<'a> {
     /// Attach through the same resolver that owns the reserved promises.
-    Resolver(&'a dyn AwaitEventResolver),
-    /// Attach through an owner-provided durable transport for the same
-    /// deployment, such as Restate ingress.
-    Dedicated(Arc<dyn crate::TurnAttach>),
+    Resolver(&'a ActorContext),
 }
 
 impl TurnControlAttachment<'_> {
@@ -94,9 +91,8 @@ impl TurnControlAttachment<'_> {
     ) -> Result<crate::TurnTerminal, RuntimeError> {
         match self {
             Self::Resolver(resolver) => {
-                crate::runtime::turn_control::await_terminal_from_resolver(*resolver, address).await
+                crate::runtime::turn_control::await_terminal_from_resolver(resolver, address).await
             }
-            Self::Dedicated(attach) => attach.await_terminal(address).await,
         }
     }
 }
@@ -110,31 +106,16 @@ impl TurnControlAttachment<'_> {
 /// durable on every host.
 pub struct TurnControlBinding<'a> {
     binding_id: String,
-    resolver: &'a dyn AwaitEventResolver,
+    resolver: &'a ActorContext,
     turn_attach: TurnControlAttachment<'a>,
 }
 
 impl TurnControlBinding<'_> {
-    pub(super) fn run_scoped<'a>(
-        binding_id: String,
-        resolver: &'a dyn AwaitEventResolver,
-        turn_attach: Option<Arc<dyn crate::TurnAttach>>,
-    ) -> TurnControlBinding<'a> {
-        TurnControlBinding {
-            binding_id,
-            resolver,
-            turn_attach: turn_attach.map_or(
-                TurnControlAttachment::Resolver(resolver),
-                TurnControlAttachment::Dedicated,
-            ),
-        }
-    }
-
     pub fn binding_id(&self) -> &str {
         &self.binding_id
     }
 
-    pub fn resolver(&self) -> &dyn AwaitEventResolver {
+    pub fn resolver(&self) -> &ActorContext {
         self.resolver
     }
 

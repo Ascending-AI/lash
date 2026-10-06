@@ -226,9 +226,10 @@ pub use crate::turn::{
 /// `async-trait` dependency to keep version-aligned.
 pub use lash_core::async_trait;
 /// The one substrate a [`LashCore`] takes every persistence port and its
-/// effect host from: one [`EffectEngine`] over one store set (ADR 0104).
-/// [`LashCore::builder`] requires one: a `lash::restate::RestateEngine` over a
-/// SQLite or PostgreSQL store set.
+/// durable store from: the concrete durable backend over one store set
+/// (ADR 0132 §1). [`LashCore::builder`] requires one, which
+/// [`durable::DurableBackendBuilder`] builds over a SQLite or PostgreSQL store
+/// set.
 pub use lash_core::engine::BuildGeneration;
 /// The slot an engine holds its build generation in, and the typed refusals
 /// of reading it before a core bound it and of binding it twice (FIG-4744).
@@ -298,10 +299,10 @@ pub use lash_core::runtime::{
 };
 pub use lash_core::store::SessionHeadOwner;
 /// The one substrate a [`LashCore`] takes every persistence port and its
-/// effect host from: one [`EffectEngine`] over one [`StoreSet`] (ADR 0104).
-/// [`LashCore::builder`] requires one; the engine crates behind the
-/// feature-gated modules (`restate`, `sqlite`, `postgres`) build one.
-pub use lash_core::{Backend, EffectEngine, StoreBindingId, StoreSet};
+/// durable store from: the concrete durable backend over one [`StoreSet`]
+/// (ADR 0132 §1). [`LashCore::builder`] requires one, which
+/// [`durable::DurableBackendBuilder`] builds.
+pub use lash_core::{Backend, StoreBindingId, StoreSet};
 /// The shape a sent input runs under (FIG-3838): a [`RunSpec`] set on
 /// [`SendBuilder::run`], or through its one-shot setters, and the
 /// [`RunDefinition`]s a [`LashCoreBuilder`] registers for specs to name.
@@ -1023,6 +1024,13 @@ pub mod plugins {
         CellFailure, CellFailureKind, ExecRequest, ExecResponse, RuntimeExecutionContext,
     };
     pub use lash_core::{CompletedToolCall, PluginOptions};
+    /// A host process engine's state machine (ADR 0132 §6): the state it
+    /// keeps, the events lash delivers to `advance`, and the action it
+    /// answers with.
+    pub use lash_core::{
+        EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
+        PinnedKey, StepName, StepRequest,
+    };
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};
     pub use lash_core::{
@@ -1122,8 +1130,7 @@ pub mod process {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::facade_support::ProcessEventSinkRegistration;
     pub use lash_core::{
-        ConsumerHold, ProcessDefinitionStoredError, ProcessRegistrationProbe,
-        ProcessSpawnProvenance, ProcessStartDeclaration,
+        ConsumerHold, ProcessDefinitionStoredError, ProcessSpawnProvenance, ProcessStartDeclaration,
     };
     pub use lash_core_store::effect_opener::EffectOpenerError;
     pub use lash_sansio::{HandleTarget, ObservedProcessFailure};
@@ -1157,9 +1164,7 @@ pub mod process {
         ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal,
     };
     /// Registry admission receipts and lifecycle write outcomes.
-    pub use lash_core::runtime::{
-        ProcessRegistrationReceipt, ProcessRegistryBinding, StoreRealization,
-    };
+    pub use lash_core::runtime::{ProcessRegistrationReceipt, StoreRealization};
     pub use lash_core::{
         AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
         DeclaredProcessIdentity, HandleId, InvalidProcessDefinitionId, InvalidStartKey, Lifetime,
@@ -1260,9 +1265,9 @@ pub mod durability {
         RunStepHandle, SelectKey,
     };
     pub use lash_core::{
-        EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,
-        facade_support::LeaseTimingsError, facade_support::RuntimeEnvironment,
-        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
+        TurnCancellationAuthority, facade_support::LeaseTimings, facade_support::LeaseTimingsError,
+        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
+        facade_support::TerminationPolicy,
     };
     pub use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig};
 }
@@ -1294,7 +1299,7 @@ pub mod runtime {
     pub use lash_core::triggers::TriggerDeliveryAdmission;
 
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
-    pub use lash_core::{ScopeBoundController, ServedOnly, TurnControlAttachment};
+    pub use lash_core::{ServedOnly, TurnControlAttachment};
     pub use lash_core_store::runtime_error::EffectErrorJournalPolicy;
     pub use lash_core_store::store::FollowOnRecoveryAnswer;
     pub use lash_core_store::turn_control_binding::{
@@ -1307,6 +1312,8 @@ pub mod runtime {
     };
     pub use lash_sansio::{CheckpointDelivery, EffectIdentityError};
 
+    /// The one effect context of an actor's activation (ADR 0132 §1).
+    pub use lash_core::ActorContext;
     /// The lazy binding of a recorded model that
     /// [`RuntimeEffectLocalExecutor::direct`] takes: bound only when an
     /// unjournaled completion's body runs.
@@ -1330,18 +1337,17 @@ pub mod runtime {
     pub use lash_core::runtime::current_epoch_ms;
     pub use lash_core::runtime::{
         AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantResponsePlan,
-        AssistantStreamHookState, AwaitEventResolver, CheckpointAdmittedSet,
-        CompletionKeyPreparation, DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost,
-        EventSink, ExecutionScope, LlmRequestSpec, LlmStreamRecord, NoSessionWork, NoopEventSink,
-        NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome, ProcessListSelection,
-        RunAggregateWakePolicy, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
-        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind,
-        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
-        RuntimeProviderConfig, ScopedEffectController, SessionWorkEngine, SleepSpec, TraceEmitter,
-        TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding, TurnPrelude, TurnPreludeRef,
-        WorkCadenceError, WorkCadencePolicy,
+        AssistantStreamHookState, CheckpointAdmittedSet, CompletionKeyPreparation,
+        DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost, EventSink, ExecutionScope,
+        LlmRequestSpec, LlmStreamRecord, NoSessionWork, NoopEventSink, NoopTurnActivitySink,
+        ProcessCommand, ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy,
+        RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
+        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SessionWorkEngine, SleepSpec,
+        TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding, TurnPrelude,
+        TurnPreludeRef, WorkCadenceError, WorkCadencePolicy,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

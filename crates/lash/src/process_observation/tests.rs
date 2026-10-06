@@ -1020,7 +1020,7 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
             .await
             .expect("open the file store set"),
     );
-    let core = crate::tests::standard_core_over(lash_conformance::recording_backend_over(stores));
+    let core = crate::tests::standard_core_over(lash_conformance::backend_over(stores));
     let watched = core.process_registry();
     let process_id = watched
         .register_process(registration("l8-facade", false))

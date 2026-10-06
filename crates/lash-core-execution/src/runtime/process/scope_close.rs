@@ -21,13 +21,14 @@
 //! (ADR 0109 §3) owes no cancel. A plan with a child stays owed for the
 //! relay of a deployment that can deliver it.
 
+use crate::ActorContext;
 use std::sync::Arc;
 
 use crate::engine::ScopeCloseSink;
 use crate::store::{ControlIntentId, RunTerminal, RunTerminalCause, StoreError};
 use crate::{
-    Clock, DeploymentStore, EffectHost, ProcessRegistry, ProcessWorkSubstrate, ScopeId, SessionId,
-    TurnId, apply_parent_end_plan, end_session_runs,
+    Clock, DeploymentStore, ProcessRegistry, ProcessWorkSubstrate, ScopeId, SessionId, TurnId,
+    apply_parent_end_plan, end_session_runs,
 };
 
 /// Closes lifetime scopes in a process registry's scope-close ledger, and —
@@ -37,7 +38,7 @@ pub struct RegistryScopeClose {
     registry: Arc<dyn ProcessRegistry>,
     delivery: Option<Arc<dyn ProcessWorkSubstrate>>,
     clock: Arc<dyn Clock>,
-    effect_host: Option<Arc<dyn EffectHost>>,
+    effect_host: Option<ActorContext>,
     sessions: Option<Arc<dyn DeploymentStore>>,
 }
 
@@ -75,7 +76,7 @@ impl RegistryScopeClose {
     /// Retire the closed run's wait-index rows through the same engine host
     /// that issued them. This runs after the registry records the scope end.
     #[must_use]
-    pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
+    pub fn with_effect_host(mut self, effect_host: ActorContext) -> Self {
         self.effect_host = Some(effect_host);
         self
     }

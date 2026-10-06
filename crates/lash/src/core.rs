@@ -1,10 +1,11 @@
 use crate::support::{
-    Arc, DeploymentStore, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime,
-    LashSession, LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginSpec,
-    PluginStack, ProcessRegistry, Result, RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig,
-    SessionBuilder, SessionListFilter, SessionView, SessionWorkEngine, StaticPluginFactory,
-    TerminationPolicy, ToolProvider,
+    Arc, DeploymentStore, EmbedError, InMemoryLiveReplayStore, LashRuntime, LashSession,
+    LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginSpec, PluginStack,
+    ProcessRegistry, Result, RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig, SessionBuilder,
+    SessionListFilter, SessionView, SessionWorkEngine, StaticPluginFactory, TerminationPolicy,
+    ToolProvider,
 };
+use lash_core::ActorContext;
 use lash_core::Backend;
 use lash_core::facade_support;
 use lash_core_worker::DurableProcessWorkerConfig;
@@ -100,7 +101,7 @@ impl AdministrationSource {
             .with_work_ports(ports.process.clone(), Arc::clone(&queued));
         lash_core::SessionAdministration::new(
             Arc::clone(&self.store_factory),
-            Arc::clone(&resolved_env.core.control.effect_host),
+            resolved_env.core.control.effect_host.clone(),
             Some(ports.process),
             Some(resolved_env.core.trigger_store()),
             Arc::clone(&resolved_env.core.durability.process_env_store),
@@ -311,13 +312,12 @@ impl LashCore {
     ) -> Result<GenerationDrainStatus> {
         let drain = self.backend.generation_drain();
         let session_delete = self.backend.session_delete_ledger();
-        let registry = self.backend.deployment_registry();
         let backend = self.backend.clone();
         let status = GenerationDrainStatus::collect(
             drain.as_ref(),
             session_delete.as_ref(),
             move |kind| backend.obligation_ledger(kind),
-            registry.as_ref(),
+            &lash_core::store::fleet_finalize::NoDeployments,
             generation,
             self.env.core.clock.timestamp_ms(),
         )
@@ -643,8 +643,8 @@ impl LashCore {
         crate::admin::Completions { core: self.clone() }
     }
 
-    pub fn effect_host(&self) -> Arc<dyn EffectHost> {
-        Arc::clone(&self.env.core.control.effect_host)
+    pub fn effect_host(&self) -> ActorContext {
+        self.env.core.control.effect_host.clone()
     }
 
     /// Exact-turn cooperative control for this deployment's effect host.
@@ -1211,7 +1211,10 @@ impl LashCoreBuilder {
                 Arc::clone(&core.clock),
             ))
         });
-        let process_work = backend.process_work();
+        let process_work = lash_core::ProcessWorkWiring::new(
+            lash_core::runtime::watch_process_registry(backend.process_registry()),
+            Arc::new(lash_core::DurableProcessWork::new(backend.clone())),
+        );
         let process_lifecycle_feed = Arc::new(crate::process_lifecycle::ProcessLifecycleFeed::new(
             Arc::clone(&live_replay_store),
             Arc::clone(&process_observation_hub),
@@ -1247,12 +1250,9 @@ impl LashCoreBuilder {
             &core,
         )?);
         // The generation exists only now that the plugins are registered:
-        // it folds in their declarations in hook order, and the engine runs
-        // on no other. Bound before anything below can stamp work with it.
-        backend.bind_build_generation(&crate::formats::composed_generation(
-            &default_plugin_host.composition()?,
-        ))?;
-        let build_generation = backend.build_generation()?.clone();
+        // it folds in their declarations in hook order.
+        let build_generation =
+            crate::formats::composed_generation(&default_plugin_host.composition()?);
         // Every backend supplies a process registry, so process lifecycle
         // is available on every core. Threaded to every plugin host so core
         // installs the same plugin-contributed process engines wherever it
@@ -1269,15 +1269,9 @@ impl LashCoreBuilder {
             .with_plugin_host(Arc::clone(&default_plugin_host))
             .with_process_work(process_work.clone())
             .build();
-        // Registration owns the scope fence (ADR 0049): the registry lifts the
-        // effect host's fence for a re-registered process id inside its own
-        // registration write, on every registration path.
-        process_registry.bind_effect_host(&env.core.control.effect_host);
-        // The retained-evidence sweep owns deferred scope retirement (ADR
-        // 0067): the catalog learns the host whose journal it sweeps.
-        store_factory.bind_effect_host(&env.core.control.effect_host);
         let residents = Arc::new(residents::ResidentSessions::default());
-        let session_work = backend.session_work();
+        let session_work: Arc<dyn SessionWorkEngine> =
+            Arc::new(lash_core::DurableSessionWork::new(backend.clone()));
         let (session_shifts, installed_shifts) = Self::build_session_shifts(
             &session_work,
             Arc::clone(&residents),
@@ -1289,6 +1283,7 @@ impl LashCoreBuilder {
             Arc::clone(&live_replay_store),
             process_lifecycle_available,
             self.recovery_lease.unwrap_or_default(),
+            build_generation.clone(),
         );
         // The `SessionShifts`'s reconcile tick runs every obligation kind's relay
         // (ADR 0109 §1.4): the backend's process wiring always supplies a
@@ -1360,6 +1355,7 @@ impl LashCoreBuilder {
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
         recovery_lease: lash_core::engine::RecoveryLeaseConfig,
+        build_generation: lash_core::engine::BuildGeneration,
     ) -> (Arc<CoreSessionShifts>, Arc<dyn lash_core::SessionShifts>) {
         let owner = shift_owner.clone();
         let recovery = Arc::new(recovery::RecoverySlot::new(&env, recovery_lease));
@@ -1373,6 +1369,7 @@ impl LashCoreBuilder {
             store_factory: Arc::clone(store_factory),
             live_replay_store,
             process_lifecycle_available,
+            build_generation,
         })));
         let installed = install_session_shifts(session_work, shifts.clone(), &owner);
         (shifts, installed)

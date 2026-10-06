@@ -1,8 +1,9 @@
 use crate::support::{
     Arc, CancellationToken, EmbedError, InputItem, LashCore, LashRuntime, PluginMessage, Result,
-    RuntimeHandle, RuntimeSessionState, ScopedEffectController, SessionError, SessionStateService,
-    ToolManifest, ToolRestoreReport, ToolState, TurnInput,
+    RuntimeHandle, RuntimeSessionState, SessionError, SessionStateService, ToolManifest,
+    ToolRestoreReport, ToolState, TurnInput,
 };
+use lash_core::ActorContext;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -89,7 +90,7 @@ impl CoreTriggerAdmin {
     pub async fn emit(
         &self,
         request: lash_core::TriggerOccurrenceRequest,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::facade_support::TriggerEmitReport> {
         // The producer's context is snapshotted here, before the first
         // await, unless the request states its own: the fire links it.
@@ -437,7 +438,7 @@ impl SessionAdmin {
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessEvent> {
         let (owner, processes) = {
             let writer = self.runtime.writer();
@@ -462,7 +463,7 @@ impl SessionAdmin {
         &self,
         to_session_id: &SessionId,
         process_ids: Vec<ProcessId>,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<()> {
         let (session_id, processes) = {
             let writer = self.runtime.writer();
@@ -643,7 +644,7 @@ impl SessionAdmin {
     async fn start_process(
         &self,
         request: lash_core::ProcessStartRequest,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessHandleView> {
         let (session_id, processes) = {
             let writer = self.runtime.writer();
@@ -687,7 +688,7 @@ impl SessionAdmin {
     async fn cancel_process(
         &self,
         process_id: &ProcessId,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessCancelReceipt> {
         let (owner, processes) = {
             let writer = self.runtime.writer();
@@ -712,7 +713,7 @@ impl SessionAdmin {
 
     async fn cancel_visible_processes(
         &self,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
         let (session_id, processes) = {
             let writer = self.runtime.writer();

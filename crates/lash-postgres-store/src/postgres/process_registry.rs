@@ -508,19 +508,6 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         ))
     }
 
-    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
-        // The host keeps its own scope fence; the binding carries only the
-        // registration truth it lifts that fence against.
-        self.scope_fence_hosts.bind(
-            effect_host,
-            lash_core_execution::ProcessRegistryBinding {
-                registrations: Arc::new(PostgresRegistrationProbe {
-                    pool: self.pool.clone(),
-                }),
-            },
-        );
-    }
-
     async fn set_external_ref(
         &self,
         process_id: &ProcessId,
@@ -1392,20 +1379,5 @@ impl lash_core_execution::ProcessRegistryTestSupport for PostgresProcessRegistry
             .map_err(plugin_sqlx_error)?
             .map(|value| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
             .transpose()
-    }
-}
-/// This registry's registration truth for a bound effect host (ADR 0049).
-struct PostgresRegistrationProbe {
-    pool: sqlx::PgPool,
-}
-
-#[async_trait::async_trait]
-impl lash_core_execution::ProcessRegistrationProbe for PostgresRegistrationProbe {
-    async fn process_is_registered(&self, process_id: &ProcessId) -> Result<bool, PluginError> {
-        sqlx::query_scalar::<_, bool>(process_sql().process.exists_by_id.sql())
-            .bind(process_id.as_str())
-            .fetch_one(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)
     }
 }

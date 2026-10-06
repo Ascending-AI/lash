@@ -61,24 +61,19 @@ impl LashRuntime {
         };
         // FIG-3795 S9: the park records the drain generation of the build the
         // parked journal belongs to — the caller's where it holds one (a
-        // resumed run's recorded admission), the running run's admitted
-        // generation, else this build's, which wrote the journal itself.
+        // resumed run's recorded admission), else the running run's admitted
+        // generation. No engine binds a build generation of its own any more
+        // (I0, FIG-5194), so a park with neither is not recorded.
         let recorded = journal_generation
             .or_else(|| self.shift_run.as_ref().map(|run| run.journal_generation()));
-        let generation = match recorded {
-            Some(generation) => generation.clone(),
-            None => match self.host.core.backend().build_generation() {
-                Ok(generation) => generation.clone(),
-                Err(error) => {
-                    tracing::warn!(
-                        session_id = %self.state.session_id,
-                        turn_id = %run,
-                        error = %error,
-                        "turn park not recorded"
-                    );
-                    return;
-                }
-            },
+        let Some(generation) = recorded.cloned() else {
+            tracing::warn!(
+                session_id = %self.state.session_id,
+                turn_id = %run,
+                error = %crate::engine::GenerationUnbound,
+                "turn park not recorded"
+            );
+            return;
         };
         let mut write = crate::store::TurnParkWrite::refusal(
             self.state.session_id.clone(),

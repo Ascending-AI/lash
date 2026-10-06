@@ -1963,19 +1963,6 @@ impl crate::ProcessEngine for TriggerTargetEngine {
         "test"
     }
 
-    async fn run(
-        &self,
-        _context: crate::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        Ok(
-            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::Value::Null,
-            ))
-            .into(),
-        )
-    }
-
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
@@ -1996,6 +1983,49 @@ impl crate::ProcessEngine for TriggerTargetEngine {
         _artifact_ref: &str,
     ) -> Result<(), crate::PluginError> {
         Ok(())
+    }
+
+    fn state_format(&self) -> crate::EngineStateFormat {
+        crate::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Option<crate::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: crate::EngineState,
+        _event: crate::EngineEvent,
+    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        todo!("L6 (FIG-5175): port TriggerTargetEngine to advance")
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &crate::ProcessDefinitionRef,
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+        Ok(crate::ProcessDefinitionResolution::new(
+            crate::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
     }
 }
 
@@ -2474,14 +2504,11 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
             reservation.occurrence.payload = serde_json::json!({"button":42});
         }
         // The production preparation seam validates the exact reserved occurrence.
-        let controller = crate::testing::UnavailableEffectController;
-        let scoped = crate::ScopedEffectController::borrowed(
-            &controller,
-            crate::admit(crate::ExecutionScope::runtime_operation(format!(
-                "capture-{invalid}"
-            ))),
-        )
-        .expect("scope refusal");
+        let scoped = crate::ActorContext::unavailable()
+            .scoped(crate::admit(crate::ExecutionScope::runtime_operation(
+                format!("capture-{invalid}"),
+            )))
+            .expect("scope refusal");
         let refusal = router
             .start_delivery(&reservation, handles.registry.clone(), &scoped)
             .await
@@ -2520,14 +2547,11 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
     ));
     // The emission's ingest is a recorded step, so it needs a host that runs
     // steps; the revoked route refuses the delivery inside its start's step.
-    let controller = InPlaceStepController;
-    let scoped = crate::ScopedEffectController::borrowed(
-        &controller,
-        crate::admit(crate::ExecutionScope::runtime_operation(
+    let scoped = crate::ActorContext::unavailable()
+        .scoped(crate::admit(crate::ExecutionScope::runtime_operation(
             "capture-emit-failure",
-        )),
-    )
-    .expect("scope emit");
+        )))
+        .expect("scope emit");
     let report = router
         .emit(
             crate::TriggerOccurrenceRequest::new(
@@ -2546,24 +2570,4 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
         crate::TriggerDeliveryEmitOutcome::Failed { .. }
     ));
     assert!(report.deliveries[0].process_id().is_none());
-}
-
-/// A controller that runs each step's body in place and journals nothing.
-struct InPlaceStepController;
-
-impl crate::AwaitEventResolver for InPlaceStepController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        None
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::RuntimeEffectController for InPlaceStepController {
-    async fn execute_effect(
-        &self,
-        envelope: crate::RuntimeEffectEnvelope,
-        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        local_executor.execute(envelope).await
-    }
 }

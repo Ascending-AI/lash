@@ -519,7 +519,7 @@ async fn summarize_compaction_prefix(
     prefix_messages: Vec<Message>,
     instructions: Option<&str>,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
-    scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
+    scoped_effect_controller: &lash_core::ActorContext,
     system_prompt: Option<Arc<str>>,
 ) -> Result<Option<String>, ContextError> {
     if prefix_messages.is_empty() {
@@ -625,7 +625,7 @@ async fn compact_messages_core(
     messages: &[Message],
     instructions: Option<&str>,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
-    scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
+    scoped_effect_controller: &lash_core::ActorContext,
     system_prompt: Option<Arc<str>>,
 ) -> Result<Option<ContextCompaction>, ContextError> {
     let prefix_len = leading_system_prefix_len(messages);
@@ -731,7 +731,7 @@ impl StandardCompactionPressureHook {
 
 fn turn_trace_context(
     session_id: &SessionId,
-    scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
+    scoped_effect_controller: &lash_core::ActorContext,
 ) -> lash_core::TraceContext {
     let trace_context = lash_core::TraceContext::default().for_session(session_id.clone());
     match scoped_effect_controller.turn_id() {

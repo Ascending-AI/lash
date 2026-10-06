@@ -7,8 +7,8 @@ use super::engine::PersistedSegmentHandover;
 use super::model::{ProcessChangeCursor, ProcessRecord};
 pub use super::registry_concerns::{
     ProcessClockRebind, ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry, ProcessQuery,
-    ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistryBinding, ProcessRetention,
-    ProcessScopeFenceHosts, ProcessTerminalPublication, ProcessToolIntents, ProcessWakeOutbox,
+    ProcessRegistrar, ProcessRetention, ProcessTerminalPublication, ProcessToolIntents,
+    ProcessWakeOutbox,
 };
 
 /// Outcome of process retention: how many terminal processes, events, and

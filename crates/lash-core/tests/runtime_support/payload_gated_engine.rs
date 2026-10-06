@@ -33,16 +33,47 @@ impl lash_core::ProcessEngine for PayloadGatedEngine {
         unreachable!("the payload-gated engine stores no artifacts")
     }
 
-    async fn run(
+    fn state_format(&self) -> lash_core::EngineStateFormat {
+        lash_core::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
         &self,
-        _context: lash_core::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        Ok(
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                json!({"ran": true}),
-            ))
-            .into(),
-        )
+        _payload: &serde_json::Value,
+    ) -> Option<lash_core::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &lash_core::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, lash_core::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: lash_core::EngineState,
+        _event: lash_core::EngineEvent,
+    ) -> Result<(lash_core::EngineState, lash_core::EngineAction), lash_core::ProcessInfraError>
+    {
+        todo!("L6 (FIG-5175): port PayloadGatedEngine to advance")
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &lash_core::ProcessDefinitionRef,
+    ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionRefusal> {
+        Ok(lash_core::ProcessDefinitionResolution::new(
+            lash_core::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
     }
 }

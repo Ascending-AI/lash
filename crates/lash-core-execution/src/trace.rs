@@ -36,6 +36,10 @@ pub fn composition_schema_serialization_count() -> usize {
 }
 
 mod boundary;
+#[expect(
+    dead_code,
+    reason = "L5 (FIG-5173) re-establishes wait receipts on ActorContext::wait_effect; the effect wrapper that opened them is deleted (I0)"
+)]
 pub(crate) mod wait_receipts;
 pub use boundary::TraceBoundaryReceipt;
 pub(crate) mod run_receipts;
@@ -737,12 +741,9 @@ mod span_identity_tests {
         let path = directory.path().join("replayed.jsonl");
         let runtime = TraceRuntime::new(Arc::new(SpyClock(clock_reads.clone())))
             .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)));
-        let controller = crate::testing::UnavailableEffectController;
-        let scoped = crate::ScopedEffectController::borrowed(
-            &controller,
-            crate::AdmittedScope::turn("session", "turn"),
-        )
-        .expect("scope");
+        let scoped = crate::ActorContext::unavailable()
+            .scoped(crate::AdmittedScope::turn("session", "turn"))
+            .expect("scope");
         let standing = runtime.shift(Some(turn_scope(1)), &scoped);
         standing.observe(|| {
             constructions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

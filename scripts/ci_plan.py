@@ -1295,6 +1295,7 @@ def collect_gate_paths(repo: Path, base: str, head: str, worktree: bool) -> list
 SCRIPT_PROOFS = {
     "scripts/check-substrate-boundary.sh": "scripts/test_check_substrate_boundary.py",
     "scripts/check-substrate-port-ledger.py": "scripts/test_check_substrate_port_ledger.py",
+    "scripts/check-substrate-todos.py": "scripts/test_check_substrate_todos.py",
     "scripts/check-dialect-boundary.py": "scripts/test_check_dialect_boundary.py",
     "scripts/check-history-readers.sh": "scripts/test_ci_plan.py",
     "scripts/check-guarded-transactions.py": "scripts/test_check_guarded_transactions.py",

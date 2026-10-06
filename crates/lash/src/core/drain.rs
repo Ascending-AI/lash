@@ -100,18 +100,16 @@ impl serde::Serialize for DeploymentDrainStatus {
 /// and the operator binary share one definition (FIG-3884).
 pub use lash_core::store::generation_drain::GenerationDrainStatus;
 
-/// Mark `generation` draining in `backend`'s stores and request every active
-/// turn and process Run's physical cut: the whole drain
+/// Mark `generation` draining in `backend`'s stores and wake every live
+/// process on it: the whole drain
 /// [`LashCore::drain_generation`](crate::LashCore::drain_generation) runs,
 /// for an operator that holds no core, such as `lashctl drain` (FIG-5059).
 /// The two share this one function, so an operator drain wakes a Run parked
 /// on a durable wait as promptly as a core's drain does.
 ///
-/// The accepted mark is delivered to the generation's current owners at
-/// once: each session it holds a turn in flight for hands its parked turn
-/// waits over, and each live process its segment. The durable mark remains
-/// recovery's retry authority for any delivery an interrupted drain left
-/// owed. Idempotent: `true` when this call marked the generation, `false`
+/// Each live process the generation holds is woken at once; the durable
+/// mark remains recovery's retry authority for any wake an interrupted drain
+/// left owed. Idempotent: `true` when this call marked the generation, `false`
 /// when it was already draining.
 pub async fn drain_generation(
     backend: &crate::Backend,
@@ -121,25 +119,10 @@ pub async fn drain_generation(
     let changed = marks
         .mark_draining(generation, backend.clock().timestamp_ms())
         .await?;
+    // No turn hands over at a drain any more (ADR 0132): a turn's next
+    // activation runs on whichever build claims its actor. A live process
+    // is woken so its activation reads the mark.
     let page = std::num::NonZeroUsize::MIN.saturating_add(255);
-    let control = backend.session_work().control();
-    let mut after = None;
-    loop {
-        let sessions = marks
-            .sessions_in_flight(generation, after.as_ref(), page)
-            .await?;
-        if sessions.is_empty() {
-            break;
-        }
-        for session in sessions {
-            control
-                .hand_over_turns(&session, generation)
-                .await
-                .map_err(|error| lash_core::RuntimeError::new(error.code, error.message))?;
-            after = Some(session);
-        }
-    }
-    let process_work = backend.process_work();
     let mut after = None;
     loop {
         let processes = marks
@@ -149,10 +132,12 @@ pub async fn drain_generation(
             break;
         }
         for process in processes {
-            process_work
-                .port()
-                .deliver_hand_over(&process, generation)
-                .await?;
+            backend.wake_process(&process).await.map_err(|error| {
+                lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::StoreCommitFailed,
+                    error.to_string(),
+                )
+            })?;
             after = Some(process);
         }
     }

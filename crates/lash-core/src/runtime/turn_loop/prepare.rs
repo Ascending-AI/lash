@@ -3,6 +3,7 @@
 //! message sequence the execute phase executes.
 
 use super::*;
+use crate::ActorContext;
 
 /// Everything the prepare phase needs to turn an admitted [`TurnInput`] into
 /// a executed physical turn.
@@ -12,11 +13,13 @@ use super::*;
 pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
     pub(in crate::runtime) input: TurnInput,
     pub(in crate::runtime) sinks: TurnSinks<'sinks>,
-    pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
+    pub(in crate::runtime) scoped_effect_controller: ActorContext,
     pub(in crate::runtime) local_stop: LocalTurnStop,
     pub(in crate::runtime) admissions: LogicalTurnAdmissions,
     pub(in crate::runtime) materialize_initial_admissions: bool,
     pub(in crate::runtime) shift_fence: Option<&'sinks ShiftFence>,
+    /// The lifetime this value is bound to; the context it carries is `'static`.
+    pub(crate) run: std::marker::PhantomData<&'run ()>,
 }
 
 impl LashRuntime {
@@ -60,6 +63,7 @@ impl LashRuntime {
         context: TurnPrepareContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let TurnPrepareContext {
+            run: std::marker::PhantomData,
             mut input,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
@@ -153,10 +157,7 @@ impl LashRuntime {
                     TurnStop::InvalidInput,
                 );
                 let turn_index = self.physical_turn_index(admitted_turn_index);
-                let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-                let turn_control_binding =
-                    turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller)
-                        .await?;
+                let turn_control_binding = turn_control_binding(&scoped_effect_controller).await?;
                 let turn_control_resolver = turn_control_binding.resolver();
                 let turn_control = ActiveTurnControl::new(
                     turn_control_resolver,
@@ -301,6 +302,7 @@ impl LashRuntime {
         // frame the turn then runs in (FIG-4110).
         let pressure = self
             .run_context_pressure(ContextPressureStep {
+                run: std::marker::PhantomData,
                 trace_turn_id: &trace_turn_id,
                 previous_prompt_usage: previous_prompt_usage.clone(),
                 scoped_effect_controller: &scoped_effect_controller,
@@ -418,6 +420,7 @@ impl LashRuntime {
         self.state.last_prompt_usage = None;
         Box::pin(self.stream_prepared_turn_inner_with_graph_appends(
             PreparedTurnExecuteContext {
+                run: std::marker::PhantomData,
                 turn: PreparedLogicalTurn {
                     trace_metadata,
                     messages,

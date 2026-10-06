@@ -6,7 +6,6 @@
 //! beside [`DeploymentStore`], and generates [`DeploymentStoreDecorator`] and
 //! its blanket [`DeploymentStore`] implementation.
 use std::num::NonZeroUsize;
-use std::sync::Arc;
 
 use super::DeploymentStore;
 use crate::store::{
@@ -61,10 +60,6 @@ macro_rules! emit_deployment_decorator {
         pub trait DeploymentStoreDecorator:
             RuntimeStoreDecorator<Inner: DeploymentStore>
         {
-            /// Forwards [`DeploymentStore::bind_effect_host`].
-            fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
-                self.inner().bind_effect_host(effect_host);
-            }
 
             $(
                 $(#[$meta])*
@@ -79,9 +74,6 @@ macro_rules! emit_deployment_decorator {
         where
             T: DeploymentStoreDecorator + ?Sized,
         {
-            fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
-                DeploymentStoreDecorator::bind_effect_host(self, effect_host);
-            }
 
             $(
                 $(#[$meta])*

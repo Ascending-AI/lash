@@ -93,7 +93,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                     .with_recorded_turn_cancel(
                         self.turn_cancel.is_some(),
                         Arc::clone(&self.turn_control),
-                        Arc::clone(&self.host.core.control.effect_host),
+                        self.host.core.control.effect_host.clone(),
                         self.children_stop.clone(),
                     )
                     .with_opener_state(self.opener_state.clone())

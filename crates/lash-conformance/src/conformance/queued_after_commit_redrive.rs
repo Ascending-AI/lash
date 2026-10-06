@@ -13,6 +13,7 @@
 //! admission and the committed run, asking the model nothing and committing
 //! nothing again; the next shift then runs the second input exactly once.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -111,7 +112,7 @@ fn attempt(
 )]
 pub async fn a_queued_shift_redriven_after_its_first_commit_runs_the_next_input_once(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    _effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -135,11 +136,10 @@ pub async fn a_queued_shift_redriven_after_its_first_commit_runs_the_next_input_
             }
         })
         .build();
-    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
-        );
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
+    );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let mut accepted = Vec::new();

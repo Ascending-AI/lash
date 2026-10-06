@@ -1,17 +1,18 @@
 use super::*;
+use crate::ActorContext;
 
 /// The factory stays unbound until the drain names the scope it runs under.
 #[derive(Clone)]
 pub enum QueuedEffectSource<'a> {
     Host {
-        host: &'a dyn crate::EffectHost,
+        host: &'a ActorContext,
         identity: Option<crate::ExecutionScope>,
     },
     Controller {
-        controller: &'a dyn crate::RuntimeEffectController,
+        controller: &'a ActorContext,
         identity: Option<crate::ExecutionScope>,
     },
-    Scoped(ScopedEffectController<'a>),
+    Scoped(ActorContext),
 }
 
 impl<'a> QueuedEffectSource<'a> {
@@ -22,16 +23,11 @@ impl<'a> QueuedEffectSource<'a> {
         }
     }
 
-    fn scoped(
-        &self,
-        scope: crate::ExecutionScope,
-    ) -> Result<ScopedEffectController<'a>, RuntimeError> {
+    fn scoped(&self, scope: crate::ExecutionScope) -> Result<ActorContext, RuntimeError> {
         let admitted = crate::AdmittedScope::new(scope);
         match self {
             Self::Host { host, .. } => host.scoped(admitted),
-            Self::Controller { controller, .. } => {
-                ScopedEffectController::borrowed(*controller, admitted)
-            }
+            Self::Controller { controller, .. } => (*controller).scoped(admitted),
             Self::Scoped(scoped) if scoped.execution_scope() == admitted.scope() => {
                 Ok(scoped.clone())
             }

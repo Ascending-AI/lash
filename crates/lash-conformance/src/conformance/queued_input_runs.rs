@@ -12,6 +12,7 @@
 //! still open and is withdrawn; the first input's run answers it untouched,
 //! and nothing ever runs the second.
 
+use crate::ActorContext;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -112,7 +113,7 @@ fn die_after_the_second_send(parts: &ShiftParts, second: String) -> crate::Confo
 )]
 pub async fn two_queued_inputs_sent_across_a_restart_get_their_own_runs_and_a_cancel_of_one_leaves_the_other(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    _effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -172,11 +173,10 @@ pub async fn two_queued_inputs_sent_across_a_restart_get_their_own_runs_and_a_ca
         })
         .build();
     // The shipped batching: the default drain, one row at a time.
-    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     let first = store
         .enqueue_pending_turn_input(

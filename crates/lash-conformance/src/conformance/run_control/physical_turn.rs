@@ -1,6 +1,7 @@
 //! A logical Run closes its park from any admitted physical turn.
 
 use super::*;
+use crate::ActorContext;
 
 /// A commit of `run`'s physical turn `turn` over `state` that ends the run,
 /// as the runtime writes it: the run's terminal evidence in the head
@@ -40,7 +41,7 @@ pub(in crate::conformance) fn run_final_commit(
 /// drain to count.
 pub async fn a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -116,13 +117,11 @@ pub async fn a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit(
     };
     let turn = PhysicalTurn::derive_turn_id(&f.run, 1);
     let address = lash_core::facade_support::TurnAddress::new(&f.parts.session_id, &turn);
-    let effect_host = f.parts.host.control.effect_host.as_ref();
-    let control = lash_core::runtime::turn_control::ActiveTurnControl::new(
-        effect_host.await_event_resolver(),
-        address.clone(),
-    )
-    .await
-    .expect("the physical turn's cancellation authority");
+    let effect_host = &f.parts.host.control.effect_host;
+    let control =
+        lash_core::runtime::turn_control::ActiveTurnControl::new(effect_host, address.clone())
+            .await
+            .expect("the physical turn's cancellation authority");
     let observed = f
         .parts
         .store

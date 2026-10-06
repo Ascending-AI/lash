@@ -11,6 +11,7 @@
 //! enough to follow the engine to completion. The handle remembers its
 //! answer, so a later call answers the same retained outcome.
 
+use lash_core::ActorContext;
 mod batch;
 mod cancel;
 mod follow;
@@ -33,8 +34,7 @@ use crate::core::ResolvedQueuedWork;
 use crate::durable_session::DurableSession;
 use crate::error::{EmbedError, Result, SendError};
 use crate::support::{
-    EffectHost, LashSession, ProtocolTurnOptions, TurnActivity, TurnActivitySink, TurnInput,
-    TurnOutcome,
+    LashSession, ProtocolTurnOptions, TurnActivity, TurnActivitySink, TurnInput, TurnOutcome,
 };
 use crate::turn::{TurnOutput, TurnReport};
 use lash_core::{GenerationOptions, LlmProfileKey, ReasoningSelection, RunSpec};
@@ -68,7 +68,7 @@ pub(crate) struct SendParts {
     pub(crate) store: lash_core::store::SessionStore,
     pub(crate) ops: DurableSessionOps,
     pub(crate) work: Arc<ResolvedQueuedWork>,
-    pub(crate) effect_host: Arc<dyn EffectHost>,
+    pub(crate) effect_host: ActorContext,
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     /// The models a spec's model key is judged against before the input is
     /// accepted.

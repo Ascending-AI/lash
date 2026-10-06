@@ -6,7 +6,7 @@ pub trait DirectCompletionService: Send + Sync {
         &self,
         request: crate::DirectRequest,
         usage_source: &str,
-        effect_controller: crate::ScopedEffectController<'_>,
+        effect_controller: crate::ActorContext,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         effect_attempt: Option<&crate::EffectAttempt>,
@@ -20,7 +20,7 @@ pub trait DirectCompletionService: Send + Sync {
         &self,
         request: crate::LlmRequest,
         usage_source: &str,
-        effect_controller: crate::ScopedEffectController<'_>,
+        effect_controller: crate::ActorContext,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
@@ -35,8 +35,10 @@ pub trait DirectCompletionService: Send + Sync {
 #[derive(Clone)]
 struct RuntimeDirectSource<'run> {
     service: Arc<dyn DirectCompletionService>,
-    effect_controller: crate::runtime::ScopedEffectController<'run>,
+    effect_controller: crate::ActorContext,
     turn_id: Option<crate::TurnId>,
+    /// The run this source serves; the context itself is `'static`.
+    run: std::marker::PhantomData<&'run ()>,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -86,7 +88,7 @@ pub struct DirectCompletionClient<'run> {
 impl<'run> DirectCompletionClient<'run> {
     pub(crate) fn runtime(
         service: Arc<dyn DirectCompletionService>,
-        effect_controller: crate::runtime::ScopedEffectController<'run>,
+        effect_controller: crate::ActorContext,
         turn_id: Option<crate::TurnId>,
     ) -> Self {
         Self {
@@ -94,6 +96,7 @@ impl<'run> DirectCompletionClient<'run> {
                 service,
                 effect_controller,
                 turn_id,
+                run: std::marker::PhantomData,
             }),
             parent_invocation: None,
             inside_tool_attempt: false,
@@ -115,8 +118,9 @@ impl<'run> DirectCompletionClient<'run> {
             DirectCompletionSource::Runtime(source) => {
                 DirectCompletionSource::Runtime(RuntimeDirectSource {
                     service: Arc::clone(&source.service),
-                    effect_controller: source.effect_controller.to_static()?,
+                    effect_controller: source.effect_controller.clone(),
                     turn_id: source.turn_id.clone(),
+                    run: std::marker::PhantomData,
                 })
             }
             #[cfg(any(test, feature = "testing"))]
@@ -336,7 +340,7 @@ pub enum DirectExecutionPosition {
 /// `lash` facade does not.
 pub fn runtime_direct_completion_client<'run>(
     service: Arc<dyn DirectCompletionService>,
-    effect_controller: crate::runtime::ScopedEffectController<'run>,
+    effect_controller: crate::ActorContext,
     turn_id: Option<crate::TurnId>,
 ) -> DirectCompletionClient<'run> {
     DirectCompletionClient::runtime(service, effect_controller, turn_id)

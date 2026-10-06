@@ -200,17 +200,6 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
-        self.scope_fence_hosts.bind(
-            effect_host,
-            lash_core_execution::ProcessRegistryBinding {
-                registrations: Arc::new(support::SqliteRegistrationProbe {
-                    conn: self.conn.clone(),
-                }),
-            },
-        );
-    }
-
     async fn set_external_ref(
         &self,
         process_id: &ProcessId,

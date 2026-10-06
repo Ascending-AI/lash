@@ -23,7 +23,7 @@ impl RuntimeSessionServices {
         turn_input: crate::TurnInput,
         result: crate::SessionTurnOutcome,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        scoped_effect_controller: crate::ActorContext,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<crate::ProcessAwaitOutput, crate::ProcessInfraError> {
         create_request = create_request.with_caused_by(crate::CausalRef::Process {

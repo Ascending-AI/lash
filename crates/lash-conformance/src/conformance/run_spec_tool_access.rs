@@ -8,6 +8,7 @@
 //! session tool access a config command sets keeps shaping every run that
 //! states none.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -154,7 +155,7 @@ fn names(names: &[&str]) -> Vec<String> {
 /// never takes a run's grants.
 pub async fn runs_stating_different_tool_grants_each_run_under_their_own(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -252,7 +253,7 @@ fn granting(tools: &'static [&'static str], resolved: &Arc<AtomicUsize>) -> crat
 )]
 pub async fn a_runs_tool_grants_survive_its_crash_and_a_cold_reopen(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -341,7 +342,7 @@ pub async fn a_runs_tool_grants_survive_its_crash_and_a_cold_reopen(
 )]
 pub async fn a_tool_access_command_still_shapes_later_runs_that_state_no_grants(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

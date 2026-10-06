@@ -1,17 +1,17 @@
 //! The frame-open law's session: one owner's frames on the tier.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::time::Duration;
 
 use lash_vm_broker::testing::{FakeWorkerPool, MemoryCheckpoints, ScriptedProgram, Step};
 use lash_vm_broker::{
-    Broker, BrokerFailure, BrokeredEnd, Checkpoint, CheckpointStore as _, RunStart, VmSession,
+    Broker, BrokerFailure, BrokeredEnd, Checkpoint, RunStart, SnapshotStore as _, VmSession,
 };
 use lash_vm_protocol::{FrameEpoch, OwnerEpoch};
 use tokio_util::sync::CancellationToken;
 
 use super::{CHECKOUT_WAIT, Phase, Scenario, TierEffects, bounds, codec, contract, echo, limits};
-use crate::ScopedEffectController;
 
 /// What the frame-open law observed.
 pub(super) struct FrameOutcome {
@@ -42,10 +42,7 @@ fn start(program: Vec<Step>, from: Option<Checkpoint>) -> RunStart {
 /// Frame 0 sets a global and completes; a second run of frame 0 is left
 /// computing on its worker; frame 1 opens; a run of frame 1 reads the
 /// global.
-pub(super) async fn open_frame_under(
-    scenario: &Scenario,
-    scoped: ScopedEffectController<'_>,
-) -> FrameOutcome {
+pub(super) async fn open_frame_under(scenario: &Scenario, scoped: ActorContext) -> FrameOutcome {
     let session = VmSession::new(FrameEpoch(0));
     let checkpoints = MemoryCheckpoints::default();
     let pool = Arc::new(FakeWorkerPool::new(codec(), 2, CHECKOUT_WAIT));
@@ -112,6 +109,7 @@ pub(super) async fn open_frame_under(
             .latest()
             .await
             .unwrap_or_else(|refusal| panic!("read the store: {refusal}"))
+            .map(|(_, checkpoint)| checkpoint)
     };
     let (straggler, persisted_after_open) = tokio::join!(straggler, open);
     let straggler_discarded = pool.stats().discards > discards_before;
@@ -120,7 +118,8 @@ pub(super) async fn open_frame_under(
     let from = checkpoints
         .latest()
         .await
-        .unwrap_or_else(|refusal| panic!("read the store: {refusal}"));
+        .unwrap_or_else(|refusal| panic!("read the store: {refusal}"))
+        .map(|(_, checkpoint)| checkpoint);
     let read = match broker
         .run(
             start(

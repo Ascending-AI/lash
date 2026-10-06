@@ -7,7 +7,7 @@ use std::sync::Arc;
 pub async fn realize_tool_intents(
     ports: super::ProcessRuntimePorts,
     request: RealizationRequest,
-    scoped: crate::ScopedEffectController<'_>,
+    scoped: crate::ActorContext,
 ) -> Result<RealizationReceipt, crate::RuntimeEffectControllerError> {
     let dispatch = request.payload.dispatch.ok_or_else(|| {
         crate::RuntimeEffectControllerError::new(
@@ -71,6 +71,7 @@ pub async fn realize_tool_intents(
         parent_invocation: dispatch.parent_invocation,
         process_lineage: dispatch.process_lineage,
         process_originator: dispatch.process_originator,
+        run: std::marker::PhantomData,
     };
     let outcomes = crate::tool_dispatch::execute_final_tool_intents(
         &context,

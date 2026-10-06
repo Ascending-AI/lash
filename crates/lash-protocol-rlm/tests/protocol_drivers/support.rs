@@ -1042,7 +1042,7 @@ fn memory_artifact_backend() -> lash_core::Backend {
                                 .await
                                 .expect("open the artifact store set"),
                         );
-                        lash_conformance::recording_backend_over(stores)
+                        lash_conformance::backend_over(stores)
                     })
             })
             .join()

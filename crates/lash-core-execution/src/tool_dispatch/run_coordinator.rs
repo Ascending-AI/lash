@@ -40,6 +40,7 @@
 //! realized in their own durable invocation: the Run's journal records only
 //! the admission and the receipt its schedule selects (ADR 0130).
 
+use crate::ActorContext;
 use std::collections::BTreeMap;
 
 mod aggregate;
@@ -70,7 +71,7 @@ use super::singleton_run::{
     SingletonRunError, SingletonStart, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
 };
 use super::{RealizationReceipt, RealizationRequest};
-use crate::runtime::effect::{AttemptStreamRecorder, ScopedEffectController};
+use crate::runtime::effect::AttemptStreamRecorder;
 use crate::runtime::process::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, IsolatedStartRefusal,
     IsolatedToolStart,
@@ -197,7 +198,7 @@ fn encode<T: serde::Serialize>(value: &T) -> Result<String, String> {
 
 /// The fold and the material of one Run as its records are served.
 struct RunJournal<'a> {
-    scoped: &'a ScopedEffectController<'a>,
+    scoped: &'a ActorContext,
     owner: EffectOpener,
     segment: SegmentOrdinal,
     ledger: RunLedger,
@@ -855,7 +856,7 @@ impl<'a> RunCoordinator<'a> {
     /// `available`.
     #[must_use]
     pub fn open(
-        scoped: &'a ScopedEffectController<'a>,
+        scoped: &'a ActorContext,
         owner: EffectOpener,
         segment: SegmentOrdinal,
         available: Vec<PluginRevision>,
@@ -969,7 +970,7 @@ impl<'a> RunCoordinator<'a> {
         );
         let observe = self.observe_generation_cuts;
         let journal = &mut self.journal;
-        let controller = journal.scoped.controller();
+        let controller = journal.scoped;
         let first = journal.record(Vec::new());
         let owner = journal.materials.owner.clone();
         let journal_owner = journal.owner.clone();
@@ -1145,7 +1146,6 @@ impl<'a> RunCoordinator<'a> {
             if member.declaration.may_defer && member.selection() == BeforeSelection::Execute {
                 let key = journal
                     .scoped
-                    .controller()
                     .await_event_key(
                         call.owner.admitted_scope().scope(),
                         crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
@@ -1161,14 +1161,9 @@ impl<'a> RunCoordinator<'a> {
                     cancel: member.policy.cancel,
                 };
                 journal.scoped.admit_journal_write()?;
-                journal
-                    .scoped
-                    .controller()
-                    .arm_run_source(descriptor.clone())
-                    .await?;
+                journal.scoped.arm_run_source(descriptor.clone()).await?;
                 let process_source = journal
                     .scoped
-                    .controller()
                     .await_event_key(
                         call.owner.admitted_scope().scope(),
                         crate::AwaitEventWaitIdentity::Custom {

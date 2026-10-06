@@ -776,15 +776,15 @@ fn benchmark_rlm_builder(
 // scenario's `ScenarioWiring` column; the builders only append the result.
 fn benchmark_plugin_factories(
     scenario: RuntimePerfScenario,
-    effect_host: &Arc<dyn lash_core::EffectHost>,
+    effect_host: &lash::runtime::ActorContext,
     settlement_control: Option<&Arc<BenchmarkSettlementControl>>,
     tool_catalog_observer: Option<&Arc<BenchmarkToolCatalogObserver>>,
 ) -> Vec<Arc<dyn PluginFactory>> {
     let wiring = scenario.wiring();
     let benchmark_tool = settlement_control.map_or_else(
-        || BenchmarkEchoTool::new(Arc::clone(effect_host)),
+        || BenchmarkEchoTool::new(effect_host.clone()),
         |control| {
-            BenchmarkEchoTool::with_settlement_control(Arc::clone(effect_host), Arc::clone(control))
+            BenchmarkEchoTool::with_settlement_control(effect_host.clone(), Arc::clone(control))
         },
     );
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
@@ -870,7 +870,7 @@ pub(crate) async fn build_embed_core(
 ) -> anyhow::Result<(BenchmarkCore, RuntimePerfStoreFactory, TurnEntry)> {
     let InProcessLane { backend, stores } = in_process_lane().await?;
     let backend: lash::Backend = backend.into();
-    let effect_host = backend.effect_host();
+    let effect_host = lash::runtime::ActorContext::detached(backend.clone());
     let provider = benchmark_provider(scenario).into_handle();
     let core = match scenario.execution_mode() {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider)
@@ -929,7 +929,7 @@ pub(crate) async fn build_runtime(
         stores: store_factory,
     } = in_process_lane().await?;
     let backend: lash::Backend = perf_backend.into();
-    let effect_host = backend.effect_host();
+    let effect_host = lash::runtime::ActorContext::detached(backend.clone());
     let settlement_control = scenario
         .settlement_children()
         .map(|_| Arc::new(BenchmarkSettlementControl::new()));
@@ -1178,7 +1178,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     };
     let backend = PerfBackend::over(engine);
     let backend: lash::Backend = backend.with_catalog(Arc::clone(&store_factory)).into();
-    let effect_host = backend.effect_host();
+    let effect_host = lash::runtime::ActorContext::detached(backend.clone());
     for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
         plugin_stack.push(factory);
     }

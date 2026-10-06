@@ -1,3 +1,4 @@
+use crate::ActorContext;
 use crate::runtime::turn_settlement::TurnIngressSettlement;
 use crate::{OmittedToolCalls, PluginSession, ToolCallRecord, TurnOutcome};
 
@@ -24,6 +25,6 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) pending_follow_on: Option<crate::store::PendingFollowOn>,
     /// The turn's settled cancellation closure, when the commit closes one.
     pub(super) interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
-    pub(super) turn_control_resolver: Option<&'a dyn crate::AwaitEventResolver>,
+    pub(super) turn_control_resolver: Option<&'a ActorContext>,
     pub(super) recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
 }

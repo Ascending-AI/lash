@@ -63,6 +63,13 @@ FIXTURE_ENGINE_FORMAT_LINE = "    RestateDurableWaitRequest,"
 FIXTURE_STORE_FILE = "crates/lash-core/src/runtime/shift.rs"
 FIXTURE_STORE_LINE = "    let open = store.list_pending_turn_inputs(session).await?;"
 FIXTURE_STORE_TEXT = "let open = store.list_pending_turn_inputs(session).await?;"
+COLLAPSED_NAMES = (
+    "EffectEngine", "EffectHost", "RuntimeEffectController", "ScopedEffectController",
+    "EffectTaskController", "LayeredEngine", "EffectLayer", "LayeredEffectHost",
+    "AwaitEventResolver",
+)
+FIXTURE_COLLAPSE_FILE = "crates/lash-core/src/runtime/turn_loop/drive.rs"
+FIXTURE_DEFAULTS_FILE = "crates/lash-core-execution/src/runtime/effect/engine.rs"
 
 
 class ShiftDeterminismRatchetTests(unittest.TestCase):
@@ -485,6 +492,91 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
             result = self.run_check(root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("stale allowlist entry", result.stderr)
+
+    def write_rust(self, root: Path, relative: str, lines: list[str]) -> None:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n")
+
+    def test_a_deleted_effect_seam_name_fails(self) -> None:
+        for name in COLLAPSED_NAMES:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.build_fixture(root, ["fn shift() {", "}"], [])
+                self.write_rust(root, FIXTURE_COLLAPSE_FILE, [f"fn drive(host: &dyn {name}) {{}}"])
+                result = self.run_check(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("rule 7 failed: a deleted effect-seam name", result.stderr)
+
+    def test_the_effect_controller_error_variants_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.write_rust(root, FIXTURE_COLLAPSE_FILE, [
+                "fn widen(error: RuntimeEffectControllerError) -> PluginError {",
+                "    crate::PluginError::RuntimeEffectController(error)",
+                "}",
+                "fn kind(error: &PluginError) -> TurnFailureKind {",
+                "    match error {",
+                "        Self::RuntimeEffectController(_) => TurnFailureKind::RuntimeEffectController,",
+                "    }",
+                "}",
+                "fn lift(result: Result<(), RuntimeEffectControllerError>) {",
+                "    let _ = result.map_err(crate::PluginError::RuntimeEffectController);",
+                "}",
+            ])
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_default_body_on_a_no_default_trait_fails(self) -> None:
+        for trait in ("ProcessEngine", "ProjectionProvider", "DurableStore"):
+            with self.subTest(trait=trait), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.build_fixture(root, ["fn shift() {", "}"], [])
+                self.write_rust(root, FIXTURE_DEFAULTS_FILE, [
+                    "#[async_trait::async_trait]",
+                    f"pub trait {trait}: Send + Sync {{",
+                    "    fn kind(&self) -> &'static str;",
+                    "    async fn resolve(",
+                    "        &self,",
+                    "        reference: &Reference,",
+                    "    ) -> Result<Resolution, Refusal> {",
+                    "        let _ = reference;",
+                    "        Ok(Resolution::unknown())",
+                    "    }",
+                    "}",
+                ])
+                result = self.run_check(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"{FIXTURE_DEFAULTS_FILE}:4:{trait} has a default method body", result.stderr)
+
+    def test_required_methods_and_other_traits_defaults_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.write_rust(root, FIXTURE_DEFAULTS_FILE, [
+                "pub trait ProcessEngine: Send + Sync {",
+                "    fn kind(&self) -> &'static str;",
+                "    fn advance(",
+                "        &self,",
+                "        state: EngineState,",
+                "    ) -> Result<(EngineState, EngineAction), ProcessInfraError>;",
+                "}",
+                "",
+                "impl ProcessEngine for Held {",
+                "    fn kind(&self) -> &'static str {",
+                "        \"held\"",
+                "    }",
+                "}",
+                "",
+                "pub trait ProcessEngineExt {",
+                "    fn label(&self) -> String {",
+                "        String::new()",
+                "    }",
+                "}",
+            ])
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

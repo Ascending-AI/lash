@@ -31,7 +31,7 @@
 //!   rendezvous changes the schedule and nothing else.
 //!
 //! The laws are parameterised over two axes. The *tier* arrives as an
-//! [`crate::EffectHost`] and a [`crate::ConformanceTurnRunner`], so every tier
+//! [`crate::ActorContext`] and a [`crate::ConformanceTurnRunner`], so every tier
 //! runs the identical assertions. The *producer* arrives as a
 //! [`ToolBatchProducer`]: the product surface that spells a width-n group —
 //! one `batch` wrapper, two wrappers beside native calls, parallel model tool
@@ -50,6 +50,7 @@
 //! producer declares a registry, and a producer that issues its group from
 //! the turn pays none of it.
 
+use crate::ActorContext;
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
 use std::collections::BTreeMap;
@@ -191,13 +192,6 @@ pub struct ToolBatchProducer {
     /// its group from the turn leaves this absent, so no tier has to supply a
     /// process engine it never runs.
     pub process_registry: Option<ToolBatchProcessRegistryFactory>,
-    /// When true the law runs the scenario's turn under a borrowed scoped
-    /// controller — the shape a Restate-style host produces — so the runtime
-    /// cannot hold a `'static` controller and every effect the turn and its
-    /// process commands issue must cross `EffectTaskController` (FIG-3415). A
-    /// producer that leaves this false exercises only the `'static` shortcut
-    /// and never reaches the proxy.
-    pub through_task_proxy: bool,
     /// What the session's `max_tool_calls` counts on this surface.
     pub limit_unit: ToolCallLimitUnit,
     /// The script that issues a plan as two groups in sequence, where the
@@ -218,7 +212,6 @@ impl std::fmt::Debug for ToolBatchProducer {
             .field("factories", &self.factories.len())
             .field("routes", &self.routes)
             .field("runs_in_a_process", &self.process_registry.is_some())
-            .field("through_task_proxy", &self.through_task_proxy)
             .finish()
     }
 }
@@ -286,7 +279,6 @@ pub fn parallel_model_tool_calls_producer(
         }),
         routes: named_routes(),
         process_registry: None,
-        through_task_proxy: false,
         limit_unit: ToolCallLimitUnit::Step,
         staged: Some(Arc::new(|plan, first| {
             let calls = |leaves: &[(usize, &ToolBatchLeaf)]| {
@@ -321,7 +313,6 @@ pub fn batch_sugar_producer(
         }),
         routes: named_routes(),
         process_registry: None,
-        through_task_proxy: false,
         limit_unit: ToolCallLimitUnit::Step,
         staged: None,
         holding: None,
@@ -363,7 +354,6 @@ pub fn batch_wrappers_beside_native_calls_producer(
         }),
         routes: named_routes(),
         process_registry: None,
-        through_task_proxy: false,
         limit_unit: ToolCallLimitUnit::Step,
         staged: None,
         holding: None,
@@ -398,7 +388,6 @@ pub fn rlm_promise_all_producer(
         script: Arc::new(|plan| rlm_cell_script(plan, "Promise.all")),
         routes: rlm_routes(grants),
         process_registry: None,
-        through_task_proxy: false,
         limit_unit: ToolCallLimitUnit::Cell,
         staged: Some(Arc::new(|plan, first| {
             rlm_staged_cell_script(plan, first, "Promise.all")
@@ -419,7 +408,6 @@ pub fn rlm_promise_all_settled_producer(
         script: Arc::new(|plan| rlm_cell_script(plan, "Promise.allSettled")),
         routes: rlm_routes(grants),
         process_registry: None,
-        through_task_proxy: false,
         limit_unit: ToolCallLimitUnit::Cell,
         staged: Some(Arc::new(|plan, first| {
             rlm_staged_cell_script(plan, first, "Promise.allSettled")
@@ -504,13 +492,6 @@ fn rlm_cell_script(plan: &ToolBatchPlan, aggregate: &str) -> Vec<crate::LlmRespo
 ///
 /// `registry` is the tier's process registry; the law binds the process work to
 /// it and installs the engine contributions the producer's plugins declare.
-///
-/// `through_task_proxy` is declared here because this is the producer whose
-/// process commands are the reason `EffectTaskController` exists: running the
-/// scenario's turn under a borrowed scoped controller makes `processes.start`
-/// and the attach that awaits it cross the proxy on the way to the real
-/// controller, which is the path a group reached through the proxy had to
-/// serve (FIG-3415).
 pub fn lashlang_process_aggregate_producer(
     factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     registry: ToolBatchProcessRegistryFactory,
@@ -526,7 +507,6 @@ pub fn lashlang_process_aggregate_producer(
         }),
         routes: named_routes(),
         process_registry: Some(registry),
-        through_task_proxy: true,
         limit_unit: ToolCallLimitUnit::Process,
         staged: Some(Arc::new(|plan, first| {
             let source = format!(
@@ -903,7 +883,7 @@ struct RendezvousLeaves {
     granted: Vec<String>,
     deferred: Vec<String>,
     state: Arc<ScenarioState>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
 }
 
 impl RendezvousLeaves {
@@ -974,15 +954,12 @@ impl crate::ToolProvider for RendezvousLeaves {
                     .into();
                 }
             };
-            let effect_host = Arc::clone(&self.effect_host);
+            let effect_host = self.effect_host.clone();
             crate::task::spawn(async move {
                 rendezvous.wait_for(&required).await;
                 rendezvous.record_answered(&name);
                 let resolution = crate::Resolution::Ok(leaf_answer(&name));
-                let _ = effect_host
-                    .await_event_resolver()
-                    .resolve_await_event(&key, resolution)
-                    .await;
+                let _ = effect_host.resolve_await_event(&key, resolution).await;
             });
             return crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new());
         }
@@ -1004,7 +981,7 @@ fn leaf_answer(name: &str) -> serde_json::Value {
 fn rendezvous_plugin(
     plan: &ToolBatchPlan,
     state: Arc<ScenarioState>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
 ) -> Arc<dyn crate::facade_support::PluginFactory> {
     let named = |route: ToolBatchRoute| {
         plan.leaves
@@ -1040,7 +1017,7 @@ fn rendezvous_plugin(
 struct ScenarioWorld {
     state: Arc<ScenarioState>,
     factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     /// The store set under test: the session catalog the turn commits to and
     /// the ports the runtime takes beside the effect host.
     stores: Arc<dyn crate::StoreSet>,
@@ -1097,7 +1074,7 @@ impl Schedule {
 )]
 async fn run_scenario(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: &Arc<dyn crate::StoreSet>,
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     producer: &ToolBatchProducer,
@@ -1144,7 +1121,7 @@ async fn run_scenario(
         Arc::new(move |turn_controller| {
             let tier = Arc::clone(&tier);
             let session_id = session_id.clone();
-            let effect_host = Arc::clone(&effect_host);
+            let effect_host = effect_host.clone();
             let stores = Arc::clone(&stores);
             let producer = producer.clone();
             let plan = plan.clone();
@@ -1230,10 +1207,10 @@ fn report_progress(
 )]
 async fn run_scenario_on_session(
     session_id: lash_sansio::SessionId,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Option<&Arc<dyn crate::ConformanceTurnRunner>>,
-    turn_controller: Option<crate::ScopedEffectController<'_>>,
+    turn_controller: Option<crate::ActorContext>,
     producer: &ToolBatchProducer,
     plan: &ToolBatchPlan,
     schedule: Schedule,
@@ -1244,7 +1221,7 @@ async fn run_scenario_on_session(
     factories.push(rendezvous_plugin(
         plan,
         Arc::clone(&state),
-        Arc::clone(&effect_host),
+        effect_host.clone(),
     ));
     let world = ScenarioWorld {
         state: Arc::clone(&state),
@@ -1410,7 +1387,7 @@ async fn execute_turn(
     runner: Option<&Arc<dyn crate::ConformanceTurnRunner>>,
     producer: &ToolBatchProducer,
     plan: &ToolBatchPlan,
-    turn_controller: Option<crate::ScopedEffectController<'_>>,
+    turn_controller: Option<crate::ActorContext>,
     budget: Duration,
 ) -> ScenarioEnd {
     // A protocol with cells closes its turn with `finish`; a model reply in
@@ -1458,8 +1435,7 @@ async fn execute_turn(
         .build();
     // The tier's host is the law backend's effect host rather than a field
     // overwritten later, so the runtime and the law share one host.
-    let mut law_backend =
-        crate::LawBackend::over_stores(Arc::clone(&world.stores), Arc::clone(&world.effect_host));
+    let mut law_backend = crate::LawBackend::over_stores(Arc::clone(&world.stores));
     if let Some(registry) = world.process_registry.as_ref() {
         law_backend = law_backend.with_process_registry(Arc::clone(registry));
     }
@@ -1544,22 +1520,6 @@ async fn execute_turn(
                 &turn_id,
             )))
             .expect("scope the tool-group parallelism turn"),
-    };
-    // A producer declaring `through_task_proxy` must reach its controller the
-    // way a scoped controller that cannot be held 'static is reached — the
-    // shape a Restate-style host produces. The borrowed view makes
-    // `to_static()` answer `None` everywhere, so every typed turn effect and
-    // every `processes.*` command the scenario issues is wrapped in
-    // `EffectTaskController` and executed over its request channel rather than
-    // taking the 'static shortcut (FIG-3415).
-    let turn_scope = if producer.through_task_proxy {
-        crate::ScopedEffectController::borrowed(
-            turn_scope.controller(),
-            turn_scope.admitted_scope().clone(),
-        )
-        .expect("a borrowed view of the turn's scoped controller")
-    } else {
-        turn_scope
     };
     let mut input = crate::TurnInput::text("run the planned group");
     input.trace_turn_id = Some(turn_id);
@@ -1671,9 +1631,9 @@ pub struct ToolBatchMeasurement {
 /// that cannot run the group is a failed measurement, not a slow one.
 pub async fn measure_tool_batch(
     session_id: lash_sansio::SessionId,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
-    turn_controller: Option<crate::ScopedEffectController<'_>>,
+    turn_controller: Option<crate::ActorContext>,
     producer: &ToolBatchProducer,
     width: usize,
 ) -> ToolBatchMeasurement {
@@ -1724,7 +1684,7 @@ pub async fn measure_tool_batch(
 /// that serialises the batch fails here rather than reporting a fast number.
 pub async fn measure_gated_tool_batch(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     producer: &ToolBatchProducer,
@@ -1849,7 +1809,7 @@ fn assert_activation_shape(context: &str, plan: &ToolBatchPlan, observed: &Scena
 /// why it is proven by rendezvous rather than by wall time.
 pub async fn tool_group_members_start_before_any_finishes(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     producer: ToolBatchProducer,
@@ -1862,7 +1822,7 @@ pub async fn tool_group_members_start_before_any_finishes(
         let plan = plan(&format!("width{width}"), &leaf_routes(width));
         let observed = run_scenario(
             prefix,
-            Arc::clone(&effect_host),
+            effect_host.clone(),
             &stores,
             &runner,
             &producer,
@@ -1878,7 +1838,7 @@ pub async fn tool_group_members_start_before_any_finishes(
     let routes = plan("routes", &mixed_routes(&producer));
     let observed = run_scenario(
         prefix,
-        Arc::clone(&effect_host),
+        effect_host.clone(),
         &stores,
         &runner,
         &producer,
@@ -1895,7 +1855,7 @@ pub async fn tool_group_members_start_before_any_finishes(
     let differential = plan("differential", &leaf_routes(8));
     let concurrent = run_scenario(
         prefix,
-        Arc::clone(&effect_host),
+        effect_host.clone(),
         &stores,
         &runner,
         &producer,
@@ -1906,7 +1866,7 @@ pub async fn tool_group_members_start_before_any_finishes(
     .await;
     let serial_safe = run_scenario(
         prefix,
-        Arc::clone(&effect_host),
+        effect_host.clone(),
         &stores,
         &runner,
         &producer,
@@ -1936,7 +1896,7 @@ pub async fn tool_group_members_start_before_any_finishes(
 /// never satisfy it, whatever its per-member latency.
 pub async fn tool_group_reverse_dependency(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     producer: ToolBatchProducer,

@@ -26,10 +26,6 @@ pub use lash_core::testing::runtime_helpers::LayeredBackend;
 /// under — the live-source route a run's built registry takes, for host
 /// tests that exercise source routing without a live session.
 pub use lash_core::testing::tool_registry_with_live_provider;
-/// A recording or fault layer over any effect host: the host lends its inner
-/// host's scoped controllers with the layer in front of their seam operations,
-/// and every group and journal operation stays the inner host's.
-pub use lash_core::testing::{EffectLayer, LayeredEffectHost};
 /// A held process for host tests: an engine input of [`HeldProcessEngine`]'s
 /// kind, a registration of one under the fixture environment, and the plugin
 /// factory that contributes the engine to a host's core. A held process runs

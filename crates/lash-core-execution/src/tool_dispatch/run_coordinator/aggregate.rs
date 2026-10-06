@@ -74,7 +74,7 @@ impl<'a> RunCoordinator<'a> {
                 }]);
                 let mut ledger = self.journal.ledger.clone();
                 ledger.append(self.journal.segment, &record)?;
-                let controller = self.journal.scoped.controller();
+                let controller = self.journal.scoped;
                 let observe = self.observe_generation_cuts;
                 let admitted = self
                     .journal
@@ -327,7 +327,7 @@ impl<'a> RunCoordinator<'a> {
             .collect();
         if !events.is_empty() {
             let record = self.journal.record(events);
-            let controller = self.journal.scoped.controller();
+            let controller = self.journal.scoped;
             let observe = self.observe_generation_cuts;
             let consumed = self
                 .journal
@@ -491,7 +491,6 @@ impl<'a> RunCoordinator<'a> {
             let seal = self
                 .journal
                 .scoped
-                .controller()
                 .cancel_run_source(source.clone())
                 .await?;
             self.accept_source(&call_id, seal).await?;

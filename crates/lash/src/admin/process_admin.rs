@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ActorContext;
 
 /// Session-scoped view of the global process surface
 /// ([`Processes`](crate::process::Processes)).
@@ -33,7 +34,7 @@ impl SessionProcessAdmin {
     pub async fn start(
         &self,
         request: lash_core::ProcessStartRequest,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessHandleView> {
         self.control
             .start_process(request, scoped_effect_controller)
@@ -115,7 +116,7 @@ impl SessionProcessAdmin {
         signal_name: impl Into<String>,
         signal_id: impl Into<String>,
         payload: serde_json::Value,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessEvent> {
         self.control
             .signal_process(
@@ -132,7 +133,7 @@ impl SessionProcessAdmin {
     pub async fn cancel(
         &self,
         process_id: &ProcessId,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessCancelReceipt> {
         self.control
             .cancel_process(process_id, scoped_effect_controller)
@@ -142,7 +143,7 @@ impl SessionProcessAdmin {
     /// Requests cancellation of every process in the session.
     pub async fn cancel_all(
         &self,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
         self.control
             .cancel_visible_processes(scoped_effect_controller)
@@ -154,7 +155,7 @@ impl SessionProcessAdmin {
         &self,
         to_session_id: &SessionId,
         process_ids: Vec<ProcessId>,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        scoped_effect_controller: ActorContext,
     ) -> Result<()> {
         self.control
             .transfer_process_handles(to_session_id, process_ids, scoped_effect_controller)

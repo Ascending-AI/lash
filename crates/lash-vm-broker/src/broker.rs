@@ -85,9 +85,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::authority::{AdmittedContext, AuthorityRefusal, HandleGrant, RequestFingerprint};
 use crate::effects::{ParentEffects, ParentFault, ParkedPerformed, Performed};
-use crate::ledger::{
-    AdmittedKind, AdmittedOperation, Checkpoint, CheckpointRefusal, CheckpointStore, ParentLedger,
-};
+use crate::ledger::{AdmittedKind, AdmittedOperation, Checkpoint, ParentLedger, QuietPointRefusal};
 use crate::transport::{CheckoutRefusal, WorkerCheckout, WorkerRead, WorkerSlots};
 
 /// The bounds a broker holds a run to, beyond the protocol's own.
@@ -261,7 +259,7 @@ pub enum BrokerFailure {
     #[error("{fault}")]
     Parent { fault: ParentFault },
     #[error("{refusal}")]
-    Checkpoint { refusal: CheckpointRefusal },
+    Checkpoint { refusal: QuietPointRefusal },
     #[error("the run's committed state is refused: {refusal}")]
     StateRefused { refusal: OpaqueStateRefusal },
 }
@@ -301,7 +299,7 @@ impl BrokerFailure {
 pub struct Broker<'a> {
     pub context: &'a AdmittedContext,
     pub effects: &'a dyn ParentEffects,
-    pub checkpoints: &'a dyn CheckpointStore,
+    pub checkpoints: &'a dyn crate::snapshot::SnapshotStore,
     pub slots: &'a dyn WorkerSlots,
     pub codec: FrameCodec,
     pub contract: VmContractReads,
@@ -441,7 +439,11 @@ impl Broker<'_> {
                                 frame_epoch,
                             };
                             self.checkpoints
-                                .commit(&checkpoint)
+                                .commit_quiet_point(crate::snapshot::QuietPoint {
+                                    checkpoint: checkpoint.clone(),
+                                    issued: Vec::new(),
+                                    waits: Vec::new(),
+                                })
                                 .await
                                 .map_err(|refusal| BrokerFailure::Checkpoint { refusal })?;
                             return Ok(BrokeredEnd::Suspended { checkpoint });
@@ -1068,7 +1070,11 @@ impl Session<'_, '_> {
         };
         self.broker
             .checkpoints
-            .commit(&checkpoint)
+            .commit_quiet_point(crate::snapshot::QuietPoint {
+                checkpoint: checkpoint.clone(),
+                issued: Vec::new(),
+                waits: Vec::new(),
+            })
             .await
             .map_err(|refusal| BrokerFailure::Checkpoint { refusal })?;
         Ok(checkpoint)

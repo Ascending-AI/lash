@@ -1134,7 +1134,7 @@ fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
         RuntimePerfScenario::OpenAiResponsesSseParse,
         RuntimePerfScenario::DirectLlmClient,
         RuntimePerfScenario::ProcessListStress,
-        RuntimePerfScenario::ScopedEffectController,
+        RuntimePerfScenario::ScopedEffects,
         RuntimePerfScenario::StoreReopen,
         RuntimePerfScenario::SqliteStoreReopen,
         RuntimePerfScenario::TurnCheckpoint,

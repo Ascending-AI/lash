@@ -54,7 +54,7 @@ impl RuntimeExecutionTracing {
     /// have really run.
     pub(crate) fn coordination(
         &self,
-        controller: &crate::ScopedEffectController<'_>,
+        controller: &crate::ActorContext,
     ) -> crate::trace::TraceStanding {
         self.runtime.shift(self.scope.clone(), controller)
     }

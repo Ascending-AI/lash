@@ -1,4 +1,5 @@
 use super::*;
+use crate::ActorContext;
 use pretty_assertions::assert_eq;
 
 /// A reused start key mints a successor whose referrer is independent of the
@@ -10,7 +11,7 @@ use pretty_assertions::assert_eq;
 pub async fn a_same_start_key_successor_after_prune_has_independent_attachment_referrers(
     factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    _effect_host: Arc<dyn crate::EffectHost>,
+    _effect_host: ActorContext,
 ) {
     let key = crate::StartKey::for_host("successor-after-prune");
     let start = || {

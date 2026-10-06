@@ -700,8 +700,6 @@ pub struct PostgresStore {
     catalog_id: Arc<str>,
     fence: guarded_tx::WriterFence,
     clock: Arc<dyn lash_core_execution::Clock>,
-    turn_cancel_closure_owner:
-        Arc<std::sync::Mutex<Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>>>,
     #[cfg(any(test, feature = "testing"))]
     decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(any(test, feature = "testing"))]
@@ -720,7 +718,6 @@ pub struct PostgresProcessRegistry {
     /// Effect hosts whose scope fence registration lifts (ADR 0049). The
     /// PostgreSQL journal's own fence rows share the pool and are cleared in
     /// the registration transaction itself.
-    scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
     /// The storage's writer fence: every mutation fences on `F`, and every
@@ -1334,7 +1331,6 @@ impl PostgresStorage {
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             #[cfg(any(test, feature = "testing"))]
             decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(any(test, feature = "testing"))]
@@ -1351,7 +1347,6 @@ impl PostgresStorage {
             pool: self.pool.clone(),
             wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
             fence: self.fence.clone(),
         }
@@ -1365,7 +1360,6 @@ impl PostgresStorage {
             pool: self.pool.clone(),
             wake_delivery_config,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
             fence: self.fence.clone(),
         }
@@ -1517,7 +1511,7 @@ mod backend;
 mod blobs;
 #[path = "postgres/connection_sql.rs"]
 mod connection_sql;
-#[path = "postgres/durable.rs"]
+#[path = "postgres/durable/mod.rs"]
 mod durable;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;

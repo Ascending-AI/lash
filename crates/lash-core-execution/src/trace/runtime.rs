@@ -211,14 +211,14 @@ impl TraceRuntime {
     pub fn shift(
         &self,
         scope: Option<DurableTraceScope>,
-        controller: &crate::ScopedEffectController<'_>,
+        controller: &crate::ActorContext,
     ) -> TraceStanding {
         controller.frontier().bind_runtime(self.clone());
         self.standing(
             scope,
             EmissionRight::Shift {
                 frontier: controller.frontier().clone(),
-                attempt: controller.controller().attempt_observation(),
+                attempt: None,
             },
         )
     }
@@ -239,7 +239,7 @@ impl TraceRuntime {
 
     /// The standing of the shift code that issues its steps through
     /// `controller`, under the scope that controller retained.
-    pub fn turn_execution(&self, controller: &crate::ScopedEffectController<'_>) -> TraceStanding {
+    pub fn turn_execution(&self, controller: &crate::ActorContext) -> TraceStanding {
         self.shift(controller.trace_scope().cloned(), controller)
     }
 

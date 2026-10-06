@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 impl RuntimeSessionServices {
     fn direct_invocation_context<'a>(
         &'a self,
-        effect_controller: crate::ScopedEffectController<'a>,
+        effect_controller: crate::ActorContext,
         turn_id: Option<&'a crate::TurnId>,
         position: DirectExecutionPosition,
         effect_attempt: Option<crate::EffectAttempt>,
@@ -32,7 +32,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         &self,
         request: crate::DirectRequest,
         usage_source: &str,
-        effect_controller: crate::ScopedEffectController<'_>,
+        effect_controller: crate::ActorContext,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         effect_attempt: Option<&crate::EffectAttempt>,
@@ -55,7 +55,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         &self,
         request: crate::LlmRequest,
         usage_source: &str,
-        effect_controller: crate::ScopedEffectController<'_>,
+        effect_controller: crate::ActorContext,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
@@ -79,7 +79,7 @@ impl DirectCompletionService for RuntimeSessionServices {
 
 pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
     current: &'a CurrentOwnerCapability,
-    effect_controller: crate::ScopedEffectController<'a>,
+    effect_controller: crate::ActorContext,
     turn_id: Option<&'a TurnId>,
     position: DirectExecutionPosition,
     replay_ordinals: &'a std::sync::Mutex<BTreeMap<String, u64>>,
@@ -246,7 +246,7 @@ impl DirectCompletionCapability {
             DirectExecutionPosition::Independent => {
                 context
                     .effect_controller
-                    .execute_effect(envelope, local_executor)
+                    .turn_effect(envelope, local_executor)
                     .await?
             }
             DirectExecutionPosition::ToolAttempt => {

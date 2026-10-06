@@ -46,7 +46,7 @@
 //! pin_definition(pin: HostArtifactPin, id: ProcessDefinitionId) -> Result<()>
 //! get_definition(id: ProcessDefinitionId) -> Result<Option<ProcessDefinition>>
 //! release(pin: HostArtifactPin) -> Result<()>
-//! start(request: ProcessStartRequest, controller: ScopedEffectController) -> Result<ProcessStartReceipt>
+//! start(request: ProcessStartRequest, cx: ActorContext) -> Result<ProcessStartReceipt>
 //! ```
 //!
 //! A host publishes the module bytes a draft names under the same pin before it

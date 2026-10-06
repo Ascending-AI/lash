@@ -1,12 +1,13 @@
 //! Real root admissions for control laws that resume execution.
 
 use super::*;
+use crate::ActorContext;
 
 impl Fixture {
     pub(super) async fn new_for_execution(
         prefix: &str,
         name: &str,
-        host: &Arc<dyn crate::EffectHost>,
+        host: &ActorContext,
         stores: &Arc<dyn crate::StoreSet>,
         runner: &Arc<dyn crate::ConformanceTurnRunner>,
     ) -> Self {
@@ -46,7 +47,7 @@ impl Fixture {
 /// settles the intent; the held input and queued send then each run once.
 pub async fn a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted(
     prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

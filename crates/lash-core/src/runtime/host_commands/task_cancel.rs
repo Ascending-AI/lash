@@ -28,6 +28,7 @@
 //! end, and the shift's peek after it still finds a requested cancel.
 
 use super::*;
+use crate::ActorContext;
 use tokio_util::sync::CancellationToken;
 
 /// What a host's cancel of an admitted plugin task did (FIG-4391,
@@ -79,7 +80,7 @@ fn foreign_resolution(key: &crate::AwaitEventKey, resolution: &crate::Resolution
 /// One admitted plugin task's cancel signal, over the deployment's effect
 /// host.
 pub(super) struct PluginTaskCancelSignal {
-    host: Arc<dyn crate::EffectHost>,
+    host: ActorContext,
     key: crate::AwaitEventKey,
 }
 
@@ -87,13 +88,12 @@ impl PluginTaskCancelSignal {
     /// The cancel signal of the plugin task command `batch_id` names, over
     /// `host`. `None` when `host` holds no signal for it.
     pub(super) async fn open(
-        host: Arc<dyn crate::EffectHost>,
+        host: ActorContext,
         session_id: &crate::SessionId,
         batch_id: &str,
     ) -> Result<Option<Self>, RuntimeError> {
         let scope = crate::ExecutionScope::session_operation(session_id.clone(), batch_id);
         let minted = host
-            .await_event_resolver()
             .await_event_key(
                 &scope,
                 crate::AwaitEventWaitIdentity::SessionCommandCancelSignal,
@@ -113,7 +113,7 @@ impl PluginTaskCancelSignal {
     /// first execution took.
     pub(super) async fn recorded_cancel_requested(
         &self,
-        controller: &crate::ScopedEffectController<'_>,
+        controller: &crate::ActorContext,
         completion: bool,
     ) -> Result<bool, RuntimeError> {
         let identity = if completion {
@@ -132,7 +132,7 @@ impl PluginTaskCancelSignal {
             identity,
         );
         let peeked = controller
-            .execute_effect(
+            .wait_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::PeekAwaitEvent {
@@ -173,7 +173,6 @@ impl PluginTaskCancelSignal {
         // signal itself cancelled.
         let watched = self
             .host
-            .await_event_resolver()
             .await_await_event(&self.key, CancellationToken::new())
             .await;
         match watched {
@@ -196,7 +195,6 @@ impl PluginTaskCancelSignal {
     async fn request_cancel(&self) -> Result<PluginTaskCancelRequest, RuntimeError> {
         let requested = self
             .host
-            .await_event_resolver()
             .resolve_await_event(&self.key, crate::Resolution::Cancelled)
             .await?;
         match requested {
@@ -228,7 +226,7 @@ impl PluginTaskCancelSignal {
 /// settlement, read back by its receipt, is how it ended.
 pub async fn request_plugin_task_cancel(
     store: &dyn crate::store::RuntimeStore,
-    effect_host: &Arc<dyn crate::EffectHost>,
+    effect_host: &ActorContext,
     receipt: &crate::SessionCommandReceipt,
 ) -> Result<PluginTaskCancelRequest, RuntimeError> {
     let settled = store
@@ -239,7 +237,7 @@ pub async fn request_plugin_task_cancel(
         return Ok(PluginTaskCancelRequest::AlreadySettled);
     }
     let Some(signal) = PluginTaskCancelSignal::open(
-        Arc::clone(effect_host),
+        effect_host.clone(),
         &receipt.session_id,
         receipt.batch_id.as_str(),
     )

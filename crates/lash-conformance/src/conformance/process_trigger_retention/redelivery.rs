@@ -67,27 +67,6 @@ fn router(handles: &ProcessTriggerRetentionHandles) -> lash_core::facade_support
     )
 }
 
-/// A host that journals nothing: it runs every step's body in place, a
-/// process start included, on the first delivery and on every redelivery.
-struct JournalLessHost;
-
-impl crate::AwaitEventResolver for JournalLessHost {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        None
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::RuntimeEffectController for JournalLessHost {
-    async fn execute_effect(
-        &self,
-        envelope: crate::RuntimeEffectEnvelope,
-        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        crate::testing::execute_effect_locally(envelope, local_executor).await
-    }
-}
-
 /// One delivery of `request` on a host that journals nothing.
 #[expect(
     clippy::expect_used,
@@ -97,15 +76,11 @@ async fn deliver(
     handles: &ProcessTriggerRetentionHandles,
     request: &crate::TriggerOccurrenceRequest,
 ) -> Result<lash_core::facade_support::TriggerEmitReport, crate::PluginError> {
-    let controller = JournalLessHost;
-    let scoped = crate::ScopedEffectController::borrowed(
-        &controller,
-        crate::admit(crate::ExecutionScope::runtime_operation(format!(
-            "redelivery:{}",
-            request.idempotency_key
-        ))),
-    )
-    .expect("scope the emission");
+    let scoped = crate::ActorContext::unavailable()
+        .scoped(crate::admit(crate::ExecutionScope::runtime_operation(
+            format!("redelivery:{}", request.idempotency_key),
+        )))
+        .expect("scope the emission");
     router(handles)
         .emit_recorded(request.clone(), &scoped)
         .await

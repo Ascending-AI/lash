@@ -78,7 +78,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         })
         .build()
         .into_handle();
-    let effect_host = backend.effect_host();
+    let effect_host = crate::ActorContext::detached(backend.clone());
     let mut host = crate::LawBackend::over(&backend).host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),

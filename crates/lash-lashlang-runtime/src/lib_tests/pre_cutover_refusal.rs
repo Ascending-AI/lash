@@ -4,43 +4,12 @@
 //! state.
 //!
 //! Each case runs `run_lashlang_process` on a segment parked by this build and
-//! restamped as another generation's, behind an effect controller that counts
-//! every crossing, and asserts the run ends typed with zero crossings and
-//! without ever building its execution runtime.
+//! restamped as another generation's, over an unavailable actor context, where
+//! any effect reaches an unfilled stub and fails the case, and asserts the run
+//! ends typed without ever building its execution runtime.
 
 use super::*;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-/// Counts every crossing of the controller boundary and executes none.
-#[derive(Default)]
-struct CrossingCounter {
-    crossings: AtomicUsize,
-}
-
-impl lash_core::AwaitEventResolver for CrossingCounter {
-    /// A test double that mints keys under no durable authority.
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        None
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for CrossingCounter {
-    async fn execute_effect(
-        &self,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        _local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        self.crossings.fetch_add(1, Ordering::SeqCst);
-        Err(lash_core::RuntimeEffectControllerError::new(
-            lash_core::RuntimeErrorCode::RuntimeStore,
-            format!(
-                "a refused predecessor dispatched {:?}",
-                envelope.command.kind()
-            ),
-        ))
-    }
-}
+use std::sync::atomic::{AtomicBool, Ordering};
 
 struct StoredBytesArtifactStore {
     bytes: Vec<u8>,
@@ -88,11 +57,10 @@ impl lash_core::ModuleArtifactStore for StoredBytesArtifactStore {
 
 struct RefusedRun {
     outcome: lash_core::ProcessRunOutcome,
-    crossings: usize,
     runtime_built: bool,
 }
 
-/// Run one process through `run_lashlang_process` behind a crossing counter.
+/// Run one process through `run_lashlang_process` over an unavailable context.
 async fn run_counted(
     store: lashlang::LashlangArtifacts,
     input: &LashlangProcessInput,
@@ -109,12 +77,9 @@ async fn run_counted(
     // The refusal lands before the run reads the registry, so the process is
     // never registered and a fixture id stands in for the one a registrar mints.
     let process_id = lash_core::ProcessId::fixture("pre-cutover-process");
-    let counter = Arc::new(CrossingCounter::default());
-    let scoped = lash_core::ScopedEffectController::shared(
-        Arc::clone(&counter) as Arc<dyn lash_core::RuntimeEffectController>,
-        lash_core::AdmittedScope::process(process_id.clone()),
-    )
-    .expect("valid process scope");
+    let scoped = lash_core::ActorContext::unavailable()
+        .scoped(lash_core::AdmittedScope::process(process_id.clone()))
+        .expect("valid process scope");
     let built =
         lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone()).build();
     let plugins = Arc::clone(&built.dispatch.plugins);
@@ -163,6 +128,7 @@ async fn run_counted(
                 .await
                 .worker_recovery(),
         ),
+        &lash_core::ActorContext::unavailable(),
         context,
         serde_json::to_value(input).expect("process input serializes"),
     ))
@@ -170,7 +136,6 @@ async fn run_counted(
     .expect("a refused predecessor is a terminal, not an infrastructure fault");
     RefusedRun {
         outcome,
-        crossings: counter.crossings.load(Ordering::SeqCst),
         runtime_built: runtime_built.load(Ordering::SeqCst),
     }
 }
@@ -199,7 +164,6 @@ fn assert_resume_refused_before_any_effect(
 
 #[track_caller]
 fn assert_stopped_before_any_effect(run: &RefusedRun) {
-    assert_eq!(run.crossings, 0, "no effect may cross the controller");
     assert!(
         !run.runtime_built,
         "the run must stop before its execution runtime exists"

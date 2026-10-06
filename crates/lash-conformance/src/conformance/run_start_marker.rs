@@ -2,6 +2,7 @@
 //! a lost predecessor journal. Atomic admission retains the original fence;
 //! the new journal receives ExecutionLost and executes no provider or tool.
 
+use crate::ActorContext;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -53,10 +54,10 @@ async fn fresh_execution<T, F>(
 ) -> T
 where
     T: Send + 'static,
-    F: for<'a> Fn(
+    F: Fn(
             crate::LashRuntime,
-            crate::ScopedEffectController<'a>,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>
+            crate::ActorContext,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>
         + Send
         + Sync
         + 'static,
@@ -90,7 +91,7 @@ where
 )]
 fn execute_run_on<'a>(
     mut runtime: crate::LashRuntime,
-    scoped: crate::ScopedEffectController<'a>,
+    scoped: crate::ActorContext,
     admitted: Admitted,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = RunOutcome> + Send + 'a>> {
     Box::pin(async move {
@@ -108,7 +109,7 @@ fn execute_run_on<'a>(
 )]
 pub async fn a_fresh_root_journal_refuses_the_retained_admission_nonce(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    _effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -132,11 +133,10 @@ pub async fn a_fresh_root_journal_refuses_the_retained_admission_nonce(
             }
         })
         .build();
-    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores)).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     store

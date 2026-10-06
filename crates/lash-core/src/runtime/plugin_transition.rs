@@ -21,7 +21,7 @@ pub(super) fn native_plugin_admission(
 }
 
 pub(super) async fn record_native_transition(
-    controller: &crate::ScopedEffectController<'_>,
+    controller: &crate::ActorContext,
     host: crate::PluginHost,
     request: crate::plugin::PluginTransitionRequest,
     state: crate::PluginState,
@@ -34,7 +34,7 @@ pub(super) async fn record_native_transition(
     let invocation =
         crate::RuntimeEffectInvocation::new(request.id.0.clone(), attribution, "plugin-transition");
     let answer = controller
-        .execute_effect(
+        .shift_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::TransitionPlugins {
@@ -96,7 +96,7 @@ impl crate::runtime::LashRuntime {
     /// A deferred session supplies no driver or renderer until this activation.
     pub(in crate::runtime) async fn materialize_turn_session(
         &mut self,
-        scoped_effect_controller: &crate::ScopedEffectController<'_>,
+        scoped_effect_controller: &crate::ActorContext,
     ) -> Result<(), crate::RuntimeError> {
         if self.session.is_none() {
             let plugins = &self.services.plugins;

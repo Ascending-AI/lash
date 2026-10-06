@@ -394,7 +394,7 @@ async fn run_once_inner(
         | RuntimePerfScenario::RlmObliqueStackMix
         | RuntimePerfScenario::OpenAiCompatStream
         | RuntimePerfScenario::ToolDiscoverySearch
-        | RuntimePerfScenario::ScopedEffectController
+        | RuntimePerfScenario::ScopedEffects
         | RuntimePerfScenario::StoreReopen
         | RuntimePerfScenario::SqliteStoreReopen
         | RuntimePerfScenario::DeepTurnComposition
@@ -634,7 +634,7 @@ async fn run_once_inner(
                     let trigger_delivery_observation = observation_ref;
                     let phase_probe = probe_ref;
                     let cancel = CancellationToken::new();
-                    let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffectController) {
+                    let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffects) {
                         let turn_id =
                             TurnId::fixture(format!("runtime-perf-scoped-{}", turn_index + 1));
                         runtime_perf_timed(

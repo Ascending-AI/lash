@@ -16,6 +16,7 @@
 //! leaf that started.
 
 use super::*;
+use crate::ActorContext;
 
 use pretty_assertions::assert_eq;
 
@@ -133,7 +134,7 @@ fn sorted(mut leaves: Vec<String>) -> Vec<String> {
 /// model is shown the refusal naming the limit.
 pub async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     producer: ToolBatchProducer,
@@ -145,7 +146,7 @@ pub async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(
     let at = plan("limitat", &leaf_routes(LIMIT));
     let observed = run_scenario(
         prefix,
-        Arc::clone(&effect_host),
+        effect_host.clone(),
         &stores,
         &runner,
         &producer,
@@ -165,7 +166,7 @@ pub async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(
     let past = plan("limitpast", &leaf_routes(LIMIT + 1));
     let observed = run_scenario(
         prefix,
-        Arc::clone(&effect_host),
+        effect_host.clone(),
         &stores,
         &runner,
         &producer,
@@ -198,7 +199,7 @@ pub async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(
 ///   group of `max_tool_calls` calls runs, and one of a call more is refused.
 pub async fn tool_call_limit_staged_calls(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     producer: ToolBatchProducer,
@@ -212,7 +213,7 @@ pub async fn tool_call_limit_staged_calls(
         let twice = plan("limittwice", &leaf_routes(2 * LIMIT));
         let observed = run_scenario(
             prefix,
-            Arc::clone(&effect_host),
+            effect_host.clone(),
             &stores,
             &runner,
             &producer,
@@ -242,7 +243,7 @@ pub async fn tool_call_limit_staged_calls(
     let past = plan("limitstaged", &leaf_routes(LIMIT + rest));
     let observed = run_scenario(
         prefix,
-        Arc::clone(&effect_host),
+        effect_host.clone(),
         &stores,
         &runner,
         &producer,
@@ -281,7 +282,7 @@ pub async fn tool_call_limit_staged_calls(
 )]
 pub async fn tool_call_limit_refuses_the_same_call_across_a_crash(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     producer: ToolBatchProducer,
@@ -319,7 +320,7 @@ pub async fn tool_call_limit_refuses_the_same_call_across_a_crash(
     let (observations, mut observation) = tokio::sync::mpsc::unbounded_channel();
     let attempt = |crashing: bool| -> crate::ConformanceTurnAttempt {
         let session_id = session_id.clone();
-        let effect_host = Arc::clone(&effect_host);
+        let effect_host = effect_host.clone();
         let stores = Arc::clone(&stores);
         let tier = Arc::clone(&runner);
         let producer = producer.clone();
@@ -329,7 +330,7 @@ pub async fn tool_call_limit_refuses_the_same_call_across_a_crash(
         let observations = observations.clone();
         Arc::new(move |turn_controller| {
             let session_id = session_id.clone();
-            let effect_host = Arc::clone(&effect_host);
+            let effect_host = effect_host.clone();
             let stores = Arc::clone(&stores);
             let tier = Arc::clone(&tier);
             let producer = producer.clone();
@@ -448,7 +449,7 @@ const WINNER_GATE: &str = "the race's winner may answer";
 )]
 pub async fn tool_call_limit_counts_what_a_process_holds_across_a_worker_kill(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     producer: ToolBatchProducer,
@@ -516,7 +517,7 @@ pub async fn tool_call_limit_counts_what_a_process_holds_across_a_worker_kill(
         let plan = plan.clone();
         Arc::new(move |turn_controller| {
             let session_id = session_id.clone();
-            let effect_host = Arc::clone(&effect_host);
+            let effect_host = effect_host.clone();
             let stores = Arc::clone(&stores);
             let tier = Arc::clone(&tier);
             let producer = producer.clone();

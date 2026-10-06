@@ -1,9 +1,7 @@
+use crate::ActorContext;
 use std::sync::Arc;
 
-use super::{
-    AdmittedScope, DeploymentStore, EffectHost, ProcessWorkWiring, RuntimeError,
-    ScopedEffectController,
-};
+use super::{AdmittedScope, DeploymentStore, ProcessWorkWiring, RuntimeError};
 use crate::SessionId;
 
 /// Lifecycle services selected together for session administration.
@@ -14,7 +12,7 @@ use crate::SessionId;
 #[derive(Clone)]
 pub struct SessionAdministration {
     store_factory: Arc<dyn DeploymentStore>,
-    effect_host: Arc<dyn EffectHost>,
+    effect_host: ActorContext,
     process: Option<ProcessWorkWiring>,
     trigger_store: Option<Arc<dyn crate::TriggerStore>>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
@@ -29,7 +27,7 @@ impl SessionAdministration {
     /// supplied services from the same physical persistence deployment.
     pub fn new(
         store_factory: Arc<dyn DeploymentStore>,
-        effect_host: Arc<dyn EffectHost>,
+        effect_host: ActorContext,
         process: Option<ProcessWorkWiring>,
         trigger_store: Option<Arc<dyn crate::TriggerStore>>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
@@ -50,7 +48,7 @@ impl SessionAdministration {
     /// Replace the execution host while retaining this administration owner.
     ///
     /// Backend adapters use this only while installing their own executor.
-    pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
+    pub fn with_effect_host(mut self, effect_host: ActorContext) -> Self {
         self.effect_host = effect_host;
         self
     }
@@ -59,7 +57,7 @@ impl SessionAdministration {
         &self.store_factory
     }
 
-    pub fn effect_host(&self) -> &Arc<dyn EffectHost> {
+    pub fn effect_host(&self) -> &ActorContext {
         &self.effect_host
     }
 
@@ -104,10 +102,7 @@ impl SessionAdministration {
 pub trait SessionDeleteExecution {
     fn administration(&self) -> &SessionAdministration;
 
-    fn scoped<'a>(
-        &'a self,
-        admitted: AdmittedScope,
-    ) -> Result<ScopedEffectController<'a>, RuntimeError>;
+    fn scoped(&self, admitted: AdmittedScope) -> Result<ActorContext, RuntimeError>;
 }
 
 impl SessionDeleteExecution for SessionAdministration {
@@ -115,10 +110,7 @@ impl SessionDeleteExecution for SessionAdministration {
         self
     }
 
-    fn scoped<'a>(
-        &'a self,
-        admitted: AdmittedScope,
-    ) -> Result<ScopedEffectController<'a>, RuntimeError> {
+    fn scoped(&self, admitted: AdmittedScope) -> Result<ActorContext, RuntimeError> {
         self.effect_host.scoped(admitted)
     }
 }
@@ -127,7 +119,9 @@ impl SessionDeleteExecution for SessionAdministration {
 pub struct SessionDeleteContext<'a> {
     session_id: SessionId,
     administration: SessionAdministration,
-    controller: ScopedEffectController<'a>,
+    controller: ActorContext,
+    /// The lifetime this value is bound to; the context it carries is `'static`.
+    pub(crate) run: std::marker::PhantomData<&'a ()>,
 }
 
 impl<'a> SessionDeleteContext<'a> {
@@ -145,6 +139,7 @@ impl<'a> SessionDeleteContext<'a> {
         let session_id = SessionId::parse(session_id.as_ref())?;
         let controller = executor.scoped(AdmittedScope::session_delete(&session_id))?;
         Ok(Self {
+            run: std::marker::PhantomData,
             session_id,
             administration: executor.administration().clone(),
             controller,
@@ -159,7 +154,7 @@ impl<'a> SessionDeleteContext<'a> {
         &self.administration
     }
 
-    pub fn controller(&self) -> &ScopedEffectController<'a> {
+    pub fn controller(&self) -> &ActorContext {
         &self.controller
     }
 }

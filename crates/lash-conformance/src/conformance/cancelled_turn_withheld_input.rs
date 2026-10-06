@@ -18,6 +18,7 @@
 //! reads the outcome back only through surfaces every backend already owes.
 
 use super::direct_turn_acceptance::{acceptance_runtime_for_session, direct_input, text_response};
+use crate::ActorContext;
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
 use lash_core::testing::conformance_support::ActiveTurnControl;
@@ -47,7 +48,7 @@ enum Stop {
 /// before the turn commits.
 struct StopAfterTerminalAdmission {
     inner: Arc<dyn crate::RuntimeStore>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     armed: Mutex<Option<Stop>>,
     withheld_inputs: Mutex<Vec<crate::InputId>>,
     withheld_batches: Mutex<Vec<crate::BatchId>>,
@@ -150,13 +151,13 @@ impl crate::store::RuntimeStoreDecorator for StopAfterTerminalAdmission {
                 Some(Stop::Local(token)) => {
                     token.cancel();
                     let control = ActiveTurnControl::new(
-                        self.effect_host.as_ref(),
+                        &self.effect_host,
                         crate::TurnAddress::new(request.fence.session(), &request.turn_id),
                     )
                     .await
                     .expect("the running turn's cancellation gate");
                     let delivered = control
-                        .watch_immediate(self.effect_host.as_ref())
+                        .watch_immediate(&self.effect_host)
                         .await
                         .expect("watch the turn's cancellation gate");
                     assert!(
@@ -166,7 +167,7 @@ impl crate::store::RuntimeStoreDecorator for StopAfterTerminalAdmission {
                 }
                 Some(Stop::Durable(request)) => {
                     crate::TurnWorkDriver::for_session(
-                        Arc::clone(&self.effect_host),
+                        self.effect_host.clone(),
                         SESSION_ID,
                         Arc::clone(&self.inner),
                     )
@@ -184,7 +185,7 @@ impl crate::store::RuntimeStoreDecorator for StopAfterTerminalAdmission {
 struct Harness {
     store: Arc<dyn crate::RuntimeStore>,
     decorated: Arc<StopAfterTerminalAdmission>,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     runtime: crate::LashRuntime,
     requests: Arc<Mutex<Vec<crate::LlmRequest>>>,
 }
@@ -514,10 +515,10 @@ async fn withheld_cancel_case(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimeStore>) -> Harness {
-    let effect_host = backend.effect_host();
+    let effect_host = crate::ActorContext::detached(backend.clone());
     let decorated = Arc::new(StopAfterTerminalAdmission {
         inner: Arc::clone(&store),
-        effect_host: Arc::clone(&effect_host),
+        effect_host: effect_host.clone(),
         armed: Mutex::new(None),
         withheld_inputs: Mutex::new(Vec::new()),
         withheld_batches: Mutex::new(Vec::new()),

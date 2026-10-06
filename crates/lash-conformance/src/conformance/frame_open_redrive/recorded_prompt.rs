@@ -12,6 +12,7 @@
 //! diverge from its own journal.
 
 use super::*;
+use crate::ActorContext;
 use pretty_assertions::assert_eq;
 
 /// The start of every prompt the laws' protocol renders.
@@ -118,7 +119,7 @@ fn assert_the_recorded_prompt_was_replayed(protocol: &WorkerPromptProtocol, mode
 /// recorded prompt.
 pub async fn a_commanded_compaction_redriven_on_another_worker_replays_its_recorded_prompt(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -141,7 +142,7 @@ pub async fn a_commanded_compaction_redriven_on_another_worker_replays_its_recor
 /// redriven on another worker replays its recorded prompt.
 pub async fn a_pressure_compaction_redriven_on_another_worker_replays_its_recorded_prompt(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -162,7 +163,7 @@ pub async fn a_pressure_compaction_redriven_on_another_worker_replays_its_record
 /// on another worker replays its recorded prompt.
 pub async fn an_overflow_recovery_redriven_on_another_worker_replays_its_recorded_prompt(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    effect_host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {

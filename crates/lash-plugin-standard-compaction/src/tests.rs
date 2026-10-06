@@ -113,12 +113,13 @@ fn unavailable_direct_completions() -> lash_core::facade_support::DirectCompleti
     })
 }
 
-fn test_turn_controller() -> lash_core::ScopedEffectController<'static> {
-    lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::testing::UnavailableEffectController),
-        lash_core::AdmittedScope::turn(SessionId::from("root"), "standard-compaction-test-turn"),
-    )
-    .expect("test scoped effect controller")
+fn test_turn_controller() -> lash_core::ActorContext {
+    lash_core::ActorContext::unavailable()
+        .scoped(lash_core::AdmittedScope::turn(
+            SessionId::from("root"),
+            "standard-compaction-test-turn",
+        ))
+        .expect("test scoped effect controller")
 }
 
 fn build_turn_ctx(
@@ -171,11 +172,11 @@ fn build_compaction_ctx(
         instructions,
         state: state.read_view(),
         traces: traces.emitter(),
-        scoped_effect_controller: lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::testing::UnavailableEffectController),
-            lash_core::AdmittedScope::runtime_operation("standard-compaction-compact-test"),
-        )
-        .expect("test scoped effect controller"),
+        scoped_effect_controller: lash_core::ActorContext::unavailable()
+            .scoped(lash_core::AdmittedScope::runtime_operation(
+                "standard-compaction-compact-test",
+            ))
+            .expect("test scoped effect controller"),
         direct_completions,
         system_prompt: None,
         plugin_config: Default::default(),
@@ -757,11 +758,11 @@ fn recovery_ctx(
         prompt_usage: None,
         max_context_tokens: Some(max_context_tokens),
         traces: traces.emitter(),
-        scoped_effect_controller: lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::testing::UnavailableEffectController),
-            lash_core::AdmittedScope::runtime_operation("standard-compaction-recovery-test"),
-        )
-        .expect("test scoped effect controller"),
+        scoped_effect_controller: lash_core::ActorContext::unavailable()
+            .scoped(lash_core::AdmittedScope::runtime_operation(
+                "standard-compaction-recovery-test",
+            ))
+            .expect("test scoped effect controller"),
         direct_completions: RecordingLlmCompletions::client(direct),
         system_prompt: None,
         plugin_config: Default::default(),

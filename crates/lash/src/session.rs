@@ -1,3 +1,4 @@
+use lash_core::ActorContext;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::pin::Pin;
@@ -8,11 +9,11 @@ pub use crate::observation_feed::SessionObservationStream;
 use crate::observation_feed::live_replay_error;
 use crate::session_binding::BoundSession;
 use crate::support::{
-    Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginOperations, ProcessHandleView,
-    Result, RuntimeHandle, RuntimeObservation, RuntimeSessionState, SessionAdmin,
-    SessionCreationHead, SessionCursor, SessionError, SessionObservation,
-    SessionObservationSubscription, SessionPolicy, SessionReadView, SessionResume, SessionScope,
-    SessionSpec, SessionStoreCreateRequest, ToolManifest, ToolState, TurnInput, build_plugin_host,
+    Arc, EmbedError, LashCore, LashRuntime, PluginOperations, ProcessHandleView, Result,
+    RuntimeHandle, RuntimeObservation, RuntimeSessionState, SessionAdmin, SessionCreationHead,
+    SessionCursor, SessionError, SessionObservation, SessionObservationSubscription, SessionPolicy,
+    SessionReadView, SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest,
+    ToolManifest, ToolState, TurnInput, build_plugin_host,
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
@@ -185,7 +186,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.store_factory),
             work,
             ingress,
-            Arc::clone(&self.core.env.core.control.effect_host),
+            self.core.env.core.control.effect_host.clone(),
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.models),
             Arc::clone(self.core.env.core.tracing.scopes()),
@@ -324,7 +325,7 @@ impl SessionBuilder {
             store,
             work,
             ingress,
-            Arc::clone(&self.core.env.core.control.effect_host),
+            self.core.env.core.control.effect_host.clone(),
             Arc::clone(&self.core.live_replay_store),
             catalog,
             Arc::clone(&self.core.env.core.providers.models),
@@ -890,7 +891,7 @@ impl LashSession {
         self.parent_session_id.as_deref()
     }
 
-    pub fn effect_host(&self) -> Arc<dyn EffectHost> {
+    pub fn effect_host(&self) -> ActorContext {
         self.binding.effect_host()
     }
 

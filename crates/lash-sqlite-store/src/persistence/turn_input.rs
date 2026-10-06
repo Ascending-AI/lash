@@ -123,29 +123,6 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                 record_kind: "TurnCancelClosureAuthorization",
                 message: error.to_string(),
             })?;
-        if authorization.admitted_scope().session_id().is_none()
-            && let Some(owner) = self.turn_cancel_closure_owner_binding()?
-        {
-            owner
-                .register(authorization.admitted_scope(), authorization.binding_id())
-                .await
-                .map_err(|error| {
-                    // The owner refuses a participant under a retired scope:
-                    // the same refusal this catalog's own retired-scope row
-                    // answers, so it keeps the same type.
-                    match authorization.admitted_scope().journal_identity() {
-                        Ok(identity)
-                            if error.code
-                                == lash_core_execution::RuntimeErrorCode::EffectScopeRetired =>
-                        {
-                            StoreError::TurnCancelClosureScopeRetired {
-                                scope_id: identity.key().to_string(),
-                            }
-                        }
-                        _ => StoreError::Backend(error.to_string()),
-                    }
-                })?;
-        }
         let fence = fence.clone();
         let authorization = authorization.clone();
         self.conn

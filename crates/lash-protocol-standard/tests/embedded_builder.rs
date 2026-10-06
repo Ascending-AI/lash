@@ -75,7 +75,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     let runtime = Box::pin(
         LashRuntime::builder(
             lash_core::facade_support::RuntimeHostConfig::new(
-                lash_conformance::recording_backend_over(stores.clone()),
+                lash_conformance::backend_over(stores.clone()),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),
@@ -137,7 +137,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
     let err = match Box::pin(
         LashRuntime::builder(
             lash_core::facade_support::RuntimeHostConfig::new(
-                lash_conformance::recording_backend_over(stores.clone()),
+                lash_conformance::backend_over(stores.clone()),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),

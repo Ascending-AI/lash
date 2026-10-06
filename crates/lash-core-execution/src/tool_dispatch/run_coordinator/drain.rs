@@ -68,11 +68,7 @@ impl<'a> RunCoordinator<'a> {
                             })?
                             .to_owned();
                         journal.scoped.admit_journal_write()?;
-                        let receipt = journal
-                            .scoped
-                            .controller()
-                            .attach_run_realization(invocation_id)
-                            .await?;
+                        let receipt = journal.scoped.attach_run_realization(invocation_id).await?;
                         self.register_realization(call_id.clone(), receipt);
                     }
                 }
@@ -118,7 +114,6 @@ impl<'a> RunCoordinator<'a> {
                     journal.scoped.admit_journal_write()?;
                     let issued = journal
                         .scoped
-                        .controller()
                         .issue_run_realization(RealizationRequest {
                             key,
                             scope: journal.scoped.admitted_scope().clone(),
@@ -286,7 +281,6 @@ impl<'a> RunCoordinator<'a> {
         let opener = self.journal.owner.clone();
         let settle = pending.settle.clone();
         let consume = pending.consume;
-        let controller = self.journal.scoped.controller();
         let check_cut = pending.check_cut && consume && self.observe_generation_cuts;
         let executed = std::sync::Arc::clone(&pending.fresh);
         let record = self
@@ -359,14 +353,8 @@ impl<'a> RunCoordinator<'a> {
                     // Consumption belongs to the program's outcome: a cut
                     // observed here records the check instead, and the
                     // successor's consumer records its own `Consumed`.
-                    let cut = if check_cut {
-                        controller
-                            .peek_run_cut()
-                            .await
-                            .map_err(|error| error.to_string())?
-                    } else {
-                        None
-                    };
+                    // `peek_run_cut` folded to `None` (I0, FIG-5194).
+                    let cut: Option<crate::BoundaryReason> = None.filter(|_| check_cut);
                     let mut events = settle;
                     events.extend(presented(
                         &call_id,

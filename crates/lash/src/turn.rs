@@ -1,10 +1,11 @@
+use lash_core::ActorContext;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 
 use crate::support::{
-    Arc, LlmCallRecord, LocalTurnStop, Message, MessageRole, RuntimeHandle, ScopedEffectController,
-    SessionSnapshot, StdMutex, TokenUsage, ToolCallRecord, TurnActivity, TurnActivitySink,
-    TurnExecutionMetrics, TurnOutcome, async_trait,
+    Arc, LlmCallRecord, LocalTurnStop, Message, MessageRole, RuntimeHandle, SessionSnapshot,
+    StdMutex, TokenUsage, ToolCallRecord, TurnActivity, TurnActivitySink, TurnExecutionMetrics,
+    TurnOutcome, async_trait,
 };
 
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
@@ -27,7 +28,7 @@ pub(crate) fn fresh_turn_id() -> TurnId {
 pub(crate) async fn execute_admitted_run_observed(
     runtime: &RuntimeHandle,
     binding: &lash_core::StoreBindingId,
-    controller: &ScopedEffectController<'_>,
+    controller: &ActorContext,
     admitted: lash_core::engine::Admitted,
     unsettled: Option<&crate::core::held_shifts::UnsettledRun>,
 ) -> lash_core::engine::RunEnd {

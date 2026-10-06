@@ -27,7 +27,6 @@ use lash_sansio::sync::MutexExt;
 // reader or editor following the merged doc comment — including the
 // submodule's own intra-doc links — would resolve it against *this* module's
 // scope, where none of the linked items exist.
-pub mod attempt_sentinel;
 pub mod behavior_transcript;
 pub mod runbook_evidence;
 #[cfg(feature = "testing")]
@@ -43,7 +42,6 @@ pub mod tool_fixtures;
 mod trigger_context;
 
 /// A recording or fault layer over any effect host (FIG-3580).
-pub use crate::runtime::effect::{EffectLayer, LayeredEffectHost};
 pub use crate::runtime::process::{
     NonTerminalPagePause, NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
     TriggerDeliveryPinReleaseLoss,
@@ -165,20 +163,6 @@ impl crate::ProcessEngine for HeldProcessEngine {
         HELD_PROCESS_ENGINE_KIND
     }
 
-    async fn run(
-        &self,
-        context: crate::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        context.cancellation_token().cancelled().await;
-        Ok(
-            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
-                crate::ToolCancellation::runtime("the held process was cancelled"),
-            ))
-            .into(),
-        )
-    }
-
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
@@ -202,6 +186,49 @@ impl crate::ProcessEngine for HeldProcessEngine {
             "the held engine stores no artifact `{artifact_ref}`"
         )))
     }
+
+    fn state_format(&self) -> crate::EngineStateFormat {
+        crate::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Option<crate::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: crate::EngineState,
+        _event: crate::EngineEvent,
+    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        todo!("L6 (FIG-5175): port HeldProcessEngine to advance")
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &crate::ProcessDefinitionRef,
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+        Ok(crate::ProcessDefinitionResolution::new(
+            crate::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
+    }
 }
 
 /// Engine fixture for trigger-delivery tests that need to exercise the real
@@ -214,19 +241,6 @@ pub struct FixtureProcessEngine;
 impl crate::ProcessEngine for FixtureProcessEngine {
     fn kind(&self) -> &'static str {
         "testing-fixture"
-    }
-
-    async fn run(
-        &self,
-        _context: crate::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
-    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        Ok(
-            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!({ "fixture": "complete" }),
-            ))
-            .into(),
-        )
     }
 
     fn start_artifacts(
@@ -251,6 +265,49 @@ impl crate::ProcessEngine for FixtureProcessEngine {
         Err(crate::PluginError::Session(format!(
             "the fixture engine stores no artifact `{artifact_ref}`"
         )))
+    }
+
+    fn state_format(&self) -> crate::EngineStateFormat {
+        crate::EngineStateFormat {
+            kind: self.kind().to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn program_identity(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Option<crate::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        _state: crate::EngineState,
+        _event: crate::EngineEvent,
+    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        todo!("L6 (FIG-5175): port FixtureProcessEngine to advance")
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &crate::ProcessDefinitionRef,
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+        Ok(crate::ProcessDefinitionResolution::new(
+            crate::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
     }
 }
 
@@ -723,11 +780,11 @@ impl ToolCallFixture<'static> {
                 session_lifecycle,
                 session_graph,
                 Arc::new(crate::UnavailableProcessService),
-                crate::runtime::ScopedEffectController::shared(
-                    Arc::new(UnavailableEffectController),
-                    crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
-                )
-                .expect("valid test runtime scope"),
+                crate::ActorContext::unavailable()
+                    .scoped(crate::AdmittedScope::runtime_operation(
+                        "test-runtime-effect-controller",
+                    ))
+                    .expect("valid test runtime scope"),
                 Arc::new(crate::RuntimeAttachmentStore::unavailable()),
                 direct_completions,
             )
@@ -828,7 +885,7 @@ impl<'run> ToolCallFixture<'run> {
     /// opener; production attempts always run under a turn, drain or process
     /// scope. A fixture that exercises an owner-derived answer (a declared
     /// child's parent scope) binds the real scope here.
-    pub fn scoped_effect_controller(mut self, scoped: crate::ScopedEffectController<'run>) -> Self {
+    pub fn scoped_effect_controller(mut self, scoped: crate::ActorContext) -> Self {
         self.context.effect_controller = scoped;
         self
     }
@@ -998,41 +1055,6 @@ pub async fn execute_effect_locally(
     }
 }
 
-/// The effect controller of a context with no effect host: every effect and
-/// group is refused, and await events answer the resolver's refusing
-/// defaults.
-///
-/// It journals nothing, so it is not an effect host. A mock tool context
-/// carries it, as it carries no process port and no attachment port: a tool
-/// test that never runs an effect needs no backend, and one that does
-/// builds its context over one.
-#[derive(Debug, Default)]
-pub struct UnavailableEffectController;
-
-impl crate::AwaitEventResolver for UnavailableEffectController {
-    /// No effect host stands behind it, so no authority mints its keys.
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        None
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::RuntimeEffectController for UnavailableEffectController {
-    async fn execute_effect(
-        &self,
-        envelope: crate::RuntimeEffectEnvelope,
-        _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        Err(crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::Plugin,
-            format!(
-                "this context has no effect host; `{}` was not executed",
-                envelope.invocation.effect_replay_key()
-            ),
-        ))
-    }
-}
-
 /// The process-exec-env port of a context with no store: publication and
 /// acquisition are refused, a cleanup has nothing to sever, and reads find
 /// nothing.
@@ -1154,7 +1176,7 @@ impl crate::ToolProvider for EmptyToolProvider {
 }
 
 pub fn code_execution_context_with_tool_catalog<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     tool_catalog: crate::ToolCatalog,
 ) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
@@ -1164,7 +1186,7 @@ pub fn code_execution_context_with_tool_catalog<'run>(
 }
 
 pub fn code_execution_context_with_tool_provider_and_catalog<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
 ) -> crate::RuntimeExecutionContext<'run> {
@@ -1176,7 +1198,7 @@ pub fn code_execution_context_with_tool_provider_and_catalog<'run>(
 }
 
 pub fn code_execution_context_with_process_dependencies<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
     trigger_router: Option<crate::TriggerRouter>,
@@ -1194,7 +1216,7 @@ pub fn code_execution_context_with_process_dependencies<'run>(
 }
 
 pub fn code_execution_context<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
 ) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .build()
@@ -1204,7 +1226,7 @@ pub fn code_execution_context<'run>(
 /// Build an empty code-execution context for a specific durable process.
 #[cfg(any(test, feature = "testing"))]
 pub fn code_execution_context_for_process<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     process_id: crate::ProcessId,
     registration: &crate::ProcessRegistration,
 ) -> crate::RuntimeExecutionContext<'run> {
@@ -1216,7 +1238,7 @@ pub fn code_execution_context_for_process<'run>(
 
 /// Build an empty code-execution context whose cancellation is already visible.
 pub fn cancelled_code_execution_context<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
 ) -> crate::RuntimeExecutionContext<'run> {
     let cancellation = tokio_util::sync::CancellationToken::new();
     cancellation.cancel();
@@ -1233,16 +1255,16 @@ pub fn cancelled_code_execution_context<'run>(
 /// checkpoint, the same boundary a request landing mid-run would be met at,
 /// instead of racing a spawned delivery against its checkpoint schedule.
 pub async fn code_execution_context_stopped<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
 ) -> crate::RuntimeExecutionContext<'run> {
     let ports = ports.into();
-    let host = Arc::clone(&ports.effect_host);
+    let host = ports.effect_host.clone();
     let context = TestExecutionContextBuilder::new(ports)
         .build()
         .into_runtime();
     let control = Arc::new(
         crate::runtime::turn_control::ActiveTurnControl::new(
-            host.await_event_resolver(),
+            &host,
             crate::TurnAddress::new(
                 context
                     .session_id()
@@ -1255,11 +1277,7 @@ pub async fn code_execution_context_stopped<'run>(
         .expect("the test host keys a turn's cancellation gate"),
     );
     control
-        .request_local_stop(
-            host.await_event_resolver(),
-            crate::TurnCancelMode::Immediate,
-            None,
-        )
+        .request_local_stop(&host, crate::TurnCancelMode::Immediate, None)
         .await
         .expect("the test host resolves the cancellation gate");
     context.with_recorded_turn_cancel(
@@ -1277,11 +1295,11 @@ pub async fn code_execution_context_stopped<'run>(
 /// keyed from the scope those waits observe, so an engine that races a wait
 /// against it (a SQL timer, FIG-3672 P9) sees the stop.
 pub async fn code_execution_context_stopped_on<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     stop: tokio_util::sync::CancellationToken,
 ) -> crate::RuntimeExecutionContext<'run> {
     let ports = ports.into();
-    let host = Arc::clone(&ports.effect_host);
+    let host = ports.effect_host.clone();
     let context = TestExecutionContextBuilder::new(ports)
         .build()
         .into_runtime();
@@ -1294,22 +1312,18 @@ pub async fn code_execution_context_stopped_on<'run>(
     };
     let control = Arc::new(
         crate::runtime::turn_control::ActiveTurnControl::new(
-            host.await_event_resolver(),
+            &host,
             crate::TurnAddress::new(session_id.clone(), turn_id.clone()),
         )
         .await
         .expect("the test host keys a turn's cancellation gate"),
     );
     let stopper = Arc::clone(&control);
-    let stop_host = Arc::clone(&host);
+    let stop_host = host.clone();
     crate::task::spawn(async move {
         stop.cancelled().await;
         stopper
-            .request_local_stop(
-                host.await_event_resolver(),
-                crate::TurnCancelMode::Immediate,
-                None,
-            )
+            .request_local_stop(&host, crate::TurnCancelMode::Immediate, None)
             .await
             .expect("the test host resolves the cancellation gate");
     });
@@ -1324,7 +1338,7 @@ pub async fn code_execution_context_stopped_on<'run>(
 /// Build an empty code-execution context carrying the stable parent invocation
 /// that production installs around an `ExecCode` effect.
 pub fn code_execution_context_with_invocation<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     invocation: crate::RuntimeInvocation,
 ) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
@@ -1336,7 +1350,7 @@ pub fn code_execution_context_with_invocation<'run>(
 /// Build a code-execution context with a concrete tool surface and the stable
 /// parent invocation production installs around an `ExecCode` effect.
 pub fn code_execution_context_with_tool_provider_catalog_and_invocation<'run>(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
     invocation: crate::RuntimeInvocation,
@@ -1356,10 +1370,10 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation<'run>(
 pub fn code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation<
     'run,
 >(
-    ports: impl Into<TestExecutionPorts<'run>>,
+    ports: impl Into<TestExecutionPorts>,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
-    effect_controller: crate::ScopedEffectController<'run>,
+    effect_controller: crate::ActorContext,
     invocation: crate::RuntimeInvocation,
 ) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
@@ -1404,7 +1418,7 @@ fn build_atomic_tool_dispatch<'run>(
 /// Execute a recorded tool-intent drain through the production process-command
 /// route while retaining a small, backend-neutral differential-test surface.
 pub async fn execute_tool_intents_with_services(
-    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    scoped_effect_controller: crate::ActorContext,
     processes: Arc<dyn crate::ProcessService>,
     session_id: &SessionId,
     tool_call_id: &crate::ToolCallId,
@@ -1426,7 +1440,7 @@ pub async fn execute_tool_intents_with_services(
 /// Durable-adapter tests use this narrow seam to prove replay refusal before
 /// trigger-store ingestion.
 pub async fn execute_tool_intents_with_services_and_trigger_router(
-    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    scoped_effect_controller: crate::ActorContext,
     processes: Arc<dyn crate::ProcessService>,
     trigger_router: crate::TriggerRouter,
     process_engines: crate::ProcessEngineRegistry,
@@ -1449,7 +1463,7 @@ pub async fn execute_tool_intents_with_services_and_trigger_router(
 /// Execute a recorded tool-intent drain through the production process-command
 /// route and notify a test hook after a child Start has committed.
 pub async fn execute_tool_intents_with_services_and_hook(
-    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    scoped_effect_controller: crate::ActorContext,
     processes: Arc<dyn crate::ProcessService>,
     session_id: &SessionId,
     tool_call_id: &crate::ToolCallId,
@@ -1469,7 +1483,7 @@ pub async fn execute_tool_intents_with_services_and_hook(
 }
 
 async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
-    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    scoped_effect_controller: crate::ActorContext,
     processes: Arc<dyn crate::ProcessService>,
     // The trigger router, with the engines that hold the revisions its
     // registrations commit (ADR 0113 §3.4).
@@ -1526,11 +1540,9 @@ pub fn process_engine_run_context_for_validation(
             Default::default(),
         ))
         .expect("test protocol session builds");
-    let scoped_effect_controller = backend
-        .effect_host()
-        .scoped_static(crate::AdmittedScope::process(process_id.clone()))
-        .expect("valid process scope")
-        .expect("the backend's effect host lends a static controller");
+    let scoped_effect_controller = crate::ActorContext::detached(backend.clone())
+        .scoped(crate::AdmittedScope::process(process_id.clone()))
+        .expect("valid process scope");
     let execution_context = crate::ProcessExecutionContext::default()
         .with_execution_write_authority(crate::ProcessExecutionWriteAuthority::invocation(
             process_id.clone(),
@@ -1615,12 +1627,6 @@ impl EffectBackedProcessService {
             scope.parent_invocation.clone(),
             &effect_id,
         );
-        let controller = scope.controller();
-        let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
-            controller,
-            scope.effect_controller.admitted_scope().clone(),
-        )
-        .map_err(crate::RuntimeEffectControllerError::from)?;
         let local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
@@ -1632,22 +1638,16 @@ impl EffectBackedProcessService {
             crate::runtime::HostStartAdmission::default(),
         )
         .with_process_env_store(Arc::clone(&self.process_env_store))
-        .with_process_effect_controller(
-            proxy
-                .owned_controller()
-                .expect("effect-task proxy owns its controller"),
-        );
-        let outcome = crate::runtime::effect::drive_effect_controller_task(
-            controller,
-            scoped.execution_scope().clone(),
-            crate::RuntimeEffectEnvelope::new(
-                invocation,
-                crate::RuntimeEffectCommand::process(command),
-            ),
-            local_executor,
-            requests,
-        )
-        .await?;
+        .with_process_effect_controller(scoped.clone());
+        let outcome = scoped
+            .process_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::process(command),
+                ),
+                local_executor,
+            )
+            .await?;
         outcome.into_process().map_err(crate::PluginError::from)
     }
 }

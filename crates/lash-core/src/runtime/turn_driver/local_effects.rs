@@ -1,4 +1,5 @@
 use super::*;
+use crate::ActorContext;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 
@@ -73,7 +74,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // recorded outcome (ADR 0105 §3, FIG-3672 P9). A watch that
                 // gave up is a live fault the engine never records.
                 let control = Arc::clone(&runner.driver.turn_control);
-                let host = Arc::clone(&runner.driver.host.core.control.effect_host);
+                let host = runner.driver.host.core.control.effect_host.clone();
                 let honoured = runner.driver.turn_cancel.is_some();
                 let request = Arc::new((*request).into_request(None, None));
                 let invocation = envelope.invocation.into_runtime_invocation();
@@ -217,7 +218,7 @@ pub(super) fn turn_effect_executor(
     driver: &mut RuntimeTurnDriver<'_>,
     machine: &crate::TurnMachine,
     event_tx: TurnObserver,
-    scoped_effect_controller: ScopedEffectController<'static>,
+    scoped_effect_controller: ActorContext,
     body_replay_key: &str,
 ) -> crate::RuntimeEffectLocalExecutor<'static> {
     let replay_trace = crate::runtime::effect::RuntimeEffectReplayTrace::for_divergence(
@@ -226,6 +227,7 @@ pub(super) fn turn_effect_executor(
         driver.trace_context(machine.protocol_iteration()),
     );
     let owned_driver = RuntimeTurnDriver {
+        run: std::marker::PhantomData,
         tool_run_owner: driver.tool_run_owner.clone(),
         // An effect body takes no boundary of its own, but a cell it runs
         // asks whether its turn may end at one inside it (FIG-4739).
@@ -316,14 +318,12 @@ mod tests {
     #[tokio::test]
     async fn a_checkpoint_body_and_the_driver_mint_distinct_observation_ids() {
         let backend = crate::testing::sqlite_recording_backend().await;
-        let scoped = backend
-            .effect_host()
-            .scoped_static(crate::AdmittedScope::turn(
+        let scoped = crate::ActorContext::detached(backend.clone())
+            .scoped(crate::AdmittedScope::turn(
                 crate::SessionId::from("session"),
                 crate::TurnId::from("turn"),
             ))
-            .expect("admit the turn scope")
-            .expect("the backend host lends a static controller");
+            .expect("admit the turn scope");
         let turn_id = crate::TurnId::from("turn");
         let session_id = crate::SessionId::from("session");
 

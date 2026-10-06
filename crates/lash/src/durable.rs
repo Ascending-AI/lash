@@ -3,18 +3,72 @@
 
 use std::sync::Arc;
 
-use lash_core::{Backend, StoreSet};
+/// The durable store port: actors, nodes, epochs, the owner and mailbox
+/// transactions, the domain rows the substrate lanes add, and the substrate's
+/// parameters.
+pub use lash_core::durable_port::*;
+use lash_core::{Backend, ProcessEngine, StoreSet};
+pub use lash_core::{
+    BackendParts, CompletionKeySecrets, DurableBuildError, KeyVersion, NoProjectionProviders,
+    ProjectionProviders, SecretBytes, SecretsRefusal,
+};
 
 /// Builds the one [`Backend`] a [`LashCore`](crate::LashCore) takes: lash's
 /// own durable engine over one store set.
+///
+/// [`build`](Self::build) refuses settings that break a rule, two process
+/// engines of one kind, two projection providers of one type, and a backend
+/// without completion secrets.
 pub struct DurableBackendBuilder {
     stores: Arc<dyn StoreSet>,
+    settings: DurableSettings,
+    secrets: Option<CompletionKeySecrets>,
+    engines: Vec<Arc<dyn ProcessEngine>>,
+    #[cfg(feature = "rlm")]
+    providers: Vec<Arc<dyn lashlang::ProjectionProvider>>,
 }
 
 impl DurableBackendBuilder {
-    /// A builder of the durable backend over `stores`.
+    /// A builder of the durable backend over `stores`, with the default
+    /// settings, no engines and no providers.
     pub fn new(stores: Arc<dyn StoreSet>) -> Self {
-        Self { stores }
+        Self {
+            stores,
+            settings: DurableSettings::default(),
+            secrets: None,
+            engines: Vec::new(),
+            #[cfg(feature = "rlm")]
+            providers: Vec::new(),
+        }
+    }
+
+    /// The substrate's parameters; [`build`](Self::build) validates them.
+    #[must_use]
+    pub fn config(mut self, settings: DurableSettings) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    /// The keys completion keys are signed with. Required.
+    #[must_use]
+    pub fn completion_secrets(mut self, secrets: CompletionKeySecrets) -> Self {
+        self.secrets = Some(secrets);
+        self
+    }
+
+    /// A host process engine; one per kind.
+    #[must_use]
+    pub fn process_engine(mut self, engine: Arc<dyn ProcessEngine>) -> Self {
+        self.engines.push(engine);
+        self
+    }
+
+    /// A projection provider; one per projection type.
+    #[cfg(feature = "rlm")]
+    #[must_use]
+    pub fn projection_provider(mut self, provider: Arc<dyn lashlang::ProjectionProvider>) -> Self {
+        self.providers.push(provider);
+        self
     }
 
     /// The durable backend over this builder's store set.
@@ -22,15 +76,35 @@ impl DurableBackendBuilder {
     /// # Errors
     /// [`DurableBuildError`] when the backend cannot be assembled.
     pub fn build(self) -> Result<Backend, DurableBuildError> {
-        let Self { stores: _stores } = self;
-        todo!("I0 (FIG-5194): assemble the durable Backend over its store set")
+        Backend::assemble(BackendParts {
+            #[cfg(feature = "rlm")]
+            providers: projection_catalog(self.providers)?,
+            #[cfg(not(feature = "rlm"))]
+            providers: Arc::new(NoProjectionProviders),
+            stores: self.stores,
+            settings: self.settings,
+            secrets: self.secrets,
+            engines: self.engines,
+        })
     }
 }
 
-/// Why [`DurableBackendBuilder::build`] refused. I0 (FIG-5194) replaces it
-/// with the pinned enum.
-#[derive(Debug, thiserror::Error)]
-#[error("{message}")]
-pub struct DurableBuildError {
-    message: String,
+/// The catalog of `providers`, refusing two of one type.
+#[cfg(feature = "rlm")]
+fn projection_catalog(
+    providers: Vec<Arc<dyn lashlang::ProjectionProvider>>,
+) -> Result<Arc<dyn lash_core::ProjectionProviders>, DurableBuildError> {
+    if providers.is_empty() {
+        return Ok(Arc::new(NoProjectionProviders));
+    }
+    let mut catalog = lashlang::ProjectionCatalog::new();
+    for provider in providers {
+        let projection = provider.projection_type();
+        catalog
+            .register(provider)
+            .map_err(|_| DurableBuildError::DuplicateProvider {
+                projection: projection.as_str().to_owned(),
+            })?;
+    }
+    Ok(Arc::new(catalog))
 }

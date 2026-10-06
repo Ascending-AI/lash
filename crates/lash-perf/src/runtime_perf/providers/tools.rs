@@ -1,7 +1,7 @@
 use super::*;
 
 impl BenchmarkEchoTool {
-    pub(crate) fn new(completion_resolver: Arc<dyn lash_core::EffectHost>) -> Self {
+    pub(crate) fn new(completion_resolver: lash::runtime::ActorContext) -> Self {
         Self {
             completion_resolver,
             completion_witness: crate::runtime_perf::smoke::completion_witness(),
@@ -10,7 +10,7 @@ impl BenchmarkEchoTool {
     }
 
     pub(crate) fn with_settlement_control(
-        completion_resolver: Arc<dyn lash_core::EffectHost>,
+        completion_resolver: lash::runtime::ActorContext,
         settlement_control: Arc<BenchmarkSettlementControl>,
     ) -> Self {
         Self {
@@ -211,7 +211,7 @@ impl ToolProvider for BenchmarkEchoTool {
             "benchmark_slow" => execute_benchmark_slow(call).await,
             "benchmark_async" => {
                 execute_benchmark_async(
-                    Arc::clone(&self.completion_resolver),
+                    self.completion_resolver.clone(),
                     self.settlement_control.clone(),
                     self.completion_witness.clone(),
                     call,
@@ -474,7 +474,7 @@ async fn execute_benchmark_slow(call: lash_core::ToolCall<'_>) -> ToolOutcome {
 }
 
 async fn execute_benchmark_async(
-    completion_resolver: Arc<dyn lash_core::EffectHost>,
+    completion_resolver: lash::runtime::ActorContext,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
     completion_witness: Option<Arc<crate::runtime_perf::smoke::CompletionWitness>>,
     call: lash_core::ToolCall<'_>,

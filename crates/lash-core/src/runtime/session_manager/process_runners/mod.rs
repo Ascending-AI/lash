@@ -6,15 +6,30 @@ mod control;
 mod runner;
 mod session;
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "L6 (FIG-5175) drives engine processes by advance and runs their steps on this dispatch wiring; ProcessEngine::run, its only caller, is deleted (I0)"
+    )
+)]
 pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContext<'run> {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "L6 (FIG-5175) drives engine processes by advance and runs their steps on this dispatch wiring; ProcessEngine::run, its only caller, is deleted (I0)"
+    )
+)]
 impl<'run> ProcessRunContext<'run> {
     pub(in crate::runtime::session_manager::process_runners) fn builder(
         services: &RuntimeSessionServices,
     ) -> ProcessRunContextBuilder<'_, 'run> {
         ProcessRunContextBuilder {
+            run: std::marker::PhantomData,
             services,
             tool_surface: None,
             scoped_effect_controller: None,
@@ -37,16 +52,26 @@ impl<'run> ProcessRunContext<'run> {
     }
 }
 
+#[expect(
+    dead_code,
+    reason = "L6 (FIG-5175) drives engine processes by advance and runs their steps on this dispatch wiring; ProcessEngine::run, its only caller, is deleted (I0)"
+)]
 pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContextBuilder<'a, 'run> {
     services: &'a RuntimeSessionServices,
     tool_surface: Option<crate::plugin::ResolvedToolSurface>,
-    scoped_effect_controller: Option<crate::ScopedEffectController<'run>>,
+    scoped_effect_controller: Option<crate::ActorContext>,
     causal_invocation: Option<crate::RuntimeInvocation>,
     cancellation: tokio_util::sync::CancellationToken,
     process_lineage: Option<crate::ProcessLineage>,
     process_originator: Option<crate::ProcessOriginator>,
+    /// The lifetime this value is bound to; the context it carries is `'static`.
+    pub(crate) run: std::marker::PhantomData<&'run ()>,
 }
 
+#[expect(
+    dead_code,
+    reason = "L6 (FIG-5175) drives engine processes by advance and runs their steps on this dispatch wiring; ProcessEngine::run, its only caller, is deleted (I0)"
+)]
 impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
     pub(in crate::runtime::session_manager::process_runners) fn tool_surface(
         mut self,
@@ -66,7 +91,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
 
     pub(in crate::runtime::session_manager::process_runners) fn scoped_effect_controller(
         mut self,
-        scoped_effect_controller: crate::ScopedEffectController<'run>,
+        scoped_effect_controller: crate::ActorContext,
     ) -> Self {
         self.scoped_effect_controller = Some(scoped_effect_controller);
         self

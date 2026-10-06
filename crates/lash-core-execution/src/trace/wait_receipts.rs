@@ -1,9 +1,10 @@
 //! Wait resolution is owned by its SQL business receipt, including a fully
 //! replayed final wait. A journal answer carries data, never an emission right.
+use crate::ActorContext;
 use crate::store::{EngineWaitKind, WaitRequestReceipt, WaitResolutionReceipt};
 use crate::{
     ProcessCommand, RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectOutcome, ScopedEffectController,
+    RuntimeEffectOutcome,
 };
 use lash_trace::{
     TraceDurableWaitResolution, TraceEvent, TraceRecordIdentity, TraceTransitionKind,
@@ -18,7 +19,7 @@ fn encoding_error(error: serde_json::Error) -> RuntimeEffectControllerError {
 }
 impl WaitBoundary {
     pub(crate) async fn begin(
-        controller: &ScopedEffectController<'_>,
+        controller: &ActorContext,
         envelope: &RuntimeEffectEnvelope,
     ) -> Result<Option<Self>, RuntimeEffectControllerError> {
         let kind = match &envelope.command {
@@ -59,7 +60,7 @@ impl WaitBoundary {
             runtime.emitter().emit(
                 receipt.permit().as_ref(),
                 scope,
-                controller.controller().attempt_observation().as_ref(),
+                None,
                 || TraceRecordIdentity::Wait {
                     wait_id: receipt.record.wait_id.clone(),
                     transition: TraceTransitionKind::WaitStarted,

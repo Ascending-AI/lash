@@ -1,3 +1,4 @@
+use crate::ActorContext;
 use crate::ProcessId;
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
@@ -33,7 +34,7 @@ pub(crate) struct RecordedTurnCancel {
     observed: Arc<std::sync::atomic::AtomicBool>,
     control: Option<Arc<crate::runtime::turn_control::ActiveTurnControl>>,
     /// The deployment host a recorded step body watches the gate pair over.
-    host: Option<Arc<dyn crate::EffectHost>>,
+    host: Option<ActorContext>,
     /// Cooperative cancellation for recorded tool bodies, fired with the turn fact.
     lent: Option<CancellationToken>,
 }
@@ -289,7 +290,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let invocation = self.language_runtime_invocation(&effect_id);
         self.dispatch
             .effect_controller
-            .execute_effect(
+            .vm_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::LanguageRuntimeValue { operation },
@@ -324,7 +325,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let invocation = self.deferred_resolution_invocation(&effect_id);
         self.dispatch
             .effect_controller
-            .execute_effect(
+            .vm_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::LanguageRuntimeValue { operation },
@@ -356,7 +357,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let invocation = self.deferred_resolution_invocation(&key);
         self.dispatch
             .effect_controller
-            .execute_effect(
+            .vm_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::LanguageRuntimeValue {
@@ -393,7 +394,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let expected_operation = operation.clone();
         self.dispatch
             .effect_controller
-            .execute_effect(
+            .vm_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::LanguageRuntimeValue { operation },
@@ -678,7 +679,6 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         self.dispatch
             .effect_controller
-            .controller()
             .record_process_drive_step(name, step)
             .await
     }
@@ -692,7 +692,6 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Result<bool, crate::RuntimeEffectControllerError> {
         self.dispatch
             .effect_controller
-            .controller()
             .observe_process_cancel(&self.cancellation_token.clone().unwrap_or_default())
             .await
     }
@@ -1170,7 +1169,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         let key = self
             .dispatch
             .effect_controller
-            .controller()
             .await_event_key(
                 &crate::ExecutionScope::process(process_id),
                 crate::AwaitEventWaitIdentity::process_signal(
@@ -1199,7 +1197,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = self
             .dispatch
             .effect_controller
-            .execute_effect(
+            .wait_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::AwaitEvent { key },
@@ -1260,29 +1258,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             self.parent_invocation.clone(),
             &effect_id,
         );
-        let controller = self.dispatch.effect_controller.controller();
         let scoped = self.dispatch.effect_controller.clone();
-        #[expect(
-            clippy::expect_used,
-            reason = "`EffectTaskController::scoped` returns a proxy that owns the controller it was just built around"
-        )]
-        let (owned_controller, task_requests): (
-            Arc<dyn crate::RuntimeEffectController>,
-            Option<crate::runtime::effect::EffectControllerTaskRequests>,
-        ) = if let Some(owned) = scoped.owned_controller() {
-            (owned, None)
-        } else {
-            let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
-                controller,
-                scoped.admitted_scope().clone(),
-            )?;
-            (
-                proxy
-                    .owned_controller()
-                    .expect("effect-task proxy owns its controller"),
-                Some(requests),
-            )
-        };
         let envelope = crate::RuntimeEffectEnvelope::new(
             invocation,
             crate::RuntimeEffectCommand::process(command),
@@ -1309,19 +1285,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             crate::runtime::HostStartAdmission::default(),
         )
         .with_process_attachments(Arc::clone(self.attachment_store.referrers()))
-        .with_process_effect_controller(owned_controller);
-        let outcome = if let Some(task_requests) = task_requests {
-            crate::runtime::effect::drive_effect_controller_task(
-                controller,
-                scoped.execution_scope().clone(),
-                envelope,
-                local_executor,
-                task_requests,
-            )
-            .await?
-        } else {
-            controller.execute_effect(envelope, local_executor).await?
-        };
+        .with_process_effect_controller(scoped.clone());
+        let outcome = scoped.process_effect(envelope, local_executor).await?;
         match outcome.into_process()? {
             crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
             other => Err(crate::RuntimeEffectControllerError::new(
@@ -1370,7 +1335,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = self
             .dispatch
             .effect_controller
-            .execute_effect(
+            .wait_effect(
                 crate::RuntimeEffectEnvelope::new(invocation, command),
                 crate::RuntimeEffectLocalExecutor::sleep_under(
                     &self.turn_cancel_wait(cancellation.clone()),
@@ -1453,7 +1418,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         );
         self.dispatch
             .effect_controller
-            .execute_effect(
+            .tool_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
                     crate::RuntimeEffectCommand::Trigger {

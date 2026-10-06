@@ -5,7 +5,7 @@ use lashlang::testing::ast_builders as b;
 
 pub async fn process_event_host_failure_stops_execution(
     backend: &lash_core::Backend,
-    scoped: lash_core::ScopedEffectController<'_>,
+    scoped: lash_core::ActorContext,
 ) {
     Box::pin(crate::process::process_event_host_failure_stops_execution(
         backend, scoped,
@@ -16,7 +16,7 @@ pub async fn process_event_host_failure_stops_execution(
 /// A real worker-backed process must return the run guard's typed failure.
 pub async fn process_shutdown_preserves_typed_failures(
     backend: &lash_core::Backend,
-    scoped: lash_core::ScopedEffectController<'_>,
+    scoped: lash_core::ActorContext,
 ) {
     use lash_core::ProcessEngine as _;
 
@@ -128,6 +128,7 @@ pub async fn process_shutdown_preserves_typed_failures(
         );
         let error = Box::pin(crate::process::run_lashlang_process(
             engine,
+            &scoped,
             context,
             serde_json::to_value(&input).expect("payload"),
         ))

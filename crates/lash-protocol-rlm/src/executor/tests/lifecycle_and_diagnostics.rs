@@ -325,14 +325,11 @@ pub(super) async fn foreground_trace_carries_the_enclosing_restate_process_invoc
     .bind_attempt(2);
     // The trace identity reads the context alone and the cell never runs, so
     // the process scope needs no journaling host.
-    let controller: Arc<dyn lash_core::RuntimeEffectController> =
-        Arc::new(lash_core::testing::UnavailableEffectController);
+    let controller = lash_core::ActorContext::unavailable();
     let process_controller = || {
-        lash_core::ScopedEffectController::shared(
-            Arc::clone(&controller),
-            lash_core::AdmittedScope::process(process_id.clone()),
-        )
-        .expect("process scope")
+        controller
+            .scoped(lash_core::AdmittedScope::process(process_id.clone()))
+            .expect("process scope")
     };
     let mut input = lash_core::TurnInput::text("run the RLM cell");
     lash_core::core_internal::attach_process_invocation_correlation(
@@ -371,8 +368,7 @@ pub(super) async fn foreground_trace_carries_the_enclosing_restate_process_invoc
     // The trace identity reads the context alone; the cell never runs, so
     // the context needs no host.
     let non_process_context = lash_core::testing::TestExecutionContextBuilder::over_controller(
-        Arc::new(lash_core::testing::UnavailableEffectController)
-            as Arc<dyn lash_core::RuntimeEffectController>,
+        lash_core::ActorContext::unavailable(),
     )
     .runtime_parent_invocation(lash_core::testing::exec_code_invocation(
         "rlm-session",

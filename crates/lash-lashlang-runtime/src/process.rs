@@ -146,8 +146,12 @@ pub(crate) fn validate_lashlang_process_for_run(
     })
 }
 
+/// Run a lashlang process body to its end under `cx`, its process's context.
+/// L6 (FIG-5175) drives the engine by `advance` instead, and L7b (FIG-5198)
+/// rebuilds resume on snapshots; until then nothing calls this but tests.
 pub async fn run_lashlang_process(
     mut engine: LashlangProcessEngine,
+    cx: &lash_core::ActorContext,
     mut context: lash_core::ProcessEngineRunContext<'_>,
     payload: serde_json::Value,
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
@@ -171,7 +175,7 @@ pub async fn run_lashlang_process(
         })?;
     engine.workers = recovery.service().clone();
     let result = Box::pin(run_lashlang_process_scoped(
-        engine, context, payload, handover, ledger,
+        engine, cx, context, payload, handover, ledger,
     ))
     .await;
     recovery.settle().await.map_err(|error| {
@@ -186,13 +190,13 @@ pub async fn run_lashlang_process(
 )]
 async fn run_lashlang_process_scoped(
     engine: LashlangProcessEngine,
+    _cx: &lash_core::ActorContext,
     context: lash_core::ProcessEngineRunContext<'_>,
     payload: serde_json::Value,
     handover: Option<lash_core::SegmentHandover>,
     worker_recovery: WorkerRecoveryLedger,
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
     let is_initial_segment = handover.is_none();
-    let segment_controller = context.scoped_effect_controller();
     let phase_probe = context.turn_phase_probe();
     let segment = context
         .execution_context()
@@ -477,7 +481,6 @@ async fn run_lashlang_process_scoped(
                     &artifact,
                     &input,
                     execution_bounds,
-                    segment_controller.controller(),
                     &host,
                     (segment_state, current_program_hash),
                 )
@@ -568,7 +571,6 @@ async fn execute_lashlang(
     artifact: &lash_vm_client::InspectedArtifact,
     input: &LashlangProcessInput,
     bounds: lashlang::ExecutionBounds,
-    controller: &dyn lash_core::RuntimeEffectController,
     host: &LashlangProcessHost<'_>,
     segment: (Option<LashlangSegmentState>, String),
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
@@ -607,16 +609,9 @@ async fn execute_lashlang(
             ))
         }
     };
-    let progress = std::sync::Mutex::new(lash_core::SegmentProgress::default());
-    let reason = std::sync::Mutex::new(None);
-    let boundary = || {
-        let mut progress = progress.lock_recover();
-        progress.effects_executed += 1;
-        let next = controller.wants_segment_boundary(&progress);
-        let wanted = next.is_some();
-        *reason.lock_recover() = next;
-        wanted
-    };
+    // No context asks for a segment boundary (I0, FIG-5194): a segment
+    // suspends only when its guest hands over.
+    let boundary = || false;
     let run = crate::WorkerRun {
         service: workers,
         host,
@@ -671,10 +666,7 @@ async fn execute_lashlang(
         .into(),
         lash_vm_broker::BrokeredEnd::Suspended { checkpoint } => {
             hold_segment_definitions(&host.ctx, checkpoint.vm.definition_ids()).await?;
-            let boundary_reason = reason
-                .lock_recover()
-                .take()
-                .unwrap_or(lash_core::BoundaryReason::HandOver);
+            let boundary_reason = lash_core::BoundaryReason::HandOver;
             host.ctx
                 .capture_tool_run(boundary_reason)
                 .await

@@ -1,22 +1,24 @@
-//! The one value a runtime takes its persistence ports and effect host from:
-//! one effect engine over one store set (ADR 0104, B2).
+//! The one value a runtime takes its persistence ports from: the durable
+//! backend over one store set (ADR 0132 §1; S9 of I0, FIG-5194).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::engine::{BuildGeneration, EngineGeneration, GenerationRebound, GenerationUnbound};
+use lash_durable::{
+    DurableConfig, DurableConfigError, DurableError, DurableSettings, DurableStore,
+};
+
+use crate::runtime::actor::projection::ProjectionProviders;
 use crate::{
-    AttachmentStore, Clock, DeploymentStore, EffectHost, ModuleArtifactStore,
-    ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
-    SessionWorkEngine, TriggerStore,
+    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessContinuationStore,
+    ProcessExecutionEnvStore, ProcessRegistry, TriggerStore,
 };
 
 /// The identity of one store set: the storage it names, such as a SQLite
 /// location or a PostgreSQL catalog. Stable for the life of that storage
 /// and distinct between any two.
 ///
-/// It names storage only. An engine's effect authority is the engine's own
-/// and is never compared with it: both are fixed when the engine is built
-/// over its store set (ADR 0104, section 2).
+/// It names storage only.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StoreBindingId(Arc<str>);
 
@@ -36,204 +38,273 @@ impl std::fmt::Display for StoreBindingId {
     }
 }
 
-/// One effect engine: the effect host that journals a runtime's effects, the
-/// work drivers that run its processes and queued work, and the store set it
-/// was built over (ADR 0104, section 2).
-///
-/// No engine operation takes a store set: the engine already holds the one
-/// it was built over, and every port a [`Backend`] hands out derives from it.
-pub trait EffectEngine: Send + Sync {
-    /// The store set this engine was built over.
-    fn stores(&self) -> Arc<dyn StoreSet>;
-
-    /// The host that journals and replays this engine's effects.
-    fn effect_host(&self) -> Arc<dyn EffectHost>;
-
-    /// The drain generation of the build this engine runs on (FIG-3795): the
-    /// digest of the drain-policy durable formats, the journal-logic epoch
-    /// and the ordered plugin composition, which the core computes once its
-    /// plugins are registered and binds here (FIG-4744). Journal-bearing
-    /// services are routed by it, and drain status (FIG-3799) reads it.
-    ///
-    /// Required, with no default, for the same reason as
-    /// [`Self::process_work`]: a wrapper that silently answered for its inner
-    /// engine would name the wrong build on a generation-routed lane.
-    fn generation(&self) -> &EngineGeneration;
-
-    /// The engine that executes the store set's background processes:
-    /// Restate's process workflow, or a wiring over
-    /// [`NoProcessWork`](crate::NoProcessWork) for an engine that runs none.
-    ///
-    /// Required, with no default: a wrapper that forgot to forward it would
-    /// answer for an engine that is not the one running the processes.
-    fn process_work(&self) -> ProcessWorkWiring;
-
-    /// The engine that runs the store set's session shifts (FIG-3600):
-    /// Restate's `SessionShifts`, or [`NoSessionWork`](crate::NoSessionWork)
-    /// for an engine that executes no sessions. Nothing works a session in
-    /// process (ADR 0104).
-    ///
-    /// Required, with no default, for the same reason as
-    /// [`Self::process_work`]: a wrapper that forgot to forward it would
-    /// answer for an engine that is not the one running the sessions.
-    fn session_work(&self) -> Arc<dyn SessionWorkEngine>;
-
-    /// The engine's retirement evidence (FIG-4454): the deployments that
-    /// serve a generation's lanes and the unfinished invocations still pinned
-    /// to them, which a generation's drain status waits for. An engine that keeps no deployments answers
-    /// [`NoDeployments`](crate::store::fleet_finalize::NoDeployments).
-    ///
-    /// Required, with no default, for the same reason as
-    /// [`Self::process_work`]: a wrapper that forgot to forward it would
-    /// report a drained generation while its engine still owes a drain.
-    fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry>;
+/// Why a durable backend was not built.
+#[derive(Debug, thiserror::Error)]
+pub enum DurableBuildError {
+    /// No completion secrets were configured: host-resolvable wait keys
+    /// cannot be minted or verified, and there is no default.
+    #[error("the durable backend needs completion secrets; there is no default")]
+    MissingCompletionSecrets,
+    /// Two process engines declare one kind.
+    #[error("two process engines declare kind `{kind}`")]
+    DuplicateEngine {
+        /// The kind.
+        kind: String,
+    },
+    /// Two projection providers answer one type.
+    #[error("two projection providers answer type `{projection}`")]
+    DuplicateProvider {
+        /// The type.
+        projection: String,
+    },
+    /// The substrate parameters break a rule.
+    #[error("invalid durable configuration: {0}")]
+    InvalidConfig(#[from] DurableConfigError),
 }
 
-/// The one value a runtime takes every port from: one effect engine, and
-/// through it the store set it was built over.
+/// What a durable backend is assembled from.
+pub struct BackendParts {
+    /// The store set.
+    pub stores: Arc<dyn StoreSet>,
+    /// The substrate parameters, validated by assembly.
+    pub settings: DurableSettings,
+    /// The completion secrets; required.
+    pub secrets: Option<crate::runtime::actor::waits::CompletionKeySecrets>,
+    /// The host process engines, one per kind.
+    pub engines: Vec<Arc<dyn crate::ProcessEngine>>,
+    /// The projection providers' catalog.
+    pub providers: Arc<dyn ProjectionProviders>,
+}
+
+/// The one value a runtime takes every port from: the store set, its
+/// durable store, the substrate's parameters, the completion secrets, the
+/// host process engines and the projection providers (ADR 0132 §1).
 ///
-/// It is the unit ADR 0102 and ADR 0104 rule on: no API assembles ports from
-/// different substrates by hand. Every accessor hands out a handle on the
-/// engine's or its store set's one instance of that port, so two calls reach
-/// the same state. Cloning shares the engine.
+/// It is the unit ADR 0102 rules on: no API assembles ports from different
+/// substrates by hand. Every accessor hands out a handle on the store set's
+/// one instance of that port, so two calls reach the same state. Cloning
+/// shares it. There is no engine trait object: the durable engine is lash's
+/// own, over this store set.
 #[derive(Clone)]
 pub struct Backend {
-    engine: Arc<dyn EffectEngine>,
+    inner: Arc<BackendInner>,
+}
+
+struct BackendInner {
+    stores: Arc<dyn StoreSet>,
+    /// The store set's durable store, taken on first use: a test store set
+    /// that serves no durable store is never asked for one.
+    durable: std::sync::OnceLock<Arc<dyn DurableStore>>,
+    config: DurableConfig,
+    secrets: crate::runtime::actor::waits::CompletionKeySecrets,
+    engines: BTreeMap<String, Arc<dyn crate::ProcessEngine>>,
+    providers: Arc<dyn ProjectionProviders>,
 }
 
 impl Backend {
-    /// The backend over `engine`.
-    pub fn new(engine: Arc<dyn EffectEngine>) -> Self {
-        Self { engine }
-    }
-
-    /// The engine every port of this backend derives from.
-    pub fn engine(&self) -> &Arc<dyn EffectEngine> {
-        &self.engine
-    }
-
-    /// The store set the engine was built over.
+    /// Assemble a durable backend from `parts`.
     ///
-    /// Prefer [`Backend`]'s own port accessors: an engine that runs its own
-    /// processes answers [`Self::process_registry`] with its process-work
-    /// wiring's registry, so `stores().process_registry()` reaches a second,
-    /// undecorated handle.
+    /// # Errors
+    ///
+    /// [`DurableBuildError`]: invalid settings, duplicate engines or
+    /// providers, then missing completion secrets.
+    pub fn assemble(parts: BackendParts) -> Result<Self, DurableBuildError> {
+        let config = parts.settings.validate()?;
+        let mut engines = BTreeMap::new();
+        for engine in parts.engines {
+            let kind = engine.kind().to_owned();
+            if engines.insert(kind.clone(), engine).is_some() {
+                return Err(DurableBuildError::DuplicateEngine { kind });
+            }
+        }
+        let providers = parts.providers;
+        let mut seen = std::collections::BTreeSet::new();
+        for projection in providers.projection_types() {
+            if !seen.insert(projection.clone()) {
+                return Err(DurableBuildError::DuplicateProvider { projection });
+            }
+        }
+        let secrets = parts
+            .secrets
+            .ok_or(DurableBuildError::MissingCompletionSecrets)?;
+        Ok(Self {
+            inner: Arc::new(BackendInner {
+                stores: parts.stores,
+                durable: std::sync::OnceLock::new(),
+                config,
+                secrets,
+                engines,
+                providers,
+            }),
+        })
+    }
+
+    /// A backend over `stores` with the default settings, testing completion
+    /// secrets, no engines and no projection providers.
+    #[cfg(any(test, feature = "testing"))]
+    #[expect(
+        clippy::expect_used,
+        reason = "the default settings validate and an empty registration has no duplicate"
+    )]
+    #[must_use]
+    pub fn for_testing(stores: Arc<dyn StoreSet>) -> Self {
+        Self::assemble(BackendParts {
+            stores,
+            settings: DurableSettings::default(),
+            secrets: Some(crate::runtime::actor::waits::CompletionKeySecrets::for_testing()),
+            engines: Vec::new(),
+            providers: Arc::new(crate::runtime::actor::projection::NoProjectionProviders),
+        })
+        .expect("a testing backend assembles")
+    }
+
+    /// This backend over `stores` instead, with the same configuration,
+    /// secrets, engines and providers: what a test that decorates store
+    /// ports builds.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn over_stores(&self, stores: Arc<dyn StoreSet>) -> Self {
+        Self {
+            inner: Arc::new(BackendInner {
+                stores,
+                durable: std::sync::OnceLock::new(),
+                config: self.inner.config,
+                secrets: self.inner.secrets.clone(),
+                engines: self.inner.engines.clone(),
+                providers: Arc::clone(&self.inner.providers),
+            }),
+        }
+    }
+
+    /// The store set.
     pub fn stores(&self) -> Arc<dyn StoreSet> {
-        self.engine.stores()
+        Arc::clone(&self.inner.stores)
+    }
+
+    /// The durable store every owner and mailbox commit goes through: the
+    /// store set's.
+    pub fn durable(&self) -> &Arc<dyn DurableStore> {
+        self.inner
+            .durable
+            .get_or_init(|| self.inner.stores.durable_store())
+    }
+
+    /// The substrate's parameters.
+    pub fn config(&self) -> &DurableConfig {
+        &self.inner.config
+    }
+
+    /// The completion secrets wait keys are minted and verified under.
+    pub fn completion_secrets(&self) -> &crate::runtime::actor::waits::CompletionKeySecrets {
+        &self.inner.secrets
+    }
+
+    /// The host process engine of `kind`.
+    pub fn process_engine(&self, kind: &str) -> Option<&Arc<dyn crate::ProcessEngine>> {
+        self.inner.engines.get(kind)
+    }
+
+    /// The projection providers.
+    pub fn projection_providers(&self) -> &Arc<dyn ProjectionProviders> {
+        &self.inner.providers
+    }
+
+    /// Wake `session`'s actor from outside a store transaction: a mailbox
+    /// transaction with one wake.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal.
+    pub async fn wake_session(&self, _session: &crate::SessionId) -> Result<(), DurableError> {
+        todo!("L3s (FIG-5196): wake a session actor in a mailbox transaction")
+    }
+
+    /// Wake `process`'s actor from outside a store transaction: a mailbox
+    /// transaction with one wake.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal.
+    pub async fn wake_process(&self, _process: &crate::ProcessId) -> Result<(), DurableError> {
+        todo!("L6 (FIG-5175): wake a process actor in a mailbox transaction")
     }
 
     /// The identity of the storage this backend's sessions, processes and
     /// artifacts live in.
     pub fn binding_identity(&self) -> StoreBindingId {
-        self.stores().binding_identity().clone()
+        self.inner.stores.binding_identity().clone()
     }
 
-    /// The clock the store set stamps from and the effect host sleeps on.
+    /// The clock the store set stamps from.
     pub fn clock(&self) -> Arc<dyn Clock> {
-        self.stores().clock()
+        self.inner.stores.clock()
     }
 
     /// The factory that creates and reopens this backend's session stores.
     pub fn session_store_factory(&self) -> Arc<dyn DeploymentStore> {
-        self.stores().session_store_factory()
+        self.inner.stores.session_store_factory()
     }
 
     pub fn attachment_referrers(&self) -> Arc<dyn crate::store::AttachmentReferrers> {
-        self.stores().attachment_referrers()
+        self.inner.stores.attachment_referrers()
     }
 
-    /// The host that journals and replays this backend's effects.
-    pub fn effect_host(&self) -> Arc<dyn EffectHost> {
-        self.engine.effect_host()
-    }
-
-    /// The generation the engine runs on ([`EffectEngine::generation`]).
-    ///
-    /// # Errors
-    /// [`GenerationUnbound`] until a core built over this backend has bound
-    /// the generation of its plugin composition.
-    pub fn build_generation(&self) -> Result<&BuildGeneration, GenerationUnbound> {
-        self.engine.generation().get()
-    }
-
-    /// Bind the generation a core computed from its registered plugins
-    /// ([`EngineGeneration::bind`]).
-    ///
-    /// # Errors
-    /// [`GenerationRebound`] when the engine already runs another
-    /// generation.
-    pub fn bind_build_generation(
-        &self,
-        composed: &BuildGeneration,
-    ) -> Result<(), GenerationRebound> {
-        self.engine.generation().bind(composed)
-    }
-
-    /// The durable registry of this backend's background processes: the one
-    /// the engine's process work is wired over, so the runtime and the engine
-    /// see one registry.
+    /// The durable registry of this backend's background processes.
     pub fn process_registry(&self) -> Arc<dyn ProcessRegistry> {
-        Arc::clone(self.engine.process_work().registry())
+        self.inner.stores.process_registry()
     }
 
     /// The durable trigger subscriptions and occurrences.
     pub fn trigger_store(&self) -> Arc<dyn TriggerStore> {
-        self.stores().trigger_store()
+        self.inner.stores.trigger_store()
     }
 
     /// The store of process execution environments.
     pub fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
-        self.stores().process_env_store()
+        self.inner.stores.process_env_store()
     }
 
     /// The store of turns' recorded preparation.
     pub fn turn_prelude_store(&self) -> Arc<dyn crate::TurnPreludeStore> {
-        self.stores().turn_prelude_store()
+        self.inner.stores.turn_prelude_store()
     }
 
     /// Retained results published by process-terminal sources.
     pub fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore> {
-        self.stores().tool_material_store()
+        self.inner.stores.tool_material_store()
     }
 
     /// The store of immutable process-definition descriptors.
     pub fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
-        self.stores().definition_store()
+        self.inner.stores.definition_store()
     }
 
     /// Parent-owned worker accounting on this backend.
     pub fn worker_recovery(&self) -> Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore> {
-        self.stores().worker_recovery()
+        self.inner.stores.worker_recovery()
     }
 
     /// The attachment byte store sessions write through.
     pub fn attachment_store(&self) -> Arc<dyn AttachmentStore> {
-        self.stores().attachment_store()
+        self.inner.stores.attachment_store()
     }
 
     /// The Lashlang module-artifact store, beside the sessions that write
-    /// its artifacts: an RLM host reads its artifacts from the storage that
-    /// reopens its sessions, and the artifact cleanup sweep reaches the store
-    /// the sessions wrote.
+    /// its artifacts.
     pub fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore> {
-        self.stores().module_artifacts()
+        self.inner.stores.module_artifacts()
     }
 
     /// The recovery leader lease over the store set's storage.
     pub fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
-        self.stores().recovery_leader()
-    }
-
-    /// The engine's retirement evidence (FIG-4454).
-    pub fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry> {
-        self.engine.deployment_registry()
+        self.inner.stores.recovery_leader()
     }
 
     /// The store set's build-generation drain marks and work reads.
     pub fn generation_drain(
         &self,
     ) -> Arc<dyn crate::store::generation_drain::GenerationDrainStore> {
-        self.stores().generation_drain()
+        self.inner.stores.generation_drain()
     }
 
     /// The store set's obligation ledger of `kind`.
@@ -241,41 +312,19 @@ impl Backend {
         &self,
         kind: crate::store::ObligationKind,
     ) -> Arc<dyn crate::store::ObligationLedger> {
-        self.stores().obligation_ledger(kind)
+        self.inner.stores.obligation_ledger(kind)
     }
 
     /// The store set's artifact-cleanup ledger (ADR 0113 §2.5).
     pub fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger> {
-        self.stores().artifact_cleanup()
+        self.inner.stores.artifact_cleanup()
     }
 
     /// The store set's session-delete reads (ADR 0109 §4).
     pub fn session_delete_ledger(
         &self,
     ) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {
-        self.stores().session_delete_ledger()
-    }
-
-    /// See [`EffectEngine::process_work`].
-    pub fn process_work(&self) -> ProcessWorkWiring {
-        self.engine.process_work()
-    }
-
-    /// See [`EffectEngine::session_work`].
-    pub fn session_work(&self) -> Arc<dyn SessionWorkEngine> {
-        self.engine.session_work()
-    }
-}
-
-impl<E: EffectEngine + 'static> From<Arc<E>> for Backend {
-    fn from(engine: Arc<E>) -> Self {
-        Self::new(engine)
-    }
-}
-
-impl<E: EffectEngine + 'static> From<E> for Backend {
-    fn from(engine: E) -> Self {
-        Self::new(Arc::new(engine))
+        self.inner.stores.session_delete_ledger()
     }
 }
 
@@ -288,13 +337,16 @@ impl std::fmt::Debug for Backend {
     }
 }
 
-/// Every persistence port of one SQL substrate: the storage an effect
-/// engine is built over (ADR 0104, section 1).
+/// Every persistence port of one SQL substrate: the storage the durable
+/// backend is built over.
 ///
-/// A store set opens no effect journal of its own, so nothing sweeps an idle
-/// one. Every accessor hands out a handle on the store set's one instance of
+/// Every accessor hands out a handle on the store set's one instance of
 /// that port.
 pub trait StoreSet: Send + Sync {
+    /// The durable store over this store set's database: actors, nodes,
+    /// mail and the domain rows of ADR 0132.
+    fn durable_store(&self) -> Arc<dyn DurableStore>;
+
     /// The identity of this store set's storage.
     fn binding_identity(&self) -> &StoreBindingId;
 

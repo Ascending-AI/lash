@@ -434,9 +434,7 @@ pub async fn live_and_durable_queue_paths_share_results_and_capability_refusals(
     let runtime = crate::RuntimeHandle::new(world.runtime(None).await);
     let store = crate::store::SessionStore::new(world.store().await, world.session_id.clone())
         .expect("binding view");
-    let backend =
-        crate::conformance::LawBackend::over_stores(tier.stores.clone(), tier.effect_host.clone())
-            .into_backend();
+    let backend = crate::conformance::LawBackend::over_stores(tier.stores.clone()).into_backend();
     let ops = crate::facade_support::DurableSessionOps::new(
         world.session_id.clone(),
         lash_core::shift::IngressRelay::over_backend(
@@ -828,18 +826,14 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals_on
                 .expect("branch journal"),
             "shared history never shares a journal address"
         );
-        let envelope = super::super::effect_host::journaled_conformance_envelope(
-            &scope,
-            "same-effect",
-            "same-replay-key",
-        );
+        let envelope = journaled_conformance_envelope(&scope, "same-effect", "same-replay-key");
         let counter = executed.clone();
         let expected = serde_json::json!(session);
         tier.runner.run_turn(crate::admit(scope), Arc::new(move |controller| {
             let (envelope, counter, expected) = (envelope.clone(), counter.clone(), expected.clone());
             Box::pin(async move {
                 let output = expected.clone();
-                let result = controller.execute_effect(envelope, crate::RuntimeEffectLocalExecutor::testing(move |_| async move {
+                let result = controller.vm_effect(envelope, crate::RuntimeEffectLocalExecutor::testing(move |_| async move {
                     counter.fetch_add(1, Ordering::SeqCst);
                     Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: output })
                 })).await.expect("journaled effect in its own handler");
@@ -854,4 +848,28 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals_on
         "both journals execute their first admission"
     );
     tier.runner.scenario_finished().await;
+}
+
+/// A journaled language-value envelope under `execution_scope`.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: a constant replay key is a valid address"
+)]
+pub(crate) fn journaled_conformance_envelope(
+    execution_scope: &crate::ExecutionScope,
+    effect_id: &str,
+    operation: &str,
+) -> crate::RuntimeEffectEnvelope {
+    let replay_key = format!("journaled-replay:{effect_id}");
+    crate::RuntimeEffectEnvelope::new(
+        crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(execution_scope.clone(), replay_key)
+                .expect("valid journaled conformance address"),
+            crate::RuntimeAttribution::for_turn("journaled-session", "journaled-turn", 7, 0),
+            format!("journaled:{effect_id}"),
+        ),
+        crate::RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: operation.to_string(),
+        },
+    )
 }

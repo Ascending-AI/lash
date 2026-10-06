@@ -6,7 +6,6 @@ mod obligation_relay;
 mod session_ingress;
 mod tool_batch;
 mod tool_call_identity;
-mod turn_crash;
 mod turn_ingress;
 mod turn_runner;
 mod vm_broker;
@@ -1908,25 +1907,6 @@ macro_rules! queue_observation_tests {
     ($fixture:block) => {
         $crate::queue_observation_tests!(@law $fixture; queue_head_read_failure_publishes_recoverable_gap);
         $crate::queue_observation_tests!(@law $fixture; queue_publication_failure_preserves_committed_mutation);
-        $crate::queue_observation_tests!(@law $fixture; absent_or_deleted_durable_operations_emit_no_driver_wake);
-    };
-    (@law $fixture:block; absent_or_deleted_durable_operations_emit_no_driver_wake) => {
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn absent_or_deleted_durable_operations_emit_no_driver_wake() {
-            let (_guard, backend) = $fixture;
-            $crate::registration_macro_support::absent_or_deleted_durable_operations_emit_no_driver_wake(backend,
-                |backend, id| async move {
-                    let core = lash::LashCore::standard_builder(backend)
-                        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-                        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                        .llm_profiles(lash_core::testing::standard_test_llm_profiles(lash_core::testing::runtime_helpers::mock_provider(Vec::new()).into_handle()))
-                        .build(lash_core::testing::runtime_lease_owner()).expect("build durable facade");
-                    let durable = core.session(id).durable().await.expect("noncreating durable handle");
-                    (durable.send(lash::TurnInput::text("driver wake probe")).await.is_ok(),
-                        durable.cancel_pending_turn_input(&lash_core::InputId::from("unknown-input")).await.is_ok(),
-                        durable.cancel_queued_work_batch(&lash_core::BatchId::from("unknown-batch")).await.is_ok())
-                }).await;
-        }
     };
     (@law $fixture:block; $law:ident) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

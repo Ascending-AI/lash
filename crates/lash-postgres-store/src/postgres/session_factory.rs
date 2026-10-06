@@ -8,13 +8,6 @@ mod store;
 
 #[async_trait::async_trait]
 impl lash_core_execution::DeploymentStore for PostgresStore {
-    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
-        *self
-            .turn_cancel_closure_owner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::downgrade(effect_host));
-    }
-
     async fn artifact_frame_is_retained(
         &self,
         frame: &lash_core_execution::FrameEnvironmentId,
@@ -47,12 +40,6 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         scope: &lash_core_execution::ExecutionScope,
     ) -> Result<(), StoreError> {
         crate::turn_cancel_closure::retire_scope(&self.pool, &self.fence, scope).await?;
-        if let Some(owner) = self.turn_cancel_closure_owner_binding()? {
-            owner
-                .release(scope)
-                .await
-                .map_err(|error| StoreError::Backend(error.to_string()))?;
-        }
         Ok(())
     }
 

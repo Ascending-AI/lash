@@ -64,7 +64,7 @@ pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteSt
 )]
 pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
     let stores = sqlite_memory_store_set().await;
-    lash_conformance::recording_backend_over(stores)
+    lash_conformance::backend_over(stores)
 }
 
 /// A backend over a fresh SQLite memory store set stamping from `clock`,
@@ -78,7 +78,7 @@ pub(crate) async fn store_backend_with_clock(
             .await
             .expect("open a SQLite memory store set"),
     );
-    lash_conformance::recording_backend_over(stores)
+    lash_conformance::backend_over(stores)
 }
 
 /// One backend with some of its ports decorated by a test that observes
@@ -94,15 +94,6 @@ impl DecoratedBackend {
     pub(crate) fn over(inner: lash_core::Backend) -> Self {
         Self {
             layered: lash_core::testing::runtime_helpers::LayeredBackend::over(inner),
-        }
-    }
-
-    pub(crate) fn effect_host(
-        self,
-        decorate: impl FnOnce(Arc<dyn lash_core::EffectHost>) -> Arc<dyn lash_core::EffectHost>,
-    ) -> Self {
-        Self {
-            layered: self.layered.map_effect_host(decorate),
         }
     }
 

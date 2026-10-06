@@ -549,7 +549,7 @@ lash_conformance::observer_intent_tests!({
     let (attachments, stores) = pg_law_stores(&storage);
     (
         (database_fixture, attachments),
-        lash_conformance::recording_backend_over(stores),
+        lash_conformance::backend_over(stores),
     )
 });
 
@@ -565,7 +565,7 @@ lash_conformance::queue_observation_tests!({
     let (attachments, stores) = pg_law_stores(&storage);
     (
         (database_fixture, attachments),
-        lash_conformance::recording_backend_over(stores),
+        lash_conformance::backend_over(stores),
     )
 });
 

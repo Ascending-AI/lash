@@ -28,6 +28,7 @@
 //! on purpose), so a tier that runs an attempt more than once before it ends
 //! (the replaying Restate double) replays it to the same point.
 
+use crate::ActorContext;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -50,7 +51,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     ConformanceTurnAttempt, ConformanceTurnEnd, EffectAddress, ExecutionScope, RuntimeAttribution,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 
 mod frames;
@@ -254,7 +255,7 @@ impl Scenario {
     }
 
     /// The identities the run's calls take under `scoped`'s turn.
-    pub(crate) fn identities(&self, scoped: &ScopedEffectController<'_>) -> CodeCallIdentities {
+    pub(crate) fn identities(&self, scoped: &ActorContext) -> CodeCallIdentities {
         self.identities.clone().unwrap_or_else(|| {
             CodeCallIdentities::cell(
                 crate::EffectOpener::for_scope(scoped.admitted_scope()).unwrap_or_else(|error| {
@@ -265,7 +266,7 @@ impl Scenario {
         })
     }
 
-    fn context(&self, scoped: &ScopedEffectController<'_>) -> AdmittedContext {
+    fn context(&self, scoped: &ActorContext) -> AdmittedContext {
         AdmittedContext {
             owner: self
                 .owner
@@ -281,7 +282,7 @@ impl Scenario {
     /// for its first worker.
     pub(crate) async fn run(
         &self,
-        scoped: ScopedEffectController<'_>,
+        scoped: ActorContext,
         phase: Phase,
         fault: Option<Fault>,
     ) -> Result<BrokeredEnd, BrokerFailure> {
@@ -386,8 +387,8 @@ impl Scenario {
 
 /// The law's parent effects: every admitted operation journals on the
 /// tier's controller.
-struct TierEffects<'run> {
-    scoped: ScopedEffectController<'run>,
+struct TierEffects {
+    scoped: ActorContext,
     probe: Arc<Probe>,
     phase: Phase,
     /// The run's own pool: a nested run checks its worker out of it.
@@ -396,7 +397,7 @@ struct TierEffects<'run> {
     stop: CancellationToken,
 }
 
-impl TierEffects<'_> {
+impl TierEffects {
     fn envelope(
         &self,
         replay_key: String,
@@ -444,7 +445,7 @@ impl TierEffects<'_> {
         let tool_name = tool.to_string();
         let outcome = self
             .scoped
-            .execute_effect(
+            .tool_effect(
                 envelope,
                 RuntimeEffectLocalExecutor::testing(move |envelope| async move {
                     let output = body(&envelope);
@@ -559,7 +560,7 @@ impl TierEffects<'_> {
 }
 
 #[async_trait::async_trait]
-impl ParentEffects for TierEffects<'_> {
+impl ParentEffects for TierEffects {
     async fn retain(
         &self,
         operation: &AdmittedOperation,
@@ -645,7 +646,7 @@ impl ParentEffects for TierEffects<'_> {
     }
 }
 
-impl TierEffects<'_> {
+impl TierEffects {
     /// The id the admission record of an operation's command journals under:
     /// the record is the parent's, not a call of the program's.
     fn scoped_command_id(&self, operation: &AdmittedOperation) -> lash_sansio::ToolCallId {

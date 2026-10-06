@@ -27,7 +27,7 @@ impl LashRuntime {
     pub(in crate::runtime) async fn execute_recovered_follow_on(
         &mut self,
         recovery: crate::store::FollowOnRecovery,
-        controller: crate::ScopedEffectController<'_>,
+        controller: crate::ActorContext,
         sinks: &crate::runtime::shift::ShiftSinks<'_>,
         fence: ShiftFence,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {

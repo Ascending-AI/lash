@@ -4,6 +4,7 @@
 //! gate peeks and the recorded outcomes of its steps (FIG-3672 P9).
 
 use super::*;
+use crate::ActorContext;
 
 struct TurnDriverSessionLoan<'slot, 'run> {
     session: &'slot mut Option<Session>,
@@ -32,23 +33,27 @@ pub(super) struct TurnDriverRemainder {
 pub(in crate::runtime) struct PreparedTurnExecuteContext<'sinks, 'run> {
     pub(in crate::runtime) turn: PreparedLogicalTurn,
     pub(in crate::runtime) sinks: TurnSinks<'sinks>,
-    pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
+    pub(in crate::runtime) scoped_effect_controller: ActorContext,
     pub(in crate::runtime) local_stop: LocalTurnStop,
     pub(in crate::runtime) initial_admissions: LogicalTurnAdmissions,
     pub(in crate::runtime) shift_fence: Option<&'sinks ShiftFence>,
+    /// The lifetime this value is bound to; the context it carries is `'static`.
+    pub(crate) run: std::marker::PhantomData<&'run ()>,
 }
 
 /// The preamble step of the execute phase: the plugin prepare-turn hooks and
 /// the context transform that produce the message sequence the driver runs.
 struct TurnPreambleContext<'preamble, 'run> {
     plugins: &'preamble Arc<crate::PluginSession>,
-    scoped_effect_controller: &'preamble ScopedEffectController<'run>,
+    scoped_effect_controller: &'preamble ActorContext,
     manager: &'preamble Arc<RuntimeSessionServices>,
     messages: crate::MessageSequence,
     turn_policy: &'preamble crate::SessionPolicy,
     effective_protocol_turn_options: &'preamble crate::ProtocolTurnOptions,
     turn_context: &'preamble crate::TurnContext,
     turn_scope_id: &'preamble str,
+    /// The lifetime this value is bound to; the context it carries is `'static`.
+    run: std::marker::PhantomData<&'run ()>,
 }
 
 /// The effect loop's own inputs: the driver, the observer it publishes
@@ -59,7 +64,7 @@ struct TurnEffectLoopContext<'loop_run, 'run> {
     event_tx: TurnObserver,
     protocol_run_offset: usize,
     turn_control: Arc<ActiveTurnControl>,
-    cancel_controller: &'loop_run ScopedEffectController<'run>,
+    cancel_controller: &'loop_run ActorContext,
 }
 
 impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
@@ -76,6 +81,7 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
     )]
     fn reclaim(mut self) -> TurnDriverRemainder {
         let RuntimeTurnDriver {
+            run: std::marker::PhantomData,
             session,
             recorded_assembly,
             turn_pipeline,
@@ -193,6 +199,7 @@ impl LashRuntime {
         context: TurnPreambleContext<'_, '_>,
     ) -> Result<crate::plugin::TurnPreparation, RuntimeError> {
         let TurnPreambleContext {
+            run: std::marker::PhantomData,
             plugins,
             scoped_effect_controller,
             manager,
@@ -254,6 +261,7 @@ impl LashRuntime {
         turn_graph_appends: TurnGraphAppendDraft,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let PreparedTurnExecuteContext {
+            run: std::marker::PhantomData,
             turn:
                 PreparedLogicalTurn {
                     trace_metadata,
@@ -280,9 +288,8 @@ impl LashRuntime {
             scoped_effect_controller.for_physical_turn(trace_turn_id.clone());
         let turn_observer = logical_observer.for_turn(&trace_turn_id);
         let observer = &turn_observer;
-        let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-        let turn_control_binding =
-            turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
+        let turn_control_host = self.host.core.control.effect_host.clone();
+        let turn_control_binding = turn_control_binding(&scoped_effect_controller).await?;
         let turn_control_resolver = turn_control_binding.resolver();
         let turn_control = Arc::new(
             ActiveTurnControl::new(
@@ -298,7 +305,7 @@ impl LashRuntime {
         let _local_stop_forwarding = local_stop
             .forward_to(
                 Arc::clone(&turn_control),
-                Arc::clone(&turn_control_host),
+                turn_control_host.clone(),
                 self.services.store.clone(),
             )
             .await;
@@ -326,6 +333,7 @@ impl LashRuntime {
         let history_len = messages.len();
         let mut prepared = self
             .prepare_turn_preamble(TurnPreambleContext {
+                run: std::marker::PhantomData,
                 plugins: &plugins,
                 scoped_effect_controller: &scoped_effect_controller,
                 manager: &manager,
@@ -459,6 +467,7 @@ impl LashRuntime {
             .take()
             .expect("lash runtime session must be available");
         let driver = Box::new(RuntimeTurnDriver {
+            run: std::marker::PhantomData,
             tool_run_owner: None,
             session,
             policy: resolved_turn_policy,

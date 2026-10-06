@@ -1,4 +1,5 @@
 use super::*;
+use crate::ActorContext;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -7,8 +8,7 @@ struct ProcessCommandRunner<'scope> {
     current: &'scope CurrentOwnerCapability,
     registry: Arc<dyn crate::ProcessRegistry>,
     parent_invocation: Option<crate::RuntimeInvocation>,
-    effect_controller: &'scope dyn crate::RuntimeEffectController,
-    scoped_effect_controller: crate::runtime::ScopedEffectController<'scope>,
+    scoped_effect_controller: crate::ActorContext,
     turn_cancellation: Option<crate::ProcessTurnCancellation>,
 }
 
@@ -21,12 +21,10 @@ impl<'scope> ProcessCommandRunner<'scope> {
         let Some(registry) = current.host.process_registry() else {
             return Err(crate::PluginError::Session(unavailable_message.to_string()));
         };
-        let effect_controller = scope.controller();
         Ok(Self {
             current,
             registry: Arc::clone(registry),
             parent_invocation: scope.parent_invocation.clone(),
-            effect_controller,
             scoped_effect_controller: scope.effect_controller.clone(),
             turn_cancellation: scope.turn_cancellation.clone(),
         })
@@ -63,7 +61,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         // This executor only writes the registry and outbox; asking to admit
         // another journal command here rejects that owner step (FIG-5009).
         let execution = self
-            .local_executor(self.scoped_effect_controller.owned_controller())
+            .local_executor(Some(self.scoped_effect_controller.clone()))
             .into_process()?;
         match execution
             .execute(
@@ -87,7 +85,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
     )]
     fn local_executor(
         &self,
-        owned_controller: Option<Arc<dyn crate::RuntimeEffectController>>,
+        owned_controller: Option<ActorContext>,
     ) -> crate::RuntimeEffectLocalExecutor<'static> {
         let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
@@ -268,10 +266,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the proxy owns its controller and the worker installs its process wiring"
-    )]
     async fn run(
         &self,
         command: crate::ProcessCommand,
@@ -302,48 +296,8 @@ impl<'scope> ProcessCommandRunner<'scope> {
             invocation,
             crate::RuntimeEffectCommand::process(command),
         );
-        let (owned_controller, task_requests): (
-            Arc<dyn crate::RuntimeEffectController>,
-            Option<
-                tokio::sync::mpsc::UnboundedReceiver<
-                    crate::runtime::effect::EffectControllerTaskRequest,
-                >,
-            >,
-        ) = if let Some(owned) = scoped.owned_controller() {
-            (owned, None)
-        } else {
-            let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
-                self.effect_controller,
-                scoped.admitted_scope().clone(),
-            )
-            .map_err(crate::RuntimeEffectControllerError::from)?;
-            (
-                proxy
-                    .owned_controller()
-                    .expect("effect-task proxy owns its controller"),
-                Some(requests),
-            )
-        };
-        let local_executor = self.local_executor(Some(owned_controller));
-        let outcome = if let Some(task_requests) = task_requests {
-            // The effect task hands the command to the raw controller, not
-            // through the scoped one: the command's guard marks it here, so a
-            // served-only command's process command reaches its engine served
-            // only, as through `execute_effect` (FIG-3719, FIG-3725).
-            let local_executor = scoped
-                .guard_local_executor(&envelope, local_executor)
-                .map_err(crate::PluginError::RuntimeEffectController)?;
-            crate::runtime::effect::drive_effect_controller_task(
-                self.effect_controller,
-                scoped.execution_scope().clone(),
-                envelope,
-                local_executor,
-                task_requests,
-            )
-            .await?
-        } else {
-            scoped.execute_effect(envelope, local_executor).await?
-        };
+        let local_executor = self.local_executor(Some(scoped.clone()));
+        let outcome = scoped.process_effect(envelope, local_executor).await?;
         outcome.into_process().map_err(crate::PluginError::from)
     }
 }
