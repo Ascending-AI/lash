@@ -372,27 +372,20 @@ macro_rules! live_fault_park_tests {
 }
 
 /// Register the served-process-start laws (FIG-3779): an RLM cell that
-/// called `agents.spawn` is cut at one point of its process start — after
-/// the start was issued, before its frontier marker, after the marker and
-/// before its registration, after its registration and before its workflow
-/// send — and redriven under a drifted `agents.spawn` binding. A recorded
-/// start is served and the turn completes; one needed live parks with no
-/// process started. The fixture hands back a guard, a prefix, the tier's
-/// effect host, the store set under test, its
-/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) — which must read
-/// its journal's replay keys, cut a turn at a
-/// [`JournalCut`](crate::JournalCut) and run process segments — the RLM
-/// protocol plugin factories, and the [`SubagentFactories`](crate::SubagentFactories)
-/// from the crates above this one.
+/// called `agents.spawn` is cut at one point of its declared process start —
+/// after the start was issued, or after its registration and before its
+/// workflow send — and redriven under a drifted `agents.spawn` binding. The
+/// recorded start is served and the turn completes. The fixture hands back a
+/// guard, a prefix, the tier's effect host, the store set under test, its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) — which must run
+/// process segments — the RLM protocol plugin factories, and the
+/// [`SubagentFactories`](crate::SubagentFactories) from the crates above this
+/// one.
 #[macro_export]
 macro_rules! served_process_start_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::served_process_start_tests!(@law [$(#[$attr])*] $fixture;
             (a_drifted_spawn_whose_start_was_issued_is_served, "served-process-start-issued"));
-        $crate::served_process_start_tests!(@law [$(#[$attr])*] $fixture;
-            (a_drifted_spawn_cut_before_its_start_marker_parks, "served-process-start-before-marker"));
-        $crate::served_process_start_tests!(@law [$(#[$attr])*] $fixture;
-            (a_drifted_spawn_cut_before_its_registration_parks, "served-process-start-before-registration"));
         $crate::served_process_start_tests!(@law [$(#[$attr])*] $fixture;
             (a_drifted_spawn_cut_before_its_send_is_served, "served-process-start-before-send"));
     };

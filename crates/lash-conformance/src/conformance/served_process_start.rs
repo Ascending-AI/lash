@@ -1,5 +1,4 @@
-//! FIG-3779: a drifted binding's recorded process start is served, and only
-//! a start at the live frontier refuses.
+//! FIG-3779: a drifted binding's recorded process start is served.
 //!
 //! One RLM turn runs a cell that calls `agents.spawn` once and finishes with
 //! the child's reply. The child session runs as a process on the tier's
@@ -9,22 +8,14 @@
 //! the cell's `agents.spawn` binding drifted: the call is served only from
 //! the journal.
 //!
-//! A Restate process start journals a frontier marker before it acts, then
-//! registers the process and sends its workflow. Each law cuts the first
-//! attempt at one point of that and redrives it under the drifted binding:
+//! The spawn's start is declared by its recorded attempt and prepared by the
+//! Run (FIG-5009). Each law cuts the first attempt at one point of the start
+//! and redrives it under the drifted binding:
 //!
 //! - after the start was issued (the child is running): the recorded start is
 //!   served and the turn completes with the child's reply;
-//! - before the marker: the start is needed live, so every redrive parks with
-//!   the binding drift and no process started;
-//! - after the marker, before the registration: the marker is served but the
-//!   registry holds no row for it, so the start refuses and records nothing,
-//!   and every redrive parks with no process started;
-//! - after the registration, before the send: the marker is served and the
-//!   row is there, so the start is the recorded one and the turn completes.
-//!
-//! A parked law then restores the capability registry and the turn completes
-//! with exactly one process started.
+//! - after the registration, before the send: the row is there, so the start
+//!   is the recorded one and the turn completes.
 
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
@@ -71,10 +62,6 @@ enum Capabilities {
 enum Cut {
     /// The child is running: the start was issued in full.
     StartIssued,
-    /// Before the start's frontier marker is journaled.
-    BeforeMarker,
-    /// After the marker, before the registry write.
-    BeforeRegistration,
     /// After the registry write, before the workflow send.
     BeforeSend,
 }
@@ -83,16 +70,8 @@ impl Cut {
     fn label(self) -> &'static str {
         match self {
             Self::StartIssued => "issued",
-            Self::BeforeMarker => "marker",
-            Self::BeforeRegistration => "register",
             Self::BeforeSend => "send",
         }
-    }
-
-    /// Whether the start had registered its process when the cut fell, so a
-    /// drifted redrive serves it.
-    fn served(self) -> bool {
-        matches!(self, Self::StartIssued | Self::BeforeSend)
     }
 }
 
@@ -107,7 +86,6 @@ struct SpawnWorld {
     registry: Arc<dyn crate::ProcessRegistry>,
     process_work: crate::ProcessWorkWiring,
     parent_calls: Arc<AtomicUsize>,
-    child_calls: Arc<AtomicUsize>,
     /// Fired by the child's first model call: the start was issued in full.
     child_started: Arc<std::sync::Mutex<Option<crate::ConformanceCrash>>>,
 }
@@ -125,18 +103,15 @@ impl SpawnWorld {
         subagents: SubagentFactories,
     ) -> Self {
         let parent_calls = Arc::new(AtomicUsize::new(0));
-        let child_calls = Arc::new(AtomicUsize::new(0));
         let child_started: Arc<std::sync::Mutex<Option<crate::ConformanceCrash>>> = Arc::default();
         let model = crate::testing::TestProvider::builder()
             .kind("stub")
             .complete({
                 let parent_calls = Arc::clone(&parent_calls);
-                let child_calls = Arc::clone(&child_calls);
                 let child_started = Arc::clone(&child_started);
                 move |request: crate::LlmRequest| {
                     let is_child = format!("{:?}", request.messages).contains(TASK);
                     let text = if is_child {
-                        child_calls.fetch_add(1, Ordering::SeqCst);
                         if let Some(crash) = child_started
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -198,7 +173,6 @@ impl SpawnWorld {
             registry,
             process_work,
             parent_calls,
-            child_calls,
             child_started,
         }
     }
@@ -310,125 +284,6 @@ async fn answer(answers: &mut tokio::sync::mpsc::UnboundedReceiver<Answer>) -> A
         .unwrap_or_else(|| panic!("the tier's runner ran the redrive"))
 }
 
-/// The replay key of the spawn's process start in `session_id`'s turn,
-/// found from a completed probe run of the same turn in a same-length
-/// session: keys spell the session id, so the probe's start key names the
-/// real one once its session id is substituted.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn start_marker_key(
-    world: &SpawnWorld,
-    runner: &Arc<dyn crate::ConformanceTurnRunner>,
-    probe_session: &SessionId,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-) -> String {
-    assert_eq!(
-        probe_session.as_str().len(),
-        session_id.as_str().len(),
-        "same-length session ids"
-    );
-    let store = crate::conformance::law_session_store(world.stores.as_ref(), probe_session).await;
-    let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
-    let probe = attempt(
-        world,
-        probe_session,
-        turn_id,
-        &store,
-        Capabilities::Recorded,
-        Some(answers),
-    );
-    let scope = crate::ExecutionScope::turn(probe_session, turn_id);
-    runner.run_turn(admit(scope.clone()), probe).await;
-    answer(&mut answered)
-        .await
-        .expect("the probe turn completes");
-    let keys = runner
-        .recorded_replay_keys(&scope)
-        .await
-        .expect("the tier reads the replay keys it journaled");
-    let mut markers = keys
-        .iter()
-        .filter(|key| key.contains(":process:start") && key.ends_with(":frontier"));
-    let marker = markers
-        .next()
-        .unwrap_or_else(|| panic!("the probe's spawn journaled its start marker: {keys:#?}"));
-    assert!(
-        markers.next().is_none(),
-        "the probe's turn journaled one start marker: {keys:#?}"
-    );
-    // The start is keyed by its call's intent identity, which spells the
-    // session, so the real session's marker names another start key: find
-    // the call id the probe's key was derived from among the marker's
-    // segments, and re-derive the key under the real session.
-    let key_at = marker
-        .find("process-start-key:")
-        .unwrap_or_else(|| panic!("the marker names its start key: {marker}"));
-    let probe_key_text = marker[key_at..]
-        .splitn(6, ':')
-        .take(5)
-        .collect::<Vec<_>>()
-        .join(":");
-    let probe_key = crate::DERIVED_START_KEYS
-        .parse(&probe_key_text)
-        .unwrap_or_else(|error| panic!("the marker's start key parses: {error}"));
-    // A cell's leaf call id is its `ToolCallId` under the turn's run at
-    // `[code opener, cell, command]` (`LashlangHostIdentities::call_id`, ADR
-    // 0117 §2), and the cell's execution key leads the marker's replay key:
-    // find the execution and ordinal the probe's key was derived from, then
-    // re-derive both under the real session. The start is the call's declared
-    // one, keyed by its intent identity, which the call's first attempt minted
-    // (ADR 0116 §3).
-    let call_id = |session: &SessionId, execution: &str, ordinal: u64| {
-        let opener = crate::EffectOpener::turn(session.clone(), turn_id.clone());
-        let encoding = opener.identity_encoding();
-        opener.tool_call_admission().call_id(&[
-            lash_core::ToolCallPosition::CodeOpener(&encoding),
-            lash_core::ToolCallPosition::CodeCell(execution),
-            lash_core::ToolCallPosition::CodeCommand(ordinal),
-        ])
-    };
-    let call_key = marker[..key_at]
-        .strip_suffix(":process:start:")
-        .unwrap_or_else(|| panic!("the marker names the call's start: {marker}"));
-    // The first attempt is keyed under the call's command by its call id.
-    let start_key = |session: &SessionId, call_id: lash_core::ToolCallId, call_key: &str| {
-        let minting = format!("{call_key}:{call_id}:attempt:1");
-        let identity = crate::rederive_tool_intent_identity(&crate::ToolIntentIdentity {
-            owner: crate::RuntimeOwner::Session(session.clone()),
-            execution_scope_id: turn_id.as_str().to_string(),
-            tool_call_id: call_id,
-            intent_index: 0,
-            replay_key: String::new(),
-            minting_emission_replay_key: Some(minting),
-        });
-        crate::DERIVED_START_KEYS.for_tool_intent(&identity)
-    };
-    let segments = call_key.split(':').collect::<Vec<_>>();
-    let (execution, ordinal) = (1..=segments.len())
-        .map(|end| segments[..end].join(":"))
-        .flat_map(|execution| (0..16_u64).map(move |ordinal| (execution.clone(), ordinal)))
-        .find(|(execution, ordinal)| {
-            start_key(
-                probe_session,
-                call_id(probe_session, execution, *ordinal),
-                call_key,
-            ) == probe_key
-        })
-        .unwrap_or_else(|| panic!("the probe's start key names its cell's call: {marker}"));
-    let real_execution = execution.replace(probe_session.as_str(), session_id.as_str());
-    let real_key = start_key(
-        session_id,
-        call_id(session_id, &real_execution, ordinal),
-        &call_key.replace(probe_session.as_str(), session_id.as_str()),
-    );
-    marker
-        .replace(probe_session.as_str(), session_id.as_str())
-        .replace(probe_key.as_str(), real_key.as_str())
-}
-
 /// Runs the law's first attempt under the recorded capabilities, cut at
 /// `cut`, then one redrive under the drifted ones, and returns its answer.
 async fn cut_then_redrive(
@@ -436,7 +291,7 @@ async fn cut_then_redrive(
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     prefix: &str,
     cut: Cut,
-) -> (SessionId, TurnId, Arc<dyn crate::RuntimeStore>, Answer) {
+) -> (SessionId, Arc<dyn crate::RuntimeStore>, Answer) {
     let turn_id = TurnId::fixture(format!("{prefix}-spawn-turn"));
     let session_id = SessionId::fixture(format!("{prefix}-{}-real", cut.label()));
     let store = crate::conformance::law_session_store(world.stores.as_ref(), &session_id).await;
@@ -458,55 +313,31 @@ async fn cut_then_redrive(
         Capabilities::Drifted,
         Some(answers),
     );
+    let crash = crate::ConformanceCrash::new();
+    let fire = {
+        let crash = crash.clone();
+        Arc::new(move || crash.fire()) as Arc<dyn Fn() + Send + Sync>
+    };
     match cut {
-        Cut::BeforeMarker => {
-            let probe_session = SessionId::fixture(format!("{prefix}-{}-prob", cut.label()));
-            let marker =
-                start_marker_key(world, runner, &probe_session, &session_id, &turn_id).await;
-            runner
-                .run_cut_then_redriven_turn(
-                    admitted.clone(),
-                    crate::JournalCut {
-                        replay_key: marker,
-                        at: crate::JournalCutPoint::BeforeEffect,
-                    },
-                    first,
-                    redrive,
-                )
-                .await;
-        }
-        Cut::StartIssued | Cut::BeforeRegistration | Cut::BeforeSend => {
-            let crash = crate::ConformanceCrash::new();
-            let fire = {
-                let crash = crash.clone();
-                Arc::new(move || crash.fire()) as Arc<dyn Fn() + Send + Sync>
-            };
-            let hold = match cut {
-                Cut::BeforeRegistration => {
-                    Some(crate::testing::RegistrationHoldPoint::BeforeRegistering)
-                }
-                Cut::BeforeSend => Some(crate::testing::RegistrationHoldPoint::AfterRegistering),
-                _ => None,
-            };
-            match hold {
-                Some(point) => world.faults.hold_next_registration(point, fire),
-                // The child's first model call fires the crash: its process
-                // was registered and its workflow sent.
-                None => {
-                    *world
-                        .child_started
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(crash.clone());
-                }
-            }
-            runner
-                .run_turn_until_crash(admitted.clone(), first, crash)
-                .await;
-            runner.run_turn(admitted.clone(), redrive).await;
+        Cut::BeforeSend => world.faults.hold_next_registration(
+            crate::testing::RegistrationHoldPoint::AfterRegistering,
+            fire,
+        ),
+        // The child's first model call fires the crash: its process was
+        // registered and its workflow sent.
+        Cut::StartIssued => {
+            *world
+                .child_started
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(crash.clone());
         }
     }
+    runner
+        .run_turn_until_crash(admitted.clone(), first, crash)
+        .await;
+    runner.run_turn(admitted, redrive).await;
     let turn = answer(&mut answered).await;
-    (session_id, turn_id, store, turn)
+    (session_id, store, turn)
 }
 
 fn assert_finished_with_the_child_reply(cut: Cut, turn: Answer) {
@@ -540,87 +371,16 @@ async fn served_process_start_law(
     cut: Cut,
 ) {
     let world = SpawnWorld::new(effect_host, stores, &runner, rlm, subagents);
-    let (session_id, turn_id, store, turn) = cut_then_redrive(&world, &runner, prefix, cut).await;
-    let children_before_redrive = world.child_calls.load(Ordering::SeqCst);
-    if cut.served() {
-        assert_finished_with_the_child_reply(cut, turn);
-        assert!(
-            store
-                .load_turn_park(&session_id)
-                .await
-                .expect("read the park")
-                .is_none(),
-            "{cut:?}: a served start leaves no park"
-        );
-    } else {
-        let admitted = admit(crate::ExecutionScope::turn(&session_id, &turn_id));
-        let mut turn = Some(turn);
-        for redrive in ["first", "second"] {
-            let error = turn
-                .take()
-                .expect("each redrive answered")
-                .expect_err("a start needed live refuses");
-            assert_eq!(
-                error.code,
-                crate::RuntimeErrorCode::LashlangCellBindingDrift,
-                "{cut:?}, {redrive} redrive: {error:?}"
-            );
-            let park = store
-                .load_turn_park(&session_id)
-                .await
-                .expect("read the park")
-                .expect("the refused turn is parked");
-            let crate::store::ParkReason::BindingDrift { message } = &park.reason else {
-                panic!("{cut:?}: the park names the binding drift: {park:?}");
-            };
-            assert!(
-                message.contains("`agents.spawn`") && message.contains("changed"),
-                "{cut:?}: the park names the drifted binding: {message}"
-            );
-            assert!(
-                world.started(&session_id).await.is_empty(),
-                "{cut:?}, {redrive} redrive: a start needed live registers no process"
-            );
-            if redrive == "first" {
-                let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
-                runner
-                    .run_turn(
-                        admitted.clone(),
-                        attempt(
-                            &world,
-                            &session_id,
-                            &turn_id,
-                            &store,
-                            Capabilities::Drifted,
-                            Some(answers),
-                        ),
-                    )
-                    .await;
-                turn = Some(answer(&mut answered).await);
-            }
-        }
-        assert_eq!(
-            world.child_calls.load(Ordering::SeqCst),
-            children_before_redrive,
-            "{cut:?}: no child ran while the turn was parked"
-        );
-        // Restoring the capabilities runs the start live, once.
-        let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
-        runner
-            .run_turn(
-                admitted,
-                attempt(
-                    &world,
-                    &session_id,
-                    &turn_id,
-                    &store,
-                    Capabilities::Recorded,
-                    Some(answers),
-                ),
-            )
-            .await;
-        assert_finished_with_the_child_reply(cut, answer(&mut answered).await);
-    }
+    let (session_id, store, turn) = cut_then_redrive(&world, &runner, prefix, cut).await;
+    assert_finished_with_the_child_reply(cut, turn);
+    assert!(
+        store
+            .load_turn_park(&session_id)
+            .await
+            .expect("read the park")
+            .is_none(),
+        "{cut:?}: a served start leaves no park"
+    );
     let started = world.started(&session_id).await;
     assert_eq!(
         started.len(),
@@ -656,51 +416,6 @@ pub async fn a_drifted_spawn_whose_start_was_issued_is_served(
         rlm,
         subagents,
         Cut::StartIssued,
-    )
-    .await;
-}
-
-/// Law: a drifted `agents.spawn` cut before its start's frontier marker
-/// needs its start live, so every redrive parks with no process started.
-pub async fn a_drifted_spawn_cut_before_its_start_marker_parks(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
-    subagents: SubagentFactories,
-) {
-    served_process_start_law(
-        prefix,
-        effect_host,
-        stores,
-        runner,
-        rlm,
-        subagents,
-        Cut::BeforeMarker,
-    )
-    .await;
-}
-
-/// Law: a drifted `agents.spawn` cut after its start's marker but before its
-/// registration parks with no process started: a served marker with no row
-/// is not a recorded start.
-pub async fn a_drifted_spawn_cut_before_its_registration_parks(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
-    subagents: SubagentFactories,
-) {
-    served_process_start_law(
-        prefix,
-        effect_host,
-        stores,
-        runner,
-        rlm,
-        subagents,
-        Cut::BeforeRegistration,
     )
     .await;
 }

@@ -13,7 +13,7 @@
 //! # Crashing a turn
 //!
 //! A crash law picks *where* a turn dies; the runner owns *how* it dies and is
-//! recovered, with the tier's own mechanism. Three ways to name the point, each
+//! recovered, with the tier's own mechanism. Two ways to name the point, each
 //! crossed with any runner:
 //!
 //! - **A panic inside the attempt**
@@ -29,9 +29,6 @@
 //!   The law can inspect or change durable state before its next
 //!   [`ConformanceTurnRunner::run_turn`] of the same scope, which is the tier's
 //!   recovery of the crashed turn.
-//! - **A journal cut**
-//!   ([`ConformanceTurnRunner::run_cut_then_redriven_turn`]): the tier cuts the
-//!   attempt at an effect named by its replay key.
 //!
 //! The recovery is the tier's own. In process it is a fresh driver over the
 //! same host and store. On Restate it is a redelivery of the same invocation,
@@ -95,28 +92,6 @@ pub type ConformanceTurnAttempt = Arc<
         + Send
         + Sync,
 >;
-
-/// Where a tier cuts an attempt down, named by the replay key of the effect
-/// it cuts at. Every tier journals lash's effects under their replay keys,
-/// whatever its journal is, so a law states the point once for all tiers and
-/// each tier's runner cuts there with its own crash mechanism: a store fault
-/// in process, a crashed handler on the Restate server double.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JournalCut {
-    pub replay_key: String,
-    pub at: JournalCutPoint,
-}
-
-/// Which side of the effect a [`JournalCut`] falls on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JournalCutPoint {
-    /// The effect ran; the attempt dies before its result is durable, and
-    /// the redrive runs it again.
-    BeforeResult,
-    /// The attempt dies before the effect is journaled at all, and the
-    /// redrive issues it anew.
-    BeforeEffect,
-}
 
 /// The instant a crash law kills a turn's execution: fired from outside the
 /// attempt, at a point the law chose (see the module docs).
@@ -246,24 +221,9 @@ pub trait ConformanceTurnRunner: Send + Sync {
     }
 
     /// The replay keys of every effect the tier journaled for `scope`'s
-    /// turn, or `None` when this runner cannot read them. A law finds the
-    /// key of a [`JournalCut`] here, from a probe run of the same turn.
+    /// turn, or `None` when this runner cannot read them.
     async fn recorded_replay_keys(&self, _scope: &crate::ExecutionScope) -> Option<Vec<String>> {
         None
-    }
-
-    /// Runs one turn across a cut the tier injects: `attempt` runs until the
-    /// tier kills it at `cut`, and the tier then redelivers the same turn to
-    /// `redrive` the way it recovers a crashed turn. Panics when the cut did
-    /// not fire. A runner that cannot cut says so by panicking.
-    async fn run_cut_then_redriven_turn(
-        &self,
-        _admitted: crate::AdmittedScope,
-        cut: JournalCut,
-        _attempt: ConformanceTurnAttempt,
-        _redrive: ConformanceTurnAttempt,
-    ) {
-        panic!("this tier's turn runner cannot cut a turn at {cut:?}");
     }
 
     /// Serves every execution of the segments of the process a start keyed

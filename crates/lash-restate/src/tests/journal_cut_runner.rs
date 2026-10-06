@@ -1,162 +1,12 @@
-//! Journal cuts on the Restate server double: the runner-supplied crash point
-//! of the turn-executing laws that cut a turn at a named effect (FIG-3587).
-//!
-//! lash-restate journals every effect's recorded outcome, and its frontier
-//! marker, as a typed step whose instance is `lash:` plus the replay key, so a
-//! [`JournalCut`] names a run of the invocation's journal. [`JournalCutRunner`] arms the double's crash plan at that run —
-//! before its command is stored for [`JournalCutPoint::BeforeEffect`],
-//! before its result is for [`JournalCutPoint::BeforeResult`] — and lets the
-//! double do what a deployment crash does: drop the handler and retry the
-//! invocation, which replays the journal the crashed attempt left.
-//!
-//! The turn itself runs on the harness's [`LiveTurnRunner`]
-//! (`super::live_turn_probe`) as a crash-then-redrive turn. A crashed
-//! execution never reports, so the cut attempt's factory reports for it: the
-//! execution that retries after the cut fired panics at once, before it
-//! journals anything, which the runner takes as the crashing attempt's crash
-//! and hands the next execution to the redrive.
-
-use std::sync::Arc;
-
-use lash_conformance::{
-    ConformanceTurnAttempt, ConformanceTurnRunner, JournalCut, JournalCutPoint,
-};
-use lash_restate_test::{CrashPoint, CrashRule, RestateTestServer};
-
-/// A turn runner on the server double that also cuts turns and reads the
-/// replay keys the double journaled.
-pub(super) struct JournalCutRunner {
-    inner: Arc<dyn ConformanceTurnRunner>,
-    server: RestateTestServer,
-}
-
-impl JournalCutRunner {
-    pub(super) fn shared(
-        inner: Arc<dyn ConformanceTurnRunner>,
-        server: RestateTestServer,
-    ) -> Arc<dyn ConformanceTurnRunner> {
-        Arc::new(Self { inner, server })
-    }
-}
-
-#[async_trait::async_trait]
-impl ConformanceTurnRunner for JournalCutRunner {
-    async fn await_group_quiescence(&self, group_keys: &[String]) {
-        self.inner.await_group_quiescence(group_keys).await;
-    }
-
-    async fn run_turn(&self, admitted: lash_core::AdmittedScope, attempt: ConformanceTurnAttempt) {
-        self.inner.run_turn(admitted, attempt).await;
-    }
-
-    async fn run_parking_turn_until_rested(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        attempt: ConformanceTurnAttempt,
-    ) -> usize {
-        self.inner
-            .run_parking_turn_until_rested(admitted, attempt)
-            .await
-    }
-
-    async fn run_crashed_then_redriven_turn(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        crashing: ConformanceTurnAttempt,
-        redrive: ConformanceTurnAttempt,
-    ) {
-        self.inner
-            .run_crashed_then_redriven_turn(admitted, crashing, redrive)
-            .await;
-    }
-
-    async fn run_turn_until_crash(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        attempt: ConformanceTurnAttempt,
-        crash: lash_conformance::ConformanceCrash,
-    ) {
-        self.inner
-            .run_turn_until_crash(admitted, attempt, crash)
-            .await;
-    }
-
-    /// The replay keys of every recorded effect and frontier marker the
-    /// double journaled whose key spells `scope`'s session and turn, in
-    /// journal order across invocations.
-    async fn recorded_replay_keys(&self, scope: &lash_core::ExecutionScope) -> Option<Vec<String>> {
-        let lash_core::ExecutionScope::Turn {
-            session_id,
-            turn_id,
-        } = scope
-        else {
-            return None;
-        };
-        let mut keys = Vec::new();
-        for invocation in self.server.invocations() {
-            for entry in self.server.journal(&invocation.id).unwrap_or_default() {
-                if let Some(key) = entry
-                    .name
-                    .as_deref()
-                    .and_then(crate::controller::effect_replay_key)
-                    && key.contains(session_id.as_str())
-                    && key.contains(turn_id.as_str())
-                {
-                    keys.push(key.to_owned());
-                }
-            }
-        }
-        Some(keys)
-    }
-
-    async fn run_cut_then_redriven_turn(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        cut: JournalCut,
-        attempt: ConformanceTurnAttempt,
-        redrive: ConformanceTurnAttempt,
-    ) {
-        let crashes_before = self.server.stats().crashes;
-        let name = crate::controller::effect_journal_name_for_replay_key(&cut.replay_key);
-        self.server.crash_on(CrashRule::new(match cut.at {
-            JournalCutPoint::BeforeEffect => CrashPoint::BeforeRun { name },
-            JournalCutPoint::BeforeResult => CrashPoint::BeforeRunResult { name: Some(name) },
-        }));
-        let server = self.server.clone();
-        let cut_attempt: ConformanceTurnAttempt = Arc::new(move |scoped| {
-            if server.stats().crashes > crashes_before {
-                // The retry after the cut: report the crash for the execution
-                // the double dropped, before journaling anything.
-                return Box::pin(async {
-                    panic!("the journal cut crashed this attempt; the redrive replays its journal")
-                });
-            }
-            attempt(scoped)
-        });
-        self.inner
-            .run_crashed_then_redriven_turn(admitted, cut_attempt, redrive)
-            .await;
-        assert!(
-            self.server.stats().crashes > crashes_before,
-            "the journal cut at {cut:?} fired"
-        );
-    }
-
-    fn process_work(
-        &self,
-        watched: lash_core::WatchedRegistry,
-        worker: lash_core_worker::DurableProcessWorker,
-    ) -> lash_core::ProcessWorkWiring {
-        self.inner.process_work(watched, worker)
-    }
-}
+//! Served process starts on the Restate server double: FIG-3779's
+//! served-process-start laws, and FIG-3719's served-only process start and
+//! sleep outside a Run.
 
 // FIG-3779's served-process-start laws on the server double: a cell's
-// `agents.spawn` is cut at one point of its process start — past the start,
-// before its frontier marker, between the marker and the registry write,
-// between that write and the workflow send — and redriven under a drifted
-// binding; its child session runs in the endpoint's `LashProcessWorkflow` on
-// the law's worker.
+// `agents.spawn` is cut at one point of its declared process start — past the
+// start, or between the registry write and the workflow send — and redriven
+// under a drifted binding; its child session runs in the endpoint's
+// `LashProcessWorkflow` on the law's worker.
 mod served_process_start_on_the_server_double {
     use std::sync::Arc;
 
@@ -181,10 +31,7 @@ mod served_process_start_on_the_server_double {
 
     lash_conformance::served_process_start_tests!({
         let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
-        let server = harness
-            .server_double()
-            .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
-        let runner = super::JournalCutRunner::shared(harness.turn_runner(), server);
+        let runner = harness.turn_runner();
         let host = harness.endpoint_host();
         let prefix: &'static str =
             Box::leak(format!("restate-spawn-{}", harness.run_nonce()).into_boxed_str());

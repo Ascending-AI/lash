@@ -52,16 +52,6 @@ pub(crate) fn is_recorded_effect_journal_name(journal_name: &str) -> bool {
         .is_some()
 }
 
-/// The journal name of the step a replay key names: a `…:frontier` key names
-/// its effect's frontier marker, any other key its recorded effect.
-#[cfg(test)]
-pub(crate) fn effect_journal_name_for_replay_key(replay_key: &str) -> String {
-    match replay_key.strip_suffix(":frontier") {
-        Some(effect_key) => live_frontier::frontier_journal_name(&format!("lash:{effect_key}")),
-        None => crate::JournalStepKind::RecordedEffect.journal_name(&format!("lash:{replay_key}")),
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn process_drive_journal_name(instance: &str) -> String {
     crate::journal_step_name(&DriveProcessStep(instance.to_owned()))

@@ -107,45 +107,6 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
         }
         Some(keys)
     }
-
-    /// Arms the double's crash plan at the run the cut names — before its
-    /// command is stored, or before its result is — and lets the double do
-    /// what a deployment crash does: drop the handler of whichever invocation
-    /// journals that run (the turn's own, or a group child's) and retry it,
-    /// replaying its journal. Every execution of the turn before the cut
-    /// fired runs `attempt`, every one after it `redrive`.
-    async fn run_cut_then_redriven_turn(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        cut: lash_conformance::JournalCut,
-        attempt: lash_conformance::ConformanceTurnAttempt,
-        redrive: lash_conformance::ConformanceTurnAttempt,
-    ) {
-        let server = self.backend.server().clone();
-        let crashes_before = server.stats().crashes;
-        let name = crate::controller::effect_journal_name_for_replay_key(&cut.replay_key);
-        server.crash_on(lash_restate_test::CrashRule::new(match cut.at {
-            lash_conformance::JournalCutPoint::BeforeEffect => {
-                lash_restate_test::CrashPoint::BeforeRun { name }
-            }
-            lash_conformance::JournalCutPoint::BeforeResult => {
-                lash_restate_test::CrashPoint::BeforeRunResult { name: Some(name) }
-            }
-        }));
-        let crashed = server.clone();
-        let cut_attempt: lash_conformance::ConformanceTurnAttempt = Arc::new(move |scoped| {
-            if crashed.stats().crashes > crashes_before {
-                redrive(scoped)
-            } else {
-                attempt(scoped)
-            }
-        });
-        self.run_turn(admitted, cut_attempt).await;
-        assert!(
-            server.stats().crashes > crashes_before,
-            "the journal cut at {cut:?} fired"
-        );
-    }
 }
 
 /// The RLM protocol with its process lifecycle on, over `backend`'s
