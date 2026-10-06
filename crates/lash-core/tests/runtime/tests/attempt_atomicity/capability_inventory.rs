@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 // capability cannot accidentally satisfy coverage.
 pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptContext<'_>) {
     let _ = attempt.session_id();
+    let _ = attempt.fleet_format();
     let _ = attempt.owner();
     let _ = attempt.execution_scope_id();
     let _ = attempt.start_cx();
