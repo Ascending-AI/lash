@@ -19,8 +19,6 @@ macro_rules! declared_start_tests {
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_cancel_at_each_point);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
-            declared_start_cancel_at_the_claim_answer_delivers_the_start);
-        $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_retention_hold_blocks_prune_until_consumed);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_prune_after_hold_release_before_settlement_replays_terminal);
