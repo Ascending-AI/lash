@@ -365,11 +365,13 @@ the last two take `{seed, questions, types}` (score also takes `answer`).
   completed passage has lookback 0. Order uses the earlier person's passage;
   an unvisited negative uses its parent branchpoint. These numbers appear in
   evidence only, never question text.
-- The scorer accepts exactly a JSON object and scores each key independently.
+- The scorer extracts the first JSON object, including inside fences or prose,
+  and scores each key independently.
   Each answer must equal the expected JSON value, including type, spelling,
   case and whitespace. Missing, wrongly typed or malformed values score zero;
-  fenced JSON, trailing prose, numeric strings, fractions, booleans and yes/no
-  aliases are rejected. Additional keys do not change the score. Buckets are
+  numeric strings, fractions, booleans and yes/no aliases are rejected.
+  The per-run `envelope_not_strict_json` flag reports fences/prose separately
+  from memory accuracy. Additional keys do not change the score. Buckets are
   0–3, 4–7 and 8+.
 - An unfinished round invalidates the run and is never scored. Every failed
   turn must be explained from the preserved response and workbench log.

@@ -68,6 +68,13 @@ def final_prompt(questions):
             "\n".join(f"{q['id']}: {q['prompt']}" for q in questions))
 
 
+def strict_json_envelope(answer):
+    try:
+        return isinstance(json.loads(answer), dict)
+    except (ValueError, TypeError):
+        return False
+
+
 def run(args):
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -131,6 +138,7 @@ def run(args):
         "rounds": rounds, "final": final, "totals": totals,
         "score": final["score"] if final else None, "stopped": stopped,
         "valid": stopped is None,
+        "envelope_not_strict_json": not strict_json_envelope(final["reply"]) if final else None,
     }
     (args.out / "results.json").write_text(json.dumps(results, indent=2))
     print(json.dumps({"totals": totals, "score": results["score"], "stopped": stopped}, indent=2))

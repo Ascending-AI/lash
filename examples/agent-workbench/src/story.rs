@@ -511,9 +511,13 @@ fn questions(
     Ok(result)
 }
 fn score(answer: &str, questions: &[Question]) -> Value {
-    let object = serde_json::from_str::<Value>(answer)
-        .ok()
-        .filter(Value::is_object);
+    let object = answer.match_indices('{').find_map(|(start, _)| {
+        serde_json::Deserializer::from_str(&answer[start..])
+            .into_iter::<Value>()
+            .next()
+            .and_then(Result::ok)
+            .filter(Value::is_object)
+    });
     let mut by_type: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut by_lookback: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut correct_count = 0;
@@ -858,14 +862,18 @@ mod tests {
             .map(|q| (q.id.clone(), q.expected.clone()))
             .collect();
         let answer = Value::Object(exact).to_string();
-        assert_eq!(score(&answer, &qs)["correct"], json!(qs.len()));
+        for envelope in [
+            answer.clone(),
+            format!("```json\n{answer}\n```"),
+            format!("Answers: {answer}\nExplanation after the answers."),
+        ] {
+            assert_eq!(score(&envelope, &qs)["correct"], json!(qs.len()));
+        }
         for malformed in [
             "garbage".to_owned(),
             "{not json}".to_owned(),
             "[]".to_owned(),
             "{}".to_owned(),
-            format!("```json\n{answer}\n```"),
-            format!("{answer} trailing"),
         ] {
             assert_eq!(score(&malformed, &qs)["correct"], json!(0));
         }
