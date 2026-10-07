@@ -1,9 +1,10 @@
-"""Extract per-step relay prompts, cells, tool calls and provider usage from a workbench trace.
+"""Extract per-step relay prompts, programs, tool calls and provider usage from a workbench trace.
 
 usage: extract_live.py <trace.jsonl> <out-dir> [turn_id ...]
 Writes stepN-prompt.json (the full LlmRequest), stepN-response.json, a
-readable transcript.md with each step's context blocks, harness message,
-reply and tool calls, and usage.md: one row per provider request with its
+readable transcript.md with each step's context entries, step message,
+reply (an execute_code program or the plain-text answer) and tool calls, and
+usage.md: one row per provider request with its step, its reply shape, its
 cache breakpoints and the provider-reported uncached input, cache-read,
 cache-write and output tokens, and the upstream provider OpenRouter routed it
 to. The usage table is also printed.
@@ -40,26 +41,27 @@ for line in trace.open():
         req = e["request"]
         (out / f"step{step}-prompt.json").write_text(json.dumps(req, indent=1))
         msgs = req.get("messages", [])
-        harness = "".join(texts(msgs[-1])) if msgs else ""
+        # A relay request: the context message (its constant header, then one
+        # `[i]` block per entry), then the step message.
+        context = texts(msgs[0])[1:] if len(msgs) == 2 else []
+        message = "".join(texts(msgs[-1])) if msgs else ""
+        n = re.match(r'<step n="(\d+)">', message)
         rows[call] = {
             "step": step,
             "turn": (ctx.get("turn_id") or "")[-8:],
             "iteration": ctx.get("protocol_iteration"),
-            "entries": len(texts(msgs[0])) if len(msgs) == 2 else 0,
+            "entries": len(context),
             "breakpoints": " ".join(breakpoints(msgs)) or "-",
             "system": prompt_hash.get((ctx.get("turn_id"), ctx.get("protocol_iteration")), "?"),
-            "harness": harness.split("\n", 1)[0].replace("=== HARNESS · ", "").replace(" ===", ""),
+            "harness": n[1] if n else "?",
+            "tools": ",".join(t.get("name", "?") for t in req.get("tools", [])) or "-",
         }
         order.append(call)
-        md.append(f"\n## Step {step} (turn {ctx.get('turn_id')}, iteration {ctx.get('protocol_iteration')})\n")
-        if len(msgs) == 2:
-            md.append("### Context blocks (as committed by the previous `next`)\n")
-            for i, text in enumerate(texts(msgs[0])):
-                md.append(f"{i}. {text}")
-        else:
-            md.append("### Context blocks\n(empty)")
+        md.append(f"\n## Request {step} (turn {ctx.get('turn_id')}, iteration {ctx.get('protocol_iteration')})\n")
+        md.append("### Context (as committed by the previous `next`)\n")
+        md.append("\n".join(context) if context else "(empty)")
         md.append(f"\nCache breakpoints (message.block): {rows[call]['breakpoints']}")
-        md.append("\n### Harness message\n```\n" + harness + "\n```")
+        md.append("\n### Step message\n```\n" + message + "\n```")
     elif t == "provider_stream_event" and call in rows:
         # OpenRouter names the upstream that served the call on its chunks.
         for upstream in re.findall(r'"provider":\s*"([^"]+)"', json.dumps(e.get("event", {})).replace('\\"', '"')):
@@ -80,19 +82,38 @@ for line in trace.open():
         body = strip(e)
         (out / f"step{step}-response.json").write_text(json.dumps(body, indent=1))
         resp = body.get("response", body)
-        reply = resp.get("text", "") if isinstance(resp, dict) else ""
-        md.append("\n### Model reply\n```\n" + (reply or json.dumps(body)[:2000]) + "\n```")
+        parts = resp.get("parts", []) if isinstance(resp, dict) else []
+        prose = "".join(p.get("text", "") for p in parts if p.get("type") == "text")
+        calls = [p for p in parts if p.get("type") == "tool_call"]
+        programs = []
+        for p in calls:
+            try:
+                programs.append(json.loads(p.get("input_json", "{}")).get("code", ""))
+            except ValueError:
+                programs.append(p.get("input_json", ""))
+        if call in rows:
+            rows[call]["reply"] = "work" if calls else "answer"
+            rows[call]["cost"] = (body.get("provider_usage") or {}).get("cost")
+        if calls:
+            if prose.strip():
+                md.append("\n### Text beside the call (dropped)\n```\n" + prose + "\n```")
+            for program in programs:
+                md.append("\n### execute_code program\n```typescript\n" + program + "\n```")
+        else:
+            md.append("\n### Answer\n```\n" + (prose or json.dumps(body)[:2000]) + "\n```")
     elif t == "tool_call_completed":
         body = strip(e)
         md.append("\n### Tool call\n```json\n" + json.dumps(body)[:1500] + "\n```")
 (out / "transcript.md").write_text("\n".join(md))
-header = "| # | turn | iter | harness | ctx entries | breakpoints (msg.block) | system hash | upstream | uncached in | cache read | cache write | output | ms |"
-table = [header, "|" + "---|" * 13]
+header = "| # | turn | iter | step | reply | ctx entries | breakpoints (msg.block) | system hash | tools | upstream | uncached in | cache read | cache write | output | ms | cost $ |"
+table = [header, "|" + "---|" * 16]
 for call in order:
     r = rows[call]
     r = {**r, "upstream": ",".join(sorted(r.get("upstreams", ()))) or "?"}
-    table.append("| {step} | {turn} | {iteration} | {harness} | {entries} | {breakpoints} | {system} | {upstream} | {input} | {cache_read} | {cache_write} | {output} | {ms} |".format(
-        **{"input": "-", "cache_read": "-", "cache_write": "-", "output": "-", "ms": "-", **r}))
+    table.append("| {step} | {turn} | {iteration} | {harness} | {reply} | {entries} | {breakpoints} | {system} | {tools} | {upstream} | {input} | {cache_read} | {cache_write} | {output} | {ms} | {cost} |".format(
+        **{"input": "-", "cache_read": "-", "cache_write": "-", "output": "-", "ms": "-", "reply": "?", **r, "cost": "-" if r.get("cost") is None else f"{r['cost']:.5f}"}))
+total = sum(rows[call].get("cost") or 0 for call in order)
+table.append(f"\nProvider-reported cost: ${total:.5f}")
 (out / "usage.md").write_text("\n".join(table) + "\n")
 print("\n".join(table))
 print(step, "llm calls")

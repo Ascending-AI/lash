@@ -410,18 +410,12 @@ impl PluginFactory for RlmProtocolPluginFactory {
             lashlang_surface,
             services,
         ));
+        super::channel::validate_execution_policy(config.channel, config.execution_policy)?;
         if config.channel == super::RlmChannel::NativeTool {
             return Ok(Arc::new(crate::native::RlmNativeToolPlugin {
                 config,
                 dialect,
             }));
-        }
-        // Relay tells work from an answer by whether a reply calls
-        // `execute_code`, which only the native channel can (FIG-4441).
-        if config.execution_policy.is_relay() {
-            return Err(PluginError::Registration(
-                "the relay execution policy runs on the native tool channel only".to_string(),
-            ));
         }
         Ok(Arc::new(RlmProtocolPlugin { config, dialect }))
     }

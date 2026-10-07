@@ -57,6 +57,21 @@ pub(super) fn validate_channel(
     }
 }
 
+/// The execution policy against the channel: relay (FIG-4441) tells work
+/// from an answer by whether a reply calls `execute_code`, which only the
+/// native tool channel can.
+pub(super) fn validate_execution_policy(
+    channel: RlmChannel,
+    policy: crate::RlmExecutionPolicy,
+) -> Result<(), PluginError> {
+    if policy.is_relay() && channel != RlmChannel::NativeTool {
+        return Err(PluginError::Registration(
+            "the relay execution policy runs on the native tool channel only".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// The session's recorded dialect against the host's selection: the language
 /// id of the dialect the host selected when the session materialized
 /// (ADR 0096). A different id is a typed conflict, and a rematerialized
@@ -117,6 +132,24 @@ mod tests {
     }
 
     const REBUILT: PluginSessionMaterialization = PluginSessionMaterialization::Rematerialization;
+
+    /// Relay runs on the native tool channel only; chronological runs on
+    /// either.
+    #[test]
+    fn relay_runs_on_the_native_tool_channel_only() {
+        use crate::RlmExecutionPolicy::{Chronological, Relay};
+        for (channel, policy) in [
+            (RlmChannel::NativeTool, Relay),
+            (RlmChannel::NativeTool, Chronological),
+            (RlmChannel::Cell, Chronological),
+        ] {
+            validate_execution_policy(channel, policy).unwrap();
+        }
+        assert!(matches!(
+            validate_execution_policy(RlmChannel::Cell, Relay),
+            Err(PluginError::Registration(message)) if message.contains("native tool channel only")
+        ));
+    }
 
     #[test]
     fn recorded_channel_refuses_substitution_and_missing_pin() {
