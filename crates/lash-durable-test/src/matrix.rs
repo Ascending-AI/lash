@@ -193,6 +193,7 @@ pub struct Matrix {
     across_nodes: bool,
     activations_first: bool,
     parallelism: Option<NonZeroUsize>,
+    census_runs: NonZeroUsize,
 }
 
 impl Default for Matrix {
@@ -220,7 +221,18 @@ impl Matrix {
             across_nodes: false,
             activations_first: false,
             parallelism: None,
+            census_runs: census_runs_from_env(),
         }
+    }
+
+    /// Run the uncut scenario `runs` times, spread over the matrix's
+    /// parallelism, and require the same census of cut points from every
+    /// run: a census that varies between runs leaves cells whose cut a
+    /// re-run never reaches. A matrix with no fault to cut runs once. By
+    /// default `LASH_MATRIX_CENSUS_RUNS`, else once.
+    pub fn census_runs(mut self, runs: NonZeroUsize) -> Self {
+        self.census_runs = runs;
+        self
     }
 
     /// Bound the number of cells running at once. By default, use
@@ -284,33 +296,118 @@ impl Matrix {
             "the uncut run must hold before any cut means anything\n  {}",
             baseline.trace
         );
-        let jobs: Vec<(CutPoint, Fault)> = cut_points(&baseline.writes, self.across_nodes)
+        let census = self.census(&baseline.writes);
+        let jobs: Vec<Job> = census
+            .iter()
+            .cloned()
+            .flat_map(|point| {
+                self.faults
+                    .iter()
+                    .copied()
+                    .filter(move |fault| applies(point.kind, *fault))
+                    .map(move |fault| Some((point.clone(), fault)))
+            })
+            .collect();
+        let mut cells: Vec<Cell> = self
+            .pool(&make, jobs)
+            .into_iter()
+            .filter_map(|(cut, run, factory)| {
+                let (point, fault) = cut?;
+                Some(Cell {
+                    point,
+                    fault,
+                    verdict: run.verdict,
+                    trace: run.trace,
+                    setup: factory + run.setup,
+                    run: run.run,
+                    check: run.check,
+                })
+            })
+            .collect();
+        cells.sort_by(|left, right| (&left.point, left.fault).cmp(&(&right.point, right.fault)));
+        self.recount(&make, &census, &baseline.trace);
+        let report = MatrixReport {
+            baseline: baseline.writes,
+            cells,
+            elapsed: started.elapsed(),
+        };
+        report.print_times(std::thread::current().name().unwrap_or("unnamed"));
+        report
+    }
+
+    /// Run the uncut scenario again until it ran [`Self::census_runs`]
+    /// times, after the cells, so a factory still makes the uncut run's
+    /// scenario first and each cell's in order, and require each run's
+    /// census to be `census`, the first run's. A matrix that cuts nothing
+    /// needs no census and runs once.
+    fn recount<S: Scenario>(&self, make: &impl Fn() -> S, census: &[CutPoint], trace: &str) {
+        if self.faults.is_empty() || self.census_runs == NonZeroUsize::MIN {
+            return;
+        }
+        let reruns = vec![None; self.census_runs.get() - 1];
+        for (run, (_, rerun, _)) in self.pool(make, reruns).into_iter().enumerate() {
+            assert_eq!(
+                rerun.verdict,
+                Verdict::Held,
+                "uncut run {} of {} did not hold\n  {}",
+                run + 2,
+                self.census_runs,
+                rerun.trace
+            );
+            let other = self.census(&rerun.writes);
+            assert!(
+                other == census,
+                "uncut run {} of {} cut other points than the first: a census must be a \
+                 function of the scenario\n  first: {}\n  then:  {}\n  first trace: {}\n  \
+                 then trace:  {}",
+                run + 2,
+                self.census_runs,
+                render(census),
+                render(&other),
+                trace,
+                rerun.trace
+            );
+        }
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "matrix census runs={} points={}",
+            self.census_runs,
+            census.len()
+        );
+    }
+
+    /// The uncut run's cut points under the matrix's labels.
+    fn census(&self, writes: &[Write]) -> Vec<CutPoint> {
+        cut_points(writes, self.across_nodes)
             .into_iter()
             .filter(|point| {
                 self.labels
                     .as_ref()
                     .is_none_or(|labels| labels.contains(&point.label))
             })
-            .flat_map(|point| {
-                self.faults
-                    .iter()
-                    .copied()
-                    .filter(move |fault| applies(point.kind, *fault))
-                    .map(move |fault| (point.clone(), fault))
-            })
-            .collect();
+            .collect()
+    }
+
+    /// Run a fresh scenario for each job, cut where it says or uncut, at
+    /// most the matrix's parallelism at once. Answers each job with its run
+    /// and the time its scenario took to make.
+    fn pool<S: Scenario>(
+        &self,
+        make: &impl Fn() -> S,
+        jobs: Vec<Job>,
+    ) -> Vec<(Job, Run, Duration)> {
         let width = self
             .parallelism
             .unwrap_or_else(|| std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN))
             .get();
-        let mut cells = std::thread::scope(|scope| {
+        std::thread::scope(|scope| {
             let (completed, ready) = std::sync::mpsc::channel();
             let mut jobs = jobs.into_iter();
             let mut running = 0;
-            let mut cells = Vec::new();
+            let mut runs = Vec::new();
             loop {
                 while running < width {
-                    let Some((point, fault)) = jobs.next() else {
+                    let Some(cut) = jobs.next() else {
                         break;
                     };
                     let completed = completed.clone();
@@ -319,8 +416,8 @@ impl Matrix {
                     let started = Instant::now();
                     let scenario = make();
                     let factory = started.elapsed();
-                    // Each cell owns its thread and runtime. A completed
-                    // cell admits the next one, even while another is slow.
+                    // Each run owns its thread and runtime. A completed run
+                    // admits the next one, even while another is slow.
                     scope.spawn(move || {
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -328,19 +425,12 @@ impl Matrix {
                                 .build()
                                 .unwrap_or_else(|error| panic!("a matrix cell runtime: {error}"));
                             runtime.block_on(async {
-                                let run = self.run_one(&scenario, Some((&point, fault))).await;
-                                Cell {
-                                    point,
-                                    fault,
-                                    verdict: run.verdict,
-                                    trace: run.trace,
-                                    setup: factory + run.setup,
-                                    run: run.run,
-                                    check: run.check,
-                                }
+                                let point = cut.as_ref().map(|(point, fault)| (point, *fault));
+                                let run = self.run_one(&scenario, point).await;
+                                (cut, run, factory)
                             })
                         }));
-                        // Send a panic too, so a failed cell cannot strand
+                        // Send a panic too, so a failed run cannot strand
                         // the receiver waiting for its result.
                         let _ = completed.send(result);
                     });
@@ -354,20 +444,12 @@ impl Matrix {
                     .unwrap_or_else(|error| panic!("a matrix cell result: {error}"));
                 running -= 1;
                 match result {
-                    Ok(cell) => cells.push(cell),
+                    Ok(run) => runs.push(run),
                     Err(panic) => std::panic::resume_unwind(panic),
                 }
             }
-            cells
-        });
-        cells.sort_by(|left, right| (&left.point, left.fault).cmp(&(&right.point, right.fault)));
-        let report = MatrixReport {
-            baseline: baseline.writes,
-            cells,
-            elapsed: started.elapsed(),
-        };
-        report.print_times(std::thread::current().name().unwrap_or("unnamed"));
-        report
+            runs
+        })
     }
 
     async fn run_one<S: Scenario>(&self, scenario: &S, cut: Option<(&CutPoint, Fault)>) -> Run {
@@ -462,6 +544,9 @@ impl Matrix {
     }
 }
 
+/// What one run of a pool does: cut at a point under a fault, or run uncut.
+type Job = Option<(CutPoint, Fault)>;
+
 struct Run {
     verdict: Verdict,
     trace: String,
@@ -469,6 +554,29 @@ struct Run {
     setup: Duration,
     run: Duration,
     check: Duration,
+}
+
+/// `LASH_MATRIX_CENSUS_RUNS`, else one.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test harness's knob: a host asks every matrix law for its census-stability check (FIG-5284)"
+)]
+fn census_runs_from_env() -> NonZeroUsize {
+    match std::env::var("LASH_MATRIX_CENSUS_RUNS") {
+        Ok(value) => value.parse().unwrap_or_else(|error| {
+            panic!("LASH_MATRIX_CENSUS_RUNS must be a positive integer: {error}")
+        }),
+        Err(std::env::VarError::NotPresent) => NonZeroUsize::MIN,
+        Err(error) => panic!("read LASH_MATRIX_CENSUS_RUNS: {error}"),
+    }
+}
+
+fn render(census: &[CutPoint]) -> String {
+    census
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// How long a paused node stays paused: past its lease, a reap and a claim,
@@ -535,9 +643,11 @@ fn applies(kind: WriteKind, fault: Fault) -> bool {
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::testing::{FORMATS, actor, sqlite};
+    use crate::testing::{FORMATS, TestDatabase, actor, sqlite};
     use lash_durable::runner::{Exit, Owned};
-    use lash_durable::{FormatSet, LeaseConfig, MailKind, MailTx};
+    use lash_durable::{
+        ActorState, FormatSet, LeaseConfig, LeaseSettings, MailKind, MailTx, Release,
+    };
     use std::num::NonZeroUsize;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -665,5 +775,134 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(without_times(serial), without_times(parallel));
+    }
+
+    /// Two nodes over one seeded actor: both claim at once, at the first
+    /// instant, and whichever claims it acknowledges its mail and lets it
+    /// idle. `slow`'s registration is held up on the wall clock.
+    struct Contended {
+        lease: LeaseConfig,
+        slow: Option<&'static str>,
+    }
+
+    #[async_trait::async_trait]
+    impl Activation for Contended {
+        async fn activate(&self, owned: Owned) -> Exit {
+            if let Ok(mut tx) = owned.begin().await {
+                tx.ack_seen().give_up(Release::Idle);
+                let _ = owned.commit(tx, CommitLabel::new("contended.ack")).await;
+            }
+            Exit::Released
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Scenario for Contended {
+        async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+            let database = TestDatabase::new(sqlite(clock).await);
+            Arc::new(match self.slow {
+                Some(node) => database.slow_registration(node, Duration::from_millis(30)),
+                None => database,
+            })
+        }
+
+        fn config(&self) -> SimNodesConfig {
+            SimNodesConfig {
+                lease: self.lease,
+                decodes: vec![FormatSet::new(FORMATS)],
+                max_active: 1,
+            }
+        }
+
+        fn activation(&self) -> Arc<dyn Activation> {
+            Arc::new(Self {
+                lease: self.lease,
+                slow: self.slow,
+            })
+        }
+
+        async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+            let mut seed = MailTx::new();
+            seed.create_actor(actor("one"), FormatSet::new(FORMATS))
+                .append(actor("one"), MailKind::new("test"), "input");
+            nodes
+                .database()
+                .commit_mail(seed, CommitLabel::new("contended.seed"))
+                .await
+                .map_err(|error| error.to_string())?;
+            nodes.start("b");
+            nodes.start("a");
+            Ok(())
+        }
+
+        fn actors(&self) -> Vec<ActorKey> {
+            vec![actor("one")]
+        }
+
+        async fn done(&self, nodes: &SimNodes) -> bool {
+            matches!(
+                nodes.database().actor(&actor("one")).await,
+                Ok(Some(row)) if row.state == ActorState::Idle && row.pending_mail == 0
+            )
+        }
+
+        async fn check(&self, _nodes: &SimNodes, _cut: Option<&Cut>) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    /// FIG-5284: which node claims a contended actor is fixed by the
+    /// scenario, never by timing. Two nodes claim one actor at one instant
+    /// while either one's registration is held up on the wall clock; under
+    /// the default and a short lease, twenty uncut runs one at a time and
+    /// twenty at once all cut the same points, the first node by name
+    /// claims in every one, and a cell that fails either registration
+    /// still holds.
+    #[tokio::test]
+    async fn which_node_claims_is_fixed_by_the_scenario_never_by_timing() {
+        let short = LeaseSettings {
+            ttl: Duration::from_millis(3_750),
+            heartbeat_every: Duration::from_millis(750),
+            self_stop_after: Duration::from_millis(2_500),
+            reap_every: Duration::from_millis(500),
+            ..LeaseConfig::default().settings()
+        }
+        .validate()
+        .unwrap();
+        let runs = NonZeroUsize::new(20).unwrap();
+        for lease in [LeaseConfig::default(), short] {
+            let mut censuses = Vec::new();
+            for slow in [None, Some("a"), Some("b")] {
+                for width in [NonZeroUsize::MIN, runs] {
+                    let report = Matrix::new()
+                        .faults(&[Fault::FailBefore])
+                        .labels(&[CommitLabel::NODE_REGISTER])
+                        .census_runs(runs)
+                        .parallelism(width)
+                        .run(|| Contended { lease, slow })
+                        .await;
+                    report.assert_held();
+                    let claims: Vec<String> = report
+                        .baseline
+                        .iter()
+                        .filter(|write| {
+                            write.point.label == CommitLabel::CLAIM
+                                && matches!(write.stored, Stored::Committed { effective: true })
+                        })
+                        .map(|write| write.node.to_string())
+                        .collect();
+                    assert_eq!(
+                        claims,
+                        vec!["a".to_string()],
+                        "slow {slow:?}, width {width}: the first node by name claims"
+                    );
+                    censuses.push((slow, width, render(&cut_points(&report.baseline, false))));
+                }
+            }
+            let (_, _, first) = &censuses[0];
+            for (slow, width, census) in &censuses {
+                assert_eq!(census, first, "slow {slow:?}, width {width}");
+            }
+        }
     }
 }

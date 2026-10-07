@@ -8,7 +8,7 @@
 //! the domain [`DurableReads`]) pass through, but a paused or dead node makes
 //! none, as a stopped process could not; a read rule fails one `actor` read.
 
-use crate::clock::SimClock;
+use crate::clock::{SimClock, settle};
 use crate::life::NodeLife;
 use crate::script::{Entry, Fault, Shared, Stored, WriteKind};
 use lash_durable::domain::{
@@ -20,46 +20,72 @@ use lash_durable::{
     DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit, MailTx,
     NodeLease, NodeSpec, Reaped, StoreFailure, StoreFailureKind,
 };
+use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{ProcessId, SessionId};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+/// A contested write waiting for its turn: its node, then its arrival.
+type Ticket = (Arc<str>, u64);
+
+/// The next change of a waiting node's life.
+type LifeChange = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Writes in flight across a deployment: a simulation moves its clock only
 /// when no node waits on the database.
+///
+/// It also orders the runners' contested writes. Nodes that claim or reap
+/// at one virtual instant race for the same rows, and which one the
+/// database answered first used to turn on wall-clock time: on the store's
+/// worker thread, and on how far each node's earlier calls had got. So
+/// each claim and reap first waits its [turn](Self::turn), and enters the
+/// store only once no call is in flight, nothing holds the clock and a
+/// settle starts neither, lowest node name first, one at a time. Which node claims is a function of the
+/// scenario, never of timing (FIG-5284).
 #[derive(Debug, Default)]
 pub(crate) struct Activity {
     in_flight: AtomicUsize,
     entered: AtomicUsize,
-    idle: tokio::sync::Notify,
+    /// The contested writes waiting for their turn, with the life of the
+    /// node that waits.
+    turns: Mutex<BTreeMap<Ticket, Arc<NodeLife>>>,
+    arrivals: AtomicU64,
+    /// Rings when a call enters or leaves and when a turn comes or goes.
+    changed: tokio::sync::Notify,
 }
 
 impl Activity {
     fn enter(&self) {
         self.entered.fetch_add(1, Ordering::SeqCst);
         self.in_flight.fetch_add(1, Ordering::SeqCst);
+        self.changed.notify_waiters();
     }
 
     fn leave(&self) {
-        if self.in_flight.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.idle.notify_waiters();
-        }
+        self.in_flight.fetch_sub(1, Ordering::SeqCst);
+        self.changed.notify_waiters();
     }
 
-    /// How many store calls ever entered.
+    /// How many store calls and turns ever entered.
     pub(crate) fn entered(&self) -> usize {
         self.entered.load(Ordering::SeqCst)
     }
 
-    /// Wait until no store call is in flight.
+    /// Wait until no store call is in flight and no live node waits for
+    /// its turn.
     pub(crate) async fn idle(&self) {
         loop {
-            let idle = self.idle.notified();
-            if self.in_flight.load(Ordering::SeqCst) == 0 {
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let lives = self.lives();
+            if self.in_flight.load(Ordering::SeqCst) == 0 && self.first_live().is_none() {
                 return;
             }
-            idle.await;
+            either(changed, lives).await;
         }
     }
 
@@ -75,6 +101,111 @@ impl Activity {
         let _leave = Leave(self);
         call.await
     }
+
+    /// Wait for `node`'s turn at a contested write: until no call is in
+    /// flight and nothing holds `clock`, a settle later still, and this is
+    /// the first turn of a live node by node name. A paused node, or one
+    /// whose runner is held, keeps its place but holds no other node back;
+    /// a killed one gives it up.
+    async fn turn(&self, node: &Arc<str>, life: &Arc<NodeLife>, clock: &SimClock) {
+        struct Waiting<'a> {
+            activity: &'a Activity,
+            ticket: Ticket,
+        }
+        impl Drop for Waiting<'_> {
+            fn drop(&mut self) {
+                self.activity.turns.lock_recover().remove(&self.ticket);
+                self.activity.changed.notify_waiters();
+            }
+        }
+        let ticket = (
+            Arc::clone(node),
+            self.arrivals.fetch_add(1, Ordering::SeqCst),
+        );
+        self.turns
+            .lock_recover()
+            .insert(ticket.clone(), Arc::clone(life));
+        self.entered.fetch_add(1, Ordering::SeqCst);
+        self.changed.notify_waiters();
+        let waiting = Waiting {
+            activity: self,
+            ticket,
+        };
+        loop {
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let lives = self.lives();
+            if self.is_turn(&waiting.ticket) {
+                clock.unheld().await;
+                let entered = self.entered() + clock.holds_taken();
+                settle().await;
+                clock.unheld().await;
+                if self.entered() + clock.holds_taken() == entered
+                    && self.take_turn(&waiting.ticket)
+                {
+                    return;
+                }
+                continue;
+            }
+            either(changed, lives).await;
+        }
+    }
+
+    /// The first waiting turn of a live node.
+    fn first_live(&self) -> Option<Ticket> {
+        self.turns
+            .lock_recover()
+            .iter()
+            .find(|(_, life)| life.live())
+            .map(|(ticket, _)| ticket.clone())
+    }
+
+    fn is_turn(&self, ticket: &Ticket) -> bool {
+        self.in_flight.load(Ordering::SeqCst) == 0 && self.first_live().as_ref() == Some(ticket)
+    }
+
+    /// Take `ticket`'s turn if it is still its turn.
+    fn take_turn(&self, ticket: &Ticket) -> bool {
+        let mut turns = self.turns.lock_recover();
+        let first = turns
+            .iter()
+            .find(|(_, life)| life.live())
+            .map(|(first, _)| first);
+        if self.in_flight.load(Ordering::SeqCst) != 0 || first != Some(ticket) {
+            return false;
+        }
+        turns.remove(ticket);
+        true
+    }
+
+    /// The next change of life of every node waiting for its turn.
+    fn lives(&self) -> Vec<LifeChange> {
+        self.turns
+            .lock_recover()
+            .values()
+            .map(|life| Box::pin(life.changes()) as LifeChange)
+            .collect()
+    }
+}
+
+/// Wait until `changed` rings or one of `lives` changes.
+async fn either(
+    mut changed: Pin<&mut tokio::sync::futures::Notified<'_>>,
+    mut lives: Vec<LifeChange>,
+) {
+    std::future::poll_fn(|cx| {
+        if changed.as_mut().poll(cx).is_ready()
+            || lives
+                .iter_mut()
+                .any(|life| life.as_mut().poll(cx).is_ready())
+        {
+            std::task::Poll::Ready(())
+        } else {
+            std::task::Poll::Pending
+        }
+    })
+    .await;
 }
 
 /// One write, owning its arguments, ready to send.
@@ -344,6 +475,9 @@ impl DurableStore for FaultStore {
     }
 
     async fn reap(&self, reaper: &NodeLease) -> Result<Vec<Reaped>, DurableError> {
+        self.activity
+            .turn(&self.node, &self.life, &self.clock)
+            .await;
         self.write(
             WriteKind::Lease,
             CommitLabel::REAP,
@@ -372,6 +506,9 @@ impl DurableStore for FaultStore {
     }
 
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
+        self.activity
+            .turn(&self.node, &self.life, &self.clock)
+            .await;
         self.write(
             WriteKind::Lease,
             CommitLabel::CLAIM,

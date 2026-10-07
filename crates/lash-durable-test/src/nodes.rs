@@ -331,8 +331,9 @@ impl SimNodes {
         )
     }
 
-    /// Wait until no node waits on the database, nothing holds the clock,
-    /// and every task woken so far has reached its next timer or gate.
+    /// Wait until no node waits on the database or for its turn at a claim
+    /// or reap, nothing holds the clock, and every task woken so far has
+    /// reached its next timer or gate.
     pub async fn quiesce(&self) {
         loop {
             self.idle().await;
@@ -369,7 +370,9 @@ impl SimNodes {
 }
 
 /// Deliver `commit`'s wakes: to the woken actor's owner when it is owned,
-/// else to every node's claim loop. A wake a fault lost reaches nobody.
+/// else to every node's claim loop. Those claims take their turns by node
+/// name, so the first live node with room claims the actor, whatever the
+/// wall clock does. A wake a fault lost reaches nobody.
 fn deliver(nodes: &Mutex<BTreeMap<String, SimNode>>, commit: &MailCommit) {
     let nodes = nodes.lock_recover();
     for woken in &commit.woken {

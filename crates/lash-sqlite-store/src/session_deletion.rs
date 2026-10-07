@@ -2,30 +2,15 @@ use super::*;
 use crate::session_sql::session_sql;
 use lash_core_execution::FleetFormat;
 
+/// Delete `session_id` from the deployment's catalog on `conn`, the store's
+/// writer connection, so the delete keeps the store's connection policy and
+/// hooks.
 pub(super) async fn delete_session_from_catalog(
-    catalog: &DatabaseLocation,
+    conn: &SqliteConnection,
     session_id: &SessionId,
-    policy: SqliteConnectionPolicy,
     now_ms: u64,
 ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
-    if !catalog.target().exists() {
-        return Ok(lash_core_execution::SessionBlobReclaimReport::default());
-    }
     let session_id = session_id.clone();
-    let conn = SqliteConnection::open_with_policy(catalog.target(), policy)
-        .await
-        .map_err(|err| {
-            lash_core_execution::MaintenanceFailure::failed_before_any_work(
-                lash_core_execution::StoreError::Backend(err.to_string()),
-            )
-        })?;
-    conn.install(FleetFormat::writable(), |tx| {
-        crate::compat::fence(tx, FleetFormat::writable())
-    })
-    .await
-    .map_err(|err| {
-        lash_core_execution::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
-    })?;
     conn.write_flow(move |tx| {
         let mut report = lash_core_execution::SessionBlobReclaimReport::default();
         let outcome: Result<
@@ -293,8 +278,6 @@ pub(super) async fn delete_session_from_catalog(
     })
     .await
     .map_err(|err| {
-        lash_core_execution::MaintenanceFailure::failed_before_any_work(
-            lash_core_execution::StoreError::Backend(err.to_string()),
-        )
+        lash_core_execution::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
     })?
 }

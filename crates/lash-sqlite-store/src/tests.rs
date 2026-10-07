@@ -860,3 +860,47 @@ fn a_registry_sql_fault_is_a_retryable_store_fault_at_the_plugin_boundary() {
     );
     assert!(fault.is_retryable() && !fault.is_terminal(), "{fault:?}");
 }
+
+/// A session's delete and fork run on the store's own writer connection, so
+/// they keep the store set's connection hooks: with inline calls each one
+/// answers at its first poll, before its caller's runtime runs anything
+/// else, and a simulation's clock never moves while one is pending
+/// (FIG-5284).
+#[tokio::test]
+async fn a_session_delete_and_fork_answer_inline_on_the_store_connection() {
+    let stores = SqliteStoreSet::memory_with_options_and_clock(
+        SqliteStoreSetOptions {
+            inline_calls: true,
+            ..SqliteStoreSetOptions::memory()
+        },
+        Arc::new(lash_core_execution::facade_support::SystemClock),
+    )
+    .await
+    .expect("open an inline store set");
+    let store = stores.session_store_factory();
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+
+    let never_made = SessionId::from("never-made");
+    let mut deleted = std::pin::pin!(store.delete_session(&never_made));
+    assert!(
+        deleted.as_mut().poll(&mut context).is_ready(),
+        "a session delete answers at its first poll"
+    );
+    let request = lash_core_execution::ForkSessionRequest {
+        pending_observer_intents: Vec::new(),
+        session_id: SessionId::from("fork"),
+        source_session_id: SessionId::from("never-made-either"),
+        head_revision: 0,
+        relation: lash_core_execution::SessionRelation::Root,
+        config: lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        )
+        .into(),
+    };
+    let mut forked = std::pin::pin!(store.fork_session(&request));
+    assert!(
+        forked.as_mut().poll(&mut context).is_ready(),
+        "a session fork answers at its first poll"
+    );
+}

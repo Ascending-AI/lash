@@ -130,10 +130,9 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     ) -> Result<lash_core_execution::ForkSessionReceipt, StoreError> {
         lash_core_execution::store::validate_session_id(&request.session_id)?;
         fork_at_in_catalog(
-            &self.location,
+            &self.conn,
             request,
             self.clock.timestamp_ms(),
-            self.options.connection_policy,
             self.options.blob_profile,
         )
         .await
@@ -191,13 +190,7 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
         lash_core_execution::store::validate_session_id(session_id)
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
-        delete_session_from_catalog(
-            &self.location,
-            session_id,
-            self.options.connection_policy,
-            self.clock.timestamp_ms(),
-        )
-        .await
+        delete_session_from_catalog(&self.conn, session_id, self.clock.timestamp_ms()).await
     }
 }
 

@@ -1,33 +1,14 @@
 use super::*;
 use crate::session_sql::session_sql;
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the sqlite store factory ensures the host-supplied store root exists before opening (FIG-2971)"
-)]
-async fn open_factory_catalog(
-    catalog: &DatabaseLocation,
-    policy: SqliteConnectionPolicy,
-) -> Result<SqliteConnection, lash_core_execution::StoreError> {
-    if let Some(root) = catalog.target().file_path().and_then(Path::parent) {
-        std::fs::create_dir_all(root)
-            .map_err(|err| lash_core_execution::StoreError::Backend(err.to_string()))?;
-    }
-    let conn = SqliteConnection::open_with_policy(catalog.target(), policy)
-        .await
-        .map_err(|err| lash_core_execution::StoreError::Backend(err.to_string()))?;
-    ensure_versioned_schema(&conn).await.map_err(sqlite_error)?;
-    Ok(conn)
-}
-
+/// Fork `request` in the deployment's catalog on `conn`, the store's writer
+/// connection, so the fork keeps the store's connection policy and hooks.
 pub(super) async fn fork_at_in_catalog(
-    catalog: &DatabaseLocation,
+    conn: &SqliteConnection,
     request: &lash_core_execution::ForkSessionRequest,
     created_at_ms: u64,
-    policy: SqliteConnectionPolicy,
     blob_profile: BuiltinBlobProfile,
 ) -> Result<lash_core_execution::ForkSessionReceipt, lash_core_execution::StoreError> {
-    let conn = open_factory_catalog(catalog, policy).await?;
     let request = request.clone();
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core_execution::ForkSessionReceipt, lash_core_execution::StoreError> = (|| {
@@ -353,44 +334,4 @@ pub(super) async fn fork_at_in_catalog(
     })
     .await
     .map_err(sqlite_error)?
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn factory_catalog_connection_uses_requested_policy() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let policy = SqliteConnectionPolicy {
-            read_connections: std::num::NonZeroUsize::new(4).expect("four is nonzero"),
-            busy_timeout: std::time::Duration::from_millis(321),
-            synchronous: SqliteSynchronous::Full,
-            wal_autocheckpoint_pages: 17,
-            cache_size: -4096,
-        };
-        let conn = open_factory_catalog(
-            &crate::location::DatabaseLocation::standalone_file(&dir.path().join("lash.db")),
-            policy,
-        )
-        .await
-        .expect("open factory catalog with connection policy");
-
-        let pragmas = conn
-            .call(|connection| {
-                Ok((
-                    connection.query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))?,
-                    connection.query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))?,
-                    connection
-                        .query_row("PRAGMA wal_autocheckpoint", [], |row| row.get::<_, i64>(0))?,
-                    connection.query_row("PRAGMA cache_size", [], |row| row.get::<_, i64>(0))?,
-                    connection
-                        .query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))?,
-                ))
-            })
-            .await
-            .expect("read factory catalog connection policy");
-
-        assert_eq!(pragmas, (321, 2, 17, -4096, "wal".to_string()));
-    }
 }

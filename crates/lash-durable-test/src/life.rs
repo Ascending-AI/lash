@@ -130,6 +130,28 @@ impl NodeLife {
         }
     }
 
+    /// Whether the node runs with its runner polled: a call it waits to
+    /// make can go now.
+    pub(crate) fn live(&self) -> bool {
+        *self.state.borrow() == Life::Running && !*self.runner_held.borrow()
+    }
+
+    /// Resolve at the node's first change of life or runner hold after this
+    /// call.
+    pub(crate) fn changes(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let mut state = self.state.subscribe();
+        let mut held = self.runner_held.subscribe();
+        async move {
+            let changed = tokio::select! {
+                changed = state.changed() => changed,
+                changed = held.changed() => changed,
+            };
+            if changed.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+
     /// Return once the node is dead.
     pub(crate) async fn dead(&self) {
         let mut life = self.state.subscribe();
