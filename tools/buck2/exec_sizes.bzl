@@ -153,7 +153,6 @@ CLIPPY_REQUESTS = {
     "lash-internal-core-execution/effect_model": {"cpu_count": 1, "memory_kb": 524288},
     "lash-internal-core-execution/lash_core_execution": {"cpu_count": 1, "memory_kb": 2359296},
     "lash-internal-core-execution/process_event_schema_generator": {"cpu_count": 1, "memory_kb": 524288},
-    "lash-internal-core-execution/process_model": {"cpu_count": 1, "memory_kb": 524288},
     "lash-internal-core-execution/store_backed": {"cpu_count": 1, "memory_kb": 786432},
     "lash-internal-core-llm/lash_core_llm": {"cpu_count": 1, "memory_kb": 524288},
     "lash-internal-core-store/lash_core_store": {"cpu_count": 1, "memory_kb": 1310720},

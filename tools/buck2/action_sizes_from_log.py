@@ -1081,6 +1081,15 @@ def compile_evidence(measured: dict) -> dict:
     }
 
 
+def prune_compile_evidence(evidence: dict, crates: set[tuple[str, str]]) -> dict:
+    """Drop retired identities, preserving all evidence for surviving targets."""
+    keys = {f"{package}/{crate}" for package, crate in crates}
+    return {
+        profile: {key: row for key, row in rows.items() if key in keys}
+        for profile, rows in evidence.items()
+    }
+
+
 def check_compile_memory(evidence: dict, memory_kb: int, identity: object) -> None:
     """Reject anonymous p99 at 80% of the request and every recorded kill."""
     assert evidence["oom_kills"] == 0, (identity, "OOM/SIGKILL in measurement window")

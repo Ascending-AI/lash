@@ -453,13 +453,14 @@ service_floor = { memory_kb = 1048576, packages = ["lash-internal-postgres-store
 "//crates/lash:facade_completeness" = { cpu_count = 1, memory_kb = 2621440 }
 # --- Service jobs --------------------------------------------------------------
 
-# The service jobs select these packages' test labels
+# The service jobs select test labels by their execution tags or package
 # (`tools/buck2/<service>_test_labels.txt`). The S3 job builds them from the
 # shared cache and executes them uncached against the service it stands up;
-# the PostgreSQL labels are hermetic and run on the pool.
-[service_packages]
-postgres = ["lash-internal-postgres-store"]
-s3 = ["lash-internal-s3-store"]
+# the PostgreSQL labels are hermetic and run on the pool. Tag selection keeps
+# multi-store durable laws in the PostgreSQL job as new binaries are added.
+[service_tests]
+postgres = { tags = ["hermetic-postgres"] }
+s3 = { packages = ["lash-internal-s3-store"] }
 
 # --- Feature-lane variants ---------------------------------------------------
 

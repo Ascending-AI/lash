@@ -884,9 +884,14 @@ def validate_package_policy(metadata: dict) -> None:
                 f"package-policy.toml [test_runs.pinned] {label} sets {sorted(request)}; "
                 "a pin is exactly cpu_count and memory_kb"
             )
-    for service, names in PACKAGE_POLICY.get("service_packages", {}).items():
-        if not names or any(name not in members for name in names):
-            raise ValueError(f"package-policy.toml [service_packages] {service} names {names}")
+    policy_tags = {tag for rule in PACKAGE_POLICY.get("rule", []) for tag in rule.get("tags", [])}
+    for service, selection in PACKAGE_POLICY.get("service_tests", {}).items():
+        if set(selection) not in ({"packages"}, {"tags"}):
+            raise ValueError(f"package-policy.toml [service_tests] {service} needs packages or tags")
+        field, names = next(iter(selection.items()))
+        known = members if field == "packages" else policy_tags
+        if not names or any(name not in known for name in names):
+            raise ValueError(f"package-policy.toml [service_tests] {service} names {names}")
     for section in ("feature_compile_data", "filegroups", "exported_files", "ui_fixtures"):
         for name in PACKAGE_POLICY.get(section, {}):
             if name not in members:
@@ -1782,31 +1787,27 @@ def generated(
     outputs[ROOT / "tools/buck2/cargo_owned_nextest_filter.txt"] = (
         " + ".join(cargo_nextest_terms) + "\n" if cargo_nextest_terms else "none()\n"
     )
-    # The service jobs build these labels from the shared cache and execute
-    # them uncached against the service they stand up. Generated, so a new
-    # service-gated binary reaches the service job without a hand edit. A
-    # feature lane's `cargo test` of a service package adds its variants: the
-    # synthetic successor's PostgreSQL suites run in the same job (FIG-4262).
+    # Service membership follows each test's execution policy, including
+    # runnable feature variants. PostgreSQL tests run hermetically on the
+    # pool; S3 tests run uncached against the service the job stands up.
+    service_units = {
+        target["label"]: {"packages": [package["package"]], "tags": target["tags"]}
+        for package in inventory
+        for target in package["targets"]
+        if target.get("label") is not None
+        and target["kind"] in ("bin-unit-test", "test", "unit-test")
+    }
     feature_service_units = {
-        unit["label"]: unit["package"]
+        unit["label"]: service_units[unit["label"].split("__fv_", 1)[0]]
         for unit in feature_units
         if unit["label"] in feature_service_tests
     }
-    for service, package_names in PACKAGE_POLICY["service_packages"].items():
+    for service, selection in PACKAGE_POLICY["service_tests"].items():
+        field, names = next(iter(selection.items()))
         labels = sorted(
-            [
-                target["label"]
-                for package in inventory
-                if package["package"] in package_names
-                for target in package["targets"]
-                if target["label"] is not None
-                and target["kind"] in ("bin-unit-test", "test", "unit-test")
-            ]
-            + [
-                label
-                for label, package_name in feature_service_units.items()
-                if package_name in package_names
-            ]
+            label
+            for label, policy in (service_units | feature_service_units).items()
+            if set(names).intersection(policy[field])
         )
         outputs[ROOT / f"tools/buck2/{service}_test_labels.txt"] = (
             "".join(f"{label}\n" for label in labels)

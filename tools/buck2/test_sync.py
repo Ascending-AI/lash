@@ -698,6 +698,22 @@ def check_measurement_filter() -> None:
     assert list(measured) == ["lash-internal-store-sql/lash_store_sql"]
     assert len(measured["lash-internal-store-sql/lash_store_sql"].records) == 1
 
+    # Removing a target must remove its evidence from every profile without
+    # losing any live target's measurements, including recorded OOMs.
+    live = "lash-internal-store-sql/lash_store_sql"
+    dead = "lash-internal-core-execution/process_model"
+    row = {"p99_anon_peak_bytes": 123, "legacy_peak_bytes": 456,
+           "oom_kills": 1, "samples": 20}
+    evidence = {
+        "crates": {live: row, dead: row},
+        "clippy": {live: row, dead: row},
+        "kinds": {live: {"test": row}, dead: {"test": row}},
+        "optimized": {live: {"target": row}, dead: {"target": row}},
+    }
+    pruned = module.prune_compile_evidence(evidence, known)
+    assert pruned == {profile: {live: rows[live]} for profile, rows in evidence.items()}
+    assert all(dead in rows for rows in evidence.values()), "pruning mutated its input"
+
 
 def check_target_kind_rule() -> None:
     """The event join, the per-kind rows and the row-in-force rule hold."""
@@ -1154,7 +1170,18 @@ def check_buildscript_metadata_bridge() -> None:
             text=True,
         )
         expected = producer_root / "OUT_DIR/include"
-        assert flags.read_text(encoding="utf-8") == f"--env-set=SEEN={expected}\n"
+        # Paths under the action cwd are emitted as $(abspath ...). Check
+        # the compiler consumer's expansion, including when TMPDIR is rooted
+        # in the checkout, rather than assuming the intermediate flag is absolute.
+        expanded = consumer_root / "expanded_flags"
+        subprocess.run(
+            [sys.executable, str(runner.with_name("rustc_action.py")),
+             "--echo", str(expanded), "compiler", "@" + str(flags)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert expanded.read_text(encoding="utf-8") == f"compiler\n--env-set=SEEN={expected}\n"
 
 
 def check_direct_buck_generator() -> None:

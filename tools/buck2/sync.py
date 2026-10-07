@@ -24,6 +24,7 @@ import tempfile
 import tomllib
 from collections import defaultdict
 
+import action_sizes_from_log
 import bootstrap_store
 import clippy_policy
 import generate_model
@@ -1133,6 +1134,17 @@ filegroup(
 def model_outputs(canonical: dict, third_party: dict[tuple[str, str], str]) -> dict[pathlib.Path, str]:
     raw, _ = generate_model.generated(canonical, third_party)
     outputs = dict(raw)
+    evidence_path = BUCK2 / "compile-memory-evidence.json"
+    workspace = canonical | {"packages": [
+        package for package in canonical["packages"]
+        if package["id"] in set(canonical["workspace_members"])
+    ]}
+    outputs[evidence_path] = action_sizes_from_log.render(
+        action_sizes_from_log.prune_compile_evidence(
+            json.loads(evidence_path.read_text(encoding="utf-8")),
+            action_sizes_from_log.first_party_crates(workspace),
+        )
+    )
     workspace = raw[BUCK2 / "workspace_targets.bzl"]
     feature = raw[BUCK2 / "feature_lanes.bzl"]
     payload = json.loads(raw[BUCK2 / "target-inventory.json"])
