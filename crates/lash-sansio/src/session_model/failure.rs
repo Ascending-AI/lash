@@ -247,6 +247,11 @@ pub enum TurnFailureCode {
     /// resolve. The call was never sent; its message names the attributed
     /// site.
     PromptCompositionFailed,
+    /// An admitted model call's exact request body cannot be sent as
+    /// admitted (ADR 0133 §6): a stored chunk of it is missing or does not
+    /// match its address, or the route serving the call is not the route
+    /// that lowered it. The call was never sent; nothing rebuilds the body.
+    AdmittedRequestUnavailable,
     /// A driver task join failed.
     TaskJoinFailed,
     /// An SSE event exceeded the configured byte limit.
@@ -362,6 +367,7 @@ impl TurnFailureCode {
             Self::Timeout => "timeout",
             Self::ModelTotalExceeded => "model_total_exceeded",
             Self::PromptCompositionFailed => "prompt_composition_failed",
+            Self::AdmittedRequestUnavailable => "admitted_request_unavailable",
             Self::TaskJoinFailed => "task_join_failed",
             Self::SseEventTooLarge => "sse_event_too_large",
             Self::SseResponseTooLarge => "sse_response_too_large",
@@ -468,6 +474,7 @@ impl TurnFailureCode {
             "timeout" => Self::Timeout,
             "model_total_exceeded" => Self::ModelTotalExceeded,
             "prompt_composition_failed" => Self::PromptCompositionFailed,
+            "admitted_request_unavailable" => Self::AdmittedRequestUnavailable,
             "task_join_failed" => Self::TaskJoinFailed,
             "sse_event_too_large" => Self::SseEventTooLarge,
             "sse_response_too_large" => Self::SseResponseTooLarge,
@@ -554,6 +561,7 @@ impl TurnFailureCode {
         Self::Timeout,
         Self::ModelTotalExceeded,
         Self::PromptCompositionFailed,
+        Self::AdmittedRequestUnavailable,
         Self::TaskJoinFailed,
         Self::SseEventTooLarge,
         Self::SseResponseTooLarge,

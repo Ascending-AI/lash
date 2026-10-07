@@ -99,8 +99,12 @@ impl Provider for LoggedProvider {
     fn requires_streaming(&self) -> bool {
         self.inner.requires_streaming()
     }
-    fn generation_retry_guarantee(&self, request: &LlmRequest) -> GenerationRetryGuarantee {
-        self.inner.generation_retry_guarantee(request)
+    fn generation_retry_guarantee(
+        &self,
+        request: &LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> GenerationRetryGuarantee {
+        self.inner.generation_retry_guarantee(request, body)
     }
     async fn close(&self) -> Result<(), LlmTransportError> {
         self.inner.close().await
@@ -112,19 +116,29 @@ impl Provider for LoggedProvider {
             secret: self.secret.clone(),
         })
     }
+    async fn lower(
+        &mut self,
+        request: &LlmRequest,
+    ) -> Result<ProviderRequestBody, LlmTransportError> {
+        self.inner.lower(request).await
+    }
     #[expect(
         clippy::expect_used,
         reason = "LlmRequest, LlmResponse and accounting::Usage are serde structs that \
                   serialize by construction, and the capture mutex guards only non-panicking \
                   pushes so it cannot be poisoned"
     )]
-    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        request: LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         let request_id = request.scope.request_id.clone();
         let attempt_index = self.capture.rows().len() + 1;
         tracing::debug!(target: "toolbench", parent: &self.capture.span(), attempt_index, request_id, request = %redact(serde_json::to_value(&request).expect("request serializes"), &self.secret), "provider request");
         self.capture.entries.lock().unwrap_or_else(|e| e.into_inner()).push(json!({"request_id":request_id, "partial":true, "request_ms":null, "cost":null, "response":null, "error":null}));
         let started = std::time::Instant::now();
-        let result = self.inner.complete(request).await;
+        let result = self.inner.send(request, body).await;
         let (error, response) = match &result {
             Ok(response) => (Value::Null, Some(response)),
             Err(error) => (

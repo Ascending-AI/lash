@@ -521,9 +521,10 @@ mod admission_tests {
         fn serialize_config(&self) -> serde_json::Value {
             serde_json::Value::Null
         }
-        async fn complete(
+        async fn send(
             &mut self,
             _request: LlmRequest,
+            _body: &ProviderRequestBody,
         ) -> Result<LlmResponse, LlmTransportError> {
             self.0.reliability.rate_limits.requests_per_window = Some(1);
             if std::mem::take(&mut self.1) {

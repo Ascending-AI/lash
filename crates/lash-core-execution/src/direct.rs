@@ -49,9 +49,6 @@ pub enum DirectOutputSpec {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DirectRequest {
-    /// Initial instructions; System messages are runtime feedback only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<Arc<str>>,
     /// The attachment-acceptance rules the request renders its attachments
     /// under. A durable direct completion replaces them with its session's
     /// recorded rules.
@@ -100,7 +97,6 @@ impl DirectRequest {
 
     pub fn text(prompt: impl Into<String>) -> Self {
         Self {
-            instructions: None,
             attachment_acceptance: Arc::default(),
             messages: vec![DirectMessage {
                 role: DirectRole::User,
@@ -146,7 +142,9 @@ impl DirectRequest {
 #[derive(Debug, thiserror::Error, Clone)]
 #[non_exhaustive]
 pub enum DirectLlmError {
-    #[error("leading System messages are ambiguous; put initial instructions in `instructions`")]
+    #[error(
+        "leading System messages are ambiguous; initial instructions are the prompt sections of the call's purpose"
+    )]
     LeadingSystemMessage,
     #[error("invalid request: {message}")]
     InvalidRequest {
@@ -196,6 +194,9 @@ impl DirectLlmOutcome {
 pub struct DirectLlmClient {
     provider: ProviderHandle,
     model: crate::LlmProfileConfig,
+    /// The host's own instruction text for this client's requests. A
+    /// host-owned call composes no prompt sections: it belongs to no session.
+    instructions: Option<Arc<str>>,
     trace_sink: Option<Arc<dyn TraceSink>>,
     trace_context: TraceContext,
     clock: Arc<dyn crate::Clock>,
@@ -206,10 +207,17 @@ impl DirectLlmClient {
         Self {
             provider,
             model,
+            instructions: None,
             trace_sink: None,
             trace_context: TraceContext::default(),
             clock: Arc::new(crate::SystemClock),
         }
+    }
+
+    /// Send `instructions` as every request's initial instructions.
+    pub fn with_instructions(mut self, instructions: Option<Arc<str>>) -> Self {
+        self.instructions = instructions;
+        self
     }
 
     pub fn with_trace_sink(mut self, sink: Option<Arc<dyn TraceSink>>) -> Self {
@@ -241,6 +249,7 @@ impl DirectLlmClient {
         let output_for_validation = request.output.clone();
         let model = self.model.clone();
         let mut llm_request = build_llm_request(request, model)?;
+        llm_request.instructions = self.instructions.clone();
         llm_request.stream_events =
             transport_stream_events_for_direct(&self.provider, llm_request.stream_events.take());
         let request_model = llm_request.model.wire_model().to_string();
@@ -269,9 +278,14 @@ impl DirectLlmClient {
                 .provider_attempts(sideband, TraceContext::default().for_llm_call(id.clone())),
             None => sideband,
         };
+        let body = match self.provider.lower(&llm_request).await {
+            Ok(body) => body,
+            Err(error) => return Err(DirectLlmError::from(Box::new(error))),
+        };
         match lash_core_llm::core_internal::complete_prepared(
             &mut self.provider,
             llm_request,
+            &body,
             sideband,
             crate::ChargeSafetyPolicy::default(),
             &Default::default(),
@@ -356,7 +370,6 @@ pub fn build_llm_request(
         return Err(DirectLlmError::LeadingSystemMessage);
     }
     let DirectRequest {
-        instructions,
         attachment_acceptance,
         messages,
         output,
@@ -430,7 +443,7 @@ pub fn build_llm_request(
     };
 
     Ok(LlmRequest {
-        instructions,
+        instructions: None,
         model,
         messages: llm_messages,
         resolved_stored: Default::default(),
@@ -1005,9 +1018,8 @@ mod runtime_feedback_tests {
     }
 
     #[test]
-    fn direct_explicit_instructions_keep_mid_conversation_feedback() {
+    fn direct_mid_conversation_system_messages_stay_feedback() {
         let mut request = DirectRequest::text("user");
-        request.instructions = Some(Arc::from("I"));
         request.messages.extend([
             DirectMessage {
                 role: DirectRole::Assistant,
@@ -1019,7 +1031,7 @@ mod runtime_feedback_tests {
             },
         ]);
         let normalized = build_llm_request(request, profile("model")).unwrap();
-        assert_eq!(normalized.instructions.as_deref(), Some("I"));
+        assert_eq!(normalized.instructions, None);
         assert_eq!(
             normalized
                 .messages

@@ -13,6 +13,7 @@ pub(crate) mod issue;
 mod lease;
 mod local_effects;
 mod machine;
+mod prepare;
 mod prompt;
 mod streaming;
 mod tool_catalog;
@@ -84,6 +85,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// may emit once a step body of this attempt has really run, or, on the
     /// copy a recorded step's body runs on, that body's live step.
     pub(super) trace: crate::trace::TraceStanding,
+    /// The exact provider body of the admitted call the next model-call
+    /// effect sends (ADR 0133 §6): handed to that effect's body, never
+    /// rebuilt there.
+    pub(super) admitted_body: Option<lash_sansio::llm::types::ProviderRequestBody>,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'a ()>,
 }

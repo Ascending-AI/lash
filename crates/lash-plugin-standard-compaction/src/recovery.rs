@@ -392,13 +392,9 @@ pub(crate) async fn overflow_recovery_decision(
     }
 
     // The summarizer is one direct completion on the same seam the ordinary
-    // compaction policy uses (FIG-3374). The system prompt resolves here, at
-    // the point of use, so its plugin hooks never fire on turns that recover
-    // without summarizing.
-    let resolved_system_prompt = match &ctx.system_prompt {
-        Some(provider) => provider().await.map_err(ContextError::from)?,
-        None => None,
-    };
+    // compaction policy uses (FIG-3374), composing the session's compaction
+    // sections only when it is admitted, so their renderers never run on
+    // turns that recover without summarizing.
     let summary = match summarize_compaction_prefix(
         &ctx.session_id,
         &history_snapshot,
@@ -406,7 +402,6 @@ pub(crate) async fn overflow_recovery_decision(
         Some(&recovery_instructions(elided_parts)),
         &ctx.direct_completions,
         &ctx.scoped_effect_controller,
-        resolved_system_prompt,
     )
     .await
     {

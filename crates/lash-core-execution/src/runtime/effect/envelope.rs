@@ -464,15 +464,6 @@ pub enum RuntimeEffectCommand {
     RecordCompactionBase {
         session: crate::SessionId,
     },
-    /// Render the system prompt a compaction's summarizer call carries, as
-    /// one recorded step before that call (FIG-4589). The protocol plugin
-    /// renders it from the session's recorded config; the text is the step's
-    /// outcome, so a redrive serves it and never renders again. Keyed by the
-    /// compaction's ordinal in its scope. The envelope names only the
-    /// session.
-    RenderCompactionPrompt {
-        session: crate::SessionId,
-    },
     /// Resolve a config transaction once, before anything publishes
     /// (FIG-4379): the base revision it resolved against and either the
     /// complete replacements with each command's output, a stale base, or a
@@ -580,7 +571,6 @@ impl RuntimeEffectCommand {
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
-            Self::RenderCompactionPrompt { .. } => RuntimeEffectKind::RenderCompactionPrompt,
             Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRunScope { .. } => RuntimeEffectKind::CloseRunScope,
@@ -1107,12 +1097,6 @@ pub enum RuntimeEffectOutcome {
     /// ran.
     RecordCompactionBase {
         base: Box<CompactionBase>,
-    },
-    /// The system prompt a compaction's summarizer call carries, as its
-    /// protocol plugin rendered it. `None` when the render is empty.
-    RenderCompactionPrompt {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        system_prompt: Option<std::sync::Arc<str>>,
     },
     /// A config transaction's recorded resolution.
     ResolveConfigTransaction {

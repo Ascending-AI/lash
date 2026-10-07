@@ -150,7 +150,6 @@ impl RuntimeEffectOutcome {
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
-            Self::RenderCompactionPrompt { .. } => RuntimeEffectKind::RenderCompactionPrompt,
             Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRunScope => RuntimeEffectKind::CloseRunScope,

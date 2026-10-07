@@ -754,16 +754,21 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
         .complete(no_sequence_request.clone())
         .await
         .expect_err("a response id without a sequence cursor remains interrupted");
+    let no_sequence_body = no_sequence
+        .lower(&no_sequence_request)
+        .await
+        .expect("the request lowers");
     assert_eq!(
-        no_sequence.generation_retry_guarantee(&no_sequence_request),
+        no_sequence.generation_retry_guarantee(&no_sequence_request, &no_sequence_body),
         GenerationRetryGuarantee::None,
         "a response id alone cannot prove replay filtering"
     );
 
-    let chat = openrouter_provider();
+    let mut chat = openrouter_provider();
     let chat_request = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
+    let chat_body = chat.lower(&chat_request).await.expect("the request lowers");
     assert_eq!(
-        chat.generation_retry_guarantee(&chat_request),
+        chat.generation_retry_guarantee(&chat_request, &chat_body),
         GenerationRetryGuarantee::None,
         "Chat Completions never claims the Responses resume contract"
     );

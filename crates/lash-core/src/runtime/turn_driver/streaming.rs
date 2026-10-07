@@ -205,10 +205,17 @@ impl RuntimeTurnDriver<'_> {
         Ok((current.unwrap_or(original), events))
     }
 
-    /// Runs one unjournaled model call on the transport its body bound.
+    /// Runs one unjournaled attempt of an admitted model call on the
+    /// transport its body bound, sending `body`, the call's exact provider
+    /// body, as it was admitted.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the admitted call's request and body with the send's invocation, observer, cancel and transport"
+    )]
     pub(in crate::runtime) async fn run_llm_call(
         &mut self,
         request: Arc<LlmRequest>,
+        body: &lash_sansio::llm::types::ProviderRequestBody,
         protocol_iteration: usize,
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,
@@ -220,33 +227,6 @@ impl RuntimeTurnDriver<'_> {
         let request = (*request).clone();
         let protocol_suppressed_stop_sequences =
             request.generation.stop_sequences_suppressed_by_protocol();
-        let request = match crate::attachments::resolve_llm_request_attachments(
-            request,
-            self.host.core.durability.attachment_store.as_ref(),
-        )
-        .await
-        {
-            Ok(request) => request,
-            Err(err) => {
-                return RuntimeLlmCallOutcome {
-                    result: Err(LlmCallError {
-                        message: err.to_string(),
-                        retryable: false,
-                        kind: crate::ProviderFailureKind::Unknown,
-                        raw: None,
-                        code: Some(FailureCode::lash(
-                            TurnFailureCode::AttachmentResolutionFailed,
-                        )),
-                        terminal_reason: crate::LlmTerminalReason::ProviderError,
-                        request_body: None,
-                        partial_response: None,
-                    }),
-                    text_streamed: false,
-                    call_record: None,
-                    stream: crate::runtime::LlmStreamRecord::unstreamed(response_plan),
-                };
-            }
-        };
         let request_model = request.model.wire_model().to_string();
         let trace_enabled = self.trace.is_observed();
         let llm_call_id = trace_enabled.then(|| self.llm_call_id(protocol_iteration, &invocation));
@@ -262,24 +242,12 @@ impl RuntimeTurnDriver<'_> {
         let mut debug = LlmStreamDebugState::new(self.host.core.clock.now());
         let provider_trace =
             self.provider_trace_sender(protocol_iteration, llm_call_id.clone(), &debug);
-        // The projector is built from the physical turn's committed frame.
-        // A logical-turn follow-on may already have advanced beyond the
-        // boundary's resident snapshot, so keep that frame identity while
-        // replacing only the runtime-owned request correlation fields.
-        let projected_agent_frame_id = request.scope.agent_frame_id.clone();
+        // The admitted request carries its correlation scope; only the
+        // attempt's live senders are added here, and the body is sent as it
+        // was admitted.
         let mut llm_request = LlmRequest {
-            scope: crate::LlmRequestScope::new(
-                self.session_id.clone(),
-                projected_agent_frame_id,
-                format!(
-                    "{}:turn:{}:llm:{}",
-                    self.session_id, self.turn_id, protocol_iteration
-                ),
-            )
-            .with_turn(self.logical_run().into(), self.turn_id.clone()),
             stream_events: transport_stream_events(&provider, Some(llm_stream_tx)),
             provider_trace,
-            generation: request.generation.clone(),
             ..request
         };
 
@@ -304,10 +272,12 @@ impl RuntimeTurnDriver<'_> {
         // the call and seals it with whatever record this body settles on,
         // the synthetic one of a cancellation included.
         let trace = self.trace.clone();
+        let body = body.clone();
         let mut llm_task = crate::task::spawn(async move {
             crate::provider::complete_prepared(
                 &mut call_provider,
                 llm_request,
+                &body,
                 task_sideband,
                 charge_safety,
                 trace.runtime().metrics(),

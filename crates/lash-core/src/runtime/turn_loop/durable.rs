@@ -342,6 +342,7 @@ impl LashRuntime {
             children_stop: CancellationToken::new(),
             turn_observations: turn_observation_cursor(&controller, run, "shift"),
             trace: self.host.core.tracing.turn_execution(&controller),
+            admitted_body: None,
         });
         Ok(DurableTurn {
             driver,

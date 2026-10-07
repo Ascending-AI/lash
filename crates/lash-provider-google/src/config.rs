@@ -86,8 +86,10 @@ impl UploadedAttachmentCache {
         self.entries.insert(key, entry);
     }
 
-    pub(crate) fn remove(&mut self, key: &UploadedAttachmentCacheKey) {
-        self.entries.remove(key);
+    /// Forget every upload whose URI is one of `uris`: the API rejected a
+    /// body that named them.
+    pub(crate) fn remove_uris(&mut self, uris: &[String]) {
+        self.entries.retain(|_, entry| !uris.contains(&entry.uri));
     }
 }
 

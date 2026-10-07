@@ -52,24 +52,28 @@ impl Provider for AnthropicProvider {
         serde_json::Value::Object(map)
     }
 
-    async fn complete(&mut self, mut req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        validate_extra_headers(
-            &self.extra_headers,
-            &[
-                "x-api-key",
-                "anthropic-version",
-                "anthropic-beta",
-                "content-type",
-                "accept",
-            ],
-            true,
-        )?;
-        let minting_route = self.route_identity(req.model.wire_model());
-        minting_route.validate_endpoint().map_err(|error| {
-            LlmTransportError::new(error.to_string())
+    async fn lower(&mut self, req: &LlmRequest) -> Result<ProviderRequestBody, LlmTransportError> {
+        self.validate_route_and_headers(req)?;
+        let (body, receipt) = self.build_request(req)?;
+        let body = serde_json::to_string(&body).map_err(|err| {
+            LlmTransportError::new(format!("Failed to serialize Anthropic body: {err}"))
                 .with_kind(ProviderFailureKind::Validation)
-                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+                .with_retry_verdict(TransportRetryVerdict::Forbidden)
         })?;
+        Ok(ProviderRequestBody {
+            route: self.route_identity(req.model.wire_model()),
+            stream: true,
+            generation: Some(receipt),
+            body: body.into(),
+        })
+    }
+
+    async fn send(
+        &mut self,
+        mut req: LlmRequest,
+        admitted: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        let minting_route = self.validate_route_and_headers(&req)?;
         if let Some(downstream) = req.stream_events.take() {
             let stream_route = minting_route.clone();
             req.stream_events = Some(LlmEventSender::new(move |mut event| {
@@ -87,20 +91,21 @@ impl Provider for AnthropicProvider {
             .clone()
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        let (body, receipt) = self.build_request(&req)?;
-        let generation_disposition = Some(receipt);
-        let request_body_bytes = serde_json::to_vec(&body).map_err(|err| {
-            LlmTransportError::new(format!("Failed to serialize Anthropic body: {err}"))
+        let body: Value = serde_json::from_str(&admitted.body).map_err(|err| {
+            LlmTransportError::new(format!("The Anthropic request body does not decode: {err}"))
                 .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
                 .with_retry_verdict(TransportRetryVerdict::Forbidden)
         })?;
+        let generation_disposition = admitted.generation;
+        let request_body_bytes = admitted.body.as_bytes().to_vec();
         emit_provider_request_trace(
             provider_trace.as_ref(),
             "anthropic",
             "messages",
             &request_body_bytes,
         );
-        let request_body = Some(String::from_utf8_lossy(&request_body_bytes).into_owned());
+        let request_body = Some(admitted.body.to_string());
         // `fine-grained-tool-streaming-2025-05-14` streams partial JSON so we
         // can surface tool arguments incrementally. Interleaved thinking is
         // built-in on adaptive thinking; the beta is only needed for the
@@ -297,6 +302,32 @@ fn replay_origin_conflict_error(
 }
 
 impl AnthropicProvider {
+    /// The route serving `req`, once its endpoint and the host's extra
+    /// headers are valid.
+    fn validate_route_and_headers(
+        &self,
+        req: &LlmRequest,
+    ) -> Result<ProviderRouteIdentity, LlmTransportError> {
+        validate_extra_headers(
+            &self.extra_headers,
+            &[
+                "x-api-key",
+                "anthropic-version",
+                "anthropic-beta",
+                "content-type",
+                "accept",
+            ],
+            true,
+        )?;
+        let route = self.route_identity(req.model.wire_model());
+        route.validate_endpoint().map_err(|error| {
+            LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+        })?;
+        Ok(route)
+    }
+
     fn partial_response(
         mut state: StreamState,
         request_body: Option<String>,

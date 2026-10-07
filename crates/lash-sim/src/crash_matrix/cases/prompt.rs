@@ -208,12 +208,17 @@ impl Workload for PromptCase {
         for call in 1..=CALLS {
             let key = lash_durable::domain::PromptCallKey {
                 session: session.clone(),
-                run: super::run_of(&session),
-                call,
+                call: lash_durable::domain::ModelCallId::Turn {
+                    run: super::run_of(&session),
+                    ordinal: call,
+                },
             };
             let loaded =
-                match lash_core::plugin::prompt::load_prompt_snapshot(reads.as_ref(), &key).await {
-                    Ok(Some(loaded)) => loaded,
+                match lash_core::plugin::prompt::load_admitted_call(reads.as_ref(), &key).await {
+                    Ok(Some(lash_core::plugin::prompt::LoadedAdmittedCall {
+                        prompt: Some(loaded),
+                        ..
+                    })) => loaded,
                     other => {
                         violations.push(format!("prompt snapshot: call {call} loaded {other:?}"));
                         continue;

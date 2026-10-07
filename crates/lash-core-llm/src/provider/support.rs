@@ -12,8 +12,8 @@ pub(super) use crate::llm::types::{
     AttemptOutcome, AttemptRecord, ChargeSafetyDecision, ChargeSafetyDenialReason,
     ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt, LlmCallId, LlmCallRecord,
     LlmContentBlock, LlmRequest, LlmRequestScope, LlmResponse, LlmTerminalReason, NormalizedError,
-    ProtocolPosition, ProviderReplayOriginConflict, ProviderRouteIdentity, RetryClass,
-    RetryDecision, RetryDeclineCause, RetryWait,
+    ProtocolPosition, ProviderReplayOriginConflict, ProviderRequestBody, ProviderRouteIdentity,
+    RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
 };
 pub(super) use lash_sansio::llm::capability::ReasoningIntent;
 pub(super) use lash_sansio::session_model::{FailureCode, Namespace, TurnFailureCode};

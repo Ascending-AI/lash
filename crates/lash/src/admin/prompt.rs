@@ -25,14 +25,17 @@ impl SessionPromptAdmin {
         let context = self.control.target.context().await?;
         let key = crate::prompt::PromptCallKey {
             session: context.parts.session_id,
-            run: run.clone(),
-            call,
+            call: crate::prompt::ModelCallId::Turn {
+                run: run.clone(),
+                ordinal: call,
+            },
         };
-        lash_core::plugin::prompt::load_prompt_snapshot(
+        lash_core::plugin::prompt::load_admitted_call(
             context.parts.effect_host.backend().durable().as_ref(),
             &key,
         )
         .await
+        .map(|admitted| admitted.and_then(|admitted| admitted.prompt))
         .map_err(EmbedError::PromptSnapshotLoad)
     }
 

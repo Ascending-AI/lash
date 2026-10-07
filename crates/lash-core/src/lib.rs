@@ -503,8 +503,8 @@ pub use lash_sansio::llm::types::{
     LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
     LlmStreamEvidence, LlmTerminalReason, LlmTurnScope, NonNegativeFiniteF64, NormalizedError,
     ProtocolPosition, ProviderEndpointError, ProviderFileScope, ProviderReplayDrop,
-    ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity, RetryClass, RetryDecision,
-    RetryDeclineCause, RetryWait,
+    ProviderReplayDropReason, ProviderReplayKind, ProviderRequestBody, ProviderRouteIdentity,
+    RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,

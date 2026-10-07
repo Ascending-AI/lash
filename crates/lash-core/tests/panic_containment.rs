@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use lash_core::facade_support::{
     LlmTransportError, Provider, ProviderComponents, ProviderHandle, ProviderOptions,
 };
-use lash_core::{GenerationOptions, LlmRequest, LlmRequestScope, LlmResponse};
+use lash_core::{GenerationOptions, LlmRequest, LlmRequestScope, LlmResponse, ProviderRequestBody};
 
 static PANIC_MODE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -36,7 +36,11 @@ impl Provider for PanicProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         panic!("provider payload only")
     }
 
@@ -68,7 +72,11 @@ impl Provider for ClassifierKeywordPanicProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         panic!("safety context length does not exist")
     }
 

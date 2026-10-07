@@ -70,7 +70,7 @@ impl GoogleOAuthProvider {
         project_id: Option<&str>,
         attachment_ref: &lash_core::AttachmentRef,
         bytes: &[u8],
-    ) -> Result<(UploadedAttachmentRef, UploadedAttachmentCacheKey), LlmTransportError> {
+    ) -> Result<UploadedAttachmentRef, LlmTransportError> {
         let key = Self::upload_cache_key(
             credential_scope_seed,
             project_id,
@@ -82,7 +82,7 @@ impl GoogleOAuthProvider {
             .await
             .get(&key, std::time::Instant::now())
         {
-            return Ok((existing, key));
+            return Ok(existing);
         }
 
         let uploaded = self
@@ -95,11 +95,11 @@ impl GoogleOAuthProvider {
             )
             .await?;
         Self::uploaded_attachment_cache().lock().await.insert(
-            key.clone(),
+            key,
             uploaded.clone(),
             std::time::Instant::now(),
         );
-        Ok((uploaded, key))
+        Ok(uploaded)
     }
 
     async fn upload_attachment(
@@ -254,15 +254,8 @@ impl GoogleOAuthProvider {
         credential_scope_seed: &str,
         project_id: Option<&str>,
         req: &LlmRequest,
-    ) -> Result<
-        (
-            Vec<(AttachmentSource, Value)>,
-            Vec<UploadedAttachmentCacheKey>,
-        ),
-        LlmTransportError,
-    > {
+    ) -> Result<Vec<(AttachmentSource, Value)>, LlmTransportError> {
         let mut parts = Vec::with_capacity(req.attachments().len());
-        let mut uploaded_keys = Vec::new();
 
         for source in &req.attachments() {
             if let AttachmentSource::Stored { attachment_ref } = source {
@@ -279,8 +272,7 @@ impl GoogleOAuthProvider {
                     )
                     .await
                 {
-                    Ok((uploaded, key)) => {
-                        uploaded_keys.push(key);
+                    Ok(uploaded) => {
                         parts.push((
                             (*source).clone(),
                             json!({
@@ -301,7 +293,7 @@ impl GoogleOAuthProvider {
             }
         }
 
-        Ok((parts, uploaded_keys))
+        Ok(parts)
     }
 }
 

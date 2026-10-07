@@ -11,7 +11,7 @@ use lash::direct::{
 use lash::provider::{
     FailureCode, GenerationRetryGuarantee, LlmContentBlock, LlmMessage, LlmRequest, LlmResponse,
     LlmRole, LlmTransportError, Provider, ProviderComponents, ProviderFailureKind, ProviderHandle,
-    ProviderOptions, ProviderReliability, TransportRetryVerdict,
+    ProviderOptions, ProviderReliability, ProviderRequestBody, TransportRetryVerdict,
 };
 
 pub(crate) const DEV_PROVIDER_SCENARIO_ENV: &str = "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO";
@@ -293,7 +293,11 @@ impl Provider for DevFailureProvider {
         true
     }
 
-    fn generation_retry_guarantee(&self, _request: &LlmRequest) -> GenerationRetryGuarantee {
+    fn generation_retry_guarantee(
+        &self,
+        _request: &LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> GenerationRetryGuarantee {
         if self.scenario == DevProviderScenario::RetryResetPartial {
             GenerationRetryGuarantee::Idempotent
         } else {
@@ -301,9 +305,10 @@ impl Provider for DevFailureProvider {
         }
     }
 
-    async fn complete(
+    async fn send(
         &mut self,
         request: LlmRequest,
+        _body: &ProviderRequestBody,
     ) -> std::result::Result<LlmResponse, LlmTransportError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         match self.scenario {

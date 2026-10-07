@@ -293,20 +293,20 @@ table lash_processes
   unique (start_key) where start_key is not null
   primary-key (process_id)
 table lash_prompt_snapshot_texts
-  column call_ordinal bigint not-null
+  column call text not-null
   column hash text not-null
-  column run text not-null
+  column owner text not-null
   column session_id text not-null
-  primary-key (session_id, run, call_ordinal, hash)
+  primary-key (session_id, owner, call, hash)
   foreign-key (hash) references lash_prompt_texts (hash) on delete no action
-  foreign-key (session_id, run, call_ordinal) references lash_prompt_snapshots (session_id, run, call_ordinal) on delete no action
+  foreign-key (session_id, owner, call) references lash_prompt_snapshots (session_id, owner, call) on delete no action
 table lash_prompt_snapshots
-  column call_ordinal bigint not-null
-  column run text not-null
+  column call text not-null
+  column owner text not-null
   column session_id text not-null
   column snapshot text not-null
   column written_epoch bigint not-null
-  primary-key (session_id, run, call_ordinal)
+  primary-key (session_id, owner, call)
 table lash_prompt_texts
   column hash text not-null
   column text text not-null

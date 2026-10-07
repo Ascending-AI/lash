@@ -20,7 +20,7 @@ error[E0609]: no field `tools` on type `&CompactionContext<'_>`
 12 |     let _ = &ctx.tools;
    |                  ^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `instructions`, `state`, `traces` ... and 3 others
+   = note: available fields are: `session_id`, `plugin_config`, `instructions`, `state`, `traces` ... and 2 others
 
 error[E0609]: no field `tools` on type `&ContextPressureContext<'_>`
   --> tests/ui/administrative_contexts_have_no_tool_dispatch.rs:16:18
@@ -28,4 +28,4 @@ error[E0609]: no field `tools` on type `&ContextPressureContext<'_>`
 16 |     let _ = &ctx.tools;
    |                  ^^^^^ unknown field
    |
-   = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `state`, `prompt_usage` ... and 5 others
+   = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `state`, `prompt_usage` ... and 4 others

@@ -10,8 +10,10 @@
 //! with the config head. A [`ResolvedPromptPlan`] records the order,
 //! placements and wrapper chains one model call composed under. A
 //! [`PromptSnapshot`] records every section's base text, each wrapper's
-//! output and the final text, as content-addressed references. Both records
-//! are version 1. Neither is ever read back to recompose a request.
+//! output and the final text, as content-addressed references. An
+//! [`AdmittedModelCall`] records a call's snapshot with its exact provider
+//! body (FIG-5259). The records are version 1. None is ever read back to
+//! recompose a request.
 
 use std::num::NonZeroU32;
 
@@ -492,6 +494,124 @@ pub struct PromptSnapshot {
     pub plan: ResolvedPromptPlan,
     /// Every selected section, in the plan's order.
     pub sections: Vec<RenderedPromptSection>,
+}
+
+/// The most bytes one stored chunk of a provider body holds. A chunk ends at
+/// a UTF-8 character boundary at or below it, so equal leading bytes of two
+/// bodies store equal leading chunks.
+pub const PROVIDER_BODY_CHUNK_BYTES: usize = 32 * 1024;
+
+/// The exact provider body an admitted call sends, as its record stores it
+/// (ADR 0133 §6): the route that lowered it, whether it streams, the
+/// generation receipt its provider built, and its bytes as content-addressed
+/// chunks in order. A body that shares a prefix with an earlier call's
+/// shares that prefix's chunks.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedProviderBody {
+    pub route: lash_sansio::llm::types::ProviderRouteIdentity,
+    pub stream: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<lash_sansio::llm::types::GenerationReceipt>,
+    /// The body's length in bytes.
+    pub bytes: u64,
+    /// Every chunk, in order.
+    pub chunks: Vec<PromptTextRef>,
+}
+
+/// Why a recorded body could not be assembled as admitted.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ProviderBodyError {
+    /// A chunk the record names is not among the texts read back.
+    #[error("provider body chunk {hash} is missing")]
+    MissingChunk { hash: String },
+    /// The assembled bytes are not the recorded length.
+    #[error("the assembled provider body holds {assembled} bytes, not the recorded {recorded}")]
+    Length { assembled: u64, recorded: u64 },
+}
+
+impl RecordedProviderBody {
+    /// Record `body` as chunks: the record and each chunk's text by its
+    /// content address.
+    pub fn chunk(
+        body: &lash_sansio::llm::types::ProviderRequestBody,
+    ) -> (Self, Vec<(BlobRef, String)>) {
+        let mut rest = &*body.body;
+        let mut chunks = Vec::new();
+        let mut texts = Vec::new();
+        while !rest.is_empty() {
+            let mut end = rest.len().min(PROVIDER_BODY_CHUNK_BYTES);
+            while !rest.is_char_boundary(end) {
+                end -= 1;
+            }
+            let (chunk, tail) = rest.split_at(end);
+            let reference = PromptTextRef::of(chunk);
+            texts.push((reference.blob.clone(), chunk.to_owned()));
+            chunks.push(reference);
+            rest = tail;
+        }
+        (
+            Self {
+                route: body.route.clone(),
+                stream: body.stream,
+                generation: body.generation,
+                bytes: u64::try_from(body.body.len()).unwrap_or(u64::MAX),
+                chunks,
+            },
+            texts,
+        )
+    }
+
+    /// The body these chunks hold, each read from `text` by its address.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderBodyError`] when a chunk is missing or the bytes are not the
+    /// recorded length; the caller verified every text against its address.
+    pub fn assemble<'a>(
+        &self,
+        text: impl Fn(&BlobRef) -> Option<&'a str>,
+    ) -> Result<lash_sansio::llm::types::ProviderRequestBody, ProviderBodyError> {
+        let mut body = String::new();
+        for chunk in &self.chunks {
+            let stored = text(&chunk.blob).ok_or_else(|| ProviderBodyError::MissingChunk {
+                hash: chunk.blob.as_str().to_owned(),
+            })?;
+            body.push_str(stored);
+        }
+        let assembled = u64::try_from(body.len()).unwrap_or(u64::MAX);
+        if assembled != self.bytes {
+            return Err(ProviderBodyError::Length {
+                assembled,
+                recorded: self.bytes,
+            });
+        }
+        Ok(lash_sansio::llm::types::ProviderRequestBody {
+            route: self.route.clone(),
+            stream: self.stream,
+            generation: self.generation,
+            body: body.into(),
+        })
+    }
+}
+
+/// What one admitted model call commits (ADR 0133 §6), version 1: its
+/// prompt snapshot, its exact provider body and, for a call no turn row
+/// pins, its deadline. A resend reads it back and sends the body; nothing
+/// recomposes or lowers the call again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdmittedModelCall {
+    pub version: PromptSnapshotVersion,
+    /// The call's prompt; `None` when the session registers no sections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<PromptSnapshot>,
+    pub body: RecordedProviderBody,
+    /// The model-total deadline, in milliseconds on the store's clock, that
+    /// every send of a compaction's or direct call keeps. A turn's call pins
+    /// its deadline in the turn row instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline_ms: Option<i64>,
 }
 
 #[cfg(test)]

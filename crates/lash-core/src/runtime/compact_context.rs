@@ -186,36 +186,11 @@ impl LashRuntime {
         };
         let plugin_session = Arc::clone(session.plugins());
         let state = self.read_view();
-        // The protocol plugin renders the summarizer's system prompt as a
-        // recorded step before the summarizer runs: a redrive serves the
-        // recorded text (FIG-4589).
-        let system_prompt = match super::compaction_prompt::recorded_compaction_prompt(
-            controller,
-            super::compaction_prompt::CompactionPromptKey::Ordinal(ordinal),
-            super::compaction_prompt::CompactionPromptInput {
-                session_id: self.state.session_id.clone(),
-                plugins: Arc::clone(&plugin_session),
-                plugin_config: self.state.admitted_plugin_config(),
-                prompt_plan: self.state.authority.prompt_plan.clone(),
-                frame: self.state.current_frame_node_id.clone(),
-                subagent: self.state.authority.subagent.clone(),
-            },
-        )
-        .await
-        {
-            Ok(system_prompt) => system_prompt,
-            Err(error) => {
-                return CompactionRun::failure(
-                    crate::PluginError::RuntimeEffectController(error).into(),
-                );
-            }
-        };
         let ctx = crate::CompactionContext {
             session_id: self.state.session_id.clone(),
             plugin_config: self.state.admitted_plugin_config(),
             state,
             instructions,
-            system_prompt,
             traces: services.trace_emitter(),
             scoped_effect_controller: controller.clone(),
             direct_completions: services.direct_completion_client(controller.clone(), None),

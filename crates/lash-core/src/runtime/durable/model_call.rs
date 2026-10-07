@@ -6,8 +6,8 @@
 //! `model_total` deadline, clipped to what remains of the turn's deadline.
 //!
 //! - **Re-send.** A turn restored in its `Model` phase re-delivers the same
-//!   call. It is sent again as the next attempt only when its request has the
-//!   pinned reference: the checkpoint the pin committed with re-yields it, and
+//!   call, and sends the exact body its admission stored. It is sent again
+//!   as the next attempt only when its request has the pinned reference: the checkpoint the pin committed with re-yields it, and
 //!   anything else is a broken pin, never a new call. The reference is the
 //!   request as the checkpoint names it (FIG-5207), so pinning and checking
 //!   it reuse the digest the checkpoint computed once.
@@ -166,6 +166,7 @@ pub(super) async fn send(
     drive: &mut dyn TurnDrive,
     id: EffectId,
     request: std::sync::Arc<LlmRequest>,
+    body: &lash_sansio::llm::types::ProviderRequestBody,
     start: &ModelStart,
 ) -> Result<(), TurnError> {
     let (pin, limit, resent) = match start {
@@ -182,7 +183,7 @@ pub(super) async fn send(
     let now = cx.durable_now().await?;
     let remaining = Duration::from_millis(millis(pin.deadline).saturating_sub(millis(now)));
     let expired = tokio::select! {
-        answered = drive.model_call(cx, id, request, pin.attempt, limit) => {
+        answered = drive.model_call(cx, id, request, body, pin.attempt, limit) => {
             answered?;
             false
         }

@@ -24,14 +24,17 @@ impl RuntimeTurnDriver<'_> {
         })
     }
 
-    pub(super) async fn handle_llm_call_effect(
+    /// Take the protocol's before-call decision on `request`, the call the
+    /// machine waits on as `id`, before the call is admitted. `false` when
+    /// the decision ended the turn instead (a frame switch, or a refusal
+    /// recorded as a failed turn): nothing is admitted.
+    pub(super) async fn before_llm_call(
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
-        request: Arc<LlmRequest>,
+        request: &LlmRequest,
         event_tx: &TurnObserver,
-    ) -> Result<(), RuntimeError> {
-        self.trace_before_llm_call(machine, &request);
+    ) -> Result<bool, RuntimeError> {
         let invocation = self
             .turn_effect_invocation(machine, id, RuntimeEffectKind::BeforeLlmCall)
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
@@ -42,7 +45,7 @@ impl RuntimeTurnDriver<'_> {
                 RuntimeEffectEnvelope::new(
                     invocation,
                     RuntimeEffectCommand::BeforeLlmCall {
-                        request: Box::new((*request).clone()),
+                        request: Box::new(request.clone()),
                     },
                 ),
                 RuntimeEffectOutcome::into_before_llm_call,
@@ -56,9 +59,9 @@ impl RuntimeTurnDriver<'_> {
                     task,
                     initial_nodes: Vec::new(),
                 });
-                return Ok(());
+                Ok(false)
             }
-            Ok(None) => {}
+            Ok(None) => Ok(true),
             // A protocol refusal before the model call is an outcome over the
             // turn's journaled inputs, recorded as a failed turn on every host
             // (FIG-3575). Only a live fault the hook ran into, or a session
@@ -76,23 +79,23 @@ impl RuntimeTurnDriver<'_> {
                     failure.message.clone(),
                     Some(failure.message),
                 ));
-                return Ok(());
+                Ok(false)
             }
         }
-        let mut request = request;
-        let degraded =
-            crate::attachments::degrade_unmaterializable_request_attachments(&mut request);
-        for notice in degraded {
-            self.emit_trace(machine.protocol_iteration(), || {
-                lash_trace::TraceEvent::AttachmentDegraded {
-                    attachment_id: notice.attachment_id,
-                    label: notice.label,
-                    media_type: notice.media_type,
-                    source: notice.source,
-                    reason: notice.reason,
-                }
-            });
-        }
+    }
+
+    /// Send attempt of the admitted call `id`: `body` is its exact provider
+    /// body, which every attempt and resend sends.
+    pub(super) async fn handle_llm_call_effect(
+        &mut self,
+        machine: &mut TurnMachine,
+        id: crate::sansio::EffectId,
+        request: Arc<LlmRequest>,
+        body: &lash_sansio::llm::types::ProviderRequestBody,
+        event_tx: &TurnObserver,
+    ) -> Result<(), RuntimeError> {
+        self.trace_before_llm_call(machine, &request);
+        self.admitted_body = Some(body.clone());
         let crate::runtime::RuntimeLlmCallOutcome {
             result,
             text_streamed,

@@ -82,7 +82,6 @@ impl McpSamplingHandler for DemoSamplingHandler {
         }
 
         let mut direct = DirectRequest::text("");
-        direct.instructions = params.system_prompt.as_deref().map(Arc::from);
         direct.messages = messages;
         direct.generation.output_token_cap = NonZeroUsize::new(params.max_tokens as usize);
         direct.generation.stop_sequences = params.stop_sequences.clone().unwrap_or_default();
@@ -99,7 +98,10 @@ impl McpSamplingHandler for DemoSamplingHandler {
                 lash::LlmProfileKey::new("mcp-sampling"),
                 self.model.clone(),
             )),
-        );
+        )
+        // The server's system prompt is this host-owned call's own
+        // instruction text.
+        .with_instructions(params.system_prompt.as_deref().map(Arc::from));
         let result = tokio::select! {
             result = client.complete(direct) => {
                 result.map_err(|error| McpProtocolError::internal_error(error.to_string(), None))?

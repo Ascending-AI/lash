@@ -44,7 +44,7 @@ pub use processes::{
     CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite, RedriveAnswer,
     RedriveRequest, SIGNAL_MAIL,
 };
-pub use prompts::{PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite};
+pub use prompts::{ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite};
 pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
 pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
 pub use session_mail::{
@@ -327,7 +327,7 @@ pub enum DomainRefusal {
         session: SessionId,
     },
     /// A prompt record named a call that already has its snapshot.
-    #[error("call {} of turn {} in session {} already has a prompt snapshot", call.call, call.run, call.session)]
+    #[error("{} in session {} is already admitted", call.call, call.session)]
     PromptCallRecorded {
         /// The call.
         call: PromptCallKey,

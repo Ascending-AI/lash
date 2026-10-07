@@ -6,37 +6,77 @@ use lash_core::{
     AttemptContext, SessionId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
     facade_support::DirectJsonSchema, facade_support::DirectMessage,
     facade_support::DirectOutputSpec, facade_support::DirectPart, facade_support::DirectRequest,
-    facade_support::DirectRole, facade_support::PluginSpec, facade_support::PluginSpecFactory,
+    facade_support::DirectRole,
 };
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
 };
 use serde_json::{Value, json};
 
+/// The plugin id `llm_query` registers under.
+pub const LLM_TOOLS_PLUGIN_ID: &str = "llm_tools";
+
+/// The usage source, and the name of the direct purpose, of every
+/// `llm_query` sub-question.
+pub const LLM_QUERY_PURPOSE: &str = "llm_query";
+
+/// The instructions a sub-question carries: the `llm_tools/llm_query`
+/// section, which renders only for the [`LLM_QUERY_PURPOSE`] direct purpose,
+/// in the initial instructions unless the host places it.
+pub const LLM_QUERY_INSTRUCTIONS: &str = "Answer the focused sub-question using only the supplied task and inputs. Return only JSON matching the requested result wrapper. Use kind=\"error\" with a concise error only when the task cannot be answered from the supplied inputs.";
+
 /// Installs `llm_query`. The tool has no model selection of its own: every
 /// query runs the model its session recorded, with that binding's
 /// capability, request extensions and request defaults, so a redrive sends
 /// what the first attempt sent whatever the deployment now installs
-/// (FIG-4531).
+/// (FIG-4531). Its instructions are a prompt section of its own direct
+/// purpose, so a sub-question composes them and nothing of the session's
+/// turn prompt (ADR 0133 §8).
 #[derive(Clone, Debug, Default)]
 pub struct LlmToolsPluginFactory {}
 
 impl PluginFactory for LlmToolsPluginFactory {
     fn id(&self) -> &'static str {
-        "llm_tools"
+        LLM_TOOLS_PLUGIN_ID
     }
 
     fn build(
         &self,
-        ctx: &PluginSessionContext,
+        _ctx: &PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, PluginError> {
-        let provider: Arc<dyn ToolProvider> = Arc::new(llm_query_provider());
+        Ok(Arc::new(LlmToolsPlugin {
+            provider: Arc::new(llm_query_provider()),
+        }))
+    }
+}
 
-        PluginSpecFactory::new(
-            <Self as lash_core::plugin::PluginDefinition>::declaration(),
-            Arc::new(move |_ctx| Ok(PluginSpec::new().with_tool_provider(Arc::clone(&provider)))),
+struct LlmToolsPlugin {
+    provider: Arc<dyn ToolProvider>,
+}
+
+impl lash_core::facade_support::SessionPlugin for LlmToolsPlugin {
+    fn id(&self) -> &'static str {
+        LLM_TOOLS_PLUGIN_ID
+    }
+
+    fn register(&self, reg: &mut lash_core::plugin::PluginRegistrar) -> Result<(), PluginError> {
+        reg.tools().provider(Arc::clone(&self.provider))?;
+        let key = lash_core::prompt_sections::PromptSectionKey::new(LLM_QUERY_PURPOSE)
+            .map_err(|error| PluginError::Registration(error.to_string()))?;
+        reg.prompt().section(
+            lash_core::plugin::prompt::PromptSectionSpec::new(
+                key,
+                lash_core::prompt_sections::PromptPlacement::InitialInstructions,
+            )
+            .purposes([lash_core::prompt_sections::PromptPurpose::Direct {
+                name: LLM_QUERY_PURPOSE.to_owned(),
+            }]),
+            Arc::new(|_: &lash_core::plugin::prompt::PromptInput<'_>| {
+                Ok(lash_core::plugin::prompt::SectionText::text(
+                    LLM_QUERY_INSTRUCTIONS,
+                ))
+            }),
         )
-        .build(ctx)
     }
 }
 
@@ -106,14 +146,11 @@ impl LlmToolsProvider {
             .direct_completions()
             .complete(
                 DirectRequest {
-                    instructions: Some(Arc::from("Answer the focused sub-question using only the supplied task and inputs. Return only JSON matching the requested result wrapper. Use kind=\"error\" with a concise error only when the task cannot be answered from the supplied inputs.")),
                     attachment_acceptance: session_model.attachment_acceptance,
-                    messages: vec![
-                        DirectMessage {
-                            role: DirectRole::User,
-                            parts: vec![DirectPart::Text(prompt)],
-                        },
-                    ],
+                    messages: vec![DirectMessage {
+                        role: DirectRole::User,
+                        parts: vec![DirectPart::Text(prompt)],
+                    }],
                     output,
                     stream_events: None,
                     generation,
@@ -121,15 +158,14 @@ impl LlmToolsProvider {
                         lash_core::RuntimeOwner::Session(session_id) => {
                             session_id.with_suffix("-llm-query")
                         }
-                        lash_core::RuntimeOwner::Process(process_id) => SessionId::prefixed(
-                            "process:",
-                            format_args!("{process_id}-llm-query"),
-                        ),
+                        lash_core::RuntimeOwner::Process(process_id) => {
+                            SessionId::prefixed("process:", format_args!("{process_id}-llm-query"))
+                        }
                     }),
                     caused_by: None,
                     replay: None,
                 },
-                "llm_query",
+                LLM_QUERY_PURPOSE,
             )
             .await
             .map_err(|error| -> LlmQueryError {

@@ -101,7 +101,11 @@ impl Provider for ContradictoryReplayProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         Ok(LlmResponse {
             parts: vec![LlmOutputPart::Reasoning {
                 text: "summary".to_string(),
@@ -144,7 +148,11 @@ impl Provider for ContradictoryPartialFailureProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new("original partial provider failure")
             .with_kind(ProviderFailureKind::Stream)
             .with_http_status(502)
@@ -200,7 +208,11 @@ impl Provider for GatewayReplayCaptureProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         assert!(matches!(
             request.messages[0].blocks[0],
             LlmContentBlock::Text { ref text, .. } if text.as_ref() == "portable summary"
@@ -233,7 +245,11 @@ impl Provider for ReplayCaptureProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         assert!(matches!(
             request.messages[0].blocks[0],
             LlmContentBlock::Text { ref text, .. } if text.as_ref() == "neutral summary"
@@ -278,7 +294,11 @@ impl Provider for PartialStreamFailureProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new("stream truncated")
             .with_kind(ProviderFailureKind::Stream)
             .with_code(FailureCode::provider("stream_ended_before_terminal"))
@@ -334,7 +354,11 @@ impl Provider for CountedPartialStreamFailureProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         Err(LlmTransportError::new("stream truncated")
             .with_kind(ProviderFailureKind::Stream)
@@ -376,7 +400,11 @@ impl Provider for PaidPartialThenSuccessProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt <= self.fail_until {
             let verdict =
@@ -437,7 +465,11 @@ impl Provider for TerminalProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {
                 text: self.text.to_string(),
@@ -488,7 +520,11 @@ impl Provider for MutatingProvider {
         serde_json::json!({})
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         self.options.response_body_bytes = Some(MUTATED_RESPONSE_BODY_BYTES);
         Ok(bare_ok_response())
     }
@@ -520,7 +556,11 @@ impl Provider for FailingProvider {
         serde_json::Value::Object(Default::default())
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt <= self.fail_until {
             let kind = if self.retryable {
@@ -586,7 +626,11 @@ impl Provider for StatusFailingProvider {
         serde_json::Value::Object(Default::default())
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt <= self.fail_until {
             let message = match self.status {
@@ -1429,6 +1473,7 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
 
     let mut request = empty_request();
     let sideband = handle.prepare_completion(&mut request);
+    let body = handle.lower(&request).await.expect("the request lowers");
     let instruments = lash_trace::telemetry::metrics::TelemetryMetrics::default();
     let permit = lash_trace::EmissionPermit::live_execution(lash_trace::TraceAttemptId::new(
         "test-provider-body",
@@ -1436,6 +1481,7 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
     let completion = handle
         .complete_prepared(
             request,
+            &body,
             sideband,
             crate::ChargeSafetyPolicy::default(),
             &instruments,
@@ -1499,7 +1545,11 @@ impl Provider for ReportingProvider {
         serde_json::Value::Null
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {
                 text: "ok".to_string(),
@@ -1683,6 +1733,7 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
 
     let mut request = empty_request();
     let sideband = handle.prepare_completion(&mut request);
+    let body = handle.lower(&request).await.expect("the request lowers");
     let instruments = lash_trace::telemetry::metrics::TelemetryMetrics::default();
     let permit = lash_trace::EmissionPermit::live_execution(lash_trace::TraceAttemptId::new(
         "test-provider-body",
@@ -1690,6 +1741,7 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
     let completion = handle
         .complete_prepared(
             request,
+            &body,
             sideband,
             crate::ChargeSafetyPolicy::default(),
             &instruments,
@@ -2028,9 +2080,19 @@ impl Provider for AdmissionRecorder {
     async fn close(&self) -> Result<(), LlmTransportError> {
         self.inner.close().await
     }
-    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn lower(
+        &mut self,
+        request: &LlmRequest,
+    ) -> Result<ProviderRequestBody, LlmTransportError> {
+        self.inner.lower(request).await
+    }
+    async fn send(
+        &mut self,
+        request: LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         self.requests.lock_recover().push(request.clone());
-        self.inner.complete(request).await
+        self.inner.send(request, body).await
     }
 }
 

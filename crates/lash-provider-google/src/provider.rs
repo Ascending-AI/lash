@@ -1,6 +1,6 @@
-//! The [`Provider`] trait implementation: config serialization, the `complete`
-//! orchestration (attachment prep, request build, inline-fallback retry), the
-//! request/stream executor, and project-id resolution.
+//! The [`Provider`] trait implementation: config serialization, lowering
+//! (project resolution, attachment uploads, request build), sending an
+//! admitted body, the request/stream executor, and project-id resolution.
 
 use crate::support::*;
 use std::sync::Arc;
@@ -8,6 +8,12 @@ use std::sync::Arc;
 struct GoogleCredentialCallContext<'a> {
     provider: &'a mut GoogleOAuthProvider,
     request: &'a LlmRequest,
+}
+
+struct GoogleSendContext<'a> {
+    provider: &'a mut GoogleOAuthProvider,
+    request: &'a LlmRequest,
+    body: &'a ProviderRequestBody,
 }
 
 /// How to read one response, fixed by the request before any I/O: whether
@@ -21,13 +27,16 @@ pub(crate) struct ResponseReading {
 }
 
 impl GoogleOAuthProvider {
-    fn should_retry_inline(err: &LlmTransportError) -> bool {
+    /// Whether `err` is the API rejecting a file reference the body names.
+    fn rejects_file_reference(err: &LlmTransportError) -> bool {
         matches!(err.http_status, Some(400 | 404))
             || err.raw.as_deref().is_some_and(|raw| {
                 raw.contains("fileData") || raw.contains("fileUri") || raw.contains("file_uri")
             })
     }
 
+    /// Send `request` as a body, for a test that scripts the response.
+    #[cfg(test)]
     pub(crate) async fn execute_request(
         &self,
         access_token: &str,
@@ -37,16 +46,45 @@ impl GoogleOAuthProvider {
         reading: ResponseReading,
         generation_disposition: Option<GenerationReceipt>,
     ) -> Result<LlmResponse, LlmTransportError> {
+        let body = ProviderRequestBody {
+            route: self.route_identity_for_model("test"),
+            stream: stream_events.is_some(),
+            generation: generation_disposition,
+            body: serde_json::to_string(&request)
+                .map_err(|err| LlmTransportError::new(err.to_string()))?
+                .into(),
+        };
+        self.execute_body(access_token, &body, stream_events, provider_trace, reading)
+            .await
+    }
+
+    /// Send `admitted`'s bytes as they are, authenticated by `access_token`.
+    pub(crate) async fn execute_body(
+        &self,
+        access_token: &str,
+        admitted: &ProviderRequestBody,
+        stream_events: Option<lash_core::llm::types::LlmEventSender>,
+        provider_trace: Option<lash_core::llm::types::LlmProviderTraceSender>,
+        reading: ResponseReading,
+    ) -> Result<LlmResponse, LlmTransportError> {
         let ResponseReading {
             stream_termination,
             defaults,
         } = reading;
         let expose_thinking = defaults.expose_thinking;
-        let request_body_bytes = serde_json::to_vec(&request).map_err(|err| {
-            LlmTransportError::new(format!("Failed to serialize Cloud Code body: {err}"))
-                .with_kind(lash_core::ProviderFailureKind::Validation)
-        })?;
-        let request_body = Some(String::from_utf8_lossy(&request_body_bytes).into_owned());
+        let generation_disposition = admitted.generation;
+        // The body decides whether the response streams.
+        let stream_events = if admitted.stream {
+            stream_events.or_else(|| Some(lash_core::llm::types::LlmEventSender::new(|_| {})))
+        } else {
+            None
+        };
+        let request_body_bytes = admitted.body.as_bytes().to_vec();
+        let request_body = Some(admitted.body.to_string());
+        // The model the body names reads the response's parts.
+        let origin_model = serde_json::from_str::<Value>(&admitted.body)
+            .ok()
+            .and_then(|body| body.get("model").and_then(Value::as_str).map(str::to_owned));
         let method = if stream_events.is_some() {
             "streamGenerateContent"
         } else {
@@ -135,8 +173,7 @@ impl GoogleOAuthProvider {
                     .with_raw(text.clone())
                     .with_retry_verdict(TransportRetryVerdict::NotRetryable)
             })?;
-            let origin_model = request.get("model").and_then(Value::as_str);
-            let parts = self.response_parts_from_value(&value, origin_model);
+            let parts = self.response_parts_from_value(&value, origin_model.as_deref());
             let provider_usage = value.get("usageMetadata").cloned();
             let usage = provider_usage
                 .as_ref()
@@ -185,10 +222,6 @@ impl GoogleOAuthProvider {
                 provider_request_id: Some(provider_request_id),
                 ..Default::default()
             });
-        let origin_model = request
-            .get("model")
-            .and_then(Value::as_str)
-            .map(str::to_string);
         let stream_result = drive_sse_response(
             resp.body,
             timeouts.chunk_timeout,
@@ -411,22 +444,14 @@ impl GoogleOAuthProvider {
             .map(|s| s.to_string()))
     }
 
-    async fn complete_with_credential(
+    /// Lower `req` with `credential`: the project resolved, every stored
+    /// attachment uploaded or inlined, and the body built once. The upload
+    /// references it names are pinned in it.
+    async fn lower_with_credential(
         &mut self,
-        req: LlmRequest,
+        req: &LlmRequest,
         credential: Lease<GoogleCredential>,
-    ) -> Result<LlmResponse, LlmTransportError> {
-        let stream_events = req.stream_events.clone();
-        let provider_trace = req.provider_trace.clone();
-        let reading = ResponseReading {
-            stream_termination: req
-                .model
-                .metadata()
-                .capability
-                .stream_termination
-                .unwrap_or(self.stream_termination),
-            defaults: req.model.metadata().request_defaults.clone(),
-        };
+    ) -> Result<ProviderRequestBody, LlmTransportError> {
         let GoogleCredential {
             access_token,
             refresh_token,
@@ -449,74 +474,101 @@ impl GoogleOAuthProvider {
             };
         }
         let project_id = self.project_id.clone();
-
-        let inline_attachment_parts = req
-            .attachments()
-            .iter()
-            .map(|source| {
-                (
-                    (*source).clone(),
-                    Self::inline_attachment_part(&req, source),
-                )
-            })
-            .collect::<Vec<_>>();
-        let inline_contents =
-            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts)?;
-
-        let (attachment_parts, uploaded_keys) = self
-            .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), &req)
+        let attachment_parts = self
+            .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), req)
             .await?;
-        let contents = if uploaded_keys.is_empty() {
-            inline_contents.clone()
-        } else {
-            self.build_contents_with_attachment_parts(&req, &attachment_parts)?
-        };
-
+        let contents = self.build_contents_with_attachment_parts(req, &attachment_parts)?;
         let (request, receipt) =
-            Self::build_request_with_receipt(self, &req, contents, project_id.as_deref())?;
-        let generation_disposition = Some(receipt);
+            Self::build_request_with_receipt(self, req, contents, project_id.as_deref())?;
+        let body = serde_json::to_string(&request).map_err(|err| {
+            LlmTransportError::new(format!("Failed to serialize Cloud Code body: {err}"))
+                .with_kind(lash_core::ProviderFailureKind::Validation)
+        })?;
+        Ok(ProviderRequestBody {
+            route: self.route_identity_for_model(req.model.wire_model()),
+            stream: req.stream_events.is_some(),
+            generation: Some(receipt),
+            body: body.into(),
+        })
+    }
 
+    /// Send `admitted` with `credential`. A rejected file reference evicts
+    /// every upload the body names, so the next lowering uploads again; the
+    /// body itself is never rebuilt.
+    async fn send_with_credential(
+        &mut self,
+        req: LlmRequest,
+        admitted: &ProviderRequestBody,
+        credential: Lease<GoogleCredential>,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        let stream_events = req.stream_events.clone();
+        let provider_trace = req.provider_trace.clone();
+        let reading = ResponseReading {
+            stream_termination: req
+                .model
+                .metadata()
+                .capability
+                .stream_termination
+                .unwrap_or(self.stream_termination),
+            defaults: req.model.metadata().request_defaults.clone(),
+        };
+        let access_token = credential.value.access_token.into_inner();
         match self
-            .execute_request(
+            .execute_body(
                 &access_token,
-                request,
-                stream_events.clone(),
-                provider_trace.clone(),
-                reading.clone(),
-                generation_disposition,
+                admitted,
+                stream_events,
+                provider_trace,
+                reading,
             )
             .await
         {
-            Ok(response) => Ok(response),
-            Err(err) if !uploaded_keys.is_empty() && Self::should_retry_inline(&err) => {
-                // The error does not name which file reference the API rejected,
-                // so every cached URI this request relied on is suspect; evict
-                // them all rather than re-attempting a dead URI on the next
-                // request.
-                {
-                    let mut cache = Self::uploaded_attachment_cache().lock().await;
-                    for key in &uploaded_keys {
-                        cache.remove(key);
+            Err(err) if Self::rejects_file_reference(&err) => {
+                let uris = file_uris(&admitted.body);
+                if !uris.is_empty() {
+                    Self::uploaded_attachment_cache()
+                        .lock()
+                        .await
+                        .remove_uris(&uris);
+                }
+                Err(err)
+            }
+            other => other,
+        }
+    }
+}
+
+/// Every `fileUri` the body names.
+fn file_uris(body: &str) -> Vec<String> {
+    fn walk(value: &Value, uris: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                for (key, value) in map {
+                    match value {
+                        Value::String(uri) if key == "fileUri" => uris.push(uri.clone()),
+                        other => walk(other, uris),
                     }
                 }
-                let (inline_request, _) = Self::build_request_with_receipt(
-                    self,
-                    &req,
-                    inline_contents,
-                    project_id.as_deref(),
-                )?;
-                self.execute_request(
-                    &access_token,
-                    inline_request,
-                    stream_events,
-                    provider_trace,
-                    reading,
-                    generation_disposition,
-                )
-                .await
             }
-            Err(err) => Err(err),
+            Value::Array(items) => items.iter().for_each(|item| walk(item, uris)),
+            _ => {}
         }
+    }
+    let mut uris = Vec::new();
+    if let Ok(value) = serde_json::from_str::<Value>(body) {
+        walk(&value, &mut uris);
+    }
+    uris
+}
+
+/// A credential manager's failure as the call's transport error.
+fn credential_failure(error: CredentialExecuteError<LlmTransportError>) -> LlmTransportError {
+    match error {
+        CredentialExecuteError::Credential(error) => error.into_transport_error(),
+        CredentialExecuteError::Call(error) => error,
+        // Unknown failures cannot establish that replay is safe.
+        _ => LlmTransportError::new(error.to_string())
+            .with_retry_verdict(TransportRetryVerdict::Forbidden),
     }
 }
 
@@ -589,7 +641,7 @@ impl Provider for GoogleOAuthProvider {
         serde_json::Value::Object(map)
     }
 
-    async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn lower(&mut self, req: &LlmRequest) -> Result<ProviderRequestBody, LlmTransportError> {
         self.route_identity_for_model(req.model.wire_model())
             .validate_endpoint()
             .map_err(|error| {
@@ -597,7 +649,7 @@ impl Provider for GoogleOAuthProvider {
                     .with_kind(ProviderFailureKind::Validation)
                     .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
             })?;
-        let req = self.reasoning_retention_safe_request(&req)?.into_owned();
+        let req = self.reasoning_retention_safe_request(req)?.into_owned();
         Self::validate_attachments(&req)?;
         validate_extra_headers(
             &self.extra_headers,
@@ -618,7 +670,50 @@ impl Provider for GoogleOAuthProvider {
                 Box::pin(async move {
                     match context
                         .provider
-                        .complete_with_credential(context.request.clone(), lease)
+                        .lower_with_credential(context.request, lease)
+                        .await
+                    {
+                        Ok(body) => Ok(body),
+                        Err(error) if error.http_status == Some(401) => {
+                            Err(CredentialCallError::PreOutputAuth(error))
+                        }
+                        Err(error) => Err(CredentialCallError::Failed(error)),
+                    }
+                })
+            })
+            .await
+            .map_err(credential_failure)
+    }
+
+    async fn send(
+        &mut self,
+        req: LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        self.route_identity_for_model(req.model.wire_model())
+            .validate_endpoint()
+            .map_err(|error| {
+                LlmTransportError::new(error.to_string())
+                    .with_kind(ProviderFailureKind::Validation)
+                    .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+            })?;
+        validate_extra_headers(
+            &self.extra_headers,
+            &["authorization", "content-type"],
+            false,
+        )?;
+        let manager = Arc::clone(&self.credentials);
+        let mut context = GoogleSendContext {
+            provider: self,
+            request: &req,
+            body,
+        };
+        manager
+            .execute(&mut context, |context, lease| {
+                Box::pin(async move {
+                    match context
+                        .provider
+                        .send_with_credential(context.request.clone(), context.body, lease)
                         .await
                     {
                         Ok(response) => Ok(response),
@@ -630,13 +725,7 @@ impl Provider for GoogleOAuthProvider {
                 })
             })
             .await
-            .map_err(|error| match error {
-                CredentialExecuteError::Credential(error) => error.into_transport_error(),
-                CredentialExecuteError::Call(error) => error,
-                // Unknown failures cannot establish that replay is safe.
-                _ => LlmTransportError::new(error.to_string())
-                    .with_retry_verdict(TransportRetryVerdict::Forbidden),
-            })
+            .map_err(credential_failure)
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {

@@ -1,7 +1,9 @@
 //! Prompt snapshot roots and their shared text (P2, FIG-5256; ADR 0133 §5).
 
 use super::{LABEL, LawBroken, LawResult, create, ensure, node, session};
-use crate::domain::{DomainRefusal, PromptCallKey, PromptText, PromptWrite, TurnWrite};
+use crate::domain::{
+    DomainRefusal, ModelCallId, PromptCallKey, PromptText, PromptWrite, TurnWrite,
+};
 use crate::{DomainWrite, DurableError, DurableStore, Epoch};
 use lash_core_store::store::{
     AdmittedTurnRows, ControlIntentId, RunAdmissionRecord, RunTerminalCause, SessionCatalogStore,
@@ -47,8 +49,10 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
     let epoch = claimed[0].epoch;
     let call = |run: &TurnId| PromptCallKey {
         session: id.clone(),
-        run: run.clone(),
-        call: 1,
+        call: ModelCallId::Turn {
+            run: run.clone(),
+            ordinal: 1,
+        },
     };
     let record = |run: &TurnId, names: &[&str]| {
         DomainWrite::Prompt(PromptWrite::Record {
@@ -210,14 +214,26 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
     let call = |session: &SessionId, run: &str, call: u32| {
         Ok::<_, LawBroken>(PromptCallKey {
             session: session.clone(),
-            run: turn(run)?,
-            call,
+            call: ModelCallId::Turn {
+                run: turn(run)?,
+                ordinal: call,
+            },
         })
+    };
+    // A compaction's call, owned by its execution with no turn, goes with
+    // its session too.
+    let owned = PromptCallKey {
+        session: deleted.clone(),
+        call: ModelCallId::Owned {
+            owner: "session-operation:compaction".to_owned(),
+            key: "summary".to_owned(),
+        },
     };
     let calls = [
         (call(&deleted, "first-turn", 1)?, &["own", "shared"][..]),
         (call(&deleted, "first-turn", 2)?, &["own"][..]),
         (call(&deleted, "second-turn", 1)?, &["later"][..]),
+        (owned, &["own", "summary"][..]),
         (call(&live, "first-turn", 1)?, &["shared", "kept"][..]),
     ];
     for (call, names) in &calls {
@@ -228,7 +244,7 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
         let mut tx = store.begin(&owned.actor, owned.epoch).await?;
         tx.write(DomainWrite::Prompt(PromptWrite::Record {
             call: call.clone(),
-            snapshot: format!("snapshot of call {} of {}", call.call, call.run),
+            snapshot: format!("snapshot of {}", call.call),
             texts: names.iter().map(|name| text(name)).collect(),
         }));
         store.commit(tx, LABEL).await?;
@@ -238,14 +254,14 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
         .delete_session(&deleted)
         .await
         .map_err(|failure| LawBroken(format!("the delete failed: {failure:?}")))?;
-    for (call, _) in &calls[..3] {
+    for (call, _) in &calls[..4] {
         ensure!(
             store.prompt_snapshot(call).await?.is_none(),
             "the deleted session kept the root of {call:?}"
         );
     }
     let root = store
-        .prompt_snapshot(&calls[3].0)
+        .prompt_snapshot(&calls[4].0)
         .await?
         .ok_or_else(|| LawBroken("deleting one session released another's root".into()))?;
     ensure!(
@@ -253,7 +269,7 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
         "the live root reads back as {root:?}"
     );
     let stored = store
-        .prompt_texts(&hashes(&["own", "shared", "later", "kept"]))
+        .prompt_texts(&hashes(&["own", "shared", "later", "summary", "kept"]))
         .await?;
     ensure!(
         stored == [text("shared"), text("kept")],

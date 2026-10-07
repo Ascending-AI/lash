@@ -40,6 +40,7 @@ use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailTx, Release,
 };
 use lash_sansio::SavedTurn;
+use lash_sansio::llm::types::ProviderRequestBody;
 use tokio_util::sync::CancellationToken;
 
 use super::head::{HeadCache, SessionHead};
@@ -148,42 +149,39 @@ pub trait TurnDrive: Send {
     /// # Errors
     ///
     /// [`TurnError`] when the call aborts the turn rather than answering it.
+    ///
+    /// `body` is the call's exact provider body as `model.start` admitted
+    /// it: every attempt, and a resend on any owner, sends those bytes.
     async fn model_call(
         &mut self,
         cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
+        body: &ProviderRequestBody,
         attempt: u32,
         limit: crate::ExecutionLimit,
     ) -> Result<(), TurnError>;
 
-    /// Compose the prompt of model call `call`, new to the turn, whose
-    /// request the machine built as `request`, and answer the request to
-    /// admit: `request` with the call's prompt sections lowered into it
-    /// (ADR 0133 §6). It reads the turn's last commit and what the turn
-    /// published since, all of which `model.start` commits with the call. A
-    /// resend of an admitted call never composes; a crash before admission
-    /// composes the call again, so what it runs must be repeat-safe until
-    /// the call is admitted. A drive with no prompt sections admits the
-    /// request as the machine built it.
-    ///
-    /// `Ok(Err(error))`: the composition failed closed. Nothing is sent, and
-    /// the call settles with `error`.
+    /// Prepare model call `call`, new to the turn, whose request the machine
+    /// built as `request` and waits on as `id`, for its admission (ADR 0133 §6): compose its
+    /// prompt sections and lower them into it, take the protocol's
+    /// before-call decision, normalize its attachments, and lower it to the
+    /// exact provider body. It reads the turn's last commit and what the
+    /// turn published since, all of which `model.start` commits with the
+    /// call. A resend of an admitted call never prepares; a crash before
+    /// admission prepares the call again, so what it runs must be
+    /// repeat-safe until the call is admitted.
     ///
     /// # Errors
     ///
     /// [`TurnError`] when the call aborts the turn rather than settling.
-    async fn compose_call(
+    async fn prepare_call(
         &mut self,
-        _cx: &ActorContext,
-        _call: u32,
+        cx: &ActorContext,
+        id: EffectId,
+        call: u32,
         request: Arc<LlmRequest>,
-    ) -> Result<Result<ComposedCall, crate::LlmCallError>, TurnError> {
-        Ok(Ok(ComposedCall {
-            request,
-            records: Vec::new(),
-        }))
-    }
+    ) -> Result<PreparedCall, TurnError>;
 
     /// The steering input the turn's checkpoints delivered, with its
     /// application evidence (ADR 0101 §5.1). Every phase commits it with its
@@ -737,13 +735,28 @@ pub struct AdmittedInputs {
     pub admission: crate::store::RunAdmissionRecord,
 }
 
-/// A new model call's composed prompt: the request to admit, and what its
-/// composition records, which `model.start` writes in the call's admission.
+/// A new model call, prepared for its admission.
+pub enum PreparedCall {
+    /// Admit the call.
+    Admit(Box<ComposedCall>),
+    /// The call settles unsent with this error: its prompt failed closed,
+    /// or it could not be lowered.
+    Unsent(crate::LlmCallError),
+    /// The protocol's before-call decision ended the turn instead (a frame
+    /// switch or a refused hook): the machine moved on and nothing is
+    /// admitted.
+    Ended,
+}
+
+/// A new model call, ready to admit: the request, its composed prompt and
+/// its exact provider body, all of which `model.start` commits.
 pub struct ComposedCall {
-    /// The request the machine built, with the call's sections in it.
+    /// The request the machine waits on, with the call's sections in it.
     pub request: Arc<LlmRequest>,
-    /// The writes that record the call's composition.
-    pub records: Vec<DomainWrite>,
+    /// The call's composition; `None` when the session has no sections.
+    pub prompt: Option<crate::plugin::prompt::ComposedPrompt>,
+    /// The exact body every send of the call sends.
+    pub body: ProviderRequestBody,
 }
 
 /// What a phase row's checkpoint holds: the machine's saved turn, the

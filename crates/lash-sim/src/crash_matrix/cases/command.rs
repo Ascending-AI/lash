@@ -85,7 +85,7 @@ fn append(operation: &str, ancestor: Option<&str>) -> Result<SessionCommand, Str
 
 /// Submit `command` to `session`'s command lane as a host's submission
 /// records it; its commit wakes the session's actor.
-async fn submit(
+pub(super) async fn submit(
     world: &World,
     session: &SessionId,
     command: SessionCommand,
@@ -108,7 +108,7 @@ async fn submit(
 }
 
 /// The outcome `batch` of `session` settled with, once it settled.
-async fn settled(
+pub(super) async fn settled(
     world: &World,
     session: &SessionId,
     batch: &BatchId,

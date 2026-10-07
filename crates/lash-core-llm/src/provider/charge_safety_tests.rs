@@ -112,10 +112,12 @@ async fn provider_handle_enforces_the_supplied_retry_limit_without_a_second_ceil
     .expect("valid budgets");
     let mut request = empty_request();
     let sideband = handle.prepare_completion(&mut request);
+    let body = handle.lower(&request).await.expect("the request lowers");
 
     let failure = handle
         .complete_prepared(
             request,
+            &body,
             sideband,
             crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: 6,

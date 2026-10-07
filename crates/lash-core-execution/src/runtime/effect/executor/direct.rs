@@ -4,7 +4,6 @@ use super::super::outcome::llm_call_error_from_transport;
 use super::*;
 use crate::LlmRequest as CoreLlmRequest;
 use crate::provider::ProviderHandle;
-use crate::sansio::LlmCallError;
 
 impl LocalDirectEffectRunner {
     pub(super) async fn run_direct(
@@ -130,31 +129,6 @@ impl LocalDirectEffectRunner {
             String,
         )>,
     ) -> RuntimeDirectLlmOutcome {
-        let request = match crate::attachments::resolve_llm_request_attachments(
-            request,
-            self.attachment_store.as_ref(),
-        )
-        .await
-        {
-            Ok(request) => request,
-            Err(err) => {
-                return (
-                    Err(LlmCallError {
-                        message: err.to_string(),
-                        retryable: false,
-                        kind: crate::ProviderFailureKind::Unknown,
-                        raw: None,
-                        code: Some(crate::FailureCode::lash(
-                            crate::TurnFailureCode::AttachmentResolutionFailed,
-                        )),
-                        terminal_reason: crate::LlmTerminalReason::ProviderError,
-                        request_body: None,
-                        partial_response: None,
-                    }),
-                    None,
-                );
-            }
-        };
         let mut request = request;
         let sideband = lash_core_llm::core_internal::prepare_completion(&provider, &mut request);
         let sideband = traced.map_or_else(
@@ -164,6 +138,7 @@ impl LocalDirectEffectRunner {
         match lash_core_llm::core_internal::complete_prepared(
             &mut provider,
             request,
+            &self.body,
             sideband,
             self.charge_safety.clone(),
             self.tracing.metrics(),

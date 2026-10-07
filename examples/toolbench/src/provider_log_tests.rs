@@ -28,7 +28,11 @@ impl Provider for Scripted {
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
     }
-    async fn complete(&mut self, _: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         self.replies.pop_front().expect("unexpected provider retry")
     }
 }

@@ -16,8 +16,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, OpenTurn, TurnCancelRequest, TurnCommit, TurnDone,
-    TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, OpenTurn, PreparedCall, TurnCancelRequest,
+    TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
+    request_turn_cancel,
 };
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
@@ -35,6 +36,7 @@ use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
 use lash_durable::domain::OwnerKey;
+use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::{
     ExecutionBudgets, ExecutionLimit, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput,
@@ -66,11 +68,14 @@ pub enum TurnScript {
     /// A turn behind the facade whose every model call composes plugin
     /// prompt sections ([`super::prompts`]).
     Prompt,
+    /// A turn behind the facade that the host's compaction command then
+    /// summarizes ([`super::compactions`]).
+    Compaction,
 }
 
 impl TurnScript {
     /// Every script.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Plain,
         Self::Round,
         Self::Hang,
@@ -78,6 +83,7 @@ impl TurnScript {
         Self::CellKilled,
         Self::Effects,
         Self::Prompt,
+        Self::Compaction,
     ];
 
     /// The script's name, the prefix of its sessions' ids.
@@ -91,6 +97,7 @@ impl TurnScript {
             Self::CellKilled => "cellkilled",
             Self::Effects => "effects",
             Self::Prompt => "prompt",
+            Self::Compaction => "compaction",
         }
     }
 
@@ -484,6 +491,9 @@ impl SimServices {
             Some(TurnScript::Prompt) => Ok(Some(super::cells::services(
                 &super::prompts::prompt_core(&self.world).map_err(TurnError::Exec)?,
             ))),
+            Some(TurnScript::Compaction) => Ok(Some(super::cells::services(
+                &super::compactions::compaction_core(&self.world).map_err(TurnError::Exec)?,
+            ))),
             _ => Ok(None),
         }
     }
@@ -576,11 +586,35 @@ impl TurnDrive for SimDrive {
         Ok(())
     }
 
+    /// A scripted session composes no sections: its request is lowered as
+    /// its canonical encoding.
+    async fn prepare_call(
+        &mut self,
+        _cx: &ActorContext,
+        _id: EffectId,
+        _call: u32,
+        request: Arc<LlmRequest>,
+    ) -> Result<PreparedCall, TurnError> {
+        let route = ProviderRouteIdentity {
+            provider: "sim".into(),
+            endpoint: "https://sim.test/v1".into(),
+            model: request.model.wire_model().into(),
+        };
+        let body = ProviderRequestBody::of_request(route, &request)
+            .map_err(|error| TurnError::Exec(error.to_string()))?;
+        Ok(PreparedCall::Admit(Box::new(ComposedCall {
+            request,
+            prompt: None,
+            body,
+        })))
+    }
+
     async fn model_call(
         &mut self,
         _cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
+        _body: &ProviderRequestBody,
         _attempt: u32,
         _limit: ExecutionLimit,
     ) -> Result<(), TurnError> {
@@ -601,9 +635,11 @@ impl TurnDrive for SimDrive {
         }
         let tools: &[Tool] = match self.script()? {
             _ if answered => &[],
-            TurnScript::Plain | TurnScript::Cell | TurnScript::CellKilled | TurnScript::Prompt => {
-                &[]
-            }
+            TurnScript::Plain
+            | TurnScript::Cell
+            | TurnScript::CellKilled
+            | TurnScript::Prompt
+            | TurnScript::Compaction => &[],
             TurnScript::Round => &[Tool::WriteSlow, Tool::Flaky, Tool::WriteNow],
             TurnScript::Hang => &[Tool::Hang],
             TurnScript::Effects => &[Tool::Spawn, Tool::Poke],

@@ -13,9 +13,10 @@ fn recorded_model() -> crate::LlmProfileConfig {
 
 #[test]
 fn runtime_feedback_is_not_part_of_initial_composition_identity() {
-    let mut direct = crate::DirectRequest::text("user");
-    direct.instructions = Some(Arc::from("I"));
-    let mut request = crate::direct::build_llm_request(direct, recorded_model()).unwrap();
+    let mut request =
+        crate::direct::build_llm_request(crate::DirectRequest::text("user"), recorded_model())
+            .unwrap();
+    request.instructions = Some(Arc::from("I"));
     let before = trace_composition_key(&request, &[]);
     request.messages.insert(
         0,
@@ -36,9 +37,10 @@ fn runtime_feedback_is_not_part_of_initial_composition_identity() {
 
 #[test]
 fn runtime_feedback_composition_identity_includes_instruction_authority() {
-    let mut direct = crate::DirectRequest::text("user");
-    direct.instructions = Some(Arc::from("I"));
-    let mut request = crate::direct::build_llm_request(direct, recorded_model()).unwrap();
+    let mut request =
+        crate::direct::build_llm_request(crate::DirectRequest::text("user"), recorded_model())
+            .unwrap();
+    request.instructions = Some(Arc::from("I"));
     let before = trace_composition_key(&request, &[]);
     request.model.metadata_mut().capability.instruction_role = crate::InstructionRole::Developer;
     assert_ne!(trace_composition_key(&request, &[]), before);

@@ -1,5 +1,5 @@
-//! Prompt snapshots: the neutral statements of the `prompts` domain
-//! (FIG-5256, ADR 0133 §5).
+//! Admitted model calls: the neutral statements of the `prompts` domain
+//! (FIG-5256, FIG-5259, ADR 0133 §5, §6).
 //!
 //! Owned by P2 (FIG-5256): its statements, and its tables' DDL in each
 //! dialect's `durable` module, are that lane's. This file and the matching
@@ -15,7 +15,8 @@
 //! call's texts as one list, `json_each` on SQLite and `unnest` on
 //! PostgreSQL, so its own module declares them.
 
-/// The table of snapshot roots, one row per admitted model call.
+/// The table of admitted-call roots, one row per admitted model call, keyed
+/// by session, owner and call.
 pub const TABLE: &str = "prompt_snapshots";
 
 /// The table of section texts, one row per content address.
@@ -28,22 +29,22 @@ crate::statements! {
     /// `prompt_snapshots`, `prompt_texts` and `prompt_snapshot_texts`
     /// statements both backends issue verbatim.
     pub struct PromptStatements @ "durable_prompt" {
-        /// Record call `?3` of turn `?2` in session `?1` as snapshot `?4`,
-        /// written at epoch `?5`. No row when the call already has one.
+        /// Record call `?3` of owner `?2` in session `?1` as `?4`, written
+        /// at epoch `?5`. No row when the call already has one.
         insert_snapshot = "INSERT INTO prompt_snapshots
-                 (session_id, run, call_ordinal, snapshot, written_epoch)
+                 (session_id, owner, call, snapshot, written_epoch)
              VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT (session_id, run, call_ordinal) DO NOTHING
-             RETURNING call_ordinal";
+             ON CONFLICT (session_id, owner, call) DO NOTHING
+             RETURNING call";
 
-        /// Call `?3` of turn `?2` in session `?1`: its snapshot and the epoch
+        /// Call `?3` of owner `?2` in session `?1`: its record and the epoch
         /// that wrote it.
         read_snapshot = "SELECT snapshot, written_epoch FROM prompt_snapshots
-             WHERE session_id = ?1 AND run = ?2 AND call_ordinal = ?3";
+             WHERE session_id = ?1 AND owner = ?2 AND call = ?3";
 
-        /// The texts call `?3` of turn `?2` in session `?1` references.
+        /// The texts call `?3` of owner `?2` in session `?1` references.
         read_edges = "SELECT hash FROM prompt_snapshot_texts
-             WHERE session_id = ?1 AND run = ?2 AND call_ordinal = ?3
+             WHERE session_id = ?1 AND owner = ?2 AND call = ?3
              ORDER BY hash";
 
         /// The text at content address `?1`.
@@ -56,14 +57,14 @@ crate::statements! {
         /// Release every root of session `?1`.
         release_session_snapshots = "DELETE FROM prompt_snapshots WHERE session_id = ?1";
 
-        /// Release every edge of turn `?2` in session `?1`, returning each
+        /// Release every edge of owner `?2` in session `?1`, returning each
         /// text it named.
         release_run_edges = "DELETE FROM prompt_snapshot_texts
-             WHERE session_id = ?1 AND run = ?2
+             WHERE session_id = ?1 AND owner = ?2
              RETURNING hash";
 
-        /// Release every root of turn `?2` in session `?1`.
+        /// Release every root of owner `?2` in session `?1`.
         release_run_snapshots = "DELETE FROM prompt_snapshots
-             WHERE session_id = ?1 AND run = ?2";
+             WHERE session_id = ?1 AND owner = ?2";
     }
 }

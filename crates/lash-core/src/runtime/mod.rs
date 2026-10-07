@@ -11,8 +11,8 @@ pub use host_commands::{
     SESSION_COMMAND_APPLYING_PHASE, SESSION_COMMAND_COMMITTED_PHASE, SESSION_COMMAND_STAGED_PHASE,
 };
 mod compaction_base;
-mod compaction_prompt;
 mod decoded_outcome;
+mod owned_call;
 pub(crate) use decoded_outcome::DecodedEffectOutcome;
 pub use lash_core_execution::runtime::attachment_delivery;
 #[cfg(feature = "testing")]
@@ -212,20 +212,20 @@ pub use effect::{
 };
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
-    AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
-    AwaitEventKey, AwaitEventWaitIdentity, CanonicalRuntimeEffectEnvelope, CausalRef,
-    CheckpointAdmittedSet, CommandJournalGuard, EffectAddress, EffectJournalIdentity,
-    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, JournalReplay, LlmRequestSpec, LlmStreamRecord, ProcessCommand,
-    ProcessDriveStep, ProcessEffectOutcome, ProcessListSelection, ProcessLocalExecution,
-    ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence, RecordedKeyRange,
-    RecordedKeys, RefusedWriteRange, Resolution, ResolveOutcome, RunAggregateWakePolicy,
-    RuntimeAssistantResponseHooksOutcome, RuntimeAttribution, RuntimeDirectLlmOutcome,
-    RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
-    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-    RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
+    AdmittedDirectSend, AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan,
+    AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity,
+    CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointAdmittedSet, CommandJournalGuard,
+    EffectAddress, EffectJournalIdentity, EffectJournalRetirement, EffectOpener,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, JournalReplay, LlmRequestSpec,
+    LlmStreamRecord, ProcessCommand, ProcessDriveStep, ProcessEffectOutcome, ProcessListSelection,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence,
+    RecordedKeyRange, RecordedKeys, RefusedWriteRange, Resolution, ResolveOutcome,
+    RunAggregateWakePolicy, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
+    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
+    RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
+    RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
     ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution, TurnPrelude,
     TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
 };

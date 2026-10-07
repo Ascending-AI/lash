@@ -75,7 +75,11 @@ impl Provider for StallingProvider {
         serde_json::Value::Object(Default::default())
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(self.stall).await;
         let failure = LlmTransportError::new("temporarily unavailable");
@@ -133,9 +137,11 @@ async fn complete_under(
         ProviderHandle::new(ProviderComponents::new(Box::new(provider))).with_clock(clock.clone());
     let mut request = empty_request();
     let sideband = handle.prepare_completion(&mut request);
+    let body = handle.lower(&request).await.expect("the request lowers");
     let error = handle
         .complete_prepared(
             request,
+            &body,
             sideband,
             crate::ChargeSafetyPolicy::default(),
             &lash_trace::telemetry::metrics::TelemetryMetrics::default(),

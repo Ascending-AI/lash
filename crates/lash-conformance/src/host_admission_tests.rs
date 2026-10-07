@@ -1,6 +1,6 @@
 use lash_core::facade_support::LlmTransportError;
 use lash_core::provider::{Provider, ProviderComponents, ProviderHandle, ProviderOptions};
-use lash_core::{LlmRequest, LlmResponse, ProviderRouteIdentity};
+use lash_core::{LlmRequest, LlmResponse, ProviderRequestBody, ProviderRouteIdentity};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -28,7 +28,11 @@ impl Provider for PendingTransport {
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
     }
-    async fn complete(&mut self, _: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         self.entered.notify_one();
         std::future::pending().await
     }
@@ -70,13 +74,23 @@ impl Provider for HostAdmission {
     async fn close(&self) -> Result<(), LlmTransportError> {
         self.inner.close().await
     }
-    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn lower(
+        &mut self,
+        request: &LlmRequest,
+    ) -> Result<ProviderRequestBody, LlmTransportError> {
+        self.inner.lower(request).await
+    }
+    async fn send(
+        &mut self,
+        request: LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         let _permit = self
             .permits
             .acquire()
             .await
             .expect("fixture keeps admission open");
-        self.inner.complete(request).await
+        self.inner.send(request, body).await
     }
 }
 

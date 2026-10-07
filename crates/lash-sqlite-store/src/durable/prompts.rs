@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    DomainRefusal, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
+    DomainRefusal, ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
 };
 use lash_durable::{DurableError, Epoch};
 use lash_sansio::{SessionId, TurnId};
@@ -39,9 +39,9 @@ lash_store_sql::statements! {
               WHERE true
              ON CONFLICT (hash) DO NOTHING";
 
-        /// Root every text in the JSON array `?4` under call `?3` of turn
+        /// Root every text in the JSON array `?4` under call `?3` of owner
         /// `?2` in session `?1`.
-        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, run, call_ordinal, hash)
+        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, hash)
              SELECT ?1, ?2, ?3, value FROM json_each(?4)";
 
         /// Reclaim every text in the JSON array `?1` no root references any
@@ -58,17 +58,17 @@ static SQLITE_SQL: LazyLock<SqlitePromptStatements> =
     LazyLock::new(|| SqlitePromptStatements::render(crate::schema_layout::MAIN));
 
 /// `prompt_snapshots`: P2's (FIG-5256) audit roots, one per admitted model
-/// call; `prompt_texts`: section text stored once by content address;
+/// call, keyed by its owner (`turn:<run>` or `owned:<scope>`) and its call
+/// there (FIG-5259); `prompt_texts`: section text stored once by content address;
 /// `prompt_snapshot_texts`: each root's edge to every text it references.
 pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS prompt_snapshots (
     session_id TEXT NOT NULL,
-    run TEXT NOT NULL,
-    call_ordinal INTEGER NOT NULL CONSTRAINT ck_prompt_snapshots_call
-        CHECK (call_ordinal BETWEEN 0 AND 4294967295),
+    owner TEXT NOT NULL,
+    call TEXT NOT NULL,
     snapshot TEXT NOT NULL,
     written_epoch INTEGER NOT NULL,
-    PRIMARY KEY (session_id, run, call_ordinal)
+    PRIMARY KEY (session_id, owner, call)
 );
 
 CREATE TABLE IF NOT EXISTS prompt_texts (
@@ -78,23 +78,23 @@ CREATE TABLE IF NOT EXISTS prompt_texts (
 
 CREATE TABLE IF NOT EXISTS prompt_snapshot_texts (
     session_id TEXT NOT NULL,
-    run TEXT NOT NULL,
-    call_ordinal INTEGER NOT NULL,
+    owner TEXT NOT NULL,
+    call TEXT NOT NULL,
     hash TEXT NOT NULL,
-    PRIMARY KEY (session_id, run, call_ordinal, hash),
-    FOREIGN KEY (session_id, run, call_ordinal)
-        REFERENCES prompt_snapshots (session_id, run, call_ordinal),
+    PRIMARY KEY (session_id, owner, call, hash),
+    FOREIGN KEY (session_id, owner, call)
+        REFERENCES prompt_snapshots (session_id, owner, call),
     FOREIGN KEY (hash) REFERENCES prompt_texts (hash)
 );
 
 CREATE INDEX IF NOT EXISTS idx_prompt_snapshot_texts_hash ON prompt_snapshot_texts (hash);
 ";
 
-fn call_params(call: &PromptCallKey) -> (String, String, i64) {
+fn call_params(call: &PromptCallKey) -> (String, String, String) {
     (
         call.session.as_str().to_owned(),
-        call.run.as_str().to_owned(),
-        i64::from(call.call),
+        call.call.owner_column(),
+        call.call.call_column(),
     )
 }
 
@@ -170,12 +170,12 @@ pub(crate) fn release(
             let hashes = released_hashes(
                 tx,
                 SQL.release_run_edges.sql(),
-                rusqlite::params![session.as_str(), run.as_str()],
+                rusqlite::params![session.as_str(), ModelCallId::turn_owner(run)],
             )?;
             cached_execute(
                 tx,
                 SQL.release_run_snapshots.sql(),
-                rusqlite::params![session.as_str(), run.as_str()],
+                rusqlite::params![session.as_str(), ModelCallId::turn_owner(run)],
             )?;
             hashes
         }

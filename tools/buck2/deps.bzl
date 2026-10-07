@@ -1113,6 +1113,7 @@ PACKAGE_DEPS = {
             "lash_lashlang_runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_plugin_process_controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls",
+            "lash_plugin_standard_compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_protocol_standard": "//crates/lash-protocol-standard:lash-protocol-standard",

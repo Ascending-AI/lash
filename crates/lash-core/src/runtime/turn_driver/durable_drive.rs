@@ -11,7 +11,7 @@ use super::*;
 use crate::runtime::durable::commit_publication::{CommitBase, PublishedHeads};
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
-    CellExit, CodeCell, ComposedCall, OpenTurn, RestoredTurn, TurnCommit, TurnDone, TurnDrive,
+    CellExit, CodeCell, OpenTurn, PreparedCall, RestoredTurn, TurnCommit, TurnDone, TurnDrive,
     TurnError, TurnRestore,
 };
 use crate::runtime::turn_loop::DurableTurn;
@@ -280,38 +280,37 @@ impl TurnDrive for RuntimeDrive {
         _cx: &ActorContext,
         id: crate::EffectId,
         request: Arc<LlmRequest>,
+        body: &lash_sansio::llm::types::ProviderRequestBody,
         _attempt: u32,
         _limit: crate::ExecutionLimit,
     ) -> Result<(), TurnError> {
         self.driver
             .protocol_reply
             .mark_model_call(self.machine.messages().iter());
-        Box::pin(
-            self.driver
-                .handle_llm_call_effect(&mut self.machine, id, request, &self.observer),
-        )
+        Box::pin(self.driver.handle_llm_call_effect(
+            &mut self.machine,
+            id,
+            request,
+            body,
+            &self.observer,
+        ))
         .await
         .map_err(runtime)
     }
 
-    async fn compose_call(
+    async fn prepare_call(
         &mut self,
         _cx: &ActorContext,
+        id: crate::EffectId,
         call: u32,
         request: Arc<LlmRequest>,
-    ) -> Result<Result<ComposedCall, crate::LlmCallError>, TurnError> {
-        let iteration = self.machine.protocol_iteration();
-        let messages = self.machine.prompt_message_sequence();
-        self.driver
-            .compose_call(
-                iteration,
-                call,
-                messages,
-                request,
-                self.machine.has_current_context_prefix(),
-            )
-            .await
-            .map_err(runtime)
+    ) -> Result<PreparedCall, TurnError> {
+        Box::pin(
+            self.driver
+                .prepare_call(&mut self.machine, id, call, request, &self.observer),
+        )
+        .await
+        .map_err(runtime)
     }
 
     fn delivered_inputs(&self) -> Vec<crate::AdmittedTurnInputs> {

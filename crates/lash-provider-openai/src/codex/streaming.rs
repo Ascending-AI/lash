@@ -20,7 +20,7 @@ use lash_core::llm::transport::{
 };
 use lash_core::llm::types::{
     ExecutionEvidence, LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence,
-    LlmTerminalReason, LlmUsage, ProviderRouteIdentity,
+    LlmTerminalReason, LlmUsage, ProviderRequestBody, ProviderRouteIdentity,
 };
 use lash_core::provider::{LlmTimeouts, Provider, ProviderOptions, StreamTermination};
 use lash_llm_transport::merge_extra_headers;
@@ -49,6 +49,10 @@ struct CodexCredentialCallContext<'a> {
     provider: &'a mut CodexProvider,
     request: &'a LlmRequest,
     minting_route: &'a ProviderRouteIdentity,
+    /// The admitted body: the SSE request sends it byte for byte, and a
+    /// WebSocket attempt frames it.
+    built: &'a BuiltRequest,
+    body: &'a ProviderRequestBody,
 }
 
 #[derive(Clone, Debug)]
@@ -152,12 +156,10 @@ impl CodexProvider {
     async fn complete_websocket(
         &self,
         req: LlmRequest,
+        built_request: &BuiltRequest,
         credential: &CodexCredential,
         credential_generation: u64,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
-        let built_request = self
-            .build_request(&req, true)
-            .map_err(CodexWebSocketAttemptError::before_send)?;
         let timeouts = self.options.llm_timeouts();
         // WebSocket connection policy is separate from the response-start
         // wait. Preserve its existing request/chunk-derived bound here.
@@ -179,7 +181,7 @@ impl CodexProvider {
                 allow_cached_context && lease.reusable,
             );
             match self
-                .run_websocket_attempt(&req, &built_request, lease, &plan, retry_state, timeouts)
+                .run_websocket_attempt(&req, built_request, lease, &plan, retry_state, timeouts)
                 .await
             {
                 Ok(response) => return Ok(response),
@@ -646,7 +648,7 @@ impl Provider for CodexProvider {
         true
     }
 
-    async fn complete(&mut self, mut req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn lower(&mut self, req: &LlmRequest) -> Result<ProviderRequestBody, LlmTransportError> {
         let route = self.route_identity(req.model.wire_model());
         route.validate_endpoint().map_err(|error| {
             LlmTransportError::new(error.to_string())
@@ -654,7 +656,40 @@ impl Provider for CodexProvider {
                 .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
         })?;
         // Every refusal lands before the credential manager may refresh.
-        self.preflight(&req)?;
+        self.preflight(req)?;
+        let stream = req.stream_events.is_some();
+        let BuiltRequest { body, receipt } = self.build_request(req, stream)?;
+        let body = serde_json::to_string(&body).map_err(|e| {
+            LlmTransportError::new(format!("Failed to serialize Codex request: {e}"))
+        })?;
+        Ok(ProviderRequestBody {
+            route,
+            stream,
+            generation: Some(receipt),
+            body: body.into(),
+        })
+    }
+
+    async fn send(
+        &mut self,
+        mut req: LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        let route = self.route_identity(req.model.wire_model());
+        route.validate_endpoint().map_err(|error| {
+            LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+        })?;
+        let built = BuiltRequest {
+            body: serde_json::from_str(&body.body).map_err(|e| {
+                LlmTransportError::new(format!("The Codex request body does not decode: {e}"))
+                    .with_kind(ProviderFailureKind::Validation)
+                    .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
+                    .with_retry_verdict(TransportRetryVerdict::Forbidden)
+            })?,
+            receipt: body.generation.unwrap_or_default(),
+        };
         if let Some(downstream) = req.stream_events.take() {
             let stream_route = route.clone();
             req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(
@@ -671,6 +706,8 @@ impl Provider for CodexProvider {
             provider: self,
             request: &req,
             minting_route: &route,
+            built: &built,
+            body,
         };
         manager
             .execute(&mut context, |context, credential_lease| {
@@ -678,6 +715,8 @@ impl Provider for CodexProvider {
                     let provider = &mut *context.provider;
                     let req = context.request;
                     let minting_route = context.minting_route;
+                    let built = context.built;
+                    let admitted = context.body;
                     let result: Result<LlmResponse, LlmTransportError> = async {
             let credential = &credential_lease.value;
             let stream_termination = req.model.metadata().capability
@@ -705,7 +744,12 @@ impl Provider for CodexProvider {
                     );
                 } else {
                     match provider
-                        .complete_websocket(req.clone(), credential, credential_lease.generation)
+                        .complete_websocket(
+                            req.clone(),
+                            built,
+                            credential,
+                            credential_lease.generation,
+                        )
                         .await
                     {
                         Ok(response) => {
@@ -736,14 +780,9 @@ impl Provider for CodexProvider {
             let provider_trace = req.provider_trace.clone();
             let timeouts = provider.options.llm_timeouts();
 
-            let BuiltRequest { body, receipt } =
-                provider.build_request(req, stream_events.is_some())?;
-            let generation_disposition = Some(receipt);
-
-            let request_body = serde_json::to_string(&body).ok();
-            let body_bytes = serde_json::to_vec(&body).map_err(|e| {
-                LlmTransportError::new(format!("Failed to serialize Codex request: {e}"))
-            })?;
+            let generation_disposition = Some(built.receipt);
+            let request_body = Some(admitted.body.to_string());
+            let body_bytes = admitted.body.as_bytes().to_vec();
             emit_provider_request_trace(provider_trace.as_ref(), "codex", "responses", &body_bytes);
             let access_token = credential.access_token.expose_secret().to_string();
             let account_id = credential.account_id.clone();

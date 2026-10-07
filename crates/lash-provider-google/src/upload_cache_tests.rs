@@ -210,18 +210,19 @@ fn stored_attachment_request() -> LlmRequest {
     }
 }
 
-/// Cached URI → provider rejects it as a dead file → the entry is evicted →
-/// the next request re-uploads instead of re-attempting the dead reference.
+/// Cached URI → provider rejects it as a dead file → the call fails with
+/// the body it admitted, which is never rewritten (FIG-5259), and the entry
+/// is evicted → the next request re-uploads instead of re-attempting the
+/// dead reference.
 #[tokio::test]
 async fn rejected_uploaded_uri_is_evicted_and_next_request_reuploads() {
     let transport = Arc::new(GeminiFilesTransport::default());
     let mut provider = crate::GoogleOAuthProvider::for_test().with_transport(transport.clone());
 
-    let response = provider
+    provider
         .complete(stored_attachment_request())
         .await
-        .expect("inline fallback completes");
-    assert_eq!(response.full_text(), "done");
+        .expect_err("the admitted body names the dead file");
     assert_eq!(
         transport.finalize_calls.load(Ordering::SeqCst),
         1,
@@ -229,14 +230,14 @@ async fn rejected_uploaded_uri_is_evicted_and_next_request_reuploads() {
     );
     {
         let bodies = transport.generate_bodies.lock_recover();
-        assert_eq!(bodies.len(), 2, "fileData attempt then inline retry");
+        assert_eq!(
+            bodies.len(),
+            1,
+            "the admitted body is sent and not rewritten"
+        );
         assert!(
             bodies[0].contains("\"fileData\"") && bodies[0].contains("file-1"),
             "first generateContent uses the uploaded URI"
-        );
-        assert!(
-            bodies[1].contains("\"inlineData\""),
-            "retry falls back to inline bytes"
         );
     }
 
@@ -251,7 +252,7 @@ async fn rejected_uploaded_uri_is_evicted_and_next_request_reuploads() {
         "evicted entry forces a fresh upload rather than re-attempting file-1"
     );
     assert!(
-        transport.generate_bodies.lock_recover()[2].contains("file-2"),
+        transport.generate_bodies.lock_recover()[1].contains("file-2"),
         "second request serves the fresh upload URI"
     );
 }

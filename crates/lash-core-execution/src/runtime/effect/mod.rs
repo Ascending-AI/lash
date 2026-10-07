@@ -32,7 +32,7 @@ pub use envelope::{
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
-    AdmittedScope, AwaitEventKey, AwaitEventWaitIdentity, CommandJournalGuard,
+    AdmittedDirectSend, AdmittedScope, AwaitEventKey, AwaitEventWaitIdentity, CommandJournalGuard,
     EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
     ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDefinitionLocalExecution,
     ProcessDriveStep, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,

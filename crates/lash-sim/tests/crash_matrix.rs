@@ -62,6 +62,7 @@ crash_matrix! {
     a_trigger_occurrence_cut_at_every_label_starts_each_delivery_once => Trigger;
     a_drained_node_cut_at_every_label_releases_its_actors_to_the_next_once => Drain;
     a_turn_s_prompt_sections_cut_at_every_label_commit_with_each_call_s_admission => Prompt;
+    a_compaction_s_summary_cut_at_every_label_sends_its_admitted_body => Compaction;
 }
 
 /// A stale-epoch cut at `cell.snapshot+admit` runs no body on the old owner:
@@ -253,4 +254,5 @@ crash_matrix_on_postgres! {
     the_crash_matrix_holds_on_postgres_for_a_trigger_occurrence => Trigger;
     the_crash_matrix_holds_on_postgres_for_a_drained_node => Drain;
     the_crash_matrix_holds_on_postgres_for_a_prompt_composition => Prompt;
+    the_crash_matrix_holds_on_postgres_for_a_compaction_s_summary => Compaction;
 }

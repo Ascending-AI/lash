@@ -110,14 +110,24 @@ pub struct ProcessDefinitionLocalExecution {
     pub(crate) claim: crate::ReferrerClaim,
 }
 
+/// An admitted direct call, ready to send: its exact body and the live limit
+/// its pinned deadline leaves.
+#[derive(Clone, Debug)]
+pub struct AdmittedDirectSend {
+    pub body: crate::ProviderRequestBody,
+    pub limit: crate::ExecutionLimit,
+}
+
 pub(super) struct LocalDirectEffectRunner {
     /// Bound only when this body runs, never on a replay (FIG-4404).
     binding: crate::LlmProfileBinding,
     charge_safety: crate::ChargeSafetyPolicy,
     /// The runtime's execution budgets and the enclosing limit the call is
-    /// clipped to.
+    /// clipped to: the deadline its admission pinned.
     bounds: lash_core_llm::core_internal::ModelCallBounds,
-    attachment_store: Arc<crate::RuntimeAttachmentStore>,
+    /// The call's exact provider body, as its admission stored it: every
+    /// attempt sends it, and nothing lowers the call again.
+    body: crate::ProviderRequestBody,
     /// Who the call spends for (ADR 0127).
     owner: crate::RuntimeOwner,
     /// The request is the body's own work, so its records are made inside
@@ -666,11 +676,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         Self::language_runtime_value_with(run)
     }
 
+    /// The body of an admitted direct call: it sends `admitted`'s exact body
+    /// within the limit its pinned deadline leaves.
     pub fn direct(
         binding: crate::LlmProfileBinding,
         charge_safety: crate::ChargeSafetyPolicy,
         budgets: crate::ExecutionBudgets,
-        attachment_store: Arc<crate::RuntimeAttachmentStore>,
+        admitted: AdmittedDirectSend,
         owner: crate::RuntimeOwner,
         tracing: crate::trace::TraceRuntime,
         replay_trace: Option<super::RuntimeEffectReplayTrace>,
@@ -682,9 +694,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     charge_safety,
                     bounds: lash_core_llm::core_internal::ModelCallBounds {
                         budgets,
-                        enclosing: None,
+                        enclosing: Some(admitted.limit),
                     },
-                    attachment_store,
+                    body: admitted.body,
                     owner,
                     tracing,
                     live: None,

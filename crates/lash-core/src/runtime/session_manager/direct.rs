@@ -54,6 +54,7 @@ impl DirectCompletionService for RuntimeSessionServices {
     async fn complete_llm(
         &self,
         request: crate::LlmRequest,
+        purpose: crate::prompt_sections::PromptPurpose,
         usage_source: &str,
         effect_controller: crate::ActorContext,
         turn_id: Option<&crate::TurnId>,
@@ -70,6 +71,7 @@ impl DirectCompletionService for RuntimeSessionServices {
                     effect_attempt.cloned(),
                 ),
                 request,
+                purpose,
                 usage_source,
                 caused_by,
             )
@@ -145,13 +147,6 @@ impl Drop for DirectUnkeyedGuard<'_> {
     }
 }
 
-struct DirectEffectPlan {
-    /// The lazy binding of the session's recorded model: the effect's body
-    /// binds it, and only when the completion is unjournaled (FIG-4404).
-    binding: crate::LlmProfileBinding,
-    envelope: crate::RuntimeEffectEnvelope,
-}
-
 #[derive(Clone, Copy)]
 struct DirectReplayPosition<'a> {
     replay: Option<&'a crate::RuntimeReplay>,
@@ -159,25 +154,68 @@ struct DirectReplayPosition<'a> {
     ordinal: u64,
 }
 
+impl CurrentOwnerCapability {
+    /// What an owned call of these services composes its prompt from: the
+    /// session's recorded plan, config and committed view, or, for a
+    /// process, its captured config under the default plan.
+    fn owned_prompt(&self) -> crate::runtime::owned_call::OwnedPrompt {
+        let config = self.plugins.admitted_plugin_config();
+        match self.session() {
+            Some(session) => {
+                let state = session.snapshot.to_runtime_state();
+                crate::runtime::owned_call::OwnedPrompt {
+                    plugins: Arc::clone(&self.plugins),
+                    plan: state.authority.prompt_plan.clone(),
+                    config,
+                    frame: state.current_frame_node_id.clone(),
+                    subagent: state.authority.subagent.clone(),
+                    session: Some(crate::SessionReadView::from_runtime_state(
+                        &state,
+                        state.effective_policy().clone(),
+                        state.effective_protocol_turn_options(),
+                    )),
+                }
+            }
+            None => crate::runtime::owned_call::OwnedPrompt {
+                plugins: Arc::clone(&self.plugins),
+                plan: Default::default(),
+                config,
+                frame: None,
+                subagent: None,
+                session: None,
+            },
+        }
+    }
+
+    /// The session an owned call's admission belongs to: the owning
+    /// session, or the process's own record namespace.
+    fn owned_call_session(&self) -> SessionId {
+        match self.runtime_owner() {
+            crate::RuntimeOwner::Session(session) => session,
+            crate::RuntimeOwner::Process(process) => {
+                SessionId::prefixed("process:", process.as_str())
+            }
+        }
+    }
+}
+
 impl DirectCompletionCapability {
-    /// Plans a single direct LLM effect from a normalized [`crate::LlmRequest`].
-    ///
-    /// Both the text-only (`DirectRequest`) and full-output entry points feed
-    /// the same effect lane; they differ only in how the caller projects the
-    /// resulting [`crate::LlmResponse`].
-    ///
-    /// The envelope carries the recorded key of `binding`'s model, so the
-    /// journaled result names the selection the completion ran under.
-    async fn plan_direct_effect(
+    /// Admit one direct call (ADR 0133 §8) and run its send across the
+    /// effect boundary, yielding the raw provider response. The call is
+    /// identified by its effect address under the owner's scope; its purpose
+    /// selects the sections it composes. The recorded model result carries
+    /// usage and sealed attempt history.
+    async fn run_direct_call(
         &self,
         context: &DirectInvocationContext<'_>,
         binding: crate::LlmProfileBinding,
         request: crate::LlmRequest,
+        purpose: crate::prompt_sections::PromptPurpose,
         usage_source: &str,
         replay_position: DirectReplayPosition<'_>,
-    ) -> Result<DirectEffectPlan, crate::PluginError> {
+    ) -> Result<(crate::LlmResponse, crate::TokenUsage, crate::LlmCallRecord), crate::PluginError>
+    {
         let current = context.current;
-        let usage_source = usage_source.to_string();
         for source in &request.attachments() {
             current
                 .host
@@ -186,11 +224,6 @@ impl DirectCompletionCapability {
                 .authorize(&crate::AttachmentProducer::Host, source)
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         }
-        let request_spec = crate::LlmRequestSpec::from_request(
-            &request,
-            current.host.core.durability.attachment_store.as_ref(),
-        )
-        .await?;
         let DirectReplayPosition {
             replay,
             caused_by,
@@ -201,32 +234,53 @@ impl DirectCompletionCapability {
         let invocation = crate::runtime::causal::direct_effect_invocation(
             context.effect_controller.execution_scope(),
             &current.runtime_owner(),
-            &usage_source,
+            usage_source,
             discriminator,
             context.turn_id,
             caused_by.cloned(),
         );
+        let key = crate::runtime::owned_call::owned_call_key(
+            current.owned_call_session(),
+            context.effect_controller.execution_scope(),
+            invocation.effect_replay_key(),
+        );
+        let admit = crate::runtime::owned_call::OwnedCall {
+            cx: &context.effect_controller,
+            key,
+            purpose,
+            prompt: current.owned_prompt(),
+            request,
+            binding: binding.clone(),
+            attachment_store: Arc::clone(&current.host.core.durability.attachment_store),
+            budgets: current.host.core.control.execution_budgets.clone(),
+        }
+        .admit();
+        let admission = Box::pin(admit).await?;
+        let (request, admitted) = match admission {
+            crate::runtime::owned_call::OwnedAdmission::Send { request, admitted } => {
+                (*request, admitted)
+            }
+            crate::runtime::owned_call::OwnedAdmission::Unsent(error) => {
+                return super::direct_outcome::apply_direct_outcome(
+                    crate::RuntimeEffectOutcome::Direct {
+                        result: Box::new(Err(error)),
+                        call_record: None,
+                    },
+                );
+            }
+        };
+        let request_spec = crate::LlmRequestSpec::from_request(
+            &request,
+            current.host.core.durability.attachment_store.as_ref(),
+        )
+        .await?;
         let envelope = crate::RuntimeEffectEnvelope::new(
             invocation,
             crate::RuntimeEffectCommand::Direct {
                 request: Box::new(request_spec),
-                usage_source,
+                usage_source: usage_source.to_string(),
             },
         );
-        Ok(DirectEffectPlan { binding, envelope })
-    }
-
-    /// Runs a planned direct effect across the journal/controller boundary and
-    /// applies trace bookkeeping, yielding the raw provider response. The
-    /// recorded model result carries usage and sealed attempt history.
-    async fn run_direct_effect(
-        &self,
-        context: &DirectInvocationContext<'_>,
-        plan: DirectEffectPlan,
-    ) -> Result<(crate::LlmResponse, crate::TokenUsage, crate::LlmCallRecord), crate::PluginError>
-    {
-        let current = context.current;
-        let DirectEffectPlan { binding, envelope } = plan;
         let tracing = &current.host.core.tracing;
         let replay_trace = crate::RuntimeEffectReplayTrace::for_divergence(
             tracing,
@@ -237,7 +291,7 @@ impl DirectCompletionCapability {
             binding,
             current.policy.charge_safety.clone(),
             current.host.core.control.execution_budgets.clone(),
-            Arc::clone(&current.host.core.durability.attachment_store),
+            admitted,
             current.runtime_owner(),
             tracing.clone(),
             replay_trace,
@@ -273,19 +327,19 @@ impl DirectCompletionCapability {
         let model = policy.llm_profile_config().clone();
         let replay = request.replay.clone();
         let caused_by = request.caused_by.clone();
-        let _unkeyed_guard = if context.position == DirectExecutionPosition::Independent
-            && replay.as_ref().is_none_or(|replay| replay.key.is_empty())
-        {
+        let keyed = replay.as_ref().is_some_and(|replay| !replay.key.is_empty());
+        let _unkeyed_guard = if context.position == DirectExecutionPosition::Independent && !keyed {
             Some(context.claim_unkeyed_lane(caused_by.as_ref(), usage_source)?)
         } else {
             None
         };
-        // Concurrent callers must provide explicit replay keys; this ordinal represents
-        // sequential program order only.
-        let replay_ordinal = if context.position == DirectExecutionPosition::ToolAttempt
-            || replay.as_ref().is_some_and(|replay| !replay.key.is_empty())
-        {
+        // Concurrent callers must provide explicit replay keys; this ordinal
+        // represents sequential program order only: the lane's within these
+        // services, or, inside a tool attempt, the attempt scope's own.
+        let replay_ordinal = if keyed {
             0
+        } else if context.position == DirectExecutionPosition::ToolAttempt {
+            u64::from(context.effect_controller.next_completion_ordinal())
         } else {
             context.next_replay_ordinal(caused_by.as_ref(), usage_source)?
         };
@@ -295,11 +349,14 @@ impl DirectCompletionCapability {
         // recorded acceptance rules, never a caller's.
         normalized.attachment_acceptance =
             std::sync::Arc::clone(&context.current.policy.attachment_acceptance);
-        let plan = self
-            .plan_direct_effect(
+        let (response, usage, llm_call) = self
+            .run_direct_call(
                 &context,
                 binding,
                 normalized,
+                crate::prompt_sections::PromptPurpose::Direct {
+                    name: usage_source.to_string(),
+                },
                 usage_source,
                 DirectReplayPosition {
                     replay: replay.as_ref(),
@@ -308,7 +365,6 @@ impl DirectCompletionCapability {
                 },
             )
             .await?;
-        let (response, usage, llm_call) = self.run_direct_effect(&context, plan).await?;
         Ok(crate::DirectCompletion {
             text: response.full_text(),
             usage,
@@ -320,6 +376,7 @@ impl DirectCompletionCapability {
         &self,
         context: DirectInvocationContext<'_>,
         mut request: crate::LlmRequest,
+        purpose: crate::prompt_sections::PromptPurpose,
         usage_source: &str,
         caused_by: Option<crate::CausalRef>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
@@ -336,11 +393,12 @@ impl DirectCompletionCapability {
             key: request.scope.request_id.clone(),
             attribution: None,
         };
-        let plan = self
-            .plan_direct_effect(
+        let (response, usage, llm_call) = self
+            .run_direct_call(
                 &context,
                 binding,
                 request,
+                purpose,
                 usage_source,
                 DirectReplayPosition {
                     replay: Some(&replay),
@@ -349,7 +407,6 @@ impl DirectCompletionCapability {
                 },
             )
             .await?;
-        let (response, usage, llm_call) = self.run_direct_effect(&context, plan).await?;
         Ok(crate::DirectLlmCompletion {
             response,
             usage,

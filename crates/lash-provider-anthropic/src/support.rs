@@ -14,9 +14,9 @@ pub(crate) use lash_core::llm::types::{
     AnthropicThinkingRetention, AttachmentSource, ExecutionEvidence, GenerationReceipt,
     LlmContentBlock, LlmEventSender, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse,
     LlmRole, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage,
-    ProviderReasoningReplay, ProviderReasoningRetentionSupport, ProviderRouteIdentity,
-    ReasoningRetentionSelection, ReasoningRetentionValidationError, StreamBlockIdentity,
-    tool_call_input_replay_value,
+    ProviderReasoningReplay, ProviderReasoningRetentionSupport, ProviderRequestBody,
+    ProviderRouteIdentity, ReasoningRetentionSelection, ReasoningRetentionValidationError,
+    StreamBlockIdentity, tool_call_input_replay_value,
 };
 pub(crate) use lash_core::provider::{
     CacheRetention, GenerationEmission, GenerationWire, OutputCapWire, Provider,

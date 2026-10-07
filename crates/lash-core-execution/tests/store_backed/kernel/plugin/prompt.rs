@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_durable::domain::PromptCallKey;
+use lash_durable::domain::{ModelCallId, PromptCallKey};
 use lash_durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
 
 use crate::plugin::prompt::{
@@ -15,7 +15,7 @@ use crate::plugin::prompt::{
     PromptCatalog, PromptCut, PromptCutParts, PromptInput, PromptModel, PromptPlacement,
     PromptPlan, PromptPurpose, PromptRenderError, PromptRenderPool, PromptSectionId,
     PromptSectionKey, PromptSectionSpec, PromptTextRef, PromptWrapKey, PromptWrapSpec,
-    PromptWrapTarget, SectionText, load_prompt_snapshot,
+    PromptWrapTarget, SectionText, admission_record, load_admitted_call,
 };
 use crate::{PromptRegistration, SessionId};
 
@@ -121,8 +121,24 @@ fn catalog(runs: &Arc<AtomicUsize>) -> PromptCatalog {
 fn call_key(call: u32) -> PromptCallKey {
     PromptCallKey {
         session: SessionId::from(SESSION),
-        run: lash_sansio::TurnId::from("prompt-turn"),
-        call,
+        call: ModelCallId::Turn {
+            run: lash_sansio::TurnId::from("prompt-turn"),
+            ordinal: call,
+        },
+    }
+}
+
+/// The exact body call `call` admits with its prompt.
+fn body(call: u32) -> lash_sansio::llm::types::ProviderRequestBody {
+    lash_sansio::llm::types::ProviderRequestBody {
+        route: lash_sansio::llm::types::ProviderRouteIdentity {
+            provider: "test".into(),
+            endpoint: "https://provider.test/v1".into(),
+            model: "model".into(),
+        },
+        stream: true,
+        generation: None,
+        body: Arc::from(format!("{{\"call\":{call}}}")),
     }
 }
 
@@ -173,7 +189,10 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
         .await
         .expect("begin the admission");
     for (call, prompt) in (1..).zip(&composed) {
-        tx.write(prompt.record(call_key(call)).expect("the snapshot encodes"));
+        tx.write(
+            admission_record(call_key(call), Some(prompt), &body(call), None)
+                .expect("the admission encodes"),
+        );
     }
     lash_durable::DurableStore::commit(&durable, tx, CommitLabel::new("model.start"))
         .await
@@ -182,10 +201,16 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
     // A second runtime over the same store reads the snapshots back.
     let reader = stores.reopen().await.expect("reopen").durable_store();
     for (call, prompt) in (1..).zip(&composed) {
-        let loaded = load_prompt_snapshot(&reader, &call_key(call))
+        let admitted = load_admitted_call(&reader, &call_key(call))
             .await
-            .expect("the snapshot loads")
-            .expect("the admitted call has a snapshot");
+            .expect("the admission loads")
+            .expect("the call is admitted");
+        assert_eq!(
+            admitted.body,
+            body(call),
+            "the body reads back byte for byte"
+        );
+        let loaded = admitted.prompt.expect("the admitted call has a snapshot");
         assert_eq!(loaded.snapshot, prompt.snapshot);
         assert_eq!(loaded.texts, prompt.texts);
         let finals = |placement| {

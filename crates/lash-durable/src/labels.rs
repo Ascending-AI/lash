@@ -32,6 +32,10 @@ impl CommitLabel {
     pub const MODEL_DONE: Self = Self::new("model.done");
     /// `round.present+model.start`: A round's presentation and the next model start, fused (C6).
     pub const ROUND_PRESENT_MODEL_START: Self = Self::new("round.present+model.start");
+    /// `completion.start`: A compaction's or direct call admitted under the
+    /// execution that owns it, before its first byte: its prompt snapshot,
+    /// exact provider body and deadline (ADR 0133 §8).
+    pub const COMPLETION_START: Self = Self::new("completion.start");
     /// `turn.commit`: The turn's commit: head compare-and-set, terminal, phase-row pruning (C7);
     /// for a turn whose preparation was refused, its `Refused` terminal alone.
     pub const TURN_COMMIT: Self = Self::new("turn.commit");
@@ -149,7 +153,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 46] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -162,6 +166,7 @@ impl CommitLabel {
         Self::MODEL_START,
         Self::MODEL_DONE,
         Self::ROUND_PRESENT_MODEL_START,
+        Self::COMPLETION_START,
         Self::TURN_COMMIT,
         Self::TURN_CANCEL,
         Self::SESSION_RELEASE,

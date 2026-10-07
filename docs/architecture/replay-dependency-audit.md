@@ -99,7 +99,7 @@ These classes refine I0's routing table in `substrate-seams.md` (which method ow
 | 20 | `DrawRunStart` | needs a phase record | L3s |
 | 21 | `ResolveTurnConfig` | pure once recorded | L3s writes it into the admission row |
 | 22 | `RecordCompactionBase` | needs a phase record | L3: `turn.prepare` |
-| 23 | `RenderCompactionPrompt` | needs a phase record | L3: `turn.prepare` |
+| 23 | `RenderCompactionPrompt` | deleted | FIG-5259: the compaction call composes its `Compaction` sections, and its snapshot and exact body commit with its admission at `completion.start`; a redrive resends the stored body (ADR 0133 §8) |
 | 24 | `ResolveConfigTransaction` | needs a phase record | L3: under the session epoch |
 | 25 | `ReadSessionCommandRun` | needs a phase record | L3 |
 | 26 | `CloseRunScope` | needs a phase record | L3: `turn.commit` ends the run's scope |

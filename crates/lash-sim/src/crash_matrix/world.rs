@@ -113,6 +113,9 @@ pub struct World {
     cell_core: OnceLock<lash::LashCore>,
     /// The core the run's prompt sessions run behind ([`super::prompts`]).
     prompt_core: OnceLock<lash::LashCore>,
+    /// The core the run's compaction sessions run behind
+    /// ([`super::compactions`]).
+    compaction_core: OnceLock<lash::LashCore>,
     ledger: BodyLedger,
     parts: OnceLock<Parts>,
     host: Mutex<Option<HostParts>>,
@@ -137,6 +140,11 @@ impl World {
     /// The run's prompt core, once built.
     pub(crate) fn prompt_core(&self) -> &OnceLock<lash::LashCore> {
         &self.prompt_core
+    }
+
+    /// The run's compaction core, once built.
+    pub(crate) fn compaction_core(&self) -> &OnceLock<lash::LashCore> {
+        &self.compaction_core
     }
 
     /// The outside world's body ledger.

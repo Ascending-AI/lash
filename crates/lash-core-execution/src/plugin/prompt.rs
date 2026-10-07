@@ -1255,8 +1255,8 @@ impl super::PluginRegistrar {
 mod composer;
 
 pub use composer::{
-    ComposedPrompt, LoadedPromptSnapshot, PROMPT_SECTION_SEPARATOR, PromptRenderPool,
-    PromptSnapshotLoadError, load_prompt_snapshot,
+    AdmittedCallLoadError, ComposedPrompt, LoadedAdmittedCall, LoadedPromptSnapshot,
+    PROMPT_SECTION_SEPARATOR, PromptRenderPool, admission_record, load_admitted_call,
 };
 
 #[cfg(test)]

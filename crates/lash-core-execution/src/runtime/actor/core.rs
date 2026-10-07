@@ -44,6 +44,7 @@ pub(super) struct Scope {
 pub(super) struct Ordinals {
     keyless_starts: AtomicU32,
     compactions: AtomicU32,
+    completions: AtomicU32,
     command_runs: AtomicU32,
     pub(super) effects: std::sync::atomic::AtomicU64,
 }
@@ -578,6 +579,16 @@ impl ActorContext {
         self.scope
             .ordinals
             .compactions
+            .fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// The ordinal of the next unkeyed direct completion under this scope:
+    /// its identity within the scope, in program order, so a redrive of the
+    /// scope names each call as its first execution did.
+    pub fn next_completion_ordinal(&self) -> u32 {
+        self.scope
+            .ordinals
+            .completions
             .fetch_add(1, Ordering::SeqCst)
     }
 

@@ -77,9 +77,9 @@ pub use error::{
     trigger_occurrence_reclaimed,
 };
 pub use history::{
-    CompactionContext, CompactionSystemPrompt, ContextCompaction, ContextCompactor, ContextError,
-    ContextPressureContext, ContextPressureDecision, ContextPressureHook, DecidedContextPressure,
-    PluginTraceEmitter, SessionReadView,
+    CompactionContext, ContextCompaction, ContextCompactor, ContextError, ContextPressureContext,
+    ContextPressureDecision, ContextPressureHook, DecidedContextPressure, PluginTraceEmitter,
+    SessionReadView,
 };
 pub use hook_key::HookKey;
 pub(crate) use hooks::owner_trace_context;

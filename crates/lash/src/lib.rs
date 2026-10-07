@@ -766,16 +766,16 @@ pub mod persistence {
 /// the final text, as content-addressed [`PromptTextRef`]s.
 pub mod prompt {
     pub use crate::admin::prompt::SessionPromptAdmin;
-    pub use lash_core::durable_port::domain::PromptCallKey;
+    pub use lash_core::durable_port::domain::{ModelCallId, PromptCallKey};
     pub use lash_core::plugin::prompt::{
-        LoadedPromptSnapshot, PromptCompositionError, PromptRenderSite, PromptSnapshotLoadError,
+        AdmittedCallLoadError, LoadedPromptSnapshot, PromptCompositionError, PromptRenderSite,
     };
     pub use lash_core::prompt_sections::{
         AppliedPromptWrap, PROMPT_KEY_MAX_BYTES, PlacementSource, PromptKeyError, PromptLimits,
         PromptPlacement, PromptPlan, PromptPlanError, PromptPurpose, PromptSectionId,
         PromptSectionKey, PromptSectionPlacement, PromptSnapshot, PromptSnapshotVersion,
-        PromptTextRef, PromptWrapId, PromptWrapKey, RecordedSectionText, RenderedPromptSection,
-        ResolvedPromptPlan, ResolvedPromptSection, ResolvedPromptWrap,
+        PromptTextRef, PromptWrapId, PromptWrapKey, ProviderBodyError, RecordedSectionText,
+        RenderedPromptSection, ResolvedPromptPlan, ResolvedPromptSection, ResolvedPromptWrap,
     };
 }
 
@@ -787,11 +787,11 @@ pub mod plugins {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::ConfigRegistry;
     pub use lash_core::plugin::{
-        AssistantProseProjectorPlugin, AssistantStreamFinishedHook, CompactionSystemPrompt,
-        DecidedContextPressure, PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture,
-        PresentedToolReturn, ResolvedToolSurface, ToolCatalogContributor,
-        ToolPresentationArtifacts, ToolPresentationFacts, ToolPresentationInput,
-        ToolPresentationStep, TranscriptRowProjectorPlugin,
+        AssistantProseProjectorPlugin, AssistantStreamFinishedHook, DecidedContextPressure,
+        PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture, PresentedToolReturn,
+        ResolvedToolSurface, ToolCatalogContributor, ToolPresentationArtifacts,
+        ToolPresentationFacts, ToolPresentationInput, ToolPresentationStep,
+        TranscriptRowProjectorPlugin,
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
@@ -1300,17 +1300,18 @@ pub mod runtime {
     /// against uses the same reading rather than its own.
     pub use lash_core::runtime::current_epoch_ms;
     pub use lash_core::runtime::{
-        AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantResponsePlan,
-        AssistantStreamHookState, CheckpointAdmittedSet, DirectCompletionClient, EffectAddress,
-        EmbeddedRuntimeHost, EventSink, ExecutionScope, LlmRequestSpec, LlmStreamRecord,
-        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution, RuntimeControlConfig,
-        RuntimeDurabilityConfig, RuntimeEffectCommand, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind,
-        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
-        RuntimeProviderConfig, SleepSpec, TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext,
-        TurnPrelude, TurnPreludeRef, WorkCadenceError, WorkCadencePolicy,
+        AdmittedDirectSend, AdmittedScope, AssembledTurn, AssistantResponseHookEvents,
+        AssistantResponsePlan, AssistantStreamHookState, CheckpointAdmittedSet,
+        DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost, EventSink, ExecutionScope,
+        LlmRequestSpec, LlmStreamRecord, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
+        ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution,
+        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
+        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec, TraceEmitter,
+        TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
+        WorkCadencePolicy,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
@@ -1435,6 +1436,9 @@ pub mod provider {
     pub use lash_provider_auth::{OAuthError, OAuthTokenErrorCode, OAuthTokens};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::llm::transport::HttpFailureContext;
+    /// The exact body a provider lowers a request to, and that every send of
+    /// an admitted call sends (ADR 0133 §6).
+    pub use lash_sansio::llm::types::ProviderRequestBody;
     pub use lash_sansio::llm::types::{
         LlmProviderTraceEvent, LlmProviderTraceSender, ProviderReasoningRetentionSupport,
     };

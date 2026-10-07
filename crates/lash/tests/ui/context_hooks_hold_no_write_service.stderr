@@ -28,7 +28,7 @@ error[E0609]: no field `session_graph` on type `&CompactionContext<'_>`
 16 |     let _ = &ctx.session_graph;
    |                  ^^^^^^^^^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `instructions`, `state`, `traces` ... and 3 others
+   = note: available fields are: `session_id`, `plugin_config`, `instructions`, `state`, `traces` ... and 2 others
 
 error[E0609]: no field `session_lifecycle` on type `&CompactionContext<'_>`
   --> tests/ui/context_hooks_hold_no_write_service.rs:17:18
@@ -36,7 +36,7 @@ error[E0609]: no field `session_lifecycle` on type `&CompactionContext<'_>`
 17 |     let _ = &ctx.session_lifecycle;
    |                  ^^^^^^^^^^^^^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `instructions`, `state`, `traces` ... and 3 others
+   = note: available fields are: `session_id`, `plugin_config`, `instructions`, `state`, `traces` ... and 2 others
 
 error[E0609]: no field `sessions` on type `&CompactionContext<'_>`
   --> tests/ui/context_hooks_hold_no_write_service.rs:18:18
@@ -44,7 +44,7 @@ error[E0609]: no field `sessions` on type `&CompactionContext<'_>`
 18 |     let _ = &ctx.sessions;
    |                  ^^^^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `instructions`, `state`, `traces` ... and 3 others
+   = note: available fields are: `session_id`, `plugin_config`, `instructions`, `state`, `traces` ... and 2 others
 
 error[E0609]: no field `session_graph` on type `&ContextPressureContext<'_>`
   --> tests/ui/context_hooks_hold_no_write_service.rs:22:18
@@ -52,7 +52,7 @@ error[E0609]: no field `session_graph` on type `&ContextPressureContext<'_>`
 22 |     let _ = &ctx.session_graph;
    |                  ^^^^^^^^^^^^^ unknown field
    |
-   = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `state`, `prompt_usage` ... and 5 others
+   = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `state`, `prompt_usage` ... and 4 others
 
 error[E0609]: no field `session_lifecycle` on type `&ContextPressureContext<'_>`
   --> tests/ui/context_hooks_hold_no_write_service.rs:23:18
@@ -60,7 +60,7 @@ error[E0609]: no field `session_lifecycle` on type `&ContextPressureContext<'_>`
 23 |     let _ = &ctx.session_lifecycle;
    |                  ^^^^^^^^^^^^^^^^^ unknown field
    |
-   = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `state`, `prompt_usage` ... and 5 others
+   = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `state`, `prompt_usage` ... and 4 others
 
 error[E0609]: no field `sessions` on type `&ContextPressureContext<'_>`
   --> tests/ui/context_hooks_hold_no_write_service.rs:24:18
@@ -68,7 +68,7 @@ error[E0609]: no field `sessions` on type `&ContextPressureContext<'_>`
 24 |     let _ = &ctx.sessions;
    |                  ^^^^^^^^ unknown field
    |
-   = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `state`, `prompt_usage` ... and 5 others
+   = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `state`, `prompt_usage` ... and 4 others
 
 error[E0599]: no method named `switch_agent_frame` found for reference `&dyn SessionGraphService` in the current scope
   --> tests/ui/context_hooks_hold_no_write_service.rs:29:19

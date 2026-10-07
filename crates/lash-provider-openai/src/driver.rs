@@ -149,26 +149,11 @@ fn request_fingerprint(body: &[u8]) -> ResponsesRequestFingerprint {
     )
 }
 
+/// The fingerprint of `body`: the bytes a resumed Responses stream belongs to.
 pub(crate) fn responses_request_fingerprint(
-    provider: &OpenAiCompatibleProvider,
-    req: &LlmRequest,
-) -> Option<ResponsesRequestFingerprint> {
-    let endpoint = CompletionEndpoint::Responses;
-    let origin_route = ProviderRouteIdentity::for_endpoint(
-        endpoint.provider_kind(),
-        &provider.base_url,
-        req.model.wire_model().to_string(),
-    );
-    let built = build_request_body(
-        provider,
-        req,
-        endpoint,
-        req.stream_events.is_some(),
-        &origin_route,
-    )
-    .ok()?;
-    let body_bytes = serde_json::to_vec(&built.body).ok()?;
-    Some(request_fingerprint(&body_bytes))
+    body: &ProviderRequestBody,
+) -> ResponsesRequestFingerprint {
+    request_fingerprint(body.body.as_bytes())
 }
 
 impl CompletionEndpoint {
@@ -237,9 +222,74 @@ impl CompletionEndpoint {
     }
 }
 
+/// Lower `req` to the exact body `endpoint` sends for it: reasoning from
+/// another route dropped, the body built and serialized once.
+pub(crate) async fn lower(
+    provider: &OpenAiCompatibleProvider,
+    req: &LlmRequest,
+    endpoint: CompletionEndpoint,
+) -> Result<ProviderRequestBody, LlmTransportError> {
+    let origin_route = ProviderRouteIdentity::for_endpoint(
+        endpoint.provider_kind(),
+        &provider.base_url,
+        req.model.wire_model().to_string(),
+    );
+    origin_route.validate_endpoint().map_err(|error| {
+        LlmTransportError::new(error.to_string())
+            .with_kind(ProviderFailureKind::Validation)
+            .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+    })?;
+    let stream = req.stream_events.is_some();
+    let blocking = needs_blocking(req);
+    // Clone only request-building configuration, never a retained resume state.
+    let builder = OpenAiCompatibleProvider {
+        api_key: String::new().into(),
+        base_url: provider.base_url.clone(),
+        options: provider.options.clone(),
+        compat: provider.compat.clone(),
+        wire: provider.wire.clone(),
+        transport: provider.transport.clone(),
+        responses_resume: None,
+    };
+    let build_route = origin_route.clone();
+    let mut req = req.clone();
+    let (bytes, receipt) = run(blocking, move || {
+        req.drop_foreign_replay(&build_route);
+        let BuiltRequest { body, receipt } =
+            build_request_body(&builder, &req, endpoint, stream, &build_route)?;
+        let bytes = serialize_body(&body)
+            .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
+        Ok::<_, LlmTransportError>((bytes, receipt))
+    })
+    .await??;
+    let body = String::from_utf8(bytes).map_err(|error| {
+        LlmTransportError::new(format!("{}: {error}", endpoint.serialize_error()))
+    })?;
+    Ok(ProviderRequestBody {
+        route: origin_route,
+        stream,
+        generation: Some(receipt),
+        body: body.into(),
+    })
+}
+
+/// Lower `req` and send its body, as one call of a test that scripts the
+/// transport.
+#[cfg(test)]
 pub(crate) async fn complete(
     provider: &mut OpenAiCompatibleProvider,
     req: LlmRequest,
+    endpoint: CompletionEndpoint,
+) -> Result<LlmResponse, LlmTransportError> {
+    let body = lower(provider, &req, endpoint).await?;
+    send(provider, req, &body, endpoint).await
+}
+
+/// Send `body`, which [`lower`] produced for `req`, to `endpoint`.
+pub(crate) async fn send(
+    provider: &mut OpenAiCompatibleProvider,
+    req: LlmRequest,
+    body: &ProviderRequestBody,
     endpoint: CompletionEndpoint,
 ) -> Result<LlmResponse, LlmTransportError> {
     let origin_model = req.model.wire_model().to_string();
@@ -266,7 +316,7 @@ pub(crate) async fn complete(
     let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
     let request_defaults = req.model.metadata().request_defaults.clone();
     let timeouts = provider.options.llm_timeouts();
-    let stream = stream_events.is_some();
+    let stream = body.stream;
     let compat = provider.resolved_compat(endpoint);
     let stream_termination = req
         .model
@@ -275,63 +325,22 @@ pub(crate) async fn complete(
         .stream_termination
         .unwrap_or(compat.stream_termination);
     let request_id = req.scope.request_id.clone();
-    let blocking = needs_blocking(&req);
-    // Clone only request-building configuration, never a retained resume state or the
-    // request's resolved attachment buffers.
-    let builder = OpenAiCompatibleProvider {
-        api_key: String::new().into(),
-        base_url: provider.base_url.clone(),
-        options: provider.options.clone(),
-        compat: provider.compat.clone(),
-        wire: provider.wire.clone(),
-        transport: provider.transport.clone(),
-        responses_resume: None,
-    };
-    let build_route = origin_route.clone();
-    let (
+    let blocking = crate::request_work::bytes_need_blocking(body.body.len());
+    let body_bytes = body.body.as_bytes();
+    let generation_disposition = body.generation;
+    let fingerprint = request_fingerprint(body_bytes);
+    let request_body_for_error = body_excerpt(&body.body);
+    emit_provider_request_trace(
+        req.provider_trace.as_ref(),
+        "openai_compatible",
+        endpoint.request_trace_name(),
         body_bytes,
-        generation_disposition,
-        fingerprint,
-        request_body_for_error,
-        tool_argument_decoder,
-    ) = run(blocking, move || {
-        let mut req = req;
-        // Sanitize the owned request before the builders borrow it, avoiding
-        // reasoning_retention_safe_for cloning the resolved-stored byte cache.
-        req.drop_foreign_replay(&build_route);
-        let BuiltRequest { body, receipt } =
-            build_request_body(&builder, &req, endpoint, stream, &build_route)?;
-        let disposition = Some(receipt);
-        let bytes = serialize_body(&body)
-            .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
-        let fingerprint = request_fingerprint(&bytes);
-        #[expect(
-            clippy::expect_used,
-            reason = "`bytes` is what `serialize_body` just produced with serde_json, \
-                      whose output is UTF-8 by construction"
-        )]
-        let diagnostic = body_excerpt(std::str::from_utf8(&bytes).expect("JSON is UTF-8"));
-        emit_provider_request_trace(
-            req.provider_trace.as_ref(),
-            "openai_compatible",
-            endpoint.request_trace_name(),
-            &bytes,
-        );
-        let compat = builder.resolved_compat(endpoint);
-        let tool_argument_decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
-            endpoint.provider_kind(),
-            &req,
-            &compat.schema_capabilities,
-        )?;
-        Ok::<_, LlmTransportError>((
-            bytes,
-            disposition,
-            fingerprint,
-            diagnostic,
-            tool_argument_decoder,
-        ))
-    })
-    .await??;
+    );
+    let tool_argument_decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
+        endpoint.provider_kind(),
+        &req,
+        &compat.schema_capabilities,
+    )?;
     let request_key = ResponsesRequestKey {
         request_id: request_id.clone(),
         fingerprint,
@@ -349,7 +358,7 @@ pub(crate) async fn complete(
         provider.responses_resume = None;
         None
     };
-    let request_body = bytes::Bytes::from(body_bytes);
+    let request_body = bytes::Bytes::copy_from_slice(body_bytes);
     let base_url = provider.base_url.trim_end_matches('/');
     let mut creation_url = match base_url.split_once('?') {
         Some((base_path, query)) => format!("{}/{}?{}", base_path, endpoint.path(), query),

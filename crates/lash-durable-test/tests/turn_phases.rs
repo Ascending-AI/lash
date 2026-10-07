@@ -67,9 +67,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, OpenTurn, PhaseCheckpoint, SessionActivation,
-    SessionParkReason, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
-    TurnRow, TurnServices, UnfinishedPhase, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, OpenTurn, PhaseCheckpoint, PreparedCall,
+    SessionActivation, SessionParkReason, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive,
+    TurnError, TurnRestore, TurnRow, TurnServices, UnfinishedPhase, request_turn_cancel,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -84,7 +84,10 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
-use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnWrite};
+use lash_durable::domain::{
+    MailAnswer, MailDomainWrite, ModelCallId, PromptCallKey, PromptWrite, TurnCancelAnswer,
+    TurnWrite,
+};
 use lash_durable::runner::Activation;
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite, DurableError, DurableStore,
@@ -93,6 +96,7 @@ use lash_durable::{
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
@@ -109,6 +113,8 @@ const AGAIN_MARKER: &str = "l3-again-";
 /// What starts the instructions a call's composition lowers into its
 /// request.
 const COMPOSED: &str = "l3-composed";
+/// The commit that loses a call's stored admission ([`Mode::MaterialLost`]).
+const MATERIAL_LOST: CommitLabel = CommitLabel::new("l3.material.lost");
 
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
@@ -144,6 +150,9 @@ enum Mode {
     /// A host cancels the turn's run as its admission is cut; the model
     /// streams until a cancel stops it.
     CancelAtAdmission,
+    /// The first send of the turn's first call loses the call's stored
+    /// admission, then its node dies before the model answers.
+    MaterialLost,
 }
 
 const QUEUED_RUN: &str = "l3-queued-turn";
@@ -247,6 +256,11 @@ struct Call {
     /// The call the turn's row pinned when the attempt was sent, and
     /// whether its stored checkpoint carries the attempt's composition.
     admitted: Option<(u32, bool)>,
+    /// The exact body the attempt sent.
+    sent: Arc<str>,
+    /// The body the pinned call's admission stored, read back as the
+    /// attempt is sent.
+    stored: Option<Arc<str>>,
     /// Whether the turn's cancel had been requested when it started.
     after_cancel: bool,
 }
@@ -286,6 +300,9 @@ struct Seen {
     calls: Vec<Call>,
     /// Every composition, in the order the owners composed them.
     compositions: Vec<Composition>,
+    /// How many bodies the owners' provider builders lowered: each lowering
+    /// is a builder of its own generation, so no two bodies are alike.
+    lowerings: u64,
     restarts: Vec<u32>,
     cancel_requested: bool,
     /// Calls that requested the cancel, and how many of them answered.
@@ -299,6 +316,11 @@ struct Seen {
     queued_cancel: Option<lash_core::facade_support::TurnCancelOutcome>,
     /// What the cancel sent at the admission cut answered.
     admission_cancel: Option<Result<TurnCancelAnswer, String>>,
+    /// Whether a send lost its call's stored admission.
+    material_lost: bool,
+    /// What the turns told the host: every effect the drive does not
+    /// answer, and every finished turn's outcome.
+    told: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -306,6 +328,15 @@ struct L3Services {
     mode: Mode,
     seen: Arc<Mutex<Seen>>,
     backend: Arc<Mutex<Option<Backend>>>,
+}
+
+/// The route the scenario's provider serves.
+fn route() -> ProviderRouteIdentity {
+    ProviderRouteIdentity {
+        provider: "l3".into(),
+        endpoint: "https://l3.test/v1".into(),
+        model: "scripted".into(),
+    }
 }
 
 fn machine_config(session: &SessionId, run: &TurnId) -> TurnMachineConfig {
@@ -359,7 +390,8 @@ impl TurnServices for L3Services {
             | Mode::AfterStepWhileStreaming
             | Mode::HeadMovesUnderTheTurn
             | Mode::QueuedCancel
-            | Mode::CancelAtAdmission => ExecutionBudgets::default(),
+            | Mode::CancelAtAdmission
+            | Mode::MaterialLost => ExecutionBudgets::default(),
         }
     }
 
@@ -459,19 +491,27 @@ impl TurnDrive for L3Drive {
                     delivery: Default::default(),
                 });
             }
-            _ => {}
+            other => self
+                .services
+                .seen
+                .lock_recover()
+                .told
+                .push(format!("{other:?}")),
         }
         Ok(())
     }
 
     /// A composition the scenario can tell apart: its call and a render
-    /// count across every node, lowered into the request's instructions.
-    async fn compose_call(
+    /// count across every node, lowered into the request's instructions;
+    /// and a body the scenario can tell apart: a provider builder whose
+    /// generation every lowering on any node advances.
+    async fn prepare_call(
         &mut self,
         _cx: &ActorContext,
+        _id: EffectId,
         call: u32,
         request: Arc<LlmRequest>,
-    ) -> Result<Result<ComposedCall, lash_core::LlmCallError>, TurnError> {
+    ) -> Result<PreparedCall, TurnError> {
         let composition = {
             let mut seen = self.services.seen.lock_recover();
             let composition = Composition {
@@ -483,10 +523,24 @@ impl TurnDrive for L3Drive {
         };
         let mut request = LlmRequest::clone(&request);
         request.instructions = Some(Arc::from(composition.instructions()));
-        Ok(Ok(ComposedCall {
+        let generation = {
+            let mut seen = self.services.seen.lock_recover();
+            seen.lowerings += 1;
+            seen.lowerings
+        };
+        let lowered = serde_json::to_string(&request).expect("a request encodes");
+        Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request: Arc::new(request),
-            records: Vec::new(),
-        }))
+            prompt: None,
+            body: ProviderRequestBody {
+                route: route(),
+                stream: true,
+                generation: None,
+                body: Arc::from(format!(
+                    "{{\"builder\":{generation},\"request\":{lowered}}}"
+                )),
+            },
+        })))
     }
 
     async fn model_call(
@@ -494,6 +548,7 @@ impl TurnDrive for L3Drive {
         cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
+        body: &ProviderRequestBody,
         attempt: u32,
         _limit: ExecutionLimit,
     ) -> Result<(), TurnError> {
@@ -513,6 +568,22 @@ impl TurnDrive for L3Drive {
                     )),
                     UnfinishedPhase::Admitted | UnfinishedPhase::Tools { .. } => None,
                 });
+        let stored = match admitted {
+            Some((ordinal, _)) => {
+                let key = PromptCallKey {
+                    session: session(),
+                    call: ModelCallId::Turn {
+                        run: self.run.clone(),
+                        ordinal,
+                    },
+                };
+                lash_core::plugin::prompt::load_admitted_call(cx.durable_reads()?, &key)
+                    .await
+                    .map_err(|error| TurnError::Exec(error.to_string()))?
+                    .map(|admitted| admitted.body.body)
+            }
+            None => None,
+        };
         if self.services.mode == Mode::HeadMovesUnderTheTurn && second && attempt == 1 {
             let backend = self.services.backend();
             let from = SessionHead::load(&backend, &session())
@@ -541,6 +612,8 @@ impl TurnDrive for L3Drive {
                 request: rendered,
                 composed,
                 admitted,
+                sent: Arc::clone(&body.body),
+                stored,
                 after_cancel,
             });
             let cancels = matches!(
@@ -549,6 +622,21 @@ impl TurnDrive for L3Drive {
             );
             cancels && !after_cancel
         };
+        if self.services.mode == Mode::MaterialLost {
+            let lose =
+                !std::mem::replace(&mut self.services.seen.lock_recover().material_lost, true);
+            if lose {
+                let mut tx = cx.begin().await?;
+                tx.write(DomainWrite::Prompt(PromptWrite::Release {
+                    session: session(),
+                    run: Some(self.run.clone()),
+                }));
+                cx.commit(tx, MATERIAL_LOST).await?;
+                return Err(TurnError::Exec(
+                    "the node died after the call's admission was lost".to_owned(),
+                ));
+            }
+        }
         if first_streaming_call {
             let mode = match self.services.mode {
                 Mode::AfterStepWhileStreaming => TurnCancelMode::AfterStep,
@@ -648,6 +736,11 @@ impl TurnDrive for L3Drive {
         done: TurnDone,
         head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
+        self.services
+            .seen
+            .lock_recover()
+            .told
+            .push(format!("{:?}", done.outcome));
         head.commit(&self.run, done, commit_budget()).await
     }
 
@@ -839,7 +932,9 @@ impl Scenario for L3 {
             .get(&(session(), run()))
             .copied()
             .unwrap_or(0);
-        if restores > 1 {
+        // A lost admission's send dies once more on its own.
+        let deaths = usize::from(seen.material_lost);
+        if restores > 1 + deaths {
             violations.push(format!("NR-4: the turn was restored {restores} times"));
         }
 
@@ -942,6 +1037,7 @@ impl Scenario for L3 {
                 violations
                     .extend(withdraw_or_cancel_laws(database.as_ref(), &trace, &seen, cut).await);
             }
+            Mode::MaterialLost => violations.extend(material_laws(&seen)),
         }
 
         if self.mode == Mode::HeadMovesUnderTheTurn {
@@ -1126,10 +1222,19 @@ async fn withdraw_or_cancel_laws(
 /// - FENCE and CUT-ACK: every attempt the model receives is of an admitted
 ///   call: the turn's row, read as the attempt is sent, pins that call and
 ///   stores the composition the attempt carries.
+/// - WIRE (FIG-5259): every attempt sends the exact body the call's
+///   admission stored, so a resend on a second owner, whose renderer and
+///   provider builder would produce other bytes, sends the admitted bytes.
 fn admission_laws(seen: &Seen) -> Vec<String> {
     let mut violations = Vec::new();
     for call in &seen.calls {
         let ordinal = if call.second { 2 } else { 1 };
+        if call.stored.as_deref() != Some(&*call.sent) {
+            violations.push(format!(
+                "WIRE: attempt {} of call {ordinal} sent {} while its admission stored {:?}",
+                call.attempt, call.sent, call.stored
+            ));
+        }
         match call.composed {
             Some(composed) if composed.call == ordinal => {}
             other => violations.push(format!(
@@ -1161,6 +1266,47 @@ fn admission_laws(seen: &Seen) -> Vec<String> {
                 seen.calls
             ));
         }
+        let mut bodies = seen
+            .calls
+            .iter()
+            .filter(|call| u32::from(call.second) + 1 == ordinal)
+            .map(|call| &call.sent);
+        if let Some(first) = bodies.next()
+            && bodies.any(|other| other != first)
+        {
+            violations.push(format!(
+                "WIRE: call {ordinal} was sent with two bodies: {:?}",
+                seen.calls
+            ));
+        }
+    }
+    violations
+}
+
+/// MATERIAL (FIG-5259): an admitted call whose stored admission is gone is
+/// never sent again, and nothing rebuilds it: it settles unsent as
+/// `admitted_request_unavailable`, and the turn ends with that failure.
+fn material_laws(seen: &Seen) -> Vec<String> {
+    let mut violations = Vec::new();
+    if !seen.material_lost {
+        violations.push("MATERIAL: no send lost its call's admission".to_owned());
+    }
+    if seen.calls.len() != 1 {
+        violations.push(format!(
+            "MATERIAL: the call was sent {} times after its admission was lost: {:?}",
+            seen.calls.len(),
+            seen.calls
+        ));
+    }
+    let failed = seen
+        .told
+        .iter()
+        .any(|told| told.contains("admitted_request_unavailable"));
+    if !failed {
+        violations.push(format!(
+            "MATERIAL: the turn did not end with admitted_request_unavailable: {:?}",
+            seen.told
+        ));
     }
     violations
 }
@@ -1230,7 +1376,8 @@ fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
         | Mode::AfterStepWhileStreaming
         | Mode::HeadMovesUnderTheTurn
         | Mode::QueuedCancel
-        | Mode::CancelAtAdmission => {}
+        | Mode::CancelAtAdmission
+        | Mode::MaterialLost => {}
     }
     violations
 }
@@ -1516,6 +1663,19 @@ async fn a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_post
         Mode::CancelAtAdmission,
         ADMISSION,
         Dialect::Postgres,
+    )
+    .await;
+}
+
+/// MATERIAL (FIG-5259): a call whose stored admission is lost is never sent
+/// again, at every cut of its admission.
+#[tokio::test]
+async fn a_call_whose_admitted_body_is_lost_settles_unsent() {
+    prove_on(
+        matrix().labels(SHORT_DEADLINE),
+        Mode::MaterialLost,
+        SHORT_DEADLINE,
+        Dialect::SqliteMemory,
     )
     .await;
 }

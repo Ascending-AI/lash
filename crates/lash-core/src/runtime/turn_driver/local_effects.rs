@@ -68,6 +68,13 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // the engine runs it again, and it is never the call's
                 // recorded result.
                 let provider = runner.driver.policy.binding().bind_for_unjournaled_call()?;
+                // The admitted call's exact body: the body sends it as it is.
+                let body = runner.driver.admitted_body.take().ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                        "a model call's effect runs only for an admitted call with its body",
+                    )
+                })?;
                 // A cancellation the turn already honoured stops the model
                 // call.
                 let stop = runner.driver.children_stop.child_token();
@@ -83,6 +90,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     stream,
                 } = Box::pin(driver.run_llm_call(
                     request,
+                    &body,
                     protocol_iteration,
                     invocation,
                     &event_tx,
@@ -257,6 +265,7 @@ pub(super) fn turn_effect_executor(
         // body and driver emissions on colliding {key}#{ordinal} ids.
         turn_observations: body_observation_cursor(body_replay_key),
         trace: driver.trace.clone(),
+        admitted_body: driver.admitted_body.take(),
     };
     lash_core_execution::core_internal::owned_runner_executor(
         Box::new(LocalTurnEffectRunner {

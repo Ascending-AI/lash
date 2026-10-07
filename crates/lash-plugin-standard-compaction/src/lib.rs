@@ -507,7 +507,6 @@ async fn summarize_compaction_prefix(
     instructions: Option<&str>,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
     scoped_effect_controller: &lash_core::ActorContext,
-    system_prompt: Option<Arc<str>>,
 ) -> Result<Option<String>, ContextError> {
     if prefix_messages.is_empty() {
         return Ok(None);
@@ -534,8 +533,10 @@ async fn summarize_compaction_prefix(
     let model = snapshot.policy.model.as_ref().ok_or_else(|| {
         ContextError::Session("compaction needs the session's model, and it selects none".into())
     })?;
+    // The summarizer's instructions are the session's compaction sections,
+    // composed into the request when the call is admitted (ADR 0133 §8).
     let request = lash_core::LlmRequest {
-        instructions: system_prompt,
+        instructions: None,
         model: model.clone(),
         messages: rendered.messages,
         resolved_stored: Default::default(),
@@ -560,7 +561,12 @@ async fn summarize_compaction_prefix(
             turn_id: parent_turn_id.clone(),
         });
     let completion = direct_completions
-        .direct_llm_completion_caused_by(request, "compaction", caused_by)
+        .direct_llm_completion_for(
+            request,
+            lash_core::prompt_sections::PromptPurpose::Compaction,
+            "compaction",
+            caused_by,
+        )
         .await
         .map_err(ContextError::from)?;
     match completion.response.terminal_reason {
@@ -613,7 +619,6 @@ async fn compact_messages_core(
     instructions: Option<&str>,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
     scoped_effect_controller: &lash_core::ActorContext,
-    system_prompt: Option<Arc<str>>,
 ) -> Result<Option<ContextCompaction>, ContextError> {
     let prefix_len = leading_system_prefix_len(messages);
     let cut_point = find_compaction_cut_point(messages, prefix_len);
@@ -628,7 +633,6 @@ async fn compact_messages_core(
         instructions,
         direct_completions,
         scoped_effect_controller,
-        system_prompt,
     )
     .await?
     else {
@@ -777,10 +781,6 @@ impl ContextPressureHook for StandardCompactionPressureHook {
         if summarized.is_empty() {
             return Ok(ContextPressureDecision::Continue);
         }
-        let system_prompt = match &ctx.system_prompt {
-            Some(provider) => provider().await.map_err(ContextError::from)?,
-            None => None,
-        };
         let Some(summary) = summarize_compaction_prefix(
             &ctx.session_id,
             &ctx.state.to_snapshot(),
@@ -788,7 +788,6 @@ impl ContextPressureHook for StandardCompactionPressureHook {
             None,
             &ctx.direct_completions,
             &ctx.scoped_effect_controller,
-            system_prompt,
         )
         .await?
         else {
@@ -878,7 +877,6 @@ impl ContextCompactor for StandardContextCompactor {
             ctx.instructions.as_deref(),
             &ctx.direct_completions,
             &ctx.scoped_effect_controller,
-            ctx.system_prompt.clone(),
         )
         .await;
         let summary_nodes = compaction

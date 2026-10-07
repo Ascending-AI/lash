@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    DomainRefusal, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
+    DomainRefusal, ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
 };
 use lash_durable::{DurableError, Epoch};
 use lash_sansio::{SessionId, TurnId};
@@ -49,9 +49,9 @@ lash_store_sql::statements! {
              SELECT hash, text FROM unnest(?1::TEXT[], ?2::TEXT[]) AS batch(hash, text)
              ON CONFLICT (hash) DO NOTHING";
 
-        /// Root every text in `?4` under call `?3` of turn `?2` in session
+        /// Root every text in `?4` under call `?3` of owner `?2` in session
         /// `?1`.
-        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, run, call_ordinal, hash)
+        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, hash)
              SELECT ?1, ?2, ?3, hash FROM unnest(?4::TEXT[]) AS batch(hash)";
 
         /// Reclaim every text in `?1` no root references any more.
@@ -97,8 +97,8 @@ pub(super) async fn apply(
         } => {
             let recorded = sqlx::query(SQL.insert_snapshot.sql())
                 .bind(call.session.as_str())
-                .bind(call.run.as_str())
-                .bind(i64::from(call.call))
+                .bind(call.call.owner_column())
+                .bind(call.call.call_column())
                 .bind(snapshot)
                 .bind(commit.epoch.0)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -135,8 +135,8 @@ pub(super) async fn apply(
                 .map_err(sqlx_failure)?;
             sqlx::query(POSTGRES_SQL.insert_edges.sql())
                 .bind(call.session.as_str())
-                .bind(call.run.as_str())
-                .bind(i64::from(call.call))
+                .bind(call.call.owner_column())
+                .bind(call.call.call_column())
                 .bind(&hashes)
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -175,12 +175,12 @@ pub(crate) async fn release(
         Some(run) => {
             let hashes = sqlx::query_scalar(SQL.release_run_edges.sql())
                 .bind(session.as_str())
-                .bind(run.as_str())
+                .bind(ModelCallId::turn_owner(run))
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await?;
             sqlx::query(SQL.release_run_snapshots.sql())
                 .bind(session.as_str())
-                .bind(run.as_str())
+                .bind(ModelCallId::turn_owner(run))
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await?;
             hashes
@@ -214,8 +214,8 @@ pub(super) async fn snapshot(
 ) -> Result<Option<PromptSnapshotRow>, DurableError> {
     let Some(row) = sqlx::query(SQL.read_snapshot.sql())
         .bind(call.session.as_str())
-        .bind(call.run.as_str())
-        .bind(i64::from(call.call))
+        .bind(call.call.owner_column())
+        .bind(call.call.call_column())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?
@@ -224,8 +224,8 @@ pub(super) async fn snapshot(
     };
     let texts: Vec<String> = sqlx::query_scalar(SQL.read_edges.sql())
         .bind(call.session.as_str())
-        .bind(call.run.as_str())
-        .bind(i64::from(call.call))
+        .bind(call.call.owner_column())
+        .bind(call.call.call_column())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;

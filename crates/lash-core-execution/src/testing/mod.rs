@@ -456,7 +456,9 @@ pub fn stage_execution_state_components(
 
 type CompletionFuture =
     Pin<Box<dyn Future<Output = Result<LlmResponse, LlmTransportError>> + Send>>;
-type CompletionFn = dyn Fn(LlmRequest) -> CompletionFuture + Send + Sync;
+type CompletionFn =
+    dyn Fn(LlmRequest, crate::ProviderRequestBody) -> CompletionFuture + Send + Sync;
+type LowerFn = dyn Fn(&LlmRequest) -> String + Send + Sync;
 type SerializeConfigFn = dyn Fn() -> serde_json::Value + Send + Sync;
 
 fn empty_provider_config() -> serde_json::Value {
@@ -472,6 +474,9 @@ pub struct TestProvider {
     generation_retry_guarantee: crate::provider::GenerationRetryGuarantee,
     options: ProviderOptions,
     serialize_config: Arc<SerializeConfigFn>,
+    /// The provider's builder: the body it lowers a request to. `None`
+    /// lowers to the request's canonical encoding.
+    lower: Option<Arc<LowerFn>>,
     complete: Arc<CompletionFn>,
 }
 
@@ -514,7 +519,8 @@ impl TestProviderBuilder {
                 generation_retry_guarantee: crate::provider::GenerationRetryGuarantee::None,
                 options: ProviderOptions::default(),
                 serialize_config: Arc::new(empty_provider_config),
-                complete: Arc::new(|_request| {
+                lower: None,
+                complete: Arc::new(|_request, _body| {
                     Box::pin(async {
                         Err(LlmTransportError::new(
                             "TestProvider::complete was called without a test completion handler",
@@ -562,13 +568,33 @@ impl TestProviderBuilder {
         F: Fn(LlmRequest) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
     {
-        self.provider.complete = Arc::new(move |request| Box::pin(complete(request)));
+        self.provider.complete = Arc::new(move |request, _body| Box::pin(complete(request)));
+        self
+    }
+
+    /// Answer each send from the request and the exact body it sends.
+    pub fn send<F, Fut>(mut self, send: F) -> Self
+    where
+        F: Fn(LlmRequest, crate::ProviderRequestBody) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
+    {
+        self.provider.complete = Arc::new(move |request, body| Box::pin(send(request, body)));
+        self
+    }
+
+    /// Lower each request to the body `lower` builds: this provider's
+    /// builder.
+    pub fn lower<F>(mut self, lower: F) -> Self
+    where
+        F: Fn(&LlmRequest) -> String + Send + Sync + 'static,
+    {
+        self.provider.lower = Some(Arc::new(lower));
         self
     }
 
     pub fn complete_error(mut self, message: impl Into<String>) -> Self {
         let message = Arc::new(message.into());
-        self.provider.complete = Arc::new(move |_request| {
+        self.provider.complete = Arc::new(move |_request, _body| {
             let message = Arc::clone(&message);
             Box::pin(async move { Err(LlmTransportError::new(message.as_str())) })
         });
@@ -608,8 +634,29 @@ impl Provider for TestProvider {
         (self.serialize_config)()
     }
 
-    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        let mut response = (self.complete)(request).await?;
+    async fn lower(
+        &mut self,
+        request: &LlmRequest,
+    ) -> Result<crate::ProviderRequestBody, LlmTransportError> {
+        let route = self.route_identity(request.model.wire_model());
+        match &self.lower {
+            Some(lower) => Ok(crate::ProviderRequestBody {
+                route,
+                stream: request.stream_events.is_some(),
+                generation: None,
+                body: lower(request).into(),
+            }),
+            None => crate::ProviderRequestBody::of_request(route, request)
+                .map_err(|error| LlmTransportError::new(error.to_string())),
+        }
+    }
+
+    async fn send(
+        &mut self,
+        request: LlmRequest,
+        body: &crate::ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        let mut response = (self.complete)(request, body.clone()).await?;
         // A scripted answer that carries counters is one its provider
         // reported, and a real provider reports them beside its own raw usage
         // record: without one the attempt is unreported by the provider
@@ -625,6 +672,7 @@ impl Provider for TestProvider {
     fn generation_retry_guarantee(
         &self,
         _request: &LlmRequest,
+        _body: &crate::ProviderRequestBody,
     ) -> crate::provider::GenerationRetryGuarantee {
         self.generation_retry_guarantee
     }

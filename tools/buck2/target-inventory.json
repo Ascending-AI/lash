@@ -502,7 +502,7 @@
     "//crates/lash-sansio:lash-sansio__fv_c9515550[static]",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_adbdc017",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_c9515550",
-    "//crates/lash-sim:lash-sim__fv_9df74418[static]",
+    "//crates/lash-sim:lash-sim__fv_bad8f018[static]",
     "//crates/lash-sqlite-store:conformance__test__fv_666bab42",
     "//crates/lash-sqlite-store:conformance__test__fv_d1945703",
     "//crates/lash-sqlite-store:conformance_memory__test__fv_666bab42",
@@ -852,12 +852,12 @@
     "//crates/lashlang:lashlang__fv_fa4390f8[static]",
     "//crates/lashlang:lashlang__fv_feadaa61[static]",
     "//crates/lashlang:lashlang__unit_test__fv_fc3b3750",
-    "//examples/agent-workbench:agent-workbench__fv_628c1dc3",
-    "//examples/agent-workbench:agent-workbench__fv_8473f158",
-    "//examples/agent-workbench:agent-workbench__fv_b6557c0e",
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_628c1dc3",
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_8473f158",
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_b6557c0e"
+    "//examples/agent-workbench:agent-workbench__fv_be3ebd4d",
+    "//examples/agent-workbench:agent-workbench__fv_bef53944",
+    "//examples/agent-workbench:agent-workbench__fv_c3274bb2",
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_be3ebd4d",
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_bef53944",
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_c3274bb2"
   ],
   "feature_lane_check_targets": [
     "//crates/lash-conformance:lash-conformance__fv_323c0170[check]",
@@ -1304,7 +1304,7 @@
     "//crates/lash-sansio:lash-sansio__fv_c9515550[check]",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_adbdc017[check]",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_c9515550[check]",
-    "//crates/lash-sim:lash-sim__fv_9df74418[check]",
+    "//crates/lash-sim:lash-sim__fv_bad8f018[check]",
     "//crates/lash-sqlite-store:conformance__test__fv_666bab42[check]",
     "//crates/lash-sqlite-store:conformance__test__fv_d1945703[check]",
     "//crates/lash-sqlite-store:conformance_memory__test__fv_666bab42[check]",
@@ -1654,12 +1654,12 @@
     "//crates/lashlang:lashlang__fv_fa4390f8[check]",
     "//crates/lashlang:lashlang__fv_feadaa61[check]",
     "//crates/lashlang:lashlang__unit_test__fv_fc3b3750[check]",
-    "//examples/agent-workbench:agent-workbench__fv_628c1dc3[check]",
-    "//examples/agent-workbench:agent-workbench__fv_8473f158[check]",
-    "//examples/agent-workbench:agent-workbench__fv_b6557c0e[check]",
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_628c1dc3[check]",
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_8473f158[check]",
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_b6557c0e[check]"
+    "//examples/agent-workbench:agent-workbench__fv_be3ebd4d[check]",
+    "//examples/agent-workbench:agent-workbench__fv_bef53944[check]",
+    "//examples/agent-workbench:agent-workbench__fv_c3274bb2[check]",
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_be3ebd4d[check]",
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_bef53944[check]",
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_c3274bb2[check]"
   ],
   "feature_lane_compile_targets": [
     "//crates/lash-conformance:lash-conformance__fv_323c0170",
@@ -2106,7 +2106,7 @@
     "//crates/lash-sansio:lash-sansio__fv_c9515550",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_adbdc017",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_c9515550",
-    "//crates/lash-sim:lash-sim__fv_9df74418",
+    "//crates/lash-sim:lash-sim__fv_bad8f018",
     "//crates/lash-sqlite-store:conformance__test__fv_666bab42",
     "//crates/lash-sqlite-store:conformance__test__fv_d1945703",
     "//crates/lash-sqlite-store:conformance_memory__test__fv_666bab42",
@@ -2456,12 +2456,12 @@
     "//crates/lashlang:lashlang__fv_fa4390f8",
     "//crates/lashlang:lashlang__fv_feadaa61",
     "//crates/lashlang:lashlang__unit_test__fv_fc3b3750",
-    "//examples/agent-workbench:agent-workbench__fv_628c1dc3",
-    "//examples/agent-workbench:agent-workbench__fv_8473f158",
-    "//examples/agent-workbench:agent-workbench__fv_b6557c0e",
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_628c1dc3",
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_8473f158",
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_b6557c0e"
+    "//examples/agent-workbench:agent-workbench__fv_be3ebd4d",
+    "//examples/agent-workbench:agent-workbench__fv_bef53944",
+    "//examples/agent-workbench:agent-workbench__fv_c3274bb2",
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_be3ebd4d",
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_bef53944",
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_c3274bb2"
   ],
   "feature_lane_test_args": {
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_e5ec9930": [
@@ -20997,6 +20997,36 @@
       "package": "lash-internal-plugin-standard-compaction"
     },
     {
+      "build_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8[static]",
+      "check_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8[check]",
+      "clippy_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "build_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8[static]",
+      "check_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8[check]",
+      "clippy_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
+      "build_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8[static]",
+      "check_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8[check]",
+      "clippy_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8",
+      "package": "lash-internal-plugin-standard-compaction"
+    },
+    {
       "build_label": "//crates/lash-postgres-store:conformance__test__fv_46d5b09f",
       "check_label": "//crates/lash-postgres-store:conformance__test__fv_46d5b09f[check]",
       "clippy_label": "//crates/lash-postgres-store:conformance__test__fv_46d5b09f__clippy[clippy.txt]",
@@ -30205,33 +30235,33 @@
       "package": "lash-internal-sansio"
     },
     {
-      "build_label": "//crates/lash-sim:lash-sim__fv_9df74418[static]",
-      "check_label": "//crates/lash-sim:lash-sim__fv_9df74418[check]",
-      "clippy_label": "//crates/lash-sim:lash-sim__fv_9df74418__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-sim:lash-sim__fv_9df74418[doc]",
+      "build_label": "//crates/lash-sim:lash-sim__fv_bad8f018[static]",
+      "check_label": "//crates/lash-sim:lash-sim__fv_bad8f018[check]",
+      "clippy_label": "//crates/lash-sim:lash-sim__fv_bad8f018__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-sim:lash-sim__fv_bad8f018[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_9df74418",
+      "label": "//crates/lash-sim:lash-sim__fv_bad8f018",
       "package": "lash-sim"
     },
     {
-      "build_label": "//crates/lash-sim:lash-sim__fv_9df74418[static]",
-      "check_label": "//crates/lash-sim:lash-sim__fv_9df74418[check]",
-      "clippy_label": "//crates/lash-sim:lash-sim__fv_9df74418__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-sim:lash-sim__fv_9df74418[doc]",
+      "build_label": "//crates/lash-sim:lash-sim__fv_bad8f018[static]",
+      "check_label": "//crates/lash-sim:lash-sim__fv_bad8f018[check]",
+      "clippy_label": "//crates/lash-sim:lash-sim__fv_bad8f018__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-sim:lash-sim__fv_bad8f018[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_9df74418",
+      "label": "//crates/lash-sim:lash-sim__fv_bad8f018",
       "package": "lash-sim"
     },
     {
-      "build_label": "//crates/lash-sim:lash-sim__fv_9df74418[static]",
-      "check_label": "//crates/lash-sim:lash-sim__fv_9df74418[check]",
-      "clippy_label": "//crates/lash-sim:lash-sim__fv_9df74418__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-sim:lash-sim__fv_9df74418[doc]",
+      "build_label": "//crates/lash-sim:lash-sim__fv_bad8f018[static]",
+      "check_label": "//crates/lash-sim:lash-sim__fv_bad8f018[check]",
+      "clippy_label": "//crates/lash-sim:lash-sim__fv_bad8f018__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-sim:lash-sim__fv_bad8f018[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_9df74418",
+      "label": "//crates/lash-sim:lash-sim__fv_bad8f018",
       "package": "lash-sim"
     },
     {
@@ -42429,65 +42459,65 @@
       "package": "lash-internal-lashlang"
     },
     {
-      "build_label": "//examples/agent-workbench:agent-workbench__fv_628c1dc3",
-      "check_label": "//examples/agent-workbench:agent-workbench__fv_628c1dc3[check]",
-      "clippy_label": "//examples/agent-workbench:agent-workbench__fv_628c1dc3__clippy[clippy.txt]",
-      "features": [
-        "e2e-tools"
-      ],
-      "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_628c1dc3",
-      "package": "agent-workbench"
-    },
-    {
-      "build_label": "//examples/agent-workbench:agent-workbench__fv_8473f158",
-      "check_label": "//examples/agent-workbench:agent-workbench__fv_8473f158[check]",
-      "clippy_label": "//examples/agent-workbench:agent-workbench__fv_8473f158__clippy[clippy.txt]",
-      "features": [],
-      "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_8473f158",
-      "package": "agent-workbench"
-    },
-    {
-      "build_label": "//examples/agent-workbench:agent-workbench__fv_b6557c0e",
-      "check_label": "//examples/agent-workbench:agent-workbench__fv_b6557c0e[check]",
-      "clippy_label": "//examples/agent-workbench:agent-workbench__fv_b6557c0e__clippy[clippy.txt]",
+      "build_label": "//examples/agent-workbench:agent-workbench__fv_be3ebd4d",
+      "check_label": "//examples/agent-workbench:agent-workbench__fv_be3ebd4d[check]",
+      "clippy_label": "//examples/agent-workbench:agent-workbench__fv_be3ebd4d__clippy[clippy.txt]",
       "features": [
         "provider-wire-fixtures"
       ],
       "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_b6557c0e",
+      "label": "//examples/agent-workbench:agent-workbench__fv_be3ebd4d",
       "package": "agent-workbench"
     },
     {
-      "build_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_628c1dc3",
-      "check_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_628c1dc3[check]",
-      "clippy_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_628c1dc3__clippy[clippy.txt]",
+      "build_label": "//examples/agent-workbench:agent-workbench__fv_bef53944",
+      "check_label": "//examples/agent-workbench:agent-workbench__fv_bef53944[check]",
+      "clippy_label": "//examples/agent-workbench:agent-workbench__fv_bef53944__clippy[clippy.txt]",
+      "features": [],
+      "kind": "bin",
+      "label": "//examples/agent-workbench:agent-workbench__fv_bef53944",
+      "package": "agent-workbench"
+    },
+    {
+      "build_label": "//examples/agent-workbench:agent-workbench__fv_c3274bb2",
+      "check_label": "//examples/agent-workbench:agent-workbench__fv_c3274bb2[check]",
+      "clippy_label": "//examples/agent-workbench:agent-workbench__fv_c3274bb2__clippy[clippy.txt]",
       "features": [
         "e2e-tools"
       ],
-      "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_628c1dc3",
+      "kind": "bin",
+      "label": "//examples/agent-workbench:agent-workbench__fv_c3274bb2",
       "package": "agent-workbench"
     },
     {
-      "build_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_8473f158",
-      "check_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_8473f158[check]",
-      "clippy_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_8473f158__clippy[clippy.txt]",
-      "features": [],
-      "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_8473f158",
-      "package": "agent-workbench"
-    },
-    {
-      "build_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_b6557c0e",
-      "check_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_b6557c0e[check]",
-      "clippy_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_b6557c0e__clippy[clippy.txt]",
+      "build_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_be3ebd4d",
+      "check_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_be3ebd4d[check]",
+      "clippy_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_be3ebd4d__clippy[clippy.txt]",
       "features": [
         "provider-wire-fixtures"
       ],
       "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_b6557c0e",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_be3ebd4d",
+      "package": "agent-workbench"
+    },
+    {
+      "build_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_bef53944",
+      "check_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_bef53944[check]",
+      "clippy_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_bef53944__clippy[clippy.txt]",
+      "features": [],
+      "kind": "bin-unit-test",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_bef53944",
+      "package": "agent-workbench"
+    },
+    {
+      "build_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_c3274bb2",
+      "check_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_c3274bb2[check]",
+      "clippy_label": "//examples/agent-workbench:agent-workbench__unit_test__fv_c3274bb2__clippy[clippy.txt]",
+      "features": [
+        "e2e-tools"
+      ],
+      "kind": "bin-unit-test",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_c3274bb2",
       "package": "agent-workbench"
     }
   ],
@@ -42692,6 +42722,7 @@
       "//crates/lash-llm-transport:lash-llm-transport__fv_4fee1f24",
       "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_a911d478",
       "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_cdcb2e36",
+      "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d9ba06f8",
       "//crates/lash-postgres-store:lash-postgres-store__fv_221ee792",
       "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_b7786c53",
       "//crates/lash-protocol-standard:lash-protocol-standard__fv_9380770f",
@@ -42704,7 +42735,7 @@
       "//crates/lash-render:lash-render",
       "//crates/lash-rlm-types:lash-rlm-types",
       "//crates/lash-sansio:lash-sansio",
-      "//crates/lash-sim:lash-sim__fv_9df74418",
+      "//crates/lash-sim:lash-sim__fv_bad8f018",
       "//crates/lash-sqlite-store:lash-sqlite-store__fv_529d81d3",
       "//crates/lash-store-sql:lash-store-sql",
       "//crates/lash-subagents:lash-subagents__fv_9e58cff8",
@@ -42717,12 +42748,12 @@
       "//crates/lash-vm-worker:lash-vm-worker__fv_f05cb014",
       "//crates/lash:lash__fv_83620e55",
       "//crates/lashlang:lashlang__fv_057fb372",
-      "//examples/agent-workbench:agent-workbench__fv_628c1dc3",
-      "//examples/agent-workbench:agent-workbench__fv_8473f158",
-      "//examples/agent-workbench:agent-workbench__fv_b6557c0e",
-      "//examples/agent-workbench:agent-workbench__unit_test__fv_628c1dc3",
-      "//examples/agent-workbench:agent-workbench__unit_test__fv_8473f158",
-      "//examples/agent-workbench:agent-workbench__unit_test__fv_b6557c0e"
+      "//examples/agent-workbench:agent-workbench__fv_be3ebd4d",
+      "//examples/agent-workbench:agent-workbench__fv_bef53944",
+      "//examples/agent-workbench:agent-workbench__fv_c3274bb2",
+      "//examples/agent-workbench:agent-workbench__unit_test__fv_be3ebd4d",
+      "//examples/agent-workbench:agent-workbench__unit_test__fv_bef53944",
+      "//examples/agent-workbench:agent-workbench__unit_test__fv_c3274bb2"
     ],
     "language-testing-features": [
       "//crates/lash-core-effect:lash-core-effect__fv_c27942ea",
@@ -46405,6 +46436,7 @@
         "lash-internal-lashlang-runtime",
         "lash-internal-llm-transport",
         "lash-internal-plugin-process-controls",
+        "lash-internal-plugin-standard-compaction",
         "lash-internal-postgres-store",
         "lash-internal-protocol-rlm",
         "lash-internal-protocol-standard",
@@ -48599,9 +48631,9 @@
     "//crates/lashlang:workflow_schema_generator__bin__unit_test": 300,
     "//crates/transcript-contract:transcript-contract__unit_test": 300,
     "//examples/agent-workbench:agent-workbench__unit_test": 300,
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_628c1dc3": 300,
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_8473f158": 300,
-    "//examples/agent-workbench:agent-workbench__unit_test__fv_b6557c0e": 300,
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_be3ebd4d": 300,
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_bef53944": 300,
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_c3274bb2": 300,
     "//examples/e2e-consumer:e2e-consumer__unit_test": 300,
     "//examples/integrator-contract:integrator-contract__unit_test": 300,
     "//examples/toolbench:toolbench__unit_test": 300,

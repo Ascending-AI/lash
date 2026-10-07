@@ -43,16 +43,63 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     /// provider kind layers that on top.
     fn serialize_config(&self) -> serde_json::Value;
 
-    /// Implementations must apply [`LlmRequest::reasoning_retention_safe_for`] for their
-    /// exact [`Provider::route_identity`] before serializing any raw wire body.
-    /// `ProviderHandle` applies the semantic gate too; this raw-trait
+    /// Lower `request` to the exact body this provider sends for it
+    /// (ADR 0133 §6): after attachment normalization, with every upload or
+    /// other material the body names resolved and pinned. Lash lowers a
+    /// call once, before admitting it; every attempt and every resend of
+    /// the admitted call sends the body this returned, so nothing that
+    /// varies between attempts (authentication, transport headers, the
+    /// attempt ordinal) belongs in it.
+    ///
+    /// Implementations must apply [`LlmRequest::reasoning_retention_safe_for`]
+    /// for their exact [`Provider::route_identity`] before serializing the
+    /// body. `ProviderHandle` applies the semantic gate too; this raw-trait
     /// obligation is the structural backstop for direct callers.
-    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError>;
+    ///
+    /// The default is the logical request's own canonical encoding
+    /// ([`ProviderRequestBody::of_request`]): it suits a provider with no
+    /// wire format of its own, such as an in-process double. A provider that
+    /// speaks a wire protocol lowers to its exact wire body.
+    async fn lower(
+        &mut self,
+        request: &LlmRequest,
+    ) -> Result<ProviderRequestBody, LlmTransportError> {
+        ProviderRequestBody::of_request(self.route_identity(request.model.wire_model()), request)
+            .map_err(|error| {
+                LlmTransportError::new(format!("the request does not encode: {error}"))
+                    .with_kind(ProviderFailureKind::Validation)
+                    .with_retry_verdict(TransportRetryVerdict::Forbidden)
+            })
+    }
 
-    /// Return the guarantee, if any, that makes retrying this logical request
-    /// safe after output has started. The default is deliberately no
-    /// guarantee: ordinary retryability does not imply idempotency or resume.
-    fn generation_retry_guarantee(&self, _request: &LlmRequest) -> GenerationRetryGuarantee {
+    /// Send `body`, which [`Provider::lower`] produced for `request`, as
+    /// one attempt, binding authentication and transport fresh. The body is
+    /// sent byte for byte: an implementation never rebuilds it from
+    /// `request`, which it reads only to decode the response (its stream
+    /// sender, trace sender, model metadata and output contract). A body
+    /// lowered by an earlier build of the provider is sent all the same.
+    async fn send(
+        &mut self,
+        request: LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError>;
+
+    /// Lower `request` and send its body once: one live call outside any
+    /// admission, retry or charge-safety policy.
+    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        let body = self.lower(&request).await?;
+        self.send(request, &body).await
+    }
+
+    /// Return the guarantee, if any, that makes retrying `body`, lowered
+    /// for `request`, safe after output has started. The default is
+    /// deliberately no guarantee: ordinary retryability does not imply
+    /// idempotency or resume.
+    fn generation_retry_guarantee(
+        &self,
+        _request: &LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> GenerationRetryGuarantee {
         GenerationRetryGuarantee::None
     }
 

@@ -151,47 +151,6 @@ impl LashRuntime {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
         let read_view = self.read_view();
-        // Lazy: rendered only if a hook actually summarizes. The render is
-        // one recorded step of this turn, taken before the summarizer call,
-        // so a redrive serves the recorded text and renders nothing
-        // (FIG-4589). Every hook of the step shares the one render.
-        let system_prompt: crate::plugin::CompactionSystemPrompt<'_> = {
-            let input = super::super::compaction_prompt::CompactionPromptInput {
-                session_id: self.state.session_id.clone(),
-                plugins: Arc::clone(&plugin_session),
-                plugin_config: self.state.admitted_plugin_config(),
-                prompt_plan: self.state.authority.prompt_plan.clone(),
-                frame: self.state.current_frame_node_id.clone(),
-                subagent: self.state.authority.subagent.clone(),
-            };
-            let controller = scoped_effect_controller.clone();
-            let turn_id = trace_turn_id.to_string();
-            // The step's hooks run one after another, so the first to ask
-            // takes the recorded step and the rest read what it answered.
-            let rendered: Arc<std::sync::Mutex<Option<Option<Arc<str>>>>> = Arc::default();
-            Arc::new(move || {
-                let input = input.clone();
-                let controller = controller.clone();
-                let turn_id = turn_id.clone();
-                let rendered = Arc::clone(&rendered);
-                Box::pin(async move {
-                    if let Some(prompt) =
-                        lash_sansio::sync::MutexExt::lock_recover(&*rendered).clone()
-                    {
-                        return Ok(prompt);
-                    }
-                    let prompt = super::super::compaction_prompt::recorded_compaction_prompt(
-                        &controller,
-                        super::super::compaction_prompt::CompactionPromptKey::Turn(&turn_id),
-                        input,
-                    )
-                    .await
-                    .map_err(crate::PluginError::RuntimeEffectController)?;
-                    *lash_sansio::sync::MutexExt::lock_recover(&*rendered) = Some(prompt.clone());
-                    Ok(prompt)
-                })
-            })
-        };
         let ctx = crate::plugin::ContextPressureContext {
             writer_formats: Arc::new(crate::protocol_build::FleetWriterFormats(
                 self.fleet_format(),
@@ -207,7 +166,6 @@ impl LashRuntime {
                 scoped_effect_controller.clone(),
                 Some(turn_phase_id(trace_turn_id, "context-pressure")),
             ),
-            system_prompt: Some(system_prompt),
         };
         let decided = plugin_session
             .decide_context_pressure(&ctx, self.turn_phase_probe.clone())

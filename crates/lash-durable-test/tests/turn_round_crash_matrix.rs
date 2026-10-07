@@ -65,8 +65,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, OpenTurn, SessionActivation, TurnCancelRequest, TurnCommit,
-    TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, OpenTurn, PreparedCall, SessionActivation,
+    TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow,
+    TurnServices, request_turn_cancel,
 };
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
@@ -90,6 +91,7 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
@@ -565,11 +567,35 @@ impl TurnDrive for L4Drive {
         Ok(())
     }
 
+    /// The scenario composes no sections: its request is lowered as its
+    /// canonical encoding.
+    async fn prepare_call(
+        &mut self,
+        _cx: &ActorContext,
+        _id: EffectId,
+        _call: u32,
+        request: Arc<LlmRequest>,
+    ) -> Result<PreparedCall, TurnError> {
+        let route = ProviderRouteIdentity {
+            provider: "round".into(),
+            endpoint: "https://round.test/v1".into(),
+            model: "scripted".into(),
+        };
+        let body = ProviderRequestBody::of_request(route, &request)
+            .map_err(|error| TurnError::Exec(error.to_string()))?;
+        Ok(PreparedCall::Admit(Box::new(ComposedCall {
+            request,
+            prompt: None,
+            body,
+        })))
+    }
+
     async fn model_call(
         &mut self,
         _cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
+        _body: &ProviderRequestBody,
         _attempt: u32,
         _limit: ExecutionLimit,
     ) -> Result<(), TurnError> {

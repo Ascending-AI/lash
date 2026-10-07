@@ -13,10 +13,12 @@
 //! not durable. The composed text is lowered into the request the machine
 //! waits on: `InitialInstructions` as its instructions, `CurrentContext` as
 //! one User message after the conversation, outside its history. A resend
-//! sends the admitted request and composes nothing.
+//! sends the admitted body and composes nothing.
 
 use std::sync::Arc;
 
+use super::RuntimeTurnDriver;
+use super::tool_catalog::SyncFailure;
 use crate::plugin::prompt::{
     ComposedPrompt, OfferedTools, ProjectedHistoryStats, PromptCall, PromptCatalog,
     PromptCompositionError, PromptCut, PromptCutParts, PromptModel, PromptRenderPool,
@@ -26,19 +28,15 @@ use crate::sansio::ExecutionEnvironmentSyncFailureKind as SyncFailureKind;
 use crate::{
     FailureCode, LlmCallError, LlmRequest, RuntimeError, RuntimeErrorCode, TurnFailureCode,
 };
-use lash_durable::domain::PromptCallKey;
-
-use super::RuntimeTurnDriver;
-use super::tool_catalog::SyncFailure;
-use crate::runtime::durable::session::ComposedCall;
 
 impl RuntimeTurnDriver<'static> {
-    /// Compose turn call `call`'s prompt over the turn's committed cut,
-    /// lower it into `request` and record its snapshot. The inner `Err` is
-    /// the typed settlement of a call whose prompt did not compose; the outer
-    /// one a live fault of this activation, which admits nothing, so its
-    /// resume composes again. A session with no sections admits `request` as
-    /// it is and records nothing.
+    /// Compose turn call `call`'s prompt over the turn's committed cut and
+    /// lower it into `request`: the request and the composition its
+    /// admission records. The inner `Err` is the typed settlement of a call
+    /// whose prompt did not compose; the outer one a live fault of this
+    /// activation, which admits nothing, so its resume composes again. A
+    /// session with no sections keeps `request` as it is and composes
+    /// nothing.
     pub(super) async fn compose_call(
         &self,
         iteration: usize,
@@ -46,14 +44,11 @@ impl RuntimeTurnDriver<'static> {
         messages: crate::MessageSequence,
         request: Arc<LlmRequest>,
         has_current_context_prefix: bool,
-    ) -> Result<Result<ComposedCall, LlmCallError>, RuntimeError> {
+    ) -> Result<Result<(Arc<LlmRequest>, Option<ComposedPrompt>), LlmCallError>, RuntimeError> {
         let plugins = Arc::clone(self.session.plugins());
         let catalog = plugins.prompt_catalog();
         if catalog.sections().is_empty() {
-            return Ok(Ok(ComposedCall {
-                request,
-                records: Vec::new(),
-            }));
+            return Ok(Ok((request, None)));
         }
         // The turn's prompt view at this call: the last commit, with the
         // previous round's outcomes and the checkpoint deliveries after it.
@@ -147,25 +142,10 @@ impl RuntimeTurnDriver<'static> {
             }
         };
         self.trace_prompt_built(iteration, &composed);
-        // The call's snapshot and its texts, recorded with its admission.
-        let record = match composed.record(PromptCallKey {
-            session: self.session_id.clone(),
-            run: self.turn_id.clone(),
-            call,
-        }) {
-            Ok(record) => record,
-            Err(error) => {
-                return Ok(Err(refused(
-                    FailureCode::lash(TurnFailureCode::PromptCompositionFailed),
-                    format!("the prompt snapshot does not encode: {error}"),
-                    None,
-                )));
-            }
-        };
-        Ok(Ok(ComposedCall {
-            request: lower(request, composed, has_current_context_prefix),
-            records: vec![record],
-        }))
+        Ok(Ok((
+            lower(request, &composed, has_current_context_prefix),
+            Some(composed),
+        )))
     }
 
     /// The protocol's facts for its prompt sections, derived from its
@@ -286,7 +266,7 @@ struct FailedComposition<'a> {
 
 /// The settlement of a call whose prompt did not compose: never sent, typed
 /// by `code`, `raw` holding the attributed error.
-fn refused(code: FailureCode, message: String, raw: Option<String>) -> LlmCallError {
+pub(super) fn refused(code: FailureCode, message: String, raw: Option<String>) -> LlmCallError {
     LlmCallError {
         message,
         retryable: false,
@@ -301,24 +281,19 @@ fn refused(code: FailureCode, message: String, raw: Option<String>) -> LlmCallEr
 
 /// `request` with `composed` lowered onto it ([`crate::sansio::place_prompt`]).
 /// An empty composition leaves `request` as it is.
-fn lower(
+pub(in crate::runtime) fn lower(
     request: Arc<LlmRequest>,
-    composed: ComposedPrompt,
+    composed: &ComposedPrompt,
     has_current_context_prefix: bool,
 ) -> Arc<LlmRequest> {
-    let ComposedPrompt {
-        initial_instructions,
-        current_context,
-        ..
-    } = composed;
-    if initial_instructions.is_none() && current_context.is_none() {
+    if composed.initial_instructions.is_none() && composed.current_context.is_none() {
         return request;
     }
     let mut request = LlmRequest::clone(&request);
     crate::sansio::place_prompt(
         &mut request,
-        initial_instructions.map(Arc::from),
-        current_context.map(Arc::from),
+        composed.initial_instructions.as_deref().map(Arc::from),
+        composed.current_context.as_deref().map(Arc::from),
         has_current_context_prefix,
     );
     Arc::new(request)

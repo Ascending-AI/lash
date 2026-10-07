@@ -2902,6 +2902,7 @@ dependencies = [
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-transport",
  "lash-internal-plugin-process-controls",
+ "lash-internal-plugin-standard-compaction",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-protocol-standard",

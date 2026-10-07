@@ -68,10 +68,6 @@ pub enum RuntimeEffectKind {
     /// replays the recorded base, never the head the compaction's own commit
     /// moved.
     RecordCompactionBase,
-    /// The system prompt a compaction's summarizer call carries, rendered by
-    /// the protocol plugin and recorded before that call (FIG-4589): a
-    /// redrive serves the recorded text and never renders again.
-    RenderCompactionPrompt,
     /// A config transaction's resolution, recorded before its commit
     /// publishes it (FIG-4379): a redrive publishes the recorded replacements
     /// and never runs a reducer again.
@@ -114,7 +110,6 @@ impl RuntimeEffectKind {
             Self::TraceBoundary => "trace_boundary",
             Self::ResolveTurnConfig => "resolve_turn_config",
             Self::RecordCompactionBase => "record_compaction_base",
-            Self::RenderCompactionPrompt => "render_compaction_prompt",
             Self::ResolveConfigTransaction => "resolve_config_transaction",
             Self::ReadSessionCommandRun => "read_session_command_run",
             Self::CloseRunScope => "close_run_scope",

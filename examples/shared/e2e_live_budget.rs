@@ -8,7 +8,8 @@ use async_trait::async_trait;
 use lash::direct::ProviderRouteIdentity;
 use lash::provider::{
     GenerationRetryGuarantee, LlmRequest, LlmResponse, LlmTransportError, Provider,
-    ProviderComponents, ProviderFailureKind, ProviderOptions, TransportRetryVerdict,
+    ProviderComponents, ProviderFailureKind, ProviderOptions, ProviderRequestBody,
+    TransportRetryVerdict,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -112,15 +113,26 @@ impl Provider for Capped {
     fn serialize_config(&self) -> Value {
         json!({"e2e_live_budget":true,"model":self.budget.model})
     }
-    fn generation_retry_guarantee(&self, request: &LlmRequest) -> GenerationRetryGuarantee {
-        self.inner.generation_retry_guarantee(request)
+    fn generation_retry_guarantee(
+        &self,
+        request: &LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> GenerationRetryGuarantee {
+        self.inner.generation_retry_guarantee(request, body)
     }
     fn requires_streaming(&self) -> bool {
         self.inner.requires_streaming()
     }
-    async fn complete(
+    async fn lower(
+        &mut self,
+        request: &LlmRequest,
+    ) -> Result<ProviderRequestBody, LlmTransportError> {
+        self.inner.lower(request).await
+    }
+    async fn send(
         &mut self,
         request: LlmRequest,
+        body: &ProviderRequestBody,
     ) -> std::result::Result<LlmResponse, LlmTransportError> {
         let bytes = serde_json::to_vec(&request).map_err(|error| refusal(error.to_string()))?;
         let output = request
@@ -154,7 +166,7 @@ impl Provider for Capped {
             self.persist(&state)?;
             ordinal
         };
-        let response = self.inner.complete(request).await;
+        let response = self.inner.send(request, body).await;
         let mut state = self
             .state
             .lock()

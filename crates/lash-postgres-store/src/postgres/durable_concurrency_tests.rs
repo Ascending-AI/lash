@@ -381,7 +381,7 @@ async fn until_lock_waiters<T>(
 /// nothing of theirs is left.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
-    use lash_durable::domain::{PromptCallKey, PromptText, PromptWrite};
+    use lash_durable::domain::{ModelCallId, PromptCallKey, PromptText, PromptWrite};
     use lash_durable::{DomainWrite, DurableReads as _};
     use lash_sansio::{SessionId, TurnId};
 
@@ -409,8 +409,10 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
     };
     let call = |session: &str, run: &str, call: u32| PromptCallKey {
         session: SessionId::try_from(session.to_owned()).expect("a law's session id"),
-        run: TurnId::try_from(run.to_owned()).expect("a law's turn id"),
-        call,
+        call: ModelCallId::Turn {
+            run: TurnId::try_from(run.to_owned()).expect("a law's turn id"),
+            ordinal: call,
+        },
     };
     let text = |hash: &str| PromptText {
         hash: hash.to_owned(),
@@ -418,7 +420,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
     };
     let record = |call: PromptCallKey, hashes: &[&str]| {
         DomainWrite::Prompt(PromptWrite::Record {
-            snapshot: format!("snapshot of call {} of {}", call.call, call.run),
+            snapshot: format!("snapshot of call {}", call.call),
             call,
             texts: hashes.iter().map(|hash| text(hash)).collect(),
         })

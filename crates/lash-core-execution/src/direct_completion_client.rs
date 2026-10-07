@@ -19,6 +19,7 @@ pub trait DirectCompletionService: Send + Sync {
     async fn complete_llm(
         &self,
         request: crate::LlmRequest,
+        purpose: crate::prompt_sections::PromptPurpose,
         usage_source: &str,
         effect_controller: crate::ActorContext,
         turn_id: Option<&crate::TurnId>,
@@ -226,7 +227,9 @@ impl<'run> DirectCompletionClient<'run> {
     }
 
     /// Executes an already-normalized request using its non-empty
-    /// `scope.request_id` as the caller-owned durable replay key.
+    /// `scope.request_id` as the caller-owned durable replay key. The call
+    /// composes the sections that declare `PromptPurpose::Direct` named
+    /// `usage_source` into its request before its admission.
     ///
     /// The request id must be unique for each logical direct call. Reusing it
     /// in the same session, turn, and usage source deliberately replays the
@@ -241,15 +244,28 @@ impl<'run> DirectCompletionClient<'run> {
         request: crate::LlmRequest,
         usage_source: &str,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
-        self.direct_llm_completion_caused_by(request, usage_source, None)
-            .await
+        self.direct_llm_completion_for(
+            request,
+            crate::prompt_sections::PromptPurpose::Direct {
+                name: usage_source.to_owned(),
+            },
+            usage_source,
+            None,
+        )
+        .await
     }
 
-    /// Same as [`Self::direct_llm_completion`], but records `caused_by` as the
-    /// call's causal trace linkage and folds it into the replay lane.
-    pub async fn direct_llm_completion_caused_by(
+    /// Same as [`Self::direct_llm_completion`] for an explicit `purpose`
+    /// (ADR 0133 §8): only the sections that declare it compose into the
+    /// request, and a [`PromptPurpose::Compaction`] call offers no tools.
+    /// `caused_by` is the call's causal trace linkage, folded into the
+    /// replay lane.
+    ///
+    /// [`PromptPurpose::Compaction`]: crate::prompt_sections::PromptPurpose::Compaction
+    pub async fn direct_llm_completion_for(
         &self,
         request: crate::LlmRequest,
+        purpose: crate::prompt_sections::PromptPurpose,
         usage_source: &str,
         caused_by: Option<crate::CausalRef>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
@@ -259,6 +275,7 @@ impl<'run> DirectCompletionClient<'run> {
                     .service
                     .complete_llm(
                         request,
+                        purpose,
                         usage_source,
                         source.effect_controller.clone(),
                         source.turn_id.as_ref(),
@@ -277,7 +294,10 @@ impl<'run> DirectCompletionClient<'run> {
                 "direct LLM completions are unavailable in this test context".to_string(),
             )),
             #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestLlmFn(invoke) => invoke(request, usage_source.to_string()),
+            DirectCompletionSource::TestLlmFn(invoke) => {
+                let _ = purpose;
+                invoke(request, usage_source.to_string())
+            }
         }
     }
 

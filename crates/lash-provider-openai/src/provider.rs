@@ -160,8 +160,16 @@ impl Provider for OpenAiCompatibleProvider {
         serde_json::Value::Object(map)
     }
 
-    async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        complete(self, req, CompletionEndpoint::ChatCompletions).await
+    async fn lower(&mut self, req: &LlmRequest) -> Result<ProviderRequestBody, LlmTransportError> {
+        lower(self, req, CompletionEndpoint::ChatCompletions).await
+    }
+
+    async fn send(
+        &mut self,
+        req: LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        send(self, req, body, CompletionEndpoint::ChatCompletions).await
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
@@ -202,18 +210,29 @@ impl Provider for OpenAiProvider {
         serde_json::Value::Object(map)
     }
 
-    async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        complete(&mut self.inner, req, CompletionEndpoint::Responses).await
+    async fn lower(&mut self, req: &LlmRequest) -> Result<ProviderRequestBody, LlmTransportError> {
+        lower(&self.inner, req, CompletionEndpoint::Responses).await
     }
 
-    fn generation_retry_guarantee(&self, request: &LlmRequest) -> GenerationRetryGuarantee {
+    async fn send(
+        &mut self,
+        req: LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        send(&mut self.inner, req, body, CompletionEndpoint::Responses).await
+    }
+
+    fn generation_retry_guarantee(
+        &self,
+        request: &LlmRequest,
+        body: &ProviderRequestBody,
+    ) -> GenerationRetryGuarantee {
         self.inner
             .responses_resume
             .as_ref()
             .filter(|resume| {
                 resume.request_key.request_id == request.scope.request_id
-                    && responses_request_fingerprint(&self.inner, request)
-                        .is_some_and(|fingerprint| fingerprint == resume.request_key.fingerprint)
+                    && responses_request_fingerprint(body) == resume.request_key.fingerprint
             })
             .map_or(GenerationRetryGuarantee::None, |_| {
                 GenerationRetryGuarantee::Resumable

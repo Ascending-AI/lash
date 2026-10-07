@@ -147,7 +147,6 @@ fn build_pressure_ctx(
         traces: traces.emitter(),
         scoped_effect_controller: test_turn_controller(),
         direct_completions,
-        system_prompt: None,
         plugin_config: Default::default(),
     }
 }
@@ -169,7 +168,6 @@ fn build_compaction_ctx(
             ))
             .expect("test scoped effect controller"),
         direct_completions,
-        system_prompt: None,
         plugin_config: Default::default(),
     }
 }
@@ -766,7 +764,6 @@ fn recovery_ctx(
             ))
             .expect("test scoped effect controller"),
         direct_completions: RecordingLlmCompletions::client(direct),
-        system_prompt: None,
         plugin_config: Default::default(),
     }
 }
@@ -1224,33 +1221,6 @@ fn compactable_messages() -> Vec<Message> {
         text_message("a1", MessageRole::Assistant, "assistant old"),
         text_message("u2", MessageRole::User, "latest request"),
     ]
-}
-
-#[tokio::test]
-async fn compaction_request_carries_the_recorded_system_prompt() {
-    let captured = Arc::new(RecordingLlmCompletions {
-        summary: "summary".to_string(),
-        ..Default::default()
-    });
-    let mut ctx = build_compaction_ctx(
-        compactable_state(compactable_messages()),
-        None,
-        &Arc::new(RecordingTraces::default()),
-        RecordingLlmCompletions::client(&captured),
-    );
-    ctx.system_prompt = Some(Arc::from("the protocol's recorded compaction prompt"));
-    StandardContextCompactor::new(StandardCompactionConfig)
-        .compact(&ctx)
-        .await
-        .expect("compact")
-        .expect("compaction");
-    let requests = captured.requests();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(
-        requests[0].instructions.as_deref(),
-        Some("the protocol's recorded compaction prompt"),
-        "the request carries the prompt the core recorded, not a plugin-side rebuild"
-    );
 }
 
 #[tokio::test]

@@ -14,9 +14,12 @@ the workbench's sections are on main (FIG-5258), and §9's plugin message and
 context-overlay routes and `TurnContextTransform` are deleted. §6, admission
 at `model.start`, is on main (FIG-5255): `lash-core/src/runtime/durable/phases.rs`
 admits each call and `lash-core/src/runtime/turn_driver/prompt.rs` composes
-it. The rest is open work this decision depends on:
+it. Exact provider bodies for every call kind, and the admission of
+compaction and direct calls under their owners (§6, §8), are on main
+(FIG-5259): `lash-core/src/runtime/turn_driver/prepare.rs` prepares a turn's
+call and `lash-core/src/runtime/owned_call.rs` admits an owned one. The rest
+is open work this decision depends on:
 
-- FIG-5259: exact provider bodies for every call kind;
 - FIG-5260: deleting every other prompt route (§9).
 
 ## Context
@@ -197,9 +200,16 @@ retention: the delete releases every root of the session in its own
 transaction (FIG-5272). On PostgreSQL a record and a release that share a
 text serialize on that text's advisory lock, shared for the record and
 exclusive for the release, so neither fails the text's foreign key and no
-recorded call loses its text. `load_prompt_snapshot` reads a
-root back with every text verified against its address and calls no
-renderer.
+recorded call loses its text.
+
+A root is keyed by the call's owner-scoped identity (`ModelCallId`): a turn's
+call is its run and ordinal, and an owned call (§8) is its owner's execution
+scope and its stable key there, with no turn required. The root also holds
+the call's exact provider body (§6), in content-addressed chunks of at most
+32 KiB beside its section texts, and an owned call's pinned deadline: one
+`AdmittedModelCall` record. `load_admitted_call` reads a root back with every
+text and chunk verified against its address, assembles the body byte for
+byte, and calls no renderer or provider builder.
 
 ### 6. When composition runs
 
@@ -216,8 +226,22 @@ transaction:
 - the call's snapshot (`PromptWrite::Record`);
 - the request, with the composed text lowered into it: the
   `InitialInstructions` text after the request's own instructions, the
-  `CurrentContext` text as one system message after the conversation. FIG-5259
-  extends this to the exact provider body.
+  `CurrentContext` text as one system message after the conversation;
+- the call's exact provider body, in its snapshot root.
+
+Before admission the call is prepared once: its prompt is composed, the
+protocol's before-call hook runs, its attachments are normalized, and the
+provider of its route lowers the request, attachments resolved, to the exact
+bytes it sends (`Provider::lower`, a `ProviderRequestBody`). Every attempt of
+the call sends those bytes (`Provider::send`), and so does a resend on any
+owner: no renderer, projector, attachment resolver or provider builder runs
+for it again, so a builder or renderer changed since sends nothing different.
+Authentication and transport are not part of the body: each attempt binds
+them fresh, and a transport's framing of the body (a WebSocket's response
+continuation, say) is derived from the stored bytes. A resend whose body
+cannot be read back as admitted is never sent and never rebuilt: it settles
+unsent with `TurnFailureCode::AdmittedRequestUnavailable`. A request that
+cannot be lowered settles unsent and admits nothing.
 
 The call is the turn's one composition point. The execution-environment
 sync builds the iteration's tool surface and composes nothing; the call's
@@ -228,7 +252,7 @@ There is no separate prepare phase. A crash before admission composes again,
 and the callbacks before it run again, which is safe because nothing was
 sent: renderers, wrappers and checkpoint callbacks must be repeat-safe until
 the call is admitted. After admission, a resend is the same call: it sends
-the admitted request, records nothing, and calls no renderer, wrapper,
+the admitted body, records nothing, and calls no renderer, wrapper,
 projector or hook, and a resume reinstalls the plugin state the admission
 committed before the turn continues. A composition that fails settles the
 call unsent with `TurnFailureCode::PromptCompositionFailed`, and protocol
@@ -276,8 +300,25 @@ reported.
 
 Compaction and direct calls compose through the same contract. Each uses a
 purpose-specific selection (`PromptPurpose`): a section declares the purposes
-it renders for. Compaction is offered no tools. Each call has its own
-admission record.
+it renders for, and the owner's recorded plan places it, as it does a turn's.
+A compaction call composes `Compaction` sections and a direct call exactly
+the `Direct { name }` sections of its explicit purpose; neither composes a
+turn's sections, and both are offered no tools (a request that names tools
+is refused unsent). Their text is kept byte for byte. `llm_query`'s
+instructions are its plugin's `Direct { name: "llm_query" }` section.
+
+Each call is admitted under the execution that owns it: a compaction under
+its session command's run, a direct call under its tool attempt or process
+step. `completion.start` commits, under the owner's fence and before the
+first byte is sent, the call's admission record (§5): its snapshot, its
+exact body and its model-total deadline. Its identity is the owner's
+execution scope and the call's stable key there (`ModelCallId::Owned`). A
+redrive of the owner makes the same call again: it finds the record, sends
+the stored body under the pinned deadline, and composes, lowers and records
+nothing; past that deadline it settles unsent with
+`TurnFailureCode::ModelTotalExceeded`. The call's response is durable only
+through the owner's own commit (the compaction's `session.command`, the
+tool's `round.outcome`), as a turn's call is through `model.done`.
 
 ### 9. One route
 
@@ -290,8 +331,8 @@ following are deleted:
 - the `messages` fields of turn, after-turn and after-tool contributions
   (deleted, FIG-5258);
 - `TurnContextTransform` (deleted, FIG-5258);
-- `RenderCompactionPrompt`;
-- the direct-call instruction fields.
+- `RenderCompactionPrompt` (deleted, FIG-5259);
+- the direct-call instruction fields (deleted, FIG-5259).
 
 Formats change in place at version 1, with no flag, shim or legacy decoder.
 

@@ -277,18 +277,10 @@ impl ProviderHandle {
     )]
     pub async fn complete(
         &mut self,
-        mut request: LlmRequest,
+        request: LlmRequest,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
-        let sideband = self.prepare_completion(&mut request);
-        self.complete_prepared(
-            request,
-            sideband,
-            crate::ChargeSafetyPolicy::default(),
-            &TelemetryMetrics::default(),
-            None,
-            ModelCallBounds::default(),
-        )
-        .await
+        self.complete_with_charge_safety(request, crate::ChargeSafetyPolicy::default())
+            .await
     }
 
     /// Completes a request under an explicit live charge-safety policy.
@@ -305,8 +297,13 @@ impl ProviderHandle {
         charge_safety: crate::ChargeSafetyPolicy,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let sideband = self.prepare_completion(&mut request);
+        let body = match self.lower(&request).await {
+            Ok(body) => body,
+            Err(error) => return Err(unsent(&request, &sideband, error)),
+        };
         self.complete_prepared(
             request,
+            &body,
             sideband,
             charge_safety,
             &TelemetryMetrics::default(),
@@ -314,6 +311,50 @@ impl ProviderHandle {
             ModelCallBounds::default(),
         )
         .await
+    }
+
+    /// Lower `request`, as [`Self::prepare_completion`] left it, to the
+    /// exact body its route sends (ADR 0133 §6). A durable call lowers once,
+    /// before its admission, and every attempt and resend sends the body.
+    /// A provider that panics while lowering is contained as a typed,
+    /// non-retryable failure; a body lowered for another route is refused.
+    ///
+    /// # Errors
+    ///
+    /// The provider's classified refusal, an invalid endpoint, a contained
+    /// panic, or a body for another route.
+    pub async fn lower(
+        &mut self,
+        request: &LlmRequest,
+    ) -> Result<ProviderRequestBody, LlmTransportError> {
+        let route = self.route_identity(request.model.wire_model());
+        route.validate_endpoint().map_err(|error| {
+            LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+                .with_retry_verdict(TransportRetryVerdict::Forbidden)
+        })?;
+        let lowered =
+            std::panic::AssertUnwindSafe(async { self.components.provider.lower(request).await })
+                .catch_unwind()
+                .await;
+        let body = match lowered {
+            Ok(lowered) => {
+                lowered.map_err(|failure| self.components.failure_classifier.classify(failure))?
+            }
+            Err(payload) => {
+                return Err(
+                    LlmTransportError::new(crate::panic_containment::payload_message(
+                        payload.as_ref(),
+                    ))
+                    .with_kind(ProviderFailureKind::Unknown)
+                    .with_lash_code(TurnFailureCode::ProviderPanicked)
+                    .with_retry_verdict(TransportRetryVerdict::NotRetryable),
+                );
+            }
+        };
+        check_body_route(&body, &route)?;
+        Ok(body)
     }
 
     pub(crate) fn prepare_completion(
@@ -359,34 +400,42 @@ impl ProviderHandle {
         clippy::result_large_err,
         reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
     )]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the admitted send: its body and sideband with the call's policy and bounds"
+    )]
     pub(crate) async fn complete_prepared(
         &mut self,
-        request: LlmRequest,
+        mut request: LlmRequest,
+        body: &ProviderRequestBody,
         sideband: ProviderCompletionSideband,
         charge_safety: crate::ChargeSafetyPolicy,
         metrics: &TelemetryMetrics,
         permit: Option<&EmissionPermit>,
         bounds: ModelCallBounds,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
-        let call_id = call_id_for_scope(&request.scope);
         let serving_route = sideband.serving_route();
         if let Err(error) = serving_route.validate_endpoint() {
             let error = LlmTransportError::new(error.to_string())
                 .with_kind(ProviderFailureKind::Validation)
                 .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
                 .with_retry_verdict(TransportRetryVerdict::Forbidden);
-            return Err(ProviderCompletionError {
-                call_record: Box::new(synthetic_terminal_call_record(
-                    call_id,
-                    AttemptOutcome::Failed,
-                    &error,
-                    false,
-                    ProtocolPosition::NoResponse,
-                    sideband.replay_drops(),
-                )),
-                error,
-            });
+            return Err(unsent(&request, &sideband, error));
         }
+        // The body is sent as it was lowered, and only by its own route.
+        if let Err(error) = check_body_route(body, &serving_route) {
+            return Err(unsent(&request, &sideband, error));
+        }
+        // The body decides whether the response streams: a streamed body is
+        // read through a sender even when the caller asked for none.
+        match (body.stream, request.stream_events.is_some()) {
+            (true, false) => {
+                request.stream_events = Some(crate::llm::types::LlmEventSender::new(|_| {}));
+            }
+            (false, true) => request.stream_events = None,
+            _ => {}
+        }
+        let call_id = call_id_for_scope(&request.scope);
         let provider_limits = bounds.budgets.provider();
         let mut reliability = self.options().reliability;
         reliability.retry.max_attempts = reliability
@@ -452,7 +501,7 @@ impl ProviderHandle {
                 let attempt = std::panic::AssertUnwindSafe(async {
                     let mut attempt_request = request.clone();
                     attempt_request.scope.attempt = Some(attempt_ordinal);
-                    self.components.provider.complete(attempt_request).await
+                    self.components.provider.send(attempt_request, body).await
                 })
                 .catch_unwind();
                 let expiry = clock.sleep_until(deadline);
@@ -582,7 +631,7 @@ impl ProviderHandle {
                     let retry_guarantee = self
                         .components
                         .provider
-                        .generation_retry_guarantee(&request);
+                        .generation_retry_guarantee(&request, body);
                     let (verdict, charge_safety_decision) = retry_verdict(
                         &failure,
                         protocol_position,
@@ -1387,7 +1436,11 @@ impl Provider for UnconfiguredProvider {
         serde_json::Value::Object(Default::default())
     }
 
-    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn send(
+        &mut self,
+        _request: LlmRequest,
+        _body: &ProviderRequestBody,
+    ) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new(
             "no provider configured: host must set SessionPolicy.provider before running a turn",
         ))
@@ -1408,14 +1461,20 @@ pub fn prepare_completion(
     handle.prepare_completion(request)
 }
 
-/// Serves a request [`prepare_completion`] prepared, under its sideband.
+/// Sends `body`, the exact body lowered for a request [`prepare_completion`]
+/// prepared, under its sideband: every attempt sends those bytes.
 #[allow(
     clippy::result_large_err,
     reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
 )]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the runtime's one seam into the handle's admitted send"
+)]
 pub async fn complete_prepared(
     handle: &mut ProviderHandle,
     request: LlmRequest,
+    body: &ProviderRequestBody,
     sideband: ProviderCompletionSideband,
     charge_safety: crate::ChargeSafetyPolicy,
     metrics: &TelemetryMetrics,
@@ -1423,8 +1482,58 @@ pub async fn complete_prepared(
     bounds: ModelCallBounds,
 ) -> Result<ProviderCompletion, ProviderCompletionError> {
     handle
-        .complete_prepared(request, sideband, charge_safety, metrics, permit, bounds)
+        .complete_prepared(
+            request,
+            body,
+            sideband,
+            charge_safety,
+            metrics,
+            permit,
+            bounds,
+        )
         .await
+}
+
+/// Refuse `body` unless `route` lowered it: an admitted body is sent only
+/// by the route that lowered it, never rebuilt for another.
+fn check_body_route(
+    body: &ProviderRequestBody,
+    route: &ProviderRouteIdentity,
+) -> Result<(), LlmTransportError> {
+    if body.route == *route {
+        return Ok(());
+    }
+    Err(LlmTransportError::new(format!(
+        "the request body was lowered for route {}:{}:{}, not the serving route {}:{}:{}",
+        body.route.provider,
+        body.route.endpoint,
+        body.route.model,
+        route.provider,
+        route.endpoint,
+        route.model
+    ))
+    .with_kind(ProviderFailureKind::Validation)
+    .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
+    .with_retry_verdict(TransportRetryVerdict::Forbidden))
+}
+
+/// The failure of a call refused before its first attempt: nothing was sent.
+fn unsent(
+    request: &LlmRequest,
+    sideband: &ProviderCompletionSideband,
+    error: LlmTransportError,
+) -> ProviderCompletionError {
+    ProviderCompletionError {
+        call_record: Box::new(synthetic_terminal_call_record(
+            call_id_for_scope(&request.scope),
+            AttemptOutcome::Failed,
+            &error,
+            false,
+            ProtocolPosition::NoResponse,
+            sideband.replay_drops(),
+        )),
+        error,
+    }
 }
 
 #[cfg(test)]

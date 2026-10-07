@@ -13,6 +13,8 @@ mod facade_inventory;
 mod mcp_catalog;
 #[path = "integration/one_home.rs"]
 mod one_home;
+#[path = "integration/owned_call_purpose.rs"]
+mod owned_call_purpose;
 #[path = "integration/prompt_section_leak.rs"]
 mod prompt_section_leak;
 #[path = "integration/prompt_sections.rs"]

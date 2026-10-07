@@ -33,6 +33,7 @@
 pub mod cases;
 pub mod catalog_audit;
 pub mod cells;
+pub mod compactions;
 pub mod deployment;
 pub mod effects;
 pub mod engine;
@@ -89,11 +90,15 @@ pub enum Case {
     /// call's prompt, its identity and the pending checkpoint decisions
     /// commit together at `model.start`, and a resend composes nothing.
     Prompt,
+    /// A session's turn summarized by the host's compaction command: the
+    /// summary call is admitted under `completion.start` with its exact
+    /// body, and a resend sends that body.
+    Compaction,
 }
 
 impl Case {
     /// Every case, in registry order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Turn,
         Self::Round,
         Self::Effects,
@@ -107,6 +112,7 @@ impl Case {
         Self::Trigger,
         Self::Drain,
         Self::Prompt,
+        Self::Compaction,
     ];
 
     /// The case's name.
@@ -126,6 +132,7 @@ impl Case {
             Self::Trigger => "trigger",
             Self::Drain => "drain",
             Self::Prompt => "prompt",
+            Self::Compaction => "compaction",
         }
     }
 
@@ -153,6 +160,7 @@ impl Case {
             Self::Trigger => Box::new(cases::trigger::TriggerCase::tagged(tag)),
             Self::Drain => Box::<cases::drain::DrainCase>::default(),
             Self::Prompt => Box::new(cases::prompt::PromptCase::tagged(tag)),
+            Self::Compaction => Box::new(cases::compaction::CompactionCase::tagged(tag)),
         }
     }
 }

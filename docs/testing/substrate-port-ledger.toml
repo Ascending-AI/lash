@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1591 rows over 862 files, 3945 laws.
-# By class: mechanical 163, semantic 111, delete 863, replace 454.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 7.
-# By status: todo 404, ported 90, deleted 1097.
+# 1593 rows over 864 files, 3947 laws.
+# By class: mechanical 163, semantic 111, delete 865, replace 454.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 7, P5 2.
+# By status: todo 404, ported 90, deleted 1099.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -25399,3 +25399,31 @@ laws = [
 disposition = "covered-by:crates/lash-sansio/src/sansio/tests.rs::checkpoint_user_messages_resume_prepare_protocol_iteration"
 status = "deleted"
 note = "FIG-5258 deleted CheckpointDelivery's plugin messages; the law is renamed to the committed user messages a checkpoint still delivers"
+
+[[row]]
+path = "crates/lash-plugin-standard-compaction/src/tests.rs"
+test = "*"
+area = "lash-plugin-standard-compaction"
+needs = []
+class = "delete"
+lane = "P5"
+laws = [
+  "compaction_request_carries_the_recorded_system_prompt",
+]
+disposition = "covered-by:crates/lash/tests/integration/owned_call_purpose.rs::compaction_and_direct_calls_compose_only_their_own_purpose"
+status = "deleted"
+note = "FIG-5259 deleted RenderCompactionPrompt and the compaction system-prompt plumbing; a compaction call composes its own purpose's sections at its admission, which the PURPOSE law pins"
+
+[[row]]
+path = "crates/lash-core-execution/src/direct.rs"
+test = "*"
+area = "direct-completions"
+needs = []
+class = "delete"
+lane = "P5"
+laws = [
+  "direct_explicit_instructions_keep_mid_conversation_feedback",
+]
+disposition = "covered-by:crates/lash-core-execution/src/direct.rs::direct_mid_conversation_system_messages_stay_feedback"
+status = "deleted"
+note = "FIG-5259 deleted DirectRequest.instructions; the instruction half is subject-deleted (a direct call's instructions are its purpose's sections, compaction_and_direct_calls_compose_only_their_own_purpose), and the feedback half is the renamed law"

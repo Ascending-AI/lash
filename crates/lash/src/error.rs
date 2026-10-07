@@ -5,9 +5,9 @@ use lash_sansio::SessionId;
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
-    /// A retained prompt snapshot or its content-addressed text could not be read.
+    /// A model call's admission record (its prompt snapshot, texts or exact body) could not be read.
     #[error(transparent)]
-    PromptSnapshotLoad(#[from] lash_core::plugin::prompt::PromptSnapshotLoadError),
+    PromptSnapshotLoad(#[from] lash_core::plugin::prompt::AdmittedCallLoadError),
     #[error(
         "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(backend)/LashCore::rlm_builder(backend, ...)"
     )]
@@ -333,7 +333,7 @@ impl EmbedError {
             // same mailbox write is safe to repeat.
             Self::Durable(error) => durable_error_is_retryable(error),
             Self::PromptSnapshotLoad(error) => match error {
-                lash_core::plugin::prompt::PromptSnapshotLoadError::Store(error) => {
+                lash_core::plugin::prompt::AdmittedCallLoadError::Store(error) => {
                     durable_error_is_retryable(error)
                 }
                 _ => false,
@@ -412,7 +412,7 @@ impl EmbedError {
             Self::Store(err) => store_error_is_terminal(err),
             Self::Durable(error) => durable_error_is_terminal(error),
             Self::PromptSnapshotLoad(error) => match error {
-                lash_core::plugin::prompt::PromptSnapshotLoadError::Store(error) => {
+                lash_core::plugin::prompt::AdmittedCallLoadError::Store(error) => {
                     durable_error_is_terminal(error)
                 }
                 _ => true,
