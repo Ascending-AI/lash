@@ -1,5 +1,9 @@
 use std::sync::Arc;
 
+mod steps;
+
+pub use steps::process_steps;
+
 use crate::RuntimeHostConfig;
 use crate::{
     DeploymentStore, PluginError, PluginFactory, PluginHost, PluginStack, ProcessRecord,

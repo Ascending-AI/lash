@@ -74,8 +74,8 @@ L13 = FIG-5193, L3t = FIG-5208, L9t = FIG-5210.
 | | `RestoreRunMaterial` | deleted: the fold reads committed records (S4) |
 | | `Trigger` | run in place, its own receipt-keyed idempotent commit. It is not yet a store-local effect: a mutation's receipt is evaluated against the live subscription row inside the store transaction, so staging it before the outcome needs a commit-time evaluation contract that FIG-5223 left open (`StoreLocalEffect::TriggerCreate`/`TriggerDelete` still refuse) |
 | | `IngestTriggerOccurrence`, `AdmitTriggerDelivery` | deleted: an emission records its occurrence, starts each delivery's process and binds it in one `trigger.start` mailbox commit (fig-5175-trigger) |
-| `wait_effect` (L5) | `AwaitEvent`, `Sleep` | phase-transaction write: a pinned wait row or timer, raced against cancel mail |
-| | `PeekAwaitEvent` | read of a wait row, recorded nowhere |
+| `wait_effect` (L5) | `Sleep` | phase-transaction write: a pinned timer, raced against cancel mail |
+| | `AwaitEvent`, `PeekAwaitEvent` | deleted with the await-event key's last caller (FIG-5216): a process takes a signal as its mail (`EngineEvent::Signal`), and a turn's waits are rows its round pins |
 | `process_effect` (L6) | `Process` (start, signal, await, cancel) | store-local effect (start, signal): a tool's realization stages the start's registration (`StoreLocalEffect::ProcessStart`) and the signal (`StoreLocalEffect::SignalSend`), and they commit as `ProcessWrite`s in the fenced `round.outcome` that records the call (FIG-5223); a code cell's call, which no round member runs until FIG-5225, commits its effects alone under `tool.effect`. Wait (await), mail (cancel) |
 | | `LoadExecutionEnv` | admitted execution |
 | `vm_effect` (V0, then L7) | `ExecCode` | admitted execution from the cell's snapshot, operations admitted at quiet points |
@@ -106,8 +106,8 @@ Behaviours the deleted `execute_effect` wrapper added around every effect, which
 Code the fold made unreachable, or nearly, that an owning lane is about to rewrite. I0 stopped here:
 
 - **L4:** the journal guard and owner-step gate in `runtime/actor/journal.rs`. (L4 deleted the generation-cut plumbing and the Run transfer.)
-- **L6 and L7b:** segment handover as process state (FIG-5224 deleted the `with_turn_hand_over(false)` plumbing, the transferable-wait flag a cell set and a cell sleep's hand-over branch); the process run-context builder (`process_runners/mod.rs`) and the capability items only it read (`session_runtime_store`, `execution_owner`, `turn_phase_probe`), kept under `#[expect(dead_code)]` for the advance-driven engine drive; `ProcessEngineRunContext` without effect accessors, and the lashlang run path (`run_lashlang_process`, which takes the context it will run under).
-- **L3 and L6:** the await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, and `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`), kept by L5 in `runtime/actor/await_event_legacy.rs`. Each reaches `port_pending`, whose arm names the lane by wait identity: the plugin task cancel signal L3 (turn control's waits are deleted: a turn cancel is session mail), process signals L6. They are deleted with their callers' ports; no wait row serves a recomputable key. L4 (FIG-5174) deleted the tool completion and custom identities with `prepare_completion_key` and `completion_host_key`: a member that may park has its `tool_completion` wait pinned by its round's admission, its body re-derives the same `wk1` key with `waits::host_key`, and the host resolves it through `resolve_host`.
+- **L6 and L7b:** segment handover as process state (FIG-5224 deleted the `with_turn_hand_over(false)` plumbing, the transferable-wait flag a cell set and a cell sleep's hand-over branch); `ProcessEngineRunContext` without effect accessors, and the lashlang run path (`run_lashlang_process`, which takes the context it will run under). FIG-5216 put the process run-context wiring (`process_runners/mod.rs`) to work: it is the dispatch a process's catalog tool steps run on.
+- **L3 and L6:** done. The await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`, and `ProcessCommand::AttachTerminal`) are deleted with `await_event_legacy.rs` (FIG-5216): a process takes a signal as its mail, and a turn's call that awaits a process pins a `process_terminal` wait with its park. L4 (FIG-5174) deleted the tool completion and custom identities with `prepare_completion_key` and `completion_host_key`: a member that may park has its `tool_completion` wait pinned by its round's admission, its body re-derives the same `wk1` key with `waits::host_key`, and the host resolves it through `resolve_host`.
 - At the L10a rebase I0 ported every file that still named the deleted seam, deleted `replay_read_gate.rs` (its subject was replay paths) and the pending list, and dropped Rule 7's engine-crate exclusion; L10a itself removed `RecordedJournal` and `read_recorded_journal`.
 
 ## Table ownership
@@ -138,19 +138,9 @@ Counts: L3 1, L6 1 (2 in all).
 
 None: V0 filled its stubs. It re-tagged the journal-era ones its path never reaches: `turn_effect` to L3, and `record_run_record`, `start_run_record`, `start_run_attempt` and `start_run_prepare` to L4.
 
-### L3 (FIG-5172)
+### L3 (FIG-5172) and L6 (FIG-5175)
 
-| Where | Function | Stub |
-|---|---|---|
-| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the plugin task cancel signal's port to session mail |
-
-### L6 (FIG-5175)
-
-| Where | Function | Stub |
-|---|---|---|
-| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the process signals' port to process mail and L5's pin and race |
-
-L6 filled the rest. The one row left was reached only by the lashlang run path's `await_process_signal_event`, which L7b (FIG-5198) deleted: an engine receives a signal as `EngineEvent::Signal` from its mail. No production caller reaches it; it goes with `AwaitEventWaitIdentity::ProcessSignal`, which only witnesses still construct.
+None. The last row, `await_event_legacy.rs`'s `port_pending`, was reached only by the lashlang run path's `await_process_signal_event`, which L7b (FIG-5198) deleted: an engine receives a signal as `EngineEvent::Signal` from its mail. FIG-5216 deleted the file with the await-event effects and `AttachTerminal`, none of which a production path issued. `AwaitEventKey` stays as the stored source identity of an outcome's material and an artifact referrer.
 
 ### L6b (FIG-5176)
 

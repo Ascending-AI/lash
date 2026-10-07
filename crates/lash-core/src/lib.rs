@@ -305,7 +305,6 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkBatchingConfig;
     pub use crate::runtime::QueuedWorkKind;
 
-    pub use crate::runtime::RuntimeAwaitEventOptions;
     pub use crate::runtime::RuntimeEffectReplayTrace;
     pub use crate::runtime::RuntimeEnvironment;
     pub use crate::runtime::RuntimeEnvironmentBuilder;
@@ -821,7 +820,9 @@ pub use tool_provider::{
 };
 #[doc(hidden)]
 pub mod core_internal {
-    pub use crate::runtime::{ProcessRuntimeContext, ProcessRuntimePorts, RuntimeSessionServices};
+    pub use crate::runtime::{
+        ProcessRuntimeContext, ProcessRuntimePorts, ProcessStepTools, RuntimeSessionServices,
+    };
     pub use lash_core_execution::core_internal::{
         RuntimeEffectLocalRunner, RuntimeExecutionContextRuntimeOps, StartKeyDerivation,
         attach_process_invocation_correlation, clear_process_invocation_correlation,

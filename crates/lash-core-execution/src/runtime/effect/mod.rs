@@ -38,9 +38,9 @@ pub use executor::{
     EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
     ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDefinitionLocalExecution,
     ProcessDriveStep, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
-    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
-    RuntimeEffectControllerError, RuntimeEffectLocalExecutor, RuntimeSleepOptions, SegmentProgress,
-    ServedOnlyRange, TriggerLocalExecution,
+    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeEffectControllerError,
+    RuntimeEffectLocalExecutor, RuntimeSleepOptions, SegmentProgress, ServedOnlyRange,
+    TriggerLocalExecution,
 };
 pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,

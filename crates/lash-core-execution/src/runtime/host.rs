@@ -276,7 +276,16 @@ impl RuntimeHostConfig {
                 process_env_store,
                 turn_prelude_store,
             },
-            process_engines: ProcessEngineRegistry::new().with_artifact_ports(artifact_ports),
+            // The backend's engines are the host's: a start of one is
+            // admitted on its recorded input, as an accepting registration.
+            process_engines: backend
+                .process_engines()
+                .fold(ProcessEngineRegistry::new(), |registry, engine| {
+                    registry.with_registration(crate::ProcessEngineRegistration::accepting(
+                        Arc::clone(engine),
+                    ))
+                })
+                .with_artifact_ports(artifact_ports),
             providers: RuntimeProviderConfig {
                 models: Arc::new(crate::EmptyLlmProfiles),
                 run_definitions: crate::RunDefinitions::default(),

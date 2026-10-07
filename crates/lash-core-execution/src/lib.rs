@@ -291,8 +291,6 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
     pub use crate::runtime::QueuedWorkKind;
-
-    pub use crate::runtime::RuntimeAwaitEventOptions;
     pub use crate::runtime::RuntimeEffectReplayTrace;
     pub use crate::runtime::RuntimeHostConfig;
     pub use crate::runtime::RuntimeSleepOptions;

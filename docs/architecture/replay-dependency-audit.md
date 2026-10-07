@@ -108,8 +108,8 @@ These classes refine I0's routing table in `substrate-seams.md` (which method ow
 | 29 | `SyncExecutionEnvironment` | pure (V0); needs a phase record (L3) for plugin-driven syncs | the sync result lands in the checkpoint's `environment`; `turn.prepare` |
 | 30 | `LoadExecutionEnv` | needs a phase record | L6: admitted execution |
 | 31 | `Sleep` | needs a phase record | L5: a pinned timer row |
-| 32 | `AwaitEvent` | needs a phase record | L5: a pinned wait row raced against cancel mail |
-| 33 | `PeekAwaitEvent` | pure | a read of a wait row, recorded nowhere |
+| 32 | `AwaitEvent` | deleted | FIG-5216: no path issued it; a process takes a signal as its mail |
+| 33 | `PeekAwaitEvent` | deleted | FIG-5216, with `AwaitEvent` |
 | 34 | `LanguageRuntimeValue` | deleted | values live in the VM heap snapshot (`cell.snapshot`) |
 
 ## verify.md §3: where a design drifts back toward replay

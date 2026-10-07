@@ -90,8 +90,6 @@ pub enum RuntimeEffectKind {
     /// the store is read once and every replay serves the recorded spec.
     LoadExecutionEnv,
     Sleep,
-    AwaitEvent,
-    PeekAwaitEvent,
     LanguageRuntimeValue,
 }
 
@@ -124,8 +122,6 @@ impl RuntimeEffectKind {
             Self::SyncExecutionEnvironment => "sync_execution_environment",
             Self::LoadExecutionEnv => "load_execution_env",
             Self::Sleep => "sleep",
-            Self::AwaitEvent => "await_event",
-            Self::PeekAwaitEvent => "peek_await_event",
             Self::LanguageRuntimeValue => "language_runtime_value",
         }
     }

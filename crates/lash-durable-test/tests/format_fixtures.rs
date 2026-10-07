@@ -32,7 +32,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::ToolBody;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Backend, EngineStepRun, EngineSteps as _, LifetimeDecision, ProcessId, ProcessIdMint,
@@ -105,8 +104,9 @@ struct LashlangSteps {
     entered: Arc<Mutex<Vec<String>>>,
 }
 
+#[async_trait::async_trait]
 impl ProcessSteps for LashlangSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &ProcessRecord,
         step: &StepRequest,
@@ -149,40 +149,44 @@ impl ProcessSteps for LashlangSteps {
 
     fn body(
         &self,
+
+        _cx: &lash_core_execution::ActorContext,
         process: &ProcessRecord,
         step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-    ) -> ToolBody {
-        let StepRequest::Engine { kind, input, .. } = step.clone() else {
-            unreachable!("admit refuses a tool step");
-        };
-        let run = EngineStepRun {
-            process: process.id.clone(),
-            engine_config: process.engine_config.clone(),
-            tool_catalog: Arc::new(lash_core_execution::ToolCatalog::default()),
-            now: lash_durable::DurableInstant(
-                i64::try_from(SimClock::timestamp_ms_at(self.clock.logical_ms()))
-                    .expect("the clock fits"),
-            ),
-            clock: Arc::clone(&self.clock) as _,
-            projection_providers: Some(Arc::clone(self.backend.projection_providers())),
-            kind,
-            input,
-        };
-        let steps = self.steps.clone();
-        let entered = Arc::clone(&self.entered);
-        // Whether the body starts from a committed VM snapshot rather than
-        // from the program's entry.
-        let from = if run.input.get("vm").is_some_and(|vm| !vm.is_null()) {
-            "snapshot"
-        } else {
-            "entry"
-        };
-        Box::new(move |token| {
-            entered
-                .lock_recover()
-                .push(format!("{}:{from}", run.kind.0));
-            Box::pin(async move { steps.run(run, token).await })
+    ) -> lash_core_execution::runtime::actor::round::MemberBody {
+        lash_core_execution::runtime::actor::round::member_body({
+            let StepRequest::Engine { kind, input, .. } = step.clone() else {
+                unreachable!("admit refuses a tool step");
+            };
+            let run = EngineStepRun {
+                process: process.id.clone(),
+                engine_config: process.engine_config.clone(),
+                tool_catalog: Arc::new(lash_core_execution::ToolCatalog::default()),
+                now: lash_durable::DurableInstant(
+                    i64::try_from(SimClock::timestamp_ms_at(self.clock.logical_ms()))
+                        .expect("the clock fits"),
+                ),
+                clock: Arc::clone(&self.clock) as _,
+                projection_providers: Some(Arc::clone(self.backend.projection_providers())),
+                kind,
+                input,
+            };
+            let steps = self.steps.clone();
+            let entered = Arc::clone(&self.entered);
+            // Whether the body starts from a committed VM snapshot rather than
+            // from the program's entry.
+            let from = if run.input.get("vm").is_some_and(|vm| !vm.is_null()) {
+                "snapshot"
+            } else {
+                "entry"
+            };
+            Box::new(move |token| {
+                entered
+                    .lock_recover()
+                    .push(format!("{}:{from}", run.kind.0));
+                Box::pin(async move { steps.run(run, token).await })
+            })
         })
     }
 }

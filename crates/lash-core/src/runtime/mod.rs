@@ -83,7 +83,7 @@ pub mod session_manager;
 #[cfg(not(feature = "testing"))]
 mod session_manager;
 #[doc(hidden)]
-pub use process_runtime::{ProcessRuntimeContext, ProcessRuntimePorts};
+pub use process_runtime::{ProcessRuntimeContext, ProcessRuntimePorts, ProcessStepTools};
 #[doc(hidden)]
 pub use session_manager::RuntimeSessionServices;
 mod session_ops;
@@ -220,12 +220,12 @@ pub use effect::{
     ProcessDriveStep, ProcessEffectOutcome, ProcessListSelection, ProcessLocalExecution,
     ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence, RecordedKeyRange,
     RecordedKeys, RefusedWriteRange, Resolution, ResolveOutcome, RunAggregateWakePolicy,
-    RuntimeAssistantResponseHooksOutcome, RuntimeAttribution, RuntimeAwaitEventOptions,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
-    RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
+    RuntimeAssistantResponseHooksOutcome, RuntimeAttribution, RuntimeDirectLlmOutcome,
+    RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
+    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
+    RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
     ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution, TurnPrelude,
     TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
 };

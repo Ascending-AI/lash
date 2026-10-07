@@ -122,6 +122,22 @@ fn parked_output(
     }
 }
 
+/// The tool output of a call that parked as `parked`, once one of its waits
+/// ended with `resolution`: a pure function of the two. A process's catalog
+/// tool step that parked settles from it.
+pub fn parked_call_output(
+    parked: &Material<CompletionSource>,
+    resolution: Resolution,
+) -> ToolCallOutput {
+    let parked = serde_json::from_str::<ParkedCall>(parked.payload()).ok();
+    crate::tool_result::tool_output_from_completion_resolution(
+        resolution,
+        parked
+            .as_ref()
+            .and_then(|parked| parked.completion.resolved_by.as_ref()),
+    )
+}
+
 /// A member's answer as its attempt's output: a final completes, a
 /// repeatable failure is a known failure, a cancel is `Cancelled`.
 pub(super) fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> SettledOutput {
@@ -364,13 +380,8 @@ pub(super) fn resolved_member(
     parked: &Material<CompletionSource>,
     resolution: Resolution,
 ) -> SettledOutput {
+    let output = parked_call_output(parked, resolution);
     let parked = serde_json::from_str::<ParkedCall>(parked.payload()).ok();
-    let output = crate::tool_result::tool_output_from_completion_resolution(
-        resolution,
-        parked
-            .as_ref()
-            .and_then(|parked| parked.completion.resolved_by.as_ref()),
-    );
     let mut completed = answered(call, output);
     // The launch receipt is the call's host-facing intent outcome; the
     // model sees the child's value only.

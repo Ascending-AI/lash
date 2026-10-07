@@ -125,30 +125,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_await_event(self) -> Result<crate::Resolution, RuntimeEffectControllerError> {
-        match self {
-            Self::AwaitEvent { resolution } => Ok(resolution),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::AwaitEvent,
-                other.kind(),
-            )),
-        }
-    }
-
-    /// Extracts the peek await event outcome for effect-host implementors while executing or
-    /// replaying a runtime effect.
-    pub fn into_peek_await_event(
-        self,
-    ) -> Result<Option<crate::Resolution>, RuntimeEffectControllerError> {
-        match self {
-            Self::PeekAwaitEvent { resolution } => Ok(resolution),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::PeekAwaitEvent,
-                other.kind(),
-            )),
-        }
-    }
-
     /// Extracts a journaled language-runtime value.
     pub fn into_language_runtime_value(
         self,
@@ -190,8 +166,6 @@ impl RuntimeEffectOutcome {
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
             Self::Sleep => RuntimeEffectKind::Sleep,
-            Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
-            Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
             Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
     }

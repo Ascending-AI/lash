@@ -40,7 +40,6 @@ impl ProcessTurnCancellation {
 /// wait that stamps the scope while silently keeping the executor's default
 /// observation — is unrepresentable. Every in-workspace wait builder takes this
 /// value whole (`RuntimeEffectLocalExecutor::sleep_under`,
-/// `RuntimeEffectLocalExecutor::await_event_under`,
 /// `ProcessOpScope::with_turn_cancellation`), and it is produced by a single
 /// accessor on the execution that owns the observation decision
 /// (`RuntimeExecutionContext::turn_cancel_wait`, or
@@ -119,10 +118,10 @@ impl super::RuntimeEffectLocalExecutor<'_> {
     /// state that issues it again. An engine draining its build races only
     /// such a wait against the Run's hand-over.
     pub fn wait_transferable(&self) -> bool {
-        if let super::RuntimeEffectLocalExecutorState::Target(
-            super::LocalTarget::SleepOnly { controls, .. }
-            | super::LocalTarget::ExternalWaitOptions { controls, .. },
-        ) = &self.state
+        if let super::RuntimeEffectLocalExecutorState::Target(super::LocalTarget::SleepOnly {
+            controls,
+            ..
+        }) = &self.state
         {
             return controls.transferable;
         }

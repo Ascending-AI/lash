@@ -81,7 +81,20 @@ pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
 
 /// The durable backend over `stores`, through the facade's builder.
 pub fn backend(stores: Arc<dyn StoreSet>) -> lash::Backend {
-    lash::durable::DurableBackendBuilder::new(stores)
+    backend_with(stores, Vec::new())
+}
+
+/// The durable backend over `stores` advancing the host's `engines`.
+pub fn backend_with(
+    stores: Arc<dyn StoreSet>,
+    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+) -> lash::Backend {
+    engines
+        .into_iter()
+        .fold(
+            lash::durable::DurableBackendBuilder::new(stores),
+            lash::durable::DurableBackendBuilder::process_engine,
+        )
         .build()
         .expect("the durable backend builds")
 }
@@ -283,16 +296,47 @@ impl World {
         tier: Tier,
         builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
     ) -> Option<Self> {
+        Self::with_engines(tier, Vec::new(), builder).await
+    }
+
+    /// [`World::new`] over a backend that also advances the host's
+    /// `engines`.
+    pub async fn with_engines(
+        tier: Tier,
+        engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) -> Option<Self> {
+        let scripts = Arc::new(Scripts::default());
+        Self::serving(tier, engines, model(Arc::clone(&scripts)), scripts, builder).await
+    }
+
+    /// [`World::with_engines`] whose sessions are served by `model`, a law's
+    /// own, rather than by the registered scripts.
+    pub async fn with_model(
+        tier: Tier,
+        engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+        model: ProviderHandle,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) -> Option<Self> {
+        Self::serving(tier, engines, model, Arc::default(), builder).await
+    }
+
+    async fn serving(
+        tier: Tier,
+        engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+        model: ProviderHandle,
+        scripts: Arc<Scripts>,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) -> Option<Self> {
         let Some((stores, keep)) = stores(tier).await else {
             eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
             return None;
         };
-        let backend = backend(stores);
-        let scripts = Arc::new(Scripts::default());
+        let backend = backend_with(stores, engines);
         let core = builder(&backend)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .serve_test_llm_profile(model(Arc::clone(&scripts)), metadata())
+            .serve_test_llm_profile(model, metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "tool-semantics-deployment",
                 "tool-semantics-boot",

@@ -1269,6 +1269,9 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
                 args.append(f"    extra_data = {string_list(extra_data)},")
             if target_shards:
                 args.append(f"    shard_count = {target_shards},")
+            target_timeout = target_policy(package["name"], kind, target["name"]).timeout
+            if target_timeout:
+                args.append(f"    timeout = {quote(target_timeout)},")
             if test_env:
                 args.append(f"    test_env = {json.dumps(test_env, sort_keys=True)},")
         args.extend([

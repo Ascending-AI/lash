@@ -17,6 +17,8 @@ mod hooks;
 mod leaf;
 mod observations;
 mod round;
+
+pub use round::parked_call_output;
 mod settlement;
 
 pub use cell::{CellCall, CellHostCalls, CellMember, CellMembers, HostCall};

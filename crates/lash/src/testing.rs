@@ -133,3 +133,31 @@ pub use lash_core::runtime::durable::session::TurnServices;
 pub fn session_turn_services(core: &crate::LashCore) -> std::sync::Arc<dyn TurnServices> {
     core.turn_services()
 }
+
+/// The backend and activation a [`LashCore`](crate::LashCore)'s node serves,
+/// each commit reported to `probe`: its sessions' turns and its processes,
+/// the process actors on the core's process worker. For a test that runs the
+/// core's actors on nodes of its own (a core built with
+/// [`serve_sessions(false)`](crate::core::LashCoreBuilder::serve_sessions)),
+/// so the nodes it kills run what the core's node runs.
+///
+/// # Errors
+///
+/// The core's process worker did not build.
+pub fn node_activation(
+    core: &crate::LashCore,
+    probe: std::sync::Arc<dyn lash_core::durable_port::DurableProbe>,
+) -> crate::Result<(
+    crate::Backend,
+    std::sync::Arc<dyn lash_core::durable_port::runner::Activation>,
+)> {
+    let activations = core.node_activations(probe);
+    let process = activations.processes?;
+    Ok((
+        activations.backend,
+        std::sync::Arc::new(lash_core::durable_port::ActorDispatch {
+            session: activations.sessions,
+            process,
+        }),
+    ))
+}

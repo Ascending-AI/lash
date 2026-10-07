@@ -1,5 +1,4 @@
 use super::*;
-use tracing::Instrument as _;
 
 async fn await_process_terminal(
     process_work: &dyn crate::ProcessWorkSubstrate,
@@ -118,7 +117,6 @@ impl ProcessLocalExecution {
             process_engines,
             host_start,
             turn_cancellation,
-            effect_controller,
             attachments,
             outcome_observer,
         } = self;
@@ -305,91 +303,6 @@ impl ProcessLocalExecution {
                     ProcessEffectOutcome::Await {
                         output: Box::new(output),
                     },
-                    crate::StoreRealization::Realized,
-                ))
-            }
-            ProcessCommand::AttachTerminal { process_id, key } => {
-                // The in-process boundary has no separate invocation to hand
-                // the wait to, so it arms a task: await the terminal, then
-                // resolve the key through the same resolver the parked turn
-                // awaits on. The task is deliberately fire-and-forget — the
-                // arming command must return so the turn can park — and it is
-                // deliberately not the durability story. Durability is the
-                // journaled arming itself: a crash loses the task, the turn is
-                // redriven, the arming replays, and a new task is armed
-                // against a wait that is still open. Resolution is idempotent,
-                // so an arming that races a terminal it already missed resolves
-                // immediately and a duplicate resolve reports
-                // `AlreadyResolved`.
-                let effect_controller = effect_controller.clone().ok_or_else(|| {
-                    RuntimeEffectControllerError::foreign(
-                        "process_terminal_resolver_unavailable",
-                        crate::TurnFailureCause::Outcome,
-                        "arming a process terminal needs the effect controller that owns the wait",
-                    )
-                })?;
-                let process_work = Arc::clone(&process_work);
-                #[allow(
-                    clippy::disallowed_methods,
-                    reason = "the lint protects the caller's tracing context, which this task carries explicitly through the `instrument` below"
-                )]
-                tokio::spawn(
-                    async move {
-                        let resolution = match await_process_terminal(
-                            process_work.as_ref(),
-                            &process_id,
-                        )
-                        .await
-                        {
-                            // Acquire before the key resolves: the waiter's
-                            // journal records the value the resolution carries
-                            // (ADR 0124 §4).
-                            // A store fault leaves the wait open rather than
-                            // recording a failure the fault did not decide:
-                            // the redriven turn re-arms and acquires again.
-                            Ok(output) => match delivered_output(
-                                attachments.as_ref(),
-                                &key.scope,
-                                output,
-                            )
-                            .await
-                            {
-                                Ok(output) => process_terminal_resolution(output),
-                                Err(error) => {
-                                    tracing::warn!(
-                                        process_id = %process_id,
-                                        key_id = %key.key_id,
-                                        "armed process terminal could not acquire its delivered attachments; the wait stays open for the redrive: {error}"
-                                    );
-                                    return;
-                                }
-                            },
-                            Err(error) => {
-                                Resolution::Err(crate::runtime::ExternalCompletionError {
-                                    code: crate::TurnFailureCode::from_wire(
-                                        "process_terminal_unobservable",
-                                    )
-                                    .into(),
-                                    message: error.to_string(),
-                                    raw: None,
-                                })
-                            }
-                        };
-                        if let Err(error) = effect_controller
-                            .resolve_await_event(&key, resolution)
-                            .await
-                        {
-                            tracing::warn!(
-                                process_id = %process_id,
-                                key_id = %key.key_id,
-                                "armed process terminal could not resolve its durable wait: {error}"
-                            );
-                        }
-                    }
-                    .instrument(tracing::Span::current()),
-                );
-                Ok((
-                    ProcessEffectOutcome::AttachTerminal,
                     crate::StoreRealization::Realized,
                 ))
             }

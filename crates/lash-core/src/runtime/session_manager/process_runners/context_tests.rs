@@ -52,12 +52,16 @@ async fn execute_process_dispatch(
         &services.current.host.core,
         &crate::ProcessId::fixture("process-route"),
     );
-    let run_context = ProcessRunContext::builder(services)
-        .tool_surface(surface)
-        .scoped_effect_controller(scoped)
-        .build()
-        .expect("process run context");
-    let dispatch = run_context.dispatch();
+    let dispatch = services
+        .process_step_dispatch(
+            surface,
+            ProcessStepScope {
+                effect_controller: scoped,
+                process_lineage: None,
+                process_originator: None,
+            },
+        )
+        .expect("process step dispatch");
     let attempt = crate::testing::ToolCallFixture::from_dispatch(Arc::clone(&dispatch))
         .attempt("process-route");
     let manifest = dispatch
@@ -74,7 +78,6 @@ async fn execute_process_dispatch(
         .await;
     drop(attempt);
     drop(dispatch);
-    run_context.shutdown().await;
     match outcome {
         crate::ToolAttemptOutcome::Done { result, .. } => {
             result.into_output().value_for_projection()

@@ -27,4 +27,6 @@ pub mod runtime {
 pub use lash_core_execution::runtime::actor::process::{
     SessionTurnCancel, SessionTurnMail, SessionTurns,
 };
-pub use runtime::process_worker::{DurableProcessWorker, DurableProcessWorkerConfig};
+pub use runtime::process_worker::{
+    DurableProcessWorker, DurableProcessWorkerConfig, process_steps,
+};

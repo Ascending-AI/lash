@@ -35,9 +35,7 @@ pub(crate) async fn issue_effect(
         RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::PresentToolResult { .. }
         | RuntimeEffectCommand::Trigger { .. } => cx.tool_effect(envelope, local).await,
-        RuntimeEffectCommand::Sleep { .. }
-        | RuntimeEffectCommand::AwaitEvent { .. }
-        | RuntimeEffectCommand::PeekAwaitEvent { .. } => cx.wait_effect(envelope, local).await,
+        RuntimeEffectCommand::Sleep { .. } => cx.wait_effect(envelope, local).await,
         RuntimeEffectCommand::Process { .. } | RuntimeEffectCommand::LoadExecutionEnv { .. } => {
             cx.process_effect(envelope, local).await
         }

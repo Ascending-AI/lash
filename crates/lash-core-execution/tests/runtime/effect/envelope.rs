@@ -46,8 +46,8 @@ mod settlement_order_journal_tests {
 }
 
 mod envelope_hash_tests {
+    use lash_core_execution::RuntimeEffectKind;
     use lash_core_execution::runtime::effect::*;
-    use lash_core_execution::{RuntimeEffectKind, SessionId, TurnId};
 
     fn invocation(kind: RuntimeEffectKind) -> RuntimeEffectInvocation {
         let _ = kind;
@@ -60,22 +60,6 @@ mod envelope_hash_tests {
             lash_core_execution::RuntimeAttribution::for_session("session"),
             "effect",
         )
-    }
-
-    fn await_event_key() -> lash_core_execution::AwaitEventKey {
-        lash_core_execution::AwaitEventKey {
-            scope: lash_core_execution::ExecutionScope::Turn {
-                session_id: SessionId::from("session"),
-                turn_id: TurnId::from("turn"),
-            },
-            wait: lash_core_execution::AwaitEventWaitIdentity::process_signal(
-                lash_core_execution::ProcessId::fixture("process"),
-                "signal",
-                1,
-            ),
-            key_id: "key".to_string(),
-            signature: "signature".to_string(),
-        }
     }
 
     fn ungrouped_corpus() -> Vec<(&'static str, RuntimeEffectEnvelope)> {
@@ -132,20 +116,6 @@ mod envelope_hash_tests {
                     checkpoint: lash_core_execution::CheckpointKind::AfterWork,
                 },
             ),
-            (
-                "await_event",
-                RuntimeEffectKind::AwaitEvent,
-                RuntimeEffectCommand::AwaitEvent {
-                    key: await_event_key(),
-                },
-            ),
-            (
-                "peek_await_event",
-                RuntimeEffectKind::PeekAwaitEvent,
-                RuntimeEffectCommand::PeekAwaitEvent {
-                    key: await_event_key(),
-                },
-            ),
         ];
         commands
             .into_iter()
@@ -191,20 +161,6 @@ mod envelope_hash_tests {
             (
                 "checkpoint",
                 "d5d9bde834af9f145e121cd2af8fd6d6e630602ccc448c847b0f68d36f9c9768",
-            ),
-            // Moved, with `peek_await_event`, by FIG-5174 and again by
-            // FIG-5172: the key's `ToolCompletion` and then its plugin task
-            // cancel signal wait identities are deleted (a tool completion is
-            // an L5 `tool_completion` wait; a plugin task's cancel is the
-            // withdrawal of its session-mail batch), so the corpus key names
-            // a process signal. Re-pinned in place under the version freeze.
-            (
-                "await_event",
-                "424371e20eaf3de5f7ac554ec6b6d3da50876038b8da281fee2c0304e2f9fbbe",
-            ),
-            (
-                "peek_await_event",
-                "fc5b9e768f90e46629a88bd4c0971cc72d4f73552943fd42b49f220d17479a76",
             ),
         ];
         let corpus = ungrouped_corpus();

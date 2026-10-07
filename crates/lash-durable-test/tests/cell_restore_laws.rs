@@ -50,7 +50,7 @@ use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, Material, SettledOutput, ToolBody,
+    AdmittedExecution, Material, MemberBody, SettledOutput,
 };
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
@@ -395,8 +395,9 @@ impl ProcessEngine for SleepEngine {
 /// The sleep engine runs no steps.
 struct NoSteps;
 
+#[async_trait::async_trait]
 impl ProcessSteps for NoSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &ProcessRecord,
         step: &StepRequest,
@@ -421,10 +422,11 @@ impl ProcessSteps for NoSteps {
 
     fn body(
         &self,
+        _cx: &lash_core_execution::ActorContext,
         _process: &ProcessRecord,
         step: &StepRequest,
         _execution: &AdmittedExecution,
-    ) -> ToolBody {
+    ) -> MemberBody {
         unreachable!("no step of `{}` is ever admitted", step.step().0)
     }
 }

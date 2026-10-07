@@ -279,23 +279,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
-    async fn attach_process_terminal(
-        &self,
-        process_id: &crate::ProcessId,
-        key: &crate::AwaitEventKey,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Option<crate::ProcessAwaitOutput>, crate::PluginError> {
-        self.services
-            .processes
-            .attach_process_terminal(
-                &self.services.current,
-                process_id.clone(),
-                key.clone(),
-                scope,
-            )
-            .await
-    }
-
     async fn abandon_consumer_hold(
         &self,
         key: &str,

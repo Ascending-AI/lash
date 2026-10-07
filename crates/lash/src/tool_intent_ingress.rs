@@ -645,9 +645,6 @@ impl ToolIntentIngress {
                 lash_core::ProcessEffectOutcome::Await { .. } => {
                     return Err(Self::outside_protocol_outcome("await"));
                 }
-                lash_core::ProcessEffectOutcome::AttachTerminal => {
-                    return Err(Self::outside_protocol_outcome("attach_terminal"));
-                }
             },
         };
         if realized.kind() != kind {

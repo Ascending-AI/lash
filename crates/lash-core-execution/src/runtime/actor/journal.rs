@@ -176,15 +176,11 @@ impl ActorContext {
             // FIG-3779).
             let dispatches = match &envelope.command {
                 crate::RuntimeEffectCommand::TraceBoundary { .. }
-                | crate::RuntimeEffectCommand::AwaitEvent { .. }
-                | crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
                 | crate::RuntimeEffectCommand::LoadExecutionEnv { .. }
                 | crate::RuntimeEffectCommand::PresentToolResult { .. } => false,
-                crate::RuntimeEffectCommand::Process { command } => !matches!(
-                    command.as_ref(),
-                    crate::ProcessCommand::Await { .. }
-                        | crate::ProcessCommand::AttachTerminal { .. }
-                ),
+                crate::RuntimeEffectCommand::Process { command } => {
+                    !matches!(command.as_ref(), crate::ProcessCommand::Await { .. })
+                }
                 _ => true,
             };
             let key = envelope.invocation.effect_replay_key();

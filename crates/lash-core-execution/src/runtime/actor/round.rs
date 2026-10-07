@@ -90,7 +90,7 @@ mod store_local;
 mod tools;
 
 pub use fold::{MemberState, RoundMember, RoundView, fold};
-pub use lifecycle::{Discharge, MemberBodies, MemberBody, MemberResult};
+pub use lifecycle::{Discharge, MemberBodies, MemberBody, MemberResult, member_body};
 pub use output::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use records::RUN_RECORD_FORMAT_VERSION;
 pub use rounds::{admit_round, present, presentation, settle_retry, start_retry};

@@ -25,6 +25,11 @@ pub(super) struct Driver {
     pub(super) next_run: u64,
     /// The steps admitted and not yet handed to `advance`, by name.
     pub(super) steps: BTreeMap<StepName, InFlight>,
+    /// How many catalog tool steps each run admitted, while any step of the
+    /// run is in flight: what the process holds against its
+    /// `max_tool_calls` (FIG-4546).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) held: BTreeMap<u64, usize>,
     /// The host-resolvable keys pinned so far, by name.
     pub(super) keys: BTreeMap<KeyName, Pinned>,
     /// What the process is blocked on, if anything.

@@ -490,12 +490,13 @@ def lash_rust_integration_test(
         rustc_env = {},
         shard_count = 0,
         test_env = {},
-        tags = []):
+        tags = [],
+        timeout = None):
     _rust_test(
         name, crate_name, crate_root, crate_features, declared_features,
         manifest_dir, package_name, version, args, None, exec_properties,
         srcs_patterns, data_exclude, extra_compile_data, extra_data, library,
-        library_crate_name, rustc_env, shard_count, test_env, tags, None,
+        library_crate_name, rustc_env, shard_count, test_env, tags, timeout,
         _named_deps(package_name, include_dev = True),
     )
 

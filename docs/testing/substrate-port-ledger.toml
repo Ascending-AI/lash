@@ -4,7 +4,7 @@
 # 1575 rows over 853 files, 3929 laws.
 # By class: mechanical 163, semantic 111, delete 852, replace 449.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
-# By status: todo 408, ported 87, deleted 1080.
+# By status: todo 406, ported 89, deleted 1080.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -624,6 +624,7 @@ law = "the turn and ingress laws L3s deleted with the store run admission, its f
 
 [planned."L9T-TOOLS"]
 owner = "L9t"
+path = "crates/lash-durable-test/tests/declared_start_crash_laws.rs::declared_start_crash_at_every_launch_boundary"
 law = "the process-dependent tool-semantics laws FIG-5208 deleted with TestTurnExecution (declared start, the process-aggregate group and the process's tool-call holding, process admission identity, the public signal intent, migrated-tools redrive) hold through a host's send() with the core's node serving the turn and its processes, on SQLite memory, SQLite file and PostgreSQL; FIG-5216 owns them, FIG-5210 ported the rest; each row's owed law names one"
 
 [planned."L3S-CLOSE"]
@@ -3248,8 +3249,8 @@ laws = [
   "lash_conformance::tool_call_limit_process_tests!",
 ]
 disposition = "port"
-status = "todo"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+status = "ported"
+note = "FIG-5216 re-wrote the Lashlang process producer through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: crates/lash-durable-test/tests/process_tool_calls.rs (a group at the limit runs and one past it is refused whole; a consumed group is held no more; a held race counts once) and crates/lash-durable-test/tests/process_tool_call_crash_laws.rs (the holding law across a worker kill)"
 
 [[row]]
 path = "crates/lash-protocol-standard/src/prompt_tests.rs"
@@ -8399,8 +8400,8 @@ laws = [
   "lash_conformance::declared_start_tests!",
 ]
 disposition = "port"
-status = "todo"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+status = "ported"
+note = "FIG-5216 re-wrote the declared-start suite through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: crates/lash-durable-test/tests/declared_start.rs and crates/lash-durable-test/tests/declared_start_crash_laws.rs"
 
 [[row]]
 path = "crates/lash-upgrade-harness/src/e2e/control/transport.rs"
@@ -24468,10 +24469,10 @@ lane = "L9t"
 laws = [
   "tool_call_limit_counts_what_a_process_holds_across_a_worker_kill",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_call_crash_laws.rs::tool_call_limit_counts_what_a_process_holds_across_a_worker_kill"
 status = "deleted"
 owed = "the tool-call limit admits the limit and refuses past it, staged and across a crash or a worker kill, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: an RLM cell's Lashlang process races max_tool_calls calls and asks one more, cut by a FaultStore matrix at every write under its labels, under fail-before, ack-hidden, zombie, abort and commit-then-abort, recovered on the other node (process.advance, step.outcome, process.terminal). The process is detached: a cell's processes.start is admitted Once until FIG-5174, so a kill inside it ends the turn"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/tool_batch_parallelism/budget.rs"
@@ -24503,10 +24504,10 @@ lane = "L9t"
 laws = [
   "process_admission_names_each_call_and_survives_replay",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_calls.rs::process_admission_names_each_call"
 status = "deleted"
 owed = "a process admission names each tool call and the names survive a replay, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the same call at the same position of two processes is two identities, each owned by its process. The replay half is crates/lash-durable-test/tests/process_tool_call_crash_laws.rs: every body entry of a process's call keeps one call id across every kill"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/tool_call_identity/laws.rs"
@@ -24567,10 +24568,10 @@ lane = "L9t"
 laws = [
   "public_signal_intent_wakes_parked_process",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::public_signal_intent_wakes_parked_process"
 status = "deleted"
 owed = "a tool's public signal intent wakes the parked process it names, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/migrated_tools_redrive.rs"
@@ -24582,10 +24583,10 @@ lane = "L9t"
 laws = [
   "public_migrated_tools_redrive_to_literal_outcomes",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start_crash_laws.rs::public_migrated_tools_redrive_to_literal_outcomes"
 status = "deleted"
 owed = "the migrated public tools redrive to their literal recorded outcomes, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: one step calls cancel_process, spawn_agent and batch, the turn commit cut under every fault; each call ran once and the tool step is asked once. The answer step may be asked again: its response commits with turn.commit, so a cut there loses it"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24597,10 +24598,10 @@ lane = "L9t"
 laws = [
   "declared_start_crash_at_every_launch_boundary",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start_crash_laws.rs::declared_start_crash_at_every_launch_boundary"
 status = "deleted"
 owed = "declared start crash at every launch boundary, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: a parent spawning one child, cut by a FaultStore matrix at every write under its labels, under fail-before, ack-hidden, zombie, abort and commit-then-abort, recovered on the other node (model.done, round.outcome); one process and one child session turn per spawn, each child reply read once"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24612,10 +24613,10 @@ lane = "L9t"
 laws = [
   "spawn_agent_record_carries_child_identity",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::spawn_agent_record_carries_child_identity"
 status = "deleted"
 owed = "spawn agent record carries child identity, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18. The record's kind, label, originator and session capability are read from the registry; the model-hidden handle from the transcript, since a durable turn publishes no tool activity to a host sink (reported)"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24627,10 +24628,10 @@ lane = "L9t"
 laws = [
   "a_session_lifetime_subagent_survives_its_waiting_turn",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::a_session_lifetime_subagent_survives_its_waiting_turn"
 status = "deleted"
 owed = "a session lifetime subagent survives its waiting turn, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24642,10 +24643,10 @@ lane = "L9t"
 laws = [
   "declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults"
 status = "deleted"
 owed = "declared start child runs under recorded facts on a worker with other defaults, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the recorded environment and the child session's builds carry the parent's facts over the node's other default. The process-owner plugin half is gone: a SessionTurn process builds no process-owner plugin runtime (reported)"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24657,10 +24658,10 @@ lane = "L9t"
 laws = [
   "declared_start_cancel_at_each_point",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point"
 status = "deleted"
 owed = "declared start cancel at each point, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: before the spawn, while parked on the child, after its terminal, and a probe that ignores cancel"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24672,10 +24673,10 @@ lane = "L9t"
 laws = [
   "declared_start_retention_hold_blocks_prune_until_consumed",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start_crash_laws.rs::declared_start_retention_hold_blocks_prune_until_consumed"
 status = "deleted"
 owed = "declared start retention hold blocks prune until consumed, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the child's terminal cut commit-then-abort, the registry surveyed while every node is down"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24687,10 +24688,10 @@ lane = "L9t"
 laws = [
   "declared_start_early_terminal_resolves_before_wait",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome"
 status = "deleted"
 owed = "declared start early terminal resolves before wait, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "the order is no longer reachable: a declared start's registration commits in the fenced round.outcome transaction that records the call's park and pins its terminal wait (FIG-5223), so a child cannot end before its parent parks on it. The FIG-5223 law cuts that transaction at every label and finds the start committed only with its outcome; FIG-5216 deleted its own early-terminal law with the order"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24702,10 +24703,10 @@ lane = "L9t"
 laws = [
   "declared_start_rearm_is_idempotent",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start_crash_laws.rs::declared_start_crash_at_every_launch_boundary"
 status = "deleted"
 owed = "declared start rearm is idempotent, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216: the launch matrix's cut at the parent's park (round.outcome) under every fault is the crash of a parked call; its redrive re-pins the same wait, and the laws (one child, its session committed once, each reply read once) are this law's"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24717,10 +24718,10 @@ lane = "L9t"
 laws = [
   "batch_of_spawns_overlaps",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::batch_of_spawns_overlaps"
 status = "deleted"
 owed = "batch of spawns overlaps, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18, at width 8 with two native siblings behind a barrier, and a mid-flight cancel. The RLM Promise.all width is not ported: a cell refuses a deferring call until FIG-5174"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24732,10 +24733,10 @@ lane = "L9t"
 laws = [
   "declared_start_discarded_retry_launches_nothing",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_discarded_retry_launches_nothing"
 status = "deleted"
 owed = "declared start discarded retry launches nothing, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24747,10 +24748,10 @@ lane = "L9t"
 laws = [
   "declared_start_refusal_settles_the_call",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_refusal_settles_the_call"
 status = "deleted"
 owed = "declared start refusal settles the call, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: a start under the ended turn scope is refused process_parent_ended, the call settles with it, and nothing registers"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24762,10 +24763,10 @@ lane = "L9t"
 laws = [
   "declared_start_rejects_foreign_or_reused_serialized_identity_before_launch",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_rejects_foreign_or_reused_serialized_identity_before_launch"
 status = "deleted"
 owed = "declared start rejects foreign or reused serialized identity before launch, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24777,10 +24778,10 @@ lane = "L9t"
 laws = [
   "declared_start_prune_after_hold_release_before_settlement_replays_terminal",
 ]
-disposition = "replaced-by:planned:L9T-TOOLS"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start_crash_laws.rs::declared_start_prune_after_hold_release_before_settlement_replays_terminal"
 status = "deleted"
 owed = "declared start prune after hold release before settlement replays terminal, through send()"
-note = "owed to FIG-5216 (lane fig-5216): the core's node serves no process yet (crates/lash/src/core/node.rs, processes: None), so a law that needs a process (a declared start, a SessionTurn child, a Lashlang process, a parked process's signal) cannot run through send(); FIG-5216 gives the core's node its production ProcessSteps and ports this law through send() itself"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the parent's settle cut by abort, the child pruned while every node is down, the redrive replays its terminal"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/turn_config.rs"

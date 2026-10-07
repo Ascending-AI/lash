@@ -32,7 +32,6 @@ use lash_core_execution::facade_support::{
     TriggerDeliveryEmitOutcome, TriggerEmitReport, TriggerRouter,
 };
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::ToolBody;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     ActorContext, AdmittedScope, Backend, BackendParts, DurableSettings, EngineAction, EngineEvent,
@@ -143,8 +142,9 @@ impl ProcessEngine for EndsAtOnce {
 /// The started processes take no steps.
 struct NoSteps;
 
+#[async_trait::async_trait]
 impl ProcessSteps for NoSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &ProcessRecord,
         step: &StepRequest,
@@ -172,10 +172,12 @@ impl ProcessSteps for NoSteps {
 
     fn body(
         &self,
+
+        _cx: &lash_core_execution::ActorContext,
         _process: &ProcessRecord,
         step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-    ) -> ToolBody {
+    ) -> lash_core_execution::runtime::actor::round::MemberBody {
         unreachable!("no step of `{}` is ever admitted", step.step().0)
     }
 }

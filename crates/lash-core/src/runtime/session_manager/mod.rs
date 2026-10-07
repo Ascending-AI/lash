@@ -180,13 +180,6 @@ impl CurrentOwnerCapability {
 
     /// Who a dispatch built from these services runs for: the session on its
     /// current agent frame, or the process.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "L6 (FIG-5175): the engine process drive reads it; ProcessEngine::run, its only reader, is deleted (I0)"
-        )
-    )]
     pub(in crate::runtime) fn execution_owner(
         &self,
     ) -> Result<crate::ExecutionOwner, crate::PluginError> {

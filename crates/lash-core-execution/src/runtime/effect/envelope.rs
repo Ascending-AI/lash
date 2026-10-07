@@ -532,12 +532,6 @@ pub enum RuntimeEffectCommand {
     Sleep {
         spec: SleepSpec,
     },
-    AwaitEvent {
-        key: crate::AwaitEventKey,
-    },
-    PeekAwaitEvent {
-        key: crate::AwaitEventKey,
-    },
     LanguageRuntimeValue {
         operation: String,
     },
@@ -595,8 +589,6 @@ impl RuntimeEffectCommand {
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
             Self::Sleep { .. } => RuntimeEffectKind::Sleep,
-            Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
-            Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
             Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
     }
@@ -646,22 +638,6 @@ pub enum ProcessCommand {
     },
     Await {
         process_id: ProcessId,
-    },
-    /// Arm the process terminal as the resolver of one durable wait, without
-    /// waiting for it here.
-    ///
-    /// This is the command half of
-    /// [`PendingResolver::ProcessTerminal`](crate::PendingResolver::ProcessTerminal).
-    /// It returns as soon as the boundary has taken responsibility for the
-    /// resolution. A terminal already observed is returned as
-    /// [`ProcessEffectOutcome::Await`]; otherwise the turn parks on `key` through
-    /// the ordinary [`RuntimeEffectCommand::AwaitEvent`] path. Arming is
-    /// idempotent: the same `(process_id, key)` may be armed on every redrive
-    /// of the parked turn, and the first terminal to land resolves the wait
-    /// exactly once.
-    AttachTerminal {
-        process_id: ProcessId,
-        key: crate::AwaitEventKey,
     },
     Cancel {
         process_id: ProcessId,
@@ -723,10 +699,6 @@ enum ProcessCommandDecode {
     },
     Await {
         process_id: ProcessId,
-    },
-    AttachTerminal {
-        process_id: ProcessId,
-        key: crate::AwaitEventKey,
     },
     Cancel {
         process_id: ProcessId,
@@ -793,9 +765,6 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 Self::DeleteSession { session_id }
             }
             ProcessCommandDecode::Await { process_id } => Self::Await { process_id },
-            ProcessCommandDecode::AttachTerminal { process_id, key } => {
-                Self::AttachTerminal { process_id, key }
-            }
             ProcessCommandDecode::Cancel {
                 process_id,
                 origin,
@@ -922,15 +891,6 @@ impl ProcessCommand {
             Self::Await { process_id } => {
                 crate::runtime::causal::CommandSubKey::ProcessAwait(process_id.as_ref()).to_string()
             }
-            // One K4 subscription per (process, source). Replays use the
-            // same receiver identity without colliding with a direct await.
-            Self::AttachTerminal { process_id, key } => {
-                crate::runtime::causal::CommandSubKey::ProcessSubscribeTerminal(&format!(
-                    "{process_id}:{}",
-                    key.key_id
-                ))
-                .to_string()
-            }
             Self::Cancel { process_id, .. } => format!("process:cancel:{process_id}"),
             Self::Signal { signal } => format!(
                 "process:signal:{}:signal.{}:{}",
@@ -986,12 +946,6 @@ pub enum ProcessEffectOutcome {
         // carried through the recursive effect executor.
         output: Box<ProcessAwaitOutput>,
     },
-    /// The boundary has taken responsibility for resolving the armed wait.
-    ///
-    /// Deliberately payload-free: the arming says nothing about the process's
-    /// state, and the resolution itself arrives through the await-event seam,
-    /// not through this outcome.
-    AttachTerminal,
     Cancel {
         record: Box<ProcessRecord>,
     },
@@ -1211,12 +1165,6 @@ pub enum RuntimeEffectOutcome {
         env: crate::ProcessExecutionEnvRef,
     },
     Sleep,
-    AwaitEvent {
-        resolution: crate::Resolution,
-    },
-    PeekAwaitEvent {
-        resolution: Option<crate::Resolution>,
-    },
     LanguageRuntimeValue {
         value: serde_json::Value,
     },

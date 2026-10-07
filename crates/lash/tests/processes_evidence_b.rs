@@ -241,12 +241,6 @@ fn processes_area_witnesses_b() {
     variant_witness(|value: &lash::runtime::RuntimeEffectKind| {
         matches!(value, lash::runtime::RuntimeEffectKind::Process)
     });
-    // W0405: lash::runtime::RuntimeEffectLocalExecutor::await_event [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::await_event;
-    // W0406: lash::runtime::RuntimeEffectLocalExecutor::await_event_with_clock [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::await_event_with_clock;
-    // W0407: lash::runtime::RuntimeEffectLocalExecutor::into_await_event_options [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::into_await_event_options;
     // W0408: lash::runtime::RuntimeEffectLocalExecutor::into_process [function]
     let _ = lash::runtime::RuntimeEffectLocalExecutor::into_process;
     // W0409: lash::runtime::RuntimeEffectLocalExecutor::processes [function]
@@ -265,8 +259,6 @@ fn processes_area_witnesses_b() {
             let _ = result;
         }
     });
-    // W0414: lash::runtime::RuntimeEffectOutcome::into_peek_await_event [function]
-    let _ = lash::runtime::RuntimeEffectOutcome::into_peek_await_event;
     // W0415: lash::runtime::RuntimeEffectOutcome::into_process [function]
     let _ = lash::runtime::RuntimeEffectOutcome::into_process;
     // W0416: lash::runtime::RuntimeError::missing_process_execution_id [function]

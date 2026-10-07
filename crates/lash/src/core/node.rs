@@ -1,5 +1,12 @@
-//! The core's node (ADR 0132 §3): the session actors of the core's backend
-//! run on it, their turns in runtimes this core opens.
+//! The core's node (ADR 0132 §3): the session and process actors of the
+//! core's backend run on it, their turns in runtimes this core opens.
+//!
+//! Its processes run on the core's durable process worker: a `SessionTurn`
+//! process mails its turn to its child session, and an engine process's
+//! steps run the process's catalog tools and its engine's own bodies
+//! (`ProcessSteps`).
+//! The node advances every engine the core registers, a plugin's as a
+//! host's.
 //!
 //! The node starts with the core, on the runtime the core is built in (or on
 //! the first session the core opens, when it was built outside one), and
@@ -13,8 +20,10 @@
 use std::sync::{Arc, Mutex};
 
 use lash_core::durable_port::DurableError;
-use lash_core::durable_port::runner::{Drain, Stopped};
+use lash_core::durable_port::DurableProbe;
+use lash_core::durable_port::runner::{Activation, Drain, Stopped};
 use lash_core::facade_support::LashRuntime;
+use lash_core::runtime::durable::ProcessActivation;
 use lash_core::runtime::durable::node::{NodeServe, serve};
 use lash_core::runtime::durable::services::{RuntimeTurnServices, SessionRuntimes};
 use lash_core::runtime::durable::session::{SessionActivation, TurnError, TurnServices};
@@ -69,14 +78,18 @@ impl NodeSlot {
         if *started || self.stop.is_cancelled() || self.drain.started() {
             return;
         }
-        // The node opens runtimes through a clone of the core that holds no
-        // node of its own, so the node never keeps its core alive.
-        let backend = core.backend.clone();
-        let sessions = Arc::new(SessionActivation::new(
-            backend.clone(),
-            core.turn_services(),
-            Arc::new(lash_core::durable_port::NoProbe),
-        ));
+        let NodeActivations {
+            backend,
+            sessions,
+            processes,
+        } = core.node_activations(Arc::new(lash_core::durable_port::NoProbe));
+        let processes = match processes {
+            Ok(processes) => Some(processes),
+            Err(error) => {
+                tracing::error!(%error, "the core's node serves no processes");
+                None
+            }
+        };
         let node = lash_core::durable_port::NodeId::new(core.runtime_owner.owner_id.clone());
         let drain = self.drain.clone();
         let stop = self.stop.clone();
@@ -89,7 +102,7 @@ impl NodeSlot {
                     node,
                     drain,
                     sessions,
-                    processes: None,
+                    processes,
                 },
                 stop.cancelled_owned(),
             )
@@ -164,7 +177,54 @@ impl SessionRuntimes for CoreRuntimes {
     }
 }
 
+/// What the core's node serves.
+pub(crate) struct NodeActivations {
+    /// The core's backend, advancing every engine the core registers.
+    pub(crate) backend: lash_core::Backend,
+    /// Runs the claimed sessions' turns.
+    pub(crate) sessions: Arc<SessionActivation>,
+    /// Runs the claimed processes on the core's process worker, or why the
+    /// worker did not build.
+    pub(crate) processes: crate::Result<Arc<dyn Activation>>,
+}
+
 impl LashCore {
+    /// The backend and activations the core's node serves, each reporting
+    /// to `probe`. The node opens runtimes through a clone of the core that
+    /// holds no node of its own, so the node never keeps its core alive.
+    pub(crate) fn node_activations(&self, probe: Arc<dyn DurableProbe>) -> NodeActivations {
+        let backend = self
+            .backend
+            .with_process_engines(self.host_process_engines.engines().cloned());
+        let sessions = Arc::new(SessionActivation::new(
+            backend.clone(),
+            self.turn_services(),
+            Arc::clone(&probe),
+        ));
+        let processes = self.process_worker().map(|worker| {
+            let worker = Arc::new(worker);
+            Arc::new(
+                ProcessActivation::new(
+                    backend.clone(),
+                    lash_core_worker::process_steps(&worker),
+                    probe,
+                )
+                .with_session_turns(worker),
+            ) as Arc<dyn Activation>
+        });
+        NodeActivations {
+            backend,
+            sessions,
+            processes,
+        }
+    }
+
+    /// The worker the core's node runs its processes on.
+    fn process_worker(&self) -> crate::Result<lash_core_worker::DurableProcessWorker> {
+        lash_core_worker::DurableProcessWorker::new(self.durable_process_worker_config()?)
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()).into())
+    }
+
     /// The turn services a node runs this core's sessions' turns with.
     pub(crate) fn turn_services(&self) -> Arc<dyn TurnServices> {
         Arc::new(RuntimeTurnServices::new(Arc::new(CoreRuntimes(

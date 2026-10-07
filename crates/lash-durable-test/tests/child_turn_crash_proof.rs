@@ -26,20 +26,13 @@ use std::time::Duration;
 use lash_core::LlmOutputPart;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
-use lash_core::runtime::durable::session::SessionActivation;
-use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::ToolBody;
-use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Backend, BackendParts, DurableSettings, HostArtifactPin, LifetimeDecision,
-    NoProjectionProviders, ProcessId, ProcessInput, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, SessionCreateRequest, SessionStartPoint, SessionTurnOutcome, StepRequest,
-    StoreSet,
+    NoProjectionProviders, ProcessId, ProcessInput, ProcessProvenance, ProcessRegistration,
+    SessionCreateRequest, SessionStartPoint, SessionTurnOutcome, StoreSet,
 };
 use lash_durable::runner::Activation;
-use lash_durable::{
-    ActorDispatch, ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig,
-};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -99,46 +92,6 @@ fn spec() -> lash::SessionSpec {
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
     )
-}
-
-/// A `SessionTurn` process takes no engine steps.
-struct NoSteps;
-
-impl ProcessSteps for NoSteps {
-    fn admit(
-        &self,
-        _process: &ProcessRecord,
-        step: &StepRequest,
-        _now_ms: u64,
-    ) -> Result<StepAdmission, StepRefusal> {
-        Err(StepRefusal::UnknownTool {
-            step: step.step().0.clone(),
-            tool: step.step().0.clone(),
-        })
-    }
-
-    /// Never asked: no step of these parks.
-    fn resolved(
-        &self,
-        _process: &ProcessRecord,
-        _step: &StepRequest,
-        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-        _parked: &lash_core_execution::runtime::actor::round::Material<
-            lash_core_store::tool_run::CompletionSource,
-        >,
-        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
-        lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
-    }
-
-    fn body(
-        &self,
-        _process: &ProcessRecord,
-        step: &StepRequest,
-        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-    ) -> ToolBody {
-        unreachable!("no step of `{}` is ever admitted", step.step().0)
-    }
 }
 
 struct ChildTurn {
@@ -262,27 +215,11 @@ impl Scenario for ChildTurn {
     }
 
     fn activation(&self) -> Arc<dyn Activation> {
-        let core = self.core();
-        let worker = lash::durability::DurableProcessWorker::new(
-            core.durable_process_worker_config()
-                .expect("the process worker's config"),
-        )
-        .expect("the process worker");
-        Arc::new(ActorDispatch {
-            session: Arc::new(SessionActivation::new(
-                self.backend(),
-                lash::testing::session_turn_services(&core),
-                Arc::clone(&self.tripwire) as _,
-            )),
-            process: Arc::new(
-                ProcessActivation::new(
-                    self.backend(),
-                    Arc::new(NoSteps),
-                    Arc::clone(&self.tripwire) as _,
-                )
-                .with_session_turns(Arc::new(worker)),
-            ),
-        })
+        // What the core's own node runs: its sessions, and its processes
+        // on its durable process worker.
+        lash::testing::node_activation(&self.core(), Arc::clone(&self.tripwire) as _)
+            .expect("the core's node activation")
+            .1
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {

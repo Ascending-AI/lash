@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::runtime::actor::round::ToolBody;
 use lash_core_execution::runtime::actor::waits::PinnedKey;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
@@ -218,8 +217,9 @@ impl ProcessEngine for BenchEngine {
 #[derive(Debug, Default)]
 pub struct NoSteps;
 
+#[async_trait::async_trait]
 impl ProcessSteps for NoSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &ProcessRecord,
         step: &StepRequest,
@@ -247,13 +247,17 @@ impl ProcessSteps for NoSteps {
 
     fn body(
         &self,
+
+        _cx: &lash_core_execution::ActorContext,
         _process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-    ) -> ToolBody {
-        Box::new(|_token| {
-            Box::pin(async {
-                lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
+    ) -> lash_core_execution::runtime::actor::round::MemberBody {
+        lash_core_execution::runtime::actor::round::member_body({
+            Box::new(|_token| {
+                Box::pin(async {
+                    lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
+                })
             })
         })
     }

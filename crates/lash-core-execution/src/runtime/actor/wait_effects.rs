@@ -10,10 +10,8 @@ use super::waits::{self, RaceWinner, WaitDeadline, WaitRef, WaitSpec};
 use crate::{RuntimeErrorCode, SleepSpec};
 
 impl ActorContext {
-    /// The wait effects: `Sleep` is a timer wait raced against cancel;
-    /// `AwaitEvent` and `PeekAwaitEvent` are addressed by the retired
-    /// await-event key and wait for their callers' ports. Any other command
-    /// is refused.
+    /// The wait effects: `Sleep` is a timer wait raced against cancel. Any
+    /// other command is refused.
     ///
     /// # Errors
     ///
@@ -25,10 +23,6 @@ impl ActorContext {
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         match envelope.command {
             crate::RuntimeEffectCommand::Sleep { spec } => self.sleep(spec).await,
-            crate::RuntimeEffectCommand::AwaitEvent { key }
-            | crate::RuntimeEffectCommand::PeekAwaitEvent { key } => {
-                super::await_event_legacy::port_pending(&key.wait)
-            }
             other => Err(crate::RuntimeEffectControllerError::new(
                 RuntimeErrorCode::AwaitEventUnsupported,
                 format!("{:?} is not a wait effect", other.kind()),

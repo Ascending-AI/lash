@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::{Material, SettledOutput, ToolBody};
+use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Backend, BackendParts, DurableSettings, EngineAction, EngineEvent, EngineState,
@@ -183,8 +183,9 @@ struct DrainSteps {
     world: Arc<World>,
 }
 
+#[async_trait::async_trait]
 impl ProcessSteps for DrainSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &ProcessRecord,
         _step: &StepRequest,
@@ -217,32 +218,36 @@ impl ProcessSteps for DrainSteps {
 
     fn body(
         &self,
+
+        _cx: &lash_core_execution::ActorContext,
         process: &ProcessRecord,
         step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-    ) -> ToolBody {
-        let world = Arc::clone(&self.world);
-        let process = process.id.clone();
-        let tool = step.admitted_tool(KIND).as_str().to_owned();
-        Box::new(move |_token| {
-            world.entries.lock_recover().push(tool.clone());
-            Box::pin(async move {
-                if tool == FIRST
-                    && let Some(nodes) = world.nodes.get().and_then(Weak::upgrade)
-                {
-                    // The operator starts the roll while the body runs: A
-                    // drains, and the newer build's node starts.
-                    nodes.drain("a");
-                    nodes.start("b");
-                }
-                let output = json!({ "ok": tool }).to_string();
-                SettledOutput::Completed(Material::journal_local(
-                    MaterialOwner::Process {
-                        process_id: process,
-                    },
-                    MaterialRole::AttemptOutput,
-                    output,
-                ))
+    ) -> lash_core_execution::runtime::actor::round::MemberBody {
+        lash_core_execution::runtime::actor::round::member_body({
+            let world = Arc::clone(&self.world);
+            let process = process.id.clone();
+            let tool = step.admitted_tool(KIND).as_str().to_owned();
+            Box::new(move |_token| {
+                world.entries.lock_recover().push(tool.clone());
+                Box::pin(async move {
+                    if tool == FIRST
+                        && let Some(nodes) = world.nodes.get().and_then(Weak::upgrade)
+                    {
+                        // The operator starts the roll while the body runs: A
+                        // drains, and the newer build's node starts.
+                        nodes.drain("a");
+                        nodes.start("b");
+                    }
+                    let output = json!({ "ok": tool }).to_string();
+                    SettledOutput::Completed(Material::journal_local(
+                        MaterialOwner::Process {
+                            process_id: process,
+                        },
+                        MaterialRole::AttemptOutput,
+                        output,
+                    ))
+                })
             })
         })
     }

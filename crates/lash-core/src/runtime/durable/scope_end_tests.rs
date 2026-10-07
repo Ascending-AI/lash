@@ -18,7 +18,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lash_core_execution::runtime::actor::process::{self, ProcessActivation};
-use lash_core_execution::runtime::actor::round::ToolBody;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_durable::domain::{
     ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
@@ -1308,8 +1307,9 @@ impl ProcessNode {
 /// cancel token.
 struct HangingSteps;
 
+#[async_trait::async_trait]
 impl ProcessSteps for HangingSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &crate::ProcessRecord,
         _step: &crate::StepRequest,
@@ -1339,11 +1339,15 @@ impl ProcessSteps for HangingSteps {
 
     fn body(
         &self,
+
+        _cx: &lash_core_execution::ActorContext,
         _process: &crate::ProcessRecord,
         _step: &crate::StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-    ) -> ToolBody {
-        Box::new(|_token| Box::pin(std::future::pending()))
+    ) -> lash_core_execution::runtime::actor::round::MemberBody {
+        lash_core_execution::runtime::actor::round::member_body({
+            Box::new(|_token| Box::pin(std::future::pending()))
+        })
     }
 }
 

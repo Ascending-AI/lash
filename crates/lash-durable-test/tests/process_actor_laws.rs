@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::{Material, SettledOutput, ToolBody};
+use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Backend, BackendParts, DurableSettings, EngineAction, EngineEvent, EngineState,
@@ -249,8 +249,9 @@ fn event_type(name: &str) -> ProcessEventType {
 /// other tool is a `Once` step that completes.
 struct LawSteps;
 
+#[async_trait::async_trait]
 impl ProcessSteps for LawSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &ProcessRecord,
         step: &StepRequest,
@@ -289,21 +290,25 @@ impl ProcessSteps for LawSteps {
 
     fn body(
         &self,
+
+        _cx: &lash_core_execution::ActorContext,
         process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-    ) -> ToolBody {
-        let process = process.id.clone();
-        Box::new(move |_token| {
-            Box::pin(async move {
-                let output = json!({ "ok": true }).to_string();
-                SettledOutput::Completed(Material::journal_local(
-                    MaterialOwner::Process {
-                        process_id: process,
-                    },
-                    MaterialRole::AttemptOutput,
-                    output,
-                ))
+    ) -> lash_core_execution::runtime::actor::round::MemberBody {
+        lash_core_execution::runtime::actor::round::member_body({
+            let process = process.id.clone();
+            Box::new(move |_token| {
+                Box::pin(async move {
+                    let output = json!({ "ok": true }).to_string();
+                    SettledOutput::Completed(Material::journal_local(
+                        MaterialOwner::Process {
+                            process_id: process,
+                        },
+                        MaterialRole::AttemptOutput,
+                        output,
+                    ))
+                })
             })
         })
     }

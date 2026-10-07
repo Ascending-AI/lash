@@ -5,6 +5,8 @@
 //!   `TurnCheckpoint` and the turn seam (V0, then L3), and turn cancel
 //!   (L3); its phase runner is `phases`.
 //! - [`node`]: the node runtime that serves a backend (L3).
+//! - [`ProcessActivation`]: the process actor a node serves processes with
+//!   (L6).
 //! - [`session_mail`]: everything the session's mailbox carries, drained
 //!   and applied under the epoch on every claim (L3s).
 //! - [`session_close`]: the session's closing state, one fenced step at a
@@ -26,6 +28,8 @@ pub mod session_mail;
 mod tool_round;
 mod turn_cancel;
 pub mod turn_scope;
+
+pub use lash_core_execution::runtime::actor::process::ProcessActivation;
 
 #[cfg(test)]
 #[path = "scope_end_tests.rs"]

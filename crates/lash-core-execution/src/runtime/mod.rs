@@ -62,14 +62,13 @@ pub use effect::{
     ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence,
     RecordedKeyRange, RecordedKeys, RefusedWriteRange, Resolution, ResolveOutcome,
     RunAggregateWakePolicy, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
-    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
-    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-    RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec, ToolAttemptCapture,
-    ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution, TurnPrelude,
-    TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
+    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
+    RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
+    RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
+    ToolAttemptCapture, ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
+    TurnPrelude, TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{

@@ -110,6 +110,9 @@ struct BackendInner {
     providers: Arc<dyn ProjectionProviders>,
     /// The format sets this build writes and decodes.
     formats: crate::formats::BuildFormats,
+    /// The formats actor state holds beyond this crate's own, which every
+    /// format set adds ([`BackendParts::formats`]).
+    surfaces: Vec<lash_durable::FormatSurface>,
     /// The in-process half of a wake: the node runner this backend serves
     /// under, when it serves, takes its hints from here, so a mailbox commit
     /// made on this node reaches its actors without waiting for a poll.
@@ -159,6 +162,7 @@ impl Backend {
                 engines,
                 providers,
                 formats,
+                surfaces: parts.formats,
                 hints: Hints::default(),
             }),
         })
@@ -197,6 +201,38 @@ impl Backend {
                 engines: self.inner.engines.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 formats: self.inner.formats.clone(),
+                surfaces: self.inner.surfaces.clone(),
+                hints: self.inner.hints.clone(),
+            }),
+        }
+    }
+
+    /// This backend also advancing `engines`: the same store set, durable
+    /// store, configuration, providers and hints, with each engine
+    /// of a kind it does not hold added, and its format sets with theirs. A
+    /// kind it holds keeps its own engine. What a core's node serves, so an
+    /// engine a plugin contributes advances there as a host's does.
+    #[must_use]
+    pub fn with_process_engines(
+        &self,
+        engines: impl IntoIterator<Item = Arc<dyn crate::ProcessEngine>>,
+    ) -> Self {
+        let mut held = self.inner.engines.clone();
+        for engine in engines {
+            held.entry(engine.kind().to_owned()).or_insert(engine);
+        }
+        let engine_formats: Vec<_> = held.values().map(|engine| engine.state_format()).collect();
+        // Both serve the one durable store, whose wakes reach one runner.
+        let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
+        Self {
+            inner: Arc::new(BackendInner {
+                stores: Arc::clone(&self.inner.stores),
+                durable,
+                config: self.inner.config,
+                formats: crate::formats::BuildFormats::new(&engine_formats, &self.inner.surfaces),
+                engines: held,
+                providers: Arc::clone(&self.inner.providers),
+                surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
             }),
         }
@@ -230,6 +266,11 @@ impl Backend {
     /// The host process engine of `kind`.
     pub fn process_engine(&self, kind: &str) -> Option<&Arc<dyn crate::ProcessEngine>> {
         self.inner.engines.get(kind)
+    }
+
+    /// Every host process engine, by kind.
+    pub fn process_engines(&self) -> impl Iterator<Item = &Arc<dyn crate::ProcessEngine>> {
+        self.inner.engines.values()
     }
 
     /// The projection providers.

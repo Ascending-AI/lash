@@ -64,41 +64,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Extracts the await event options outcome for effect-host implementors while executing or
-    /// replaying a runtime effect.
-    pub fn into_await_event_options(
-        mut self,
-    ) -> Result<RuntimeAwaitEventOptions, RuntimeEffectControllerError> {
-        // The substrate answers the wait itself: no recorded body.
-        self.issued.unrecorded();
-        match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
-                controls:
-                    WaitControls {
-                        cancellation,
-                        observe_turn_cancel,
-                        turn_cancel_scope,
-                        ..
-                    },
-
-                clock,
-            }) => Ok(RuntimeAwaitEventOptions {
-                cancellation,
-
-                clock,
-                observe_turn_cancel,
-                turn_cancel_scope,
-            }),
-            _ => Ok(RuntimeAwaitEventOptions {
-                cancellation: CancellationToken::new(),
-
-                clock: Arc::new(crate::SystemClock),
-                observe_turn_cancel: false,
-                turn_cancel_scope: None,
-            }),
-        }
-    }
-
     /// Consumes a local executor for effect-host implementors, returning sleep options only when
     /// the effect was configured for sleep.
     pub fn into_sleep_options(mut self) -> RuntimeSleepOptions {

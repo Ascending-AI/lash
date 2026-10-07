@@ -10,6 +10,7 @@ mod intent_executor;
 mod pending_resolver;
 mod preparation;
 mod production;
+pub use production::parked_call_output;
 mod realization;
 mod retry;
 pub use production::{CellCall, CellHostCalls, CellMember, CellMembers, HostCall};

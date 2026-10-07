@@ -1245,24 +1245,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::durability::ProcessTurnCancellation| {
         let _ = &value.scope;
     });
-    // W0414: lash::durability::RuntimeAwaitEventOptions [struct]
-    type_witness::<lash::durability::RuntimeAwaitEventOptions>();
-    // W0415: lash::durability::RuntimeAwaitEventOptions::cancellation [field]
-    field_witness(|value: &lash::durability::RuntimeAwaitEventOptions| {
-        let _ = &value.cancellation;
-    });
-    // W0416: lash::durability::RuntimeAwaitEventOptions::clock [field]
-    field_witness(|value: &lash::durability::RuntimeAwaitEventOptions| {
-        let _ = &value.clock;
-    });
-    // W0418: lash::durability::RuntimeAwaitEventOptions::observe_turn_cancel [field]
-    field_witness(|value: &lash::durability::RuntimeAwaitEventOptions| {
-        let _ = &value.observe_turn_cancel;
-    });
-    // W0419: lash::durability::RuntimeAwaitEventOptions::turn_cancel_scope [field]
-    field_witness(|value: &lash::durability::RuntimeAwaitEventOptions| {
-        let _ = &value.turn_cancel_scope;
-    });
     // W0420: lash::durability::RuntimeSleepOptions [struct]
     type_witness::<lash::durability::RuntimeSleepOptions>();
     // W0421: lash::durability::RuntimeSleepOptions::cancellation [field]
@@ -1399,10 +1381,6 @@ fn drain_area_witnesses() {
     fn meth_0479<T: lash::sync::MutexExt<()>>(_: &T) {
         let _ = T::try_lock_recover;
     }
-    // W0481: lash::durability::ProcessLocalExecution::effect_controller [field]
-    field_witness(|value: &lash::durability::ProcessLocalExecution| {
-        let _ = &value.effect_controller;
-    });
     // W0485: lash::runtime::ExecutionScope::from_journal_key [function]
     let _ = lash::runtime::ExecutionScope::from_journal_key;
     // W0506: lash::durability::CanonicalRuntimeEffectEnvelope::json [function]

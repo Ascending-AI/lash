@@ -245,7 +245,6 @@ pub enum CommandSubKey<'a> {
         call_id: crate::ToolCallId,
     },
     ProcessStart(&'a str),
-    ProcessSubscribeTerminal(&'a str),
     ProcessAwait(&'a str),
     AggregateChild(&'a str),
 }
@@ -258,7 +257,6 @@ impl<'a> CommandSubKey<'a> {
     const AWAIT: &'static str = "await";
     const CANCEL_WORK: &'static str = "cancel-work";
     const PROCESS_START: &'static str = "process:start:";
-    const PROCESS_SUBSCRIBE_TERMINAL: &'static str = "process:subscribe-terminal:";
     const PROCESS_AWAIT: &'static str = "process:await:";
     const CHILD: &'static str = "child:";
 
@@ -274,10 +272,6 @@ impl<'a> CommandSubKey<'a> {
             (
                 Self::PROCESS_START,
                 Self::ProcessStart as fn(&'a str) -> Self,
-            ),
-            (
-                Self::PROCESS_SUBSCRIBE_TERMINAL,
-                Self::ProcessSubscribeTerminal,
             ),
             (Self::PROCESS_AWAIT, Self::ProcessAwait),
             (Self::CHILD, Self::AggregateChild),
@@ -328,9 +322,6 @@ impl std::fmt::Display for CommandSubKey<'_> {
             Self::ToolAwait { call_id } => write!(f, "{call_id}:{}", Self::AWAIT),
             Self::ToolCancelWork { call_id } => write!(f, "{call_id}:{}", Self::CANCEL_WORK),
             Self::ProcessStart(payload) => write!(f, "{}{payload}", Self::PROCESS_START),
-            Self::ProcessSubscribeTerminal(payload) => {
-                write!(f, "{}{payload}", Self::PROCESS_SUBSCRIBE_TERMINAL)
-            }
             Self::ProcessAwait(payload) => write!(f, "{}{payload}", Self::PROCESS_AWAIT),
             Self::AggregateChild(payload) => write!(f, "{}{payload}", Self::CHILD),
         }
@@ -770,7 +761,6 @@ mod tests {
                 call_id: call_id.clone(),
             },
             CommandSubKey::ProcessStart("start:key"),
-            CommandSubKey::ProcessSubscribeTerminal("process:id:wait:key"),
             CommandSubKey::ProcessAwait("process:id"),
             CommandSubKey::AggregateChild("0"),
             CommandSubKey::AggregateChild("0:nested:row"),

@@ -131,24 +131,6 @@ pub trait ProcessService: Send + Sync {
         self.await_process(process_id, scope).await
     }
 
-    /// Returns an observed terminal, or `None` once the boundary has armed
-    /// `key`. An observed terminal lets the caller settle without opening a wait.
-    ///
-    /// The default refuses: a service that cannot observe process terminals
-    /// must not silently accept responsibility for a wait it will never
-    /// resolve, which would hang the parked call forever.
-    async fn attach_process_terminal(
-        &self,
-        process_id: &ProcessId,
-        key: &crate::AwaitEventKey,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<Option<ProcessAwaitOutput>, PluginError> {
-        let _ = (process_id, key, scope);
-        Err(PluginError::Session(
-            "arming a process terminal is unavailable in this service".to_string(),
-        ))
-    }
-
     /// Releases a parked call's hold on the process whose terminal it
     /// consumed (ADR 0116 §3.6), keyed by the call's completion key id.
     ///

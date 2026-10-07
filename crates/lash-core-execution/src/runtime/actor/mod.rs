@@ -16,12 +16,10 @@
 //! | [`round`] | V0, then L4 |
 //! | [`ingress`] | L3s |
 //! | [`waits`], `wait_effects.rs` | L5 |
-//! | `await_event_legacy.rs` | L3, L4, L6 (deleted with their ports) |
 //! | [`process`] | L6 |
 //! | [`vm`] | V0, then L7 |
 //! | [`projection`] | L7p |
 
-mod await_event_legacy;
 mod core;
 pub mod ingress;
 pub mod journal;

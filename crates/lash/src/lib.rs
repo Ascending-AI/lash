@@ -1172,9 +1172,9 @@ pub mod durability {
     pub use lash_core::runtime::{
         CanonicalRuntimeEffectEnvelope, EffectJournalIdentity, EffectJournalRetirement,
         EffectRetirementGate, HostStartAdmission, ProcessLocalExecution, ProcessOutcomeObserver,
-        ProcessTurnCancellation, RuntimeAwaitEventOptions, RuntimeEffectReplayTrace, RuntimeReplay,
-        RuntimeReplayAttribution, RuntimeSleepOptions, RuntimeSubject, SegmentProgress,
-        ToolAttemptLaunch, TriggerLocalExecution,
+        ProcessTurnCancellation, RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution,
+        RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ToolAttemptLaunch,
+        TriggerLocalExecution,
     };
     /// Durable group and journal values returned by effect-host implementors.
     pub use lash_core::runtime::{JournalReplay, ProcessDriveStep, RecordedKeyRange};

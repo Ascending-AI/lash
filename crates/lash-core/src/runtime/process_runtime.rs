@@ -118,6 +118,48 @@ impl ProcessRuntimeContext {
     }
 }
 
+/// The tools a process's steps run: the catalog they resolve against, and
+/// the round tools that pin a catalog tool's policy and limit and run its
+/// body through the tool dispatch a turn's round runs on.
+pub struct ProcessStepTools {
+    /// The process's own plugin session's catalog.
+    pub catalog: Arc<crate::ToolCatalog>,
+    /// The round tools over it, owned by the process.
+    pub tools: Arc<dyn lash_core_execution::runtime::actor::round::RoundTools>,
+}
+
+impl ProcessRuntimeContext {
+    /// The catalog this runtime's process's steps resolve against: its own
+    /// plugin session's tools.
+    ///
+    /// # Errors
+    ///
+    /// The surface does not resolve.
+    pub fn step_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
+        self.services.process_step_catalog()
+    }
+
+    /// The tools `process`'s steps run under `cx`, the process actor's
+    /// claimed context.
+    ///
+    /// # Errors
+    ///
+    /// `process` is not this runtime's, or its surface does not resolve.
+    pub fn step_tools(
+        &self,
+        cx: crate::ActorContext,
+        process: &crate::ProcessRecord,
+    ) -> Result<ProcessStepTools, crate::PluginError> {
+        if process.id != self.process_id {
+            return Err(crate::PluginError::attempt_fault(format!(
+                "the runtime of process `{}` cannot run process `{}`",
+                self.process_id, process.id
+            )));
+        }
+        self.services.process_step_tools(cx, process)
+    }
+}
+
 /// Everything one process runtime is built from.
 struct ProcessRuntimeBuild {
     process_id: crate::ProcessId,

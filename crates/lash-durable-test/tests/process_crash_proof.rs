@@ -46,7 +46,7 @@ use std::time::Duration;
 
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::{
-    self, Material, PolicyView, Recovery, SettledOutput, ToolBody,
+    self, Material, PolicyView, Recovery, SettledOutput,
 };
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
@@ -266,8 +266,9 @@ fn policy(tool: &ToolId) -> ExecutionPolicy {
     }
 }
 
+#[async_trait::async_trait]
 impl ProcessSteps for ProofSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &ProcessRecord,
         step: &StepRequest,
@@ -300,46 +301,50 @@ impl ProcessSteps for ProofSteps {
 
     fn body(
         &self,
+
+        _cx: &lash_core_execution::ActorContext,
         process: &ProcessRecord,
         step: &StepRequest,
         execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-    ) -> ToolBody {
-        let call = execution.call();
-        let world = Arc::clone(&self.world);
-        let database = Arc::clone(&self.database);
-        let process = process.id.clone();
-        let tool = step.admitted_tool(KIND).as_str().to_owned();
-        let call = call.clone();
-        let stagger = self.stagger.clone();
-        Box::new(move |_token| {
-            // Entered: noted before anything can stop the body.
-            let entry = {
-                let mut entries = world.entries.lock_recover();
-                entries.push((call.clone(), tool.clone()));
-                entries
-                    .iter()
-                    .filter(|(_, entered)| *entered == tool)
-                    .count()
-            };
-            Box::pin(async move {
-                if let Some(clock) = stagger {
-                    lash_core_ids::clock::Clock::sleep(&*clock, staggered(&tool, entry)).await;
-                }
-                let admitted = database
-                    .run_records(&OwnerKey::Process(process.clone()))
-                    .await
-                    .is_ok_and(|rows| rows.iter().any(|row| row.call.as_ref() == Some(&call)));
-                if !admitted {
-                    world.unadmitted.lock_recover().push((call.clone(), tool));
-                }
-                let output = json!({ "ok": true }).to_string();
-                SettledOutput::Completed(Material::journal_local(
-                    MaterialOwner::Process {
-                        process_id: process,
-                    },
-                    MaterialRole::AttemptOutput,
-                    output,
-                ))
+    ) -> lash_core_execution::runtime::actor::round::MemberBody {
+        lash_core_execution::runtime::actor::round::member_body({
+            let call = execution.call();
+            let world = Arc::clone(&self.world);
+            let database = Arc::clone(&self.database);
+            let process = process.id.clone();
+            let tool = step.admitted_tool(KIND).as_str().to_owned();
+            let call = call.clone();
+            let stagger = self.stagger.clone();
+            Box::new(move |_token| {
+                // Entered: noted before anything can stop the body.
+                let entry = {
+                    let mut entries = world.entries.lock_recover();
+                    entries.push((call.clone(), tool.clone()));
+                    entries
+                        .iter()
+                        .filter(|(_, entered)| *entered == tool)
+                        .count()
+                };
+                Box::pin(async move {
+                    if let Some(clock) = stagger {
+                        lash_core_ids::clock::Clock::sleep(&*clock, staggered(&tool, entry)).await;
+                    }
+                    let admitted = database
+                        .run_records(&OwnerKey::Process(process.clone()))
+                        .await
+                        .is_ok_and(|rows| rows.iter().any(|row| row.call.as_ref() == Some(&call)));
+                    if !admitted {
+                        world.unadmitted.lock_recover().push((call.clone(), tool));
+                    }
+                    let output = json!({ "ok": true }).to_string();
+                    SettledOutput::Completed(Material::journal_local(
+                        MaterialOwner::Process {
+                            process_id: process,
+                        },
+                        MaterialRole::AttemptOutput,
+                        output,
+                    ))
+                })
             })
         })
     }

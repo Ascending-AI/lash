@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use lash_core_execution::runtime::actor::round::{Material, SettledOutput, ToolBody};
+use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
@@ -231,8 +231,9 @@ impl WorkerSteps {
     }
 }
 
+#[async_trait::async_trait]
 impl ProcessSteps for WorkerSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &ProcessRecord,
         step: &StepRequest,
@@ -266,43 +267,47 @@ impl ProcessSteps for WorkerSteps {
 
     fn body(
         &self,
+
+        _cx: &lash_core_execution::ActorContext,
         process: &ProcessRecord,
         step: &StepRequest,
         execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-    ) -> ToolBody {
-        let call = execution.call();
-        let witness = self.witness.clone();
-        let process = process.id.clone();
-        let tool = step.admitted_tool(KIND).as_str().to_owned();
-        let call = call.to_string();
-        Box::new(move |_token| {
-            Box::pin(async move {
-                witness.entered(&call, &tool).await;
-                report(
-                    witness.node(),
-                    Event::Body {
-                        call: call.clone(),
-                        tool: tool.clone(),
-                        phase: "entered".to_owned(),
-                    },
-                );
-                witness.returned(&call, &tool).await;
-                report(
-                    witness.node(),
-                    Event::Body {
-                        call,
-                        tool,
-                        phase: "returned".to_owned(),
-                    },
-                );
-                let output = json!({ "ok": true }).to_string();
-                SettledOutput::Completed(Material::journal_local(
-                    MaterialOwner::Process {
-                        process_id: process,
-                    },
-                    MaterialRole::AttemptOutput,
-                    output,
-                ))
+    ) -> lash_core_execution::runtime::actor::round::MemberBody {
+        lash_core_execution::runtime::actor::round::member_body({
+            let call = execution.call();
+            let witness = self.witness.clone();
+            let process = process.id.clone();
+            let tool = step.admitted_tool(KIND).as_str().to_owned();
+            let call = call.to_string();
+            Box::new(move |_token| {
+                Box::pin(async move {
+                    witness.entered(&call, &tool).await;
+                    report(
+                        witness.node(),
+                        Event::Body {
+                            call: call.clone(),
+                            tool: tool.clone(),
+                            phase: "entered".to_owned(),
+                        },
+                    );
+                    witness.returned(&call, &tool).await;
+                    report(
+                        witness.node(),
+                        Event::Body {
+                            call,
+                            tool,
+                            phase: "returned".to_owned(),
+                        },
+                    );
+                    let output = json!({ "ok": true }).to_string();
+                    SettledOutput::Completed(Material::journal_local(
+                        MaterialOwner::Process {
+                            process_id: process,
+                        },
+                        MaterialRole::AttemptOutput,
+                        output,
+                    ))
+                })
             })
         })
     }

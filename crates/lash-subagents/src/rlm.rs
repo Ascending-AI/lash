@@ -380,7 +380,19 @@ fn spawn_agent_definition(capability_names: &[String], examples: Vec<String>) ->
     .with_output_from_input_schema("output", None)
     // The child runs as a declared process start the call parks on.
     .with_declaration(lash_core::ToolDeclaration::deferring().with_intents([lash_core::ToolIntentKind::StartProcess]))
+    // The body's one effect is that start, under a key derived from the
+    // call: a rerun after a crash gets the child it registered back, so the
+    // call is rerun rather than settled as interrupted.
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        SPAWN_ATTEMPTS,
+        0,
+        0,
+    ))
 }
+
+/// How many times a `spawn_agent` call's body may run: once, and again
+/// after each of two crashes.
+const SPAWN_ATTEMPTS: std::num::NonZeroU32 = std::num::NonZeroU32::MIN.saturating_add(2);
 
 fn capability_detail_for_tool_description(capability_names: &[String]) -> String {
     if capability_names.len() == 1 {

@@ -1086,8 +1086,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             self.dispatch.process_engines.clone(),
             crate::runtime::HostStartAdmission::default(),
         )
-        .with_process_attachments(Arc::clone(self.attachment_store.referrers()))
-        .with_process_effect_controller(scoped.clone());
+        .with_process_attachments(Arc::clone(self.attachment_store.referrers()));
         let outcome = scoped.process_effect(envelope, local_executor).await?;
         match outcome.into_process()? {
             crate::ProcessEffectOutcome::Signal { event } => Ok(*event),

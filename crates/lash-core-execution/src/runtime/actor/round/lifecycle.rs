@@ -104,6 +104,15 @@ impl From<SettledOutput> for MemberResult {
 pub type MemberBody =
     Box<dyn FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = MemberResult> + Send>> + Send>;
 
+/// The member body of `body`, whose answer is its output alone: no
+/// store-local effect, and no process whose terminal it awaits.
+pub fn member_body(body: super::ToolBody) -> MemberBody {
+    Box::new(move |token| {
+        let running = body(token);
+        Box::pin(async move { MemberResult::from(running.await) })
+    })
+}
+
 /// Where an owner's member bodies come from: a round's catalog tools, or a
 /// process's steps.
 pub trait MemberBodies: Send + Sync {

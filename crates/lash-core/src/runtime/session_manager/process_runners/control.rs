@@ -1,5 +1,4 @@
 use super::*;
-use crate::ActorContext;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -59,7 +58,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         execution_context: crate::ProcessExecutionContext,
     ) -> Result<crate::StagedProcessStart, crate::PluginError> {
         Ok(self
-            .local_executor(Some(self.scoped_effect_controller.clone()))
+            .local_executor()
             .into_process()?
             .stage_start(registration, observers, execution_context)
             .await?)
@@ -71,7 +70,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         signal: &crate::ProcessSignal,
     ) -> Result<crate::StoreLocalEffect, crate::PluginError> {
         Ok(self
-            .local_executor(Some(self.scoped_effect_controller.clone()))
+            .local_executor()
             .into_process()?
             .stage_signal(signal)
             .await?)
@@ -81,10 +80,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         clippy::expect_used,
         reason = "the process service requires its host's process-work wiring"
     )]
-    fn local_executor(
-        &self,
-        owned_controller: Option<ActorContext>,
-    ) -> crate::RuntimeEffectLocalExecutor<'static> {
+    fn local_executor(&self) -> crate::RuntimeEffectLocalExecutor<'static> {
         let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
             self.current
@@ -111,9 +107,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 .attachment_store
                 .referrers(),
         ));
-        if let Some(owned_controller) = owned_controller {
-            local_executor = local_executor.with_process_effect_controller(owned_controller);
-        }
         if let Some(turn_cancellation) = self.turn_cancellation.clone() {
             local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
         }
@@ -130,21 +123,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
         {
             crate::ProcessEffectOutcome::Await { output } => Ok(*output),
             _ => Err(wrong_process_outcome("await")),
-        }
-    }
-
-    async fn attach_process_terminal(
-        &self,
-        process_id: crate::ProcessId,
-        key: crate::AwaitEventKey,
-    ) -> Result<Option<crate::ProcessAwaitOutput>, crate::PluginError> {
-        match self
-            .run(crate::ProcessCommand::AttachTerminal { process_id, key })
-            .await?
-        {
-            crate::ProcessEffectOutcome::AttachTerminal => Ok(None),
-            crate::ProcessEffectOutcome::Await { output } => Ok(Some(*output)),
-            _ => Err(wrong_process_outcome("attach-terminal")),
         }
     }
 
@@ -265,7 +243,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             invocation,
             crate::RuntimeEffectCommand::process(command),
         );
-        let local_executor = self.local_executor(Some(scoped.clone()));
+        let local_executor = self.local_executor();
         let outcome = scoped.process_effect(envelope, local_executor).await?;
         outcome.into_process().map_err(crate::PluginError::from)
     }
@@ -595,20 +573,6 @@ impl ProcessCapability {
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         self.command_runner(current, &scope)?
             .await_process_ref(process_id)
-            .await
-    }
-
-    /// Observe a terminal through the journaled process seam, or arm it as
-    /// the resolver of `key` and return `None` without waiting.
-    pub(in crate::runtime::session_manager) async fn attach_process_terminal(
-        &self,
-        current: &CurrentOwnerCapability,
-        process_id: crate::ProcessId,
-        key: crate::AwaitEventKey,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Option<crate::ProcessAwaitOutput>, crate::PluginError> {
-        self.command_runner(current, &scope)?
-            .attach_process_terminal(process_id, key)
             .await
     }
 

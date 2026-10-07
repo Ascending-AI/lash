@@ -36,7 +36,7 @@
 //! steps already running to commit their outcomes, then releases the actor
 //! `ready` under `drain.release`, for a node of the next build to claim.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core_store::tool_run::{
@@ -68,7 +68,7 @@ use crate::runtime::actor::waits::{self, Resolution, WaitDeadline, WaitKind, Wai
 use crate::runtime::process::engine_state::{
     EngineAction, EngineEvent, EngineState, HostWaitKind, StepRequest,
 };
-use crate::runtime::process::steps::ProcessSteps;
+use crate::runtime::process::steps::{ProcessSteps, StepRefusal};
 use crate::{
     ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
     ProcessRecord, ProcessSignal, ToolCallId,
@@ -184,13 +184,15 @@ impl Activation for ProcessActivation {
                 }
             }
         };
+        let steps_cx = self.steps_context(&owned, &process);
         let bodies = Arc::new(StepBodies {
             steps: Arc::clone(&self.steps),
+            cx: steps_cx.clone(),
             seen: Mutex::default(),
         });
         let mut live = Live {
             lifecycle: Lifecycle::new(
-                &self.steps_context(&owned, &process),
+                &steps_cx,
                 PolicyView::default(),
                 Arc::clone(&bodies) as Arc<dyn MemberBodies>,
                 CommitLabel::STEP_OUTCOME,
@@ -385,12 +387,13 @@ impl ProcessActivation {
         let rows = reads
             .run_records(&OwnerKey::Process(process.clone()))
             .await?;
-        let policies = PolicyView::new(driver.steps.values().filter_map(|step| {
-            self.steps
-                .admit(&record, &step.request, millis(now))
-                .ok()
-                .map(|admission| (step.request.admitted_tool(kind), admission.policy))
-        }));
+        let mut policies = Vec::with_capacity(driver.steps.len());
+        for step in driver.steps.values() {
+            if let Ok(admission) = self.steps.admit(&record, &step.request, millis(now)).await {
+                policies.push((step.request.admitted_tool(kind), admission.policy));
+            }
+        }
+        let policies = PolicyView::new(policies);
         let fold = round::fold(&rows, &policies)
             .map_err(|error| corrupt("a process's run records", error))?;
         live.lifecycle.declare(policies);
@@ -477,16 +480,18 @@ impl ProcessActivation {
             return self.park(owned, tx, &reason).await;
         }
         let mut fresh = Vec::new();
-        let applied = self.apply(
-            &mut tx,
-            process,
-            &record,
-            row.state_rev,
-            &mut driver,
-            action,
-            now,
-            &mut fresh,
-        )?;
+        let applied = self
+            .apply(
+                &mut tx,
+                process,
+                &record,
+                row.state_rev,
+                &mut driver,
+                action,
+                now,
+                &mut fresh,
+            )
+            .await?;
         if let Some(outcome) = applied {
             record_terminal(&mut tx, process, &outcome)?;
             tx.ack_seen();
@@ -891,7 +896,7 @@ impl ProcessActivation {
         clippy::too_many_arguments,
         reason = "the transition and the rows its admission is recorded against"
     )]
-    fn apply(
+    async fn apply(
         &self,
         tx: &mut ActorTx,
         process: &ProcessId,
@@ -917,6 +922,35 @@ impl ProcessActivation {
         driver.blocked = None;
         match action {
             EngineAction::Steps(requests) => {
+                let tools = requests
+                    .iter()
+                    .filter(|request| matches!(request, StepRequest::Tool { .. }))
+                    .count();
+                if tools > 0 {
+                    let limit = match self.steps.max_tool_calls(record).await {
+                        Ok(limit) => limit,
+                        Err(StepRefusal::Unavailable { reason, .. }) => {
+                            return Err(unavailable(reason));
+                        }
+                        Err(refusal) => return Ok(Some(refused(refusal.to_string()))),
+                    };
+                    // A run is held whole while any of its steps is in
+                    // flight; a consumed run is held no more.
+                    let live: BTreeSet<u64> = driver.steps.values().map(|step| step.run).collect();
+                    driver.held.retain(|run, _| live.contains(run));
+                    let counted = driver.held.values().sum::<usize>();
+                    if let Some(limit) = limit
+                        && counted.saturating_add(tools) > limit.get()
+                    {
+                        return Ok(Some(tool_call_limit(crate::ToolCallLimitExceeded {
+                            scope: crate::ToolCallLimitScope::Process,
+                            limit,
+                            counted,
+                            requested: tools,
+                        })));
+                    }
+                    driver.held.insert(driver.next_run, tools);
+                }
                 let run = driver.next_run;
                 driver.next_run += 1;
                 let admission = ToolCallAdmission::process("", process.clone());
@@ -928,8 +962,13 @@ impl ProcessActivation {
                             request.step().0
                         ))));
                     }
-                    let admitted = match self.steps.admit(record, &request, millis(now)) {
+                    let admitted = match self.steps.admit(record, &request, millis(now)).await {
                         Ok(admitted) => admitted,
+                        // Not a refusal: the pass did not commit, and the
+                        // next one asks again.
+                        Err(StepRefusal::Unavailable { reason, .. }) => {
+                            return Err(unavailable(reason));
+                        }
                         Err(refusal) => return Ok(Some(refused(refusal.to_string()))),
                     };
                     let call = admission.call_id(&[ToolCallPosition::ProcessStep {
@@ -1072,6 +1111,26 @@ fn commit_refused(message: &str) -> crate::ProcessOutcome {
 }
 
 /// A process ended because lash refused what its engine asked for.
+/// The terminal of a process refused a round of tool steps past its
+/// `max_tool_calls`: the typed refusal itself, as a cell's call settles with
+/// it (FIG-4546).
+fn tool_call_limit(exceeded: crate::ToolCallLimitExceeded) -> crate::ProcessOutcome {
+    let mut failure = crate::session::tool_execution::tool_call_limit_failure(exceeded);
+    failure.raw = Some(crate::ToolValue::untrusted_json(
+        serde_json::json!({ "tool_call_limit": exceeded }),
+    ));
+    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(failure))
+}
+
+/// A step's declaration that could not be read now: the pass commits
+/// nothing, and the next one asks again.
+fn unavailable(reason: String) -> DurableError {
+    DurableError::Store(StoreFailure {
+        kind: StoreFailureKind::Unavailable,
+        message: reason,
+    })
+}
+
 fn refused(message: String) -> crate::ProcessOutcome {
     crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
         crate::ToolFailure::runtime(
@@ -1116,6 +1175,8 @@ fn steps_failure(error: RoundError) -> DurableError {
 /// the last pass read them.
 pub(super) struct StepBodies {
     steps: Arc<dyn ProcessSteps>,
+    /// The context step bodies run under: the process actor's claimed one.
+    cx: ActorContext,
     seen: Mutex<SeenSteps>,
 }
 
@@ -1158,10 +1219,7 @@ fn unknown_step() -> SettledOutput {
 impl MemberBodies for StepBodies {
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {
         match self.step(execution.call()) {
-            Some((record, step)) => {
-                let body = self.steps.body(&record, &step, execution);
-                Box::new(move |token| Box::pin(async move { body(token).await.into() }))
-            }
+            Some((record, step)) => self.steps.body(&self.cx, &record, &step, execution),
             // The lifecycle runs only admitted steps; a body for any other
             // is never asked for. Answer as a stop rather than run anything.
             None => Box::new(|_| Box::pin(async { unknown_step().into() })),

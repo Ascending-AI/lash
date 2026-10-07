@@ -1001,11 +1001,9 @@ impl<'run> crate::AttemptContext<'run> {
 }
 
 /// Run one effect through its local executor with no journal: the execution
-/// half of a controller-owned test double, which keeps its own journal and
-/// answers its own await events.
+/// half of a controller-owned test double, which keeps its own journal.
 ///
-/// Await-event commands are refused, because answering them needs a promise
-/// authority this function does not have. A process command runs on a task of
+/// A process command runs on a task of
 /// its own, as a host runs it, so a panicking process is contained as a typed
 /// failure rather than unwinding the double.
 pub async fn execute_effect_locally(
@@ -1013,13 +1011,6 @@ pub async fn execute_effect_locally(
     local_executor: crate::RuntimeEffectLocalExecutor<'_>,
 ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
     match envelope.command {
-        crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
-        | crate::RuntimeEffectCommand::AwaitEvent { .. } => {
-            Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::AwaitEventUnsupported,
-                "a locally executed effect has no await-event authority",
-            ))
-        }
         crate::RuntimeEffectCommand::Process { command } => {
             if matches!(
                 command.as_ref(),
@@ -1531,8 +1522,7 @@ impl EffectBackedProcessService {
             process_engine_fixture(),
             crate::runtime::HostStartAdmission::default(),
         )
-        .with_process_env_store(Arc::clone(&self.process_env_store))
-        .with_process_effect_controller(scoped.clone());
+        .with_process_env_store(Arc::clone(&self.process_env_store));
         let outcome = scoped
             .process_effect(
                 crate::RuntimeEffectEnvelope::new(
@@ -1547,10 +1537,7 @@ impl EffectBackedProcessService {
 
     /// The process executor production stages a call's starts and signals
     /// on, over this service's stores.
-    fn stager(
-        &self,
-        scope: &crate::ProcessOpScope<'_>,
-    ) -> Result<crate::runtime::ProcessLocalExecution, crate::PluginError> {
+    fn stager(&self) -> Result<crate::runtime::ProcessLocalExecution, crate::PluginError> {
         crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
@@ -1560,7 +1547,6 @@ impl EffectBackedProcessService {
             crate::runtime::HostStartAdmission::default(),
         )
         .with_process_env_store(Arc::clone(&self.process_env_store))
-        .with_process_effect_controller(scope.effect_controller.clone())
         .into_process()
         .map_err(crate::PluginError::from)
     }
@@ -1621,7 +1607,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         let observers = request.observers.clone();
         let registration = admitted_registration(request.into_registration(), &scope)?;
         Ok(self
-            .stager(&scope)?
+            .stager()?
             .stage_start(
                 registration,
                 observers.into_iter().collect(),
@@ -1771,9 +1757,9 @@ impl crate::ProcessService for EffectBackedProcessService {
         &self,
         _owner: &crate::RuntimeOwner,
         signal: &crate::ProcessSignal,
-        scope: crate::ProcessOpScope<'_>,
+        _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::runtime::actor::round::StoreLocalEffect, crate::PluginError> {
-        Ok(self.stager(&scope)?.stage_signal(signal).await?)
+        Ok(self.stager()?.stage_signal(signal).await?)
     }
 
     async fn emit_event(
@@ -1980,15 +1966,6 @@ pub struct MockSessionManager {
     /// backend, and one that does hands in its backend's registry.
     pub process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
     pub created: Mutex<Vec<SessionCreateRequest>>,
-    /// Process terminals armed through
-    /// [`ProcessService::attach_process_terminal`](crate::ProcessService::attach_process_terminal),
-    /// in arming order.
-    ///
-    /// This mock cannot observe a real terminal, so it records the arming and
-    /// leaves the resolution to the test standing in for the process: a test
-    /// that resolves the recorded key is the terminal, and one that never does
-    /// is a process that never ended.
-    pub terminal_attachments: Mutex<Vec<(crate::ProcessId, crate::AwaitEventKey)>>,
 }
 
 impl Default for MockSessionManager {
@@ -2000,7 +1977,6 @@ impl Default for MockSessionManager {
             tool_registry: None,
             process_registry: None,
             created: Mutex::new(Vec::new()),
-            terminal_attachments: Mutex::new(Vec::new()),
         }
     }
 }
@@ -2073,18 +2049,6 @@ impl MockSessionManager {
 
 #[async_trait::async_trait]
 impl crate::ProcessService for MockSessionManager {
-    async fn attach_process_terminal(
-        &self,
-        process_id: &crate::ProcessId,
-        key: &crate::AwaitEventKey,
-        _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Option<crate::ProcessAwaitOutput>, PluginError> {
-        self.terminal_attachments
-            .lock_recover()
-            .push((process_id.clone(), key.clone()));
-        Ok(None)
-    }
-
     async fn stage_recorded_start(
         &self,
         owner: &crate::RuntimeOwner,

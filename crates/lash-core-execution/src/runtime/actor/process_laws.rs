@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use super::process::ProcessActivation;
 use super::wait_laws::{LawBroken, LawResult};
 use crate::runtime::actor::round::{
-    self, AdmittedExecution, Material, MemberState, PolicyView, SettledOutput, ToolBody,
+    self, AdmittedExecution, Material, MemberState, PolicyView, SettledOutput,
 };
 use crate::runtime::actor::waits::{self, Resolution, WaitDeadline};
 use crate::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
@@ -410,8 +410,9 @@ fn step_output(process: &ProcessId, text: &str) -> Material {
     )
 }
 
+#[async_trait::async_trait]
 impl ProcessSteps for LawSteps {
-    fn admit(
+    async fn admit(
         &self,
         _process: &ProcessRecord,
         step: &StepRequest,
@@ -456,54 +457,60 @@ impl ProcessSteps for LawSteps {
 
     fn body(
         &self,
+
+        _cx: &crate::ActorContext,
         process: &ProcessRecord,
         step: &StepRequest,
         execution: &AdmittedExecution,
-    ) -> ToolBody {
-        let tool = step_tool(step).to_owned();
-        let owner = process.id.clone();
-        let tag = match process.input.as_ref() {
-            ProcessInput::Engine { payload, .. } => {
-                payload["tag"].as_str().unwrap_or_default().to_owned()
-            }
-            _ => String::new(),
-        };
-        let call = execution.call().clone();
-        let attempt = execution.attempt();
-        // A step that may park re-derives the key of the wait its admission
-        // pinned, as a round member does.
-        let key = execution
-            .draft()
-            .pinned_wait()
-            .and_then(|pinned| waits::host_key(&pinned.wait()).map(|key| (pinned.id, key)));
-        Box::new(move |_token| {
-            Box::pin(async move {
-                *STEP_ENTRIES
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .entry(call.as_str().to_owned())
-                    .or_default() += 1;
-                match tool.as_str() {
-                    LAW_FLAKY if attempt == 1 => SettledOutput::Failed(
-                        step_output(&owner, "failed once")
-                            .failure(KnownFailureReason::Reported, Some(10)),
-                    ),
-                    LAW_FLAKY => SettledOutput::Completed(step_output(
-                        &owner,
-                        &format!("succeeded on attempt {attempt}"),
-                    )),
-                    LAW_PARK => {
-                        let Some((wait, key)) = key else {
-                            return SettledOutput::Interrupted;
-                        };
-                        PARKED_KEYS
-                            .lock()
-                            .unwrap_or_else(PoisonError::into_inner)
-                            .insert(tag, key.as_str().to_owned());
-                        SettledOutput::Waiting(step_output(&owner, "parked").parked(wait.to_hex()))
-                    }
-                    _ => std::future::pending().await,
+    ) -> crate::runtime::actor::round::MemberBody {
+        crate::runtime::actor::round::member_body({
+            let tool = step_tool(step).to_owned();
+            let owner = process.id.clone();
+            let tag = match process.input.as_ref() {
+                ProcessInput::Engine { payload, .. } => {
+                    payload["tag"].as_str().unwrap_or_default().to_owned()
                 }
+                _ => String::new(),
+            };
+            let call = execution.call().clone();
+            let attempt = execution.attempt();
+            // A step that may park re-derives the key of the wait its admission
+            // pinned, as a round member does.
+            let key = execution
+                .draft()
+                .pinned_wait()
+                .and_then(|pinned| waits::host_key(&pinned.wait()).map(|key| (pinned.id, key)));
+            Box::new(move |_token| {
+                Box::pin(async move {
+                    *STEP_ENTRIES
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .entry(call.as_str().to_owned())
+                        .or_default() += 1;
+                    match tool.as_str() {
+                        LAW_FLAKY if attempt == 1 => SettledOutput::Failed(
+                            step_output(&owner, "failed once")
+                                .failure(KnownFailureReason::Reported, Some(10)),
+                        ),
+                        LAW_FLAKY => SettledOutput::Completed(step_output(
+                            &owner,
+                            &format!("succeeded on attempt {attempt}"),
+                        )),
+                        LAW_PARK => {
+                            let Some((wait, key)) = key else {
+                                return SettledOutput::Interrupted;
+                            };
+                            PARKED_KEYS
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .insert(tag, key.as_str().to_owned());
+                            SettledOutput::Waiting(
+                                step_output(&owner, "parked").parked(wait.to_hex()),
+                            )
+                        }
+                        _ => std::future::pending().await,
+                    }
+                })
             })
         })
     }

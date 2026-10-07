@@ -470,6 +470,11 @@ impl ProcessEngineRegistry {
         Ok(self.with_registration(registration))
     }
 
+    /// Every registered engine, by kind.
+    pub fn engines(&self) -> impl Iterator<Item = &Arc<dyn ProcessEngine>> {
+        self.engines.values()
+    }
+
     pub(crate) fn get(&self, kind: &str) -> Option<Arc<dyn ProcessEngine>> {
         self.engines.get(kind).cloned()
     }

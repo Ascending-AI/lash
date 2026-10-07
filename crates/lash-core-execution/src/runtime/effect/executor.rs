@@ -1,4 +1,3 @@
-use crate::ActorContext;
 use crate::ClockWallTime;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -45,20 +44,6 @@ use super::envelope::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
     RuntimeEffectOutcome,
 };
-
-/// Host controls attached to one external event wait.
-///
-/// Durable effect controllers consume these controls and translate them to
-/// their engine-native cancellation and timer primitives.
-pub struct RuntimeAwaitEventOptions {
-    pub cancellation: CancellationToken,
-
-    pub clock: Arc<dyn crate::Clock>,
-    /// Selects the durable turn-cancel race shape. Callers keep this stable
-    /// for a wait's lifetime (ADR 0132 §6).
-    pub observe_turn_cancel: bool,
-    pub turn_cancel_scope: Option<crate::ExecutionScope>,
-}
 
 /// Host controls attached to one sleep effect.
 pub struct RuntimeSleepOptions {
@@ -108,7 +93,6 @@ pub struct ProcessLocalExecution {
     /// session-turn start's default binding.
     pub host_start: Box<crate::runtime::HostStartAdmission>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
-    pub effect_controller: Option<ActorContext>,
     /// The attachment referrers a delivered terminal is acquired through
     /// before the receiver records it (ADR 0124). `None` on a host with no
     /// durable attachment store: its terminals deliver nothing to hold.
@@ -195,11 +179,6 @@ enum LocalTarget {
     Unavailable,
     SleepOnly {
         controls: WaitControls,
-        clock: Arc<dyn crate::Clock>,
-    },
-    ExternalWaitOptions {
-        controls: WaitControls,
-
         clock: Arc<dyn crate::Clock>,
     },
     Process(Box<ProcessLocalExecution>),
@@ -435,34 +414,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the native durable-wait path using the system clock for observation.
-    pub fn await_event(cancellation: CancellationToken) -> Self {
-        Self::await_event_with_clock(cancellation, Arc::new(crate::SystemClock))
-    }
-
-    /// Builds the native durable-wait path with an injected observation clock.
-    pub fn await_event_with_clock(
-        cancellation: CancellationToken,
-
-        clock: Arc<dyn crate::Clock>,
-    ) -> Self {
-        Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
-                controls: WaitControls {
-                    cancellation,
-                    observe_turn_cancel: true,
-                    turn_cancel_scope: None,
-                    transferable: false,
-                },
-
-                clock,
-            }),
-            replay_trace: None,
-            served_only: None,
-            issued: crate::trace::StepIssue::default(),
-        }
-    }
-
     /// Builds the native sleep path from the complete turn-cancel trio, so an
     /// in-workspace sleep cannot be journaled with a half-stamped one.
     pub(crate) fn sleep_under(wait: &TurnCancelWait, clock: Arc<dyn crate::Clock>) -> Self {
@@ -477,28 +428,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the native durable-wait path from the complete turn-cancel trio,
-    /// so an in-workspace wait cannot be journaled with a half-stamped one.
-    pub fn await_event_under(wait: &TurnCancelWait, clock: Arc<dyn crate::Clock>) -> Self {
-        Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
-                controls: wait.controls(),
-
-                clock,
-            }),
-            replay_trace: None,
-            served_only: None,
-            issued: crate::trace::StepIssue::default(),
-        }
-    }
-
     /// This is a wait-shape switch, not a live policy toggle: every attempt
     /// of one wait constructs the same value.
     pub fn with_turn_cancel_observation(mut self, observe_turn_cancel: bool) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(
-            LocalTarget::SleepOnly { controls, .. }
-            | LocalTarget::ExternalWaitOptions { controls, .. },
-        ) = &mut self.state
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::SleepOnly {
+            controls, ..
+        }) = &mut self.state
         {
             controls.observe_turn_cancel = observe_turn_cancel;
         }
@@ -508,10 +443,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// Adds the turn execution scope that effect-host implementors use to distinguish turn
     /// cancellation from an ordinary wait cancellation.
     pub fn with_turn_cancel_scope(mut self, scope: crate::ExecutionScope) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(
-            LocalTarget::SleepOnly { controls, .. }
-            | LocalTarget::ExternalWaitOptions { controls, .. },
-        ) = &mut self.state
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::SleepOnly {
+            controls, ..
+        }) = &mut self.state
         {
             controls.turn_cancel_scope = Some(scope);
         }
@@ -526,15 +460,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             &mut self.state
         {
             execution.turn_cancellation = Some(turn_cancellation);
-        }
-        self
-    }
-
-    pub fn with_process_effect_controller(mut self, controller: ActorContext) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
-            &mut self.state
-        {
-            execution.effect_controller = Some(controller);
         }
         self
     }
@@ -604,7 +529,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     process_engines,
                     host_start: Box::new(host_start),
                     turn_cancellation: None,
-                    effect_controller: None,
                     attachments: None,
                     outcome_observer: None,
                 },
@@ -933,15 +857,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 controls: WaitControls { cancellation, .. },
                 clock,
             }) => execute_local_sleep(envelope, cancellation, clock.as_ref()).await,
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
-                ..
-            }) => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                format!(
-                    "local await-event options cannot execute {} command directly",
-                    envelope.command.kind().as_str()
-                ),
-            )),
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Unavailable) => {
                 Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
