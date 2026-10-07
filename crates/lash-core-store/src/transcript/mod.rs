@@ -309,7 +309,9 @@ fn project_message(message: &Message) -> TranscriptProjectionOutcome {
     for part in message.parts.iter() {
         let rendered = part.render();
         if part.kind() == PartKind::Reasoning {
-            content.reasoning.push(rendered);
+            if !rendered.trim().is_empty() {
+                content.reasoning.push(rendered);
+            }
         } else if message
             .reply_marker
             .as_ref()
@@ -324,20 +326,29 @@ fn project_message(message: &Message) -> TranscriptProjectionOutcome {
         );
     }
     content.text = text.join("\n");
+    if content.reasoning.is_empty()
+        && !message.parts.is_empty()
+        && message
+            .parts
+            .iter()
+            .all(|part| part.kind() == PartKind::Reasoning)
+    {
+        return TranscriptProjectionOutcome::Suppress(SuppressionReason::EmptyContent);
+    }
     let kind = if message.reply_marker.is_some() {
         TranscriptRowKind::AssistantReply
     } else if message.role == MessageRole::User {
         TranscriptRowKind::User
     } else if message.role == MessageRole::Event {
         TranscriptRowKind::Event
-    } else if !content.reasoning.is_empty() {
-        TranscriptRowKind::Reasoning
     } else if message
         .parts
         .iter()
         .any(|part| matches!(part.kind(), PartKind::ToolCall | PartKind::ToolResult))
     {
         TranscriptRowKind::ToolCall
+    } else if !content.reasoning.is_empty() {
+        TranscriptRowKind::Reasoning
     } else {
         return TranscriptProjectionOutcome::Suppress(SuppressionReason::NoCommittedReply);
     };

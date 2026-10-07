@@ -1411,3 +1411,110 @@ fn node_timestamp_round_trips_fixed_width_utc_instants() {
         "2023-11-14T22:13:20.123000000Z"
     );
 }
+
+fn project_stored_assistant(id: &str, parts: Vec<Part>) -> crate::transcript::TranscriptProjection {
+    let node = SessionNodeRecord {
+        node_id: NodeId::fixture(id),
+        parent_node_id: None,
+        timestamp: "2026-10-08T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
+        payload: SessionNodePayload::Event {
+            event: SessionHistoryRecord::Conversation(crate::ConversationRecord::from_message(
+                Message {
+                    id: id.into(),
+                    role: MessageRole::Assistant,
+                    parts: shared_parts(parts),
+                    origin: None,
+                    reply_marker: None,
+                },
+            )),
+        },
+    };
+    let body = node
+        .encode_storage_body(crate::store::FleetFormat::current())
+        .expect("encode the stored conversation node");
+    let stored = SessionNodeRecord::decode_storage_body(id.into(), None, &body)
+        .expect("decode the stored conversation node");
+    let projection = crate::transcript::TranscriptProjection::from_records(
+        [&stored],
+        &crate::transcript::TranscriptProjectionOptions::default(),
+    )
+    .expect("project the stored conversation node");
+    // The shared renderer harness consumes these canonical records verbatim.
+    println!(
+        "FIG-5291 row={}",
+        serde_json::to_string(projection.rows()[0].record()).expect("serialize the canonical row")
+    );
+    projection
+}
+
+/// FIG-5291: opaque replay reasoning has no visible content, including whitespace.
+#[test]
+fn transcript_suppresses_blank_opaque_reasoning_as_empty_content() {
+    for (index, text) in ["", " \n\t", "\u{2003}"].into_iter().enumerate() {
+        let projection = project_stored_assistant(
+            &format!("blank-reasoning-{index}"),
+            vec![Part::reasoning(
+                "reasoning".into(),
+                text.into(),
+                Some(lash_sansio::llm::types::ProviderReasoningReplay {
+                    encrypted_content: Some("opaque-provider-replay".into()),
+                    ..Default::default()
+                }),
+            )],
+        );
+        assert_eq!(projection.rows().len(), 1);
+        assert_eq!(projection.visible().count(), 0);
+        assert_eq!(
+            projection.rows()[0].record().suppressed,
+            Some(crate::transcript::SuppressionReason::EmptyContent)
+        );
+    }
+}
+
+/// FIG-5291: tool calls own the row kind while reasoning accompanies that same row.
+#[test]
+fn transcript_reasoning_with_tool_call_is_one_tool_call_row() {
+    let projection = project_stored_assistant(
+        "reasoning-with-tool",
+        vec![
+            Part::reasoning("reasoning".into(), "Inspect the file first.".into(), None),
+            Part::tool_call(
+                "call".into(),
+                "{\"path\":\"notes.txt\"}".into(),
+                lash_sansio::ToolCallId::fixture("transcript-call"),
+                "provider-call".into(),
+                "read_file".into(),
+                None,
+            ),
+        ],
+    );
+    assert_eq!(projection.rows().len(), 1);
+    let rows = projection.visible().collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].kind, crate::transcript::TranscriptRowKind::ToolCall);
+    assert_eq!(rows[0].content.reasoning, ["Inspect the file first."]);
+    assert_eq!(rows[0].content.text, "{\"path\":\"notes.txt\"}");
+}
+
+/// FIG-5291: exposed reasoning retains its text and drops blank sibling parts.
+#[test]
+fn transcript_nonempty_reasoning_remains_a_reasoning_row() {
+    let projection = project_stored_assistant(
+        "nonempty-reasoning",
+        vec![
+            Part::reasoning("blank".into(), " \n\t".into(), None),
+            Part::reasoning("reasoning".into(), "  Consider the options.\n".into(), None),
+        ],
+    );
+    assert_eq!(projection.rows().len(), 1);
+    let rows = projection.visible().collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].kind,
+        crate::transcript::TranscriptRowKind::Reasoning
+    );
+    assert_eq!(rows[0].content.reasoning, ["  Consider the options.\n"]);
+    assert!(rows[0].content.text.is_empty());
+}
