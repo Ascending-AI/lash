@@ -106,6 +106,20 @@ pub trait RoundTools: Send + Sync {
     /// committed `output`, with the payload of the material it names.
     fn completed(&self, call: &PendingToolCall, output: &SettledOutput) -> CompletedCall;
 
+    /// Publish `state`, the plugin-state resolutions a member's committed
+    /// outcome carries, into the session's resident namespaces. See
+    /// [`MemberBodies::publish_state`](super::MemberBodies::publish_state).
+    ///
+    /// # Errors
+    ///
+    /// A resolution a namespace's frontier refuses.
+    fn publish_state(
+        &self,
+        _state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Ok(())
+    }
+
     /// The round's admission refusal, read from the catalog: when it refuses
     /// any member of `calls`, what every member answers instead, in declared
     /// order. A refused round's members settle at its admission and no body
@@ -259,6 +273,13 @@ impl MemberBodies for RoundCalls {
             Some(call) => self.tools.discharge(call, execution, parked, cancelled),
             None => Box::pin(async {}),
         }
+    }
+
+    fn publish_state(
+        &self,
+        state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.tools.publish_state(state)
     }
 
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {

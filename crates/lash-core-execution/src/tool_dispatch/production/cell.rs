@@ -392,4 +392,15 @@ impl MemberBodies for CellMembers {
             cancelled,
         ))
     }
+
+    fn publish_state(
+        &self,
+        state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.tools
+            .context
+            .dispatch()
+            .plugins
+            .publish_committed_state(state)
+    }
 }

@@ -16,7 +16,9 @@ pub use lash_core_store::tool_run::{
     PublicationOrdinal, ResolvedStateChange, StateCommand, StateCommandOrigin, StateCommandRefusal,
     StateFrontier, StateResolution, StateResolutionOutcome,
 };
-pub use publication::{EffectPublication, PluginStateEffect, StateReducer, StateReduction};
+pub use publication::{
+    EffectPublication, PluginStateEffect, StagedPluginState, StateReducer, StateReduction,
+};
 pub(crate) use publication::{Proposal, collect_proposals, propose, propose_all, record_effect};
 
 use lash_core_store::plugin_state::{

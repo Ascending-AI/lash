@@ -151,7 +151,9 @@ The execution record splits into a start and an outcome.
   effect is a lash store write (process start, trigger create or delete,
   signal send, child session spawn, the store half of intent realization)
   performs that write in the transaction that records its outcome. Its effect
-  is exactly once.
+  is exactly once. A tool's plugin-state resolutions are such an effect: they
+  ride its outcome record and publish into the resident namespace only from
+  that committed record (FIG-5266).
 - **Group commit.** Finished members commit in batches, one transaction per
   batch.
 

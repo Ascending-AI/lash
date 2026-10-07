@@ -22,7 +22,8 @@ pub(super) fn write(
     write_effect(tx, effect).map_err(|_| SettleRefusal::ForeignEffect(admitted.call().clone()))
 }
 
-/// Write `effect` on `tx`; an effect no store commits yet comes back.
+/// Write `effect` on `tx`; an effect no store commits yet comes back, and
+/// so does plugin state, which only an outcome's record carries.
 fn write_effect(tx: &mut ActorTx, effect: StoreLocalEffect) -> Result<(), StoreLocalEffect> {
     match effect {
         StoreLocalEffect::ProcessStart(rows) => {
@@ -38,7 +39,8 @@ fn write_effect(tx: &mut ActorTx, effect: StoreLocalEffect) -> Result<(), StoreL
         }
         effect @ (StoreLocalEffect::TriggerCreate(_)
         | StoreLocalEffect::TriggerDelete(_)
-        | StoreLocalEffect::ChildSessionSpawn(_)) => Err(effect),
+        | StoreLocalEffect::ChildSessionSpawn(_)
+        | StoreLocalEffect::PluginState(_)) => Err(effect),
     }
 }
 

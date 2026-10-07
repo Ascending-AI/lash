@@ -59,8 +59,9 @@ pub enum CallEnd {
         presentation: String,
         /// The process its declared start launches.
         launched: Option<ProcessId>,
-        /// The store-local effects its realization and its declared start
-        /// staged: they commit with the call's outcome.
+        /// The store-local effects its realization, its declared start and
+        /// its plugin-state resolutions staged: they commit with the call's
+        /// outcome.
         store_local: Vec<StoreLocalEffect>,
     },
     /// A check or the Run's cancel withheld the result.
@@ -464,8 +465,9 @@ impl<'a> AdmittedToolCall<'a> {
     }
 
     /// Decide the call (D) on `capture`: the Run's cancel, then every
-    /// after-check, with the result's state commands proposed and published
-    /// with a final. A final then realizes its declarations and is presented.
+    /// after-check, with the result's state commands proposed and, for a
+    /// final, reduced and staged to commit with the call's outcome (ADR 0132
+    /// §5). A final then realizes its declarations and is presented.
     async fn decide(
         &self,
         source: ResultSource,
@@ -519,6 +521,7 @@ impl<'a> AdmittedToolCall<'a> {
             };
             Ok::<_, String>((decision, Some(after)))
         };
+        let mut staged = None;
         let (decision, after) = match (&plugins, &self.address) {
             (Some(plugins), Some(address)) => {
                 let publication =
@@ -536,7 +539,7 @@ impl<'a> AdmittedToolCall<'a> {
                         .reduce_proposals(address, segment, proposals)
                         .await
                         .map_err(fault)?;
-                    publication.publish_run(state)?;
+                    staged = Some(publication.stage(state));
                 }
                 decided
             }
@@ -557,7 +560,34 @@ impl<'a> AdmittedToolCall<'a> {
                 });
             return self.withheld(decision, cause, Some(&capture));
         }
-        self.present(decision, capture, cancel).await
+        let end = self.present(decision, capture, cancel).await;
+        match (end, staged) {
+            (
+                Ok(CallEnd::Final {
+                    capture,
+                    presentation,
+                    launched,
+                    mut store_local,
+                }),
+                Some(staged),
+            ) => {
+                store_local.push(StoreLocalEffect::PluginState(staged));
+                Ok(CallEnd::Final {
+                    capture,
+                    presentation,
+                    launched,
+                    store_local,
+                })
+            }
+            // A call that ends without a final outcome carries none of what
+            // it reduced: nothing of it is durable.
+            (end, staged) => {
+                if let Some(staged) = staged {
+                    staged.discard();
+                }
+                end
+            }
+        }
     }
 
     /// A withheld call's end: its stream, incorporation and observation.

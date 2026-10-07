@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_core_store::tool_run::CompletionSource;
+use lash_core_store::tool_run::{CompletionSource, StateResolution};
 use lash_durable::DurableInstant;
 use lash_durable::domain::{AdmittedId, Ordinal, OwnerKey, RunRecordKind, RunRecordRow, RunSeq};
 
@@ -65,6 +65,8 @@ pub struct RoundMember {
     member: u64,
     starts: Vec<Ordinal>,
     state: MemberState,
+    /// The plugin-state resolutions its final outcome committed.
+    committed_state: Vec<StateResolution>,
 }
 
 impl RoundMember {
@@ -96,6 +98,13 @@ impl RoundMember {
     #[must_use]
     pub fn starts(&self) -> &[Ordinal] {
         &self.starts
+    }
+
+    /// The plugin-state resolutions its final outcome committed: none
+    /// before it has one.
+    #[must_use]
+    pub fn committed_state(&self) -> &[StateResolution] {
+        &self.committed_state
     }
 
     /// Its final outcome, once it has one.
@@ -344,6 +353,7 @@ fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRef
                                 start: row.ordinal,
                                 attempt: 1,
                             },
+                            committed_state: Vec::new(),
                         });
                     }
                     Some(member)
@@ -387,6 +397,7 @@ fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRef
                     start: Ordinal(settled.start),
                     outcome: settled.output,
                 };
+                member.committed_state = settled.state;
             }
             RunRecordKind::Retry => {
                 let retry: RetryBody = decode(row)?;

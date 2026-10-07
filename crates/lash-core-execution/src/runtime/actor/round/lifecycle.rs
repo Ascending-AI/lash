@@ -26,7 +26,13 @@
 //!   its resolver awaits; whichever ends first settles it, and its body is
 //!   never entered again;
 //! - once its run is cancelled, every unfinished member records
-//!   `Cancelled`.
+//!   `Cancelled`;
+//! - a member's plugin-state resolutions commit in its `x_outcome` and
+//!   publish into the resident namespaces from that committed record only:
+//!   once its commit is acknowledged, or, for a record an earlier activation
+//!   or a lost acknowledgement committed, once the fold holds it, before
+//!   anything runs or the owner reads the fold's outcomes. No member sees
+//!   another's state before that state is durable.
 //!
 //! With nothing to commit, `act` answers [`Idle`], what the lifecycle waits
 //! on, and the owner races [`Lifecycle::wake`] against its own events. An
@@ -141,6 +147,22 @@ pub trait MemberBodies: Send + Sync {
         Box::pin(async move { output })
     }
 
+    /// Publish `state`, the plugin-state resolutions a member's committed
+    /// outcome carries, into the resident namespaces the members' bodies
+    /// reduce against. Called once per committed outcome, never before its
+    /// commit; a resolution a namespace already holds applies once. An owner
+    /// whose bodies reduce no plugin state publishes nothing.
+    ///
+    /// # Errors
+    ///
+    /// A resolution a namespace's frontier refuses.
+    fn publish_state(
+        &self,
+        _state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Ok(())
+    }
+
     /// Release what `execution`'s park launched, once its park ended:
     /// `cancelled` when the call ends cancelled. Runs before the call's
     /// final outcome is recorded, so a crash in between repeats it; it is
@@ -234,6 +256,8 @@ pub struct Lifecycle {
     /// The process-terminal waits this lifecycle checked against their
     /// process's recorded end.
     checked: HashSet<WaitRef>,
+    /// The members whose committed plugin state this lifecycle published.
+    published: BTreeSet<AdmittedId>,
 }
 
 impl Lifecycle {
@@ -262,6 +286,7 @@ impl Lifecycle {
             finished: BTreeMap::new(),
             batch_opened: None,
             checked: HashSet::new(),
+            published: BTreeSet::new(),
         }
     }
 
@@ -353,6 +378,16 @@ impl Lifecycle {
     }
 
     async fn act_with(&mut self, folded: &RunFold, starting: bool) -> Result<Act, RoundError> {
+        // What the rows committed publishes before anything reads it: an
+        // earlier activation's outcomes on a resume, and outcomes whose
+        // acknowledgement was lost.
+        for view in folded.rounds() {
+            for member in view.members() {
+                if member.outcome().is_some() {
+                    self.publish(view.id_of(member), member.committed_state())?;
+                }
+            }
+        }
         // An outcome the rows already have came back on an unacknowledged
         // commit: it is not written again.
         self.finished.retain(|id, result| {
@@ -473,24 +508,32 @@ impl Lifecycle {
         if batch_due {
             let mut tx = self.cx.begin().await?;
             let mut retried = false;
-            let mut outcomes = false;
+            let mut outcomes = BTreeSet::new();
             for (id, result) in &self.finished {
                 let Some(execution) = folded.admitted(id) else {
                     continue;
                 };
                 match self.record_finished(&mut tx, &execution, result.clone(), now)? {
                     Recorded::Retry => retried = true,
-                    Recorded::Outcome => outcomes = true,
+                    Recorded::Outcome => {
+                        outcomes.insert(id.clone());
+                    }
                 }
             }
-            let label = if retried && !outcomes {
+            let label = if retried && outcomes.is_empty() {
                 CommitLabel::ROUND_RETRY
             } else {
                 self.outcome_label
             };
             let act = self.commit(tx, label).await?;
             if matches!(act, Act::Committed(_)) {
-                self.finished.clear();
+                // The outcomes are durable: their plugin state publishes now,
+                // before the reservations they hold are released.
+                for (id, result) in std::mem::take(&mut self.finished) {
+                    if let (true, Ok(result)) = (outcomes.contains(&id), &result) {
+                        self.publish(id, &staged_state(&result.store_local))?;
+                    }
+                }
                 self.batch_opened = None;
             }
             return Ok(Some(act));
@@ -515,6 +558,23 @@ impl Lifecycle {
             return Ok(Some(act));
         }
         Ok(None)
+    }
+
+    /// Publish `state`, what `id`'s committed outcome carries, unless this
+    /// lifecycle published it already.
+    fn publish(
+        &mut self,
+        id: AdmittedId,
+        state: &[crate::plugin::StateResolution],
+    ) -> Result<(), RoundError> {
+        if state.is_empty() || self.published.contains(&id) {
+            return Ok(());
+        }
+        self.bodies
+            .publish_state(state)
+            .map_err(RoundError::StatePublication)?;
+        self.published.insert(id);
+        Ok(())
     }
 
     /// Wait for what `idle` waits on: a body to finish, a parked wait to
@@ -830,6 +890,19 @@ fn unsettled(view: &RoundView, id: &AdmittedId, park: bool) -> bool {
         super::MemberState::Waiting { start, .. } => !park && *start == id.ordinal,
         super::MemberState::RetryDue { .. } | super::MemberState::Final { .. } => false,
     })
+}
+
+/// The plugin-state resolutions `effects` stage.
+fn staged_state(effects: &[StoreLocalEffect]) -> Vec<crate::plugin::StateResolution> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            StoreLocalEffect::PluginState(staged) => Some(staged.resolutions()),
+            _ => None,
+        })
+        .flatten()
+        .cloned()
+        .collect()
 }
 
 /// Whether a finished result parks its call.

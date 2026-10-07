@@ -9,10 +9,23 @@
 //! A served replay of the same outcome publishes the same resolutions and
 //! runs no reducer.
 //!
+//! A tool call's resolutions are an admitted member's (ADR 0132 §5): its
+//! decision stages them ([`StagedPluginState`]), they ride the member's
+//! `x_outcome` record into the transaction that commits it, and the member's
+//! lifecycle publishes them from the committed record, only once that
+//! commit is acknowledged; a resume publishes them from the same record
+//! before the round is presented. Nothing a member reduced is visible
+//! before its outcome is durable.
+//!
 //! A namespace has at most one reduced publication the engine has not yet
 //! returned. The next reduction of that namespace waits for it, so it never
 //! reduces against unrecorded work; a body that proposes nothing, or only
-//! for other namespaces, never waits.
+//! for other namespaces, never waits. For two members of one round that
+//! change one namespace this is the composition rule: they apply in the
+//! order they reduce, and the second reduces only once the first's outcome
+//! committed and published, against that committed value. Neither reads the
+//! other's uncommitted state, and each committed record is one step of the
+//! namespace's frontier.
 use super::*;
 use crate::{RuntimeEffectControllerError, RuntimeEffectKind, RuntimeEffectOutcome};
 use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
@@ -204,7 +217,7 @@ fn fenced_fault(error: PluginStateError) -> RuntimeEffectControllerError {
 }
 
 /// The publication of one recorded effect's outcome, from the frame that
-/// awaits the engine's answer. Dropping it unpublished fences whatever the
+/// awaits the engine's answer. Dropping it unsettled fences whatever the
 /// effect reduced: the engine may have recorded it.
 ///
 /// The engine's seam for a frame that executes an effect through a
@@ -225,13 +238,18 @@ impl EffectPublication {
         }
     }
 
-    pub(crate) fn publish_run(
-        mut self,
-        resolutions: Vec<StateResolution>,
-    ) -> Result<(), RuntimeEffectControllerError> {
+    /// Stage `resolutions`, what a tool call's decision reduced, to commit
+    /// with the call's outcome: its namespaces stay reserved for the call
+    /// until that outcome's committed record publishes them.
+    pub(crate) fn stage(mut self, resolutions: Vec<StateResolution>) -> StagedPluginState {
         self.settled = true;
-        self.plugins
-            .publish_run_resolutions(&self.address, resolutions)
+        StagedPluginState {
+            resolutions,
+            reservation: Some(Arc::new(StateReservation {
+                plugins: Arc::clone(&self.plugins),
+                address: self.address.clone(),
+            })),
+        }
     }
 
     /// Publish the resolutions `outcome` carries and return its result.
@@ -254,6 +272,67 @@ impl Drop for EffectPublication {
         if !self.settled {
             self.plugins.abandon_publication(&self.address);
         }
+    }
+}
+
+/// A tool call's plugin-state resolutions, reduced by its decision and
+/// staged to commit with its outcome (ADR 0132 §5): the store-local effect
+/// [`StoreLocalEffect::PluginState`](crate::runtime::actor::round::StoreLocalEffect::PluginState).
+///
+/// Its namespaces stay reserved for the call until the outcome's committed
+/// record publishes the resolutions. Dropped otherwise, it fences them: the
+/// outcome may be durable. A call that ends without carrying it to an
+/// outcome [`discard`](Self::discard)s it, which publishes nothing.
+#[derive(Clone)]
+pub struct StagedPluginState {
+    resolutions: Vec<StateResolution>,
+    reservation: Option<Arc<StateReservation>>,
+}
+
+impl StagedPluginState {
+    /// The resolutions, as the outcome's record carries them.
+    #[must_use]
+    pub fn resolutions(&self) -> &[StateResolution] {
+        &self.resolutions
+    }
+
+    /// Release the reservation without publishing: the call ended without
+    /// an outcome that carries these resolutions, so none is durable.
+    pub fn discard(self) {
+        if let Some(reservation) = &self.reservation {
+            reservation
+                .plugins
+                .release_publication(&reservation.address);
+        }
+    }
+}
+
+impl std::fmt::Debug for StagedPluginState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StagedPluginState")
+            .field("resolutions", &self.resolutions)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for StagedPluginState {
+    fn eq(&self, other: &Self) -> bool {
+        self.resolutions == other.resolutions
+    }
+}
+
+impl Eq for StagedPluginState {}
+
+/// The namespaces one call's staged resolutions reserved. Dropped while
+/// they are still reserved, it fences them.
+struct StateReservation {
+    plugins: Arc<crate::PluginSession>,
+    address: crate::EffectAddress,
+}
+
+impl Drop for StateReservation {
+    fn drop(&mut self) {
+        self.plugins.abandon_publication(&self.address);
     }
 }
 
@@ -470,6 +549,33 @@ impl crate::PluginSession {
         *result
     }
 
+    /// Publish `resolutions`, what committed outcome records carry, each
+    /// under the effect that reduced it, and release what that effect
+    /// reserved. A resolution the namespace already holds applies once.
+    ///
+    /// # Errors
+    ///
+    /// A resolution its namespace's frontier refuses: the namespace is
+    /// fenced, since the resident state no longer follows the durable one.
+    pub fn publish_committed_state(
+        &self,
+        resolutions: &[StateResolution],
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let mut by_publisher: Vec<(&crate::EffectAddress, Vec<StateResolution>)> = Vec::new();
+        for resolution in resolutions {
+            match by_publisher
+                .iter_mut()
+                .find(|(publisher, _)| **publisher == resolution.publisher)
+            {
+                Some((_, batch)) => batch.push(resolution.clone()),
+                None => by_publisher.push((&resolution.publisher, vec![resolution.clone()])),
+            }
+        }
+        by_publisher
+            .into_iter()
+            .try_for_each(|(publisher, batch)| self.publish_run_resolutions(publisher, batch))
+    }
+
     pub(crate) fn publish_run_resolutions(
         &self,
         address: &crate::EffectAddress,
@@ -525,7 +631,7 @@ impl crate::PluginSession {
 
     /// Release what `address` reserved, and wake every waiting reduction: a
     /// publication may also have settled owed resolutions.
-    fn release_publication(&self, address: &crate::EffectAddress) {
+    pub(crate) fn release_publication(&self, address: &crate::EffectAddress) {
         let mut registry = self.state.lock_recover();
         registry.reserved.retain(|_, holder| holder != address);
         registry.settled.notify_waiters();

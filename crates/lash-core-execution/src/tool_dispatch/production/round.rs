@@ -360,12 +360,19 @@ pub(super) fn member_body(
                 end => member_output(&owner, end).into(),
             };
             // The effects commit with the completion or the park that
-            // staged them; any other answer leaves them unwritten.
+            // staged them; any other answer leaves them unwritten, and the
+            // plugin state among them publishes nothing.
             if matches!(
                 result.output,
                 SettledOutput::Completed(_) | SettledOutput::Waiting(_)
             ) {
                 result.store_local = store_local;
+            } else {
+                for effect in store_local {
+                    if let StoreLocalEffect::PluginState(staged) = effect {
+                        staged.discard();
+                    }
+                }
             }
             result
         })
@@ -771,6 +778,16 @@ impl RoundTools for ProductionRoundTools {
         output: &SettledOutput,
     ) -> CompletedCall {
         completed_answer(call, output)
+    }
+
+    fn publish_state(
+        &self,
+        state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.context
+            .dispatch()
+            .plugins
+            .publish_committed_state(state)
     }
 }
 

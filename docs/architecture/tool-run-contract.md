@@ -130,9 +130,15 @@ bytes.
 
 **State and hook policy.** Only before-turn, after-turn, checkpoint and
 after-tool (result check) callbacks on the Run's sequential path may return
-state commands. A successful final's commands are reduced privately and
-published with its decision; a failed or cancelled candidate publishes none.
-One refusal publishes nothing.
+state commands. A successful final's commands are reduced privately at its
+decision and commit in the member's `x_outcome` record; they publish into the
+resident namespace only once that record is committed, and a resume publishes
+them from the same record before the round is presented. A failed or
+cancelled candidate publishes none. One refusal publishes nothing. Two
+members of one round that change one namespace apply in the order they
+reduce: the second reduces only once the first's outcome committed and
+published, against that committed value, so no member reads another's
+uncommitted state.
 
 **Hook composition.** For one admitted call: argument transforms, provider
 preparation, then every before-check on one immutable prepared call. Checks

@@ -37,7 +37,7 @@
 //! |---|---|---|
 //! | 0 | `admit` | every member's call, tool, request, policy, limit and wait |
 //! | 1 + i | `x_start` | member i's first attempt, committed with the admission |
-//! | next | `x_outcome` | an attempt's final outcome and the material it names |
+//! | next | `x_outcome` | an attempt's final outcome, the material it names and its plugin-state resolutions |
 //! | next | `x_wait` | an attempt that parked: the waits it races and its pending completion |
 //! | next | `retry` | a `Repeatable` attempt's failure and the due time of the next |
 //! | next | `x_start` | the next attempt of a retried member, once its retry is due |
@@ -58,6 +58,11 @@
 //! does not decode, so the fold refuses it. A vetoed retry's final record
 //! carries the retry's payload again: no record leans on another's bytes.
 //!
+//! A completion's plugin-state resolutions ([`StoreLocalEffect::PluginState`])
+//! ride its `x_outcome`, so they commit exactly when the outcome does. The
+//! lifecycle publishes them into the resident namespace from that committed
+//! record only, once the commit is acknowledged or a resume folds it.
+//!
 //! [`DomainRefusal::RunOrdinalGap`]: lash_durable::domain::DomainRefusal::RunOrdinalGap
 
 use std::future::Future;
@@ -75,6 +80,7 @@ use super::ActorContext;
 use super::waits::{WaitDeadline, WaitId, WaitKind, WaitRef};
 use crate::{ToolCallId, ToolId};
 
+pub use crate::plugin::StagedPluginState;
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
 
 mod context;
@@ -569,6 +575,9 @@ pub enum StoreLocalEffect {
     TriggerDelete(StoreLocalRows),
     /// Spawn a child session.
     ChildSessionSpawn(StoreLocalRows),
+    /// A tool's plugin-state resolutions: they ride its `x_outcome` record
+    /// and publish from it once it committed.
+    PluginState(StagedPluginState),
 }
 
 impl StoreLocalEffect {
@@ -818,7 +827,8 @@ pub(crate) async fn run_bounded(
 
 /// Record `admitted`'s outcome on `tx`, with the store-local effects that
 /// commit with it, at its run's next ordinal. Only a completion or a park
-/// carries effects: a park's declared start is what it waits on.
+/// carries effects: a park's declared start is what it waits on. Only a
+/// completion carries plugin state, which its `x_outcome` records.
 ///
 /// # Errors
 ///
@@ -829,6 +839,7 @@ pub fn settle(
     output: SettledOutput,
     store_local: Vec<StoreLocalEffect>,
 ) -> Result<(), SettleRefusal> {
+    let mut state = Vec::new();
     if !store_local.is_empty() {
         if !matches!(
             output,
@@ -837,10 +848,20 @@ pub fn settle(
             return Err(SettleRefusal::ForeignEffect(admitted.call().clone()));
         }
         for effect in store_local {
-            store_local::write(tx, admitted, effect)?;
+            match effect {
+                StoreLocalEffect::PluginState(staged)
+                    if matches!(output, SettledOutput::Completed(_)) =>
+                {
+                    state.extend_from_slice(staged.resolutions());
+                }
+                StoreLocalEffect::PluginState(_) => {
+                    return Err(SettleRefusal::ForeignEffect(admitted.call().clone()));
+                }
+                effect => store_local::write(tx, admitted, effect)?,
+            }
         }
     }
-    record_outcome(tx, admitted, output);
+    record_outcome(tx, admitted, output, state);
     Ok(())
 }
 
@@ -861,11 +882,16 @@ pub fn settle_interrupted(
         run: id.run,
         ordinal: id.ordinal,
     })?;
-    record_outcome(tx, &admitted, SettledOutput::Interrupted);
+    record_outcome(tx, &admitted, SettledOutput::Interrupted, Vec::new());
     Ok(())
 }
 
-fn record_outcome(tx: &mut ActorTx, admitted: &AdmittedExecution, output: SettledOutput) {
+fn record_outcome(
+    tx: &mut ActorTx,
+    admitted: &AdmittedExecution,
+    output: SettledOutput,
+    state: Vec<crate::plugin::StateResolution>,
+) {
     let id = admitted.id();
     // A park is no outcome: the call's one `x_outcome` follows it.
     let kind = if matches!(output, SettledOutput::Waiting(_)) {
@@ -882,6 +908,7 @@ fn record_outcome(tx: &mut ActorTx, admitted: &AdmittedExecution, output: Settle
         encode(&OutcomeBody {
             start: id.ordinal.0,
             output,
+            state,
         }),
     ));
 }

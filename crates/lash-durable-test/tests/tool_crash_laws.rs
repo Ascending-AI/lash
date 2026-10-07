@@ -26,6 +26,12 @@
 //!   recoverable chat from before the turn even when the owner lost the
 //!   commit's acknowledgement or its life before it published the commit: a
 //!   `TerminalReplacement`, or a `ReplayGap` with the durable head.
+//! - **Plugin state (FIG-5266):** a tool's plugin-state change commits with
+//!   its outcome (ADR 0132 §5). Cut at its `round.outcome`, the session's
+//!   committed state holds the value the call's committed outcome carries,
+//!   and a zombie's change, which never committed, is nowhere in it. In a
+//!   round of two members, a member never observes the other's state before
+//!   the other's outcome committed.
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -38,7 +44,7 @@ mod dialect;
 mod served;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use lash_core::ToolDefinitionBindingExt as _;
@@ -62,6 +68,17 @@ const INPUT: &str = "tool-crash-turn";
 const PROBE: &str = "crash_probe";
 /// The label of the [`Turn::Activity`] call.
 const ACTIVITY: &str = "activity";
+/// The plugin whose namespace the state scenarios change.
+const STATE_PLUGIN: &str = "crash-state-law";
+/// The plugin's tool that sets the namespace's key to its entry's value.
+const STATE_SET: &str = "state_set";
+/// The plugin's tool that first looks for the other member's value.
+const STATE_OBSERVE: &str = "state_observe";
+/// The key both tools set.
+const STATE_KEY: &str = "t";
+/// How many times [`STATE_OBSERVE`] yields while it looks for the other
+/// member's value before it stops looking.
+const OBSERVE_YIELDS: usize = 512;
 /// How long the recoverable chat may take to yield what is already on the
 /// live stream.
 const PUBLISHED_WITHIN: Duration = Duration::from_secs(10);
@@ -90,6 +107,11 @@ enum Turn {
     CellIdentity,
     /// One step of one native call, followed by a host's sink.
     Activity,
+    /// One step of one [`STATE_SET`] call.
+    State,
+    /// One step of two members: [`STATE_SET`], and [`STATE_OBSERVE`]
+    /// looking for its value.
+    StatePair,
 }
 
 impl Turn {
@@ -141,6 +163,15 @@ impl Turn {
                 PROBE,
                 serde_json::json!({ "label": ACTIVITY }),
             )])],
+            Self::State => vec![served::response(vec![served::call(
+                "call-state",
+                STATE_SET,
+                serde_json::json!({ "label": "T" }),
+            )])],
+            Self::StatePair => vec![served::response(vec![
+                served::call("call-a", STATE_SET, serde_json::json!({ "label": "A" })),
+                served::call("call-b", STATE_OBSERVE, serde_json::json!({ "label": "B" })),
+            ])],
             Self::CellIdentity => vec![
                 served::cell(&format!("await {};", call("cell-one"))),
                 served::cell(&format!(
@@ -169,7 +200,13 @@ impl Turn {
                 Vec::new(),
             ),
             Self::Activity => (vec![ACTIVITY.to_owned()], Vec::new()),
+            Self::State => (vec!["T".to_owned()], Vec::new()),
+            Self::StatePair => (vec!["A".to_owned(), "B".to_owned()], Vec::new()),
         }
+    }
+
+    fn changes_state(self) -> bool {
+        matches!(self, Self::State | Self::StatePair)
     }
 
     /// The refusal the model must be shown: after `counted` calls, `rest`
@@ -178,7 +215,7 @@ impl Turn {
         let (counted, requested) = match self {
             Self::LimitStep => (0, LIMIT + 1),
             Self::LimitCell => (LIMIT, 1),
-            Self::CellIdentity | Self::Activity => return None,
+            Self::CellIdentity | Self::Activity | Self::State | Self::StatePair => return None,
         };
         let exceeded = lash::ToolCallLimitExceeded {
             scope: lash::ToolCallLimitScope::Cell,
@@ -192,7 +229,7 @@ impl Turn {
     fn max_tool_calls(self) -> usize {
         match self {
             Self::LimitStep | Self::LimitCell => LIMIT,
-            Self::CellIdentity | Self::Activity => 64,
+            Self::CellIdentity | Self::Activity | Self::State | Self::StatePair => 64,
         }
     }
 }
@@ -210,11 +247,39 @@ fn refusal_in(text: &str) -> Option<String> {
 #[derive(Default)]
 struct World {
     entries: Mutex<BTreeMap<String, Vec<lash_core::ToolCallId>>>,
+    /// What each [`STATE_OBSERVE`] entry saw of the other member's value,
+    /// and whether any `round.outcome` had committed when it saw it.
+    observations: Mutex<Vec<(Option<serde_json::Value>, bool)>>,
+    /// The deployment, whose trace an observation reads.
+    nodes: OnceLock<Weak<SimNodes>>,
 }
 
 impl World {
     fn entries(&self) -> BTreeMap<String, Vec<lash_core::ToolCallId>> {
         self.entries.lock_recover().clone()
+    }
+
+    /// Record a body entry of the call `label`, and answer the value its
+    /// entry sets: the label and the entry's count, so a rerun sets a value
+    /// of its own.
+    fn enter(&self, label: &str, call: &lash_core::ToolCallId) -> String {
+        let mut entries = self.entries.lock_recover();
+        let seen = entries.entry(label.to_owned()).or_default();
+        seen.push(call.clone());
+        format!("{label}-{}", seen.len())
+    }
+
+    /// Whether a `round.outcome` write has committed by now: read from the
+    /// trace at once, without yielding.
+    fn outcome_committed(&self) -> bool {
+        self.nodes
+            .get()
+            .and_then(Weak::upgrade)
+            .is_some_and(|nodes| {
+                nodes.script().trace().iter().any(|write| {
+                    write.point.label == CommitLabel::ROUND_OUTCOME && write.committed()
+                })
+            })
     }
 }
 
@@ -262,6 +327,116 @@ impl lash_core::ToolProvider for Probe {
             .or_default()
             .push(call.context.call_id().clone());
         ToolOutcome::ok(serde_json::json!({ "label": label })).into()
+    }
+}
+
+fn state_definition(name: &str) -> lash_core::ToolDefinition {
+    let object = serde_json::json!({ "type": "object", "additionalProperties": true });
+    lash_core::ToolDefinition::raw(
+        format!("tool:{name}"),
+        name,
+        "Sets the plugin's key to its entry's value.",
+        object.clone(),
+        object,
+    )
+    .expect("the state tool's schemas")
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
+    // A call a kill interrupted runs again at its ordinal and sets a value
+    // of its own entry.
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
+        1,
+        1,
+    ))
+}
+
+/// The plugin whose tools change its namespace.
+#[derive(Clone)]
+struct StatePlugin {
+    world: Arc<World>,
+}
+
+impl lash::plugins::PluginDefinition for StatePlugin {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(STATE_PLUGIN)
+    }
+}
+
+impl lash::plugins::PluginFactory for StatePlugin {
+    fn id(&self) -> &'static str {
+        STATE_PLUGIN
+    }
+
+    fn build(
+        &self,
+        _: &lash::plugins::PluginSessionContext,
+    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash::plugins::SessionPlugin for StatePlugin {
+    fn id(&self) -> &'static str {
+        STATE_PLUGIN
+    }
+
+    fn register(
+        &self,
+        reg: &mut lash::plugins::PluginRegistrar,
+    ) -> Result<(), lash::plugins::PluginError> {
+        let view = reg.state();
+        reg.tools().provider(Arc::new(StateTools {
+            world: Arc::clone(&self.world),
+            view,
+        }))
+    }
+}
+
+/// The plugin's tools, reading its namespace through its published view.
+struct StateTools {
+    world: Arc<World>,
+    view: lash::plugins::PluginStateView,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for StateTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        [STATE_SET, STATE_OBSERVE]
+            .map(|name| state_definition(name).manifest())
+            .into()
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        [STATE_SET, STATE_OBSERVE]
+            .contains(&name)
+            .then(|| Arc::new(state_definition(name).contract()))
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let label = call.args["label"].as_str().unwrap_or_default().to_owned();
+        let value = self.world.enter(&label, call.context.call_id());
+        if call.name() == STATE_OBSERVE {
+            // Look for the other member's value while it runs, and note
+            // whether its outcome had committed by the time it showed.
+            let mut seen = None;
+            for _ in 0..OBSERVE_YIELDS {
+                seen = self.view.get(STATE_KEY);
+                if seen.is_some() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            let committed = self.world.outcome_committed();
+            self.world
+                .observations
+                .lock_recover()
+                .push((seen, committed));
+        }
+        lash_core::ToolAttemptOutcome::Done {
+            result: lash_core::ToolOutcomeDone::ok(serde_json::json!({ "value": value }))
+                .with_state(lash::plugins::StateCommands::new().set(STATE_KEY, value.into())),
+            intents: lash_core::ToolIntents::default(),
+        }
     }
 }
 
@@ -338,6 +513,9 @@ impl Crash {
                     .tools(Arc::new(Probe {
                         world: Arc::clone(&self.world),
                     }))
+                    .plugin(Arc::new(StatePlugin {
+                        world: Arc::clone(&self.world),
+                    }))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         "tool-crash-deployment",
                         "tool-crash-boot",
@@ -409,6 +587,9 @@ impl Crash {
         if self.turn == Turn::Activity {
             violations.extend(self.activity_laws(cut).await);
         }
+        if self.turn.changes_state() {
+            violations.extend(self.state_laws().await);
+        }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
         }
@@ -419,6 +600,63 @@ impl Crash {
             }
         }
         violations
+    }
+
+    /// The [`Turn::State`] and [`Turn::StatePair`] laws, once the turn
+    /// ended: the session's committed state holds the value of a call's
+    /// committed outcome, the one the model was shown, and no other; and no
+    /// member saw the other's value before an outcome committed.
+    async fn state_laws(&self) -> Vec<String> {
+        let mut violations = Vec::new();
+        for (seen, committed) in self.world.observations.lock_recover().iter() {
+            if seen.is_some() && !committed {
+                violations.push(format!(
+                    "a member observed the other member's state {seen:?} before its outcome \
+                     committed"
+                ));
+            }
+        }
+        let shown = self
+            .scripts
+            .requests(INPUT)
+            .last()
+            .map(|request| shown_values(request))
+            .unwrap_or_default();
+        let committed = match self.committed_state().await {
+            Ok(value) => value,
+            Err(error) => return vec![error],
+        };
+        match &committed {
+            Some(serde_json::Value::String(value)) if shown.contains(value) => {}
+            other => violations.push(format!(
+                "the committed state holds {other:?}, not a value of an outcome the model \
+                 was shown ({shown:?})"
+            )),
+        }
+        if self.turn == Turn::State && shown.len() != 1 {
+            violations.push(format!("the model was shown {shown:?}, not one value"));
+        }
+        violations
+    }
+
+    /// The value of [`STATE_KEY`] in the session's committed plugin state.
+    async fn committed_state(&self) -> Result<Option<serde_json::Value>, String> {
+        let factory = self.backend().stores().session_store_factory();
+        let view = lash_core_execution::store::SessionStore::new(factory, session())
+            .map_err(|error| format!("the session's store: {error}"))?;
+        let loaded = lash_core_execution::store::load_session_window_state(
+            &view,
+            lash_core_execution::store::WindowSelector::Current,
+        )
+        .await
+        .map_err(|error| format!("the session's committed state: {error}"))?
+        .ok_or("the session has no committed state")?;
+        Ok(loaded
+            .state
+            .plugin_state()
+            .and_then(|state| state.plugins.get(STATE_PLUGIN))
+            .and_then(|namespace| namespace.values.get(STATE_KEY))
+            .cloned())
     }
 
     /// The [`Turn::Activity`] laws, once the turn ended: the host follows
@@ -547,6 +785,25 @@ impl Crash {
     }
 }
 
+/// The values the state tools' outcomes carry in `request`, as the model
+/// was shown them: every `<label>-<entry>` of the scenarios' labels.
+fn shown_values(request: &str) -> BTreeSet<String> {
+    let request = request.replace("\\\"", "\"");
+    let mut shown = BTreeSet::new();
+    for label in ["T", "A", "B"] {
+        let marker = format!("\"{label}-");
+        let mut rest = request.as_str();
+        while let Some(at) = rest.find(&marker) {
+            rest = &rest[at + marker.len()..];
+            let entry: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            if !entry.is_empty() {
+                shown.insert(format!("{label}-{entry}"));
+            }
+        }
+    }
+    shown
+}
+
 /// A host's activity sink: everything it was handed, in order.
 #[derive(Default)]
 struct Collected(Mutex<Vec<lash_core::TurnActivity>>);
@@ -589,6 +846,7 @@ impl Scenario for Crash {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        let _ = self.world.nodes.set(Arc::downgrade(nodes));
         // The host is outside the deployment under test: its send is uncut.
         let session = self
             .core()
@@ -689,6 +947,23 @@ async fn prove(turn: Turn, tier: Tier) {
 /// Cut `turn` on `tier` at every write of its uncut run labelled one of
 /// `cut_labels`, or at every label when `cut_labels` is empty.
 async fn prove_at(turn: Turn, tier: Tier, cut_labels: &[CommitLabel]) {
+    prove_under(
+        turn,
+        tier,
+        cut_labels,
+        &[
+            Fault::FailBefore,
+            Fault::AckHidden,
+            Fault::Zombie,
+            Fault::Abort,
+            Fault::CommitThenAbort,
+        ],
+    )
+    .await;
+}
+
+/// [`prove_at`] under `faults` only.
+async fn prove_under(turn: Turn, tier: Tier, cut_labels: &[CommitLabel], faults: &[Fault]) {
     let (dialect, postgres_url) = match tier {
         Tier::SqliteMemory => (Dialect::SqliteMemory, None),
         Tier::SqliteFile => (Dialect::SqliteFile, None),
@@ -706,13 +981,7 @@ async fn prove_at(turn: Turn, tier: Tier, cut_labels: &[CommitLabel]) {
         Matrix::new().labels(cut_labels)
     };
     let report = matrix
-        .faults(&[
-            Fault::FailBefore,
-            Fault::AckHidden,
-            Fault::Zombie,
-            Fault::Abort,
-            Fault::CommitThenAbort,
-        ])
+        .faults(faults)
         .horizon(Duration::from_secs(600))
         .run(|| Crash::new(turn, dialect, postgres_url.clone()))
         .await;
@@ -777,8 +1046,49 @@ async fn a_commit_whose_publication_was_lost_still_reaches_the_host(tier: Tier) 
     prove_at(Turn::Activity, tier, &[CommitLabel::TURN_COMMIT]).await;
 }
 
+/// A tool's plugin-state change cut at its `round.outcome`, before or after
+/// the commit, its acknowledgement or its owner lost: once the turn
+/// resumes, the session's committed state is the value the call's committed
+/// outcome carries (FIG-5266).
+async fn a_tool_state_change_cut_at_its_outcome_is_the_committed_value_after_resume(tier: Tier) {
+    prove_under(
+        Turn::State,
+        tier,
+        &[CommitLabel::ROUND_OUTCOME],
+        &[
+            Fault::FailBefore,
+            Fault::AckHidden,
+            Fault::Abort,
+            Fault::CommitThenAbort,
+        ],
+    )
+    .await;
+}
+
+/// A zombie member's state change commits nothing: its `round.outcome` is
+/// refused, and the session's committed state is the value of the outcome
+/// the new owner committed, never the zombie's (FIG-5266).
+async fn a_zombie_members_state_change_commits_nothing(tier: Tier) {
+    prove_under(
+        Turn::State,
+        tier,
+        &[CommitLabel::ROUND_OUTCOME],
+        &[Fault::Zombie],
+    )
+    .await;
+}
+
+/// In a round of two members, one never observes the other's state before
+/// the other's outcome committed, however the round is cut (FIG-5266).
+async fn a_member_never_observes_another_members_uncommitted_state(tier: Tier) {
+    prove_at(Turn::StatePair, tier, &[CommitLabel::ROUND_OUTCOME]).await;
+}
+
 tiered_laws!(
     current_thread:
+    a_tool_state_change_cut_at_its_outcome_is_the_committed_value_after_resume,
+    a_zombie_members_state_change_commits_nothing,
+    a_member_never_observes_another_members_uncommitted_state,
     a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome,
     a_commit_whose_publication_was_lost_still_reaches_the_host,
     tool_call_limit_refuses_the_same_call_across_a_crash,

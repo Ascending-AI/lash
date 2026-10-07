@@ -114,12 +114,15 @@ pub(super) struct StartBody {
 
 /// An `x_outcome` or `x_wait` record's body: the call's final output, or
 /// its park, settling the attempt started at `start`. It decodes only with
-/// the payload its outcome names.
+/// the payload its outcome names. A completion's plugin-state resolutions
+/// commit in it (ADR 0132 §5); a record that carries none omits them.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct OutcomeBody {
     pub(super) start: u64,
     pub(super) output: SettledOutput,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) state: Vec<lash_core_store::tool_run::StateResolution>,
 }
 
 /// A `retry` record's body: the attempt started at `start` failed in a way

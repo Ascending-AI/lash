@@ -77,6 +77,11 @@ pub enum RoundError {
     /// An outcome could not be recorded as it was.
     #[error(transparent)]
     Settle(#[from] SettleRefusal),
+    /// A committed outcome's plugin state does not publish into the resident
+    /// namespace: the activation ends, and the next one rebuilds the
+    /// namespace from durable state.
+    #[error("a committed outcome's plugin state does not publish: {0}")]
+    StatePublication(crate::RuntimeEffectControllerError),
     /// The owner has no admission under this run.
     #[error("run {0:?} is not admitted")]
     NotAdmitted(RunSeq),
