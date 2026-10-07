@@ -510,6 +510,8 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     .collect(),
                 outcome.call_id.clone(),
                 outcome.tool_name.clone(),
+                outcome.output.status(),
+                outcome.display.clone(),
             ));
         }
         if !result_parts.is_empty() {

@@ -90,6 +90,10 @@ pub struct ToolPresentation {
     /// (FIG-1643). Recorded whether or not it retained anything, so a replay
     /// under another policy serves this decision unchanged.
     pub retention: crate::OutputRetentionPolicy,
+    /// What a host shows of the call, as the steps folded it and bounded to
+    /// [`crate::TOOL_DISPLAY_LIMIT_BYTES`] (FIG-5290). Never model-facing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<crate::ToolDisplay>,
 }
 
 /// The [`crate::plugin::ToolPresentationArtifacts`] implementation the runtime

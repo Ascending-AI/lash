@@ -110,6 +110,7 @@ fn settled_success() -> RemoteProcessAwaitOutput {
             control: None,
             view: None,
             projection_value: None,
+            display: None,
         },
     }
 }
@@ -117,6 +118,7 @@ fn settled_success() -> RemoteProcessAwaitOutput {
 fn settled_cancelled() -> RemoteProcessAwaitOutput {
     RemoteProcessAwaitOutput::Settled {
         output: RemoteProcessToolCallOutput {
+            display: None,
             outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
                 origin: None,
                 message: "cancelled".to_string(),
@@ -171,6 +173,7 @@ fn remote_process_event_semantics_decode_an_outcome_only() {
 fn settled_failed() -> RemoteProcessAwaitOutput {
     RemoteProcessAwaitOutput::Settled {
         output: RemoteProcessToolCallOutput {
+            display: None,
             outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
                 cause: None,
                 class: RemoteToolFailureClass::Execution,

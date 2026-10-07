@@ -63,14 +63,22 @@ pub struct RowProvenance {
     pub is_turn_reply: bool,
 }
 
-/// Display-only tool facts carried by committed nodes, without execution state.
+/// Display-only tool facts carried by committed nodes, without execution
+/// state: the call's identity when it has one, its operation and status,
+/// and the display its tool or a presentation step declared (FIG-5290).
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct RowTool {
+    pub call_id: Option<lash_sansio::ToolCallId>,
     pub operation: String,
     pub status: String,
+    pub display: Option<lash_sansio::ToolDisplay>,
 }
+
+/// The status of a standard tool-call part's row: its outcome commits later,
+/// on the result part that answers it.
+pub const REQUESTED_TOOL_STATUS: &str = "requested";
 
 /// Protocol-neutral display content. Reasoning and attachments can accompany a
 /// reply in its one node-backed row; they do not create extra identities.
@@ -307,6 +315,21 @@ fn project_message(message: &Message) -> TranscriptProjectionOutcome {
     let mut content = RowContent::default();
     let mut text = Vec::new();
     for part in message.parts.iter() {
+        if let (Some(call_id), Some(operation)) = (part.call_id(), part.tool_name()) {
+            content.tools.push(RowTool {
+                call_id: Some(call_id.clone()),
+                operation: operation.to_owned(),
+                status: part
+                    .tool_status()
+                    .map_or(REQUESTED_TOOL_STATUS, lash_sansio::ToolCallStatus::as_str)
+                    .to_owned(),
+                display: part.tool_display().cloned(),
+            });
+        }
+        // A declared display stands in for the result's flattened text.
+        if part.tool_display().is_some() {
+            continue;
+        }
         let rendered = part.render();
         if part.kind() == PartKind::Reasoning {
             if !rendered.trim().is_empty() {
@@ -335,9 +358,13 @@ fn project_message(message: &Message) -> TranscriptProjectionOutcome {
     {
         return TranscriptProjectionOutcome::Suppress(SuppressionReason::EmptyContent);
     }
+    let answers_tools = message
+        .parts
+        .iter()
+        .any(|part| part.kind() == PartKind::ToolResult);
     let kind = if message.reply_marker.is_some() {
         TranscriptRowKind::AssistantReply
-    } else if message.role == MessageRole::User {
+    } else if message.role == MessageRole::User && !answers_tools {
         TranscriptRowKind::User
     } else if message.role == MessageRole::Event {
         TranscriptRowKind::Event

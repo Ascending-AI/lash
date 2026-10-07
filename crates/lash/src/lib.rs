@@ -449,14 +449,15 @@ pub mod tools {
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, ExecutionOwner,
         IsolatedProcessBinding, IsolatedProcessRequest, PendingAnnouncement, PendingCompletion,
         PendingResolver, PreparedToolCall, SignalProcessIntent, StartProcessIntent,
-        TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND,
-        TOOL_INTENT_PROTOCOL_V3, ToolArgumentProjectionPolicy, ToolAttachmentClient,
-        ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-        ToolCatalogEntry, ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
-        ToolExecutionGrant, ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource,
-        ToolIntent, ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentIdentity,
-        ToolIntentKind, ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure,
-        ToolIntents, ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
+        TOOL_DISPLAY_LIMIT_BYTES, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
+        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolArgumentProjectionPolicy,
+        ToolAttachmentClient, ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput,
+        ToolCallRecord, ToolCatalogEntry, ToolContract, ToolDefinition, ToolDirectCompletionClient,
+        ToolDiscovery, ToolDisplay, ToolDisplayLink, ToolDisplayTruncation, ToolExecutionGrant,
+        ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolIntent,
+        ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+        ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents,
+        ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
         ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolSessionLlmProfile,
         ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
         facade_support::ReconfigureError, facade_support::ToolSourceHandle,
@@ -788,9 +789,9 @@ pub mod plugins {
     pub use lash_core::plugin::{
         AssistantProseProjectorPlugin, AssistantStreamFinishedHook, CompactionSystemPrompt,
         DecidedContextPressure, PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture,
-        ResolvedToolSurface, ToolCatalogContributor, ToolPresentationArtifacts,
-        ToolPresentationFacts, ToolPresentationInput, ToolPresentationStep,
-        TranscriptRowProjectorPlugin,
+        PresentedToolReturn, ResolvedToolSurface, ToolCatalogContributor,
+        ToolPresentationArtifacts, ToolPresentationFacts, ToolPresentationInput,
+        ToolPresentationStep, TranscriptRowProjectorPlugin,
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
@@ -1497,8 +1498,8 @@ pub use lash_core::{RetainedRevision, Retention, Target};
 /// Canonical committed chat rows and protocol-neutral display contracts.
 pub mod transcript {
     pub use lash_core::transcript::{
-        RowContent, RowId, RowOrdinal, RowProvenance, RowTool, SuppressionReason,
-        TranscriptProjection, TranscriptProjectionOptions, TranscriptProjectionOutcome,
-        TranscriptRow, TranscriptRowKind, TranscriptRowRecord,
+        REQUESTED_TOOL_STATUS, RowContent, RowId, RowOrdinal, RowProvenance, RowTool,
+        SuppressionReason, TranscriptProjection, TranscriptProjectionOptions,
+        TranscriptProjectionOutcome, TranscriptRow, TranscriptRowKind, TranscriptRowRecord,
     };
 }

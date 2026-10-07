@@ -42,6 +42,14 @@
 //!   after resume, the value of the step's committed outcome; and of two
 //!   concurrent steps, one never observes the other's change before it
 //!   committed.
+//! - **Display (FIG-5290):** a step of two native calls, and a cell of the
+//!   same two calls, one of whose tool declares a display, cut around the
+//!   calls' outcome. The committed transcript holds one settled row tool per
+//!   call, with its call id, operation and status; the declaring call's
+//!   carries the display of the outcome the model was shown, and the other's
+//!   none. A standard result row drops the declaring call's flattened result
+//!   and keeps the other's. No model request ever holds the display, and a
+//!   cut after the outcome committed resumes without running the tool again.
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -85,6 +93,13 @@ const INPUT: &str = "tool-crash-turn";
 const PROBE: &str = "crash_probe";
 /// The label of the [`Turn::Activity`] call.
 const ACTIVITY: &str = "activity";
+/// The label of the display scenarios' call whose tool declares a display.
+const SHOWN: &str = "shown";
+/// The label of the display scenarios' call whose tool declares none.
+const PLAIN: &str = "plain";
+/// What every piece of the declared display carries, and no model request
+/// may.
+const DISPLAY_MARK: &str = "display-only";
 /// The plugin whose namespace the state scenarios change.
 const STATE_PLUGIN: &str = "crash-state-law";
 /// The plugin's tool that sets the namespace's key to its entry's value.
@@ -133,14 +148,27 @@ enum Turn {
     StateCell,
     /// One cell of a `Promise.all` of [`STATE_SET`] and [`STATE_OBSERVE`].
     StatePairCell,
+    /// One step of two native calls: [`SHOWN`], whose tool declares a
+    /// display, and [`PLAIN`].
+    Display,
+    /// One cell of the same two calls.
+    DisplayCell,
 }
 
 impl Turn {
     fn code(self) -> bool {
         matches!(
             self,
-            Self::LimitCell | Self::CellIdentity | Self::StateCell | Self::StatePairCell
+            Self::LimitCell
+                | Self::CellIdentity
+                | Self::StateCell
+                | Self::StatePairCell
+                | Self::DisplayCell
         )
+    }
+
+    fn displays(self) -> bool {
+        matches!(self, Self::Display | Self::DisplayCell)
     }
 
     fn script(self) -> Vec<LlmResponse> {
@@ -203,6 +231,23 @@ impl Turn {
                 "const both = await Promise.all([tools.{STATE_SET}({{ label: \"A\" }}), \
                  tools.{STATE_OBSERVE}({{ label: \"B\" }})]);\nprint(both);"
             ))],
+            Self::Display => vec![served::response(vec![
+                served::call(
+                    &format!("call-{SHOWN}"),
+                    PROBE,
+                    serde_json::json!({ "label": SHOWN }),
+                ),
+                served::call(
+                    &format!("call-{PLAIN}"),
+                    PROBE,
+                    serde_json::json!({ "label": PLAIN }),
+                ),
+            ])],
+            Self::DisplayCell => vec![served::cell(&format!(
+                "const shown = await {};\nconst plain = await {};\nprint([shown, plain]);",
+                call(SHOWN),
+                call(PLAIN)
+            ))],
             Self::CellIdentity => vec![
                 served::cell(&format!("await {};", call("cell-one"))),
                 served::cell(&format!(
@@ -236,6 +281,9 @@ impl Turn {
             Self::StatePair | Self::StatePairCell => {
                 (vec!["A".to_owned(), "B".to_owned()], Vec::new())
             }
+            Self::Display | Self::DisplayCell => {
+                (vec![SHOWN.to_owned(), PLAIN.to_owned()], Vec::new())
+            }
         }
     }
 
@@ -263,7 +311,9 @@ impl Turn {
             | Self::State
             | Self::StatePair
             | Self::StateCell
-            | Self::StatePairCell => return None,
+            | Self::StatePairCell
+            | Self::Display
+            | Self::DisplayCell => return None,
         };
         let exceeded = lash::ToolCallLimitExceeded {
             scope: lash::ToolCallLimitScope::Cell,
@@ -282,7 +332,9 @@ impl Turn {
             | Self::State
             | Self::StatePair
             | Self::StateCell
-            | Self::StatePairCell => 64,
+            | Self::StatePairCell
+            | Self::Display
+            | Self::DisplayCell => 64,
         }
     }
 }
@@ -377,14 +429,38 @@ impl lash_core::ToolProvider for Probe {
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let label = call.args["label"].as_str().unwrap_or_default().to_owned();
-        self.world
-            .entries
-            .lock_recover()
-            .entry(label.clone())
-            .or_default()
-            .push(call.context.call_id().clone());
-        ToolOutcome::ok(serde_json::json!({ "label": label })).into()
+        if label != SHOWN && label != PLAIN {
+            self.world
+                .entries
+                .lock_recover()
+                .entry(label.clone())
+                .or_default()
+                .push(call.context.call_id().clone());
+            return ToolOutcome::ok(serde_json::json!({ "label": label })).into();
+        }
+        // The display scenarios' calls answer their entry, so a rerun
+        // answers, and displays, a value of its own.
+        let entry = self.world.enter(&label, call.context.call_id());
+        let output =
+            lash_core::ToolCallOutput::success(serde_json::json!({ "entry": entry.clone() }));
+        let output = if label == SHOWN {
+            output.with_display(declared_display(&entry))
+        } else {
+            output
+        };
+        ToolOutcome::from_output(output).into()
     }
+}
+
+/// The display [`SHOWN`]'s tool declares for its entry `entry`.
+fn declared_display(entry: &str) -> lash::tools::ToolDisplay {
+    lash::tools::ToolDisplay::new()
+        .with_arguments(format!("{DISPLAY_MARK} arguments of {SHOWN}"))
+        .with_result(format!("{DISPLAY_MARK} result {entry}"))
+        .with_link(
+            lash::tools::ToolDisplayLink::new(format!("https://{DISPLAY_MARK}.example/{entry}"))
+                .with_title(format!("{DISPLAY_MARK} citation")),
+        )
 }
 
 fn state_definition(name: &str) -> lash_core::ToolDefinition {
@@ -661,6 +737,9 @@ impl Crash {
         if self.turn.changes_state() {
             violations.extend(self.state_laws().await);
         }
+        if self.turn.displays() {
+            violations.extend(self.display_laws(cut).await);
+        }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
         }
@@ -683,7 +762,7 @@ impl Crash {
             .scripts
             .requests(INPUT)
             .last()
-            .map(|request| shown_values(request))
+            .map(|request| shown_values(request, &["T", "A", "B", "C"]))
             .unwrap_or_default();
         let committed = match self.committed_state().await {
             Ok(value) => value,
@@ -802,6 +881,107 @@ impl Crash {
         violations
     }
 
+    /// The [`Turn::Display`] and [`Turn::DisplayCell`] laws, once the turn
+    /// ended, read from the session's committed transcript (FIG-5290).
+    async fn display_laws(&self, cut: Option<&Cut>) -> Vec<String> {
+        use lash::transcript::REQUESTED_TOOL_STATUS;
+        let mut violations = Vec::new();
+        let requests = self.scripts.requests(INPUT);
+        if requests
+            .iter()
+            .any(|request| request.contains(DISPLAY_MARK))
+        {
+            violations.push("a model request carried the declared display".to_owned());
+        }
+        // The entry of the outcome the model was shown is the one whose
+        // display committed: both are the journaled presentation's.
+        let shown = requests
+            .last()
+            .map(|request| shown_values(request, &[SHOWN]))
+            .unwrap_or_default();
+        let Some(shown) = shown.iter().next().filter(|_| shown.len() == 1) else {
+            return vec![format!(
+                "the model was shown {shown:?}, not one `{SHOWN}` entry"
+            )];
+        };
+        let Some((session, _)) = self.host.lock_recover().take() else {
+            return vec!["the host sent nothing".to_owned()];
+        };
+        let rows = match session.transcript().await {
+            Ok(transcript) => transcript.into_records(),
+            Err(error) => return vec![format!("the committed transcript: {error}")],
+        };
+        let tools = rows
+            .iter()
+            .filter(|row| row.suppressed.is_none())
+            .flat_map(|row| row.content.tools.iter().map(move |tool| (row, tool)))
+            .collect::<Vec<_>>();
+        let entries = self.world.entries();
+        for (label, display) in [(SHOWN, Some(declared_display(shown))), (PLAIN, None)] {
+            let Some(call_id) = entries.get(label).and_then(|seen| seen.first()) else {
+                continue;
+            };
+            let of_call = |status: Option<&str>| {
+                tools
+                    .iter()
+                    .filter(|(_, tool)| tool.call_id.as_ref() == Some(call_id))
+                    .filter(|(_, tool)| {
+                        status.map_or(tool.status != REQUESTED_TOOL_STATUS, |status| {
+                            tool.status == status
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let settled = of_call(None);
+            let [(row, tool)] = settled.as_slice() else {
+                violations.push(format!(
+                    "call `{label}` has {} settled row tools, not one",
+                    settled.len()
+                ));
+                continue;
+            };
+            if !tool.operation.ends_with(PROBE) || tool.status != "success" {
+                violations.push(format!("call `{label}`'s row tool is {tool:?}"));
+            }
+            if tool.display != display {
+                violations.push(format!(
+                    "call `{label}`'s row tool carries the display {:?}, not {display:?}",
+                    tool.display
+                ));
+            }
+            if self.turn.code() {
+                continue;
+            }
+            // The standard result row flattens a result only when its call
+            // declared no display, and the request row keeps the model's
+            // own arguments.
+            let flattened = row.content.text.contains(&format!("{label}-"));
+            if flattened == display.is_some() {
+                violations.push(format!(
+                    "call `{label}`'s result row text is {:?}",
+                    row.content.text
+                ));
+            }
+            let requested = of_call(Some(REQUESTED_TOOL_STATUS));
+            match requested.as_slice() {
+                [(row, tool)]
+                    if tool.display.is_none()
+                        && tool.operation == PROBE
+                        && row.content.text.contains(&format!("\"label\":\"{label}\"")) => {}
+                other => violations.push(format!("call `{label}`'s request rows are {other:?}")),
+            }
+        }
+        // A cut once the outcome committed resumes from the journal and
+        // never runs the tool again.
+        let ran = entries.get(SHOWN).map_or(0, Vec::len);
+        if cut.is_some_and(|cut| cut.point.label == CommitLabel::TURN_COMMIT) && ran != 1 {
+            violations.push(format!(
+                "call `{SHOWN}` ran {ran} times after its outcome committed"
+            ));
+        }
+        violations
+    }
+
     /// The host following the session's recoverable chat from before the
     /// turn reached the durable head: by the commit's `TerminalReplacement`,
     /// or by a `ReplayGap` whose snapshot is the head. The session's owner
@@ -848,12 +1028,12 @@ impl Crash {
     }
 }
 
-/// The values the state tools' outcomes carry in `request`, as the model
-/// was shown them: every `<label>-<entry>` of the scenarios' labels.
-fn shown_values(request: &str) -> BTreeSet<String> {
+/// The values the tools' outcomes carry in `request`, as the model was
+/// shown them: every `<label>-<entry>` of `labels`.
+fn shown_values(request: &str, labels: &[&str]) -> BTreeSet<String> {
     let request = request.replace("\\\"", "\"");
     let mut shown = BTreeSet::new();
-    for label in ["T", "A", "B", "C"] {
+    for label in labels {
         let marker = format!("\"{label}-");
         let mut rest = request.as_str();
         while let Some(at) = rest.find(&marker) {
@@ -1550,6 +1730,34 @@ async fn a_commit_whose_publication_was_lost_still_reaches_the_host(tier: Tier) 
     prove_at(Turn::Activity, tier, &[CommitLabel::TURN_COMMIT]).await;
 }
 
+/// A tool's declared display, cut around its call's outcome: the committed
+/// row of each call carries its call id, operation and status once, the
+/// declaring call's with the display of the outcome the model was shown and
+/// the other's with none, and no model request ever carries it (FIG-5290).
+async fn a_declared_tool_display_commits_once_with_its_outcome_and_never_reaches_the_model(
+    tier: Tier,
+) {
+    prove_at(
+        Turn::Display,
+        tier,
+        &[CommitLabel::ROUND_OUTCOME, CommitLabel::TURN_COMMIT],
+    )
+    .await;
+}
+
+/// The same law for a code cell's calls, whose row is the cell's code block
+/// (FIG-5290).
+async fn a_cell_calls_declared_display_commits_once_with_its_outcome_and_never_reaches_the_model(
+    tier: Tier,
+) {
+    prove_at(
+        Turn::DisplayCell,
+        tier,
+        &[CommitLabel::ROUND_OUTCOME, CommitLabel::TURN_COMMIT],
+    )
+    .await;
+}
+
 /// A tool's plugin-state change cut at its `round.outcome`, before or after
 /// the commit, its acknowledgement or its owner lost: once the turn
 /// resumes, the session's committed state is the value the call's committed
@@ -1686,6 +1894,8 @@ tiered_laws!(
     a_member_never_observes_another_members_uncommitted_state,
     a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome,
     a_commit_whose_publication_was_lost_still_reaches_the_host,
+    a_declared_tool_display_commits_once_with_its_outcome_and_never_reaches_the_model,
+    a_cell_calls_declared_display_commits_once_with_its_outcome_and_never_reaches_the_model,
     tool_call_limit_refuses_the_same_call_across_a_crash,
     tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell,
     code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill,

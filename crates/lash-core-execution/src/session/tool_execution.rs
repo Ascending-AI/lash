@@ -370,6 +370,7 @@ impl RuntimeExecutionContext<'_> {
                 Err(error) => Err(error.into()),
             }?;
             let mut model_return = presentation.model_return;
+            let display = presentation.display;
             let possession = outcome
                 .intent_outcomes
                 .iter()
@@ -412,6 +413,7 @@ impl RuntimeExecutionContext<'_> {
                     args: outcome.record.args,
                     output,
                     model_return,
+                    display,
                     intent_outcomes: outcome.intent_outcomes,
                     replay,
                 },

@@ -206,7 +206,29 @@ pub struct RlmTrajectoryEntry {
     pub outcome: HistoryCellOutcome,
 }
 
-pub type RlmExecutedCall = lash_sansio::ExecutedCallRecord;
+/// One executed call of a trajectory entry: the model-safe ledger pair,
+/// and beside it the display-only facts its transcript row renders
+/// (FIG-5290). The `history` item and the `Calls:` lines read the ledger
+/// pair only, so the call id and display never reach a model.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RlmExecutedCall {
+    pub operation: String,
+    pub outcome: RlmExecutedCallOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<lash_sansio::ToolCallId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<lash_sansio::ToolDisplay>,
+}
+
+impl RlmExecutedCall {
+    /// The model-safe ledger pair of this call.
+    pub fn ledger(&self) -> lash_sansio::ExecutedCallRecord {
+        lash_sansio::ExecutedCallRecord {
+            operation: self.operation.clone(),
+            outcome: self.outcome,
+        }
+    }
+}
 
 /// One inline print. Oversized steps retain the complete array in one archive.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -429,7 +451,7 @@ pub enum RlmHistoryItem {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         images: Vec<RlmImageRef>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
-        calls: Vec<RlmExecutedCall>,
+        calls: Vec<lash_sansio::ExecutedCallRecord>,
         #[serde(skip_serializing_if = "is_zero")]
         calls_omitted: usize,
         /// What the cell resolved to: `error` for a failed cell,
@@ -463,7 +485,7 @@ impl RlmHistoryItem {
                 .iter()
                 .map(RlmImageRef::from_attachment)
                 .collect(),
-            calls: entry.calls.clone(),
+            calls: entry.calls.iter().map(RlmExecutedCall::ledger).collect(),
             calls_omitted: entry.calls_omitted,
             outcome: match &entry.outcome {
                 CellOutcome::Running => CellOutcome::Running,
@@ -521,9 +543,11 @@ mod rlm_step_serde_tests {
                 )),
                 label: Some("plot".to_string()),
             }],
-            calls: vec![lash_sansio::ExecutedCallRecord {
+            calls: vec![super::RlmExecutedCall {
                 operation: "math.add".to_string(),
                 outcome: lash_sansio::ExecutedCallOutcome::Ok,
+                call_id: None,
+                display: None,
             }],
             calls_omitted: 2,
             outcome: CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),

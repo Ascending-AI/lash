@@ -254,7 +254,7 @@ pub mod facade_support {
     pub use crate::plugin::{
         PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,
     };
-    pub use crate::plugin::{ToolPresentationFacts, ToolPresentationInput};
+    pub use crate::plugin::{PresentedToolReturn, ToolPresentationFacts, ToolPresentationInput};
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
     pub use crate::provider::GenerationRetryGuarantee;
@@ -435,6 +435,7 @@ pub mod facade_support {
     pub use lash_sansio::SchemaResolutionRequest;
     pub use lash_sansio::SessionStreamEvent;
     pub use lash_sansio::StreamMessageKind;
+    pub use lash_sansio::ToolCallStatus;
     pub use lash_sansio::ToolCatalogBuildError;
     pub use lash_sansio::TurnFinish;
     pub use lash_sansio::TurnOutcome;
@@ -517,14 +518,15 @@ pub use lash_sansio::{
     OutputValue, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
     ProviderAttemptLimits, RegistrationRefused, RetainedOutput, RunId, SchemaAdmissionError,
     SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
-    SessionAppendNode, TOOL_BINDING_KEY, TextProjectionMetadata, TokenUsage, TokenUsageOverflow,
-    ToolAdmissionRefusal, ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome,
-    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
-    ToolCatalogEntry, ToolContract, ToolControl, ToolDeclaration, ToolDefinition,
-    ToolDefinitionBindingExt, ToolDiscovery, ToolFailure, ToolFailureCause, ToolFailureClass,
-    ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
-    ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId,
-    TurnOutputSource, TurnReply, ValueMismatch,
+    SessionAppendNode, TOOL_BINDING_KEY, TOOL_DISPLAY_LIMIT_BYTES, TextProjectionMetadata,
+    TokenUsage, TokenUsageOverflow, ToolAdmissionRefusal, ToolArgumentProjectionPolicy,
+    ToolBinding, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
+    ToolCatalogBuildError, ToolCatalogEntry, ToolContract, ToolControl, ToolDeclaration,
+    ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery, ToolDisplay, ToolDisplayLink,
+    ToolDisplayTruncation, ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource,
+    ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract,
+    ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
+    TurnReply, ValueMismatch,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,

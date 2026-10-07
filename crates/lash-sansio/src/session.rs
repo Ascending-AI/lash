@@ -11,6 +11,10 @@ pub struct ExecutedCall {
     pub operation: String,
     pub outcome: ExecutedCallOutcome,
     pub host_record: Option<ToolCallRecord>,
+    /// What a host shows of the call, as its presentation recorded it
+    /// (FIG-5290); never part of the model-safe ledger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<crate::ToolDisplay>,
 }
 
 /// Compact source-level record of an effect the embedded executor actually ran.

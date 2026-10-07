@@ -564,6 +564,10 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
         identity.string(value)
     });
     identity.optional(part.tool_name(), |identity, value| identity.string(value));
+    identity.optional(part.tool_status(), |identity, status| {
+        identity.string(status.as_str())
+    });
+    identity.optional(part.tool_display(), push_tool_display);
     identity.optional(part.tool_replay(), |identity, replay| {
         let lash_sansio::llm::types::ProviderReplayMeta {
             item_id,
@@ -617,6 +621,46 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
         identity.optional(legacy_origin_model.as_ref(), |identity, value| {
             identity.string(value)
         });
+    });
+}
+
+fn push_tool_display(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    display: &lash_sansio::ToolDisplay,
+) {
+    let lash_sansio::ToolDisplay {
+        arguments,
+        result,
+        links,
+        truncated,
+    } = display;
+    identity.optional(
+        arguments.as_deref(),
+        crate::stable_identity::IdentityEncoder::string,
+    );
+    identity.optional(
+        result.as_deref(),
+        crate::stable_identity::IdentityEncoder::string,
+    );
+    identity.sequence(links, |identity, link| {
+        let lash_sansio::ToolDisplayLink {
+            uri,
+            title,
+            description,
+        } = link;
+        identity.string(uri);
+        identity.optional(
+            title.as_deref(),
+            crate::stable_identity::IdentityEncoder::string,
+        );
+        identity.optional(
+            description.as_deref(),
+            crate::stable_identity::IdentityEncoder::string,
+        );
+    });
+    identity.optional(truncated.as_ref(), |identity, truncated| {
+        identity.u64(truncated.original_bytes);
+        identity.u64(truncated.limit_bytes);
     });
 }
 
@@ -882,7 +926,13 @@ mod append_request_identity_tests {
                                     }},
                                     {"type": "text", "text": "after"}
                                 ],
-                                "call_id": "tc_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "tool_name": "tool-name"
+                                "call_id": "tc_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "tool_name": "tool-name",
+                                "status": "success",
+                                "display": {
+                                    "arguments": "arguments", "result": "result",
+                                    "links": [{"uri": "https://example.test/a", "title": "title"}],
+                                    "truncated": {"original_bytes": 20000, "limit_bytes": 16384}
+                                }
                             },
                             {
                                 "id": "p8", "kind": "Reasoning", "content": "reasoning",

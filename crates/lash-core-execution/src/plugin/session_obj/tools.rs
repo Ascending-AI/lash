@@ -315,11 +315,13 @@ impl PluginSession {
         let callbacks = self
             .resolve_tool_presentation_plan(plan)
             .map_err(crate::RuntimeEffectControllerError::from)?;
-        let mut model_return =
-            crate::ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output);
+        let mut presented = crate::plugin::PresentedToolReturn {
+            model_return: crate::ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output),
+            display: ctx.output.display.clone(),
+        };
         if let Some(presenter) = callbacks.presenter {
-            model_return = (presenter.hook)(ToolPresentationInput {
-                previous: model_return,
+            presented = (presenter.hook)(ToolPresentationInput {
+                previous: presented,
                 facts: Arc::clone(&facts),
                 context: ctx.clone(),
             })
@@ -327,11 +329,11 @@ impl PluginSession {
         }
         for registered in callbacks.steps {
             let input = ToolPresentationInput {
-                previous: model_return,
+                previous: presented.clone(),
                 facts: Arc::clone(&facts),
                 context: ctx.clone(),
             };
-            model_return = match (registered.hook)(input).await {
+            presented = match (registered.hook)(input).await {
                 Ok(next) => next,
                 Err(err) if err.is_retryable() => {
                     return Err(crate::RuntimeEffectControllerError::from(
@@ -339,9 +341,21 @@ impl PluginSession {
                     )
                     .retryable_uncommitted_derivation());
                 }
-                Err(err) => crate::ModelToolReturn::text(ctx.tool_name.clone(), err.to_string()),
+                // The broken step's fallback replaces the model-facing
+                // return; the display the chain had stands.
+                Err(err) => crate::plugin::PresentedToolReturn {
+                    model_return: crate::ModelToolReturn::text(
+                        ctx.tool_name.clone(),
+                        err.to_string(),
+                    ),
+                    display: presented.display,
+                },
             };
         }
+        let crate::plugin::PresentedToolReturn {
+            mut model_return,
+            display,
+        } = presented;
         crate::session::tool_execution::surface_attachment_materialization_notices(
             attachment_acceptance,
             &ctx.output,
@@ -362,6 +376,7 @@ impl PluginSession {
             model_return,
             artifacts: ctx.artifacts.retained(),
             retention,
+            display: display.map(|display| display.bounded(crate::TOOL_DISPLAY_LIMIT_BYTES)),
         })
     }
 }

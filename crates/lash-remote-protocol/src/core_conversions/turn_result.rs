@@ -359,12 +359,14 @@ impl From<lash_core::ToolCallOutput> for RemoteToolCallOutput {
             control,
             view,
             projection_value,
+            display,
         } = value;
         Self {
             outcome: outcome.into(),
             control: control.map(Into::into),
             view,
             projection_value,
+            display: display.map(Box::new),
         }
     }
 }

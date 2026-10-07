@@ -936,9 +936,14 @@ fn executed_call_ledger(records: &[lash_core::ExecutedCall]) -> (Vec<RlmExecuted
     let calls = records
         .iter()
         .skip(omitted)
-        .map(|call| lash_core::ExecutedCallRecord {
+        .map(|call| RlmExecutedCall {
             operation: call.operation.clone(),
             outcome: call.outcome,
+            call_id: call
+                .host_record
+                .as_ref()
+                .map(|record| record.call_id.clone()),
+            display: call.display.clone(),
         })
         .collect();
     (calls, omitted)
@@ -992,6 +997,7 @@ fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
         control,
         view: None,
         projection_value: None,
+        display: None,
     }
 }
 
@@ -1373,6 +1379,7 @@ mod tests {
             lash_core::ExecutedCallOutcome::Err
         };
         lash_core::ExecutedCall {
+            display: None,
             operation: format!("module.call_{index}"),
             outcome,
             host_record: Some(record(index, output)),
@@ -1495,6 +1502,7 @@ mod tests {
     fn executed_call_ledger_elides_arguments_and_keeps_the_diagnostic_tail() {
         let records = (0..MAX_EXEC_TOOL_CALL_RECORDS + 3)
             .map(|index| lash_core::ExecutedCall {
+                display: None,
                 operation: format!("module.call_{index}"),
                 outcome: if index == MAX_EXEC_TOOL_CALL_RECORDS + 2 {
                     lash_core::ExecutedCallOutcome::Err

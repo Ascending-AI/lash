@@ -138,6 +138,7 @@ fn completion(
 ) -> CompletedToolCall {
     let output = ToolCallOutput::success(value);
     CompletedToolCall {
+        display: None,
         call_id: call_id.clone(),
         provider_call_id: None,
         tool_name: tool_name.to_string(),

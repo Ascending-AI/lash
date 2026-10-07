@@ -264,6 +264,7 @@ fn remote_turn_result_json_round_trips() {
                 control: None,
                 view: None,
                 projection_value: None,
+                display: None,
             },
         }],
         llm_calls: vec![call_record.clone()],

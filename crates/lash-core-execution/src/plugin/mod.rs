@@ -90,9 +90,10 @@ pub use hooks::{
     AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform, BeforeTurnHook,
     CheckpointHook, CheckpointHookContext, NoPresentationArtifacts, PluginFuture,
     PluginLifecycleEvent, PluginLifecycleEventHook, PluginLifecycleFuture, PluginSessionTask,
-    SessionConfigChangedContext, ToolCatalogContributor, ToolPresentationArtifacts,
-    ToolPresentationFacts, ToolPresentationInput, ToolPresentationPresenter, ToolPresentationStep,
-    ToolResultProjectionContext, TurnHookContext, TurnHookReport, TurnResultHookContext,
+    PresentedToolReturn, SessionConfigChangedContext, ToolCatalogContributor,
+    ToolPresentationArtifacts, ToolPresentationFacts, ToolPresentationInput,
+    ToolPresentationPresenter, ToolPresentationStep, ToolResultProjectionContext, TurnHookContext,
+    TurnHookReport, TurnResultHookContext,
 };
 pub use protocol::{
     AssistantProseProjectorPlugin, CheckpointComponentKey, CodeExecutionOutcome,

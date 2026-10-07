@@ -181,11 +181,9 @@ fn presenter() -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let step: lash_core::plugin::ToolPresentationStep = Arc::new(|input| {
         Box::pin(async move {
             let mut presented = input.previous;
-            presented
-                .parts
-                .push(lash_core::facade_support::ModelToolReturnPart::text(
-                    PRESENTED,
-                ));
+            presented.model_return.parts.push(
+                lash_core::facade_support::ModelToolReturnPart::text(PRESENTED),
+            );
             Ok(presented)
         })
     });

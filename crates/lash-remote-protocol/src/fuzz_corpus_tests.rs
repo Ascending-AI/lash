@@ -453,6 +453,7 @@ fn seed_turn_report_full() -> RemoteTurnReport {
             control: None,
             view: None,
             projection_value: None,
+            display: None,
         },
     }];
     report.llm_calls = vec![record.clone()];

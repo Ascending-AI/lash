@@ -267,6 +267,7 @@ fn completed_tool(
     output: ToolCallOutput,
 ) -> CompletedToolCall {
     CompletedToolCall {
+        display: None,
         call_id: crate::ToolCallId::fixture(call_id),
         provider_call_id: None,
         tool_name: tool_name.to_string(),

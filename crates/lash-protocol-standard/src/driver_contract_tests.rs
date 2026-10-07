@@ -134,6 +134,7 @@ fn completed_call(
     output: ToolCallOutput,
 ) -> sansio::CompletedToolCall {
     sansio::CompletedToolCall {
+        display: None,
         call_id: call.call_id.clone(),
         provider_call_id: call.provider_call_id.clone(),
         tool_name: call.tool_name.clone(),

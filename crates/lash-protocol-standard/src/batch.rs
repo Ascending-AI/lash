@@ -322,6 +322,7 @@ fn fold_wrapper(
             parts,
             attachment_notices,
         },
+        display: None,
         intent_outcomes,
         replay: wrapper.replay.clone(),
     }
