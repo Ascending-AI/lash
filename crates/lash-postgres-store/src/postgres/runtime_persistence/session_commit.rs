@@ -473,7 +473,7 @@ pub(crate) async fn apply_runtime_commit_tx(
     // outcome already; the plan's own refusals (a follow-on the commit
     // would drop, a moved head) answer before the ownership's.
     let head_ownership = if lash_core_execution::store::head_write_needs_ownership(
-        commit.committing_run().is_some(),
+        commit.is_sessions_own_head_write(),
         existing.as_ref().is_some_and(|head| !head.is_created()),
     ) {
         let owed_follow_on = lash_core_execution::store::follow_on_owning_the_head(

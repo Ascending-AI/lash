@@ -545,7 +545,7 @@ pub(crate) fn apply_runtime_commit_conn(
     // the plan's own refusals (a follow-on the commit would
     // drop, a moved head) answer first.
     if lash_core_execution::store::head_write_needs_ownership(
-        commit.committing_run().is_some(),
+        commit.is_sessions_own_head_write(),
         existing.as_ref().is_some_and(|head| !head.is_created()),
     ) {
         let facts = crate::session_runs::head_ownership_facts_conn(

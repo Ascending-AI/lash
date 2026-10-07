@@ -700,14 +700,18 @@ impl RuntimeTurnCommitStamp {
 }
 
 impl RuntimeCommit {
-    /// The run this commit commits under: the run whose end it records,
-    /// else the physical turn it commits.
+    /// Whether this commit is the session's own head write, which no head
+    /// owner refuses (FIG-4202): a commit under a run (the run whose end it
+    /// records, or the physical turn it commits), or the command lane
+    /// applying the open commands it settles ([`Self::applied_commands`]).
     #[must_use]
-    pub fn committing_run(&self) -> Option<&crate::TurnId> {
-        self.run_terminal
-            .as_deref()
-            .map(|terminal| &terminal.run)
-            .or_else(|| self.turn_commit.operation.turn_id())
+    pub fn is_sessions_own_head_write(&self) -> bool {
+        self.run_terminal.is_some()
+            || self.turn_commit.operation.turn_id().is_some()
+            || self
+                .applied_commands
+                .as_ref()
+                .is_some_and(|commands| !commands.batch_ids.is_empty())
     }
 
     /// This commit, ending `transition.ended` and opening

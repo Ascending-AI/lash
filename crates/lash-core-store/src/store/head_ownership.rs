@@ -2,12 +2,14 @@
 //! (FIG-4202, ADR 0105).
 //!
 //! The bound turn owns the session head. A head commit that names the run
-//! it commits under ([`RuntimeCommit::committing_run`]) is a run's own: the
-//! session actor's epoch fences it. A commit that names none is a writer
-//! outside every run (a host-scoped service's write): the store refuses it,
-//! in the commit's own transaction, while a run owns the head or is owed
-//! it, so no such write moves a head a bound run, an owed follow-on or an
-//! open command run was planned against. A host that must move the head
+//! it commits under is a run's own: the session actor's epoch fences it.
+//! So is the command lane's commit that applies the open commands it
+//! settles, the owner it would otherwise wait on
+//! ([`RuntimeCommit::is_sessions_own_head_write`]). Any other commit is a
+//! writer outside every run (a host-scoped service's write): the store
+//! refuses it, in the commit's own transaction, while a run owns the head
+//! or is owed it, so no such write moves a head a bound run, an owed
+//! follow-on or an open command run was planned against. A host that must move the head
 //! submits its write as a session command, which the session applies at a
 //! turn boundary.
 //!
@@ -21,7 +23,7 @@
 //! A session's first commit publishes over the created head, which is no
 //! head to own (FIG-4099), so creation is never refused.
 //!
-//! [`RuntimeCommit::committing_run`]: super::RuntimeCommit::committing_run
+//! [`RuntimeCommit::is_sessions_own_head_write`]: super::RuntimeCommit::is_sessions_own_head_write
 
 use crate::{SessionId, TurnId};
 
@@ -66,11 +68,11 @@ pub struct HeadOwnershipFacts {
 }
 
 /// Whether a commit onto a head that exists (`head_exists`) must be checked
-/// against the head's owners: exactly a write that names no run it commits
-/// under (`names_its_run`) onto an existing head.
+/// against the head's owners: exactly a write that is not the session's own
+/// (`sessions_own`) onto an existing head.
 #[must_use]
-pub fn head_write_needs_ownership(names_its_run: bool, head_exists: bool) -> bool {
-    !names_its_run && head_exists
+pub fn head_write_needs_ownership(sessions_own: bool, head_exists: bool) -> bool {
+    !sessions_own && head_exists
 }
 
 /// The follow-on that owns the head against a write outside every run:
