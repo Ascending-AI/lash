@@ -49,6 +49,13 @@ use crate::projection::{
 #[cfg(any(test, feature = "testing"))]
 static EXECUTION_BOUND_EXHAUSTION_LOUD: AtomicBool = AtomicBool::new(true);
 
+/// Turns the loud panic on a confidence run's bound exhaustion off or on,
+/// answering what it was: a law of the recorded limit failure needs it off.
+#[cfg(test)]
+fn set_execution_bound_exhaustion_loud(loud: bool) -> bool {
+    EXECUTION_BOUND_EXHAUSTION_LOUD.swap(loud, Ordering::SeqCst)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_owned_code(
     dialect: &dyn crate::dialect::Dialect,

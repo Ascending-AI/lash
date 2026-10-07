@@ -1049,6 +1049,12 @@ impl RlmExecutionState {
         self.vm.state().expired_functions()
     }
 
+    /// How many globals the last capture encoded afresh.
+    #[cfg(test)]
+    pub(super) fn encoded_globals_in_last_snapshot(&self) -> usize {
+        self.encoded_globals_in_last_snapshot
+    }
+
     /// The bindings the "Bound Variables" section shows by summary: the ones
     /// with no host view (ADR 0076), each with its bounded runtime summary,
     /// under the same exclusions as [`Self::bound_variable_values`].

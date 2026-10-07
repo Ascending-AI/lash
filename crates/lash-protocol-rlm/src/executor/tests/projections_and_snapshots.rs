@@ -2,6 +2,30 @@ use super::*;
 
 use lashlang::testing::ast_builders as b;
 
+struct GrowthMeasurement {
+    started: std::time::Instant,
+    pool: lash_vm_client::WorkerPool,
+}
+
+impl Drop for GrowthMeasurement {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "record host contention in the growth witness"
+    )]
+    fn drop(&mut self) {
+        eprintln!(
+            "FIG4474_GROWTH elapsed_ms={:.3} worker_cpu_ms={:.3} panicking={} pool={:?} loadavg={}",
+            self.started.elapsed().as_secs_f64() * 1000.0,
+            self.pool.measured_cpu().as_secs_f64() * 1000.0,
+            std::thread::panicking(),
+            self.pool.stats(),
+            std::fs::read_to_string("/proc/loadavg")
+                .unwrap_or_else(|_| "unavailable".into())
+                .trim(),
+        );
+    }
+}
+
 /// `finish { <name>: <expr>, .. }` — the shape every projection witness reads
 /// its bindings back with. ADR 0096 retired the Lashlang front-end, so these
 /// cells state their AST; the source each stood for is kept at the call site.
@@ -534,5 +558,572 @@ pub(super) fn flow_record_to_tool_args_preserves_only_seed_projected_roots() {
                 })
             );
         })
+    });
+}
+
+/// Run `code` as one cell of a session whose execution state is `state`, on
+/// a durable host of its own; the cell must succeed.
+pub(super) async fn execute_test_code(
+    mut state: RlmExecutionState,
+    code: String,
+) -> RlmExecutionState {
+    let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+    let response = Box::pin(execute_code_with_test_render(
+        &mut state,
+        lash_core::testing::code_execution_context(handler.ports()),
+        ExecRequest { code },
+        handler.artifacts(),
+        LashlangSurface::default(),
+        None,
+        RlmProjectedBindings::default(),
+        None,
+        lashlang::ExecutionBounds::unbounded(),
+        crate::plugin::RlmChannel::Cell,
+    ))
+    .await;
+    assert_eq!(response.error, None, "test TypeScript execution failed");
+    state
+}
+
+/// The TypeScript frontend caps a single cell at 64 KiB of source, which the
+/// state-growth fixtures below deliberately exceed: they seed dozens of
+/// multi-kilobyte bindings before measuring what one later assignment costs.
+/// Seeding them one cell at a time is the same end state — RLM globals persist
+/// across cells — without pretending a model would ever emit a 1 MB cell.
+pub(super) async fn execute_test_code_chunked(
+    mut state: RlmExecutionState,
+    source: String,
+) -> RlmExecutionState {
+    const MAX_CELL_BYTES: usize = 48 * 1024;
+    let mut cell = String::new();
+    for line in source.lines() {
+        if !cell.is_empty() && cell.len() + line.len() + 1 > MAX_CELL_BYTES {
+            state = Box::pin(execute_test_code(state, std::mem::take(&mut cell))).await;
+        }
+        cell.push_str(line);
+        cell.push('\n');
+    }
+    if !cell.trim().is_empty() {
+        state = Box::pin(execute_test_code(state, cell)).await;
+    }
+    state
+}
+
+#[test]
+pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
+    block_on(async {
+        let mut source = String::new();
+        for index in 0..12 {
+            let payload = format!("large-{index}-{}", "x".repeat(6 * 1024));
+            source.push_str(&format!("let large_{index} = [\"{payload}\"];\n"));
+        }
+        for index in 0..40 {
+            source.push_str(&format!("let small_{index} = {index};\n"));
+        }
+        let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
+        let initial = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("initial snapshot");
+        assert_eq!(
+            initial
+                .leaves()
+                .values()
+                .filter(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
+                .count(),
+            12
+        );
+        state.acknowledge_execution_state_capture();
+
+        state = execute_test_code(
+            state,
+            // A TypeScript cell cannot assign to a prior cell's binding — an
+            // ambient global is `const` — so "change one binding" is a
+            // re-declaration that carries the same payload plus the new entry.
+            format!(
+                "let large_0 = [\"large-0-{}\", \"one changed binding\"];",
+                "x".repeat(6 * 1024)
+            ),
+        )
+        .await;
+        let changed = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("changed snapshot");
+        let changed_bodies = changed
+            .leaves()
+            .values()
+            .filter(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
+            .count();
+        let unchanged_refs = changed
+            .leaves()
+            .values()
+            .filter(|component| matches!(component, lash_core::plugin::LeafChange::Unchanged))
+            .count();
+        assert_eq!(
+            changed_bodies, 1,
+            "only the assigned large binding carries bytes"
+        );
+        assert_eq!(unchanged_refs, 11, "all other large bindings ride as refs");
+
+        let initial_budget = state::measure_snapshot(&initial);
+        let changed_budget = state::measure_snapshot(&changed);
+        println!(
+            "RLM_SNAPSHOT_BUDGET initial={} changed={}",
+            initial_budget.checkpoint_bytes, changed_budget.checkpoint_bytes
+        );
+        // Pin serializer measurements for the counter-only header and list-owned holes.
+        assert_eq!(initial_budget.checkpoint_bytes, 82_028);
+        assert_eq!(changed_budget.checkpoint_bytes, 13_381);
+    });
+}
+
+#[test]
+pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen() {
+    block_on(async {
+        let initial_payload = format!("before-{}", "x".repeat(8 * 1024));
+        let mut state = execute_test_code(
+            RlmExecutionState::new(),
+            format!("let large = [\"{initial_payload}\"];"),
+        )
+        .await;
+        let progress_snapshot = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("progress-boundary capture");
+
+        state = execute_test_code(
+            state,
+            format!("let large = [\"{initial_payload}\", \"after-progress\"];"),
+        )
+        .await;
+        let final_snapshot = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("final capture after later assignment");
+        assert_ne!(
+            final_snapshot.root(),
+            progress_snapshot.root(),
+            "the final capture must supersede the pending progress capture"
+        );
+        assert_eq!(
+            final_snapshot
+                .leaves()
+                .values()
+                .filter(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
+                .count(),
+            1,
+            "the post-progress value leaf must still carry its uncommitted body"
+        );
+
+        let hydrated = hydrate_snapshot(final_snapshot);
+        let mut reopened = RlmExecutionState::new();
+        reopened
+            .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+            .await
+            .expect("cold reopen final capture");
+        assert_eq!(
+            reopened.vm.state().globals().get("large"),
+            state.vm.state().globals().get("large"),
+            "cold reopen must include the assignment made after the progress capture"
+        );
+
+        state.abort_execution_state_capture();
+        let retry_snapshot = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("retry superseded capture after commit failure");
+        let retry_hydrated = hydrate_snapshot(retry_snapshot);
+        let mut retry_reopened = RlmExecutionState::new();
+        retry_reopened
+            .restore_execution_state(&retry_hydrated, lash_core::FleetFormat::current())
+            .await
+            .expect("cold reopen retry capture");
+        assert_eq!(
+            retry_reopened.vm.state().globals().get("large"),
+            state.vm.state().globals().get("large"),
+            "aborting a superseded capture must retain the post-progress assignment"
+        );
+    });
+}
+
+#[test]
+pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
+    block_on(async {
+        let payload_a = format!("a-{}", "x".repeat(8 * 1024));
+        let payload_b = format!("b-{}", "y".repeat(8 * 1024));
+        let mut state = execute_test_code(
+            RlmExecutionState::new(),
+            format!("let large = [\"{payload_a}\"];"),
+        )
+        .await;
+        let durable_a = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("durable A capture");
+        state.acknowledge_execution_state_capture();
+        let mut staged_runtime = lash_core::RuntimeSessionState {
+            session_id: lash_core::SessionId::from("progress-a-b-a-staged"),
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ))
+        };
+        lash_core::testing::stage_execution_state_components(
+            &mut staged_runtime,
+            durable_a.clone(),
+        )
+        .expect("stage durable A");
+        let mut retry_runtime = lash_core::RuntimeSessionState {
+            session_id: lash_core::SessionId::from("progress-a-b-a-retry"),
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ))
+        };
+        lash_core::testing::stage_execution_state_components(&mut retry_runtime, durable_a)
+            .expect("stage retry baseline A");
+
+        state = execute_test_code(state, format!("let large = [\"{payload_b}\"];")).await;
+        let progress_b = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("progress-boundary B capture");
+        lash_core::testing::stage_execution_state_components(
+            &mut staged_runtime,
+            progress_b.clone(),
+        )
+        .expect("stage progress B");
+        state = execute_test_code(state, format!("let large = [\"{payload_a}\"];")).await;
+        let final_a = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("final A capture");
+        assert_ne!(final_a.root(), progress_b.root());
+        assert_eq!(
+            final_a
+                .leaves()
+                .values()
+                .filter(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
+                .count(),
+            1,
+            "A was evicted by the staged B root, so final A must resend its body"
+        );
+
+        lash_core::testing::stage_execution_state_components(&mut staged_runtime, final_a)
+            .expect("stage final A over progress B");
+        let final_hydration = staged_runtime
+            .execution_state_hydration()
+            .expect("hydrate staged final A")
+            .expect("final A root");
+        let mut reopened = RlmExecutionState::new();
+        reopened
+            .restore_execution_state(&final_hydration, lash_core::FleetFormat::current())
+            .await
+            .expect("cold reopen final A capture");
+        assert_eq!(
+            reopened.vm.state().globals().get("large"),
+            state.vm.state().globals().get("large")
+        );
+
+        state.abort_execution_state_capture();
+        let retry_a = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("retry A after final commit failure");
+        lash_core::testing::stage_execution_state_components(&mut retry_runtime, retry_a)
+            .expect("stage retry A over durable A");
+        let retry_hydration = retry_runtime
+            .execution_state_hydration()
+            .expect("hydrate retry A")
+            .expect("retry A root");
+        let mut retry_reopened = RlmExecutionState::new();
+        retry_reopened
+            .restore_execution_state(&retry_hydration, lash_core::FleetFormat::current())
+            .await
+            .expect("cold reopen retry A capture");
+        assert_eq!(
+            retry_reopened.vm.state().globals().get("large"),
+            state.vm.state().globals().get("large")
+        );
+    });
+}
+
+#[test]
+pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
+    block_on(async {
+        let mut source = String::new();
+        for index in 0..16 {
+            let payload = format!("session-{index}-{}", "y".repeat(8 * 1024));
+            source.push_str(&format!("let large_{index} = [\"{payload}\"];\n"));
+        }
+        for index in 0..80 {
+            source.push_str(&format!("let small_{index} = {index};\n"));
+        }
+        let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
+        let full_state_bytes = state
+            .vm
+            .state()
+            .bytes()
+            .expect("canonical worker state")
+            .len();
+        let _initial = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("initial snapshot");
+        state.acknowledge_execution_state_capture();
+
+        let mut measured = Vec::new();
+        for turn in 0..40 {
+            let binding = turn % 16;
+            state = execute_test_code(
+                state,
+                format!(
+                    "let large_{binding} = [\"session-{binding}-{}\", \"turn-{turn}\"];",
+                    "y".repeat(8 * 1024)
+                ),
+            )
+            .await;
+            let snapshot = state
+                .snapshot_execution_state(lash_core::FleetFormat::current())
+                .await
+                .expect("turn snapshot");
+            assert_eq!(
+                state.encoded_globals_in_last_snapshot(),
+                1,
+                "turn {turn} must re-encode only its assigned binding"
+            );
+            assert_eq!(
+                snapshot
+                    .leaves()
+                    .values()
+                    .filter(|component| matches!(
+                        component,
+                        lash_core::plugin::LeafChange::Changed(_)
+                    ))
+                    .count(),
+                1,
+                "turn {turn} must submit one changed leaf body"
+            );
+            measured.push(state::measure_snapshot(&snapshot).checkpoint_bytes);
+            state.acknowledge_execution_state_capture();
+        }
+        let minimum = *measured.iter().min().expect("measurements");
+        let maximum = *measured.iter().max().expect("measurements");
+        println!(
+            "FIG1195_FLAT_GROWTH full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
+            measured.len()
+        );
+        assert_eq!(full_state_bytes, 136_767);
+        // Pin serializer measurements for the counter-only header and list-owned holes.
+        assert_eq!(minimum, 19_548);
+        assert_eq!(maximum, 19_550);
+    });
+}
+
+/// The failure geometry this arc exists for: a research session whose state
+/// is many mid-size composite bindings rather than a few large ones. Three
+/// live jitindex episodes committed 1.52/1.32/1.24 MB of exactly this shape
+/// against a 1 MiB budget, so per-commit bytes have to track the changed
+/// binding here too — a payoff that only appears above some large-binding
+/// size would not have prevented those failures.
+#[test]
+pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
+    block_on(async {
+        let started = std::time::Instant::now();
+        let state = RlmExecutionState::new();
+        let pool = state
+            .vm
+            .state()
+            .service()
+            .pool()
+            .expect("witness worker pool");
+        let measurement = GrowthMeasurement { started, pool };
+        let mut source = String::new();
+        for index in 0..300 {
+            let payload = format!("note-{index}-{}", "n".repeat(3 * 1024 + 512));
+            source.push_str(&format!("let mid_{index} = [\"{payload}\"];\n"));
+        }
+        let mut state = execute_test_code_chunked(state, source).await;
+        eprintln!(
+            "FIG4474_SEED elapsed_ms={:.3} worker_cpu_ms={:.3}",
+            measurement.started.elapsed().as_secs_f64() * 1000.0,
+            measurement.pool.measured_cpu().as_secs_f64() * 1000.0
+        );
+        let full_state_bytes = state
+            .vm
+            .state()
+            .bytes()
+            .expect("canonical worker state")
+            .len();
+        assert_eq!(full_state_bytes, 1_106_995);
+        let _initial = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("initial snapshot");
+        state.acknowledge_execution_state_capture();
+
+        let mut measured = Vec::new();
+        for turn in 0..20 {
+            let binding = turn % 300;
+            state = execute_test_code(
+                state,
+                format!(
+                    "let mid_{binding} = [\"note-{binding}-{}\", \"turn-{turn}\"];",
+                    "n".repeat(3 * 1024 + 512)
+                ),
+            )
+            .await;
+            let snapshot = state
+                .snapshot_execution_state(lash_core::FleetFormat::current())
+                .await
+                .expect("turn snapshot");
+            assert_eq!(
+                state.encoded_globals_in_last_snapshot(),
+                1,
+                "turn {turn} must re-encode only its assigned binding"
+            );
+            assert_eq!(
+                snapshot
+                    .leaves()
+                    .values()
+                    .filter(|component| matches!(
+                        component,
+                        lash_core::plugin::LeafChange::Changed(_)
+                    ))
+                    .count(),
+                1,
+                "turn {turn} must submit one changed leaf body"
+            );
+            measured.push(state::measure_snapshot(&snapshot).checkpoint_bytes);
+            state.acknowledge_execution_state_capture();
+        }
+        let minimum = *measured.iter().min().expect("measurements");
+        let maximum = *measured.iter().max().expect("measurements");
+        println!(
+            "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
+            measured.len()
+        );
+        // Pin serializer measurements for the counter-only header and list-owned holes.
+        assert_eq!(minimum, 94_481);
+        assert_eq!(maximum, 94_483);
+    });
+}
+
+/// The other side of the leaf line: a session of many short bindings must
+/// keep them inline. Each leaf costs a root reference plus a checkpoint
+/// manifest row on every commit, so promoting short values to leaves would
+/// raise the per-commit floor instead of lowering it.
+#[test]
+pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
+    block_on(async {
+        let mut source = String::new();
+        for index in 0..200 {
+            let payload = format!("short-{index}-{}", "s".repeat(48));
+            source.push_str(&format!("let short_{index} = [\"{payload}\"];\n"));
+        }
+        let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
+        let initial = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("initial snapshot");
+        assert_eq!(initial.leaves().len(), 0);
+        state.acknowledge_execution_state_capture();
+
+        state = execute_test_code(
+            state,
+            format!(
+                "let short_0 = [\"short-0-{}\", \"one changed binding\"];",
+                "s".repeat(48)
+            ),
+        )
+        .await;
+        let changed = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("changed snapshot");
+        let commit_bytes = state::measure_snapshot(&changed).checkpoint_bytes;
+        println!(
+            "FIG1195_SHORT_BINDING_FLOOR commit_bytes={commit_bytes} leaves={}",
+            changed.leaves().len()
+        );
+        assert!(
+            changed.leaves().is_empty(),
+            "a changed short binding must not mint a leaf"
+        );
+        // The property under test is the assertion above: no leaf is minted,
+        // so 200 short bindings cost no root references and no manifest
+        // rows. The byte bound is a sanity ceiling on top of that. The
+        // measurement is deterministic and has been 33,027 bytes since the
+        // pre-heap tree representation — the heap form encodes the same
+        // bytes for these bindings — so the ceiling is set well above it
+        // rather than one percent above it: a tight assert here fails on any
+        // harmless change to the payload strings while telling us nothing
+        // the leaf-count assertion does not.
+        assert!(
+            commit_bytes < 48 * 1024,
+            "many short bindings must keep the per-commit floor low: {commit_bytes}"
+        );
+    });
+}
+
+#[test]
+pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
+    block_on(async {
+        let mut state = RlmExecutionState::new();
+        let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+        let ctx = lash_core::testing::code_execution_context(handler.ports());
+        // Same constructs the runtime-perf `rlm_globals` scenario seeds:
+        // a large record and a large list that exceed the inline budget.
+        let code = r#"let big_map: Record<string, unknown> = {};
+                for (let i = 0; i < 24; i++) {
+                  big_map[`room_${i}`] = { exits: ["north", "south"], items: [`item_${i}`] };
+                }
+                let big_notes: string[] = [];
+                for (let i = 0; i < 45; i++) {
+                  big_notes = [...big_notes, `note ${i}: observation`];
+                }"#
+        .to_string();
+        let response = execute_code_with_test_render(
+            &mut state,
+            ctx,
+            ExecRequest { code },
+            handler.artifacts(),
+            LashlangSurface::new(
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangLanguageFeatures::default(),
+                lashlang::LashlangHostCatalog::new(),
+            ),
+            None,
+            RlmProjectedBindings::default(),
+            None,
+            lashlang::ExecutionBounds::unbounded(),
+            crate::plugin::RlmChannel::Cell,
+        )
+        .await;
+        assert_eq!(response.error, None);
+
+        let globals = state.bound_variable_values(&BTreeSet::new());
+        let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
+        let s = crate::rlm_support::render_bound_variables(
+            &mut cache,
+            &globals,
+            &[],
+            &crate::dialect::TypescriptDialect,
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
+        )
+        .to_string();
+
+        // Large record -> type + keys=N + projector preview.
+        assert!(s.contains("`big_map`:"), "{s}");
+        assert!(s.contains("keys=24"), "{s}");
+        assert!(s.contains("≈ {") && s.contains("room_0"), "{s}");
+        assert!(s.contains("≈ {"), "{s}");
+        // Large list -> type + len=N + projector preview.
+        assert!(s.contains("`big_notes`:"), "{s}");
+        assert!(s.contains("len=45"), "{s}");
+        assert!(s.contains("≈ [") && s.contains("note 0:"), "{s}");
+        assert!(s.contains("hidden items"), "{s}");
     });
 }
