@@ -1,15 +1,28 @@
-//! A node's runner: the one loop that keeps a node's lease, reaps dead
-//! nodes, claims actors and runs each claimed actor's activation.
+//! A node's runner: it keeps a node's lease, reaps dead nodes, claims actors
+//! and runs each claimed actor's activation.
+//!
+//! The lease renews on a task of its own, one heartbeat at a time, from the
+//! moment the node registers: no claim, reap, hand-back or liveness probe
+//! the serving loop waits on can delay it, so a saturated pool or a slow
+//! claim never makes a healthy node stop itself. Each renewal moves the
+//! self-stop deadline to `self_stop_after` past the moment its heartbeat was
+//! sent, never past the moment its answer came, so a late answer never
+//! extends serving beyond the lease it renewed. When the renewal ends (the
+//! lease is lost, or no heartbeat succeeded by the deadline) the serving
+//! loop stops at once.
 //!
 //! The runner owns every activation it starts. When the node stops serving,
 //! for any reason, the runner returns and every activation is dropped with
 //! it: a node that lost its lease keeps nothing, and a reaped node's actors
 //! are already fenced by their bumped epochs.
 //!
-//! No store call holds the runner: each one races the host's stop and the
-//! self-stop deadline (`self_stop_after` past the last renewal), so a node
-//! whose heartbeat hangs still stops itself, and drops its activations,
-//! before anyone may reap it.
+//! No store call holds the runner: each one the serving loop makes races the
+//! host's stop and the renewal's end, and the renewal's own heartbeat races
+//! the self-stop deadline, so a node whose heartbeat hangs still stops
+//! itself, and drops its activations, before anyone may reap it.
+//! Registration and the listener's start share the `startup` budget;
+//! the final release shares the `shutdown` budget, and a release that does
+//! not answer in time is left to the lease's expiry.
 //!
 //! All of its time is the injected [`Clock`]'s, so a simulated deployment
 //! runs the same loop on virtual time.
@@ -35,9 +48,9 @@
 //! and then free. None of it is needed for correctness: the claim poll, each
 //! owner's mail poll and the lease reap find every piece of work.
 
-use crate::config::LeaseConfig;
+use crate::config::{LeaseConfig, LeaseSettings};
 use crate::durable_config::DurableConfig;
-use crate::error::DurableError;
+use crate::error::{DurableError, StoreFailure, StoreFailureKind};
 use crate::formats::FormatSet;
 use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
 use crate::port::{
@@ -52,7 +65,7 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 use tokio::task::JoinSet;
 
 /// What a runner runs as.
@@ -207,6 +220,11 @@ impl Liveness {
 
     fn renew(&self, deadline: Instant) {
         *self.deadline.lock().unwrap_or_else(PoisonError::into_inner) = deadline;
+    }
+
+    /// The lease is gone: the node holds it no longer, whatever its clock.
+    fn lose(&self) {
+        self.renew(self.clock.now());
     }
 
     /// Whether the node still holds its lease: its self-stop deadline is
@@ -653,30 +671,57 @@ impl Runner {
     ///
     /// # Errors
     ///
-    /// The store's refusal of the node's registration.
+    /// The store's refusal of the node's registration or listener, either
+    /// one not in place within `startup` of the registration attempt, or
+    /// the store's refusal of the final release.
     pub async fn run(self, stop: impl Future<Output = ()> + Send) -> Result<Stopped, DurableError> {
         let settings = self.config.lease.settings();
+        // The lease's clock starts when the registration is sent: the
+        // stored lease cannot start earlier, so the local deadline is never
+        // later than the stored one.
+        let registering = self.clock.now();
+        let started_by = registering + settings.startup;
+        let spec = NodeSpec {
+            node: self.config.node.clone(),
+            decodes: self.config.decodes.clone(),
+            ttl_millis: self.config.lease.ttl_millis(),
+        };
         let lease = self
-            .store
-            .register_node(&NodeSpec {
-                node: self.config.node.clone(),
-                decodes: self.config.decodes.clone(),
-                ttl_millis: self.config.lease.ttl_millis(),
-            })
-            .await?;
+            .within(started_by, self.store.register_node(&spec))
+            .await
+            .unwrap_or_else(|| Err(not_started("registration", settings)))?;
         *self
             .hints
             .inner
             .boot
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(lease.owner.clone());
+        self.liveness.renew(registering + settings.self_stop_after);
+        // Renewal runs before the listener opens, so a slow listener never
+        // ages the lease. Dropping the set on any return cancels it.
+        let (ended_tx, ended) = watch::channel(None);
+        let mut renewal: JoinSet<()> = JoinSet::new();
+        renewal.spawn(renew(
+            Arc::clone(&self.store),
+            Arc::clone(&self.clock),
+            lease.clone(),
+            settings,
+            self.liveness.clone(),
+            registering,
+            ended_tx,
+        ));
         // The listener is in place before the first claim scans.
         let mut feed = match &self.signals {
-            Some(signals) => match signals.listen(&lease).await {
-                Ok(feed) => Some(feed),
-                Err(error) => {
-                    let _ = self.store.release_node(&lease).await;
-                    return Err(error);
+            Some(signals) => match self.within(started_by, signals.listen(&lease)).await {
+                Some(Ok(feed)) => Some(feed),
+                failed => {
+                    renewal.abort_all();
+                    while renewal.join_next().await.is_some() {}
+                    let _ = self.release(&lease, settings).await;
+                    return Err(match failed {
+                        Some(Err(error)) => error,
+                        _ => not_started("listener", settings),
+                    });
                 }
             },
             None => None,
@@ -692,9 +737,6 @@ impl Runner {
         let mut claims: HashMap<tokio::task::Id, (ActorKey, Epoch)> = HashMap::new();
         let mut abandoned: Vec<(ActorKey, Epoch)> = Vec::new();
         let start = self.clock.now();
-        let mut last_renewed = start;
-        self.liveness.renew(start + settings.self_stop_after);
-        let mut next_heartbeat = start + settings.heartbeat_every;
         let mut next_reap = start + settings.reap_every;
         let mut next_claim = start;
         let mut claim_delay = settings.claim_backoff;
@@ -708,12 +750,11 @@ impl Runner {
         let mut marked_draining = false;
         tokio::pin!(stop);
         let stopped = 'serve: loop {
-            let unrenewed = last_renewed + settings.self_stop_after;
             // A hand-back that failed is retried at the next turn of the
             // loop; one the fence refused finds the actor already gone.
             for (actor, epoch) in std::mem::take(&mut abandoned) {
                 match self
-                    .bounded(&mut stop, unrenewed, self.hand_back(&actor, epoch))
+                    .bounded(&mut stop, &ended, self.hand_back(&actor, epoch))
                     .await
                 {
                     Ok(Ok(())) => {
@@ -728,7 +769,7 @@ impl Runner {
             if self.drain.started() {
                 if !marked_draining {
                     let mark = self.store.mark_draining(&lease);
-                    match self.bounded(&mut stop, unrenewed, mark).await {
+                    match self.bounded(&mut stop, &ended, mark).await {
                         Ok(Ok(())) => {
                             marked_draining = true;
                             // Idle owners release at once.
@@ -744,13 +785,14 @@ impl Runner {
                     break Stopped::Drained;
                 }
             }
-            let mut next = next_heartbeat.min(next_reap).min(next_claim).min(unrenewed);
+            let mut next = next_reap.min(next_claim);
             if feed.is_some() {
                 next = next.min(next_watch);
             }
             tokio::select! {
                 biased;
                 () = &mut stop => break Stopped::Requested,
+                stopped = renewal_ended(&ended) => break stopped,
                 Some(joined) = active.join_next_with_id(), if !active.is_empty() => {
                     // A panicked activation stopped holding its actor too.
                     let (task, exit) = match joined {
@@ -791,31 +833,10 @@ impl Runner {
                 () = self.clock.sleep_until(next) => {}
             }
             let now = self.clock.now();
-            if now >= next_heartbeat {
-                next_heartbeat = now + settings.heartbeat_every;
-                let beat = self.store.heartbeat(&lease);
-                match self.bounded(&mut stop, unrenewed, beat).await {
-                    Ok(Ok(HeartbeatOutcome::Renewed { .. })) => {
-                        last_renewed = now;
-                        self.liveness.renew(now + settings.self_stop_after);
-                    }
-                    Ok(Ok(HeartbeatOutcome::Reaped) | Err(DurableError::NodeLeaseLost { .. })) => {
-                        break Stopped::LeaseLost;
-                    }
-                    Ok(Err(_)) => {}
-                    Err(stopped) => break stopped,
-                }
-            }
-            // Only a heartbeat renews, so the rest of the tick runs under
-            // one deadline.
-            let unrenewed = last_renewed + settings.self_stop_after;
-            if self.clock.now() >= unrenewed {
-                break Stopped::Unrenewed;
-            }
             if now >= next_reap {
                 next_reap = now + settings.reap_every;
                 match self
-                    .bounded(&mut stop, unrenewed, self.store.reap(&lease))
+                    .bounded(&mut stop, &ended, self.store.reap(&lease))
                     .await
                 {
                     Ok(Err(DurableError::NodeLeaseLost { .. })) => break Stopped::LeaseLost,
@@ -828,7 +849,7 @@ impl Runner {
                 && now >= next_watch
             {
                 next_watch = now + settings.claim_poll;
-                let probed = match self.bounded(&mut stop, unrenewed, signals.liveness()).await {
+                let probed = match self.bounded(&mut stop, &ended, signals.liveness()).await {
                     Ok(probed) => probed,
                     Err(stopped) => break stopped,
                 };
@@ -842,7 +863,7 @@ impl Runner {
                 };
                 for boot in released {
                     let reap = signals.reap_released(&lease, &boot);
-                    match self.bounded(&mut stop, unrenewed, reap).await {
+                    match self.bounded(&mut stop, &ended, reap).await {
                         Ok(Ok(reaped)) if !reaped.is_empty() => next_claim = now,
                         Ok(Err(DurableError::NodeLeaseLost { .. })) => {
                             break 'serve Stopped::LeaseLost;
@@ -856,7 +877,7 @@ impl Runner {
                 next_claim = now + settings.claim_poll;
                 let claimed = if adopt {
                     match self
-                        .bounded(&mut stop, unrenewed, self.store.owned(&lease))
+                        .bounded(&mut stop, &ended, self.store.owned(&lease))
                         .await
                     {
                         Ok(owned) => owned.map(|owned| {
@@ -877,7 +898,7 @@ impl Runner {
                         continue;
                     }
                     match self
-                        .bounded(&mut stop, unrenewed, self.store.claim(&lease, room))
+                        .bounded(&mut stop, &ended, self.store.claim(&lease, room))
                         .await
                     {
                         Ok(claimed) => claimed,
@@ -906,31 +927,70 @@ impl Runner {
                 }
             }
         };
+        if stopped == Stopped::LeaseLost {
+            self.liveness.lose();
+        }
         active.abort_all();
         while active.join_next().await.is_some() {}
-        if matches!(stopped, Stopped::Requested | Stopped::Drained) {
-            self.store.release_node(&lease).await?;
-        }
+        renewal.abort_all();
+        while renewal.join_next().await.is_some() {}
         publisher.abort_all();
+        let released = if matches!(stopped, Stopped::Requested | Stopped::Drained) {
+            self.release(&lease, settings).await
+        } else {
+            Ok(())
+        };
+        // Dropping the listener ends its session, which frees the boot's
+        // liveness lock; nothing waits on it.
         drop(feed);
-        Ok(stopped)
+        released.map(|()| stopped)
     }
 
-    /// `call`'s answer, unless the host's `stop` or the self-stop deadline
-    /// `unrenewed` comes first: then why the node stops instead. A call that
+    /// Release the node's lease within `shutdown`. A release that does not
+    /// answer in time is left to the lease's expiry.
+    async fn release(
+        &self,
+        lease: &NodeLease,
+        settings: LeaseSettings,
+    ) -> Result<(), DurableError> {
+        let by = self.clock.now() + settings.shutdown;
+        match self.within(by, self.store.release_node(lease)).await {
+            Some(released) => released.map(drop),
+            None => Ok(()),
+        }
+    }
+
+    /// `call`'s answer, unless `deadline` comes first.
+    async fn within<T>(&self, deadline: Instant, call: impl Future<Output = T>) -> Option<T> {
+        tokio::select! {
+            biased;
+            () = self.clock.sleep_until(deadline) => None,
+            answer = call => Some(answer),
+        }
+    }
+
+    /// `call`'s answer, unless the host's `stop` or the end of the node's
+    /// renewal comes first: then why the node stops instead. A call that
     /// hangs (a held lock, a dead connection's TCP wait, a pool's acquire
-    /// timeout) never holds the node past either.
+    /// timeout) never holds the node past either. An answer that comes
+    /// once the node no longer holds its lease is not acted on, even before
+    /// the renewal reports its end.
     async fn bounded<T>(
         &self,
         stop: &mut (impl Future<Output = ()> + Unpin),
-        unrenewed: Instant,
+        ended: &watch::Receiver<Option<Stopped>>,
         call: impl Future<Output = T>,
     ) -> Result<T, Stopped> {
-        tokio::select! {
+        let answer = tokio::select! {
             biased;
-            () = stop => Err(Stopped::Requested),
-            () = self.clock.sleep_until(unrenewed) => Err(Stopped::Unrenewed),
-            answer = call => Ok(answer),
+            () = stop => return Err(Stopped::Requested),
+            stopped = renewal_ended(ended) => return Err(stopped),
+            answer = call => answer,
+        };
+        if self.liveness.held() {
+            Ok(answer)
+        } else {
+            Err(ended.borrow().clone().unwrap_or(Stopped::Unrenewed))
         }
     }
 
@@ -978,6 +1038,74 @@ impl Runner {
         });
         claims.insert(task.id(), claim);
     }
+}
+
+/// Renew `lease` until it is lost or unrenewed, one heartbeat at a time,
+/// and report why the renewal ended through `ended`. The self-stop deadline
+/// starts at `registering + self_stop_after` and each renewal moves it to
+/// `self_stop_after` past the moment its heartbeat was sent; a heartbeat
+/// still unanswered at the deadline is dropped and the node stops.
+async fn renew(
+    store: Arc<dyn DurableStore>,
+    clock: Arc<dyn Clock>,
+    lease: NodeLease,
+    settings: LeaseSettings,
+    liveness: Liveness,
+    registering: Instant,
+    ended: watch::Sender<Option<Stopped>>,
+) {
+    let mut deadline = registering + settings.self_stop_after;
+    let mut next = registering + settings.heartbeat_every;
+    let stopped = loop {
+        tokio::select! {
+            biased;
+            () = clock.sleep_until(deadline) => break Stopped::Unrenewed,
+            () = clock.sleep_until(next) => {}
+        }
+        let sent = clock.now();
+        next = sent + settings.heartbeat_every;
+        tokio::select! {
+            biased;
+            () = clock.sleep_until(deadline) => break Stopped::Unrenewed,
+            beat = store.heartbeat(&lease) => match beat {
+                Ok(HeartbeatOutcome::Renewed { .. }) => {
+                    deadline = deadline.max(sent + settings.self_stop_after);
+                    liveness.renew(deadline);
+                }
+                Ok(HeartbeatOutcome::Reaped) | Err(DurableError::NodeLeaseLost { .. }) => {
+                    break Stopped::LeaseLost;
+                }
+                // Retried at the next heartbeat.
+                Err(_) => {}
+            },
+        }
+    };
+    if stopped == Stopped::LeaseLost {
+        liveness.lose();
+    }
+    ended.send_replace(Some(stopped));
+}
+
+/// Why the node's renewal ended, once it has. A renewal task that ended
+/// without saying (it panicked) renews no more: the node is unrenewed.
+async fn renewal_ended(ended: &watch::Receiver<Option<Stopped>>) -> Stopped {
+    let mut ended = ended.clone();
+    match ended.wait_for(Option::is_some).await {
+        Ok(stopped) => stopped.clone().unwrap_or(Stopped::Unrenewed),
+        Err(_) => Stopped::Unrenewed,
+    }
+}
+
+/// A node that did not start within `startup`: whether its `what` took
+/// effect is unknown, and an unrenewed lease expires on its own.
+fn not_started(what: &str, settings: LeaseSettings) -> DurableError {
+    DurableError::Store(StoreFailure {
+        kind: StoreFailureKind::Unavailable,
+        message: format!(
+            "the node's {what} was not in place within startup ({:?})",
+            settings.startup
+        ),
+    })
 }
 
 /// Fold one liveness probe into `seen_held`, answering each boot this node

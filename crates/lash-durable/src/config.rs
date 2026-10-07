@@ -3,7 +3,10 @@
 //! The defaults are the PostgreSQL measurement's (S2, FIG-5167): a 3 s
 //! heartbeat against a 15 s lease, a 10 s self-stop, a 2 s reap sweep, and a
 //! claim poll that backs off from 25 ms to a 250 ms ceiling while claims come
-//! back empty, so a lost wake hint costs at most a quarter second.
+//! back empty, so a lost wake hint costs at most a quarter second. Startup
+//! and shutdown are bounded at 2 s each (FIG-5238): a node that cannot
+//! register and listen in that time fails to start, and one that cannot
+//! release its lease in that time leaves it to expire.
 
 use std::time::Duration;
 
@@ -29,6 +32,15 @@ pub struct LeaseSettings {
     /// that took work. Each empty claim doubles the wait up to
     /// `claim_poll`; a wake hint claims at once.
     pub claim_backoff: Duration,
+    /// How long a node may take to start, from its registration attempt
+    /// until its registration and its listener are in place. Its renewal
+    /// starts as soon as it is registered, so a slow listener never ages
+    /// the lease.
+    pub startup: Duration,
+    /// How long a stopping node waits for its lease's release once its
+    /// activations have stopped. A release that does not answer in time is
+    /// left to the lease's expiry.
+    pub shutdown: Duration,
 }
 
 impl Default for LeaseSettings {
@@ -40,6 +52,8 @@ impl Default for LeaseSettings {
             reap_every: Duration::from_secs(2),
             claim_poll: Duration::from_millis(250),
             claim_backoff: Duration::from_millis(25),
+            startup: Duration::from_secs(2),
+            shutdown: Duration::from_secs(2),
         }
     }
 }
@@ -110,6 +124,8 @@ impl LeaseSettings {
             ("reap_every", self.reap_every),
             ("claim_poll", self.claim_poll),
             ("claim_backoff", self.claim_backoff),
+            ("startup", self.startup),
+            ("shutdown", self.shutdown),
         ] {
             if value.as_millis() == 0 {
                 return Err(LeaseConfigError::BelowResolution { field });

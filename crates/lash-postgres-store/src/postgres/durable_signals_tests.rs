@@ -424,8 +424,13 @@ async fn a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses() {
     survivor.task.abort();
 }
 
-/// The node lease's commits run on reserved connections: with every shared
-/// connection held by other work, a heartbeat still renews at once.
+/// A node's lease renews on a task of its own: with every shared connection
+/// held, so the runner's claim waits on the pool, and the reserved
+/// connections busy with other work, the node keeps serving across three
+/// self-stop windows, so it renewed at least three times. Its stored lease
+/// lives two seconds and a second node reaps expired leases every 250 ms,
+/// so those renewals reached the database: a reaped node's next heartbeat
+/// answers `Reaped` and its runner stops (FIG-5241).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
     let Some(database) = database("a_saturated_shared_pool_cannot_starve_the_heartbeat").await
@@ -442,14 +447,56 @@ async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
     .await
     .expect("open the isolated store");
     let store = storage.durable_store();
-    let lease = node(&store, "busy").await;
-    let _first = storage.pool().acquire().await.expect("hold a connection");
-    let _second = storage.pool().acquire().await.expect("hold a connection");
-    let renewed = tokio::time::timeout(Duration::from_secs(3), store.heartbeat(&lease))
+    let lease = LeaseSettings {
+        ttl: Duration::from_secs(2),
+        heartbeat_every: Duration::from_millis(300),
+        self_stop_after: Duration::from_millis(1_500),
+        ..LeaseSettings::default()
+    };
+    let watcher = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("watcher"),
+            decodes: vec![formats()],
+            ttl_millis: i64::try_from(lease.ttl.as_millis()).expect("ttl fits"),
+        })
         .await
-        .expect("the heartbeat is not starved")
-        .expect("the heartbeat commits");
-    assert!(matches!(renewed, HeartbeatOutcome::Renewed { .. }));
+        .expect("register the watcher");
+    let _shared: Vec<_> = vec![
+        storage.pool().acquire().await.expect("hold a connection"),
+        storage.pool().acquire().await.expect("hold a connection"),
+    ];
+    let reserve = store.reserve.pool(&store.pool);
+    let mut reserved = Vec::new();
+    for _ in 1..super::super::RESERVED_CONNECTIONS {
+        reserved.push(reserve.acquire().await.expect("hold a reserved connection"));
+    }
+    let node = start(&storage, "busy", lease, false);
+    let started = Instant::now();
+    while started.elapsed() < 3 * lease.self_stop_after {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(
+            matches!(
+                store.heartbeat(&watcher).await,
+                Ok(HeartbeatOutcome::Renewed { .. })
+            ),
+            "the watcher renews"
+        );
+        store.reap(&watcher).await.expect("reap expired leases");
+        assert!(
+            !node.task.is_finished(),
+            "the busy node stopped {:?} in: {:?}",
+            started.elapsed(),
+            node.task.await
+        );
+    }
+    // A reap in the last tick ends the runner at its next heartbeat.
+    tokio::time::sleep(2 * lease.heartbeat_every).await;
+    assert!(
+        !node.task.is_finished(),
+        "the busy node's lease was reaped: {:?}",
+        node.task.await
+    );
+    node.task.abort();
 }
 
 #[test]

@@ -110,6 +110,8 @@ Each node keeps one heartbeat row. `DurableSettings::lease`
 | `reap_every` | 2 s | How often the node reaps dead nodes. |
 | `claim_poll` | 250 ms | The idle claim interval's ceiling, and the longest a lost wake can delay work. |
 | `claim_backoff` | 25 ms | The claim interval's floor after a claim that took work. |
+| `startup` | 2 s | How long registration and the listener's start may take together, from the registration attempt. A node not in place by then fails to start; renewal already runs while the listener opens. |
+| `shutdown` | 2 s | How long a stopping node waits for its lease's release. A release that does not answer in time is left to the lease's expiry. |
 
 The reaper deletes an expired node row and, in the same statement, releases
 its actors with an **epoch bump**. Every owner transaction begins by reading
@@ -145,10 +147,15 @@ acknowledged work is lost either way. A node served directly with
 `node::serve(&backend, serve, stop)` stops when its `stop` future completes,
 for the same reasons.
 
-Every store call the runner makes races the host's stop and the self-stop
-deadline, so a heartbeat that hangs still stops the node at `self_stop_after`,
-and its activations with it. Bound the store's connect and statement timeouts
-anyway, so a hung call ends.
+The lease renews on a task of its own, one heartbeat at a time, from the
+moment the node registers. A claim, reap, hand-back or liveness probe that
+waits on a busy pool or a held lock never delays a renewal. Each renewal moves
+the self-stop deadline to `self_stop_after` past the moment its heartbeat was
+sent, so a late answer never extends serving past the lease it renewed. A
+heartbeat that hangs still stops the node at `self_stop_after`, and the
+serving loop's own store calls race the host's stop and the renewal's end, so
+the node's activations stop with it. Bound the store's connect and statement
+timeouts anyway, so a hung call ends.
 
 ### Drain by release
 

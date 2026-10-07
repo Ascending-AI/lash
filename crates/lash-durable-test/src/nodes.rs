@@ -610,6 +610,62 @@ mod tests {
         );
     }
 
+    /// A node whose claim hangs keeps its lease: renewal runs on a task of
+    /// its own, so the node renews again and again across several
+    /// self-stop windows and keeps serving while the claim waits
+    /// (FIG-5241).
+    #[tokio::test]
+    async fn a_hung_claim_never_delays_renewal() {
+        let script = Script::new();
+        script.cut_on(
+            "a",
+            CommitLabel::CLAIM,
+            1,
+            Fault::DelayedAck(Duration::from_secs(60)),
+        );
+        let clock = SimClock::new();
+        let nodes = SimNodes::new(
+            sqlite(Arc::clone(&clock)).await,
+            clock,
+            script,
+            SimNodesConfig {
+                lease: LeaseConfig::default(),
+                decodes: vec![FormatSet::new(FORMATS)],
+                max_active: 4,
+            },
+            Arc::new(Hold::default()) as Arc<dyn Activation>,
+        );
+        nodes.start("a");
+        let self_stop_after = u64::try_from(
+            LeaseConfig::default()
+                .settings()
+                .self_stop_after
+                .as_millis(),
+        )
+        .unwrap();
+        while nodes.clock().logical_ms() <= 3 * self_stop_after {
+            assert!(
+                nodes.serving("a"),
+                "stopped at {} ms while its claim hung: {:?}\n{}",
+                nodes.clock().logical_ms(),
+                nodes.stopped("a").await,
+                nodes.script().rendered_trace()
+            );
+            nodes.step().await;
+        }
+        let renewals = nodes
+            .script()
+            .trace()
+            .iter()
+            .filter(|write| write.point.label == CommitLabel::HEARTBEAT && write.committed())
+            .count();
+        assert!(
+            renewals >= 9,
+            "{renewals} renewals in three self-stop windows\n{}",
+            nodes.script().rendered_trace()
+        );
+    }
+
     /// A node asked to stop while its heartbeat hangs stops at once: the
     /// stop is heard during the heartbeat, not after it (FIG-5178).
     #[tokio::test]
