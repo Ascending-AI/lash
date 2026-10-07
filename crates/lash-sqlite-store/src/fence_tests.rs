@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use lash_core_execution::compat::{CompatRefusal, VersionRange};
 use lash_core_execution::{
-    FleetFormat, FleetFormatStore, ProcessLifecycle as _, ProcessOriginator,
+    FleetFormat, FleetFormatStore, ProcessOriginator, ProcessRegistrar as _,
     SessionCatalogStore as _, SessionId, SessionMeta, SessionRelation, StoreError, TriggerCommand,
     TriggerOwnerScope, TriggerStore as _,
 };
@@ -158,11 +158,13 @@ async fn sqlite_fence_refuses_a_writer_of_each_family_after_finalize() {
         "a fenced session writer wrote nothing"
     );
 
+    let processes_before = count(&location, "processes");
     let registry_error = set
         .process_registry()
-        .record_parent_end(&lash_core_execution::ScopeId::turn(
-            SessionId::from("fence-parent"),
-            lash_core_execution::TurnId::from("fence-turn"),
+        .register_process(lash_core_execution::testing::held_engine_registration(
+            serde_json::Value::Null,
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
         ))
         .await
         .expect_err("the process-registry writer is fenced");
@@ -171,8 +173,8 @@ async fn sqlite_fence_refuses_a_writer_of_each_family_after_finalize() {
         "{registry_error}"
     );
     assert_eq!(
-        count(&location, "parent_end_plans"),
-        0,
+        count(&location, "processes"),
+        processes_before,
         "a fenced process-registry writer wrote nothing"
     );
 

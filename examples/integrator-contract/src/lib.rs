@@ -763,9 +763,6 @@ impl ProcessLifecycle for Integrator {
     ) -> Result<ProcessCompletionOutcome, PluginError> {
         unreachable!("external signature witness")
     }
-    async fn record_parent_end(&self, parent: &ScopeId) -> Result<(), PluginError> {
-        unreachable!("external signature witness")
-    }
     async fn get_parent_end_plan(
         &self,
         parent: &ScopeId,

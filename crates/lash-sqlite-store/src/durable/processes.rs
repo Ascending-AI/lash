@@ -9,7 +9,7 @@
 //! and the cancel request are the registry's own writes on this commit's
 //! connection, so the registry and the actor never disagree.
 
-use lash_core_execution::runtime::actor::process::scope_index;
+use lash_core_execution::runtime::actor::process::{scope_id, scope_index, subtree_roots};
 use lash_durable::domain::{
     CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessWrite,
     SIGNAL_MAIL, ScopeKey,
@@ -275,6 +275,33 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
             }
             Ok(Ok(()))
         }
+        ProcessWrite::ScopeClosed { scope } => close_scope(tx, commit, scope),
+    }
+}
+
+/// Write `scope`'s closure fact, then read its unmarked `Until` children in
+/// this transaction: the one writer serializes it with every registration,
+/// so a child that committed first is read here, and any later one is
+/// refused. A turn scope with one left is recorded as ending.
+fn close_scope(tx: &Connection, commit: &Committing<'_>, scope: &ScopeKey) -> Answer<()> {
+    let Some(closed) = scope_id(scope) else {
+        return Ok(Ok(()));
+    };
+    if let Err(error) = crate::process_registry::parent_end::record_conn(
+        tx,
+        &closed,
+        millis(commit.now),
+        commit.fleet,
+    ) {
+        return Ok(Err(registry_failure(&error)));
+    }
+    let ScopeKey::Turn(session, _) = scope else {
+        return Ok(Ok(()));
+    };
+    match until_children(tx, scope, None, 1)? {
+        Ok(left) if left.is_empty() => Ok(Ok(())),
+        Ok(_) => super::session_close::record_ending(tx, commit, session, scope),
+        Err(error) => Ok(Err(error)),
     }
 }
 
@@ -321,9 +348,8 @@ pub(super) fn process(tx: &Connection, process: &ProcessId) -> Answer<Option<Pro
     )))
 }
 
-fn children(
+pub(super) fn until_children(
     tx: &Connection,
-    statement: &str,
     scope: &ScopeKey,
     after: Option<&ProcessId>,
     limit: usize,
@@ -334,7 +360,7 @@ fn children(
     let after = after.map_or("", ProcessId::as_str);
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let ids = tx
-        .prepare_cached(statement)?
+        .prepare_cached(SQL.process.pending_children.sql())?
         .query_map(rusqlite::params![kind, id, after, limit], |row| {
             row.get::<_, String>(0)
         })?
@@ -345,43 +371,33 @@ fn children(
         .collect())
 }
 
-pub(super) fn until_children(
-    tx: &Connection,
-    scope: &ScopeKey,
-    after: Option<&ProcessId>,
-    limit: usize,
-) -> Answer<Vec<ProcessId>> {
-    children(tx, SQL.process.pending_children.sql(), scope, after, limit)
-}
-
-/// The live `Until` subtree of `scope`, breadth first, one indexed page per
-/// scope: each live child's own `Until` children follow it. Bounded by
-/// `limit`; a parent's terminal says nothing about this being empty.
+/// Up to `limit` live processes in the `Until` subtree of `scope`, by id:
+/// one walk through every process row below it, ended or not, and for a
+/// session through its turn and session-operation scopes too. A parent's
+/// terminal says nothing about this being empty.
 pub(super) fn live_until_descendants(
     tx: &Connection,
     scope: &ScopeKey,
     limit: usize,
 ) -> Answer<Vec<ProcessId>> {
-    let mut found = Vec::new();
-    let mut frontier = std::collections::VecDeque::from([scope.clone()]);
-    while let Some(scope) = frontier.pop_front() {
-        if found.len() >= limit {
-            break;
-        }
-        let page = match children(
-            tx,
-            SQL.process.live_children.sql(),
-            &scope,
-            None,
-            limit - found.len(),
-        )? {
-            Ok(page) => page,
-            Err(error) => return Ok(Err(error)),
-        };
-        for child in page {
-            frontier.push_back(ScopeKey::Process(child.clone()));
-            found.push(child);
-        }
-    }
-    Ok(Ok(found))
+    let Some(roots) = subtree_roots(scope) else {
+        return Ok(Ok(Vec::new()));
+    };
+    let ids = tx
+        .prepare_cached(SQL.process.live_descendants.sql())?
+        .query_map(
+            rusqlite::params![
+                roots.kind,
+                roots.id,
+                roots.turns,
+                roots.operations,
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            |row| row.get::<_, String>(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids
+        .into_iter()
+        .map(|id| ProcessId::parse(&id).map_err(|_| super::corrupt("process id", &id)))
+        .collect())
 }

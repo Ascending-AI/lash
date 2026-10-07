@@ -63,10 +63,6 @@ law!(
     |store, _advance| { laws::a_session_close_moves_one_step_at_a_time(store) }
 );
 law!(
-    an_ending_scope_stays_recorded_until_its_last_batch,
-    |store, _advance| { laws::an_ending_scope_stays_recorded_until_its_last_batch(store) }
-);
-law!(
     a_node_claims_only_actors_whose_formats_it_decodes,
     |store, _advance| { laws::a_node_claims_only_actors_whose_formats_it_decodes(store) }
 );

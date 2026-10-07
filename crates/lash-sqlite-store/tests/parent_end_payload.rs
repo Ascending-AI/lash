@@ -31,42 +31,6 @@ fn inject(dir: &std::path::Path, kind: &str, id: &str, payload: &str) {
     .expect("inject the ledger row");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_ledger_row_decodes_its_typed_payload() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let registry = Arc::new(
-        SqliteProcessRegistry::open_standalone_for_testing(&dir.path().join("processes.db"))
-            .await
-            .expect("process registry"),
-    ) as Arc<dyn ProcessRegistry>;
-
-    let process_parent = registry
-        .register_process(lash_core::testing::held_engine_registration(
-            serde_json::Value::Null,
-            lash_core_execution::ProcessProvenance::session(
-                lash_core_execution::SessionScope::new("payload-session"),
-            ),
-            lash_core_execution::Lifetime::Detached,
-        ))
-        .await
-        .expect("register the process parent");
-    let scope = lash_core_execution::ScopeId::process(process_parent.id.clone());
-    registry
-        .record_parent_end(&scope)
-        .await
-        .expect("end the process scope");
-
-    let plan = registry
-        .get_parent_end_plan(&scope)
-        .await
-        .expect("read the ledger row")
-        .expect("the row exists");
-    assert_eq!(
-        plan.parent, scope,
-        "the ledger decodes the typed parent — incarnation included — from its payload"
-    );
-}
-
 /// ADR 0094's version-2 row keyed a parent scope (`Host` included) rather
 /// than a lifetime scope. FIG-3607 re-keys the ledger by `ScopeId` in place,
 /// under the same payload version; the old row's scope is not a `ScopeId`, so

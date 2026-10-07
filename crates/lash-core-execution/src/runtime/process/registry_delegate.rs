@@ -312,13 +312,6 @@ macro_rules! delegate_process_lifecycle {
                 $event_hook
             }
 
-            async fn record_parent_end(
-                &self,
-                parent: &$crate::ScopeId,
-            ) -> Result<(), $crate::PluginError> {
-                self.$inner.record_parent_end(parent).await
-            }
-
             async fn get_parent_end_plan(
                 &self,
                 parent: &$crate::ScopeId,

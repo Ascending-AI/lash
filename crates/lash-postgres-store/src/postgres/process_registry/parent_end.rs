@@ -78,7 +78,9 @@ pub(crate) async fn lock_parent_scope_tx(
 }
 
 /// Record that `parent` ended at `ended_at_ms`, in the caller's
-/// transaction. A repeated record keeps the first row.
+/// transaction, under the scope's lock: a process's terminal append, or the
+/// durable commit that closed a turn or a session
+/// (`ProcessWrite::ScopeClosed`). A repeated record keeps the first row.
 pub(crate) async fn record_tx(
     tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
@@ -153,25 +155,6 @@ pub(crate) async fn plan_exists_tx(
         .await
         .map_err(plugin_sqlx_error)?;
     Ok(row.is_some())
-}
-
-/// The standalone ledger write, which a turn takes after its own commit.
-///
-/// It runs in its own transaction so it can hold the parent-scope advisory
-/// lock: a registration deciding the same scope either commits its child
-/// before this row exists, or reads the row and refuses the child.
-pub(super) async fn record(
-    pool: &PgPool,
-    fence: &crate::guarded_tx::WriterFence,
-    parent: &ScopeId,
-    ended_at_ms: u64,
-) -> Result<(), PluginError> {
-    let mut tx = crate::begin_guarded(pool, fence)
-        .await
-        .map_err(crate::plugin_store_error)?;
-    let fleet_format = tx.fleet();
-    record_tx(&mut tx, parent, ended_at_ms, fleet_format).await?;
-    tx.commit().await.map_err(plugin_sqlx_error)
 }
 
 pub(super) async fn get(

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use lash_core_execution::compat::VersionRange;
 use lash_core_execution::{
-    FleetFormat, ProcessLifecycle as _, ProcessRetention as _, SessionCatalogStore as _,
+    FleetFormat, ProcessRegistrar as _, ProcessRetention as _, SessionCatalogStore as _,
     SessionCommitStore as _, SessionId, SessionMeta, SessionRelation, StoreError, WriterPin,
 };
 
@@ -179,9 +179,10 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
 
     let error = storage
         .process_registry()
-        .record_parent_end(&lash_core_execution::ScopeId::turn(
-            SessionId::from("fence-parent"),
-            lash_core_execution::TurnId::from("fence-turn"),
+        .register_process(lash_core_execution::testing::held_engine_registration(
+            serde_json::Value::Null,
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
         ))
         .await
         .expect_err("a process-registry write after the move of F is fenced");
@@ -189,11 +190,11 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
         error.to_string().contains("writer fenced"),
         "expected WriterFenced, got {error:?}"
     );
-    let plans: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_parent_end_plans")
+    let processes: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_processes")
         .fetch_one(storage.pool())
         .await
-        .expect("count parent-end plans");
-    assert_eq!(plans, 0, "a fenced writer wrote nothing");
+        .expect("count processes");
+    assert_eq!(processes, 0, "a fenced writer wrote nothing");
     assert_eq!(
         storage.fleet_format().version(),
         seeded,

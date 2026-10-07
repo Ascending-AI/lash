@@ -64,44 +64,6 @@ async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage, PgPool)> {
     Some((database_lock, storage, pool))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_ledger_row_decodes_its_typed_payload() {
-    let Some((_database_lock, storage, pool)) = storage().await else {
-        eprintln!("skipping PostgreSQL parent-end payload test: database URL is not set");
-        return;
-    };
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-
-    let process_parent = registry
-        .register_process(lash_core::testing::held_engine_registration(
-            serde_json::Value::Null,
-            lash_core_execution::ProcessProvenance::session(
-                lash_core_execution::SessionScope::new("pg-payload-session"),
-            ),
-            lash_core_execution::Lifetime::Detached,
-        ))
-        .await
-        .expect("register the process parent");
-    let scope = lash_core_execution::ScopeId::process(process_parent.id.clone());
-    registry
-        .record_parent_end(&scope)
-        .await
-        .expect("end the process scope");
-
-    let plan = registry
-        .get_parent_end_plan(&scope)
-        .await
-        .expect("read the ledger row")
-        .expect("the row exists");
-    assert_eq!(
-        plan.parent, scope,
-        "the ledger decodes the typed parent from its payload"
-    );
-
-    // Leave no row behind on the shared database.
-    clean_injected(&pool, scope.storage_kind(), &scope.storage_id()).await;
-}
-
 /// ADR 0094's version-2 row keyed a parent scope (`Host` included) rather
 /// than a lifetime scope. FIG-3607 re-keys the ledger by `ScopeId` in place,
 /// under the same payload version; the old row's scope is not a `ScopeId`, so

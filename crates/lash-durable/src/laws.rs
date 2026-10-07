@@ -42,9 +42,7 @@ pub use formats::{
     a_newer_format_is_not_written_while_an_older_node_is_live,
     a_node_claims_only_actors_whose_formats_it_decodes,
 };
-pub use session_close::{
-    a_session_close_moves_one_step_at_a_time, an_ending_scope_stays_recorded_until_its_last_batch,
-};
+pub use session_close::a_session_close_moves_one_step_at_a_time;
 
 macro_rules! ensure {
     ($condition:expr, $($message:tt)+) => {

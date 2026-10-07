@@ -209,9 +209,8 @@ async fn complete_process(registry: &Arc<dyn ProcessRegistry>, process_id: &Proc
 
 /// A session's `Session` scope closes only through its close row (FIG-3607
 /// R10, ADR 0108 §5). Deleting the session's process state writes none: the
-/// session's close is the one owner of that row. Once the row is there, a
-/// start that names the closed session — as its lifetime or its starter — is
-/// refused (R11).
+/// session's close is the one owner of that row, which the close's `Begin`
+/// commits (FIG-5222).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -263,7 +262,7 @@ pub(super) async fn a_session_scope_closes_only_through_its_close_row(
             .is_none(),
         "deleting a session's process state writes no close row: its close intent owns it"
     );
-    let until_unclosed = registry
+    registry
         .register_process(crate::started_until(
             registration(),
             turn.clone(),
@@ -271,50 +270,14 @@ pub(super) async fn a_session_scope_closes_only_through_its_close_row(
         ))
         .await
         .expect("a session that is not closed still admits a start living until it");
-
-    registry
-        .record_parent_end(&session_scope)
-        .await
-        .expect("close the session's scope");
-    let closed = registry
-        .get_parent_end_plan(&session_scope)
-        .await
-        .expect("read the session's close row")
-        .expect("the scope close writes the session scope's close row");
-    assert_eq!(closed.parent, session_scope);
-    for survivor in [&until_session, &until_unclosed, &detached] {
+    for survivor in [&until_session, &detached] {
         assert!(
             registry
                 .get_process(&survivor.id)
                 .await
                 .expect("read a child of the session")
                 .is_some(),
-            "the close row deletes no process"
+            "deleting the session's process state deletes no child of it"
         );
     }
-    assert!(
-        matches!(
-            registry
-                .register_process(crate::started_until(
-                    registration(),
-                    turn.clone(),
-                    session_scope.clone(),
-                ))
-                .await,
-            Err(crate::PluginError::ParentEnded { .. })
-        ),
-        "a start living until the closed session is refused"
-    );
-    let session_started = {
-        let mut registration = registration();
-        registration.ancestry = crate::Ancestry::from_scopes([session_scope.clone()]);
-        registration
-    };
-    assert!(
-        matches!(
-            registry.register_process(session_started).await,
-            Err(crate::PluginError::ParentEnded { .. })
-        ),
-        "a start whose starter is the closed session is refused"
-    );
 }

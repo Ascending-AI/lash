@@ -106,19 +106,6 @@ pub(super) fn apply(
             )?;
             Ok(Ok(()))
         }
-        SessionCloseWrite::ScopeEnding { session, scope } => {
-            cached_execute(
-                tx,
-                SQL.scope_ending.sql(),
-                rusqlite::params![
-                    session.as_str(),
-                    scope.stored(),
-                    commit.now.0,
-                    commit.epoch.0
-                ],
-            )?;
-            Ok(Ok(()))
-        }
         SessionCloseWrite::ScopeEnded { session, scope } => {
             cached_execute(
                 tx,
@@ -128,6 +115,27 @@ pub(super) fn apply(
             Ok(Ok(()))
         }
     }
+}
+
+/// Record `scope` of `session` as ending: its closure left a child to mark.
+/// Recording a scope already ending changes nothing.
+pub(super) fn record_ending(
+    tx: &Connection,
+    commit: &Committing<'_>,
+    session: &SessionId,
+    scope: &ScopeKey,
+) -> Answer<()> {
+    cached_execute(
+        tx,
+        SQL.scope_ending.sql(),
+        rusqlite::params![
+            session.as_str(),
+            scope.stored(),
+            commit.now.0,
+            commit.epoch.0
+        ],
+    )?;
+    Ok(Ok(()))
 }
 
 pub(super) fn ending_scopes(tx: &Connection, session: &SessionId) -> Answer<Vec<ScopeKey>> {

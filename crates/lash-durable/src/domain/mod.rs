@@ -315,9 +315,11 @@ pub trait DurableReads: Send + Sync {
     /// L6: one process actor's row.
     async fn process(&self, process: &ProcessId) -> Result<Option<ProcessActorRow>, DurableError>;
 
-    /// L6: up to `limit` non-terminal processes whose lifetime is `Until`
-    /// `scope` or one of its descendants. A parent's terminal does not mean
-    /// this is empty: the subtree's ends are not a durable fact.
+    /// L6: up to `limit` non-terminal processes, by id, in `scope`'s `Until`
+    /// subtree: those whose lifetime is `Until` `scope` or one of its
+    /// descendants, ended or not, and for a session those of its turn and
+    /// session-operation scopes too. A parent's terminal does not mean this
+    /// is empty: the subtree's ends are not a durable fact.
     async fn live_until_descendants(
         &self,
         scope: &ScopeKey,

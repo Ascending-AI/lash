@@ -111,6 +111,20 @@ pub enum ProcessWrite {
         /// The cursor after this batch.
         cursor: Option<String>,
     },
+    /// Close `scope`: its closure fact, the registry's `parent_end_plans`
+    /// row, commits with the transaction that ended it, and from then on
+    /// every registration under the scope, or inside it, is refused. On
+    /// PostgreSQL the write takes the scope's advisory lock first, which a
+    /// registration deciding the same scope also holds, so the start either
+    /// commits before the closure or reads it. The scope's `Until` children
+    /// are read after that, in the transaction: when a turn scope still has
+    /// one unmarked once this transaction's batch is applied, the turn scope
+    /// is recorded as ending, so the session marks the rest. Closing a
+    /// closed scope keeps its first fact.
+    ScopeClosed {
+        /// The closed scope.
+        scope: ScopeKey,
+    },
 }
 
 /// A request to cancel a process, from outside its owner.

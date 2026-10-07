@@ -9,7 +9,7 @@ use lash_core_execution::{ParentEndPlan, PluginError, ScopeId};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::sql::process_sql;
-use super::{SqliteProcessRegistry, process_decode_error, process_sqlite_error, tx_outcome};
+use super::{SqliteProcessRegistry, process_decode_error, process_sqlite_error};
 
 /// The storage key for a scope.
 fn ledger_key(scope: &ScopeId) -> (&'static str, String) {
@@ -48,8 +48,10 @@ fn ledger_payload(
 }
 
 /// Record that `parent` ended at `ended_at_ms`, in the caller's
-/// transaction. A repeated record keeps the first row.
-pub(super) fn record_conn(
+/// transaction: a process's terminal append, or the durable commit that
+/// closed a turn or a session (`ProcessWrite::ScopeClosed`). A repeated
+/// record keeps the first row.
+pub(crate) fn record_conn(
     conn: &Connection,
     parent: &ScopeId,
     ended_at_ms: u64,
@@ -99,27 +101,6 @@ pub(super) fn plan_exists_conn(conn: &Connection, parent: &ScopeId) -> Result<bo
     .optional()
     .map(|row| row.is_some())
     .map_err(process_sqlite_error)
-}
-
-pub(super) async fn record(
-    registry: &SqliteProcessRegistry,
-    parent: &ScopeId,
-) -> Result<(), PluginError> {
-    let parent = parent.clone();
-    let ended_at_ms = registry.clock.timestamp_ms();
-    registry
-        .conn
-        .write_flow(move |tx| {
-            let fleet_format = tx.fleet();
-            Ok(tx_outcome(record_conn(
-                tx,
-                &parent,
-                ended_at_ms,
-                fleet_format,
-            )))
-        })
-        .await
-        .map_err(process_sqlite_error)?
 }
 
 /// One stored row's plan. A typed payload that does not decode is corrupt

@@ -30,12 +30,12 @@ pub enum CascadeProgress {
     },
 }
 
-/// The registry's index columns for `scope`, `(lifetime_scope_kind,
-/// lifetime_scope_id)`: the projection its `Until` children are found by.
-/// A code cell owns no `Until` processes.
+/// The registry's scope for `scope`: what its `Until` children name and
+/// what its closure fact is keyed by. A code cell owns no `Until`
+/// processes.
 #[must_use]
-pub fn scope_index(scope: &ScopeKey) -> Option<(&'static str, String)> {
-    let scope = match scope {
+pub fn scope_id(scope: &ScopeKey) -> Option<crate::ScopeId> {
+    Some(match scope {
         ScopeKey::Turn(session_id, turn_id) => crate::ScopeId::Opener(crate::EffectOpener::Turn {
             session_id: session_id.clone(),
             turn_id: turn_id.clone(),
@@ -45,8 +45,61 @@ pub fn scope_index(scope: &ScopeKey) -> Option<(&'static str, String)> {
             process_id: process_id.clone(),
         }),
         ScopeKey::Cell(..) => return None,
+    })
+}
+
+/// The registry's index columns for `scope`, `(lifetime_scope_kind,
+/// lifetime_scope_id)`: the projection its `Until` children are found by.
+#[must_use]
+pub fn scope_index(scope: &ScopeKey) -> Option<(&'static str, String)> {
+    scope_id(scope).map(|scope| (scope.storage_kind(), scope.storage_id()))
+}
+
+/// The roots of `scope`'s `Until` subtree, as the live-subtree read binds
+/// them: the scope's own index columns and, for a session, the index-id
+/// prefixes of the turn and session-operation scopes inside it, whose
+/// processes live in the session's tree too.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubtreeRoots {
+    /// The scope's `lifetime_scope_kind`.
+    pub kind: &'static str,
+    /// The scope's `lifetime_scope_id`.
+    pub id: String,
+    /// For a session, the prefix of its turn scopes' ids.
+    pub turns: Option<String>,
+    /// For a session, the prefix of its session-operation scopes' ids.
+    pub operations: Option<String>,
+}
+
+/// The roots of `scope`'s `Until` subtree; `None` for a code cell.
+#[must_use]
+pub fn subtree_roots(scope: &ScopeKey) -> Option<SubtreeRoots> {
+    let (kind, id) = scope_index(scope)?;
+    let (turns, operations) = match scope {
+        // Each range's lower bound is the prefix every encoding in it
+        // starts with.
+        ScopeKey::Session(session_id) => (
+            Some(crate::EffectOpener::session_turn_encoding_range(session_id).0),
+            Some(crate::EffectOpener::session_operation_encoding_range(session_id).0),
+        ),
+        ScopeKey::Turn(..) | ScopeKey::Process(_) | ScopeKey::Cell(..) => (None, None),
     };
-    Some((scope.storage_kind(), scope.storage_id()))
+    Some(SubtreeRoots {
+        kind,
+        id,
+        turns,
+        operations,
+    })
+}
+
+/// Close `scope` on `tx`, the transaction that ended it: its closure fact
+/// refuses every later registration under it (ADR 0132 §11). Write it after
+/// the scope's first cascade batch, so the transaction records a turn
+/// scope as ending exactly when a child is left unmarked.
+pub fn close_scope(tx: &mut ActorTx, scope: &ScopeKey) {
+    tx.write(DomainWrite::Process(ProcessWrite::ScopeClosed {
+        scope: scope.clone(),
+    }));
 }
 
 /// Mark the next `batch` of `scope`'s live `Until` children for cancel on

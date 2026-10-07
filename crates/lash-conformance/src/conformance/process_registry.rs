@@ -51,7 +51,6 @@ pub use registration::{
     process_registry_fresh_instances, registration_and_observers_are_atomic,
 };
 pub mod status_filters;
-mod turn_parent_end;
 
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
@@ -705,38 +704,14 @@ pub async fn a_completion_authority_commits_and_records_its_evidence(
     completion_authority::a_completion_authority_commits_and_records_its_evidence(registry).await;
 }
 
-/// A turn scope has no terminal row to ride, so its ledger row is recorded
-/// on its own: the write, its fence and its scoping.
-pub async fn a_turn_scope_ends_through_its_recorded_ledger_row(registry: Arc<dyn ProcessRegistry>) {
-    turn_parent_end::a_turn_scope_ends_through_its_recorded_ledger_row(registry).await;
-}
-
 /// A consumer hold's abandonment returns what its call owes a cancel and
 /// refuses every later start under the hold (ADR 0116 §3.4).
 pub async fn an_abandoned_consumer_hold_fences_registration(registry: Arc<dyn ProcessRegistry>) {
     consumer_holds::an_abandoned_consumer_hold_fences_registration(registry).await;
 }
 
-/// Two scopes whose components render to one stored id under the retired
-/// delimiter codec must share no ledger key or fence.
-pub async fn scopes_that_collide_in_rendering_share_no_ledger_key(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    turn_parent_end::scopes_that_collide_in_rendering_share_no_ledger_key(registry).await;
-}
-
-/// A turn scope that never became a run is closed by its session's close:
-/// the session's row refuses every later start inside the session
-/// (FIG-3948).
-pub async fn a_session_close_fences_the_turn_scopes_that_never_became_runs(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    turn_parent_end::a_session_close_fences_the_turn_scopes_that_never_became_runs(registry).await;
-}
-
 /// A session's `Session` scope closes only through its close row, never
-/// through the deletion of its process state; the row refuses later starts
-/// naming it (FIG-3607 R10, R11).
+/// through the deletion of its process state (FIG-3607 R10).
 pub async fn a_session_scope_closes_only_through_its_close_row(registry: Arc<dyn ProcessRegistry>) {
     parent_end::a_session_scope_closes_only_through_its_close_row(registry).await;
 }

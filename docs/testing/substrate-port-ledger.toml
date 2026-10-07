@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1555 rows over 847 files, 3902 laws.
-# By class: mechanical 163, semantic 111, delete 832, replace 449.
-# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 77, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 8, L9t 30, I0 49.
-# By status: todo 408, ported 87, deleted 1060.
+# 1562 rows over 848 files, 3909 laws.
+# By class: mechanical 163, semantic 111, delete 839, replace 449.
+# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 77, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 8, L9t 30, I0 49.
+# By status: todo 408, ported 87, deleted 1067.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -24253,7 +24253,7 @@ lane = "L10b"
 laws = [
     "a_child_registering_as_its_parent_scope_ends_is_refused_or_swept",
 ]
-disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs::a_turn_scope_ends_through_its_recorded_ledger_row"
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_start_after_its_turn_ended_or_its_session_began_closing_is_refused"
 status = "deleted"
 note = "deleted by L10b (FIG-5191): the file's subject was the replaced obligation machinery (ADR 0132 §12)"
 
@@ -24267,7 +24267,7 @@ lane = "L10b"
 laws = [
     "an Until child registering while its parent scope ends is refused or swept",
 ]
-disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs::a_turn_scope_ends_through_its_recorded_ledger_row"
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_start_after_its_turn_ended_or_its_session_began_closing_is_refused"
 status = "deleted"
 note = "deleted by L10b (FIG-5191): the sweep half was the ParentEnd relay's, deleted; the fence half (a start after the row is refused) is the conformance law, and the advisory lock that orders them is unchanged"
 
@@ -24281,7 +24281,7 @@ lane = "L10b"
 laws = [
     "a_child_registering_as_its_parent_scope_ends_is_refused_or_swept",
 ]
-disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs::a_turn_scope_ends_through_its_recorded_ledger_row"
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_start_after_its_turn_ended_or_its_session_began_closing_is_refused"
 status = "deleted"
 note = "deleted by L10b (FIG-5191): the file's subject was the replaced obligation machinery (ADR 0132 §12)"
 
@@ -24295,7 +24295,7 @@ lane = "L10b"
 laws = [
     "an Until child registering while its parent scope ends is refused or swept",
 ]
-disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs::a_turn_scope_ends_through_its_recorded_ledger_row"
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_start_after_its_turn_ended_or_its_session_began_closing_is_refused"
 status = "deleted"
 note = "deleted by L10b (FIG-5191): the sweep half was the ParentEnd relay's, deleted; the fence half (a start after the row is refused) is the conformance law, and the advisory lock that orders them is unchanged"
 
@@ -24903,3 +24903,101 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "deleted by FIG-5208 with the legacy turn loop: TurnObserver::published and abandon_terminal served only the legacy loop's return to its host sink; the session actor's drive publishes through its live publisher"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs"
+test = "a_turn_scope_ends_through_its_recorded_ledger_row"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L6b"
+laws = [
+    "a turn scope's recorded row refuses a later Until or detached start under the turn, and a turn that did not end still admits",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_start_after_its_turn_ended_or_its_session_began_closing_is_refused"
+status = "deleted"
+note = "deleted by FIG-5222: record_parent_end, the standalone write it drove, is deleted; a turn's end writes the row as ProcessWrite::ScopeClosed in its own commit, and the law that replaces this one drives that commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs"
+test = "scopes_that_collide_in_rendering_share_no_ledger_key"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L6b"
+laws = [
+    "two scopes that render to one id share no ledger key or fence",
+]
+disposition = "covered-by:crates/lash-core-store/src/effect_opener.rs::delimiter_bearing_components_render_equal_but_encode_distinctly"
+status = "deleted"
+note = "deleted by FIG-5222 with record_parent_end, the write it drove; the ledger key is the scope's identity encoding, whose injectivity the covering law pins"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs"
+test = "a_session_close_fences_the_turn_scopes_that_never_became_runs"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L6b"
+laws = [
+    "a session's close refuses every later start in a turn of the session that never became a run",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_start_after_its_turn_ended_or_its_session_began_closing_is_refused"
+status = "deleted"
+note = "deleted by FIG-5222 with record_parent_end; a session's close begin writes the session's row (ProcessWrite::ScopeClosed), and the covering law starts in a never-run turn after it"
+
+[[row]]
+path = "crates/lash-durable/src/laws/session_close.rs"
+test = "*"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L6b"
+laws = [
+    "an_ending_scope_stays_recorded_until_its_last_batch",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5222: only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-durable/src/laws/session_close.rs"
+test = "an_ending_scope_stays_recorded_until_its_last_batch"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L6b"
+laws = [
+    "a turn scope whose cascade is still marking stays recorded as ending until the commit that marks its last batch",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_turn_cascade_larger_than_a_batch_ends_every_child_across_a_cut_at_each_batch"
+status = "deleted"
+note = "deleted by FIG-5222 with SessionCloseWrite::ScopeEnding: a turn scope is recorded as ending by its closure, which reads the scope's children in the ending transaction, so a store law without processes cannot reach it"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/parent_end_payload.rs"
+test = "a_ledger_row_decodes_its_typed_payload"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L6b"
+laws = [
+    "a ledger row the store writes decodes its typed scope from its payload",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/parent_end.rs::terminal_completion_atomically_retains_parent_end_plan"
+status = "deleted"
+note = "deleted by FIG-5222: it wrote its row through record_parent_end, which is deleted"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/parent_end_payload.rs"
+test = "a_ledger_row_decodes_its_typed_payload"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L6b"
+laws = [
+    "a ledger row the store writes decodes its typed scope from its payload",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/parent_end.rs::terminal_completion_atomically_retains_parent_end_plan"
+status = "deleted"
+note = "deleted by FIG-5222: it wrote its row through record_parent_end, which is deleted"

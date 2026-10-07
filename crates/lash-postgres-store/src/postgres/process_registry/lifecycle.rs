@@ -60,13 +60,6 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         })
     }
 
-    async fn record_parent_end(
-        &self,
-        parent: &lash_core_execution::ScopeId,
-    ) -> Result<(), PluginError> {
-        parent_end::record(&self.pool, &self.fence, parent, self.clock.timestamp_ms()).await
-    }
-
     async fn get_parent_end_plan(
         &self,
         parent: &lash_core_execution::ScopeId,

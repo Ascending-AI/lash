@@ -653,13 +653,6 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         .await
     }
 
-    async fn record_parent_end(
-        &self,
-        parent: &lash_core_execution::ScopeId,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        parent_end::record(self, parent).await
-    }
-
     async fn get_parent_end_plan(
         &self,
         parent: &lash_core_execution::ScopeId,

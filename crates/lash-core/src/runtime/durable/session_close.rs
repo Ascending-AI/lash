@@ -4,7 +4,9 @@
 //! A deletion is session mail ([`request_session_close`]): the session
 //! actor, not the caller, closes the session. The session activation drains
 //! the mail and enters the closing state on the drain's transaction
-//! ([`begin_session_close`]); then, on that claim and on every later one,
+//! ([`begin_session_close`]), which also closes the session's scope: from
+//! that commit on no process registers under the session or inside it, in
+//! any of its turns. Then, on that claim and on every later one,
 //! [`run_session_close`] runs the steps that remain, each its own fenced
 //! transaction under its `session.close.*` label, so a crash at any step
 //! resumes at that step:
@@ -14,8 +16,8 @@
 //! 2. `revoke`: the session's waits are revoked;
 //! 3. `end_scope`: the session's `Until` processes are marked for cancel,
 //!    batched; the step is recorded with the last batch;
-//! 4. `triggers`: once every process of the session is terminal, its
-//!    trigger subscriptions are deleted;
+//! 4. `triggers`: once no process is live anywhere in the session's scope
+//!    tree, its trigger subscriptions are deleted;
 //! 5. `artifacts`: the session's storage is deleted, and that delete's
 //!    transaction fences the session's artifact referrers and arms their
 //!    `ArtifactCleanup` obligations (ADR 0113), the one outbox kind a close
@@ -26,11 +28,13 @@
 //! Logical cleanup settles before anything is deleted: no state is deleted
 //! while a process of the session is non-terminal. A parent's terminal does
 //! not mean its children have stopped, so step 4 reads
-//! `live_until_descendants` and, while one remains, pins a
-//! `process_terminal` wait on it and releases as waiting; the terminal wakes
-//! the session. A process that ended between that read and the wait's
-//! commit resolved no wait, so the pin reads the registry after its commit
-//! and resolves the wait itself. The deletion steps are idempotent, so a
+//! `live_until_descendants` of the session, which walks below ended
+//! processes and through the session's turn scopes, whose children a turn's
+//! end marked but which may still be in their grace. While one remains, it
+//! pins a `process_terminal` wait on it and releases as waiting; the
+//! terminal wakes the session. A process that ended between that read and
+//! the wait's commit resolved no wait, so the pin reads the registry after
+//! its commit and resolves the wait itself. The deletion steps are idempotent, so a
 //! crash between a delete and its step's commit repeats the delete, which
 //! finds nothing.
 
@@ -44,7 +48,7 @@ use lash_durable::{
 use super::session::{TurnError, cancel_open_turn};
 use super::turn_scope::{continue_scope_ends, end_turn_scope, mark_until_children};
 use crate::{ActorContext, Backend, SessionId};
-use lash_core_execution::runtime::actor::process::CascadeProgress;
+use lash_core_execution::runtime::actor::process::{self, CascadeProgress};
 
 /// The mail kind of a close request. The session's mailbox drain
 /// (`session_mail`) hands it to the activation as its `close`.
@@ -108,11 +112,14 @@ fn session_actor(session: &SessionId) -> ActorKey {
 }
 
 /// Enter the closing state on `tx`, the transaction that drained the close
-/// request. A session already closing keeps where its close got to.
+/// request, and close the session's scope in it: a start under the session
+/// or inside it that commits later is refused. A session already closing
+/// keeps where its close got to.
 pub fn begin_session_close(tx: &mut ActorTx, session: &SessionId) {
     tx.write(DomainWrite::SessionClose(SessionCloseWrite::Begin {
         session: session.clone(),
     }));
+    process::close_scope(tx, &ScopeKey::Session(session.clone()));
 }
 
 /// Where a close run stopped.

@@ -40,14 +40,36 @@ crate::statements! {
              ORDER BY process_id
              LIMIT ?4";
 
-        /// Up to `?4` live processes `Until` the scope of kind `?1` and
-        /// index id `?2`, after process id `?3`, by id.
-        live_children = "SELECT process_id FROM processes
-             WHERE lifetime = 'until' AND lifetime_scope_kind = ?1 AND lifetime_scope_id = ?2
-               AND status IN ('running', 'waiting')
-               AND process_id > ?3
+        /// Up to `?5` live processes, by id, in the `Until` subtree of the
+        /// scope of kind `?1` and index id `?2` and, when they are set, of
+        /// every turn scope whose index id starts with `?3` and every
+        /// session-operation scope whose index id starts with `?4`: the
+        /// scopes inside a session. The walk follows `Until` edges through
+        /// every process row, ended or not, so a live process below an
+        /// ended one is found. A process's scope id is its identity
+        /// encoding, `process:<byte length>:<id>`; a process id is ASCII.
+        live_descendants = "WITH RECURSIVE subtree AS (
+                 SELECT process_id, status FROM processes
+                 WHERE lifetime = 'until'
+                   AND ((lifetime_scope_kind = ?1 AND lifetime_scope_id = ?2)
+                     OR (lifetime_scope_kind = 'turn'
+                         AND substr(lifetime_scope_id, 1, length(CAST(?3 AS TEXT)))
+                             = CAST(?3 AS TEXT))
+                     OR (lifetime_scope_kind = 'session_operation'
+                         AND substr(lifetime_scope_id, 1, length(CAST(?4 AS TEXT)))
+                             = CAST(?4 AS TEXT)))
+                 UNION
+                 SELECT child.process_id, child.status
+                 FROM subtree parent
+                 JOIN processes child
+                   ON child.lifetime = 'until' AND child.lifetime_scope_kind = 'process'
+                  AND child.lifetime_scope_id = 'process:'
+                      || CAST(length(parent.process_id) AS TEXT) || ':' || parent.process_id
+             )
+             SELECT process_id FROM subtree
+             WHERE status IN ('running', 'waiting')
              ORDER BY process_id
-             LIMIT ?4";
+             LIMIT ?5";
     }
 }
 

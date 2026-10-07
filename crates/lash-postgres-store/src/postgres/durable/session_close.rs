@@ -85,17 +85,6 @@ pub(super) async fn apply(
                 .map_err(sqlx_failure)?;
             Ok(())
         }
-        SessionCloseWrite::ScopeEnding { session, scope } => {
-            sqlx::query(SQL.scope_ending.sql())
-                .bind(session.as_str())
-                .bind(scope.stored())
-                .bind(commit.now.0)
-                .bind(commit.epoch.0)
-                .execute(tx)
-                .await
-                .map_err(sqlx_failure)?;
-            Ok(())
-        }
         SessionCloseWrite::ScopeEnded { session, scope } => {
             sqlx::query(SQL.scope_ended.sql())
                 .bind(session.as_str())
@@ -106,6 +95,25 @@ pub(super) async fn apply(
             Ok(())
         }
     }
+}
+
+/// Record `scope` of `session` as ending: its closure left a child to mark.
+/// Recording a scope already ending changes nothing.
+pub(super) async fn record_ending(
+    tx: &mut PgConnection,
+    commit: &Committing<'_>,
+    session: &SessionId,
+    scope: &ScopeKey,
+) -> Result<(), DurableError> {
+    sqlx::query(SQL.scope_ending.sql())
+        .bind(session.as_str())
+        .bind(scope.stored())
+        .bind(commit.now.0)
+        .bind(commit.epoch.0)
+        .execute(tx)
+        .await
+        .map_err(sqlx_failure)?;
+    Ok(())
 }
 
 pub(super) async fn ending_scopes(

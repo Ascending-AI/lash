@@ -9,7 +9,8 @@
 //! session's other state is gone and its actor is terminal.
 //!
 //! A turn scope whose first cascade batch did not mark every child is
-//! recorded as ending ([`SessionCloseWrite::ScopeEnding`]) in the
+//! recorded as ending by its closure
+//! ([`ProcessWrite::ScopeClosed`](super::ProcessWrite::ScopeClosed)) in the
 //! transaction that ended the turn, and cleared
 //! ([`SessionCloseWrite::ScopeEnded`]) in the transaction that marks its last
 //! batch, so the session re-drives it on every claim until it is done.
@@ -138,14 +139,6 @@ pub enum SessionCloseWrite {
         session: SessionId,
         /// The step done.
         step: SessionCloseStep,
-    },
-    /// Record that `scope`'s cascade still has children to mark. Recording
-    /// a scope already ending changes nothing.
-    ScopeEnding {
-        /// The session that owns the scope.
-        session: SessionId,
-        /// The ending scope.
-        scope: ScopeKey,
     },
     /// Record that `scope`'s cascade marked its last child.
     ScopeEnded {

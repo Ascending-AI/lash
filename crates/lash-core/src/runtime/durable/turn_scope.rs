@@ -3,12 +3,14 @@
 //!
 //! # Contracts
 //!
-//! - **The first batch rides the ending transaction.** L3's `turn.commit`
-//!   and `turn.cancel` transactions call [`end_turn_scope`] on their own
-//!   `tx`: it revokes the turn's waits and marks the first batch of the
-//!   turn's `Until` children for cancel through L6's `end_scope`. When
-//!   children remain, the same `tx` records the turn scope as ending in the
-//!   session's row set ([`SessionCloseWrite::ScopeEnding`]).
+//! - **The closure and the first batch ride the ending transaction.** L3's
+//!   `turn.commit` and `turn.cancel` transactions call [`end_turn_scope`] on
+//!   their own `tx`: it revokes the turn's waits, marks the first batch of
+//!   the turn's `Until` children for cancel through L6's `end_scope`, and
+//!   closes the turn's scope (`ProcessWrite::ScopeClosed`), so no process
+//!   registers under it once `tx` commits. The closure reads the children
+//!   again inside `tx`, after it: when one is left unmarked, the same `tx`
+//!   records the turn scope as ending in the session's row set.
 //! - **The rest is cursor work on the session actor.** After either commit,
 //!   and on every claim before anything else, the session activation runs
 //!   [`continue_scope_ends`]: one `cascade.batch` transaction per further
@@ -24,7 +26,9 @@
 //!   unbound cancellation token.
 //!
 //! A parent's terminal does not mean its children have stopped: the
-//! subtree's ends are not a durable fact (`DurableReads::live_until_descendants`).
+//! subtree's ends are not a durable fact. [`await_turn_children`] reads the
+//! whole live subtree (`DurableReads::live_until_descendants`), below ended
+//! processes too.
 
 use std::time::Duration;
 
@@ -66,9 +70,10 @@ pub(super) async fn mark_until_children(
 }
 
 /// End `run`'s scope on `tx`, the transaction that ended the turn
-/// (`turn.commit` or `turn.cancel`): revoke the turn's waits and mark the
-/// first batch of its `Until` children for cancel. When children remain the
-/// scope is recorded as ending, for [`continue_scope_ends`].
+/// (`turn.commit` or `turn.cancel`): revoke the turn's waits, mark the
+/// first batch of its `Until` children for cancel and close the scope. When
+/// a child is left unmarked the scope is recorded as ending, for
+/// [`continue_scope_ends`].
 ///
 /// A run named by a process id is that `SessionTurn` process's child turn
 /// (FIG-5208): its end resolves the process's child-session wait, which
@@ -82,25 +87,22 @@ pub async fn end_turn_scope(
     tx: &mut ActorTx,
     session: &SessionId,
     run: &TurnId,
-) -> Result<CascadeProgress, DurableError> {
+) -> Result<(), DurableError> {
     let scope = ScopeKey::Turn(session.clone(), run.clone());
-    let progress = mark_until_children(cx, tx, &scope).await?;
+    mark_until_children(cx, tx, &scope).await?;
     waits::revoke_scope(tx, &scope);
     if let Ok(process) = crate::ProcessId::parse(run.as_str()) {
         waits::resolve_child_session_waits(tx, &process)?;
     }
-    if progress != CascadeProgress::Done {
-        tx.write(DomainWrite::SessionClose(SessionCloseWrite::ScopeEnding {
-            session: session.clone(),
-            scope,
-        }));
-    }
-    Ok(progress)
+    process::close_scope(tx, &scope);
+    Ok(())
 }
 
 /// Mark the rest of every ending scope of `session`, one `cascade.batch`
 /// transaction per batch, clearing each scope in the transaction that marks
-/// its last batch. Runs after a turn's end commits and on every claim.
+/// its last batch. Runs after a turn's end commits and on every claim. The
+/// scope closed with the turn, so no child joins it: the read before each
+/// batch can only overcount what is left.
 ///
 /// # Errors
 ///
@@ -150,11 +152,11 @@ pub enum TurnChildrenStopError {
     Deadline(#[from] waits::WaitDeadlineRefusal),
 }
 
-/// Wait up to `stop_grace` for the first `limit` live `Until` children of
-/// `run`, which the turn's end marked for cancel, to reach their terminals
-/// (G1b). Each wait is a bounded `process_terminal` wait; all share one
-/// deadline, so the stop takes at most `stop_grace` however many children
-/// there are.
+/// Wait up to `stop_grace` for the first `limit` live processes of `run`'s
+/// `Until` subtree to reach their terminals (G1b): the children the turn's
+/// end marked for cancel, and their descendants, below ended ones too. Each
+/// wait is a bounded `process_terminal` wait; all share one deadline, so the
+/// stop takes at most `stop_grace` however many there are.
 ///
 /// # Errors
 ///

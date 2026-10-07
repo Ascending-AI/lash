@@ -304,13 +304,10 @@ macro_rules! process_registry_tests {
                 (a_completion_authority_commits_and_records_its_evidence, "completion-authority-granted"),
                 (terminal_completion_replay_keeps_original_authority_and_writes_nothing, "terminal-completion-authority-replay"),
                 (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
-                (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
                 (an_abandoned_consumer_hold_fences_registration, "abandoned-consumer-hold"),
                 (consumer_hold_prevents_destructive_prune_until_settlement, "consumer-hold-retention"),
                 (later_segment_recovery_refuses_without_terminal_mutation, "later-segment-recovery"),
                 (every_execution_write_refuses_a_superseded_invocation_without_mutation, "invocation-write-matrix"),
-                (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),
-                (a_session_close_fences_the_turn_scopes_that_never_became_runs, "never-run-turn-scopes"),
                 (process_prune_scoped_by_originator, "scoped-prune"),
                 (process_prune_batch_tombstones, "batch-prune"),
             ]

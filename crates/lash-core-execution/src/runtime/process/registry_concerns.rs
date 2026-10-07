@@ -491,15 +491,11 @@ pub trait ProcessLifecycle: Send + Sync {
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
-    /// This is the single durable scope-close fact, written for a turn run,
-    /// a session operation, a process or a session. The row carries no action list. On the SQL tiers the write
-    /// must ride the same transaction as the fact that ended the scope, so a
-    /// child either commits before the row and is swept, or after it and is
-    /// refused at registration. Repetition on an existing row is an idempotent
-    /// no-op that preserves the first `ended_at_ms`.
-    async fn record_parent_end(&self, parent: &crate::ScopeId) -> Result<(), PluginError>;
-
-    /// Load the ledger row for one parent scope.
+    /// Load the ledger row for one parent scope: the single durable
+    /// scope-close fact. A process's terminal append writes it for the
+    /// process's scope; a turn's end and a session's close begin write it in
+    /// their own fenced commit (`ProcessWrite::ScopeClosed`). It carries no
+    /// action list.
     ///
     /// Registration reads this to fence a late start: a start whose starter
     /// or lifetime scope has closed is refused rather than left unvisited.

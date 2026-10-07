@@ -9,7 +9,7 @@
 //! terminal and the cancel request are the registry's own writes on this
 //! commit's connection, so the registry and the actor never disagree.
 
-use lash_core_execution::runtime::actor::process::scope_index;
+use lash_core_execution::runtime::actor::process::{scope_id, scope_index, subtree_roots};
 use lash_durable::domain::{
     CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessWrite,
     SIGNAL_MAIL, ScopeKey,
@@ -251,7 +251,34 @@ pub(super) async fn apply(
             }
             Ok(())
         }
+        ProcessWrite::ScopeClosed { scope } => close_scope(tx, commit, scope).await,
     }
+}
+
+/// Write `scope`'s closure fact under the scope's advisory lock, then read
+/// its unmarked `Until` children in this transaction. A registration under
+/// the scope holds the same lock until it commits, so a child that
+/// committed first is read here (each statement sees what committed before
+/// it), and any later one reads the fact and is refused. A turn scope with
+/// a child left is recorded as ending.
+async fn close_scope(
+    tx: &mut PgConnection,
+    commit: &Committing<'_>,
+    scope: &ScopeKey,
+) -> Result<(), DurableError> {
+    let Some(closed) = scope_id(scope) else {
+        return Ok(());
+    };
+    crate::process_registry::parent_end::record_tx(tx, &closed, millis(commit.now), commit.fleet)
+        .await
+        .map_err(|error| registry_failure(&error))?;
+    let ScopeKey::Turn(session, _) = scope else {
+        return Ok(());
+    };
+    if until_children(tx, scope, None, 1).await?.is_empty() {
+        return Ok(());
+    }
+    super::session_close::record_ending(tx, commit, session, scope).await
 }
 
 async fn set_cursor(
@@ -311,9 +338,8 @@ pub(super) async fn process(
     }))
 }
 
-async fn children(
+pub(super) async fn until_children(
     tx: &mut PgConnection,
-    statement: &str,
     scope: &ScopeKey,
     after: Option<&ProcessId>,
     limit: usize,
@@ -321,7 +347,7 @@ async fn children(
     let Some((kind, id)) = scope_index(scope) else {
         return Ok(Vec::new());
     };
-    let ids: Vec<String> = sqlx::query_scalar(statement)
+    let ids: Vec<String> = sqlx::query_scalar(SQL.process.pending_children.sql())
         .bind(kind)
         .bind(id)
         .bind(after.map_or("", ProcessId::as_str))
@@ -329,46 +355,35 @@ async fn children(
         .fetch_all(&mut *tx)
         .await
         .map_err(sqlx_failure)?;
-    ids.into_iter()
-        .map(|id| ProcessId::parse(&id).map_err(|_| corrupt("process id", &id)))
-        .collect()
+    process_ids(ids)
 }
 
-pub(super) async fn until_children(
-    tx: &mut PgConnection,
-    scope: &ScopeKey,
-    after: Option<&ProcessId>,
-    limit: usize,
-) -> Result<Vec<ProcessId>, DurableError> {
-    children(tx, SQL.process.pending_children.sql(), scope, after, limit).await
-}
-
-/// The live `Until` subtree of `scope`, breadth first, one indexed page per
-/// scope: each live child's own `Until` children follow it. Bounded by
-/// `limit`; a parent's terminal says nothing about this being empty.
+/// Up to `limit` live processes in the `Until` subtree of `scope`, by id:
+/// one walk through every process row below it, ended or not, and for a
+/// session through its turn and session-operation scopes too. A parent's
+/// terminal says nothing about this being empty.
 pub(super) async fn live_until_descendants(
     tx: &mut PgConnection,
     scope: &ScopeKey,
     limit: usize,
 ) -> Result<Vec<ProcessId>, DurableError> {
-    let mut found = Vec::new();
-    let mut frontier = std::collections::VecDeque::from([scope.clone()]);
-    while let Some(scope) = frontier.pop_front() {
-        if found.len() >= limit {
-            break;
-        }
-        let page = children(
-            tx,
-            SQL.process.live_children.sql(),
-            &scope,
-            None,
-            limit - found.len(),
-        )
-        .await?;
-        for child in page {
-            frontier.push_back(ScopeKey::Process(child.clone()));
-            found.push(child);
-        }
-    }
-    Ok(found)
+    let Some(roots) = subtree_roots(scope) else {
+        return Ok(Vec::new());
+    };
+    let ids: Vec<String> = sqlx::query_scalar(SQL.process.live_descendants.sql())
+        .bind(roots.kind)
+        .bind(roots.id)
+        .bind(roots.turns)
+        .bind(roots.operations)
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(sqlx_failure)?;
+    process_ids(ids)
+}
+
+fn process_ids(ids: Vec<String>) -> Result<Vec<ProcessId>, DurableError> {
+    ids.into_iter()
+        .map(|id| ProcessId::parse(&id).map_err(|_| corrupt("process id", &id)))
+        .collect()
 }

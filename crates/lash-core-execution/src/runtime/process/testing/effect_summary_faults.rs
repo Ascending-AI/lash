@@ -239,10 +239,6 @@ impl ProcessLifecycle for EffectSummaryAppendFaults {
             .await
     }
 
-    async fn record_parent_end(&self, parent: &ScopeId) -> Result<(), PluginError> {
-        self.inner.record_parent_end(parent).await
-    }
-
     async fn get_parent_end_plan(
         &self,
         parent: &ScopeId,
