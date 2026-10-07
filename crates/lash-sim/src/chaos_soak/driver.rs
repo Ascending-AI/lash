@@ -4,7 +4,7 @@
 //! the matrix's invariants and the workloads' laws checked.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lash_durable::CommitLabel;
 use lash_durable_test::{Script, SimClock, SimNodes, Stored, Write, WriteKind};
@@ -87,6 +87,7 @@ struct Fenced {
 
 /// Run one epoch of `config` at `seed`.
 pub async fn epoch(config: &SoakConfig, seed: u64) -> Epoch {
+    let started = Instant::now();
     let steps = plan::draw(seed, config.steps, &config.without_names());
     let mut epoch = Epoch {
         seed,
@@ -134,6 +135,8 @@ pub async fn epoch(config: &SoakConfig, seed: u64) -> Epoch {
         node_config,
         activation,
     ));
+    let setup = started.elapsed();
+    let started = Instant::now();
     if let Err(error) = world.start_host(&nodes) {
         epoch.violations.push(error);
         return epoch;
@@ -198,6 +201,9 @@ pub async fn epoch(config: &SoakConfig, seed: u64) -> Epoch {
     }
     nodes.quiesce().await;
 
+    let run = started.elapsed();
+    let started = Instant::now();
+
     let trace = nodes.script().trace();
     epoch.writes = trace.len();
     epoch.committed = trace.iter().filter(|write| write.committed()).count();
@@ -217,6 +223,13 @@ pub async fn epoch(config: &SoakConfig, seed: u64) -> Epoch {
     }
     world.stop_tasks();
     drop(keep);
+    eprintln!(
+        "soak seed={seed:#x} steps={} setup={:.6}s run={:.6}s check={:.6}s",
+        steps.len(),
+        setup.as_secs_f64(),
+        run.as_secs_f64(),
+        started.elapsed().as_secs_f64(),
+    );
     epoch
 }
 
