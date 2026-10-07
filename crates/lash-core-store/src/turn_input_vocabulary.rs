@@ -925,14 +925,14 @@ impl AdmittedTurnInputs {
             .collect()
     }
 
-    /// Records the application evidence of inputs that formed a turn's
-    /// initial input.
+    /// Records evidence for each input's own opening message.
     pub fn record_initial_turn_application(
         &mut self,
         turn_id: &crate::TurnId,
-        committed_message_id: &str,
+        committed_messages: &[crate::Message],
     ) {
-        self.applications = initial_turn_applications(&self.inputs, turn_id, committed_message_id);
+        self.applications.clear();
+        self.record_applications(turn_id, None, committed_messages);
     }
 
     /// Records application evidence only for admitted inputs whose deterministic ingress message
@@ -941,6 +941,15 @@ impl AdmittedTurnInputs {
         &mut self,
         turn_id: &crate::TurnId,
         checkpoint: CheckpointKind,
+        committed_messages: &[crate::Message],
+    ) {
+        self.record_applications(turn_id, Some(checkpoint), committed_messages);
+    }
+
+    fn record_applications(
+        &mut self,
+        turn_id: &crate::TurnId,
+        checkpoint: Option<CheckpointKind>,
         committed_messages: &[crate::Message],
     ) {
         let committed_message_ids = committed_messages
@@ -959,7 +968,7 @@ impl AdmittedTurnInputs {
                         source_key: input.source_key.clone(),
                         turn_id: turn_id.clone(),
                         committed_message_id,
-                        checkpoint: Some(checkpoint),
+                        checkpoint,
                     })
             })
             .collect::<Vec<_>>();
@@ -1006,11 +1015,6 @@ impl AdmittedTurnInputs {
             turn_causes: Vec::new(),
         })
     }
-
-    /// Materializes the admitted inputs as one turn's input.
-    pub fn materialize_turn_input(&self) -> TurnInput {
-        materialize_turn_input(&self.inputs)
-    }
 }
 
 pub(crate) fn source_key_display_id(source: &str) -> String {
@@ -1021,43 +1025,6 @@ pub(crate) fn source_key_display_id(source: &str) -> String {
         .to_string()
 }
 
-fn initial_turn_applications(
-    inputs: &[PendingTurnInput],
-    turn_id: &crate::TurnId,
-    committed_message_id: &str,
-) -> Vec<TurnInputApplication> {
-    inputs
-        .iter()
-        .filter(|input| {
-            input.input.items.iter().any(|item| match item {
-                crate::InputItem::Text { text } => !text.is_empty(),
-                crate::InputItem::Attachment { .. } => true,
-            })
-        })
-        .map(|input| TurnInputApplication {
-            input_id: input.input_id.clone(),
-            source_key: input.source_key.clone(),
-            turn_id: turn_id.clone(),
-            committed_message_id: committed_message_id.to_string(),
-            checkpoint: None,
-        })
-        .collect()
-}
-pub fn materialize_turn_input(inputs: &[PendingTurnInput]) -> TurnInput {
-    let mut input_items = Vec::new();
-    let mut trace_turn_id = None;
-    for pending in inputs {
-        input_items.extend(pending.input.items.clone());
-        if trace_turn_id.is_none() {
-            trace_turn_id = pending.input.trace_turn_id.clone();
-        }
-    }
-    TurnInput {
-        items: input_items,
-        trace_turn_id,
-        turn_context: crate::TurnContext::default(),
-    }
-}
 #[derive(Clone, Debug, Default)]
 pub struct QueuedCheckpointTurnInput {
     pub messages: Vec<crate::Message>,

@@ -51,12 +51,7 @@ impl LashRuntime {
             true,
             self.tool_restore_report.take(),
         );
-        let mut input = admissions
-            .turn_inputs
-            .first()
-            .map(crate::AdmittedTurnInputs::materialize_turn_input)
-            .unwrap_or_else(TurnInput::empty);
-        input.trace_turn_id = Some(run.clone());
+        let turn_context = crate::TurnContext::default();
         let turn_boundary = self
             .host
             .core
@@ -89,11 +84,6 @@ impl LashRuntime {
         self.services
             .plugins
             .adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment));
-        let (normalized, invalid_input) = match self.normalize_input_items(&input.items).await {
-            Ok(items) => (items, None),
-            Err(error) => (Vec::new(), Some(error)),
-        };
-
         let mut turn_delta = Vec::new();
         let initial_turn_causes: Vec<_> = admissions
             .queued
@@ -105,62 +95,48 @@ impl LashRuntime {
                 .iter()
                 .map(crate::TurnCause::to_event_message),
         );
-        let turn_input_id = admissions
+        let mut invalid_input = None;
+        let mut input_item_count = 0;
+        let mut user_messages = Vec::new();
+        for pending in admissions
             .turn_inputs
             .iter()
-            .flat_map(|admitted| admitted.inputs.iter().map(|input| input.input_id.clone()))
-            .next();
-        let user_id = turn_input_id
-            .as_deref()
-            .map(crate::runtime::ingress_message_id)
-            .unwrap_or_else(|| format!("m_turn_{run}_input"));
-        let mut user_parts: Vec<Part> = Vec::new();
-        let trace_metadata = prepare::turn_trace_metadata(&self.state, normalized.len());
-        for item in normalized {
-            match item {
-                NormalizedItem::Text(text) => {
-                    if text.is_empty() {
-                        continue;
-                    }
-                    user_parts.push(Part::text(
-                        format!("{}.p{}", user_id, user_parts.len()),
-                        text,
-                        None,
-                    ));
+            .flat_map(|admitted| &admitted.inputs)
+        {
+            let normalized = match self.normalize_input_items(&pending.input.items).await {
+                Ok(items) => items,
+                Err(error) => {
+                    invalid_input = Some(error);
+                    break;
                 }
-                NormalizedItem::Attachment(source) => {
-                    user_parts.push(Part::attachment_part(
-                        format!("{}.p{}", user_id, user_parts.len()),
-                        String::new(),
-                        Some(crate::session_model::message::PartAttachment { source }),
-                    ));
-                }
-            }
+            };
+            input_item_count += normalized.len();
+            let user_id = crate::runtime::ingress_message_id(&pending.input_id);
+            user_messages.push(opening_user_message(
+                user_id,
+                run,
+                Some(pending.input_id.clone()),
+                normalized,
+            ));
         }
-        if invalid_input.is_none() {
-            if user_parts.is_empty() && initial_turn_causes.is_empty() {
-                user_parts.push(Part::text(format!("{user_id}.p0"), String::new(), None));
-            }
-            if !user_parts.is_empty() {
-                reassign_part_ids(&user_id, &mut user_parts);
-                turn_delta.push(Message {
-                    id: user_id.clone(),
-                    role: MessageRole::User,
-                    parts: shared_parts(user_parts),
-                    // Typed provenance, not a pinned id: a host that rendered
-                    // its own row for this turn recognizes the committed copy
-                    // by `turn_id` (FIG-972).
-                    origin: Some(crate::MessageOrigin::TurnInput {
-                        turn_id: run.clone(),
-                        input_id: turn_input_id.clone(),
-                    }),
-                    reply_marker: None,
-                });
-            }
+        // A run without host input or wake causes still opens with an empty
+        // user message. Invalid input contributes no user messages.
+        if user_messages.is_empty() && initial_turn_causes.is_empty() && invalid_input.is_none() {
+            user_messages.push(opening_user_message(
+                format!("m_turn_{run}_input"),
+                run,
+                None,
+                Vec::new(),
+            ));
         }
+        if invalid_input.is_some() {
+            user_messages.clear();
+        }
+        turn_delta.extend(user_messages);
+        let trace_metadata = prepare::turn_trace_metadata(&self.state, input_item_count);
         let mut initial_turn_input_applications = Vec::new();
         for admitted in &mut admissions.turn_inputs {
-            admitted.record_initial_turn_application(run, &user_id);
+            admitted.record_initial_turn_application(run, &turn_delta);
             initial_turn_input_applications.extend(admitted.applications.iter().cloned());
         }
         if !initial_turn_input_applications.is_empty() {
@@ -274,7 +250,7 @@ impl LashRuntime {
                 manager: &manager,
                 turn_policy: &turn_policy,
                 effective_protocol_turn_options: &effective_protocol_turn_options,
-                turn_context: &input.turn_context,
+                turn_context: &turn_context,
                 turn_scope_id: run,
             })
             .await?;
@@ -356,7 +332,7 @@ impl LashRuntime {
             session_services: manager,
             after_turn_reads,
             protocol_turn_options: effective_protocol_turn_options,
-            turn_context: input.turn_context,
+            turn_context,
             turn_causes: initial_turn_causes,
             pending_queued: admissions.queued,
             pending_turn_inputs: admissions.turn_inputs,
@@ -374,5 +350,45 @@ impl LashRuntime {
             messages,
             invalid_input,
         })
+    }
+}
+
+/// One opening message per accepted input: normalization may combine text
+/// within an input, but never across input provenance (ADR 0129, FIG-5288).
+fn opening_user_message(
+    user_id: String,
+    run: &TurnId,
+    input_id: Option<crate::InputId>,
+    normalized: Vec<NormalizedItem>,
+) -> Message {
+    let mut parts = Vec::new();
+    for item in normalized {
+        let part_id = format!("{user_id}.p{}", parts.len());
+        match item {
+            NormalizedItem::Text(text) if !text.is_empty() => {
+                parts.push(Part::text(part_id, text, None));
+            }
+            NormalizedItem::Text(_) => {}
+            NormalizedItem::Attachment(source) => {
+                parts.push(Part::attachment_part(
+                    part_id,
+                    String::new(),
+                    Some(crate::session_model::message::PartAttachment { source }),
+                ));
+            }
+        }
+    }
+    if parts.is_empty() {
+        parts.push(Part::text(format!("{user_id}.p0"), String::new(), None));
+    }
+    Message {
+        id: user_id,
+        role: MessageRole::User,
+        parts: shared_parts(parts),
+        origin: Some(crate::MessageOrigin::TurnInput {
+            turn_id: run.clone(),
+            input_id,
+        }),
+        reply_marker: None,
     }
 }

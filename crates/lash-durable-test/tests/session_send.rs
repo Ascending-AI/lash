@@ -215,4 +215,316 @@ async fn cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_on
 tiered_laws!(
     withdraw_while_queued_vs_cancel_while_running,
     cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one,
+    coalesced_inputs_commit_distinct_user_rows,
+    host_input_ids_correlate_new_queued_and_steering_rows,
 );
+
+/// FIG-5288: a coalesced opening retains every input's own row and application,
+/// in admission order, even though their answer belongs to one run.
+async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
+    let Some((stores, _keep)) = served::stores(tier).await else {
+        return;
+    };
+    let backend = served::backend(stores);
+    let scripts = Arc::new(served::Scripts::default());
+    let build = |serve| {
+        lash::LashCore::standard_builder(backend.clone())
+            .serve_sessions(serve)
+            .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .queued_work_batching(
+                lash::QueuedWorkBatchingConfig::new(1).with_drain_mode(lash::DrainMode::All),
+            )
+            .serve_test_llm_profile(served::model(Arc::clone(&scripts)), served::metadata())
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "input-rows",
+                if serve { "serving" } else { "producer" },
+            ))
+            .expect("the core builds")
+    };
+    let producer = build(false);
+    let session = producer
+        .session(lash::SessionId::try_from("coalesced-input-rows".to_owned()).unwrap())
+        .create(lash::SessionCreation::root(served::spec(8)))
+        .await
+        .expect("create the session");
+    tokio::time::timeout(WATCHDOG, async {
+        let names = [
+            "first admitted input",
+            "second admitted input",
+            "third admitted input",
+        ];
+        let handles = session
+            .send_batch(names.map(lash::TurnInput::text))
+            .await
+            .expect("accept the batch before its node starts");
+        let expected: Vec<_> = handles
+            .iter()
+            .zip(names)
+            .map(|(handle, text)| (handle.input_id().clone(), text.to_owned()))
+            .collect();
+        // The serving node currently drains one row per run. Record the
+        // multi-input admission whose transcript contract this law pins.
+        let run_id = handles[0].id().expect("the send names its run").clone();
+        let ids = handles
+            .iter()
+            .map(|handle| handle.input_id().clone())
+            .collect::<Vec<_>>();
+        admit_composed_inputs(&backend, session.session_id(), &run_id, ids).await;
+        let serving = build(true);
+        let mut run = None;
+        for handle in handles {
+            let outcome = handle.outcome().await.expect("the coalesced run answers");
+            served::assert_answered(
+                "coalesced inputs",
+                outcome.output().expect("a settled output"),
+            );
+            let this_run = outcome.run().expect("the run was admitted").clone();
+            if let Some(run) = &run {
+                assert_eq!(&this_run, run);
+            }
+            run = Some(this_run);
+        }
+        assert_input_rows(&session, &expected, &run.unwrap()).await;
+        serving.shutdown().await.expect("stop the serving node");
+    })
+    .await
+    .expect("deadlock watchdog: coalesced inputs never answered");
+    producer.shutdown().await.expect("stop the producer");
+}
+
+/// Every accepted input appears exactly once in committed history, with the
+/// same id in its row and application, and with no neighbouring input's text.
+async fn assert_input_rows(
+    session: &lash::DurableSession,
+    expected: &[(lash::InputId, String)],
+    run: &lash::TurnId,
+) {
+    let transcript = session.transcript().await.expect("read committed rows");
+    let rows: Vec<_> = transcript
+        .visible()
+        .filter(|row| row.kind == lash::transcript::TranscriptRowKind::User)
+        .collect();
+    let actual: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            (
+                row.provenance
+                    .input_id
+                    .clone()
+                    .expect("each user row names its input"),
+                row.content.text.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        actual, expected,
+        "every admitted input has its own ordered row"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row.provenance.turn_id.as_ref() == Some(run))
+    );
+    let applications = session
+        .turn_input_applications()
+        .await
+        .expect("read applications");
+    assert_eq!(applications.len(), expected.len());
+    assert_eq!(
+        applications
+            .iter()
+            .map(|application| application.input_id.clone())
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>()
+    );
+    for application in &applications {
+        assert_eq!(
+            application.committed_message_id,
+            lash_core_store::turn_input_vocabulary::ingress_message_id(
+                application.input_id.as_str()
+            )
+        );
+    }
+    let message_ids: std::collections::HashSet<_> = applications
+        .iter()
+        .map(|application| &application.committed_message_id)
+        .collect();
+    assert_eq!(
+        message_ids.len(),
+        expected.len(),
+        "each application names its own message"
+    );
+}
+
+/// Record a composed admission, then release its actor for the serving node.
+async fn admit_composed_inputs(
+    backend: &lash::Backend,
+    session: &lash::SessionId,
+    run: &lash::TurnId,
+    inputs: Vec<lash::InputId>,
+) {
+    use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
+    use lash_durable::domain::{DomainWrite, SessionMailWrite, TurnWrite};
+    let database = backend.durable();
+    let actor = lash_durable::ActorKey::session(session.as_str()).unwrap();
+    let snapshot = database
+        .actor(&actor)
+        .await
+        .unwrap()
+        .expect("the inputs woke the session");
+    let lease = database
+        .register_node(&lash_durable::NodeSpec {
+            node: lash_durable::NodeId::new("composed-input-admission"),
+            decodes: vec![snapshot.formats],
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    let claimed = database.claim(&lease, 1).await.unwrap();
+    assert_eq!(claimed.len(), 1);
+    let mut tx = database.begin(&actor, claimed[0].epoch).await.unwrap();
+    tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
+        session: session.clone(),
+        run: run.clone(),
+        inputs: inputs.clone(),
+        batches: Vec::new(),
+    }));
+    tx.write(DomainWrite::Turn(TurnWrite::Admit {
+        session: session.clone(),
+        run: run.clone(),
+        admission: RunAdmissionRecord::Turn {
+            took: AdmittedTurnRows::Inputs {
+                ids: AdmittedInputIds::new(inputs).unwrap(),
+            },
+        },
+        turn_deadline: None,
+    }));
+    tx.ack_seen();
+    database
+        .commit(tx, lash_durable::CommitLabel::TURN_ADMIT)
+        .await
+        .unwrap();
+    database.release_node(&lease).await.unwrap();
+}
+
+/// FIG-5288: the id a host computes before sending is the accepted input's
+/// id and the committed row's provenance, for new, queued and steering sends.
+async fn host_input_ids_correlate_new_queued_and_steering_rows(tier: Tier) {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let model = lash_core::testing::TestProvider::builder()
+        .kind("input-correlation-model")
+        .complete({
+            let started = Arc::clone(&started);
+            let gate = Arc::clone(&gate);
+            move |request: lash_core::llm::types::LlmRequest| {
+                let started = Arc::clone(&started);
+                let gate = Arc::clone(&gate);
+                let calls = Arc::clone(&calls);
+                async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        started.notify_one();
+                        gate.acquire()
+                            .await
+                            .expect("the host opens the model gate")
+                            .forget();
+                    }
+                    Ok(served::text(&request, "done"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let Some(world) = World::with_model(tier, Vec::new(), model, |backend| {
+        lash::LashCore::standard_builder(backend.clone())
+    })
+    .await
+    else {
+        return;
+    };
+    let session = world
+        .session("host-input-correlation", served::spec(8))
+        .await;
+    let live = world
+        .core
+        .session(session.session_id().clone())
+        .open()
+        .await
+        .expect("open the facade");
+    tokio::time::timeout(WATCHDOG, async {
+        let ids = ["opening-send", "queued-send", "steering-send"]
+            .map(|id| lash::TurnId::try_from(id.to_owned()).unwrap());
+        let texts = ["opening input", "queued input", "steering input"];
+        let expected: Vec<_> = ids
+            .iter()
+            .zip(texts)
+            .map(|(id, text)| {
+                let input = live.input_id(id);
+                assert_eq!(
+                    input,
+                    session.input_id(id),
+                    "both facades compute the same id"
+                );
+                (input, text.to_owned())
+            })
+            .collect();
+        let first = live
+            .send(lash::TurnInput::text(texts[0]))
+            .id(ids[0].clone())
+            .await
+            .expect("accept the opening input");
+        assert_eq!(first.input_id(), &expected[0].0);
+        started.notified().await;
+        let queued = session
+            .send(lash::TurnInput::text(texts[1]))
+            .id(ids[1].clone())
+            .await
+            .expect("accept the queued input");
+        assert_eq!(queued.input_id(), &expected[1].0);
+        assert_eq!(
+            queued.run().await.unwrap(),
+            None,
+            "the model still holds the first run"
+        );
+        let steering = live
+            .send(lash::TurnInput::text(texts[2]))
+            .id(ids[2].clone())
+            .ingress(lash::persistence::TurnInputIngress::active_turn(
+                ids[0].clone(),
+                Default::default(),
+            ))
+            .await
+            .expect("accept the steering input");
+        assert_eq!(steering.input_id(), &expected[2].0);
+        gate.add_permits(1);
+        for handle in [first, queued, steering] {
+            served::assert_answered("host input correlation", &handle.output().await.unwrap());
+        }
+        let transcript = session.transcript().await.expect("read committed rows");
+        let rows: Vec<_> = transcript
+            .visible()
+            .filter(|row| row.kind == lash::transcript::TranscriptRowKind::User)
+            .collect();
+        assert_eq!(
+            rows.iter()
+                .map(|row| (
+                    row.provenance
+                        .input_id
+                        .clone()
+                        .expect("the user row names its input"),
+                    row.content.text.clone(),
+                ))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(rows[0].provenance.turn_id.as_ref(), Some(&ids[0]));
+        assert_eq!(rows[1].provenance.turn_id.as_ref(), Some(&ids[1]));
+    })
+    .await
+    .expect("deadlock watchdog: correlated inputs never answered");
+    drop(live);
+    world.shutdown().await;
+}

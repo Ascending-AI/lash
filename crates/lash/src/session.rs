@@ -884,6 +884,14 @@ impl LashSession {
         )
     }
 
+    /// Compute the input identity for a send's host-supplied
+    /// [`id`](crate::SendBuilder::id), before sending or observing acceptance.
+    /// Correlate every committed user row by `provenance.input_id`, including
+    /// steering inputs that share another send's run. This performs no read.
+    pub fn input_id(&self, id: &crate::TurnId) -> crate::InputId {
+        lash_core::PendingTurnInputDraft::keyed_input_id(&self.session_id(), id.as_str())
+    }
+
     /// Re-attach to an input accepted earlier: after a restart, or from
     /// another handle. Never commits anything.
     pub fn attach(&self, input_id: lash_core::InputId) -> crate::SendHandle {

@@ -145,21 +145,6 @@ impl RuntimeTurnServices {
     ) -> Result<(DurableTurn, DriveParts), TurnError> {
         let mut runtime = self.runtimes.open(&row.session).await?;
         let admissions = admitted_rows(&runtime, row).await?;
-        let settlement = crate::store::IngressSettlement {
-            run: row.run.clone(),
-            completed_inputs: admissions
-                .turn_inputs
-                .iter()
-                .map(crate::AdmittedTurnInputs::completion)
-                .collect(),
-            completed_batches: admissions
-                .queued
-                .iter()
-                .map(crate::AdmittedQueuedWork::completion)
-                .collect(),
-            released: Vec::new(),
-            dropped: Vec::new(),
-        };
         let controller = cx.scoped(AdmittedScope::turn(row.session.clone(), row.run.clone()))?;
         let live = self.runtimes.live_replay();
         let commit = CommitBase::of(&runtime);
@@ -167,6 +152,25 @@ impl RuntimeTurnServices {
         let turn = runtime
             .prepare_durable_turn(&controller, &row.run, admissions, &observer)
             .await?;
+        // Preparation records the messages each admitted input produced.
+        // Freeze settlement only after that evidence exists (FIG-5288).
+        let settlement = crate::store::IngressSettlement {
+            run: row.run.clone(),
+            completed_inputs: turn
+                .driver
+                .pending_turn_inputs
+                .iter()
+                .map(crate::AdmittedTurnInputs::completion)
+                .collect(),
+            completed_batches: turn
+                .driver
+                .pending_queued
+                .iter()
+                .map(crate::AdmittedQueuedWork::completion)
+                .collect(),
+            released: Vec::new(),
+            dropped: Vec::new(),
+        };
         Ok((
             turn,
             DriveParts {

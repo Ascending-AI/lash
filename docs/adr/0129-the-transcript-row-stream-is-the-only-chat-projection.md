@@ -16,11 +16,19 @@ content or a suppression; the RLM implementation owns its payload decoder.
 Core renders the marked reply part and resolves part rendering through the
 owning representation. Live observations remain provisional.
 
-FIG-972: the UI owns its input rows. A UI correlates its copy with a committed
-input using `provenance.turn_id`, and retains its own identity and attachments.
-It does not derive that relationship from either ID's spelling. The workbench
-persists its input row's ID and creation time with the active-turn claim, so
-a web process can recover that provisional row while the send is unfinished.
+FIG-972, FIG-5288: the UI owns its input rows. A UI correlates the opening
+input by `provenance.turn_id` and every input by `provenance.input_id`, retaining
+its own identity and attachments. The host computes the input ID before
+sending, using `LashSession::input_id(&send_id)` or
+`DurableSession::input_id(&send_id)`, and supplies that same send ID through
+`SendBuilder::id`. Steering inputs can share a run's turn ID; their input IDs
+identify them individually. A coalesced opening or terminal-withheld follow-on
+commits one user message per admitted input, in admission order, with each
+message naming exactly its own input. Its application evidence names that
+message. Hosts do not derive correlation from either ID's spelling. The
+workbench persists its input row's ID and creation time with the active-turn
+claim, so a web process can recover that provisional row while the send is
+unfinished.
 
 FIG-984: every settled turn has one committed reply. Its writer depends on
 termination: standard output, an RLM finish, a terminal tool, or a stopped
