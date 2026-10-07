@@ -2,11 +2,13 @@
 //! crash detection. Neither is ever a fence or a correctness input.
 //!
 //! - **Wakes.** A node coalesces what its commits woke into one
-//!   [`WakeBatch`] per flush and publishes it after those commits: a
-//!   readied unowned actor rings every node's claim loop, mail for an owned
-//!   actor rings its owner's node only. A writer on the owner's own node
-//!   hints in process and publishes nothing. A lost or late hint costs
-//!   latency only: the claim poll and each owner's mail scan find the work.
+//!   [`WakeBatch`] per flush and publishes it after those commits. A
+//!   readied unowned actor rings one claim loop: the writer's own node's
+//!   while it has a free slot, in process, or else the one live node the
+//!   actor's key hashes to. Mail for an owned actor rings its owner's node
+//!   only, and a writer on the owner's own node hints in process and
+//!   publishes nothing. A lost or late hint costs latency only: the claim
+//!   poll and each owner's mail scan find the work.
 //! - **Liveness.** A node's [`SignalFeed`] holds its boot's liveness lock
 //!   for as long as the feed's session lives. A watcher that saw a boot's
 //!   lock held, and later sees it free while the boot is still registered,
@@ -26,8 +28,9 @@ use crate::port::{NodeLease, Owner, Reaped};
 /// One flush of a node's wake hints, coalesced per channel.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WakeBatch {
-    /// An unowned actor became ready: every node's claim loop is rung once.
-    pub ready: bool,
+    /// Nodes picked to claim readied unowned actors: each one's claim loop
+    /// is rung once.
+    pub ready: BTreeSet<NodeId>,
     /// Owned actors that took mail, under the node that owns each.
     pub owned: BTreeMap<NodeId, BTreeSet<ActorKey>>,
 }
@@ -36,14 +39,15 @@ impl WakeBatch {
     /// Whether the batch rings nothing.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        !self.ready && self.owned.is_empty()
+        self.ready.is_empty() && self.owned.is_empty()
     }
 }
 
 /// What a node's listener heard.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Signal {
-    /// Some unowned actor became ready: claim now.
+    /// This node was picked to claim some readied unowned actor: claim
+    /// now, unless it runs as many actors as it may.
     Ready,
     /// These actors, owned by this node, took mail.
     Owned(Vec<ActorKey>),
@@ -71,10 +75,10 @@ pub trait Signals: Send + Sync + 'static {
     /// that woke its actors, never inside a writing transaction.
     async fn publish(&self, batch: &WakeBatch) -> Result<(), DurableError>;
 
-    /// Open `lease`'s listener: subscribe to the ready channel and the
-    /// node's own channel, and take the boot's liveness lock on the
-    /// listener's session. Returns once both are in place, so a scan that
-    /// follows misses no hint sent after it.
+    /// Open `lease`'s listener: subscribe to the node's own channel, and
+    /// take the boot's liveness lock on the listener's session. Returns
+    /// once both are in place, so a scan that follows misses no hint sent
+    /// after it.
     async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn SignalFeed>, DurableError>;
 
     /// Every registered boot's liveness lock, held or free, now.

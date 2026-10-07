@@ -45,8 +45,11 @@
 //! missed; it rescans after the listener resubscribes; it publishes what
 //! its node's commits woke, coalesced, after those commits; and it watches
 //! the other boots' liveness locks, reaping a boot whose lock it saw held
-//! and then free. None of it is needed for correctness: the claim poll, each
-//! owner's mail poll and the lease reap find every piece of work.
+//! and then free. A readied unowned actor wakes one node: this one when it
+//! has a free slot, or else the live peer its key hashes to among the
+//! peers its last liveness probe saw. None of it is needed for correctness:
+//! the claim poll, each owner's mail poll and the lease reap find every
+//! piece of work.
 
 use crate::config::{LeaseConfig, LeaseSettings};
 use crate::durable_config::DurableConfig;
@@ -62,7 +65,7 @@ use crate::tx::{ActorTx, Release};
 use lash_core_ids::clock::Clock;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 use tokio::sync::{Notify, watch};
@@ -447,6 +450,13 @@ struct HintsInner {
     boot: Mutex<Option<Owner>>,
     /// Whether woken actors owned elsewhere, or readied, are published.
     publishing: AtomicBool,
+    /// The slots this node offers readied actors until its next claim: its
+    /// free capacity, none while it drains. Each readied actor hinted to
+    /// this node's own claim loop takes one.
+    room: AtomicUsize,
+    /// The other nodes whose listeners this node's last liveness probe saw
+    /// live, sorted: where a readied actor goes when this node has no room.
+    peers: Mutex<Vec<NodeId>>,
     /// What the next flush publishes.
     pending: Mutex<WakeBatch>,
     /// Rings the publisher.
@@ -455,10 +465,11 @@ struct HintsInner {
 
 /// A wake's delivery: a mailbox writer on this node hands the runner what
 /// its commit woke, after the commit. An actor this boot runs is hinted in
-/// process and nothing is published; a readied unowned actor rings this
-/// node's claim loop and, with [`Signals`], every other node's; an actor
-/// another node owns is published to that node alone. Publishes coalesce
-/// until the publisher's next flush.
+/// process and nothing is published; a readied unowned actor rings one
+/// claim loop: this node's while it has a free slot, or else, with
+/// [`Signals`], the one live peer its key hashes to; an actor another node
+/// owns is published to that node alone. Publishes coalesce until the
+/// publisher's next flush.
 #[derive(Clone, Default)]
 pub struct Hints {
     inner: Arc<HintsInner>,
@@ -488,8 +499,13 @@ impl Hints {
                     .insert(woken.actor.clone());
             }),
             None if woken.state == ActorState::Ready => {
-                self.inner.claim.notify_one();
-                self.queue(|batch| batch.ready = true);
+                if self.take_room() {
+                    self.inner.claim.notify_one();
+                } else if let Some(peer) = self.peer_for(&woken.actor) {
+                    self.queue(|batch| {
+                        batch.ready.insert(peer);
+                    });
+                }
             }
             None => {}
         }
@@ -502,6 +518,41 @@ impl Hints {
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             == Some(owner)
+    }
+
+    /// Take one of the slots this node offers readied actors, if any is
+    /// left.
+    fn take_room(&self) -> bool {
+        self.inner
+            .room
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |room| {
+                room.checked_sub(1)
+            })
+            .is_ok()
+    }
+
+    fn offer_room(&self, room: usize) {
+        self.inner.room.store(room, Ordering::Release);
+    }
+
+    /// The live peer `actor` hashes to: the highest rendezvous score, so a
+    /// peer joining or leaving moves only the actors that hash to it.
+    fn peer_for(&self, actor: &ActorKey) -> Option<NodeId> {
+        self.inner
+            .peers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .max_by_key(|peer| rendezvous(actor, peer))
+            .cloned()
+    }
+
+    fn see_peers(&self, peers: Vec<NodeId>) {
+        *self
+            .inner
+            .peers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = peers;
     }
 
     fn hint_running(&self, actor: &ActorKey) -> bool {
@@ -740,7 +791,9 @@ impl Runner {
         let mut next_reap = start + settings.reap_every;
         let mut next_claim = start;
         let mut claim_delay = settings.claim_backoff;
-        let mut next_watch = start + settings.claim_poll;
+        // The first probe runs at once, so the node knows its live peers
+        // before its first readied actor.
+        let mut next_watch = start;
         // Each other boot whose liveness lock a probe saw held, with the
         // listener session it was seen under.
         let mut seen_held: HashMap<Owner, u64> = HashMap::new();
@@ -785,6 +838,11 @@ impl Runner {
                     break Stopped::Drained;
                 }
             }
+            self.hints.offer_room(if self.drain.started() {
+                0
+            } else {
+                self.config.max_active.saturating_sub(active.len())
+            });
             let mut next = next_reap.min(next_claim);
             if feed.is_some() {
                 next = next.min(next_watch);
@@ -857,6 +915,7 @@ impl Runner {
                     // An observation that spans a lost listener session is
                     // stale: the outage may have dropped every boot's lock.
                     Ok(boots) if feed.as_ref().map(|feed| feed.session()) == Some(session) => {
+                        self.hints.see_peers(live_peers(&lease, &boots));
                         released_boots(&lease, boots, session, &mut seen_held)
                     }
                     _ => Vec::new(),
@@ -1106,6 +1165,37 @@ fn not_started(what: &str, settings: LeaseSettings) -> DurableError {
             settings.startup
         ),
     })
+}
+
+/// The other nodes whose listeners hold their boots' locks in `boots`,
+/// sorted and once each.
+fn live_peers(lease: &NodeLease, boots: &[crate::signals::BootLiveness]) -> Vec<NodeId> {
+    let mut peers: Vec<NodeId> = boots
+        .iter()
+        .filter(|liveness| liveness.held && liveness.boot.node != lease.owner.node)
+        .map(|liveness| liveness.boot.node.clone())
+        .collect();
+    peers.sort();
+    peers.dedup();
+    peers
+}
+
+/// `actor`'s rendezvous score on `peer`: FNV-1a over both, then mixed so
+/// names that differ in one byte score far apart. Stable across builds and
+/// processes, so every producer that sees one live set picks one peer.
+fn rendezvous(actor: &ActorKey, peer: &NodeId) -> u64 {
+    let hash = actor
+        .as_str()
+        .bytes()
+        .chain([0xff])
+        .chain(peer.as_str().bytes())
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        });
+    // The 64-bit finalizer of MurmurHash3.
+    let hash = (hash ^ (hash >> 33)).wrapping_mul(0xff51_afd7_ed55_8ccd);
+    let hash = (hash ^ (hash >> 33)).wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    hash ^ (hash >> 33)
 }
 
 /// Fold one liveness probe into `seen_held`, answering each boot this node

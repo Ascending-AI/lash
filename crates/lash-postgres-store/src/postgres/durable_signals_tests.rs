@@ -11,8 +11,9 @@ use std::time::{Duration, Instant};
 use lash_durable::runner::{Activation, Exit, Owned, Runner, RunnerConfig, Stopped};
 use lash_durable::{
     ActorState, CommitLabel, DurableError, DurableSettings, DurableStore, FormatSet,
-    HeartbeatOutcome, LeaseSettings, MailKind, MailTx, NodeSpec, Release,
+    HeartbeatOutcome, LeaseSettings, MailKind, MailTx, NodeSpec, Release, domain,
 };
+use lash_sansio::{ProcessId, SessionId, TurnId};
 use tokio::sync::mpsc;
 
 use super::*;
@@ -129,21 +130,47 @@ struct Node {
 }
 
 fn start(storage: &PostgresStorage, name: &str, lease: LeaseSettings, signals: bool) -> Node {
-    let config = DurableSettings {
+    let signals = signals.then(|| Arc::new(storage.durable_signals()) as Arc<dyn Signals>);
+    let settings = DurableSettings {
         lease,
         ..DurableSettings::default()
-    }
-    .validate()
-    .expect("the law's settings validate");
+    };
+    run(Arc::new(storage.durable_store()), signals, name, settings)
+}
+
+/// A runner with signals over `storage` under `settings`, whose every claim
+/// `claims` counts.
+fn start_counted(
+    storage: &PostgresStorage,
+    name: &str,
+    settings: DurableSettings,
+    claims: &Claims,
+) -> Node {
+    let store = CountingStore {
+        inner: storage.durable_store(),
+        node: name.to_owned(),
+        claims: claims.clone(),
+    };
+    let signals: Arc<dyn Signals> = Arc::new(storage.durable_signals());
+    run(Arc::new(store), Some(signals), name, settings)
+}
+
+fn run(
+    store: Arc<dyn DurableStore>,
+    signals: Option<Arc<dyn Signals>>,
+    name: &str,
+    settings: DurableSettings,
+) -> Node {
+    let config = settings.validate().expect("the law's settings validate");
     let (send, arrived) = mpsc::unbounded_channel();
     let mut runner = Runner::new(
-        Arc::new(storage.durable_store()),
+        store,
         Arc::new(lash_core_execution::runtime::SystemClock),
         RunnerConfig::new(NodeId::new(name), vec![formats()], &config),
         Arc::new(Hold { arrived: send }),
     );
-    if signals {
-        runner = runner.with_signals(Arc::new(storage.durable_signals()));
+    if let Some(signals) = signals {
+        runner = runner.with_signals(signals);
     }
     let hints = runner.hints();
     let task = tokio::spawn(runner.run(std::future::pending()));
@@ -151,6 +178,214 @@ fn start(storage: &PostgresStorage, name: &str, lease: LeaseSettings, signals: b
         hints,
         arrived,
         task,
+    }
+}
+
+/// Every claim call the counted nodes made, as (node, actors taken).
+#[derive(Clone, Default)]
+struct Claims(Arc<std::sync::Mutex<Vec<(String, usize)>>>);
+
+impl Claims {
+    fn len(&self) -> usize {
+        self.0.lock().expect("the claims lock").len()
+    }
+
+    fn take(&self) -> Vec<(String, usize)> {
+        std::mem::take(&mut *self.0.lock().expect("the claims lock"))
+    }
+}
+
+/// The seam the wake laws count claim attempts through: a durable store
+/// that records each claim call and forwards every call unchanged.
+struct CountingStore {
+    inner: PostgresDurableStore,
+    node: String,
+    claims: Claims,
+}
+
+#[async_trait::async_trait]
+impl DurableStore for CountingStore {
+    async fn now(&self) -> Result<lash_durable::DurableInstant, DurableError> {
+        self.inner.now().await
+    }
+
+    async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
+        self.inner.register_node(spec).await
+    }
+
+    async fn heartbeat(&self, node: &NodeLease) -> Result<HeartbeatOutcome, DurableError> {
+        self.inner.heartbeat(node).await
+    }
+
+    async fn reap(&self, reaper: &NodeLease) -> Result<Vec<Reaped>, DurableError> {
+        self.inner.reap(reaper).await
+    }
+
+    async fn release_node(&self, node: &NodeLease) -> Result<Vec<ActorKey>, DurableError> {
+        self.inner.release_node(node).await
+    }
+
+    async fn claim(
+        &self,
+        node: &NodeLease,
+        limit: usize,
+    ) -> Result<Vec<lash_durable::Claimed>, DurableError> {
+        let claimed = self.inner.claim(node, limit).await;
+        if let Ok(claimed) = &claimed {
+            self.claims
+                .0
+                .lock()
+                .expect("the claims lock")
+                .push((self.node.clone(), claimed.len()));
+        }
+        claimed
+    }
+
+    async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
+        self.inner.mark_draining(node).await
+    }
+
+    async fn live_decodes(&self) -> Result<Vec<Vec<FormatSet>>, DurableError> {
+        self.inner.live_decodes().await
+    }
+
+    async fn owned(&self, node: &NodeLease) -> Result<Vec<lash_durable::Claimed>, DurableError> {
+        self.inner.owned(node).await
+    }
+
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: lash_durable::Epoch,
+    ) -> Result<lash_durable::ActorTx, DurableError> {
+        self.inner.begin(actor, epoch).await
+    }
+
+    async fn commit(
+        &self,
+        tx: lash_durable::ActorTx,
+        label: CommitLabel,
+    ) -> Result<lash_durable::ActorCommit, DurableError> {
+        self.inner.commit(tx, label).await
+    }
+
+    async fn commit_mail(
+        &self,
+        tx: MailTx,
+        label: CommitLabel,
+    ) -> Result<lash_durable::MailCommit, DurableError> {
+        self.inner.commit_mail(tx, label).await
+    }
+
+    async fn actor(
+        &self,
+        actor: &ActorKey,
+    ) -> Result<Option<lash_durable::ActorSnapshot>, DurableError> {
+        self.inner.actor(actor).await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_durable::DurableReads for CountingStore {
+    async fn turn(&self, session: &SessionId) -> Result<Option<domain::TurnRow>, DurableError> {
+        self.inner.turn(session).await
+    }
+
+    async fn turn_end(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Option<domain::TurnEnd>, DurableError> {
+        self.inner.turn_end(session, run).await
+    }
+
+    async fn run_records(
+        &self,
+        owner: &domain::OwnerKey,
+    ) -> Result<Vec<domain::RunRecordRow>, DurableError> {
+        self.inner.run_records(owner).await
+    }
+
+    async fn snapshot(
+        &self,
+        exec: &domain::ExecKey,
+    ) -> Result<Option<domain::SnapshotRow>, DurableError> {
+        self.inner.snapshot(exec).await
+    }
+
+    async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<domain::WaitRow>, DurableError> {
+        self.inner.pending_waits(owner).await
+    }
+
+    async fn wait(&self, id: &domain::WaitId) -> Result<Option<domain::WaitRow>, DurableError> {
+        self.inner.wait(id).await
+    }
+
+    async fn process(
+        &self,
+        process: &ProcessId,
+    ) -> Result<Option<domain::ProcessActorRow>, DurableError> {
+        self.inner.process(process).await
+    }
+
+    async fn live_until_descendants(
+        &self,
+        scope: &domain::ScopeKey,
+        limit: usize,
+    ) -> Result<Vec<ProcessId>, DurableError> {
+        self.inner.live_until_descendants(scope, limit).await
+    }
+
+    async fn until_children(
+        &self,
+        scope: &domain::ScopeKey,
+        after: Option<&ProcessId>,
+        limit: usize,
+    ) -> Result<Vec<ProcessId>, DurableError> {
+        self.inner.until_children(scope, after, limit).await
+    }
+
+    async fn session_close(
+        &self,
+        session: &SessionId,
+    ) -> Result<Option<domain::SessionCloseRow>, DurableError> {
+        self.inner.session_close(session).await
+    }
+
+    async fn ending_scopes(
+        &self,
+        session: &SessionId,
+    ) -> Result<Vec<domain::ScopeKey>, DurableError> {
+        self.inner.ending_scopes(session).await
+    }
+
+    async fn session_mailbox(
+        &self,
+        session: &SessionId,
+    ) -> Result<domain::SessionMailbox, DurableError> {
+        self.inner.session_mailbox(session).await
+    }
+
+    async fn park_events(
+        &self,
+        after: Option<domain::ParkEventSeq>,
+        limit: usize,
+    ) -> Result<Vec<domain::ParkEventRow>, DurableError> {
+        self.inner.park_events(after, limit).await
+    }
+
+    async fn prompt_snapshot(
+        &self,
+        call: &domain::PromptCallKey,
+    ) -> Result<Option<domain::PromptSnapshotRow>, DurableError> {
+        self.inner.prompt_snapshot(call).await
+    }
+
+    async fn prompt_texts(
+        &self,
+        hashes: &[String],
+    ) -> Result<Vec<domain::PromptText>, DurableError> {
+        self.inner.prompt_texts(hashes).await
     }
 }
 
@@ -272,7 +507,7 @@ async fn a_lost_listener_session_resubscribes_holding_its_lock() {
     assert_eq!(held(&signals, &lease.owner).await, Some(true));
     signals
         .publish(&WakeBatch {
-            ready: true,
+            ready: std::collections::BTreeSet::from([lease.owner.node.clone()]),
             ..WakeBatch::default()
         })
         .await
@@ -424,6 +659,195 @@ async fn a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses() {
     survivor.task.abort();
 }
 
+/// Polls far apart, so inside a wake law every claim is a hint's.
+fn quiet() -> LeaseSettings {
+    LeaseSettings {
+        claim_poll: Duration::from_secs(30),
+        claim_backoff: Duration::from_secs(30),
+        ..LeaseSettings::default()
+    }
+}
+
+/// Settings that run at most `max_active` actors under `lease`.
+fn holding(lease: LeaseSettings, max_active: usize) -> DurableSettings {
+    let defaults = DurableSettings::default();
+    DurableSettings {
+        lease,
+        max_active,
+        claim_batch: defaults.claim_batch.min(max_active),
+        ..defaults
+    }
+}
+
+/// Create `actor` ready and unowned, answering what the commit woke.
+async fn create_woken(store: &dyn DurableStore, actor: &ActorKey) -> lash_durable::MailCommit {
+    let mut tx = MailTx::new();
+    tx.create_actor(actor.clone(), formats());
+    store
+        .commit_mail(tx, CommitLabel::new("law.create"))
+        .await
+        .expect("create the actor")
+}
+
+/// Wait until `node` holds its liveness lock.
+async fn listening(signals: &PostgresSignals, node: &str) {
+    eventually(Duration::from_secs(5), "the node listens", || async {
+        signals
+            .liveness()
+            .await
+            .expect("probe")
+            .iter()
+            .any(|liveness| liveness.boot.node.as_str() == node && liveness.held)
+    })
+    .await;
+}
+
+/// A readied unowned actor rings one node, not every node (FIG-5277). The
+/// producing node is full, so its hint goes to one of fifteen peers; each
+/// readied actor then costs exactly one claim attempt, and that attempt
+/// takes it. Before, every peer claimed on the shared ready channel and
+/// all but one came back empty.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node() {
+    const NODES: usize = 16;
+    const READIED: usize = 8;
+    let Some(database) = database("a_readied_actor_is_claimed_by_one_attempt_on_one_node").await
+    else {
+        return;
+    };
+    let mut config = crate::testing::fixture_config();
+    config.roles.served_nodes = u32::try_from(NODES).expect("the node count fits");
+    config.roles.scheduler.max_connections = 4;
+    let storage = crate::testing::connect_with(database.url(), &config)
+        .await
+        .expect("open the isolated store");
+    let store = storage.durable_store();
+    let signals = storage.durable_signals();
+    let claims = Claims::default();
+    let mut nodes = Vec::new();
+    for index in 1..NODES {
+        let name = format!("peer-{index:02}");
+        nodes.push(start_counted(
+            &storage,
+            &name,
+            holding(quiet(), 256),
+            &claims,
+        ));
+        listening(&signals, &name).await;
+    }
+    eventually(Duration::from_secs(5), "each peer claimed once", || async {
+        claims.len() == NODES - 1
+    })
+    .await;
+    let held_actor = actor("held");
+    create(&store, &held_actor).await;
+    let producer = start_counted(&storage, "producer", holding(quiet(), 1), &claims);
+    eventually(Duration::from_secs(5), "the producer is full", || async {
+        owner_of(&store, &held_actor).await.as_deref() == Some("producer")
+    })
+    .await;
+    claims.take();
+
+    for index in 0..READIED {
+        let readied = actor(&format!("readied-{index}"));
+        producer.hints.woke(&create_woken(&store, &readied).await);
+        eventually(Duration::from_secs(5), "a peer runs the actor", || async {
+            owner_of(&store, &readied)
+                .await
+                .is_some_and(|owner| owner.starts_with("peer-"))
+        })
+        .await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let attempts = claims.take();
+    let empty = attempts.iter().filter(|(_, taken)| *taken == 0).count();
+    eprintln!(
+        "ready wake on {NODES} nodes: {} claim attempts for {READIED} readied actors, \
+         {empty} empty",
+        attempts.len()
+    );
+    assert_eq!(
+        (attempts.len(), empty),
+        (READIED, 0),
+        "each readied actor costs one claim attempt that takes it: {attempts:?}"
+    );
+    producer.task.abort();
+    for node in nodes {
+        node.task.abort();
+    }
+}
+
+/// The hinted node dies before it claims: its hint is lost, and a live
+/// node's claim poll takes the actor within one poll interval. The full
+/// producer last probed liveness while the dead node was its only live
+/// peer, so the hint goes to the dead node.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_hint_to_a_dead_node_is_backed_by_the_claim_poll() {
+    let Some(database) = database("a_hint_to_a_dead_node_is_backed_by_the_claim_poll").await else {
+        return;
+    };
+    let storage = storage(&database).await;
+    let store = storage.durable_store();
+    let signals = storage.durable_signals();
+    let claims = Claims::default();
+    let doomed = start_counted(&storage, "doomed", holding(quiet(), 256), &claims);
+    listening(&signals, "doomed").await;
+    eventually(
+        Duration::from_secs(5),
+        "the doomed node claimed",
+        || async { claims.len() == 1 },
+    )
+    .await;
+    let held_actor = actor("held");
+    create(&store, &held_actor).await;
+    let producer = start_counted(&storage, "producer", holding(quiet(), 1), &claims);
+    eventually(Duration::from_secs(5), "the producer is full", || async {
+        owner_of(&store, &held_actor).await.as_deref() == Some("producer")
+    })
+    .await;
+    let poll = Duration::from_millis(500);
+    let polling = LeaseSettings {
+        claim_poll: poll,
+        claim_backoff: poll,
+        ..LeaseSettings::default()
+    };
+    let survivor = start_counted(&storage, "survivor", holding(polling, 256), &claims);
+    listening(&signals, "survivor").await;
+    doomed.task.abort();
+    assert!(doomed.task.await.is_err(), "the doomed node was stopped");
+    eventually(
+        Duration::from_secs(5),
+        "the doomed node's lock is free",
+        || async {
+            signals
+                .liveness()
+                .await
+                .expect("probe")
+                .iter()
+                .all(|liveness| liveness.boot.node.as_str() != "doomed" || !liveness.held)
+        },
+    )
+    .await;
+
+    let readied = actor("readied");
+    let sent = Instant::now();
+    producer.hints.woke(&create_woken(&store, &readied).await);
+    eventually(
+        Duration::from_secs(5),
+        "the survivor runs the actor",
+        || async { owner_of(&store, &readied).await.as_deref() == Some("survivor") },
+    )
+    .await;
+    let latency = sent.elapsed();
+    eprintln!("lost ready hint: the poll claimed the actor after {latency:?}");
+    assert!(
+        latency < poll + Duration::from_millis(500),
+        "the poll took {latency:?} on a {poll:?} poll"
+    );
+    producer.task.abort();
+    survivor.task.abort();
+}
+
 /// A node's lease renews on a task of its own over its renewal connection:
 /// with every work, scheduler and critical connection held, so the runner's
 /// claim waits on the scheduler pool, the node keeps serving across three
@@ -499,7 +923,7 @@ async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
 #[test]
 fn a_batch_rings_each_channel_with_bounded_payloads() {
     let mut batch = WakeBatch {
-        ready: true,
+        ready: std::collections::BTreeSet::from([NodeId::new("b")]),
         ..WakeBatch::default()
     };
     let crowd: std::collections::BTreeSet<ActorKey> = (0..1_000)
@@ -507,7 +931,11 @@ fn a_batch_rings_each_channel_with_bounded_payloads() {
         .collect();
     batch.owned.insert(NodeId::new("a"), crowd.clone());
     let (channels, payloads) = notifications(&batch);
-    assert_eq!(channels[0], READY_CHANNEL);
+    assert_eq!(
+        (channels[0].as_str(), payloads[0].as_str()),
+        ("lash_node_b", ""),
+        "a ready hint rings its one node with an empty payload"
+    );
     assert!(channels[1..].iter().all(|channel| channel == "lash_node_a"));
     assert!(
         payloads

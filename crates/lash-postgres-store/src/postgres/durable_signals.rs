@@ -5,11 +5,12 @@
 //!   pool, after the commits that woke its actors and never inside a writing
 //!   transaction: S2 (FIG-5167) measured post-commit delivery at
 //!   0.41 ms p50 at sixteen listeners, and an in-transaction notify takes
-//!   the notification queue's lock on every writer's commit. A readied
-//!   unowned actor rings [`READY_CHANNEL`]; an owned one rings its owner's
-//!   node channel with its key in the payload.
+//!   the notification queue's lock on every writer's commit. Each node has
+//!   one channel. A ready hint rings the one node picked to claim a readied
+//!   unowned actor, with an empty payload; mail for an owned actor rings its
+//!   owner's channel with the actor's key in the payload.
 //! - **Listener.** Each node has one listener on a connection of its own. It
-//!   subscribes to both channels, then takes its boot's liveness lock, a
+//!   subscribes to its node's channel, then takes its boot's liveness lock, a
 //!   session advisory lock, before [`Signals::listen`] returns. When its
 //!   session is lost it reconnects, subscribes and locks again, and only then
 //!   reports [`Signal::Resubscribed`], so the runner rescans after it. Its
@@ -42,9 +43,6 @@ use crate::host::ReconnectPolicy;
 
 use super::{PostgresDurableStore, SQL, sqlx_failure};
 
-/// The channel every node listens on for readied unowned actors.
-pub(crate) const READY_CHANNEL: &str = "lash_ready";
-
 /// The most bytes one notification's payload carries; PostgreSQL refuses
 /// payloads of 8000 bytes or more.
 const PAYLOAD_LIMIT: usize = 7_900;
@@ -72,8 +70,8 @@ pub(crate) fn node_channel(node: &NodeId) -> String {
 fn notifications(batch: &WakeBatch) -> (Vec<String>, Vec<String>) {
     let mut channels = Vec::new();
     let mut payloads = Vec::new();
-    if batch.ready {
-        channels.push(READY_CHANNEL.to_owned());
+    for node in &batch.ready {
+        channels.push(node_channel(node));
         payloads.push(String::new());
     }
     for (node, actors) in &batch.owned {
@@ -99,7 +97,7 @@ fn notifications(batch: &WakeBatch) -> (Vec<String>, Vec<String>) {
 
 /// What one notification signals, if anything.
 fn signal_of(notification: &PgNotification) -> Option<Signal> {
-    if notification.channel() == READY_CHANNEL {
+    if notification.payload().is_empty() {
         return Some(Signal::Ready);
     }
     let actors: Vec<ActorKey> = notification
@@ -127,7 +125,7 @@ struct Session {
     /// A pool of one listener-role connection that the listener alone
     /// uses.
     pool: PgPool,
-    channels: [String; 2],
+    channel: String,
     boot: String,
     /// How long one open may take, connecting and the lock wait included.
     open_within: Duration,
@@ -142,9 +140,7 @@ impl Session {
     async fn open(&self) -> Result<PgListener, sqlx::Error> {
         let open = async {
             let mut listener = PgListener::connect_with(&self.pool).await?;
-            listener
-                .listen_all(self.channels.iter().map(String::as_str))
-                .await?;
+            listener.listen(&self.channel).await?;
             sqlx::query(SQL.postgres.hold_liveness.sql())
                 .bind(&self.boot)
                 .execute(&mut listener)
@@ -195,7 +191,7 @@ async fn forward(
             continue;
         }
         // The session is gone, or no longer trustworthy: drop it whole and
-        // open another, so the lock and both subscriptions are taken anew.
+        // open another, so the lock and the subscription are taken anew.
         lost.fetch_add(1, Ordering::AcqRel);
         drop(listener);
         let mut failures = 0;
@@ -294,7 +290,7 @@ impl Signals for PostgresSignals {
                 .idle_timeout(None)
                 .max_lifetime(None)
                 .connect_lazy_with(pools.listener.clone()),
-            channels: [READY_CHANNEL.to_owned(), node_channel(&lease.owner.node)],
+            channel: node_channel(&lease.owner.node),
             boot: lease.owner.boot.as_str().to_owned(),
             open_within,
             reconnect: pools.reconnect,

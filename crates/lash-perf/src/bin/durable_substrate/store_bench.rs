@@ -373,7 +373,7 @@ async fn wake(report: &Report, url: &str, count: usize, events: usize) -> Result
         let publishing = Instant::now();
         signals
             .publish(&WakeBatch {
-                ready: false,
+                ready: BTreeSet::new(),
                 owned: owned_batch,
             })
             .await
