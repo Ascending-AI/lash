@@ -1,5 +1,5 @@
 //! A durable turn's tool activity and presentation through a host's
-//! `send()` on a served node (FIG-5251).
+//! `send()` on a served node (FIG-5251, FIG-5289).
 //!
 //! A host creates a session on a core over the tier's database and sends it
 //! an input; the core's own node claims the session and runs the turn on
@@ -32,6 +32,9 @@ use std::sync::{Arc, Mutex};
 use lash::observe::Stream as _;
 use lash::recoverable_chat::{RecoverableChatSubscription, RecoverableChatUpdate};
 use lash_core::ToolDefinitionBindingExt as _;
+use lash_core::llm::types::{
+    LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity, StreamBlockKind,
+};
 use lash_core::{
     LiveReplayStore, SessionObservationEventPayload, ToolCall, TurnActivity, TurnEvent,
 };
@@ -459,6 +462,266 @@ async fn a_durable_turn_streams_a_native_call_s_activity_to_its_sink(tier: Tier)
     world.shutdown().await;
 }
 
+/// The live delta's kind, block address and exact suffix.
+fn provider_delta(event: &TurnEvent) -> Option<(bool, StreamBlockIdentity, String)> {
+    match event {
+        TurnEvent::AssistantProseDelta { block, text } => {
+            Some((false, block.clone(), text.to_string()))
+        }
+        TurnEvent::ReasoningDelta { block, text } => Some((true, block.clone(), text.to_string())),
+        _ => None,
+    }
+}
+
+/// Provider prose and exposed reasoning reach the host's sink, in stream
+/// order and addressed to the run, before its committed rows (ADR 0129).
+/// Hidden reasoning reaches neither the live lane nor the terminal fallback
+/// publication (ADR 0121).
+async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: Tier) {
+    for expose_thinking in [true, false] {
+        let Some((stores, keep)) = served::stores(tier).await else {
+            return;
+        };
+        let backend = served::backend(stores);
+        let reasoning = StreamBlockIdentity::new("reasoning:0", 0);
+        let prose = StreamBlockIdentity::new("text:0", 1);
+        let expected: Vec<_> = [
+            (true, reasoning.clone(), "Consider "),
+            (true, reasoning.clone(), "the evidence."),
+            (false, prose.clone(), "Here "),
+            (false, prose.clone(), "is the "),
+            (false, prose.clone(), "answer."),
+        ]
+        .into_iter()
+        .filter(|(thinking, _, _)| expose_thinking || !thinking)
+        .map(|(thinking, block, text)| (thinking, block, text.to_owned()))
+        .collect();
+        let gates: Vec<_> = expected.iter().map(|_| Gate::new(false)).collect();
+        let model = {
+            let deltas = expected.clone();
+            let gates = gates.clone();
+            lash_core::testing::TestProvider::builder()
+                .kind("provider-activity-scripted")
+                .requires_streaming(true)
+                .complete(move |request: LlmRequest| {
+                    let deltas = deltas.clone();
+                    let gates = gates.clone();
+                    async move {
+                        assert_eq!(
+                            request
+                                .model
+                                .model
+                                .metadata()
+                                .request_defaults
+                                .expose_thinking,
+                            expose_thinking,
+                            "the recorded model profile reaches the provider"
+                        );
+                        let stream = request.stream_events.as_ref().expect("a streamed request");
+                        // Like a provider adapter, publish reasoning only when
+                        // requested. Keep its final part even when hidden, so
+                        // the law also pins the runtime's fallback suppression.
+                        for (index, (thinking, block, text)) in deltas.iter().enumerate() {
+                            if index == 0 || deltas[index - 1].0 != *thinking {
+                                stream.send(if *thinking {
+                                    LlmStreamEvent::ReasoningBlockStart {
+                                        block: block.clone(),
+                                    }
+                                } else {
+                                    LlmStreamEvent::TextBlockStart {
+                                        block: block.clone(),
+                                    }
+                                });
+                            }
+                            stream.send(if *thinking {
+                                LlmStreamEvent::ReasoningDelta {
+                                    block: block.clone(),
+                                    text: text.clone(),
+                                }
+                            } else {
+                                LlmStreamEvent::Delta {
+                                    block: block.clone(),
+                                    text: text.clone(),
+                                }
+                            });
+                            // The host acknowledges each suffix before the next
+                            // one: observation backpressure cannot coalesce them,
+                            // and a response withheld here cannot commit rows.
+                            gates[index].passed().await;
+                            if index + 1 == deltas.len() || deltas[index + 1].0 != *thinking {
+                                stream.send(if *thinking {
+                                    LlmStreamEvent::ReasoningBlockEnd {
+                                        block: block.clone(),
+                                        text: "Consider the evidence.".into(),
+                                    }
+                                } else {
+                                    LlmStreamEvent::TextBlockEnd {
+                                        block: block.clone(),
+                                        text: "Here is the answer.".into(),
+                                    }
+                                });
+                            }
+                        }
+                        Ok(LlmResponse {
+                            parts: vec![
+                                lash_core::LlmOutputPart::Reasoning {
+                                    text: "Consider the evidence.".into(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::Text {
+                                    text: "Here is the answer.".into(),
+                                    response_meta: None,
+                                },
+                            ],
+                            expose_thinking: Some(expose_thinking),
+                            ..LlmResponse::default()
+                        })
+                    }
+                })
+                .build()
+                .into_handle()
+        };
+        let core = lash::LashCore::standard_builder(backend)
+            .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .serve_test_llm_profile(
+                model,
+                lash_core::LlmProfileMetadata::builder(served::MODEL)
+                    .context_window_tokens(1_000_000)
+                    .expose_thinking(expose_thinking)
+                    .build()
+                    .expect("the model's metadata"),
+            )
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "provider-activity-deployment",
+                "provider-activity-boot",
+            ))
+            .expect("the core builds");
+        let session_id = lash::SessionId::try_from("provider-activity".to_owned()).unwrap();
+        let session = core
+            .session(session_id.clone())
+            .create(lash::SessionCreation::root(served::spec(8)))
+            .await
+            .expect("the session is created");
+        let observed = core
+            .session(session_id)
+            .open()
+            .await
+            .expect("the session opens");
+        let snapshot = observed
+            .observe()
+            .recoverable_chat_snapshot()
+            .await
+            .expect("the snapshot reads the durable head");
+        let mut updates = observed
+            .observe()
+            .subscribe_recoverable_chat(snapshot.cursor);
+        let run = lash::TurnId::from("provider-activity-run");
+        let sink = Recorded::default();
+        let (outcome, ()) = tokio::time::timeout(WATCHDOG, async {
+            tokio::join!(
+                session
+                    .send(lash::TurnInput::text("stream the answer"))
+                    .id(run.clone())
+                    .outcome_into(&sink),
+                async {
+                    let mut seen = Vec::new();
+                    loop {
+                        let update = next_update(&mut updates).await;
+                        match update {
+                            RecoverableChatUpdate::Event { event, .. } => {
+                                if let SessionObservationEventPayload::TurnActivity(activity) =
+                                    &event.payload
+                                {
+                                    if !expose_thinking {
+                                        assert!(
+                                            !matches!(
+                                                activity.event,
+                                                TurnEvent::ReasoningDelta { .. }
+                                                    | TurnEvent::StreamBlockStarted {
+                                                        kind: StreamBlockKind::Reasoning,
+                                                        ..
+                                                    }
+                                                    | TurnEvent::StreamBlockCompleted {
+                                                        kind: StreamBlockKind::Reasoning,
+                                                        ..
+                                                    }
+                                            ),
+                                            "hidden reasoning is never published: {event:#?}"
+                                        );
+                                    }
+                                    if let Some(delta) = provider_delta(&activity.event) {
+                                        assert_eq!(
+                                            event.turn_id.as_ref(),
+                                            Some(&run),
+                                            "every delta addresses the run"
+                                        );
+                                        assert_eq!(
+                                            expected.get(seen.len()),
+                                            Some(&delta),
+                                            "every suffix arrives in stream order"
+                                        );
+                                        seen.push(delta);
+                                        sink.until(|activities| {
+                                            activities
+                                                .iter()
+                                                .filter(|activity| {
+                                                    provider_delta(&activity.event).is_some()
+                                                })
+                                                .count()
+                                                == seen.len()
+                                        })
+                                        .await;
+                                        gates[seen.len() - 1].open();
+                                    }
+                                }
+                            }
+                            RecoverableChatUpdate::TerminalReplacement { event, .. } => {
+                                assert_eq!(event.turn_id.as_ref(), Some(&run));
+                                let SessionObservationEventPayload::Committed { rows, .. } =
+                                    &event.payload
+                                else {
+                                    panic!("a replacement carries committed rows: {event:#?}");
+                                };
+                                assert!(!rows.is_empty(), "the run commits transcript rows");
+                                assert_eq!(seen, expected, "all live deltas precede Committed");
+                                break;
+                            }
+                            RecoverableChatUpdate::ReplayGap { .. } => {
+                                panic!("the host keeps up with the stream")
+                            }
+                            RecoverableChatUpdate::ResidentReplacement { .. } => {
+                                panic!("the durable turn has no resident replacement")
+                            }
+                        }
+                    }
+                },
+            )
+        })
+        .await
+        .expect("deadlock watchdog: the streamed turn never settled");
+        let outcome = outcome.expect("the turn answers");
+        assert!(
+            outcome.gaps().is_empty(),
+            "the sink loses no activity: {outcome:#?}"
+        );
+        let lash::SendOutcome::Settled { output, .. } = outcome else {
+            panic!("the turn settles: {outcome:#?}");
+        };
+        served::assert_answered("the streamed turn", &output);
+        assert_eq!(
+            sink.activities()
+                .iter()
+                .filter_map(|activity| provider_delta(&activity.event))
+                .collect::<Vec<_>>(),
+            expected,
+            "the live sink receives each delta exactly once"
+        );
+        core.shutdown().await.expect("the core shuts down");
+        drop(keep);
+    }
+}
+
 /// A plugin's presentation step presents a native round call that answers
 /// at once and one that parks and is resolved out of band: the turn records
 /// the presented return, and the model is shown it.
@@ -718,6 +981,7 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
 }
 
 tiered_laws!(
+    a_durable_turn_streams_provider_deltas_before_its_committed_rows,
     a_durable_turn_streams_a_native_call_s_activity_to_its_sink,
     a_presentation_step_presents_every_native_round_call,
     a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows,
