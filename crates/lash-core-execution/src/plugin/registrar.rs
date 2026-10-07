@@ -157,6 +157,8 @@ pub(crate) struct PluginContributions {
         Vec<RegisteredHook<Arc<dyn TranscriptRowProjectorPlugin>>>,
     pub(crate) assistant_prose_projector:
         Option<RegisteredExclusiveHook<Arc<dyn AssistantProseProjectorPlugin>>>,
+    /// Prompt sections and wrappers, in registration order (ADR 0133).
+    pub(crate) prompt: super::prompt::PromptRegistry,
 }
 
 pub struct PluginRegistrar {

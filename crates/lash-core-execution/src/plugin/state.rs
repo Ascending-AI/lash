@@ -252,6 +252,21 @@ impl PluginStateView {
             .map_or(0, |namespace| namespace.generation)
     }
 
+    /// This namespace frozen at its published generation, read under one
+    /// lock: a prompt renderer reading it never sees two generations.
+    pub fn committed(&self) -> super::prompt::CommittedPluginNamespace {
+        let registry = self.state.lock_recover();
+        registry.data.plugins.get(self.plugin_id()).map_or_else(
+            super::prompt::CommittedPluginNamespace::default,
+            |namespace| {
+                super::prompt::CommittedPluginNamespace::new(
+                    namespace.generation,
+                    namespace.values.clone(),
+                )
+            },
+        )
+    }
+
     pub fn get(&self, key: &str) -> Option<Value> {
         self.state
             .lock_recover()

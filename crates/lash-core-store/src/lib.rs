@@ -34,6 +34,7 @@ pub mod message_projection;
 mod persisted_node_ids;
 pub mod plugin_state;
 pub mod process_identity;
+pub mod prompt_sections;
 pub mod protocol_turn_options;
 pub mod queued_drain_policy;
 pub mod queued_work_vocabulary;

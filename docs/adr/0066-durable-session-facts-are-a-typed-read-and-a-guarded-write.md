@@ -61,7 +61,9 @@ that commit leaves a session that opens with what its creation recorded.
 The RLM owner registers `SetRlmRender`, which replaces the recorded print and
 preview render and clears it when empty, and two prompt commands (FIG-4588):
 `SetRlmPrompt` replaces the recorded prompt config whole, and
-`SetRlmPromptContext` replaces its context. Termination, the
+`SetRlmPromptContext` replaces its context. Moving protocol prompt text into
+sections that the host's `SetPromptPlan` orders and places is open work of
+[ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md) §9 (FIG-5257). Termination, the
 final-answer format, the channel and the dialect have no command, so a
 transaction cannot name them: a host that states one is refused
 `UnknownCommand` at submission. The owner's validation refuses a candidate

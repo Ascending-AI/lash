@@ -27,6 +27,7 @@ L13 = FIG-5193, L3t = FIG-5208, L9t = FIG-5210.
 | S8 projection providers | `lashlang/src/runtime/projection_provider.rs`, `lashlang/src/runtime/value.rs` (`ResourceRef`), `lash-core-execution/src/runtime/actor/projection.rs` | Reads are pure, `Repeatable` and never recorded; a read answers `None` when its provider does not answer that request; a missing provider for a type found in a value or a snapshot is a typed refusal. | all of it: L7p (FIG-5197) filled the catalog, the VM's `ProjectionReader`, the worker's batched wire and the lash-provided `history` provider | none |
 | S9 the durable backend | `lash-core-execution/src/backend.rs`; the facade's `DurableBackendBuilder` (`lash/src/durable.rs`) | `Backend` is concrete. Assembly refuses invalid settings, two engines of one kind, and two providers of one projection type. | `Backend::assemble`, accessors, `StoreSet::durable_store` in both dialects, `DurableBackendBuilder::build`; laws in `lash-conformance/src/backend_assembly_tests.rs` | L3s (`wake_session`), L6 (`wake_process`), L3 (`serve`) |
 | S10 table ownership | `lash-postgres-store/schema.sql` (with its regenerated `teardown.sql` and `schema-shape.txt`), `lash-sqlite-store/src/schema.rs` (`FRAGMENTS`) | See [table ownership](#table-ownership). | DDL for `lash_run_records`, `lash_exec_snapshots` | V0 (statements) |
+| S11 prompt composition (ADR 0133) | `lash-core-store/src/prompt_sections.rs` (plan, records), `lash-core-execution/src/plugin/prompt.rs` (registration, cut, resolution, chain) | Sections are keyed `(plugin id, local key)`; wrappers chain in plugin registration order, then declaration order; the host's `PromptPlan` (core config, `SetPromptPlan`) orders and places; a renderer reads a `PromptInput` over a committed cut and its own frozen namespace; a call records its `ResolvedPromptPlan` and a version-1 `PromptSnapshot`. | the contract and its records (FIG-5254) | none: wiring is FIG-5255 (admission at `model.start`) and FIG-5256 (composer and storage) |
 
 ### Renames and re-homes
 
@@ -58,9 +59,10 @@ L13 = FIG-5193, L3t = FIG-5208, L9t = FIG-5210.
 | Group method (owner) | Variant | Becomes |
 |---|---|---|
 | `turn_effect` (V0, then L3) | `BeforeLlmCall`, `AssistantResponseHooks` | phase-transaction write: the hook recomputes from committed state at its phase, and its result commits with the phase (L3) |
-| | `LlmCall` | phase-transaction writes: `model.start` pins the call, `model.done` commits its answer |
+| | `LlmCall` | phase-transaction writes: `model.start` pins the call together with the pending checkpoint-callback decisions and the call's prompt snapshot (ADR 0133 §6, FIG-5255), `model.done` commits its answer |
 | | `Direct` | admitted execution of the calling tool's body |
-| | `SyncExecutionEnvironment`, `ResolveTurnConfig`, `RecordCompactionBase`, `RenderCompactionPrompt` | phase-transaction write (`turn.prepare`) |
+| | `SyncExecutionEnvironment`, `ResolveTurnConfig`, `RecordCompactionBase` | phase-transaction write (`turn.prepare`); the environment sync renders no prompt text, which the call's sections carry (ADR 0133 §1) |
+| | `RenderCompactionPrompt` | deleted (ADR 0133 §8, FIG-5259, FIG-5260): the compaction call composes its sections like any model call, and its snapshot commits with its admission |
 | | `Checkpoint` | phase-transaction write (the bounded checkpoint ref on the turn row) |
 | | `RecoverFollowOn` | deleted: restore reads the turn row (S3) |
 | | `TraceBoundary` | phase-transaction write (the trace receipt rides the commit) |

@@ -22,6 +22,7 @@ fn persisted_state_hydrates_the_recorded_llm_profile_without_live_rebinding() {
             charge_safety: crate::ChargeSafetyPolicy::default(),
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
+            prompt_plan: crate::prompt_sections::PromptPlan::default(),
             subagent: None,
             config_revision: 0,
             plugin_config: crate::PluginConfig::default(),

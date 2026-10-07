@@ -117,7 +117,8 @@ pub mod config {
     pub use lash_core::CoreConfigOwner;
     pub use lash_core::plugin::config::core::{
         SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetLlmProfile,
-        SetMaxToolCalls, SetNoProgressBudget, SetReasoning, SetToolAccess, SetTurnBudget,
+        SetMaxToolCalls, SetNoProgressBudget, SetPromptPlan, SetReasoning, SetToolAccess,
+        SetTurnBudget,
     };
     pub use lash_core::{
         CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,
@@ -742,6 +743,35 @@ pub mod persistence {
     pub use lash_lashlang_runtime::LashlangArtifacts;
 }
 
+/// Prompt sections (ADR 0133): the host's plan and the records of what a
+/// model call composed.
+///
+/// Every piece of model-facing instruction text is a keyed section owned by
+/// the plugin that registered it ([`PromptSectionId`]). The host owns the
+/// [`PromptPlan`], recorded as session config and changed by
+/// [`SetPromptPlan`](crate::config::SetPromptPlan): the section order and each
+/// section's [`PromptPlacement`], which overrides the plugin's default. Lash
+/// sets no placement policy. [`PromptPlacement::InitialInstructions`] puts a
+/// section in the provider's instruction field, at the head of the request,
+/// so a section that changes between calls changes the cached request
+/// prefix. [`PromptPlacement::CurrentContext`] puts it late, after the
+/// conversation and outside its history, which keeps the history prefix
+/// stable but may reach the model in a different role.
+///
+/// A call records its [`ResolvedPromptPlan`] and a version-1
+/// [`PromptSnapshot`]: each section's base text, each wrapper's output and
+/// the final text, as content-addressed [`PromptTextRef`]s.
+pub mod prompt {
+    pub use lash_core::plugin::prompt::{PromptCompositionError, PromptRenderSite};
+    pub use lash_core::prompt_sections::{
+        AppliedPromptWrap, PROMPT_KEY_MAX_BYTES, PlacementSource, PromptKeyError, PromptLimits,
+        PromptPlacement, PromptPlan, PromptPlanError, PromptPurpose, PromptSectionId,
+        PromptSectionKey, PromptSectionPlacement, PromptSnapshot, PromptSnapshotVersion,
+        PromptTextRef, PromptWrapId, PromptWrapKey, RecordedSectionText, RenderedPromptSection,
+        ResolvedPromptPlan, ResolvedPromptSection, ResolvedPromptWrap,
+    };
+}
+
 /// Plugin contracts, manifests, and operation types.
 ///
 /// Compare [`SessionReadView::current_frame()`](crate::persistence::SessionReadView::current_frame)
@@ -800,6 +830,23 @@ pub mod plugins {
     /// `#[derive(lash::plugins::schemars::JsonSchema)]` with
     /// `#[schemars(crate = "lash::plugins::schemars")]`.
     pub use lash_core::facade_support::schemars;
+    /// Prompt sections (ADR 0133): a plugin registers keyed sections and
+    /// trusted wrappers through `reg.prompt()`. A renderer reads only a
+    /// [`PromptInput`]: the call's committed cut, its own frozen namespace
+    /// and its admitted config. The host's plan and the recorded snapshots
+    /// are in [`prompt`](crate::prompt).
+    pub use lash_core::plugin::prompt::{
+        CommittedPluginNamespace, OfferedTools, ProjectedHistoryStats, PromptCall, PromptInput,
+        PromptModel, PromptRegistrations, PromptRenderError, PromptSection, PromptSectionSpec,
+        PromptSectionWrap, PromptWrapSpec, PromptWrapTarget, SectionText,
+    };
+    /// A session's registered sections and the one-call composition the
+    /// runtime resolves from them: the cut it builds from committed state,
+    /// the resolved plan and each section's composed chain.
+    pub use lash_core::plugin::prompt::{
+        ComposedSection, PromptCatalog, PromptCut, PromptCutParts, PromptSectionInfo,
+        ResolvedPromptComposition,
+    };
     /// The tool hook phases (ADR 0128): argument transforms, before-checks
     /// over the prepared call, result transforms, and after-checks over the
     /// final result.

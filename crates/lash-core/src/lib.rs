@@ -90,6 +90,7 @@ pub mod provider {
 pub mod runtime;
 pub use lash_core_execution::session;
 pub use lash_core_execution::session_model;
+pub use lash_core_store::prompt_sections;
 pub use lash_core_store::session_graph;
 /// Stable hashing primitives, re-exported from `lash-core-ids`. The helpers
 /// stay crate-internal; the module itself is public under `testing` exactly as

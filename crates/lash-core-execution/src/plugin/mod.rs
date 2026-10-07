@@ -26,6 +26,7 @@ mod error_class_tests;
 pub(crate) mod history;
 mod hook_key;
 mod hooks;
+pub mod prompt;
 pub(crate) mod protocol;
 mod recorded_callbacks;
 mod registrar;

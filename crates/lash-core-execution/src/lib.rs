@@ -91,6 +91,7 @@ pub mod provider {
 }
 pub mod runtime;
 pub mod session;
+pub use lash_core_store::prompt_sections;
 pub use lash_core_store::session_graph;
 pub mod session_model;
 /// Stable hashing primitives, re-exported from `lash-core-ids`. The helpers

@@ -635,6 +635,13 @@ pub struct RuntimeSessionAuthority {
     /// admitted view. Every plugin session built for this state reads it.
     #[serde(default, skip_serializing_if = "crate::PluginConfig::is_empty")]
     pub plugin_config: crate::PluginConfig,
+    /// The host's recorded prompt plan (ADR 0133), as the installed config
+    /// view states it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::prompt_sections::PromptPlan::is_default"
+    )]
+    pub prompt_plan: crate::prompt_sections::PromptPlan,
     /// The recorded view of the run the state is running or last ran,
     /// while it is installed. Written only by
     /// [`RuntimeSessionState::install_run_view`] and
@@ -1143,6 +1150,7 @@ pub fn adopt_session_config(
     state.authority.tool_access = config.tool_access.clone();
     state.authority.subagent = config.subagent.clone();
     state.authority.plugin_config = config.plugin_config.clone();
+    state.authority.prompt_plan = config.prompt_plan.clone();
     apply_persisted_session_config(state, config);
 }
 

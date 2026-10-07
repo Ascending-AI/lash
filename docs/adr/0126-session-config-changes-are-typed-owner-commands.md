@@ -42,12 +42,14 @@ setting with no command cannot change after creation. Core config is owned
 by the reserved `core` owner, whose commands include `SetLlmProfile`,
 `SetReasoning`, `SetAttachmentAcceptance`,
 `SetGeneration`, `SetToolAccess`, `SetTurnBudget`, `SetAutonomy`,
-`SetNoProgressBudget` and `SetChargeSafety`. `SetChargeSafety` refuses a
+`SetNoProgressBudget`, `SetChargeSafety` and `SetPromptPlan`, which records
+the host's prompt plan (ADR 0133 §3). `SetChargeSafety` refuses a
 policy accepting more unsafe retries than the provider handle ever buys. The
 RLM and standard protocols register one render command each
 (`SetRlmRender`, `SetStandardRender`) and its prompt commands
 (`SetRlmPrompt` and `SetRlmPromptContext`, `SetStandardPrompt` and
-`SetStandardPromptContext`). The system prompt has no core command: it is
+`SetStandardPromptContext`). Moving that prompt text into sections is open
+work of [ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md) §9 (FIG-5257). The system prompt has no core command: it is
 the protocol's recorded config (ADR 0030, FIG-4589). A run's options are the
 owner's `RunOptions` type (`RlmTurnOptions`, `StandardRunOptions`), which has
 no field for the prompt, the behaviour or a pin: a payload that names one

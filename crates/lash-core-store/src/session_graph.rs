@@ -529,6 +529,14 @@ pub struct PersistedSessionConfig {
     /// Authority inputs needed to reconstruct the same tool policy on a
     /// stateless worker. Catalog membership remains separate host curation.
     pub tool_access: crate::SessionToolAccess,
+    /// The host's prompt plan (ADR 0133): the section order, the placements
+    /// that override plugin defaults, and the composition limits. Absent is
+    /// the empty plan.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::prompt_sections::PromptPlan::is_default"
+    )]
+    pub prompt_plan: crate::prompt_sections::PromptPlan,
     /// Subagent authority is part of durable session construction rather than
     /// ambient worker state.
     #[serde(default)]
@@ -593,6 +601,7 @@ impl PersistedSessionConfig {
             charge_safety: neutral.charge_safety,
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
+            prompt_plan: crate::prompt_sections::PromptPlan::default(),
             subagent: None,
             plugin_config: crate::PluginConfig::default(),
             config_revision: 0,
@@ -618,6 +627,7 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             charge_safety: policy.charge_safety.clone(),
             generation: policy.generation.clone(),
             tool_access: crate::SessionToolAccess::default(),
+            prompt_plan: crate::prompt_sections::PromptPlan::default(),
             subagent: None,
             // A `SessionPolicy` carries no plugin configuration; its creator
             // records what the owners resolved.

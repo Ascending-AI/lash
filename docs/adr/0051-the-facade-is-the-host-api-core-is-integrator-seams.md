@@ -79,6 +79,10 @@ single general prelude is `lash::prelude`.
 `RunSpec`. A plugin receives runtime-provided services rather than assembling
 the runtime's authority.
 
+Prompt sections follow [ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md): `lash::plugins` carries the section and wrapper
+contracts, and `lash::prompt` the host's plan and the recorded snapshots.
+Deleting `TurnContextTransform` is open work of ADR 0133 §9.
+
 ### Read-only handles
 
 `DurableSession::read` returns settled `SessionReadView` data without opening a

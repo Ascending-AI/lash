@@ -13,6 +13,8 @@ mod facade_inventory;
 mod mcp_catalog;
 #[path = "integration/one_home.rs"]
 mod one_home;
+#[path = "integration/prompt_sections.rs"]
+mod prompt_sections;
 #[path = "integration/stores_evidence.rs"]
 mod stores_evidence;
 #[path = "integration/support.rs"]

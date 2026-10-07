@@ -1,7 +1,7 @@
 //! The core owner's config commands (FIG-4379): the changes a session's
 //! model, reasoning, attachment acceptance, generation, execution
 //! controls (turn budget, autonomy, no-progress budget, charge safety;
-//! FIG-4376) and tool access admit.
+//! FIG-4376), tool access and the host's prompt plan (ADR 0133) admit.
 //!
 //! The core owner is not a plugin. Its share of the session's config is the
 //! [`CoreConfig`] view of the config head and its reducers are the functions
@@ -59,6 +59,11 @@ pub enum CoreConfigRefusal {
     ReasoningWithoutLlmProfile {
         reasoning: crate::ReasoningSelection,
     },
+    /// A [`SetPromptPlan`] states a plan that orders or places a section
+    /// twice, or a per-section limit above its total.
+    PromptPlanRefused {
+        error: crate::prompt_sections::PromptPlanError,
+    },
 }
 
 impl std::fmt::Display for CoreConfigRefusal {
@@ -72,6 +77,7 @@ impl std::fmt::Display for CoreConfigRefusal {
                 formatter,
                 "reasoning {reasoning:?} needs a model, and the session records none"
             ),
+            Self::PromptPlanRefused { error } => write!(formatter, "prompt plan refused: {error}"),
             Self::UnsafeRetriesAboveCeiling { requested, ceiling } => write!(
                 formatter,
                 "charge safety accepts {requested} unsafe retries, above the ceiling of {ceiling}"
@@ -300,6 +306,23 @@ impl ConfigCommand for SetToolAccess {
     const NAME: &'static str = "set_tool_access";
 }
 
+/// Replace the host's prompt plan, whole, from the session's next run (ADR
+/// 0133): the section order, the placements that override plugin defaults,
+/// and the composition limits. A plan that orders or places a section twice,
+/// or states a per-section limit above its total, is refused. Whether each
+/// named section is registered is judged when a call resolves the plan.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPromptPlan {
+    pub plan: crate::prompt_sections::PromptPlan,
+}
+
+impl ConfigCommand for SetPromptPlan {
+    type Owner = CoreConfigOwner;
+    type Output = ();
+    const NAME: &'static str = "set_prompt_plan";
+}
+
 /// Judge the core candidate a transaction changed: its reasoning must fit
 /// the capability of the model it records. Nothing is judged when neither
 /// the model nor the reasoning moved.
@@ -410,6 +433,16 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
     reg.command::<SetToolAccess>(|core, command| {
         changed(CoreConfig {
             tool_access: command.access,
+            ..core.clone()
+        })
+    })?;
+    reg.command::<SetPromptPlan>(|core, command| {
+        command
+            .plan
+            .validate()
+            .map_err(|error| CoreConfigRefusal::PromptPlanRefused { error })?;
+        changed(CoreConfig {
+            prompt_plan: command.plan,
             ..core.clone()
         })
     })?;
