@@ -4,7 +4,7 @@
 # 1177 rows over 713 files, 3329 laws.
 # By class: mechanical 142, semantic 99, delete 621, replace 315.
 # By lane: L1b 11, L4 7, L5 2, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 491, ported 40, deleted 646.
+# By status: todo 475, ported 42, deleted 660.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -41,26 +41,12 @@
 #   before tool hook receives resolved argument projection policy
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them
 #   dispatch allows unknown mcp args when schema does not forbid them
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_rejects_hidden_tool_before_contract_resolution
-#   dispatch rejects hidden tool before contract resolution
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_rejects_non_catalog_tool_before_provider_resolution
-#   dispatch rejects non catalog tool before provider resolution
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::explicit_execution_grant_runs_non_catalog_tool_with_binding
 #   explicit execution grant runs non catalog tool with binding
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::retry_ladder_survives_a_later_pending_completion
 #   retry ladder survives a later pending completion
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/attachment_normalization.rs
 #   denied second source records no manifest intent for the first; and 4 more law(s) of the file, by test name
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_cache_before_a_normalizer_hits_on_the_normalized_call
-#   a cache before a normalizer hits on the normalized call
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_check_sees_the_final_arguments_in_either_registration_order
-#   a check sees the final arguments in either registration order
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_denial_or_abort_beats_a_cache_in_every_order
-#   a denial or abort beats a cache in every order
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_failing_check_denies_and_the_others_still_run
-#   a failing check denies and the others still run
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_failing_transform_fails_the_call
-#   a failing transform fails the call
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::after_checks_fail_or_abort_but_never_replace
 #   after checks fail or abort but never replace
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::argument_transforms_chain_once_in_registration_order
@@ -69,14 +55,10 @@
 #   checks inspect the provider prepared call
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::displaced_terminals_are_published_as_composition_evidence
 #   displaced terminals are published as composition evidence
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::fixed_replies_reduce_identically_in_every_order
-#   fixed replies reduce identically in every order
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_checks_without_a_decision_record_publish_no_state_before_settlement
 #   result checks without a decision record publish no state before settlement
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_transforms_chain_and_checks_see_the_final_result
 #   result transforms chain and checks see the final result
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/protocol_version_refusal.rs
-#   empty batch dispatches predecessor and unknown versions to a typed protocol refusal
 # - L9c: crates/lash-protocol-standard/src/discovery_tests.rs::all_discovery_refusals_are_reported_and_accounted_before_continuing
 #   all discovery refusals are reported and accounted before continuing
 # - L9c: crates/lash-protocol-standard/src/discovery_tests.rs::mixed_discovery_refusals_and_admitted_calls_are_each_reported_once
@@ -93,8 +75,6 @@
 #   a session actor runs every open item once, in arrival order and one at a time; a repeated request id is one drive; a crash at any commit label consumes each item once
 # - L9c: crates/lash-restate/src/tests/otel_laws.rs::golden_tree_survives_replay_and_redrive
 #   a turn's span tree is the golden tree after a kill and resume on another node
-# - L9c: crates/lash-restate/src/tests/remote_turn_cancel.rs
-#   a remote after-step stop waits for the turn's committed boundary
 # - L9c: crates/lash-restate/src/tests/run_control_witnesses.rs::a_handle_naming_another_sessions_run_is_refused_for_good_with_its_code
 #   a run handle naming another session's run is refused for good with its code
 # - L9c: crates/lash-restate/src/tests/run_coordinator_on_the_double.rs
@@ -109,8 +89,6 @@
 #   an environment sync or assistant hook whose store call meets a transient fault retries the phase without recording it; a deterministic refusal is the phase's recorded outcome
 # - L9c: crates/lash-restate/src/tests/turn_cancel_modes.rs
 #   stop modes over a waiting turn: after-step lets a sleep, event wait or process await finish, immediate aborts it at wake, and escalating a deferred stop aborts the wait; the conformance turn_runner_tests re-instantiate (L9g)
-# - L9c: crates/lash/src/core/runtime_host_config.rs::trace_configuration_setters_replace_previous_values
-#   trace configuration setters replace previous values
 # - L9c: crates/lash/src/tests/admin_reads_without_runtime.rs
 #   every admin read answers from durable state without an activated runtime; and 1 more law(s) of the file, by test name
 # - L9c: crates/lash/src/tests/adr_claims.rs
@@ -145,16 +123,12 @@
 #   a native model patch reaches all runtime consumers
 # - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::a_session_key_selects_its_transport_and_an_unserved_key_is_refused_typed
 #   a session key selects its transport and an unserved key is refused typed
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
-#   cold open surfaces v5 execution snapshot rejection with operator remedy
 # - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::malformed_rlm_create_extras_fail_child_session_creation
 #   malformed rlm create extras fail child session creation
 # - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::open_with_state_keeps_supplied_policy_without_rewriting_frame_history
 #   open with state keeps supplied policy without rewriting frame history
 # - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::public_session_state_appends_preserve_concurrent_retirement_refusals
 #   public session state appends preserve concurrent retirement refusals
-# - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
-#   rlm compile surface uses core plugins extra plugins and request options
 # - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::rlm_protocol_config_sleep_ability_drives_prompt_surface
 #   rlm protocol config sleep ability drives prompt surface
 # - L9c: crates/lash/src/tests/core_session_builder/session_lifecycle.rs::rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_raw
@@ -794,6 +768,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): turn_effect (assistant-response, sync and plugin-checkpoint hooks) is a todo!, and the phase runner delivers no plugin checkpoint"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/declared_start_possession.rs"
@@ -821,7 +796,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "l06_cold_replay no longer asserts the Once loser is redelivered after the crash (ruling #74); planned:F2 owns its never-twice, folds-to-Interrupted law"
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); planned:F2 owns the never-twice, folds-to-Interrupted law"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/native_cancel.rs"
@@ -842,6 +817,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!); a round member's cancel is held at the primitive by crates/lash-durable-test/tests/round_crash_matrix.rs::a_turn_cancel_ends_unfinished_members_as_cancelled, and a cancel in a retry backoff is blocked:crates/lash-durable-test/tests/round_crash_matrix.rs::a_cancel_during_a_retry_backoff_starts_no_next_attempt (L4)"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/output_retention.rs"
@@ -855,6 +831,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/presentation_redrive.rs"
@@ -869,6 +846,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; declared-order presentation at every cut is held by crates/lash-durable-test/tests/round_crash_matrix.rs::outcomes_committed_out_of_order_present_in_declared_order"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
@@ -916,7 +894,8 @@ laws = [
   "the_trigger_store_stamps_from_the_backend_clock",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "the law runs in the file over a clocked SQLite memory backend"
 
 [[row]]
 path = "crates/lash-core/src/runtime/session_manager/mod.rs"
@@ -1383,6 +1362,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5172-prod (L3, FIG-5172): turn_effect (assistant-response, sync and plugin-checkpoint hooks) is a todo!, and the phase runner delivers no plugin checkpoint; a paid completion commits at model.done and a resumed call re-sends only under its pin (crates/lash-durable-test/tests/turn_phases.rs)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect_response_hook.rs"
@@ -1407,9 +1387,9 @@ lane = "L9c"
 laws = [
   "values_are_sampled_once_and_replayed_by_effect_id",
 ]
-disposition = "port"
-status = "todo"
-note = "a sampled value is read back on resume, never sampled again (NR-1)"
+disposition = "subject-deleted"
+status = "deleted"
+note = "LanguageRuntimeValue is deleted: values are snapshotted with the VM heap (I0's variant classification); restoring them from the snapshot is L7's"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/persistence.rs"
@@ -1653,6 +1633,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the model-call half of after_step_stop_mid_model_call runs at crates/lash-durable-test/tests/turn_phases.rs::an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary; its tool half, the tool and retry-sleep laws: blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; the start gate, undelivered dispositions and queued next-turn work: blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!; the next turn's context: fig-5172-prod (the real head commit)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/active_input_settlement.rs"
@@ -1932,8 +1913,8 @@ laws = [
   "(no test functions) defines: sqlite_recording_backend, sqlite_recording_backend_with_clock, sqlite_memory_backend, kernel_double, apply_config, configure, apply_storeless_config, configure_storeless, apply_host_command, apply_host_append",
 ]
 disposition = "port"
-status = "todo"
-note = "shared kernel-test support over the double, with manual virtual time"
+status = "ported"
+note = "kernel_double and the manual-time recording backends went with the double (L10a); the module now serves SQLite memory store backends only, and its kernel tests have their own rows"
 
 [[row]]
 path = "crates/lash-core/tests/runtime_support/process_start_admission.rs"
@@ -2769,6 +2750,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the redrive law (a run resumed on another node executes under the behaviour its admission recorded): blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; the always_replay legs are forced replay, deleted machinery; run_options_apply_over_the_recorded_render_field_by_field and a_refused_render_is_typed_and_an_unreadable_namespace_is_corruption run in the file without an engine"
 
 [[row]]
 path = "crates/lash-protocol-standard/src/retention_failure_tests.rs"
@@ -2790,6 +2772,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-protocol-standard/src/retention_failure_tests.rs"
@@ -2925,6 +2908,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-protocol-standard/tests/tool_batch_parallelism.rs"
@@ -3011,6 +2995,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the strict round-trip, rejected-before-dispatch and non-strict laws drive a facade turn: blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; the persisted_effect_replay laws are journal replay, deleted machinery; the decoder, dialect and canonical-call request laws run in the file without an engine"
 
 [[row]]
 path = "crates/lash-provider-openai/tests/codex_websocket_runtime.rs"
@@ -3678,6 +3663,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a host's send leaves the engine the only driver, an empty commit finishes the work without another admission, and inputs on both sides of it each run once"
+note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash-restate-test/tests/process_crash_replay.rs"
@@ -3748,6 +3734,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "the next run is admitted while the previous run's close is owed, and a close crashed after the next admission converges once"
+note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash-restate-test/tests/run_wake.rs"
@@ -3828,6 +3815,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "session sends: an idle send is admitted at once, busy sends answer in arrival order, at most one drive is queued, withdraw-while-queued differs from cancel-while-running, and dropping a handle stops nothing"
+note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash-restate-test/tests/session_send.rs"
@@ -3882,6 +3870,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a session actor runs every open item once, in arrival order and one at a time; a repeated request id is one drive; a crash at any commit label consumes each item once"
+note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash-restate-test/tests/session_shifts.rs"
@@ -5171,6 +5160,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a turn's span tree is the golden tree after a kill and resume on another node"
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn: a durable turn emits no trace tree yet"
 
 [[row]]
 path = "crates/lash-restate/src/tests/parent_end_on_the_double.rs"
@@ -6176,9 +6166,10 @@ lane = "L9c"
 laws = [
   "remote_after_step_waits_for_committed_boundary",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/turn_phases.rs::an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary"
+status = "deleted"
 owed = "a remote after-step stop waits for the turn's committed boundary"
+note = "an AfterStep cancel requested from outside the actor lets the streaming call finish and stops the turn at its next phase boundary, at every cut"
 
 [[row]]
 path = "crates/lash-restate/src/tests/remote_turn_cancel.rs"
@@ -6355,6 +6346,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a run handle naming another session's run is refused for good with its code"
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_control_witnesses.rs"
@@ -6467,6 +6459,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "the RunCoordinator's round laws on phase rows: every admitted body enters before any completes, a committed final drains every lower rank first at every cut, a cancel during backoff starts no next body, the stream publishes only after presentation acceptance, admission ignores live isolation drift, Once never repeats, Repeatable admits only bounded ordinals after a known failure or slice timeout, and a current Once vetoes without upgrading stored Once"
+note = "blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!); already held at the primitive: Once never repeats (crates/lash-durable-test/tests/round_crash_matrix.rs::a_once_member_never_starts_twice_across_every_cut), Repeatable admits bounded ordinals only after a known failure (crates/lash-durable-test/tests/round_crash_matrix.rs::a_mixed_round_holds_once_and_repeatable_rules_across_every_cut, ::the_attempt_cap_ends_a_repeatable_call), a current Once vetoes without upgrading (crates/lash-core-execution/src/runtime/actor/round/fold_tests.rs::a_current_once_vetoes_a_stored_repeat_and_never_upgrades_a_stored_once); a cancel during backoff is blocked:crates/lash-durable-test/tests/round_crash_matrix.rs::a_cancel_during_a_retry_backoff_starts_no_next_attempt (L4)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_coordinator_on_the_double.rs"
@@ -6517,6 +6510,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "aggregate rounds (all, race, any, settled) keep operand order, aliases and distinct rejections; a race returns before its inline loser and keeps it unconsumed; only logical closing cancels losers"
+note = "blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!); blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_coordinator_on_the_double/aggregate.rs"
@@ -6545,6 +6539,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a round resumed cold decides its durable attempts in acknowledgement order, and a served result wins over a fresh choice"
+note = "blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_coordinator_on_the_double/owner_park.rs"
@@ -6828,6 +6823,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a singleton tool run records its tool in the operation run, its logical receipts follow the recorded admission and protected presentation, cancelled spending calls keep their provider results, and an undeclared outcome is refused before anything it declared is realized"
+note = "blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!); planned:INTENT1 (L4) owns the declared-intent realization law"
 
 [[row]]
 path = "crates/lash-restate/src/tests/singleton_tool_run_on_the_double.rs"
@@ -7022,6 +7018,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "an environment sync or assistant hook whose store call meets a transient fault retries the phase without recording it; a deterministic refusal is the phase's recorded outcome"
+note = "blocked: fig-5172-prod (L3, FIG-5172): turn_effect (assistant-response, sync and plugin-checkpoint hooks) is a todo!, and the phase runner delivers no plugin checkpoint: the production sync_environment and assistant hooks"
 
 [[row]]
 path = "crates/lash-restate/src/tests/sync_hooks_retryable_faults.rs"
@@ -7215,6 +7212,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "stop modes over a waiting turn: after-step lets a sleep, event wait or process await finish, immediate aborts it at wake, and escalating a deferred stop aborts the wait; the conformance turn_runner_tests re-instantiate (L9g)"
+note = "stop modes over a waiting turn: fig-5172-prod: the phase runner reaches no wait_effect; L6 (FIG-5175, not landed) for process awaits"
 
 [[row]]
 path = "crates/lash-restate/src/tests/turn_cancel_modes.rs"
@@ -8028,7 +8026,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "RunStartNonce, executor generations and Restate purge are deleted machinery"
+note = "RunStartNonce, executor generations and Restate purge are deleted machinery; turn.commit's head supersession needs the real head commit: blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/commit_superseded.rs"
@@ -8111,6 +8109,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/runtime_dependencies.rs"
@@ -8148,6 +8147,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; L6b (FIG-5176, not landed): a session delete is session mail"
 
 [[row]]
 path = "crates/lash/src/tests/crashed_create_drain.rs"
@@ -8168,6 +8168,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/deleted_session_run_replay.rs"
@@ -8184,7 +8185,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "the forced-replay tiers become kill-and-resume legs; a run resumed after its session was deleted ends typed"
+note = "the forced-replay tiers become kill-and-resume legs; a run resumed after its session was deleted ends typed; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; L6b (FIG-5176, not landed): a session delete is session mail; the always_replay legs are forced replay, deleted machinery"
 
 [[row]]
 path = "crates/lash/src/tests/drain_hand_over.rs"
@@ -8328,6 +8329,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash/src/tests/output_retention.rs"
@@ -8438,6 +8440,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; the always_replay legs are forced replay, deleted machinery"
 
 [[row]]
 path = "crates/lash/src/tests/recorded_execution_controls.rs"
@@ -8487,6 +8490,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/recorded_turn_prelude.rs"
@@ -8500,7 +8504,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "a turn crashed after its sync resumes with the prelude it stored by digest; the journal-only-digest assertion is deleted"
+note = "a turn crashed after its sync resumes with the prelude it stored by digest; the journal-only-digest assertion is deleted; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/recorded_turn_prelude.rs"
@@ -8514,6 +8518,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/redrive_residue.rs"
@@ -8550,6 +8555,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5172-prod (L3, FIG-5172): turn_effect (assistant-response, sync and plugin-checkpoint hooks) is a todo!, and the phase runner delivers no plugin checkpoint; the always_replay legs are forced replay, deleted machinery; the four recorded-callback laws left in the file run without an engine"
 
 [[row]]
 path = "crates/lash/src/tests/response_phase_replay.rs"
@@ -8724,6 +8730,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/session_shift.rs"
@@ -8791,6 +8798,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "compaction's base and prompt are turn.prepare writes of turn_effect: blocked: fig-5172-prod (L3, FIG-5172): turn_effect (assistant-response, sync and plugin-checkpoint hooks) is a todo!, and the phase runner delivers no plugin checkpoint; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/store_faults.rs"
@@ -8851,7 +8859,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "cold-replay legs become kill-and-resume legs"
+note = "cold-replay legs become kill-and-resume legs; blocked: fig-5172-prod (L3, FIG-5172): turn_effect (assistant-response, sync and plugin-checkpoint hooks) is a todo!, and the phase runner delivers no plugin checkpoint"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming.rs"
@@ -9123,6 +9131,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; the _live legs ran on live Restate, deleted; recorded_tool_surface_is_preserved_when_advertised_tools_change runs in the file"
 
 [[row]]
 path = "crates/lash/tests/integration/public_process_command_replay.rs"
@@ -10278,7 +10287,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "retry ladder survives a later pending completion"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -10293,7 +10302,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "before tool hook receives resolved argument projection policy"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -10305,10 +10314,10 @@ lane = "L9c"
 laws = [
   "dispatch_rejects_non_catalog_tool_before_provider_resolution",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_rejects_non_catalog_tool_before_provider_resolution"
+status = "deleted"
 owed = "dispatch rejects non catalog tool before provider resolution"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "the refusal ends before any attempt, so it runs with no effects"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -10323,7 +10332,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "explicit execution grant runs non catalog tool with binding"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -10335,10 +10344,10 @@ lane = "L9c"
 laws = [
   "dispatch_rejects_hidden_tool_before_contract_resolution",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_rejects_hidden_tool_before_contract_resolution"
+status = "deleted"
 owed = "dispatch rejects hidden tool before contract resolution"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "the refusal ends before any attempt, so it runs with no effects"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -10353,7 +10362,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "dispatch allows unknown mcp args when schema does not forbid them"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -10368,7 +10377,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "attempt context provider realizes every v2 intent through the coordinator"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; planned:INTENT1 (L4)"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/attachment_normalization.rs"
@@ -10387,7 +10396,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "denied second source records no manifest intent for the first; and 4 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10402,7 +10411,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "result checks without a decision record publish no state before settlement"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10417,7 +10426,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "argument transforms chain once in registration order"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10429,10 +10438,10 @@ lane = "L9c"
 laws = [
   "a_check_sees_the_final_arguments_in_either_registration_order",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_check_sees_the_final_arguments_in_either_registration_order"
+status = "deleted"
 owed = "a check sees the final arguments in either registration order"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "no body runs under this composition, so the law runs with no effects"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10447,7 +10456,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "checks inspect the provider prepared call"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10459,10 +10468,10 @@ lane = "L9c"
 laws = [
   "a_cache_before_a_normalizer_hits_on_the_normalized_call",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_cache_before_a_normalizer_hits_on_the_normalized_call"
+status = "deleted"
 owed = "a cache before a normalizer hits on the normalized call"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "no body runs under this composition, so the law runs with no effects"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10474,10 +10483,10 @@ lane = "L9c"
 laws = [
   "a_denial_or_abort_beats_a_cache_in_every_order",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_denial_or_abort_beats_a_cache_in_every_order"
+status = "deleted"
 owed = "a denial or abort beats a cache in every order"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "no body runs under this composition, so the law runs with no effects"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10489,10 +10498,10 @@ lane = "L9c"
 laws = [
   "fixed_replies_reduce_identically_in_every_order",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::fixed_replies_reduce_identically_in_every_order"
+status = "deleted"
 owed = "fixed replies reduce identically in every order"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "no body runs under this composition, so the law runs with no effects"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10507,7 +10516,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "displaced terminals are published as composition evidence"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10519,10 +10528,10 @@ lane = "L9c"
 laws = [
   "a_failing_check_denies_and_the_others_still_run",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_failing_check_denies_and_the_others_still_run"
+status = "deleted"
 owed = "a failing check denies and the others still run"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "no body runs under this composition, so the law runs with no effects"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10537,7 +10546,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "result transforms chain and checks see the final result"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10552,7 +10561,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "after checks fail or abort but never replace"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs"
@@ -10564,10 +10573,10 @@ lane = "L9c"
 laws = [
   "a_failing_transform_fails_the_call",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::a_failing_transform_fails_the_call"
+status = "deleted"
 owed = "a failing transform fails the call"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "no body runs under this composition, so the law runs with no effects"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/granted_dispatch.rs"
@@ -10642,10 +10651,10 @@ lane = "L9c"
 laws = [
   "empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_protocol_refusal",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/protocol_version_refusal.rs::empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_protocol_refusal"
+status = "deleted"
 owed = "empty batch dispatches predecessor and unknown versions to a typed protocol refusal"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "the refusal realizes nothing, so it runs with no effects"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/retry_laws.rs"
@@ -11096,7 +11105,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "all discovery refusals are reported and accounted before continuing"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash-protocol-standard/src/discovery_tests.rs"
@@ -11111,7 +11120,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "mixed discovery refusals and admitted calls are each reported once"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash-protocol-standard/src/provider_part_persistence_tests.rs"
@@ -11126,7 +11135,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "final and tool calling responses persist identical typed provider parts"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash-restate/src/controller/context.rs"
@@ -13348,10 +13357,10 @@ lane = "L9c"
 laws = [
   "trace_configuration_setters_replace_previous_values",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/core/runtime_host_config.rs::trace_configuration_setters_replace_previous_values"
+status = "deleted"
 owed = "trace configuration setters replace previous values"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "the builder resolves its trace configuration over a SQLite memory backend"
 
 [[row]]
 path = "crates/lash/src/send/restate.rs"
@@ -13381,7 +13390,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "every admin read answers from durable state without an activated runtime; and 1 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/adr_claims.rs"
@@ -13398,7 +13407,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "root and child materialization install the same plugin owned engines; and 2 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; L6 (FIG-5175, not landed) for the process engines"
 
 [[row]]
 path = "crates/lash/src/tests/agent_scenarios/cases.rs"
@@ -13452,7 +13461,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "awaited comprehension of unwrapped calls matches the imperative loop"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13467,7 +13476,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite aggregate shapes ask the host for exactly their leaves"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13482,7 +13491,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite all settled reports every leaf in input order"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13497,7 +13506,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite promise all reports the first settled rejection"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13512,7 +13521,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite a terminal leaf settles ahead of a held source first leaf"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13527,7 +13536,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite a preparation failure leads the settlement order"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13542,7 +13551,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite a rejected promise all resumes at its first consumed rejection"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13557,7 +13566,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite an aggregate of durable waits settles both"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13572,7 +13581,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite a pending handle in an aggregate is refused"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13587,7 +13596,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite an aggregate over a non array is refused"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle.rs"
@@ -13602,7 +13611,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite an aggregate leafs declared intent is realized"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed); blocked: fig-5174-coord (L4, FIG-5174): the RunCoordinator port (record_run_record, start_run_* and await_run_sources are todo!)"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_oracle/race_any.rs"
@@ -13687,7 +13696,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "adopted attachment intent rows fail the node budget before commit"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/config_settlement.rs"
@@ -13783,7 +13792,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "facade session delete failure preserves witnessed partial report"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; L6b (FIG-5176, not landed): a session delete is session mail"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -13798,7 +13807,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "the standard prompt comes from the session spec and its command"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -13813,7 +13822,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a session key selects its transport and an unserved key is refused typed"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -13842,7 +13851,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "rlm protocol config sleep ability drives prompt surface"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -13854,10 +13863,10 @@ lane = "L9c"
 laws = [
   "rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/core_session_builder/rlm_compile_surface.rs::rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options"
+status = "deleted"
 owed = "rlm compile surface uses core plugins extra plugins and request options"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "the compile surface needs no session; it publishes into a SQLite memory backend's artifact store"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -13872,7 +13881,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "rlm root session final answer format defaults to markdown and can be raw"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -13901,7 +13910,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "malformed rlm create extras fail child session creation"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/session_lifecycle.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -13913,10 +13922,10 @@ lane = "L9c"
 laws = [
   "cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:planned:FMT1"
+status = "deleted"
 owed = "cold open surfaces v5 execution snapshot rejection with operator remedy"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "the session-state execution snapshot is gone (L7: a VM snapshot is a lash_exec_snapshots row); a node claims only actors whose formats it decodes"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -13973,7 +13982,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "public session state appends preserve concurrent retirement refusals"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/session_lifecycle.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -13988,7 +13997,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a native model patch reaches all runtime consumers"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"
@@ -14003,7 +14012,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "open with state keeps supplied policy without rewriting frame history"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/session_lifecycle.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle/commit_budget.rs"
@@ -14063,7 +14072,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "parent relation is read back and a conflicting create is refused"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/session_lifecycle.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle/session_binding.rs"
@@ -14092,7 +14101,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "flat commit growth after large bindings stabilize"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/shifts_install.rs"
@@ -14107,7 +14116,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a core built while a dropped cores shift is in flight works on its own provider"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/typed_errors.rs"
@@ -14124,7 +14133,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a native tool membership refusal preserves its cause; and 2 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/deployment_and_testing_facade.rs"
@@ -14167,7 +14176,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "discovery hidden tool executes through rlm and standard batch but not native"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14182,7 +14191,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "catalog contention retains its type and retryability across existing session apis"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14197,7 +14206,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "unsupported catalog lookup retains its operation across existing session apis"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14212,7 +14221,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "existing session apis preserve absence and tombstones without creating"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14227,7 +14236,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "durable acquisition retries contention once for clones and reuses bound stores"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14242,7 +14251,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "open of a missing id is unknown session and writes no row"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14257,7 +14266,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "concurrent creates of one id give exactly one ok"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14272,7 +14281,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "durable enqueue to an unknown id stores nothing and creates nothing"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14287,7 +14296,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "durable operations on a deleted id report the tombstone"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14302,7 +14311,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "an input addressed to an unknown turn is refused through the facade"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14317,7 +14326,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "sqlite durable acquisition covers absent metadata only and checkpointed ids"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14332,7 +14341,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a send links its input to the context its first acceptance carried"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14347,7 +14356,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a live observer sees queue events from a separately acquired durable session"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14376,7 +14385,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "two durable handles operate beside an independently leased writer"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14391,7 +14400,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "durable queue access on a grantless core builds no runtime"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14406,7 +14415,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a catalog without the by id seam names the capability not a missing session"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14421,7 +14430,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a held input is still listed held by a separate durable handle"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14436,7 +14445,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "create admits an absent id and builds no runtime"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14465,7 +14474,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "create on a deleted id is refused with the tombstone"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/durable_session.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14480,7 +14489,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "reused enqueue id with changed input is a typed identity conflict"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14495,7 +14504,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "transcript totally projects really committed nodes in source order"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14510,7 +14519,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "committed row deltas transport each new node once"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -14525,7 +14534,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "transcript totally projects a really committed rlm trajectory"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
 
 [[row]]
 path = "crates/lash/src/tests/facade_construction.rs"
@@ -14540,7 +14549,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "facade change feeds share bounded pages and typed cutoffs"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; a port that fails only on that todo! is in the FIG-5181 run record (drafts/facade-support.diff)"
 
 [[row]]
 path = "crates/lash/src/tests/failure_settlement.rs"
@@ -14636,7 +14645,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "the restoring run delivers the tool restore report to the host; and 3 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/control_and_cancel.rs"
@@ -14676,7 +14685,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "invalidated live observation recovers with an authoritative snapshot"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observation_recovery.rs"
@@ -14705,7 +14714,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "completed reasoning part does not republish streamed summary"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14720,7 +14729,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "semantic publication reasoning then tool does not repeat reasoning"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14735,7 +14744,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "semantic publication streamed reasoning keeps nonstreamed text"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14750,7 +14759,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "semantic publication preserves identical completed reasoning parts and turns"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14765,7 +14774,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "rlm provider failure after prose is not retried or committed"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14780,7 +14789,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "rlm natural prose completion is single copy in next request"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14795,7 +14804,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "session observation envelopes scope activity and commit to the turn"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14824,7 +14833,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "trimmed gap replacement cursor preserves unseen auxiliary event"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14839,7 +14848,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "durable revision requires replacement evidence"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14854,7 +14863,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "idle session reconnect after failed append yields gap without another commit"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14869,7 +14878,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "snapshot subscribe has only two histories"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14884,7 +14893,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "payload authority matches revision transition"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14899,7 +14908,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "recoverable chat conformance deduplicates redelivery identity"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14914,7 +14923,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "gap replacement then continuation after unavailable history"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14929,7 +14938,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "gap replacement then continuation after trimmed history"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14944,7 +14953,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "subscriber lag with trimmed suffix forces gap then continues"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -14959,7 +14968,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "recoverable chat conformance disconnect does not cancel server work"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations/attempt_reset.rs"
@@ -14974,7 +14983,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "remote reset and transcript projection agree"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/replica_feed.rs"
@@ -15032,7 +15041,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a stopped turn runs withheld input in a follow on"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lash/tests/facade_host_wrappers.rs"
@@ -15049,7 +15058,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a facade host wraps the rlm factory and its stores on sqlite memory; and 2 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: fig-5172-prod (L3, FIG-5172): TurnServices::exec_cell is not wired to the RLM path (L7's snapshot cells landed)"
 
 [[row]]
 path = "crates/lash/tests/replay_after_advance.rs"
@@ -15123,7 +15132,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "operator json contract postgres"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "crates/lashctl/tests/operator_json_contract.rs"
@@ -15138,7 +15147,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "recovery json uses sqlite and keeps typed refusals"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/approvals.rs"
@@ -18188,7 +18197,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a session-binding runbook selects the session binding, catalog acquisition, deletion and fork laws once they run on the durable harness"
-note = "FIG-5190 follow-up deleted the runbook: every test it selected was deleted with the engine (each has its own row, mostly L9c), and its live geometries were the Restate E2E recipes."
+note = "its laws are blocked first: blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "runbooks/workbench-session-config/runbook.md"
@@ -18207,7 +18216,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a session-config runbook selects the recorded-config, stale-revision, redrive and tool-call-limit laws once they run on the durable harness"
-note = "FIG-5190 follow-up deleted the runbook: its companions ran on the Restate double (shift_laws_on_the_double, the restate_double tool_call_limit instantiation) or were deleted with the engine (each has its own row)."
+note = "its laws are blocked first: blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
 
 [[row]]
 path = "runbooks/workbench-trigger-retention/runbook.md"

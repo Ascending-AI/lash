@@ -927,3 +927,50 @@ async fn a_turn_cancel_ends_unfinished_members_as_cancelled() {
         "{settled:?}"
     );
 }
+
+/// Member cancel during a backoff: a cancel that lands while a `Repeatable`
+/// call waits out its retry starts no next attempt, and records the call
+/// `Cancelled` at once rather than at the retry's due time.
+///
+/// Red on the durable path: the runner settles a `RetryDue` member with an
+/// `x_outcome` on the failed attempt's start, which the fold's
+/// `open_attempt` refuses as `OutOfOrder`, so the round never settles.
+#[tokio::test]
+#[ignore = "blocked: L4 (FIG-5174) settles a member cancelled in its retry backoff with a record the fold refuses"]
+async fn a_cancel_during_a_retry_backoff_starts_no_next_attempt() {
+    let members = vec![Member {
+        call: call("call-f"),
+        tool: Tool::Failing,
+    }];
+    let world: Arc<ExternalWorld> = Arc::default();
+    let settled: Arc<Mutex<Vec<AttemptOutcome>>> = Arc::default();
+    let shared = (Arc::clone(&world), Arc::clone(&settled));
+    let report = Matrix::new()
+        .faults(&[])
+        .run(move || {
+            let mut fresh = RoundScenario::new(members.clone());
+            // Attempt 1 fails at 0 and its retry is due at 100.
+            fresh.cancel_after_ms = Some(50);
+            fresh.world = Arc::clone(&shared.0);
+            fresh.settled = Arc::clone(&shared.1);
+            fresh
+        })
+        .await;
+    report.assert_held();
+    assert_eq!(world.writes(&call("call-f")), vec![1]);
+    let settled = settled.lock_recover().clone();
+    assert!(
+        matches!(settled.as_slice(), [AttemptOutcome::Cancelled { .. }]),
+        "{settled:?}"
+    );
+    let cancelled_at = report
+        .baseline
+        .iter()
+        .filter(|write| write.committed() && write.point.label == CommitLabel::ROUND_OUTCOME)
+        .map(|write| write.at_ms)
+        .max();
+    assert!(
+        cancelled_at.is_some_and(|at| at < 100),
+        "the cancel waited for the retry's due time: {cancelled_at:?}"
+    );
+}

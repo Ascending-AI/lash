@@ -20,6 +20,9 @@
 //! - **Turn cancel:** a cancel requested while the model streams ends the
 //!   turn `Cancelled` in one `turn.cancel` commit with no head advance, and
 //!   no model call starts after the request, whatever node finalizes it.
+//! - **After-step cancel:** an `AfterStep` cancel requested from outside the
+//!   actor while the model streams lets that call finish, and the turn stops
+//!   at the next phase boundary, before its next model call.
 
 // Test code.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -83,6 +86,9 @@ enum Mode {
     /// The first model call requests the turn's cancel, then streams until
     /// it is dropped.
     CancelWhileStreaming,
+    /// The first model call requests an `AfterStep` cancel of the turn, then
+    /// answers "again", which would call the model a second time.
+    AfterStepWhileStreaming,
 }
 
 /// The scripted protocol: an "again" answer closes the iteration and calls
@@ -183,6 +189,9 @@ struct Seen {
     calls: Vec<Call>,
     restarts: Vec<u32>,
     cancel_requested: bool,
+    /// Calls that requested the cancel, and how many of them answered.
+    cancel_requests: usize,
+    answered_after_request: usize,
 }
 
 struct L3Services {
@@ -237,7 +246,9 @@ impl TurnServices for L3Services {
                 })
                 .expect("budgets")
             }
-            Mode::Plain | Mode::CancelWhileStreaming => ExecutionBudgets::default(),
+            Mode::Plain | Mode::CancelWhileStreaming | Mode::AfterStepWhileStreaming => {
+                ExecutionBudgets::default()
+            }
         }
     }
 
@@ -272,9 +283,17 @@ impl TurnServices for L3Services {
                 request: rendered,
                 after_cancel,
             });
-            self.mode == Mode::CancelWhileStreaming && !after_cancel
+            let cancels = matches!(
+                self.mode,
+                Mode::CancelWhileStreaming | Mode::AfterStepWhileStreaming
+            );
+            cancels && !after_cancel
         };
         if first_streaming_call {
+            let mode = match self.mode {
+                Mode::AfterStepWhileStreaming => TurnCancelMode::AfterStep,
+                _ => TurnCancelMode::Immediate,
+            };
             let backend = self
                 .backend
                 .lock_recover()
@@ -289,15 +308,31 @@ impl TurnServices for L3Services {
                     origin: None,
                     reason: Some("the host cancelled".to_owned()),
                     undelivered: TurnCancelUndeliveredInputPolicy::Defer,
-                    mode: TurnCancelMode::Immediate,
+                    mode,
                 },
             )
             .await;
             if answer.is_ok() {
-                self.seen.lock_recover().cancel_requested = true;
+                let mut seen = self.seen.lock_recover();
+                seen.cancel_requested = true;
+                seen.cancel_requests += 1;
             }
-            // The stream never ends on its own: only the cancel stops it.
-            return std::future::pending().await;
+            if mode == TurnCancelMode::Immediate {
+                // The stream never ends on its own: only the cancel stops it.
+                return std::future::pending().await;
+            }
+            // Outlive at least one wake of the owner's cancel watch before
+            // answering: an after-step request must not stop the call.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            self.seen.lock_recover().answered_after_request += 1;
+            return Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: AGAIN.to_owned(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            });
         }
         let text = if second { "done" } else { AGAIN };
         Ok(LlmResponse {
@@ -515,7 +550,7 @@ impl Scenario for L3 {
                     violations.push(format!("the turn committed {commits} times"));
                 }
             }
-            Mode::CancelWhileStreaming => {
+            Mode::CancelWhileStreaming | Mode::AfterStepWhileStreaming => {
                 let commits = committed(CommitLabel::TURN_COMMIT);
                 let cancels = committed(CommitLabel::TURN_CANCEL);
                 if commits != 0 || cancels != 1 {
@@ -527,6 +562,23 @@ impl Scenario for L3 {
                     violations.push(format!(
                         "cancel: a model call started after the request: {:?}",
                         seen.calls
+                    ));
+                }
+                // A call dies with its node; only a cancel must not stop it.
+                let killed = cut.is_some_and(|cut| {
+                    matches!(
+                        cut.fault,
+                        Fault::Abort | Fault::CommitThenAbort | Fault::Zombie
+                    )
+                });
+                if self.mode == Mode::AfterStepWhileStreaming
+                    && !killed
+                    && (seen.cancel_requests == 0
+                        || seen.answered_after_request != seen.cancel_requests)
+                {
+                    violations.push(format!(
+                        "after-step: {} calls requested the cancel but {} answered",
+                        seen.cancel_requests, seen.answered_after_request
                     ));
                 }
             }
@@ -571,7 +623,7 @@ fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
                 ));
             }
         }
-        Mode::CancelWhileStreaming => {}
+        Mode::CancelWhileStreaming | Mode::AfterStepWhileStreaming => {}
     }
     violations
 }
@@ -660,6 +712,18 @@ async fn a_model_call_whose_pinned_deadline_passed_is_never_sent_again() {
 async fn a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it() {
     prove(
         Mode::CancelWhileStreaming,
+        &[CommitLabel::MODEL_START, CommitLabel::TURN_CANCEL],
+    )
+    .await;
+}
+
+/// An `AfterStep` cancel requested from outside the actor while the model
+/// streams lets the call finish and ends the turn `Cancelled` at the next
+/// phase boundary, before its next model call, at every cut.
+#[tokio::test]
+async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary() {
+    prove(
+        Mode::AfterStepWhileStreaming,
         &[CommitLabel::MODEL_START, CommitLabel::TURN_CANCEL],
     )
     .await;

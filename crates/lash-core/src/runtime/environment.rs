@@ -236,5 +236,36 @@ impl RuntimeEnvironment {
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
-mod tests {}
+mod tests {
+    use super::*;
+
+    /// The trigger store is the backend's, stamping from the backend's clock.
+    #[tokio::test]
+    async fn the_trigger_store_stamps_from_the_backend_clock() {
+        const NOW_MS: u64 = 4_200_000;
+        let clock = Arc::new(crate::testing::TestClock::new(NOW_MS));
+        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
+            .await
+            .expect("open a SQLite memory store set");
+        let backend = lash_conformance::backend_over(Arc::new(stores));
+
+        let env = RuntimeEnvironment::builder(RuntimeHostConfig::new(
+            backend,
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ))
+        .build();
+        let receipt = env
+            .core
+            .trigger_store()
+            .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+                "fig1982.clock",
+                "resolved-core-clock",
+                serde_json::Value::Null,
+                "fig1982:resolved-core-clock",
+            ))
+            .await
+            .expect("ingest clock probe");
+        assert_eq!(receipt.occurrence.occurred_at_ms, NOW_MS);
+    }
+}
