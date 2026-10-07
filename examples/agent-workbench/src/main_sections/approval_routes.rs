@@ -129,10 +129,7 @@ pub(crate) async fn decide_approval(
     let outcome = state
         .core
         .completions()
-        .resolve(
-            lash::durable::completion_host_key(&key).as_str(),
-            resolution.clone(),
-        )
+        .resolve(key.as_str(), resolution.clone())
         .await
         .map_err(AppError::internal)?;
     match outcome {
@@ -185,10 +182,7 @@ pub(crate) async fn reconcile_decided_approvals(state: &AppState) {
         match state
             .core
             .completions()
-            .resolve(
-                lash::durable::completion_host_key(&decided.completion_key).as_str(),
-                resolution,
-            )
+            .resolve(decided.completion_key.as_str(), resolution)
             .await
         {
             Ok(

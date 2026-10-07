@@ -20,7 +20,6 @@ pub use lash_core_execution::ExecutionOwner;
 pub use lash_core_execution::IngressReservedSourceKeyRefusal;
 pub use lash_core_execution::admitted_scope_wire;
 pub use lash_core_execution::compat;
-pub use lash_core_execution::completion_host_key;
 pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
 pub use lash_core_execution::engine;
@@ -675,8 +674,8 @@ pub use runtime::{
     AdmittedTurnInputs, Ancestry, AssistantResponseHookEvents, AssistantResponsePlan,
     AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity, BindingId, BoundaryReason,
     CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
-    ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
-    DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
+    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredProcessIdentity,
+    DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
     DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork, EffectAddress,
     EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate, EngineAction,
     EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun,

@@ -610,7 +610,8 @@ impl ProcessActivation {
                     Recovery::Settled(_)
                     | Recovery::Vetoed(_)
                     | Recovery::Interrupt
-                    | Recovery::RetryDue { .. },
+                    | Recovery::RetryDue { .. }
+                    | Recovery::Waiting(_),
                 ) => {
                     continue;
                 }

@@ -33,6 +33,7 @@
 //! | 0 | `admit` | every member's call, tool, request, policy, limit and wait |
 //! | 1 + i | `x_start` | member i's first attempt, committed with the admission |
 //! | next | `x_outcome` | an attempt's final outcome and the material it names |
+//! | next | `x_wait` | an attempt that parked: the waits it races and its pending completion |
 //! | next | `retry` | a `Repeatable` attempt's failure and the due time of the next |
 //! | next | `x_start` | the next attempt of a retried member, once its retry is due |
 //! | next | `present` | the round's presentation, in declared order |
@@ -44,7 +45,9 @@
 //! owner folds again before it writes that run again.
 //!
 //! A call has at most one `x_outcome`: a `retry` settles a failed attempt
-//! without ending the call. An outcome's material payload rides in its row:
+//! without ending the call, and an `x_wait` parks it on the completion wait
+//! its admission pinned until its `x_outcome`, at the same start, settles
+//! it. An outcome's material payload rides in its row:
 //! the record is the payload's journal-local home, and the fold hands it back
 //! by digest.
 //!
@@ -62,7 +65,7 @@ use lash_sansio::{ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause}
 use tokio_util::sync::CancellationToken;
 
 use super::ActorContext;
-use super::waits::WaitDeadline;
+use super::waits::{KeyVersion, WaitDeadline, WaitId, WaitKind, WaitRef};
 use crate::{ToolCallId, ToolId};
 
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
@@ -79,7 +82,9 @@ mod tools;
 
 pub use fold::{MemberState, RoundMember, RoundView, fold};
 pub use rounds::{admit_round, present, presentation, settle_retry, start_retry};
-pub use runner::{MemberBodies, MemberBody, MemberResult, RoundEnd, RoundError, RoundRunner};
+pub use runner::{
+    Discharge, MemberBodies, MemberBody, MemberResult, RoundEnd, RoundError, RoundRunner,
+};
 pub use tools::{
     CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools, call_draft,
     completed_material, decode_completed, request_material, require_admitted, settle_cancelled,
@@ -87,8 +92,28 @@ pub use tools::{
 
 use records::{OutcomeBody, append, encode, first_start};
 
+/// The tool completion wait a round pinned for a member that may defer,
+/// with its admission: the wait, and the secret version its key was minted
+/// under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PinnedWait {
+    /// The wait.
+    pub id: WaitId,
+    /// Its key's secret version.
+    pub version: KeyVersion,
+}
+
+impl PinnedWait {
+    /// The wait, as its owner races it.
+    #[must_use]
+    pub fn wait(&self) -> WaitRef {
+        WaitRef::new(self.id, WaitKind::ToolCompletion)
+    }
+}
+
 /// One execution to admit: a call, its tool, its request material, the
-/// policy and limit pinned now, and the wait deadline of a Pending call.
+/// policy and limit pinned now, and the wait deadline of a call that may
+/// park (Pending), with the wait its round pins.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionDraft {
     call: ToolCallId,
@@ -97,6 +122,7 @@ pub struct ExecutionDraft {
     policy: ExecutionPolicy,
     limit: ExecutionLimit,
     wait: Option<WaitDeadline>,
+    pinned: Option<PinnedWait>,
 }
 
 impl ExecutionDraft {
@@ -118,7 +144,15 @@ impl ExecutionDraft {
             policy,
             limit,
             wait,
+            pinned: None,
         }
+    }
+
+    /// This draft with `pinned`, the completion wait its round pinned.
+    #[must_use]
+    pub(crate) fn with_pinned_wait(mut self, pinned: Option<PinnedWait>) -> Self {
+        self.pinned = pinned;
+        self
     }
 
     /// The call.
@@ -155,6 +189,12 @@ impl ExecutionDraft {
     #[must_use]
     pub fn wait(&self) -> Option<WaitDeadline> {
         self.wait
+    }
+
+    /// The completion wait its round pinned, for a call that may park.
+    #[must_use]
+    pub fn pinned_wait(&self) -> Option<PinnedWait> {
+        self.pinned
     }
 }
 
@@ -307,15 +347,15 @@ impl From<AttemptOutcome> for BodyOutput {
     }
 }
 
-/// The material an outcome names: a completion's output or a known
-/// failure's.
+/// The material an outcome names: a completion's output, a known failure's,
+/// or a parked call's pending completion.
 #[must_use]
 pub fn outcome_material(outcome: &AttemptOutcome) -> Option<&MaterialRef> {
     match outcome {
         AttemptOutcome::Completed(material) => Some(material),
         AttemptOutcome::Failed(failure) => Some(&failure.output),
-        AttemptOutcome::Waiting(_)
-        | AttemptOutcome::Interrupted
+        AttemptOutcome::Waiting(source) => Some(&source.metadata),
+        AttemptOutcome::Interrupted
         | AttemptOutcome::TimedOut { .. }
         | AttemptOutcome::Cancelled { .. } => None,
     }
@@ -336,6 +376,9 @@ pub enum AdmissionRefusal {
     /// One call appears twice.
     #[error("call {0} is admitted twice")]
     DuplicateCall(ToolCallId),
+    /// A member's completion wait could not be pinned.
+    #[error(transparent)]
+    Wait(#[from] super::waits::PinRefusal),
 }
 
 /// Why a settle was refused; nothing was recorded.
@@ -449,6 +492,8 @@ pub enum Recovery {
     /// A retry was recorded, but the current declaration vetoes the repeat:
     /// the failed attempt's outcome becomes the call's final one.
     Vetoed(AttemptOutcome),
+    /// The attempt parked: race its waits, never enter its body again.
+    Waiting(lash_core_store::tool_run::CompletionSource),
     /// Admitted but never started.
     NotStarted,
 }
@@ -658,15 +703,7 @@ pub fn admit(
     run: RunSeq,
     drafts: Vec<ExecutionDraft>,
 ) -> Result<Vec<AdmittedExecution>, AdmissionRefusal> {
-    if drafts.is_empty() {
-        return Err(AdmissionRefusal::Empty);
-    }
-    let mut seen = std::collections::BTreeSet::new();
-    for draft in &drafts {
-        if !seen.insert(draft.call().clone()) {
-            return Err(AdmissionRefusal::DuplicateCall(draft.call().clone()));
-        }
-    }
+    check_drafts(&drafts)?;
     tx.write(records::admit_record(owner, run, &drafts));
     let cursor = RunCursor::at(first_start(drafts.len() as u64));
     let mut admitted = Vec::with_capacity(drafts.len());
@@ -688,6 +725,20 @@ pub fn admit(
         ));
     }
     Ok(admitted)
+}
+
+/// Refuse an admission of no draft, or of one call twice.
+fn check_drafts(drafts: &[ExecutionDraft]) -> Result<(), AdmissionRefusal> {
+    if drafts.is_empty() {
+        return Err(AdmissionRefusal::Empty);
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for draft in drafts {
+        if !seen.insert(draft.call().clone()) {
+            return Err(AdmissionRefusal::DuplicateCall(draft.call().clone()));
+        }
+    }
+    Ok(())
 }
 
 /// The ordinal of member `member`'s first `x_start` in its admission's run:
@@ -823,11 +874,17 @@ pub fn settle_interrupted(
 
 fn record_outcome(tx: &mut ActorTx, admitted: &AdmittedExecution, output: BodyOutput) {
     let id = admitted.id();
+    // A park is no outcome: the call's one `x_outcome` follows it.
+    let kind = if matches!(output.outcome, AttemptOutcome::Waiting(_)) {
+        RunRecordKind::XWait
+    } else {
+        RunRecordKind::XOutcome
+    };
     tx.write(append(
         &id.owner,
         id.run,
         admitted.cursor().take(),
-        RunRecordKind::XOutcome,
+        kind,
         Some(admitted.call()),
         encode(&OutcomeBody {
             start: id.ordinal.0,

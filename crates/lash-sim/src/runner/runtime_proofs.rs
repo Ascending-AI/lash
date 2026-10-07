@@ -201,10 +201,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
     });
     let accepted = core
         .completions()
-        .resolve(
-            lash_core::completion_host_key(&key).as_str(),
-            lash_core::Resolution::Ok(resolution.clone()),
-        )
+        .resolve(key.as_str(), lash_core::Resolution::Ok(resolution.clone()))
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     // The duplicate lands while the resumed turn still waits on its final
@@ -214,7 +211,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
     let duplicate = core
         .completions()
         .resolve(
-            lash_core::completion_host_key(&key).as_str(),
+            key.as_str(),
             lash_core::Resolution::Ok(json!({"ok": false, "duplicate": true})),
         )
         .await
@@ -524,13 +521,13 @@ pub(super) fn rlm_final_value_provider() -> ProviderHandle {
 }
 
 struct PendingToolProvider {
-    key_tx: Mutex<Option<tokio::sync::oneshot::Sender<lash_core::AwaitEventKey>>>,
+    key_tx: Mutex<Option<tokio::sync::oneshot::Sender<lash_core::PinnedKey>>>,
     observer: crate::invariants::ToolObserver,
 }
 
 impl PendingToolProvider {
     fn new(
-        key_tx: tokio::sync::oneshot::Sender<lash_core::AwaitEventKey>,
+        key_tx: tokio::sync::oneshot::Sender<lash_core::PinnedKey>,
         observer: crate::invariants::ToolObserver,
     ) -> Self {
         Self {

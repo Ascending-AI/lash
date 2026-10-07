@@ -68,9 +68,7 @@ mod envelope_hash_tests {
                 session_id: SessionId::from("session"),
                 turn_id: TurnId::from("turn"),
             },
-            wait: lash_core_execution::AwaitEventWaitIdentity::ToolCompletion {
-                tool_call_id: lash_core_execution::ToolCallId::fixture("call"),
-            },
+            wait: lash_core_execution::AwaitEventWaitIdentity::SessionCommandCancelSignal,
             key_id: "key".to_string(),
             signature: "signature".to_string(),
         }
@@ -190,13 +188,18 @@ mod envelope_hash_tests {
                 "checkpoint",
                 "d5d9bde834af9f145e121cd2af8fd6d6e630602ccc448c847b0f68d36f9c9768",
             ),
+            // Moved, with `peek_await_event`, by FIG-5174: the key's
+            // `ToolCompletion` wait identity is deleted (a tool completion
+            // is an L5 `tool_completion` wait), so the corpus key names the
+            // plugin task cancel signal instead. Re-pinned in place under the
+            // version freeze.
             (
                 "await_event",
-                "52750206854642766773ddcb1838e3582e5e6f086c7dcd289f5584bc56c9f11a",
+                "2553f41e1527149fdb6f7d98459d7057cde4157ee04d9526e5ac65389d4f2dfb",
             ),
             (
                 "peek_await_event",
-                "3f59b829efacf2f2a6d14f0410100630d691e752e92faa641cc09883c852dec2",
+                "07f71ffd5dec425a8a37a007e346f2c84b174e48a8989286c3e88e884e494b39",
             ),
         ];
         let corpus = ungrouped_corpus();

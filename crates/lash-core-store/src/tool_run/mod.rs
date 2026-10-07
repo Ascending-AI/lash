@@ -15,7 +15,6 @@
 //! | K2 material references | [`material`] | FIG-4876 |
 //! | K2/K6 retained bundles and leases | [`retention`] | FIG-4889 |
 //! | K3 attempt outcomes and call decisions | [`run_event`] | FIG-4877, FIG-5174 |
-//! | K4 source seal | [`source_seal`] | FIG-4883 |
 //! | K8 operation Run | [`operation`] | FIG-4888 |
 //! | K10 state commands | [`state_command`] | FIG-4878 |
 //!
@@ -28,7 +27,6 @@ pub mod operation;
 pub mod refusal;
 pub mod retention;
 pub mod run_event;
-pub mod source_seal;
 pub mod state_command;
 pub mod tool_hooks;
 
@@ -46,11 +44,7 @@ pub use refusal::{DeclaredStartObligationRefusal, IsolatedStartRefusal, RunCutRe
 pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{
     AttemptOrdinal, AttemptOutcome, AvailableEvidence, CallDecision, CompletionSource,
-    KnownFailure, KnownFailureReason, LimitCause, PendingStart, ResultSource, SegmentOrdinal,
-};
-pub use source_seal::{
-    SealOutcome, SealRefusal, SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal,
-    SourceSeal, SourceSubscription,
+    KnownFailure, KnownFailureReason, LimitCause, ResultSource, SegmentOrdinal,
 };
 pub use state_command::{
     ApplyReducer, CallbackSlot, FrontierRefusal, FrontierStep, NamespaceFrontierRefusal,

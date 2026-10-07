@@ -1050,7 +1050,7 @@ CREATE TABLE IF NOT EXISTS lash_run_records (
     run_seq BIGINT NOT NULL,
     ordinal BIGINT NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_run_records_kind
-        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'decide', 'present', 'retry')),
+        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'decide', 'present', 'retry')),
     call_id TEXT,
     record_json TEXT NOT NULL,
     written_epoch BIGINT NOT NULL,

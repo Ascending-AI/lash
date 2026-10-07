@@ -476,6 +476,17 @@ impl RoundTools for NoTools {
         unreachable!("the L3 scenario calls no tool")
     }
 
+    fn resolved(
+        &self,
+        _call: &PendingToolCall,
+        _execution: &AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        unreachable!("the L3 scenario calls no tool")
+    }
+
     fn completed(
         &self,
         _call: &PendingToolCall,

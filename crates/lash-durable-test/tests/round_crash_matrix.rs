@@ -21,7 +21,11 @@
 //!   ordinal emitted again;
 //! - no body runs for an `x_start` that never committed;
 //! - the rows fold without a gap, and the presentation is in declared order;
-//! - F1: a zombie's writes after its reap are refused.
+//! - F1: a zombie's writes after its reap are refused;
+//! - Pending: a member that parks takes the key of the completion wait its
+//!   admission pinned, a rerun is handed the same key, its body is never
+//!   entered again once the park committed, and the host's resolution of
+//!   that key settles it; a forged key resolves nothing.
 
 // Test code.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -35,11 +39,14 @@ use lash_core_execution::runtime::actor::round::{
     self, BodyOutput, ExecutionDraft, MemberBodies, MemberBody, MemberResult, PolicyView,
     RoundDraft, RoundRunner, RunFold,
 };
+use lash_core_execution::runtime::actor::waits::{
+    self, HostKeyCheck, Resolution, ResolveAnswer, WaitDeadline, WaitKind,
+};
 use lash_core_execution::{ActorContext, AdmittedScope, Backend};
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
-    AttemptOutcome, KnownFailure, KnownFailureReason, MaterialDigest, MaterialLocation,
-    MaterialOwner, MaterialRef, MaterialRole,
+    AttemptOutcome, CompletionSource, KnownFailure, KnownFailureReason, MaterialDigest,
+    MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
 };
 use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq};
 use lash_durable::runner::{Activation, Owned};
@@ -81,14 +88,32 @@ fn call(name: &str) -> ToolCallId {
     ToolCallId::fixture(name)
 }
 
-/// The outside world: every body entry, per call and attempt. It survives
-/// every node, so a write a crash cannot undo is visible to the laws.
+/// The outside world: every body entry, per call and attempt, and every
+/// completion key a parking body handed out. It survives every node, so a
+/// write a crash cannot undo is visible to the laws.
 #[derive(Debug, Default)]
 struct ExternalWorld {
     writes: Mutex<BTreeMap<ToolCallId, Vec<u32>>>,
+    keys: Mutex<BTreeMap<ToolCallId, Vec<String>>>,
 }
 
 impl ExternalWorld {
+    fn hand_out(&self, call: &ToolCallId, key: &str) {
+        self.keys
+            .lock_recover()
+            .entry(call.clone())
+            .or_default()
+            .push(key.to_owned());
+    }
+
+    fn keys(&self, call: &ToolCallId) -> Vec<String> {
+        self.keys
+            .lock_recover()
+            .get(call)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     fn write(&self, call: &ToolCallId, attempt: u32) {
         self.writes
             .lock_recover()
@@ -132,6 +157,9 @@ enum Tool {
     Failing,
     /// A `Repeatable` write that completes.
     Quick,
+    /// A write that parks on its completion wait: it hands the wait's key
+    /// to the outside world, which resolves it `after` milliseconds later.
+    Defer { repeatable: bool },
 }
 
 impl Tool {
@@ -141,17 +169,32 @@ impl Tool {
             Self::Flaky => "flaky",
             Self::Failing => "failing",
             Self::Quick => "quick",
+            Self::Defer { repeatable: false } => "defer",
+            Self::Defer { repeatable: true } => "defer-repeatable",
         })
     }
 
     fn policy(self) -> ExecutionPolicy {
         match self {
-            Self::Write { .. } => ExecutionPolicy::Once,
-            Self::Flaky | Self::Failing | Self::Quick => {
+            Self::Write { .. } | Self::Defer { repeatable: false } => ExecutionPolicy::Once,
+            Self::Flaky | Self::Failing | Self::Quick | Self::Defer { repeatable: true } => {
                 ExecutionPolicy::repeatable(NonZeroU32::new(3).unwrap(), 100, 1_000)
             }
         }
     }
+
+    /// Whether it may park.
+    fn defers(self) -> bool {
+        matches!(self, Self::Defer { .. })
+    }
+}
+
+/// How long the outside world takes to resolve a key it was handed.
+const RESOLVE_AFTER_MS: u64 = 20;
+
+/// The resolution the outside world answers a parked call with.
+fn host_answer(call: &ToolCallId) -> serde_json::Value {
+    serde_json::json!({ "answered": call.as_str() })
 }
 
 /// One member: its call and its tool.
@@ -166,15 +209,42 @@ struct Catalog {
     world: Arc<ExternalWorld>,
     tools: BTreeMap<ToolCallId, Tool>,
     clock: Arc<SimClock>,
+    backend: Backend,
 }
 
 impl MemberBodies for Catalog {
+    fn resolved(
+        &self,
+        execution: &round::AdmittedExecution,
+        _source: &CompletionSource,
+        metadata: Option<&str>,
+        resolution: Resolution,
+    ) -> round::BodyOutput {
+        assert_eq!(
+            metadata,
+            Some("parked"),
+            "the park's material rides its row"
+        );
+        let answer = match resolution {
+            Resolution::Ok(value) => value.to_string(),
+            other => format!("{other:?}"),
+        };
+        assert!(execution.draft().pinned_wait().is_some());
+        BodyOutput {
+            outcome: AttemptOutcome::Completed(material(&answer)),
+            material: Some(answer),
+        }
+    }
+
     fn body(&self, execution: &round::AdmittedExecution) -> MemberBody {
+        let call = execution.call().clone();
+        let tool = self.tools[&call];
+        if tool.defers() {
+            return self.parking_body(execution);
+        }
         let world = Arc::clone(&self.world);
         let clock = Arc::clone(&self.clock);
-        let call = execution.call().clone();
         let attempt = execution.attempt();
-        let tool = self.tools[&call];
         Box::new(move |_token| {
             Box::pin(async move {
                 if let Tool::Write { millis } = tool
@@ -186,7 +256,7 @@ impl MemberBodies for Catalog {
                 world.write(&call, attempt);
                 let output = format!("{call}#{attempt}");
                 let fails = match tool {
-                    Tool::Write { .. } | Tool::Quick => false,
+                    Tool::Write { .. } | Tool::Quick | Tool::Defer { .. } => false,
                     Tool::Flaky => attempt == 1,
                     Tool::Failing => true,
                 };
@@ -202,6 +272,49 @@ impl MemberBodies for Catalog {
                 MemberResult::from(BodyOutput {
                     outcome,
                     material: Some(output),
+                })
+            })
+        })
+    }
+}
+
+impl Catalog {
+    /// A body that takes the key of the completion wait its admission
+    /// pinned, hands it to the outside world, which resolves it a little
+    /// later, and parks on it.
+    fn parking_body(&self, execution: &round::AdmittedExecution) -> MemberBody {
+        let world = Arc::clone(&self.world);
+        let clock = Arc::clone(&self.clock);
+        let backend = self.backend.clone();
+        let call = execution.call().clone();
+        let attempt = execution.attempt();
+        let pinned = execution
+            .draft()
+            .pinned_wait()
+            .expect("a member that may park has its completion wait pinned");
+        let key = waits::host_key(backend.completion_secrets(), &pinned.wait(), pinned.version)
+            .expect("a tool completion wait has a host key");
+        Box::new(move |_token| {
+            Box::pin(async move {
+                world.write(&call, attempt);
+                world.hand_out(&call, key.as_str());
+                let answer = host_answer(&call);
+                tokio::spawn(async move {
+                    lash_core_ids::clock::Clock::sleep(
+                        &*clock,
+                        Duration::from_millis(RESOLVE_AFTER_MS),
+                    )
+                    .await;
+                    let _ =
+                        waits::resolve_host(&backend, key.as_str(), Resolution::Ok(answer)).await;
+                });
+                MemberResult::from(BodyOutput {
+                    outcome: AttemptOutcome::Waiting(CompletionSource {
+                        wait: pinned.id.to_hex(),
+                        terminal: None,
+                        metadata: material("parked"),
+                    }),
+                    material: Some("parked".to_owned()),
                 })
             })
         })
@@ -248,23 +361,30 @@ impl RoundOwner {
                 .members
                 .iter()
                 .map(|member| {
+                    let limit = ExecutionLimit::starting_at(
+                        now,
+                        Duration::from_millis(self.limit_ms),
+                        Duration::from_millis(self.limit_ms),
+                    );
                     ExecutionDraft::new(
                         member.call.clone(),
                         member.tool.id(),
                         material(member.call.as_str()),
                         member.tool.policy(),
-                        ExecutionLimit::starting_at(
-                            now,
-                            Duration::from_millis(self.limit_ms),
-                            Duration::from_millis(self.limit_ms),
-                        ),
-                        None,
+                        limit,
+                        member.tool.defers().then(|| {
+                            WaitDeadline::at_instant(lash_durable::DurableInstant(
+                                i64::try_from(limit.expires_at).unwrap(),
+                            ))
+                        }),
                     )
                 })
                 .collect();
             let mut tx = cx.begin().await.map_err(Pass::from)?;
             let admitted = round::admit_round(
                 &mut tx,
+                cx.backend().completion_secrets(),
+                &waits::wait_scope(cx),
                 RoundDraft {
                     owner: owner(),
                     run: RUN,
@@ -431,7 +551,7 @@ impl Scenario for RoundScenario {
             .clone()
             .expect("the database is built first");
         Arc::new(RoundOwner {
-            backend,
+            backend: backend.clone(),
             members: self.members.clone(),
             limit_ms: self.limit_ms,
             cancel_after_ms: self.cancel_after_ms,
@@ -443,6 +563,7 @@ impl Scenario for RoundScenario {
                     .map(|member| (member.call.clone(), member.tool))
                     .collect(),
                 clock,
+                backend,
             }),
             tripwire: Arc::clone(&self.tripwire),
         })
@@ -520,8 +641,68 @@ impl Scenario for RoundScenario {
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &nodes.script().trace()));
         }
+        let backend = self
+            .backend
+            .lock_recover()
+            .clone()
+            .map(|(backend, _)| backend);
+        if let Some(backend) = backend {
+            for member in self.members.iter().filter(|member| member.tool.defers()) {
+                for key in self.world.keys(&member.call) {
+                    violations.extend(key_laws(&backend, &member.call, &key).await);
+                }
+            }
+        }
         violations
     }
+}
+
+/// K: a key a parking body was handed verifies as its call's tool
+/// completion wait under the deployment's secret, and every forgery of it
+/// reaches the MAC check, is refused, and resolves nothing.
+async fn key_laws(backend: &Backend, call: &ToolCallId, key: &str) -> Vec<String> {
+    let mut violations = Vec::new();
+    match waits::check_host_key(backend, key).await {
+        Ok(HostKeyCheck::Verified(row)) if row.kind == WaitKind::ToolCompletion => {}
+        other => violations.push(format!("K: {call}'s key did not verify: {other:?}")),
+    }
+    let (prefix, mac) = key.rsplit_once('.').expect("a wk1 key has a MAC");
+    let flipped = |text: &str| {
+        let mut chars: Vec<char> = text.chars().collect();
+        let last = chars.last_mut().expect("a non-empty part");
+        *last = if *last == '0' { '1' } else { '0' };
+        chars.into_iter().collect::<String>()
+    };
+    let (_, id) = prefix.split_once('.').expect("a wk1 key has a wait id");
+    let forgeries = [
+        // Another MAC for the same wait.
+        format!("{prefix}.{}", flipped(mac)),
+        // The same MAC for another wait.
+        format!("wk1.{}.{mac}", flipped(id)),
+        // No MAC at all.
+        prefix.to_owned(),
+    ];
+    for forged in forgeries {
+        match waits::check_host_key(backend, &forged).await {
+            Ok(HostKeyCheck::Verified(_)) | Err(_) => {
+                violations.push(format!("K: a forgery of {call}'s key verified"));
+            }
+            Ok(_) => {}
+        }
+        match waits::resolve_host(
+            backend,
+            &forged,
+            Resolution::Ok(serde_json::json!("forged")),
+        )
+        .await
+        {
+            Ok(ResolveAnswer::UnknownOrRevoked) => {}
+            other => violations.push(format!(
+                "K: a forgery of {call}'s key resolved as {other:?}"
+            )),
+        }
+    }
+    violations
 }
 
 /// The laws every run of a round must hold after it ends.
@@ -604,6 +785,36 @@ fn round_laws(
                 AttemptOutcome::Cancelled { .. } if cancelled => {}
                 other => violations.push(format!("{call} settled {other:?}")),
             },
+            Tool::Defer { repeatable } => {
+                if !repeatable && (entries > 1 || writes.len() > 1) {
+                    violations.push(format!(
+                        "F2: Once {call} was entered {entries} times, wrote {writes:?}"
+                    ));
+                }
+                if view_member.starts().len() != 1 {
+                    violations.push(format!(
+                        "L-B2: a crash advanced parked {call} to {} attempts",
+                        view_member.starts().len()
+                    ));
+                }
+                let keys = world.keys(call);
+                if keys.windows(2).any(|pair| pair[0] != pair[1]) {
+                    violations.push(format!(
+                        "L-B2: a rerun of {call} was handed another completion key"
+                    ));
+                }
+                match outcome {
+                    AttemptOutcome::Completed(material_ref)
+                        if !writes.is_empty()
+                            && fold.material(material_ref)
+                                == Some(host_answer(call).to_string().as_str()) => {}
+                    AttemptOutcome::Interrupted if !repeatable => {}
+                    AttemptOutcome::Cancelled { .. } if cancelled => {}
+                    other => violations.push(format!(
+                        "Pending: {call} settled {other:?} after writing {writes:?}"
+                    )),
+                }
+            }
             Tool::Quick => {
                 if view_member.starts().len() != 1 {
                     violations.push(format!(
@@ -735,6 +946,69 @@ async fn a_mixed_round_holds_once_and_repeatable_rules_across_every_cut() {
             "the matrix never cut {label}"
         );
     }
+}
+
+/// Pending, F2 and K over every cut of a round whose `Once` member parks on
+/// the completion wait its admission pinned beside a `Once` write: the
+/// parked body is entered at most once, a crash before its park commits
+/// interrupts it, and the host's resolution of the key it handed out
+/// settles it; a forged key resolves nothing.
+#[tokio::test]
+async fn a_pending_member_parks_once_and_its_key_settles_it_across_every_cut() {
+    let members = vec![
+        Member {
+            call: call("call-p"),
+            tool: Tool::Defer { repeatable: false },
+        },
+        Member {
+            call: call("call-w"),
+            tool: Tool::Write { millis: 0 },
+        },
+    ];
+    let settled: Arc<Mutex<Vec<AttemptOutcome>>> = Arc::default();
+    let shared = Arc::clone(&settled);
+    let report = matrix()
+        .run(move || {
+            let mut fresh = RoundScenario::new(members.clone());
+            fresh.settled = Arc::clone(&shared);
+            fresh
+        })
+        .await;
+    eprintln!("L4 pending round: {} cells", report.cells.len());
+    report.assert_held();
+    for label in [
+        CommitLabel::MODEL_DONE,
+        CommitLabel::ROUND_OUTCOME,
+        CommitLabel::ROUND_PRESENT_MODEL_START,
+    ] {
+        assert!(
+            report.labels().contains(&label),
+            "the matrix never cut {label}"
+        );
+    }
+    assert!(
+        settled
+            .lock_recover()
+            .iter()
+            .any(|outcome| matches!(outcome, AttemptOutcome::Completed(_))),
+        "no run settled the parked call from its key"
+    );
+}
+
+/// L-B2 for a parked `Repeatable` member: a crash before its park commits
+/// reruns it at its same ordinal, handed the same completion key, and the
+/// host's resolution of that key settles it.
+#[tokio::test]
+async fn a_repeatable_pending_member_reruns_with_the_same_key_across_every_cut() {
+    let members = vec![Member {
+        call: call("call-r"),
+        tool: Tool::Defer { repeatable: true },
+    }];
+    let report = matrix()
+        .run(move || RoundScenario::new(members.clone()))
+        .await;
+    eprintln!("L4 repeatable pending round: {} cells", report.cells.len());
+    report.assert_held();
 }
 
 /// Declared order: two members whose outcomes commit in the opposite order

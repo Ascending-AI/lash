@@ -734,10 +734,33 @@ pub async fn pin_process_terminal(
     )
     .map_err(|refusal| corrupt(&refusal.to_string()))?;
     cx.commit(tx, CommitLabel::WAIT_MINT).await?;
-    let record = cx
-        .backend()
+    resolve_ended_terminal(cx.backend(), &wait).await?;
+    Ok(wait)
+}
+
+/// Resolve `wait`, a pending process-terminal wait, from its process's
+/// recorded outcome when the process had already ended: a process that ended
+/// before the wait was pinned resolved no wait in its terminal transaction.
+/// First winner beside that transaction, and the resolution wakes the wait's
+/// owner; a wait already settled, or one on a process still running, is left
+/// as it is.
+///
+/// # Errors
+///
+/// A store or registry failure.
+pub async fn resolve_ended_terminal(backend: &Backend, wait: &WaitRef) -> Result<(), DurableError> {
+    let Some(row) = backend.durable().wait(&wait.id()).await? else {
+        return Ok(());
+    };
+    let Some(process) = row
+        .target_process
+        .filter(|_| row.state == WaitState::Pending)
+    else {
+        return Ok(());
+    };
+    let record = backend
         .process_registry()
-        .get_process(process)
+        .get_process(&process)
         .await
         .map_err(|error| {
             DurableError::Store(StoreFailure {
@@ -748,7 +771,7 @@ pub async fn pin_process_terminal(
     if let Some(outcome) = record.and_then(|record| record.outcome()) {
         let (digest, resolution_ref) = encode_process_outcome(&outcome)?;
         resolve_row(
-            cx.backend(),
+            backend,
             WaitResolution {
                 id: wait.id(),
                 by_host: false,
@@ -758,7 +781,7 @@ pub async fn pin_process_terminal(
         )
         .await?;
     }
-    Ok(wait)
+    Ok(())
 }
 
 /// Resolve every pending process-terminal wait on `process` with `outcome`
@@ -784,6 +807,26 @@ pub fn resolve_process_terminal_waits(
 /// Revoke every pending wait of `scope`. Called by L6 and L6b.
 pub fn revoke_scope(tx: &mut ActorTx, scope: &ScopeKey) {
     tx.write(DomainWrite::Wait(WaitWrite::RevokeScope(scope.clone())));
+}
+
+/// The host key of `wait`, minted under `version`, rebuilt as [`pin`]
+/// minted it: what an owner hands a body that runs again under the wait it
+/// pinned before. `None` for a kind no host resolves, or a version that is
+/// no longer configured.
+#[must_use]
+pub fn host_key(
+    secrets: &CompletionKeySecrets,
+    wait: &WaitRef,
+    version: KeyVersion,
+) -> Option<PinnedKey> {
+    if !wait.kind().host_resolvable() {
+        return None;
+    }
+    let secret = secrets.secret(version)?;
+    Some(PinnedKey::new(render_key(
+        &wait.id(),
+        &mac(secret, &wait.id(), wait.kind()),
+    )))
 }
 
 /// The host-resolvable keys of `owner`'s pending waits, rebuilt from their

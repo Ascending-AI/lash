@@ -959,7 +959,8 @@ impl crate::ToolProvider for RendezvousLeaves {
                 rendezvous.wait_for(&required).await;
                 rendezvous.record_answered(&name);
                 let resolution = crate::Resolution::Ok(leaf_answer(&name));
-                let _ = effect_host.resolve_await_event(&key, resolution).await;
+                let _ = crate::waits::resolve_host(effect_host.backend(), key.as_str(), resolution)
+                    .await;
             });
             return crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new());
         }

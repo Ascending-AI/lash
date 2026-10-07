@@ -26,7 +26,8 @@ A call has one durable home: the admitted execution that runs it.
   retry due is a row. A turn cancel ends unfinished members as `Cancelled`.
   The round's `present` record rides the turn's next commit
   (`round.present+model.start` or `turn.commit`) and answers the members
-  in declared order.
+  in declared order. A member that parks records an `x_wait` before its
+  `x_outcome`; see Pending calls.
 - **A code cell or a lashlang process** (`tool_dispatch::call_run::ToolRun`).
   The cell's program forms aggregates over the calls it issues. Every call
   runs to its own end beside the program, and the cell's snapshot holds
@@ -45,7 +46,7 @@ A call has one durable home: the admitted execution that runs it.
 | K1/K3/K10 hooks | Tool hook phases, occurrences, verdicts, reducer and selection | `lash_core_store::tool_run::tool_hooks` |
 | K2 | Owner-qualified material references and typed retained-result refusals | `lash_core_store::tool_run::material` |
 | K3 | A call's attempt outcomes and its one final-or-cancel decision | `lash_core_store::tool_run::run_event` |
-| K4 | Immutable `Resolved(ref)`/`Cancelled` source seal for a Deferred call | `lash_core_store::tool_run::source_seal`, `retention` |
+| K4 | A parked call's completion source: its `tool_completion` wait and the process terminal it races | `lash_core_store::tool_run::run_event::CompletionSource`; `runtime/actor/waits` |
 | K5 | Declared start obligation: stable `StartKey`, environment, consumer hold, cancel policy | `crates/lash-core-execution/src/runtime/process/declared_start.rs` |
 | K8 | Operation Run input kind over the session-operation opener | `lash_core_store::tool_run::operation` |
 | K10 | Callback slots, state authority, command batches, resolutions, applied frontier | `lash_core_store::tool_run::state_command` |
@@ -151,10 +152,25 @@ policy owes that, and the hold is released, all before it is presented.
 A lost launch registers again under the same key and recovers the same
 process.
 
-**Pending calls.** A body that returns Pending needs a completion key armed
-before the attempt. Until tool completion keys are L5 waits
-(fig-5174-pending), no key is armed and a Pending body fails typed
-(`pending_tool_missing_completion_key`).
+**Pending calls.** A turn's round admission pins a `tool_completion` wait
+(L5's `waits::pin`) for every member whose declaration may defer, with the
+member's one limit as its deadline, and records the wait in the member's
+admission. The body re-derives the wait's `wk1` key with `waits::host_key`,
+so a rerun is handed the same key; the tool hands it to whoever completes
+the call. A body that returns Pending records an `x_wait` carrying its
+`CompletionSource`: the wait, the process terminal of its declared start,
+if it launched one, and the parked call's material. The round runner
+races the parked members' waits (`waits::race`): the host's
+`resolve_host` of the key, or the declared start's terminal, settles the
+call through `RoundTools::resolved` in its one `x_outcome`; the deadline
+settles it `TimedOut { ExecutionTotal }`, and a turn cancel `Cancelled`.
+Before that outcome is recorded, the park is discharged: a call that ends
+cancelled under `CancelExternalWork` cancels the child its declared start
+launched, and the call's hold on that child is released. Both are
+idempotent, so a crash before the outcome repeats them harmlessly. A forged
+or altered key verifies nothing and resolves nothing. A code
+cell or a process pins no completion wait, so a Pending body there is
+refused typed (`pending_tool_missing_completion_key`).
 
 ## Identity preimages
 

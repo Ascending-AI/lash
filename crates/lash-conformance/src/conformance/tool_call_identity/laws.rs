@@ -376,10 +376,15 @@ pub async fn suspended_tool_keeps_turn_and_history_head_until_resolution(
         }
         let execution = only(&world, "suspended");
         let key = execution.completion_key.expect("pending completion key");
-        assert!(
-            tier.effect_host
-                .peek_await_event(&key)
+        let crate::waits::HostKeyCheck::Verified(row) =
+            crate::waits::check_host_key(tier.effect_host.backend(), key.as_str())
                 .await
+                .expect("the wait reads")
+        else {
+            panic!("the completion key names its wait");
+        };
+        assert!(
+            crate::waits::settled(&row)
                 .expect("unsettled wait")
                 .is_none()
         );

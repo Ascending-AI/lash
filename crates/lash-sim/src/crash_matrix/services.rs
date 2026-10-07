@@ -671,7 +671,20 @@ impl RoundTools for Catalog {
             tool: ToolId::new(tool.name()),
             policy: tool.policy(),
             limit: ExecutionLimit::starting_at(now_ms, budget, budget),
+            wait: None,
         }
+    }
+
+    fn resolved(
+        &self,
+        _call: &PendingToolCall,
+        _execution: &AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> BodyOutput {
+        // No tool of this catalog parks, so no park ever resolves.
+        BodyOutput::from(AttemptOutcome::Interrupted)
     }
 
     fn policies(&self) -> PolicyView {

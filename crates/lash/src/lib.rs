@@ -766,8 +766,7 @@ pub mod plugins {
         ToolAggregateRequest, ToolRunAggregateCursor, ToolRunAggregatePoll,
     };
     pub use lash_core::tool_dispatch::{
-        ArmedResolver, LaunchReceipt, PendingToolDispatchOutcome, ToolCallIds, ToolDispatchOutcome,
-        ToolPreparationOutcome,
+        LaunchReceipt, ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
     };
     pub use lash_core::{
         ArtifactReferrerPorts, CommandJournalGuard, CommandReplayKey, DeclaredModuleArtifact,
@@ -909,14 +908,12 @@ pub mod plugins {
         SingletonPresentationError, SingletonRunError, SingletonToolCall, SingletonToolHandlers,
         StartLaunch, ToolRun, run_call,
     };
-    /// A source seal's typed refusal, distinct from engine admission refusal.
-    pub use lash_core::tool_run::SealRefusal as SourceSealRefusal;
     /// One recorded Run attempt's outcome, distinct from the provider's
     /// [`crate::provider::AttemptOutcome`].
     pub use lash_core::tool_run::run_event::AttemptOutcome as RunAttemptOutcome;
     pub use lash_core::tool_run::run_event::{
         AvailableEvidence, CallDecision, CompletionSource, KnownFailure, KnownFailureReason,
-        PendingStart, ResultSource,
+        ResultSource,
     };
     pub use lash_core::tool_run::{
         AdmissionRefusal as ToolRunAdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound,
@@ -928,8 +925,7 @@ pub mod plugins {
         CheckRecord, InvalidMaterialDigest, MaterialBundle, MaterialDigest, MaterialEntry,
         MaterialHolder, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
         MaterialRefusal, MaterialRetentionError, MaterialRole, OperationRun, RetainedBundle,
-        RunInputKind, SealOutcome, SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal,
-        SourceSeal, SourceSubscription,
+        RunInputKind,
     };
     /// A session's recorded plugin configuration and the owner contract that
     /// creates and changes it (FIG-4379): each installed plugin registers the
@@ -1244,17 +1240,16 @@ pub mod runtime {
     pub use lash_core::runtime::current_epoch_ms;
     pub use lash_core::runtime::{
         AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantResponsePlan,
-        AssistantStreamHookState, CheckpointAdmittedSet, CompletionKeyPreparation,
-        DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost, EventSink, ExecutionScope,
-        LlmRequestSpec, LlmStreamRecord, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
-        ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution,
-        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
-        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
-        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec, TraceEmitter,
-        TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
-        WorkCadencePolicy,
+        AssistantStreamHookState, CheckpointAdmittedSet, DirectCompletionClient, EffectAddress,
+        EmbeddedRuntimeHost, EventSink, ExecutionScope, LlmRequestSpec, LlmStreamRecord,
+        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution, RuntimeControlConfig,
+        RuntimeDurabilityConfig, RuntimeEffectCommand, RuntimeEffectControllerError,
+        RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind,
+        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
+        RuntimeProviderConfig, SleepSpec, TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext,
+        TurnPrelude, TurnPreludeRef, WorkCadenceError, WorkCadencePolicy,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

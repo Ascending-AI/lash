@@ -13,6 +13,10 @@
 //! - a `Repeatable` failure the pinned contract repeats records a retry with
 //!   its due time; once due, the next attempt's `x_start` commits
 //!   (`round.start`) before its body runs;
+//! - a member whose body parked records `Waiting` and races its waits: the
+//!   tool completion wait its admission pinned, and the process terminal
+//!   its resolver awaits; whichever ends first settles it, and its body is
+//!   never entered again;
 //! - once the turn is cancelled, every unfinished member records
 //!   `Cancelled`.
 //!
@@ -30,7 +34,9 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
-use lash_core_store::tool_run::{AttemptOutcome, AvailableEvidence, KnownFailure};
+use lash_core_store::tool_run::{
+    AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, LimitCause,
+};
 use lash_durable::domain::{
     AdmittedId, DomainRefusal, OwnerKey, RunRecordRow, RunRecordWrite, RunSeq,
 };
@@ -38,6 +44,7 @@ use lash_durable::{CommitLabel, DomainWrite, DueSource, DurableError, DurableIns
 use tokio_util::sync::CancellationToken;
 
 use super::super::ActorContext;
+use super::super::waits::{self, RaceWinner, Resolution, WaitId, WaitKind, WaitRef};
 use super::{
     AdmittedExecution, AdmittedRound, BodyOutput, FoldRefusal, PolicyView, Recovery, RoundView,
     RunFold, SettleRefusal, Stop, StoreLocalEffect, ToolBody, fold, run_bounded, settle,
@@ -52,6 +59,9 @@ pub struct MemberResult {
     pub output: BodyOutput,
     /// The store write that commits with a completion.
     pub store_local: Option<StoreLocalEffect>,
+    /// For a park, the process whose terminal the call also awaits: its
+    /// `process_terminal` wait is pinned with the park.
+    pub terminal: Option<crate::ProcessId>,
 }
 
 impl From<BodyOutput> for MemberResult {
@@ -59,6 +69,7 @@ impl From<BodyOutput> for MemberResult {
         Self {
             output,
             store_local: None,
+            terminal: None,
         }
     }
 }
@@ -71,7 +82,34 @@ pub type MemberBody =
 pub trait MemberBodies: Send + Sync {
     /// The body of `execution`'s attempt, for its call and request.
     fn body(&self, execution: &AdmittedExecution) -> MemberBody;
+
+    /// The final answer of `execution`, which parked on `source`, once one
+    /// of its waits ended with `resolution`; `metadata` is the payload of
+    /// the parked outcome's material. Runs no body.
+    fn resolved(
+        &self,
+        execution: &AdmittedExecution,
+        source: &CompletionSource,
+        metadata: Option<&str>,
+        resolution: Resolution,
+    ) -> BodyOutput;
+
+    /// Release what `execution`'s park launched, once its park ended:
+    /// `cancelled` when the call ends cancelled. Runs before the call's
+    /// final outcome is recorded, so a crash in between repeats it; it is
+    /// idempotent. Runs no body.
+    fn discharge<'a>(
+        &'a self,
+        _execution: &'a AdmittedExecution,
+        _metadata: Option<&'a str>,
+        _cancelled: bool,
+    ) -> Discharge<'a> {
+        Box::pin(async {})
+    }
 }
+
+/// A park's discharge: see [`MemberBodies::discharge`].
+pub type Discharge<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
 /// How a round's run ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,6 +177,9 @@ pub struct RoundRunner {
     bodies: Arc<dyn MemberBodies>,
     cancel: CancellationToken,
     fresh: BTreeSet<AdmittedId>,
+    /// The process-terminal waits this runner checked against their
+    /// process's recorded end.
+    checked: std::collections::HashSet<WaitRef>,
 }
 
 impl RoundRunner {
@@ -159,6 +200,7 @@ impl RoundRunner {
             policies,
             bodies,
             cancel: CancellationToken::new(),
+            checked: std::collections::HashSet::new(),
             fresh: round
                 .members()
                 .iter()
@@ -185,6 +227,7 @@ impl RoundRunner {
             bodies,
             cancel: CancellationToken::new(),
             fresh: BTreeSet::new(),
+            checked: std::collections::HashSet::new(),
         }
     }
 
@@ -220,7 +263,7 @@ impl RoundRunner {
                 .clone();
             // An outcome the rows already have came back on an
             // unacknowledged commit: it is not written again.
-            finished.retain(|id, _| unsettled(&view, id));
+            finished.retain(|id, result| unsettled(&view, id, parks(result)));
             if view.settled() && in_flight.is_empty() && finished.is_empty() {
                 self.cx.clear_due(DueSource::RetryDue);
                 return Ok(RoundEnd {
@@ -234,6 +277,7 @@ impl RoundRunner {
             // Run what this activation admitted; recover what it did not.
             let mut settlements = Vec::new();
             let mut due_starts = Vec::new();
+            let mut parked: Vec<(WaitRef, AdmittedExecution, CompletionSource)> = Vec::new();
             let mut next_due: Option<DurableInstant> = None;
             for member in view.members() {
                 let id = view.id_of(member);
@@ -276,6 +320,17 @@ impl RoundRunner {
                             due_starts.push(execution);
                         } else {
                             next_due = Some(next_due.map_or(at, |due| due.min(at)));
+                        }
+                    }
+                    Recovery::Waiting(source) if cancelled => {
+                        self.bodies
+                            .discharge(&execution, folded.material(&source.metadata), true)
+                            .await;
+                        settlements.push((execution, cancelled_outcome()));
+                    }
+                    Recovery::Waiting(source) => {
+                        for wait in source_waits(&execution, &source)? {
+                            parked.push((wait, execution.clone(), source.clone()));
                         }
                     }
                 }
@@ -343,7 +398,26 @@ impl RoundRunner {
             let until_due = next_due.map(|at| {
                 Duration::from_millis(u64::try_from(at.0.saturating_sub(now.0)).unwrap_or(0))
             });
+            let racing: Vec<WaitRef> = parked.iter().map(|(wait, _, _)| *wait).collect();
+            // A process that ended before its terminal wait was pinned
+            // resolved no wait: resolve it from the process's recorded end,
+            // once per runner, so a resume after a crash checks it too.
+            for wait in &racing {
+                if wait.kind() == WaitKind::ProcessTerminal && self.checked.insert(*wait) {
+                    waits::resolve_ended_terminal(self.cx.backend(), wait).await?;
+                }
+            }
             tokio::select! {
+                won = waits::race(&self.cx, &racing), if !racing.is_empty() => {
+                    for (execution, source, output) in self.parked_ends(won?, &parked, &folded) {
+                        let cancelled = matches!(output.outcome, AttemptOutcome::Cancelled { .. });
+                        self.bodies
+                            .discharge(&execution, folded.material(&source.metadata), cancelled)
+                            .await;
+                        finished.insert(execution.id().clone(), Ok(output.into()));
+                    }
+                    batch_opened.get_or_insert_with(|| clock.now());
+                }
                 Some(done) = running.next(), if !running.is_empty() => {
                     in_flight.remove(&done.id);
                     if matches!(done.result, Err(Stop::Activation)) {
@@ -358,6 +432,63 @@ impl RoundRunner {
                 () = self.cx.cancel().cancelled() => return Err(RoundError::Stopped),
             }
         }
+    }
+
+    /// The final answers a race's winner gives the parked members: the
+    /// member whose wait resolved or timed out, or every parked member when
+    /// the awaiter was cancelled or the round's scope revoked its waits.
+    fn parked_ends(
+        &self,
+        won: RaceWinner,
+        parked: &[(WaitRef, AdmittedExecution, CompletionSource)],
+        folded: &RunFold,
+    ) -> Vec<(AdmittedExecution, CompletionSource, BodyOutput)> {
+        let member_of = |wait: &WaitRef| parked.iter().find(|(parked, _, _)| parked == wait);
+        let mut ends = Vec::new();
+        match won {
+            RaceWinner::Resolved { wait, resolution } => {
+                if let Some((_, execution, source)) = member_of(&wait) {
+                    let metadata = folded.material(&source.metadata);
+                    ends.push((
+                        execution.clone(),
+                        source.clone(),
+                        self.bodies
+                            .resolved(execution, source, metadata, resolution),
+                    ));
+                }
+            }
+            RaceWinner::TimedOut(wait) => {
+                if let Some((_, execution, source)) = member_of(&wait) {
+                    ends.push((
+                        execution.clone(),
+                        source.clone(),
+                        AttemptOutcome::TimedOut {
+                            cause: LimitCause::ExecutionTotal,
+                            evidence: AvailableEvidence::default(),
+                        }
+                        .into(),
+                    ));
+                }
+            }
+            RaceWinner::Cancelled => {
+                for (_, execution, source) in parked {
+                    if ends.iter().all(|(end, _, _)| end.id() != execution.id()) {
+                        let metadata = folded.material(&source.metadata);
+                        ends.push((
+                            execution.clone(),
+                            source.clone(),
+                            self.bodies.resolved(
+                                execution,
+                                source,
+                                metadata,
+                                Resolution::Cancelled,
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        ends
     }
 
     /// The round's committed records, read once.
@@ -404,20 +535,28 @@ impl RoundRunner {
         let cx = self.cx.clone();
         let cancel = self.cancel.clone();
         Box::pin(async move {
-            let effect: Arc<Mutex<Option<StoreLocalEffect>>> = Arc::default();
-            let slot = Arc::clone(&effect);
+            type Carried = (Option<StoreLocalEffect>, Option<crate::ProcessId>);
+            let carried: Arc<Mutex<Carried>> = Arc::default();
+            let slot = Arc::clone(&carried);
             let tool_body: ToolBody = Box::new(move |token| {
                 Box::pin(async move {
                     let result = body(token).await;
-                    *slot.lock().unwrap_or_else(PoisonError::into_inner) = result.store_local;
+                    *slot.lock().unwrap_or_else(PoisonError::into_inner) =
+                        (result.store_local, result.terminal);
                     result.output
                 })
             });
             let result = run_bounded(&cx, &execution, tool_body, &cancel)
                 .await
-                .map(|output| MemberResult {
-                    output,
-                    store_local: effect.lock().unwrap_or_else(PoisonError::into_inner).take(),
+                .map(|output| {
+                    let (store_local, terminal) = std::mem::take(
+                        &mut *carried.lock().unwrap_or_else(PoisonError::into_inner),
+                    );
+                    MemberResult {
+                        output,
+                        store_local,
+                        terminal,
+                    }
                 });
             Finished {
                 id: execution.id().clone(),
@@ -435,8 +574,8 @@ impl RoundRunner {
         result: Result<MemberResult, Stop>,
         now: DurableInstant,
     ) -> Result<Recorded, RoundError> {
-        let (output, store_local) = match result {
-            Ok(result) => (result.output, result.store_local),
+        let (mut output, store_local, terminal) = match result {
+            Ok(result) => (result.output, result.store_local, result.terminal),
             Err(Stop::Limit(cause)) => (
                 AttemptOutcome::TimedOut {
                     cause,
@@ -444,9 +583,31 @@ impl RoundRunner {
                 }
                 .into(),
                 None,
+                None,
             ),
-            Err(Stop::Cancelled | Stop::Activation) => (cancelled_outcome().into(), None),
+            Err(Stop::Cancelled | Stop::Activation) => (cancelled_outcome().into(), None, None),
         };
+        // A park whose resolver awaits a process waits on its terminal too:
+        // the wait is pinned with the park, under the call's own deadline.
+        if let (AttemptOutcome::Waiting(source), Some(process)) = (&mut output.outcome, terminal) {
+            let (wait, _) = waits::pin(
+                tx,
+                self.cx.backend().completion_secrets(),
+                waits::WaitSpec {
+                    kind: WaitKind::ProcessTerminal,
+                    scope: waits::wait_scope(&self.cx),
+                    target_process: Some(process),
+                    deadline: execution.draft().wait(),
+                },
+            )
+            .map_err(|refusal| {
+                RoundError::Durable(DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Corrupt,
+                    message: refusal.to_string(),
+                }))
+            })?;
+            source.terminal = Some(wait.id().to_hex());
+        }
         if let Some(due) = self.retry_due(execution, &output.outcome, now) {
             settle_retry(tx, execution, output, due)?;
             return Ok(Recorded::Retry);
@@ -501,12 +662,55 @@ fn cancelled_outcome() -> AttemptOutcome {
     }
 }
 
-/// Whether `id` is still `view`'s open attempt of its member.
-fn unsettled(view: &RoundView, id: &AdmittedId) -> bool {
-    view.members().iter().any(|member| {
-        member.outcome().is_none()
-            && matches!(member.state(), super::MemberState::Started { start, .. } if *start == id.ordinal)
+/// Whether `id` is still `view`'s open attempt of its member, for a
+/// finished result that does (`park`) or does not park it: a park records
+/// only on a started attempt, an end on a started or a parked one.
+fn unsettled(view: &RoundView, id: &AdmittedId, park: bool) -> bool {
+    view.members().iter().any(|member| match member.state() {
+        super::MemberState::Started { start, .. } => *start == id.ordinal,
+        super::MemberState::Waiting { start, .. } => !park && *start == id.ordinal,
+        super::MemberState::RetryDue { .. } | super::MemberState::Final { .. } => false,
     })
+}
+
+/// Whether a finished result parks its call.
+fn parks(result: &Result<MemberResult, Stop>) -> bool {
+    matches!(
+        result,
+        Ok(MemberResult {
+            output: BodyOutput {
+                outcome: AttemptOutcome::Waiting(_),
+                ..
+            },
+            ..
+        })
+    )
+}
+
+/// The waits a parked `execution` races: its tool completion wait, and the
+/// process terminal its resolver awaits.
+fn source_waits(
+    execution: &AdmittedExecution,
+    source: &CompletionSource,
+) -> Result<Vec<WaitRef>, RoundError> {
+    let undecodable = || {
+        RoundError::Fold(super::FoldRefusal::Undecodable {
+            run: execution.id().run,
+            ordinal: execution.ordinal(),
+            reason: "a parked call names a wait that is not a wait id".to_owned(),
+        })
+    };
+    let mut refs = vec![WaitRef::new(
+        WaitId::parse_hex(&source.wait).ok_or_else(undecodable)?,
+        WaitKind::ToolCompletion,
+    )];
+    if let Some(terminal) = &source.terminal {
+        refs.push(WaitRef::new(
+            WaitId::parse_hex(terminal).ok_or_else(undecodable)?,
+            WaitKind::ProcessTerminal,
+        ));
+    }
+    Ok(refs)
 }
 
 /// The run records `writes` append to `run`, as the store will hold them.

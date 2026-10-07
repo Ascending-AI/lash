@@ -82,11 +82,13 @@ where
     let fixture = make();
     let opener = run("source-consumer");
     let consumer = run_owner(&opener);
+    let source_session = format!("material-source-{}", uuid::Uuid::new_v4().simple());
     let source = lash_core::AwaitEventKey {
-        scope: lash_core::ExecutionScope::turn("material-source-session", "material-turn"),
-        wait: lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-            &format!("material-call-{}", uuid::Uuid::new_v4().simple()),
-        )),
+        scope: lash_core::ExecutionScope::turn(
+            lash_core::SessionId::fixture(source_session),
+            "material-turn",
+        ),
+        wait: lash_core::AwaitEventWaitIdentity::SessionCommandCancelSignal,
         key_id: "material-key".into(),
         signature: "material-signature".into(),
     };

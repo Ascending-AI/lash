@@ -8,7 +8,7 @@ use pretty_assertions::assert_eq;
 )]
 pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
     factory: Arc<dyn crate::store::ConformanceDeployment>,
-    host: ActorContext,
+    _host: ActorContext,
 ) {
     let source_id = SessionId::from("fork-isolated-source");
     let fork_id = SessionId::from("fork-isolated-branch");
@@ -55,31 +55,6 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
         ))
         .await
         .expect("enqueue source work");
-    let source_scope = crate::ExecutionScope::turn(source_id.clone(), "same-turn");
-    let fork_scope = crate::ExecutionScope::turn(fork_id.clone(), "same-turn");
-    // This law owns an application wait, not an admitted tool source (K4).
-    // Minting a tool completion key alone does not arm its source.
-    let wait = crate::AwaitEventWaitIdentity::Custom {
-        key: "same-wait".into(),
-    };
-    let source_key = host
-        .await_event_key(&source_scope, wait.clone())
-        .await
-        .expect("source wait");
-    let resolved = host
-        .resolve_await_event(
-            &source_key,
-            crate::Resolution::Ok(serde_json::json!("source-only")),
-        )
-        .await
-        .expect("settle source wait");
-    assert_eq!(resolved, crate::ResolveOutcome::Accepted);
-    assert_eq!(
-        host.peek_await_event(&source_key)
-            .await
-            .expect("source wait is settled"),
-        Some(crate::Resolution::Ok(serde_json::json!("source-only")))
-    );
     let source_head_meta = source.load_session_head_meta().await.expect("source head");
     let source_revision = source_head_meta
         .as_ref()
@@ -141,17 +116,6 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
             .expect("source work survives")
             .len(),
         1
-    );
-    let fork_key = host
-        .await_event_key(&fork_scope, wait)
-        .await
-        .expect("fork has its own wait");
-    assert_ne!(fork_key, source_key);
-    assert!(
-        host.peek_await_event(&fork_key)
-            .await
-            .expect("fork wait was not copied")
-            .is_none()
     );
     assert_eq!(
         format!(

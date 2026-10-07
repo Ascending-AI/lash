@@ -752,7 +752,6 @@ pub use runtime::ExecutionOwner;
 pub(crate) use runtime::ToolAttemptEffectOutcome;
 pub use runtime::TurnCancelWait;
 pub use runtime::actor::ActorContext;
-pub use runtime::actor::completion_host_key;
 pub use runtime::actor::projection::{NoProjectionProviders, ProjectionProviders};
 pub use runtime::actor::waits;
 pub use runtime::actor::waits::{
@@ -766,15 +765,14 @@ pub use runtime::{
     Ancestry, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
     AwaitEventKey, AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock, ClockWallTime, CommandJournalGuard,
-    CommandReplayKey, CompletionKeyPreparation, ContractRef, DeclaredProcessIdentity,
-    DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
-    DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork, EffectAddress,
-    EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate, EngineAction,
-    EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun,
-    EngineSteps, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
-    ForkSessionReceipt, ForkSessionRequest, HandleId, HostWaitKind, InputItem,
-    InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, KeyName, Lifetime,
-    LifetimeDecision, LifetimePolicy, LlmRequestSpec, LlmStreamRecord, LocalTurnStop,
+    CommandReplayKey, ContractRef, DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef,
+    DeliveryPolicy, DeploymentStore, DeploymentStoreDecorator, DrainMode, DrainModePolicy,
+    DurableProcessWork, EffectAddress, EffectJournalRetirement, EffectOpener, EffectOpenerError,
+    EffectRetirementGate, EngineAction, EngineEvent, EngineState, EngineStateFormat,
+    EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, ExecutableGeneration,
+    ExecutableGenerationRefusal, ExecutionScope, ForkSessionReceipt, ForkSessionRequest, HandleId,
+    HostWaitKind, InputItem, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, KeyName,
+    Lifetime, LifetimeDecision, LifetimePolicy, LlmRequestSpec, LlmStreamRecord, LocalTurnStop,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoRunOptionsOwner, NonTerminalProcessPage,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndApplication,
     ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,

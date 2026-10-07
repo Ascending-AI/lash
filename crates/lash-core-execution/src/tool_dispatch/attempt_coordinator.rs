@@ -3,10 +3,7 @@ use crate::{
     RuntimeInvocation, ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass,
 };
 
-use super::{
-    PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome,
-    ToolTriggerEffectOutcome,
-};
+use super::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome, ToolTriggerEffectOutcome};
 
 /// The invocation a tool call's attempts descend from: its lineage.
 ///
@@ -110,42 +107,14 @@ pub async fn coordinate_tool_invocation<'run>(
     lineage: ToolAttemptLineage,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
     child_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-    mut local_executor: impl FnMut(Option<crate::AwaitEventKey>) -> RuntimeEffectLocalExecutor<'run>,
+    mut local_executor: impl FnMut() -> RuntimeEffectLocalExecutor<'run>,
 ) -> CoordinatedToolInvocation {
     let max_attempts = execution_policy.max_attempts().max(1);
     let mut triggers = Vec::new();
     let mut captures = Vec::new();
     let mut attempts = Vec::new();
 
-    let may_defer = super::atomic_attempt::AttemptAuthority::resolve(
-        context,
-        &call.tool_id,
-        execution_grant.as_deref(),
-    )
-    .is_some_and(|authority| authority.manifest().declaration.may_defer);
     for attempt in 1..=max_attempts {
-        let prepared_key = context
-            .effect_controller
-            .prepare_completion_key(
-                context.effect_controller.execution_scope(),
-                crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
-                may_defer,
-            )
-            .await;
-        let completion_key = match prepared_key {
-            Ok(crate::CompletionKeyPreparation::Issued(key)) => Some(key),
-            Ok(crate::CompletionKeyPreparation::NotNeeded)
-            | Ok(crate::CompletionKeyPreparation::Unsupported) => None,
-            // A completion-key prederive failure is a controller error, not a
-            // tool result: it must abort like the attempt's own journal faults
-            // do, so nothing the store reported reaches the model (FIG-3528).
-            Err(err) => {
-                abandon_to_open_buffers(context, triggers, captures);
-                return CoordinatedToolInvocation {
-                    launch: ToolCallLaunch::ControllerAborted(err.into()),
-                };
-            }
-        };
         let invocation = lineage.attempt_invocation(context, &call, attempt);
         let outcome = context
             .effect_controller
@@ -159,7 +128,7 @@ pub async fn coordinate_tool_invocation<'run>(
                         max_attempts,
                     },
                 ),
-                local_executor(completion_key),
+                local_executor(),
             )
             .await
             .and_then(crate::RuntimeEffectOutcome::into_tool_attempt_effect);
@@ -216,30 +185,6 @@ pub async fn coordinate_tool_invocation<'run>(
         // replayed attempt indistinguishable from a fresh one (ADR 0099 §13).
         captures.push(outcome.capture);
         match outcome.launch {
-            crate::ToolAttemptLaunch::Pending { key, pending } => {
-                // The attempt that parked is the declaring attempt: its own
-                // invocation minted whatever start it declared, exactly as it
-                // mints a completed attempt's intents (ADR 0116 §3.1).
-                let declaring_identity = super::intent_executor::declaring_identity(
-                    context,
-                    &call.call_id,
-                    &invocation.clone().into_runtime_invocation(),
-                );
-                return CoordinatedToolInvocation {
-                    launch: ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
-                        call_id: call.call_id,
-                        provider_call_id: call.provider_call_id,
-                        tool_name: call.tool_name,
-                        args: call.args,
-                        key: *key,
-                        pending,
-                        declaring_identity,
-                        attempts,
-                        captures,
-                        triggers,
-                    })),
-                };
-            }
             crate::ToolAttemptLaunch::Done {
                 mut record,
                 intents,

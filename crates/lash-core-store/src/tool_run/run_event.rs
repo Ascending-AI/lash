@@ -9,8 +9,6 @@ use std::num::NonZeroU32;
 use serde::{Deserialize, Serialize};
 
 use super::material::MaterialRef;
-use crate::await_event_identity::AwaitEventKey;
-use crate::process_identity::StartKey;
 
 /// The ordinal of an attempt of one logical call, from 1. A crash
 /// redelivery keeps it; only a reported retry advances it.
@@ -89,22 +87,20 @@ pub enum AttemptOutcome {
     },
 }
 
+/// What a parked attempt waits on: the tool completion wait its round
+/// pinned at admission, and the process terminal wait its resolver pinned
+/// when it parked. `metadata` names the parked call's pending completion,
+/// whose payload rides in the `x_outcome` record that parks it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum CompletionSource {
-    Pending {
-        source: AwaitEventKey,
-        metadata: MaterialRef,
-        start: Option<Box<PendingStart>>,
-    },
-    Deferred {
-        source: AwaitEventKey,
-    },
-    DeferredStart {
-        source: AwaitEventKey,
-        start_key: StartKey,
-        obligation: MaterialRef,
-    },
+#[serde(deny_unknown_fields)]
+pub struct CompletionSource {
+    /// The tool completion wait, by its id's hex.
+    pub wait: String,
+    /// The process terminal wait a runtime-owned resolver awaits, by its
+    /// id's hex.
+    pub terminal: Option<String>,
+    /// The parked call's pending completion.
+    pub metadata: MaterialRef,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,14 +152,6 @@ impl AttemptOutcome {
             Self::Waiting(_) | Self::Interrupted => None,
         }
     }
-}
-
-/// The obligation of a pending call that declared a process start.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PendingStart {
-    pub start_key: StartKey,
-    pub obligation: MaterialRef,
 }
 
 /// Where a final result came from.

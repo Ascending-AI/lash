@@ -15,7 +15,6 @@ use lash_core::{Backend, ProcessEngine, StoreSet};
 pub use lash_core::{
     BackendParts, CompletionKeySecrets, DurableBuildError, KeyVersion, NoProjectionProviders,
     PinnedKey, ProjectionProviders, ResolveAnswer, SecretBytes, SecretsRefusal,
-    completion_host_key,
 };
 
 /// Builds the one [`Backend`] a [`LashCore`](crate::LashCore) takes: lash's

@@ -256,9 +256,8 @@ pub async fn execute_once<'run>(
 pub fn prepared_tool_attempt<'run>(
     dispatch: std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     call: super::ToolCallFixture<'run>,
-    completion_key: Option<crate::AwaitEventKey>,
 ) -> crate::RuntimeEffectLocalExecutor<'run> {
-    crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(dispatch, call.context, completion_key)
+    crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(dispatch, call.context)
 }
 
 /// Complete a settled output through the journaled presentation boundary.

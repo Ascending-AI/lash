@@ -79,7 +79,7 @@ pub(crate) struct Execution {
     pub(crate) identity: AttemptIdentity,
     /// The payload the call's prepare phase sealed.
     /// The completion key a deferred probe parked on.
-    pub(crate) completion_key: Option<crate::AwaitEventKey>,
+    pub(crate) completion_key: Option<crate::PinnedKey>,
 }
 
 /// A gate a held probe waits on until the law opens it.
@@ -268,12 +268,12 @@ impl IdentityProbes {
             if args.hold {
                 witness.gate.passed().await;
             }
-            let _ = resolver
-                .resolve_await_event(
-                    &key,
-                    crate::Resolution::Ok(serde_json::json!({ "label": args.label })),
-                )
-                .await;
+            let _ = crate::waits::resolve_host(
+                resolver.backend(),
+                key.as_str(),
+                crate::Resolution::Ok(serde_json::json!({ "label": args.label })),
+            )
+            .await;
         });
         crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new())
     }

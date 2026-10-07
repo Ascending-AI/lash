@@ -6,7 +6,6 @@
 
 pub use lash_core_store::await_event_identity::*;
 
-pub use lash_core_effect::CompletionKeyPreparation;
 use lash_core_effect::retirement;
 pub use retirement::*;
 

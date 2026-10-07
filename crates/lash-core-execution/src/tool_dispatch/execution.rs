@@ -54,11 +54,10 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
         super::ToolAttemptLineage::from_parent(context.parent_invocation.clone()),
         turn_cancel_wait.as_ref(),
         None,
-        |completion_key| {
+        || {
             crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
                 Arc::clone(&dispatch),
                 tool_context.clone(),
-                completion_key,
             )
         },
     ))
@@ -73,20 +72,6 @@ async fn tool_call_launch_into_done_or_runtime_failure(
 ) -> ToolDispatchOutcome {
     match launch {
         ToolCallLaunch::Done(outcome) => *outcome,
-        ToolCallLaunch::Pending(pending) => {
-            normalized_outcome(
-                context,
-                ids,
-                pending.tool_name,
-                pending.args,
-                runtime_failure(
-                    ToolFailureClass::Internal,
-                    "pending_tool_not_supported_here",
-                    "pending tool completion is not supported on this dispatch path",
-                ),
-            )
-            .await
-        }
         ToolCallLaunch::ControllerAborted(error) => {
             normalized_outcome(
                 context,

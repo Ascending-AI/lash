@@ -503,18 +503,18 @@ async fn execute_benchmark_async(
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
         drop(pending_phase);
-        let outcome = completion_resolver
-            .resolve_await_event(
-                &key,
-                Resolution::Ok(serde_json::json!({
-                    "value": value,
-                    "mode": "pending_completion",
-                    "delay_ms": delay_ms
-                })),
-            )
-            .await?;
+        let outcome = lash_core::waits::resolve_host(
+            completion_resolver.backend(),
+            key.as_str(),
+            Resolution::Ok(serde_json::json!({
+                "value": value,
+                "mode": "pending_completion",
+                "delay_ms": delay_ms
+            })),
+        )
+        .await?;
         anyhow::ensure!(
-            matches!(outcome, lash_core::ResolveOutcome::Accepted),
+            matches!(outcome, lash_core::ResolveAnswer::Resolved),
             "benchmark completion was not accepted: {outcome:?}"
         );
         Ok(())

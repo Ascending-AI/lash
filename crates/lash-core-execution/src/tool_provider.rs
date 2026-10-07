@@ -434,15 +434,17 @@ impl<'run> AttemptContext<'run> {
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
         crate::runtime::RuntimeNamedPhase::begin(self.phase_probe.clone(), phase)
     }
-    /// The durable key this call's deferred completion resolves, derived
-    /// from its [`call_id`](Self::call_id) within its execution scope.
+    /// The host key of this call's completion wait: the tool completion wait
+    /// its round pinned when it admitted the call, which a host resolves
+    /// through [`resolve_host`](crate::runtime::actor::waits::resolve_host).
+    /// A rerun of the call is handed the same key.
     ///
     /// # Errors
     ///
     /// A typed refusal when the capability is missing: the tool did not
-    /// declare that its attempt may defer, or the host's controller issues
-    /// no durable await-event keys.
-    pub fn completion_key(&self) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+    /// declare that its attempt may defer, or the call runs where no
+    /// completion wait is pinned for it.
+    pub fn completion_key(&self) -> Result<crate::PinnedKey, crate::RuntimeError> {
         self.completion.key()
     }
     /// The identity of the intent this attempt declares at `intent_index`,
@@ -460,27 +462,22 @@ impl<'run> AttemptContext<'run> {
 
 #[derive(Clone, Default)]
 pub(crate) struct ToolCompletionState {
-    key: Arc<Mutex<Option<crate::AwaitEventKey>>>,
+    key: Arc<Mutex<Option<crate::PinnedKey>>>,
 }
 
 impl ToolCompletionState {
-    pub(crate) fn store(
-        &self,
-        key: crate::AwaitEventKey,
-    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+    pub(crate) fn store(&self, key: crate::PinnedKey) {
         let mut guard = self.key.lock_recover();
-        if let Some(existing) = guard.as_ref() {
-            return Ok(existing.clone());
+        if guard.is_none() {
+            *guard = Some(key);
         }
-        *guard = Some(key.clone());
-        Ok(key)
     }
 
-    pub(crate) fn take(&self) -> Option<crate::AwaitEventKey> {
+    pub(crate) fn take(&self) -> Option<crate::PinnedKey> {
         self.key.lock_recover().take()
     }
 
-    pub(crate) fn load(&self) -> Option<crate::AwaitEventKey> {
+    pub(crate) fn load(&self) -> Option<crate::PinnedKey> {
         self.key.lock_recover().clone()
     }
 }
@@ -737,9 +734,10 @@ impl<'run> ToolContext<'run> {
             })
     }
 
-    pub(crate) fn install_prederived_completion_key(&self, key: Option<crate::AwaitEventKey>) {
+    /// Hands the call the key of the completion wait its round pinned.
+    pub(crate) fn install_completion_key(&self, key: Option<crate::PinnedKey>) {
         if let Some(key) = key {
-            let _ = self.completion.store(key);
+            self.completion.store(key);
         }
     }
     pub(crate) fn replay_validation_trace(&self) -> Option<crate::RuntimeEffectReplayTrace> {
@@ -883,7 +881,7 @@ impl<'run> ToolContext<'run> {
         self
     }
 
-    pub(crate) fn take_completion_key(&self) -> Option<crate::AwaitEventKey> {
+    pub(crate) fn take_completion_key(&self) -> Option<crate::PinnedKey> {
         self.completion.take()
     }
 

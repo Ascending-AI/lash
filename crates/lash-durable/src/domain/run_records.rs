@@ -19,6 +19,8 @@ pub enum RunRecordKind {
     XStart,
     /// An execution's outcome.
     XOutcome,
+    /// An execution parked on its waits; its outcome follows.
+    XWait,
     /// A coordinator's decision.
     Decide,
     /// A presentation (incorporation) record.
@@ -35,6 +37,7 @@ impl RunRecordKind {
             Self::Admit => "admit",
             Self::XStart => "x_start",
             Self::XOutcome => "x_outcome",
+            Self::XWait => "x_wait",
             Self::Decide => "decide",
             Self::Present => "present",
             Self::Retry => "retry",
@@ -48,6 +51,7 @@ impl RunRecordKind {
             Self::Admit,
             Self::XStart,
             Self::XOutcome,
+            Self::XWait,
             Self::Decide,
             Self::Present,
             Self::Retry,

@@ -3,12 +3,16 @@
 //! the `x_start` and the `x_outcome` its round commits (ADR 0132 §5).
 use super::*;
 use crate::runtime::actor::round::{
-    AdmittedExecution, BodyOutput, CompletedCall, MemberBody, MemberPin, PolicyView, RoundTools,
-    completed_material, decode_completed,
+    AdmittedExecution, BodyOutput, CompletedCall, Discharge, MemberBody, MemberPin, MemberResult,
+    PolicyView, RoundTools, completed_material, decode_completed,
 };
+use crate::runtime::actor::waits::{self, Resolution, WaitDeadline};
 use crate::session::tool_execution::ToolInvocation;
 use crate::tool_dispatch::call_run::{AdmittedToolCall, AttemptEnd, CallEnd};
-use crate::tool_run::{AttemptOutcome, AvailableEvidence, KnownFailure, KnownFailureReason};
+use crate::tool_run::{
+    AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
+    MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
+};
 
 /// How one attempt of a round member ended.
 enum MemberEnd {
@@ -21,6 +25,31 @@ enum MemberEnd {
     },
     /// The turn's cancel withheld the call's result.
     Cancelled,
+    /// The body parked on its completion wait.
+    Parked(ParkedCall),
+}
+
+/// A parked call as its `Waiting` outcome records it: its pending
+/// completion, and the launch receipt of the start it declared to resolve
+/// it. What its resolution is answered from.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ParkedCall {
+    completion: crate::PendingCompletion,
+    launch: Option<super::super::LaunchReceipt>,
+}
+
+impl ParkedCall {
+    /// The process whose terminal resolves the call, when the runtime owns
+    /// one.
+    fn awaited_process(&self) -> Option<&crate::ProcessId> {
+        match self.completion.resolved_by.as_ref()? {
+            crate::PendingResolver::ProcessTerminal { process_id } => Some(process_id),
+            crate::PendingResolver::DeclaredStart(_) => self
+                .launch
+                .as_ref()
+                .and_then(|launch| launch.process_id.as_ref()),
+        }
+    }
 }
 
 fn answered(call: &crate::sansio::PendingToolCall, output: ToolCallOutput) -> CompletedCall {
@@ -79,6 +108,59 @@ fn outcome_output(outcome: &AttemptOutcome) -> ToolCallOutput {
     }
 }
 
+/// A parked member's answer: `Waiting` on the completion wait its round
+/// pinned, the parked call riding as its material, and the process whose
+/// terminal its runner pins a wait on beside it.
+fn parked_output(
+    call: &crate::sansio::PendingToolCall,
+    owner: &crate::EffectOpener,
+    execution: &AdmittedExecution,
+    parked: &ParkedCall,
+) -> MemberResult {
+    let encoded = execution.draft().pinned_wait().and_then(|pinned| {
+        let text = serde_json::to_string(parked).ok()?;
+        let metadata = MaterialPayload::new(
+            MaterialOwner::Run {
+                opener: owner.clone(),
+            },
+            MaterialRole::AttemptOutput,
+            None,
+            text.clone(),
+        )
+        .reference(MaterialLocation::JournalLocal)
+        .ok()?;
+        Some((pinned, metadata, text))
+    });
+    // A call whose round pinned no wait never had a key to take, so it
+    // cannot park; nor can one whose park does not encode.
+    let Some((pinned, metadata, text)) = encoded else {
+        return member_output(
+            owner,
+            MemberEnd::Final(answered(
+                call,
+                ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "pending_tool_missing_completion_key",
+                    "tool returned Pending without a completion wait to park on",
+                )),
+            )),
+        )
+        .into();
+    };
+    MemberResult {
+        output: BodyOutput {
+            outcome: AttemptOutcome::Waiting(CompletionSource {
+                wait: pinned.id.to_hex(),
+                terminal: None,
+                metadata,
+            }),
+            material: Some(text),
+        },
+        store_local: None,
+        terminal: parked.awaited_process().cloned(),
+    }
+}
+
 /// A member's answer as its attempt's output: a final completes, a
 /// repeatable failure is a known failure, a cancel is `Cancelled`.
 fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> BodyOutput {
@@ -89,6 +171,8 @@ fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> BodyOutput {
             }
             .into();
         }
+        // A park is answered by `parked_output`.
+        MemberEnd::Parked(_) => return AttemptOutcome::Interrupted.into(),
         MemberEnd::Final(completed) => (completed, None),
         MemberEnd::Retry {
             failure,
@@ -195,6 +279,10 @@ impl ProductionToolHandlers<'_> {
                 failure: retry_failure(call, &capture),
                 suggested_delay_ms,
             },
+            AttemptEnd::Parked { completion, launch } => MemberEnd::Parked(ParkedCall {
+                completion: *completion,
+                launch: launch.map(|launch| *launch),
+            }),
         })
     }
 }
@@ -241,13 +329,25 @@ impl RoundTools for ProductionRoundTools {
             .as_ref()
             .and_then(|manifest| budgets.admit_tool(manifest).ok())
             .unwrap_or_else(|| budgets.tool_default());
+        let limit = lash_sansio::ExecutionLimit::starting_at(now_ms, total, total);
+        // One limit spans a deferring call's body and its park: its wait's
+        // deadline is the limit's, written once with the admission.
+        let wait = manifest
+            .as_ref()
+            .filter(|manifest| manifest.declaration.may_defer)
+            .map(|_| {
+                WaitDeadline::at_instant(lash_durable::DurableInstant(
+                    i64::try_from(limit.expires_at).unwrap_or(i64::MAX),
+                ))
+            });
         MemberPin {
             tool: manifest.as_ref().map_or_else(
                 || crate::ToolId::new(call.tool_name.clone()),
                 |manifest| manifest.id.clone(),
             ),
             policy: manifest.map_or(ExecutionPolicy::Once, |manifest| manifest.execution_policy),
-            limit: lash_sansio::ExecutionLimit::starting_at(now_ms, total, total),
+            limit,
+            wait,
         }
     }
 
@@ -338,6 +438,18 @@ impl RoundTools for ProductionRoundTools {
         let ordinal = AttemptOrdinal::new(execution.attempt());
         let may_retry = execution.attempt() < pinned.max_attempts()
             && self.policies().permits_repeat(&tool, pinned);
+        let execution = execution.clone();
+        let key = execution.draft().pinned_wait().and_then(|wait| {
+            waits::host_key(
+                self.context
+                    .dispatch()
+                    .effect_controller
+                    .backend()
+                    .completion_secrets(),
+                &wait.wait(),
+                wait.version,
+            )
+        });
         Box::new(move |token| {
             Box::pin(async move {
                 let Some(ordinal) = ordinal else {
@@ -345,10 +457,13 @@ impl RoundTools for ProductionRoundTools {
                 };
                 // Each attempt owns its handlers: an inline body stops on the
                 // member's cancel, which the round fires on a turn cancel.
-                let handlers = Arc::new(ProductionToolHandlers::new(
-                    context.with_cancellation_token(token.clone()),
-                    None,
-                ));
+                let handlers = Arc::new(
+                    ProductionToolHandlers::new(
+                        context.with_cancellation_token(token.clone()),
+                        None,
+                    )
+                    .with_completion_key(key),
+                );
                 let end = handlers
                     .round_member(&owner, &call, tool, ordinal, may_retry, &token)
                     .await
@@ -362,8 +477,93 @@ impl RoundTools for ProductionRoundTools {
                             )),
                         ))
                     });
-                member_output(&owner, end).into()
+                match end {
+                    MemberEnd::Parked(parked) => parked_output(&call, &owner, &execution, &parked),
+                    end => member_output(&owner, end).into(),
+                }
             })
+        })
+    }
+
+    fn resolved(
+        &self,
+        call: &crate::sansio::PendingToolCall,
+        _execution: &AdmittedExecution,
+        _source: &CompletionSource,
+        metadata: Option<&str>,
+        resolution: Resolution,
+    ) -> BodyOutput {
+        let parked = metadata.and_then(|text| serde_json::from_str::<ParkedCall>(text).ok());
+        let output = crate::tool_result::tool_output_from_completion_resolution(
+            resolution,
+            parked
+                .as_ref()
+                .and_then(|parked| parked.completion.resolved_by.as_ref()),
+        );
+        let mut completed = answered(call, output);
+        // The launch receipt is the call's host-facing intent outcome; the
+        // model sees the child's value only.
+        completed.intent_outcomes = parked
+            .and_then(|parked| parked.launch)
+            .map(|launch| vec![launch.outcome])
+            .unwrap_or_default();
+        member_output(&self.owner, MemberEnd::Final(completed))
+    }
+
+    /// Discharges the child a parked call's declared start launched (ADR
+    /// 0116 §3.6): a call that ends cancelled under
+    /// [`CancelHint::CancelExternalWork`](crate::CancelHint) cancels it, and
+    /// the call's hold on it is released, so a later redrive finds the
+    /// launch receipt its park recorded and the row may be pruned. Both are
+    /// idempotent registry writes; a failure is logged and leaves the hold
+    /// to the owning scope's close.
+    fn discharge<'a>(
+        &'a self,
+        call: &'a crate::sansio::PendingToolCall,
+        _execution: &'a AdmittedExecution,
+        metadata: Option<&'a str>,
+        cancelled: bool,
+    ) -> Discharge<'a> {
+        Box::pin(async move {
+            let Some(parked) =
+                metadata.and_then(|text| serde_json::from_str::<ParkedCall>(text).ok())
+            else {
+                return;
+            };
+            let Some(process_id) = parked
+                .launch
+                .as_ref()
+                .and_then(|launch| launch.process_id.as_ref())
+            else {
+                return;
+            };
+            let processes = &self.context.dispatch().processes;
+            if cancelled
+                && parked.completion.on_cancel == crate::CancelHint::CancelExternalWork
+                && let Err(error) = processes
+                    .cancel_bound(process_id, self.context.process_scope(None))
+                    .await
+            {
+                tracing::warn!(
+                    process_id = %process_id,
+                    error = %error,
+                    "a cancelled parked call could not cancel the child it launched"
+                );
+                return;
+            }
+            if let Err(error) = processes
+                .release_consumer_hold(
+                    process_id,
+                    &super::super::call_run::start_hold_key(&call.call_id),
+                )
+                .await
+            {
+                tracing::warn!(
+                    process_id = %process_id,
+                    error = %error,
+                    "a parked call could not release its hold on the child it launched"
+                );
+            }
         })
     }
 

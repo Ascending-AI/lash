@@ -25,11 +25,7 @@ pub use call_run::{
     AdmittedToolCall, Answer, AttemptEnd, CallEnd, Consumer, Leaf, ToolRun, run_call,
 };
 pub use context::{ToolDispatchContext, ToolTriggerEffectOutcome};
-pub use pending_resolver::{
-    ArmedResolver, LaunchReceipt, ParkSite, ResolverArming, arm_pending_resolver,
-    consumer_hold_owner, discharge_abandoned_call, finish_parked_wait,
-    model_visible_intent_outcomes,
-};
+pub use pending_resolver::{LaunchReceipt, model_visible_intent_outcomes};
 pub use realization::RealizationReceipt;
 pub use singleton_run::{
     BeforeCheckReply, IsolatedBinding, IsolatedProcessDescriptor, SingletonAttempt,
@@ -43,9 +39,7 @@ pub use attempt_coordinator::{ToolAttemptLineage, coordinate_tool_invocation};
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(not(feature = "testing"))]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
-pub use context::{
-    PendingToolDispatchOutcome, ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
-};
+pub use context::{ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub use hooks::finalize_tool_result_with_execution_context;

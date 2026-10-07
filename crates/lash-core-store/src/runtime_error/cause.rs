@@ -14,10 +14,6 @@ use crate::SessionId;
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
-    /// A source's authority or lifecycle refused an arm, subscription or seal.
-    SourceRefused {
-        refusal: Box<crate::tool_run::SourceRefusal>,
-    },
     ToolRunCutRefused {
         refusal: Box<crate::tool_run::RunCutRefusal>,
     },

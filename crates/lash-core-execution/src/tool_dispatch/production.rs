@@ -31,6 +31,8 @@ pub(crate) struct ProductionToolHandlers<'run> {
     isolated: Mutex<BTreeMap<crate::ToolCallId, IsolatedToolStart>>,
     /// Each aggregate's operands refused before it formed, by operand.
     refused: Mutex<BTreeMap<String, BTreeMap<usize, aggregate::RefusedInput>>>,
+    /// The key of the completion wait a round member's round pinned for it.
+    completion_key: Option<crate::PinnedKey>,
 }
 
 #[derive(Default)]
@@ -138,6 +140,7 @@ impl<'run> ProductionToolHandlers<'run> {
             contributions: Mutex::default(),
             declarations: Mutex::default(),
             isolated: Mutex::default(),
+            completion_key: None,
             refused: Mutex::default(),
         }
     }
@@ -286,6 +289,40 @@ impl<'run> ProductionToolHandlers<'run> {
             messages,
             triggers,
             start_refusal: None,
+        })
+    }
+
+    /// These handlers, handing their call the key of the completion wait
+    /// its round pinned.
+    pub(crate) fn with_completion_key(mut self, key: Option<crate::PinnedKey>) -> Self {
+        self.completion_key = key;
+        self
+    }
+
+    /// Launch the start a parked call declared, under its start key beneath
+    /// the call's lineage, holding the child for the call.
+    async fn launch_parked(
+        &self,
+        call_id: &crate::ToolCallId,
+        start: &crate::DeclaredStart,
+        cancels: bool,
+    ) -> Result<super::LaunchReceipt, String> {
+        let parent = self
+            .context
+            .language_runtime_invocation(&format!("run:start:{}", start.identity().replay_key));
+        super::pending_resolver::launch_parked_start(
+            self.context.dispatch().processes.as_ref(),
+            self.context
+                .process_scope_for_language_call(parent.into_runtime_invocation(), call_id),
+            start,
+            super::call_run::start_hold_key(call_id),
+            cancels,
+            None,
+        )
+        .await
+        .map_err(|error| {
+            self.context.record_nested_effect_error(error.clone());
+            error.to_string()
         })
     }
 }
@@ -505,6 +542,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .build()
             .with_attempt_dispatch(dispatch.clone(), invocation);
         context = context.with_prepared_payload(prepared.call.prepared_payload.clone());
+        context.install_completion_key(self.completion_key.clone());
         let completion_context = context.clone();
         if let Some(grant) = &prepared.input.grant {
             context = context
@@ -718,8 +756,73 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         suggested_delay_ms: None,
                     })
                 } else {
+                    let pending = match super::atomic_attempt::announce_pending_park(
+                        &completion_context,
+                        pending,
+                    )
+                    .await
+                    {
+                        Ok(pending) => pending,
+                        Err(failure) => {
+                            let capture = self
+                                .capture_output(
+                                    prepared,
+                                    ToolCallOutput::failure(*failure),
+                                    crate::plugin::ToolHookOccurrence::Attempt {
+                                        attempt: attempt.attempt,
+                                    },
+                                    ToolIntents::default(),
+                                    dispatch.checkpoint_messages.drain(),
+                                    dispatch.trigger_outcomes.drain(),
+                                )
+                                .await?;
+                            return Ok(SingletonBodyOutcome::Failed {
+                                output: encode(&capture)?,
+                                suggested_delay_ms: None,
+                            });
+                        }
+                    };
+                    let launch = match &pending.resolved_by {
+                        Some(crate::PendingResolver::DeclaredStart(start)) => {
+                            let receipt = self
+                                .launch_parked(
+                                    attempt.call_id,
+                                    start,
+                                    pending.on_cancel == crate::CancelHint::CancelExternalWork,
+                                )
+                                .await?;
+                            if receipt.process_id.is_none() {
+                                // A refused start settles the call: there is
+                                // no child whose terminal it could await.
+                                let mut capture = self
+                                    .capture_output(
+                                        prepared,
+                                        ToolCallOutput::failure(
+                                            super::pending_resolver::launch_refusal(
+                                                &receipt.outcome,
+                                            ),
+                                        ),
+                                        crate::plugin::ToolHookOccurrence::Attempt {
+                                            attempt: attempt.attempt,
+                                        },
+                                        ToolIntents::default(),
+                                        dispatch.checkpoint_messages.drain(),
+                                        dispatch.trigger_outcomes.drain(),
+                                    )
+                                    .await?;
+                                capture.start_refusal = Some(receipt.outcome);
+                                return Ok(SingletonBodyOutcome::Failed {
+                                    output: encode(&capture)?,
+                                    suggested_delay_ms: None,
+                                });
+                            }
+                            Some(Box::new(receipt))
+                        }
+                        Some(crate::PendingResolver::ProcessTerminal { .. }) | None => None,
+                    };
                     Ok(SingletonBodyOutcome::Pending {
                         completion: Box::new(pending),
+                        launch,
                     })
                 }
             }

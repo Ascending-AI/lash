@@ -26,7 +26,6 @@ impl RuntimeErrorCause {
             | Self::ToolRunIsolationRefused { .. }
             | Self::ToolRunControl { .. }
             | Self::ToolRunAdmissionRefused { .. }
-            | Self::SourceRefused { .. }
             | Self::MaterialRefused { .. }
             | Self::ProviderFailure { .. }
             | Self::IngressReservedSourceKey { .. }

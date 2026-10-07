@@ -100,6 +100,25 @@ pub enum AttemptEnd {
         /// The body's own backoff hint.
         suggested_delay_ms: Option<u64>,
     },
+    /// The body parked on the completion wait its round pinned: the call
+    /// ends when that wait, or the process its resolver awaits, does.
+    Parked {
+        /// Its pending completion.
+        completion: Box<crate::PendingCompletion>,
+        /// The launch receipt of the start it declared to resolve it.
+        launch: Option<Box<super::LaunchReceipt>>,
+    },
+}
+
+/// What one execution of the body left.
+enum Executed {
+    /// A captured answer.
+    Captured(SingletonCapture),
+    /// The body parked.
+    Parked {
+        completion: Box<crate::PendingCompletion>,
+        launch: Option<Box<super::LaunchReceipt>>,
+    },
 }
 
 /// What admission selected from the call's before-checks.
@@ -132,7 +151,7 @@ fn fault(message: impl std::fmt::Display) -> SingletonRunError {
     .into()
 }
 
-fn start_hold_key(call_id: &ToolCallId) -> String {
+pub(crate) fn start_hold_key(call_id: &ToolCallId) -> String {
     format!("{call_id}:start")
 }
 
@@ -325,7 +344,12 @@ impl<'a> AdmittedToolCall<'a> {
             }
             Selection::Cached(capture) => (ResultSource::Cached, capture.clone()),
             Selection::Execute => {
-                let capture = self.execute(ordinal).await?;
+                let capture = match self.execute(ordinal).await? {
+                    Executed::Captured(capture) => capture,
+                    Executed::Parked { completion, launch } => {
+                        return Ok(AttemptEnd::Parked { completion, launch });
+                    }
+                };
                 if let SingletonCapture::Failed {
                     suggested_delay_ms, ..
                 } = &capture
@@ -348,14 +372,11 @@ impl<'a> AdmittedToolCall<'a> {
 
     /// Execute the body once (X) and capture what it answered under the
     /// call's admitted declaration.
-    async fn execute(
-        &self,
-        ordinal: AttemptOrdinal,
-    ) -> Result<SingletonCapture, SingletonRunError> {
+    async fn execute(&self, ordinal: AttemptOrdinal) -> Result<Executed, SingletonRunError> {
         if let Some(binding) = &self.request.isolation {
-            return Ok(SingletonCapture::Isolated {
+            return Ok(Executed::Captured(SingletonCapture::Isolated {
                 binding: Box::new(binding.clone()),
-            });
+            }));
         }
         let recorder = AttemptStreamRecorder::start();
         let outcome = self
@@ -370,7 +391,7 @@ impl<'a> AdmittedToolCall<'a> {
             .map_err(fault)?;
         let stream = recorder.finish();
         let declaration = &self.call.declaration;
-        Ok(match outcome {
+        Ok(Executed::Captured(match outcome {
             SingletonBodyOutcome::Done {
                 output,
                 commands,
@@ -417,12 +438,25 @@ impl<'a> AdmittedToolCall<'a> {
             SingletonBodyOutcome::Cancelled { evidence } => {
                 SingletonCapture::Cancelled { evidence }
             }
-            // A pending completion needs a completion key armed before the
-            // attempt; none is armed, so its body has nothing to hand out.
-            SingletonBodyOutcome::Pending { .. } => SingletonCapture::Refused {
+            SingletonBodyOutcome::Pending { completion, launch } => {
+                return Ok(Executed::Parked { completion, launch });
+            }
+        }))
+    }
+
+    /// End a call whose body parked where no completion wait is pinned for
+    /// it: refused as an unarmed source, then decided.
+    async fn unarmed(&self, cancel: &CancellationToken) -> Result<CallEnd, SingletonRunError> {
+        self.decide(
+            ResultSource::Attempt {
+                attempt: AttemptOrdinal::FIRST,
+            },
+            SingletonCapture::Refused {
                 refusal: DeclarationRefusal::UnarmedSource,
             },
-        })
+            cancel,
+        )
+        .await
     }
 
     /// Decide the call (D) on `capture`: the Run's cancel, then every
@@ -657,6 +691,8 @@ pub async fn run_call<'a>(
         let last = ordinal.get() >= policy.max_attempts();
         match admitted.attempt(ordinal, !last, cancel).await? {
             AttemptEnd::Ended(end) => return Ok(end),
+            // Only a round member parks: its round pins the wait.
+            AttemptEnd::Parked { .. } => return admitted.unarmed(cancel).await,
             AttemptEnd::Retry {
                 suggested_delay_ms, ..
             } => {

@@ -33,7 +33,6 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             self.dispatch.as_ref(),
             self.tool_context,
             envelope.invocation.into_runtime_invocation(),
-            self.completion_key,
             effect_attempt,
         )
         .execute(*call, execution_grant, attempt, max_attempts)

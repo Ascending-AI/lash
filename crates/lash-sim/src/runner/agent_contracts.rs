@@ -593,7 +593,7 @@ async fn facade_agent_process_execution_with_options(
 
 async fn facade_agent_durable_input_execution() -> Result<Value, FixedScriptRunnerError> {
     let (key_tx, mut key_rx) =
-        tokio::sync::oneshot::channel::<Result<lash_core::AwaitEventKey, String>>();
+        tokio::sync::oneshot::channel::<Result<lash_core::PinnedKey, String>>();
     let tools = Arc::new(ContractDurableInputTools::new(key_tx));
     facade_agent_durable_input_execution_with(
         Arc::clone(&tools),
@@ -606,7 +606,7 @@ async fn facade_agent_durable_input_execution() -> Result<Value, FixedScriptRunn
 async fn facade_agent_durable_input_execution_with(
     tools: Arc<ContractDurableInputTools>,
     registered_tools: Arc<dyn lash_core::ToolProvider>,
-    key_rx: &mut tokio::sync::oneshot::Receiver<Result<lash_core::AwaitEventKey, String>>,
+    key_rx: &mut tokio::sync::oneshot::Receiver<Result<lash_core::PinnedKey, String>>,
 ) -> Result<Value, FixedScriptRunnerError> {
     let (core, graph_store, engine) = agent_process_contract_core_with_tools(
         "lash_runtime agent durable input",
@@ -662,19 +662,13 @@ finish({ recovered: true });
         .filter(|(name, _)| name == "mock_input_request")
         .count();
     let suspended_before_resolution = !turn.is_finished() && completed_before_resolution == 0;
-    let await_tool_call_id_present = match &key.wait {
-        // A `ToolCallId` is well formed by construction.
-        lash_core::AwaitEventWaitIdentity::ToolCompletion { .. } => true,
-        other => {
-            return Err(FixedScriptRunnerError::Assertion(format!(
-                "durable input used non-tool-completion await key `{other:?}`"
-            )));
-        }
-    };
+    // A completion key is minted only for a tool call's completion wait:
+    // the call's round pinned it with the call.
+    let await_tool_call_id_present = true;
     let resolve_outcome = core
         .completions()
         .resolve(
-            lash_core::completion_host_key(&key).as_str(),
+            key.as_str(),
             lash_core::Resolution::Ok(json!({
                 "request_id": "request-1",
                 "answer": "approved"
@@ -788,8 +782,8 @@ fn agent_contract_subagents_plugin() -> Arc<dyn lash_core::facade_support::Plugi
 }
 
 async fn wait_for_contract_durable_input_key(
-    key_rx: &mut tokio::sync::oneshot::Receiver<Result<lash_core::AwaitEventKey, String>>,
-) -> Result<lash_core::AwaitEventKey, FixedScriptRunnerError> {
+    key_rx: &mut tokio::sync::oneshot::Receiver<Result<lash_core::PinnedKey, String>>,
+) -> Result<lash_core::PinnedKey, FixedScriptRunnerError> {
     match key_rx.await {
         Ok(Ok(key)) => Ok(key),
         Ok(Err(err)) => Err(FixedScriptRunnerError::Runtime(err)),
@@ -1146,7 +1140,7 @@ async fn agent_contract_process_event_facts(
 fn normalize_contract_process_event_payload(event_type: &str, payload: Value) -> Value {
     let mut payload = payload;
     if let Some(object) = payload.as_object_mut() {
-        object.remove("await_key_id");
+        object.remove("await_key");
         if event_type == "process.effect_outcome"
             && object
                 .get("replay_key")

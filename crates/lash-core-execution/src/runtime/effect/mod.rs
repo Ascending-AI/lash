@@ -36,13 +36,12 @@ pub use envelope::{
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
     AdmittedScope, AwaitEventKey, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
-    CompletionKeyPreparation, EffectJournalIdentity, EffectJournalRetirement, EffectOpener,
-    EffectRetirementGate, ExecutionScope, ExternalCompletionError, JournalReplay,
-    ProcessDefinitionLocalExecution, ProcessDriveStep, ProcessLocalExecution,
-    ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence, RefusedWriteRange,
-    Resolution, ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectControllerError,
-    RuntimeEffectLocalExecutor, RuntimeSleepOptions, SegmentProgress, ServedOnlyRange,
-    TriggerLocalExecution,
+    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
+    ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDefinitionLocalExecution,
+    ProcessDriveStep, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
+    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    RuntimeEffectControllerError, RuntimeEffectLocalExecutor, RuntimeSleepOptions, SegmentProgress,
+    ServedOnlyRange, TriggerLocalExecution,
 };
 pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,

@@ -173,13 +173,13 @@ fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
 }
 
 pub(super) struct ContractDurableInputTools {
-    key_tx: Mutex<Option<tokio::sync::oneshot::Sender<Result<lash_core::AwaitEventKey, String>>>>,
+    key_tx: Mutex<Option<tokio::sync::oneshot::Sender<Result<lash_core::PinnedKey, String>>>>,
     attempt_count: Mutex<usize>,
 }
 
 impl ContractDurableInputTools {
     pub(super) fn new(
-        key_tx: tokio::sync::oneshot::Sender<Result<lash_core::AwaitEventKey, String>>,
+        key_tx: tokio::sync::oneshot::Sender<Result<lash_core::PinnedKey, String>>,
     ) -> Self {
         Self {
             key_tx: Mutex::new(Some(key_tx)),
@@ -195,7 +195,7 @@ impl ContractDurableInputTools {
         *self.attempt_count.lock_recover() += 1;
     }
 
-    fn send_key_result(&self, result: Result<lash_core::AwaitEventKey, String>) {
+    fn send_key_result(&self, result: Result<lash_core::PinnedKey, String>) {
         if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(result);
         }
@@ -243,7 +243,7 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
                 "type": "work.input_request.opened",
                 "request_id": "request-1",
                 "question": question,
-                "await_key_id": key.key_id,
+                "await_key": key.as_str(),
             }),
             "mock-input-request:request-1",
         );

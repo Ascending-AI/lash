@@ -135,14 +135,14 @@ impl lash_core::ToolProvider for PendingEchoTool {
             .unwrap_or_default()
             .to_string();
         tokio::task::yield_now().await;
-        let _ = resolver
-            .resolve_await_event(
-                &key,
-                lash_core::Resolution::Ok(serde_json::json!({
-                    "payload": format!("raw:{value}")
-                })),
-            )
-            .await;
+        let _ = lash_core::waits::resolve_host(
+            resolver.backend(),
+            key.as_str(),
+            lash_core::Resolution::Ok(serde_json::json!({
+                "payload": format!("raw:{value}")
+            })),
+        )
+        .await;
         lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::default())
     }
 }

@@ -337,10 +337,6 @@ impl SettledOutcome {
 
 /// What happened to a process since its last transition.
 #[derive(Clone, Debug, PartialEq)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "the pinned event shape (S6): one event per transition, handed to advance by value"
-)]
 pub enum EngineEvent {
     /// The process started with its payload.
     Started {

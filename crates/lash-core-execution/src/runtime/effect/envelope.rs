@@ -1043,12 +1043,6 @@ pub enum ToolAttemptLaunch {
         record: Box<crate::ToolCallRecord>,
         intents: crate::ToolIntents,
     },
-    Pending {
-        // Boxed: the canonical `ExecutionScope` inside the key dominates this
-        // enum's size.
-        key: Box<crate::AwaitEventKey>,
-        pending: crate::PendingCompletion,
-    },
 }
 
 /// Plugin-attributed runtime events emitted by one assistant-response hook.

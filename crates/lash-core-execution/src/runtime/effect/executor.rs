@@ -28,9 +28,9 @@ pub use turn_cancel_wait::{ProcessTurnCancellation, TurnCancelWait};
 pub use await_event_support::await_event_scope_not_retirable;
 pub use control::{
     AwaitEventKey, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
-    CompletionKeyPreparation, EffectJournalIdentity, EffectJournalRetirement, EffectRetirementGate,
-    ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDriveStep, RecordedKeyFence,
-    RefusedWriteRange, Resolution, ResolveOutcome, SegmentProgress, ServedOnlyRange,
+    EffectJournalIdentity, EffectJournalRetirement, EffectRetirementGate, ExecutionScope,
+    ExternalCompletionError, JournalReplay, ProcessDriveStep, RecordedKeyFence, RefusedWriteRange,
+    Resolution, ResolveOutcome, SegmentProgress, ServedOnlyRange,
 };
 pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::admitted_scope::AdmittedScope;
@@ -172,7 +172,6 @@ pub(super) struct LocalDirectEffectRunner {
 struct LocalPreparedToolAttemptEffectRunner<'run> {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     tool_context: crate::ToolContext<'run>,
-    completion_key: Option<crate::AwaitEventKey>,
 }
 
 #[async_trait::async_trait]
@@ -802,7 +801,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub(crate) fn prepared_tool_attempt(
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
         tool_context: crate::ToolContext<'run>,
-        completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
         let replay_trace = tool_context.replay_validation_trace();
         if let (Some(dispatch), Some(tool_context)) =
@@ -813,7 +811,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     LocalPreparedToolAttemptEffectRunner {
                         dispatch: Arc::new(dispatch),
                         tool_context,
-                        completion_key,
                     },
                 ))),
                 replay_trace,
@@ -826,7 +823,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 LocalPreparedToolAttemptEffectRunner {
                     dispatch,
                     tool_context,
-                    completion_key,
                 },
             )),
             replay_trace,

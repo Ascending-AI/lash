@@ -641,11 +641,24 @@ impl RoundTools for EchoTools {
             tool: ToolId::new(ECHO),
             policy: ExecutionPolicy::Once,
             limit: ExecutionLimit::starting_at(now_ms, budget, budget),
+            wait: None,
         }
     }
 
     fn policies(&self) -> PolicyView {
         PolicyView::new([(ToolId::new(ECHO), ExecutionPolicy::Once)])
+    }
+
+    fn resolved(
+        &self,
+        _call: &PendingToolCall,
+        _execution: &AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> BodyOutput {
+        // No tool of this catalog parks, so no park ever resolves.
+        BodyOutput::from(AttemptOutcome::Interrupted)
     }
 
     fn body(&self, call: &PendingToolCall, _execution: &AdmittedExecution) -> MemberBody {

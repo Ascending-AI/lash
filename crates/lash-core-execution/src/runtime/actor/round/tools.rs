@@ -22,11 +22,13 @@ use lash_sansio::sansio::PendingToolCall;
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 
 use super::super::ActorContext;
+use super::super::waits::{Resolution, WaitDeadline};
 use super::{
-    AdmittedExecution, ExecutionDraft, MemberBodies, MemberBody, PolicyView, RoundError, fold,
-    settle,
+    AdmittedExecution, BodyOutput, ExecutionDraft, MemberBodies, MemberBody, PolicyView,
+    RoundError, fold, settle,
 };
 use crate::{ToolCallId, ToolId};
+use lash_core_store::tool_run::CompletionSource;
 
 /// A settled member as the turn's machine is answered with it.
 pub type CompletedCall = lash_sansio::sansio::CompletedToolCall<crate::ToolIntentExecutionOutcome>;
@@ -40,6 +42,9 @@ pub struct MemberPin {
     pub policy: ExecutionPolicy,
     /// Its limit, starting now.
     pub limit: ExecutionLimit,
+    /// For a tool that may park, the deadline of the completion wait its
+    /// round pins: the call's park never outlives it.
+    pub wait: Option<WaitDeadline>,
 }
 
 /// The tools a turn's rounds run: the catalog the turn was built with.
@@ -60,6 +65,32 @@ pub trait RoundTools: Send + Sync {
     /// the attempt's outcome, the journal-local material it names and the
     /// store-local effect that commits with a completion.
     fn body(&self, call: &PendingToolCall, execution: &AdmittedExecution) -> MemberBody;
+
+    /// The final answer of `execution`, an attempt of `call` that parked on
+    /// `source`, once one of its waits ended with `resolution`: a pure
+    /// function of the resolution and `metadata`, the parked call's pending
+    /// completion as its `Waiting` outcome recorded it. Runs no body.
+    fn resolved(
+        &self,
+        call: &PendingToolCall,
+        execution: &AdmittedExecution,
+        source: &CompletionSource,
+        metadata: Option<&str>,
+        resolution: Resolution,
+    ) -> BodyOutput;
+
+    /// Release what `execution`, an attempt of `call`, launched for its
+    /// park, once the park ended: `cancelled` when the call ends cancelled.
+    /// See [`MemberBodies::discharge`](super::MemberBodies::discharge).
+    fn discharge<'a>(
+        &'a self,
+        _call: &'a PendingToolCall,
+        _execution: &'a AdmittedExecution,
+        _metadata: Option<&'a str>,
+        _cancelled: bool,
+    ) -> super::runner::Discharge<'a> {
+        Box::pin(async {})
+    }
 
     /// What the machine is answered with for `call`: a pure function of its
     /// committed `outcome` and the material that outcome names.
@@ -166,7 +197,7 @@ pub fn call_draft(
         request_material(owner, call)?,
         pin.policy,
         pin.limit,
-        None,
+        pin.wait,
     ))
 }
 
@@ -192,6 +223,35 @@ impl RoundCalls {
 }
 
 impl MemberBodies for RoundCalls {
+    fn resolved(
+        &self,
+        execution: &AdmittedExecution,
+        source: &CompletionSource,
+        metadata: Option<&str>,
+        resolution: Resolution,
+    ) -> BodyOutput {
+        match self.calls.get(execution.call()) {
+            Some(call) => self
+                .tools
+                .resolved(call, execution, source, metadata, resolution),
+            None => BodyOutput::from(AttemptOutcome::Cancelled {
+                evidence: AvailableEvidence::default(),
+            }),
+        }
+    }
+
+    fn discharge<'a>(
+        &'a self,
+        execution: &'a AdmittedExecution,
+        metadata: Option<&'a str>,
+        cancelled: bool,
+    ) -> super::runner::Discharge<'a> {
+        match self.calls.get(execution.call()) {
+            Some(call) => self.tools.discharge(call, execution, metadata, cancelled),
+            None => Box::pin(async {}),
+        }
+    }
+
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {
         match self.calls.get(execution.call()) {
             Some(call) => self.tools.body(call, execution),

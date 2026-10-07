@@ -13,7 +13,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         max_attempts: u32,
         attempt_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-        completion_key: Option<crate::AwaitEventKey>,
         effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         // The attempt is a recorded step its engine cannot select away: its
@@ -27,7 +26,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 max_attempts,
                 attempt_invocation,
                 child_execution_trace_hook,
-                completion_key,
                 effect_attempt,
                 stop,
             )
@@ -44,7 +42,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         max_attempts: u32,
         attempt_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-        completion_key: Option<crate::AwaitEventKey>,
         effect_attempt: Option<crate::EffectAttempt>,
         stop: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
@@ -69,7 +66,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 self.dispatch.as_ref(),
                 tool_context.build(),
                 attempt_invocation,
-                completion_key,
                 effect_attempt,
             )
             .execute(prepared, execution_grant, attempt, max_attempts),

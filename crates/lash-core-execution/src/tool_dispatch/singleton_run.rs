@@ -216,9 +216,11 @@ pub enum SingletonBodyOutcome {
     Cancelled {
         evidence: Option<String>,
     },
-    /// The body's pending completion.
+    /// The body parked on its completion wait: its pending completion, and
+    /// the launch receipt of the start it declared to resolve it.
     Pending {
         completion: Box<crate::PendingCompletion>,
+        launch: Option<Box<super::LaunchReceipt>>,
     },
 }
 

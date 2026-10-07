@@ -442,7 +442,7 @@ impl ToolObserver {
     }
 
     /// Record that `call` registered `key`.
-    pub fn registered(&self, call: CallRef, key: &lash_core::AwaitEventKey) {
+    pub fn registered(&self, call: CallRef, key: &lash_core::PinnedKey) {
         self.recorder.record(Fact::CompletionRegistered {
             key: completion_key_label(key),
             call,
@@ -466,10 +466,14 @@ pub async fn check_engine(
     Ok(check(&history))
 }
 
-/// A completion key as a history names it.
+/// A completion key as a history names it: its wait id, never its MAC.
 #[must_use]
-pub fn completion_key_label(key: &lash_core::AwaitEventKey) -> String {
-    serde_json::to_string(key).unwrap_or_else(|_| format!("{key:?}"))
+pub fn completion_key_label(key: &lash_core::PinnedKey) -> String {
+    key.as_str()
+        .split('.')
+        .nth(1)
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// Record that a host start requested under `requested` was answered with

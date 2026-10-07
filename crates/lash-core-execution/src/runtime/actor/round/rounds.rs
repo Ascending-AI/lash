@@ -8,19 +8,53 @@ use lash_durable::{ActorTx, DomainWrite, DurableInstant};
 
 use super::records::{PresentBody, RetryBody, append, encode, start_record};
 use super::{
-    AdmissionRefusal, AdmittedExecution, AdmittedRound, BodyOutput, Presentation, RoundDraft,
-    RunFold, SettleRefusal, admit,
+    AdmissionRefusal, AdmittedExecution, AdmittedRound, BodyOutput, PinnedWait, Presentation,
+    RoundDraft, RunFold, SettleRefusal, admit, check_drafts,
 };
+use crate::runtime::actor::waits::{self, CompletionKeySecrets, WaitKind, WaitSpec};
 
 /// Admit a tool round inside the `model.done` transaction: its membership,
 /// pinned policies, limits and wait deadlines, and an `x_start` for every
-/// member. No member's body starts before that transaction commits.
+/// member. A member that may park gets its tool completion wait pinned in
+/// the same transaction, under `secrets` and revoked with `scope`, so its
+/// key exists before its body can hand it out, and a rerun of the body is
+/// handed the same key. No member's body starts before that transaction
+/// commits.
 ///
 /// # Errors
 ///
 /// [`AdmissionRefusal`]; nothing is recorded.
-pub fn admit_round(tx: &mut ActorTx, round: RoundDraft) -> Result<AdmittedRound, AdmissionRefusal> {
-    let members = admit(tx, &round.owner, round.run, round.members)?;
+pub fn admit_round(
+    tx: &mut ActorTx,
+    secrets: &CompletionKeySecrets,
+    scope: &lash_durable::domain::ScopeKey,
+    round: RoundDraft,
+) -> Result<AdmittedRound, AdmissionRefusal> {
+    check_drafts(&round.members)?;
+    let mut members = Vec::with_capacity(round.members.len());
+    for draft in round.members {
+        let pinned = match draft.wait() {
+            Some(deadline) => {
+                let (wait, _) = waits::pin(
+                    tx,
+                    secrets,
+                    WaitSpec {
+                        kind: WaitKind::ToolCompletion,
+                        scope: scope.clone(),
+                        target_process: None,
+                        deadline: Some(deadline),
+                    },
+                )?;
+                Some(PinnedWait {
+                    id: wait.id(),
+                    version: secrets.current(),
+                })
+            }
+            None => None,
+        };
+        members.push(draft.with_pinned_wait(pinned));
+    }
+    let members = admit(tx, &round.owner, round.run, members)?;
     Ok(AdmittedRound::admitted(round.run, members))
 }
 

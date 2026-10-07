@@ -29,6 +29,10 @@
 //! - **Turn cancel:** a cancel requested while a member runs ends the
 //!   unfinished members `Cancelled` and the turn `Cancelled`, with no model
 //!   call after the request.
+//! - **Pending:** a member that parks takes the key of the completion wait
+//!   the turn's `model.done` pinned, is never entered again once its park
+//!   committed, and settles from the host's resolution of that key; the
+//!   model's next call sees that resolution.
 //! - **F1:** a zombie's writes after its reap are refused.
 
 // Test code.
@@ -56,10 +60,11 @@ use lash_core_execution::runtime::actor::round::{
     self, AdmittedExecution, BodyOutput, CompletedCall, MemberBody, MemberPin, MemberResult,
     PolicyView, RoundTools, RunFold,
 };
+use lash_core_execution::runtime::actor::waits::{self, WaitDeadline};
 use lash_core_execution::{ActorContext, Backend, StoreSet};
 use lash_core_store::tool_run::{
-    AttemptOutcome, KnownFailure, KnownFailureReason, MaterialLocation, MaterialOwner,
-    MaterialPayload, MaterialRef, MaterialRole,
+    AttemptOutcome, CompletionSource, KnownFailure, KnownFailureReason, MaterialLocation,
+    MaterialOwner, MaterialPayload, MaterialRef, MaterialRole,
 };
 use lash_durable::domain::{AdmittedId, ExecKey, OwnerKey, RunRecordKind, RunSeq};
 use lash_durable::runner::Activation;
@@ -108,6 +113,9 @@ enum Tool {
     Flaky,
     /// A `Once` write that waits until the turn's cancel stops it.
     Hang,
+    /// A `Once` write that parks on its completion wait, whose key the
+    /// outside world resolves a little later.
+    Defer,
 }
 
 impl Tool {
@@ -117,6 +125,7 @@ impl Tool {
             Self::Write { .. } => "write_slow",
             Self::Flaky => "flaky",
             Self::Hang => "hang",
+            Self::Defer => "defer",
         }
     }
 
@@ -126,13 +135,14 @@ impl Tool {
             "write_slow" => Self::Write { millis: 50 },
             "flaky" => Self::Flaky,
             "hang" => Self::Hang,
+            "defer" => Self::Defer,
             other => panic!("no tool {other}"),
         }
     }
 
     fn policy(self) -> ExecutionPolicy {
         match self {
-            Self::Write { .. } | Self::Hang => ExecutionPolicy::Once,
+            Self::Write { .. } | Self::Hang | Self::Defer => ExecutionPolicy::Once,
             Self::Flaky => ExecutionPolicy::repeatable(NonZeroU32::new(3).unwrap(), 100, 1_000),
         }
     }
@@ -147,6 +157,9 @@ enum Mode {
     /// The model calls one tool that runs until the turn's cancel, which a
     /// host requests once the member's body is running.
     CancelWhileRunning,
+    /// The model calls a tool that parks on its completion wait and a quick
+    /// `Once` write.
+    Pending,
 }
 
 impl Mode {
@@ -158,6 +171,7 @@ impl Mode {
                 Tool::Write { millis: 0 },
             ],
             Self::CancelWhileRunning => vec![Tool::Hang],
+            Self::Pending => vec![Tool::Defer, Tool::Write { millis: 0 }],
         }
     }
 }
@@ -167,6 +181,14 @@ impl Mode {
 #[derive(Debug, Default)]
 struct ExternalWorld {
     writes: Mutex<BTreeMap<ToolCallId, Vec<u32>>>,
+}
+
+/// How long the outside world takes to resolve a key it was handed.
+const RESOLVE_AFTER_MS: u64 = 20;
+
+/// The answer the outside world resolves a parked call with.
+fn host_answer(call: &ToolCallId) -> serde_json::Value {
+    serde_json::json!({ "answered": call.as_str() })
 }
 
 impl ExternalWorld {
@@ -558,10 +580,16 @@ impl RoundTools for Catalog {
     fn pin(&self, call: &PendingToolCall, now_ms: u64) -> MemberPin {
         let tool = Tool::named(&call.tool_name);
         let budget = ExecutionBudgets::default().tool_default();
+        let limit = ExecutionLimit::starting_at(now_ms, budget, budget);
         MemberPin {
             tool: ToolId::new(tool.name()),
             policy: tool.policy(),
-            limit: ExecutionLimit::starting_at(now_ms, budget, budget),
+            limit,
+            wait: (tool == Tool::Defer).then(|| {
+                WaitDeadline::at_instant(lash_durable::DurableInstant(
+                    i64::try_from(limit.expires_at).unwrap(),
+                ))
+            }),
         }
     }
 
@@ -572,6 +600,7 @@ impl RoundTools for Catalog {
                 Tool::Write { millis: 50 },
                 Tool::Flaky,
                 Tool::Hang,
+                Tool::Defer,
             ]
             .into_iter()
             .map(|tool| (ToolId::new(tool.name()), tool.policy())),
@@ -585,9 +614,43 @@ impl RoundTools for Catalog {
         let tool = Tool::named(&call.tool_name);
         let call = call.call_id.clone();
         let attempt = execution.attempt();
+        let pinned = execution.draft().pinned_wait();
         Box::new(move |token| {
             Box::pin(async move {
                 match tool {
+                    Tool::Defer => {
+                        let pinned = pinned.expect("a parking member's wait is pinned");
+                        let backend = services.backend();
+                        let key = waits::host_key(
+                            backend.completion_secrets(),
+                            &pinned.wait(),
+                            pinned.version,
+                        )
+                        .expect("a tool completion wait has a host key");
+                        world.write(&call, attempt);
+                        let answer = host_answer(&call);
+                        tokio::spawn(async move {
+                            lash_core_ids::clock::Clock::sleep(
+                                &*clock,
+                                Duration::from_millis(RESOLVE_AFTER_MS),
+                            )
+                            .await;
+                            let _ = waits::resolve_host(
+                                &backend,
+                                key.as_str(),
+                                waits::Resolution::Ok(answer),
+                            )
+                            .await;
+                        });
+                        return MemberResult::from(BodyOutput {
+                            outcome: AttemptOutcome::Waiting(CompletionSource {
+                                wait: pinned.id.to_hex(),
+                                terminal: None,
+                                metadata: output_material("parked"),
+                            }),
+                            material: Some("parked".to_owned()),
+                        });
+                    }
                     Tool::Write { millis } if millis > 0 => {
                         lash_core_ids::clock::Clock::sleep(&*clock, Duration::from_millis(millis))
                             .await;
@@ -634,6 +697,29 @@ impl RoundTools for Catalog {
                 })
             })
         })
+    }
+
+    fn resolved(
+        &self,
+        _call: &PendingToolCall,
+        _execution: &AdmittedExecution,
+        _source: &CompletionSource,
+        metadata: Option<&str>,
+        resolution: waits::Resolution,
+    ) -> BodyOutput {
+        assert_eq!(
+            metadata,
+            Some("parked"),
+            "the park's material rides its row"
+        );
+        let text = match resolution {
+            waits::Resolution::Ok(value) => value.to_string(),
+            other => format!("{other:?}"),
+        };
+        BodyOutput {
+            outcome: AttemptOutcome::Completed(output_material(&text)),
+            material: Some(text),
+        }
     }
 
     fn completed(
@@ -860,6 +946,13 @@ impl Scenario for L4 {
                     violations.push(format!("the turn committed {commits} times"));
                 }
             }
+            Mode::Pending => {
+                violations.extend(pending_laws(&fold, &self.world, &self.tripwire, &seen));
+                let commits = committed(CommitLabel::TURN_COMMIT);
+                if commits != 1 {
+                    violations.push(format!("the turn committed {commits} times"));
+                }
+            }
             Mode::CancelWhileRunning => {
                 violations.extend(cancel_laws(&fold, &self.world, &seen));
                 // The turn ends once. A member interrupted before its body
@@ -942,7 +1035,7 @@ fn mixed_laws(
             continue;
         };
         match tool {
-            Tool::Write { .. } | Tool::Hang => {
+            Tool::Write { .. } | Tool::Hang | Tool::Defer => {
                 if entries > 1 || writes.len() > 1 {
                     violations.push(format!(
                         "F2: Once {call} was entered {entries} times, wrote {writes:?}"
@@ -993,6 +1086,68 @@ fn mixed_laws(
         }
         None if seen.requests.is_empty() => {}
         None => violations.push("the model never saw the round's results".to_owned()),
+    }
+    violations
+}
+
+/// F2 and Pending over the parking round: the parked `Once` is entered at
+/// most once and settles from its key's resolution, or `Interrupted` when
+/// its owner died before its park committed; the model's next call sees
+/// what it settled with.
+fn pending_laws(
+    fold: &RunFold,
+    world: &ExternalWorld,
+    tripwire: &Tripwire,
+    seen: &Seen,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let Some((run, calls)) = declared(fold) else {
+        return vec!["the round was never admitted".to_owned()];
+    };
+    let view = fold.round(run).unwrap();
+    if view.presented() != Some(calls.as_slice()) {
+        violations.push(format!(
+            "the presentation {:?} is not the declared order {calls:?}",
+            view.presented()
+        ));
+    }
+    for (tool, member) in Mode::Pending.tools().iter().zip(view.members()) {
+        let call = member.call();
+        let entries: usize = member
+            .starts()
+            .iter()
+            .map(|ordinal| {
+                tripwire.bodies(&AdmittedId {
+                    owner: owner(),
+                    run,
+                    ordinal: *ordinal,
+                })
+            })
+            .sum();
+        let writes = world.writes(call);
+        if entries > 1 || writes.len() > 1 {
+            violations.push(format!(
+                "F2: Once {call} was entered {entries} times, wrote {writes:?}"
+            ));
+        }
+        let answered = host_answer(call).to_string();
+        match (tool, member.outcome()) {
+            (Tool::Defer, Some(AttemptOutcome::Completed(material)))
+                if !writes.is_empty() && fold.material(material) == Some(answered.as_str()) =>
+            {
+                let seen_answer = seen.requests.iter().any(|request| {
+                    request.contains(RESULTS_MARKER) && request.contains("answered")
+                });
+                if !seen_answer && !seen.requests.is_empty() {
+                    violations.push(format!("Pending: the model never saw {call}'s resolution"));
+                }
+            }
+            (_, Some(AttemptOutcome::Interrupted)) => {}
+            (Tool::Write { .. }, Some(AttemptOutcome::Completed(_))) if writes.len() == 1 => {}
+            (_, other) => violations.push(format!(
+                "Pending: {call} settled {other:?} after writing {writes:?}"
+            )),
+        }
     }
     violations
 }
@@ -1106,6 +1261,24 @@ async fn a_cancel_while_a_member_runs_ends_the_round_and_the_turn() {
     prove(
         Mode::CancelWhileRunning,
         &[CommitLabel::MODEL_DONE, CommitLabel::TURN_CANCEL],
+    )
+    .await;
+}
+
+/// A turn whose model calls a tool that parks on its completion wait, beside
+/// a quick write: the parked `Once` is entered at most once, its key's
+/// resolution settles it, and the model's next call sees that resolution,
+/// at every commit label of the turn and its round.
+#[tokio::test]
+async fn a_parked_member_settles_from_its_key_at_every_label() {
+    prove(
+        Mode::Pending,
+        &[
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::TURN_COMMIT,
+        ],
     )
     .await;
 }

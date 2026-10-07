@@ -264,6 +264,13 @@ pub fn outcomes_to_inject(
                 "the snapshot's operation {operation:?} was admitted without starting"
             )));
         }
+        // A VM operation is admitted with no completion wait, so it never
+        // parks.
+        Recovery::Waiting(_) => {
+            return Err(QuietPointRefusal(format!(
+                "the snapshot's operation {operation:?} parked without a completion wait"
+            )));
+        }
     };
     Ok(Some((operation, recovered)))
 }
@@ -551,6 +558,9 @@ impl DurableSnapshotStore {
             }
             Recovery::RetryDue { .. } | Recovery::NotStarted => Err(QuietPointRefusal(format!(
                 "the snapshot's operation {operation:?} was admitted without starting"
+            ))),
+            Recovery::Waiting(_) => Err(QuietPointRefusal(format!(
+                "the snapshot's operation {operation:?} parked without a completion wait"
             ))),
         }
     }

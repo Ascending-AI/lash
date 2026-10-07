@@ -7,19 +7,10 @@ use serde::{Deserialize, Serialize};
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AwaitEventWaitIdentity {
-    /// The completion of one tool call, named by its lash identity within
-    /// the wait's execution scope: two calls that share a provider id never
-    /// share a completion (ADR 0117 §6).
-    ToolCompletion {
-        tool_call_id: lash_sansio::ToolCallId,
-    },
     ProcessSignal {
         process_id: ProcessId,
         signal_name: String,
         ordinal: u64,
-    },
-    Custom {
-        key: String,
     },
     /// Reserved cancel signal of a host plugin task a session command runs
     /// (FIG-4391), under the command's own session-operation scope. Only a host's
@@ -28,10 +19,6 @@ pub enum AwaitEventWaitIdentity {
     SessionCommandCancelSignal,
 }
 impl AwaitEventWaitIdentity {
-    pub fn tool_completion(tool_call_id: lash_sansio::ToolCallId) -> Self {
-        Self::ToolCompletion { tool_call_id }
-    }
-
     pub fn process_signal(
         process_id: impl Into<ProcessId>,
         signal_name: impl Into<String>,
@@ -46,14 +33,12 @@ impl AwaitEventWaitIdentity {
 
     pub fn validate(&self) -> Result<(), RuntimeError> {
         let invalid = match self {
-            Self::ToolCompletion { .. } => false,
             Self::ProcessSignal {
                 signal_name,
                 ordinal,
                 ..
             } => signal_name.trim().is_empty() || *ordinal == 0,
             Self::SessionCommandCancelSignal => false,
-            Self::Custom { key } => key.trim().is_empty(),
         };
         if invalid {
             return Err(RuntimeError::new(

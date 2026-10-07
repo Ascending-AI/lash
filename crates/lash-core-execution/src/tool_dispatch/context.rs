@@ -252,37 +252,9 @@ pub struct ToolDispatchOutcome {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct PendingToolDispatchOutcome {
-    /// The parked call's identity.
-    pub call_id: lash_sansio::ToolCallId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_call_id: Option<String>,
-    pub tool_name: String,
-    pub args: serde_json::Value,
-    pub key: crate::AwaitEventKey,
-    pub pending: crate::PendingCompletion,
-    /// The intent identity the attempt that parked derives for index 0,
-    /// from the admitted call: its session, execution scope, `ToolCallId`
-    /// and the attempt's own emission. A declared start launches only under
-    /// exactly this identity (ADR 0116 §3.1); it is never read off the
-    /// declaration.
-    pub declaring_identity: crate::ToolIntentIdentity,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attempts: Vec<lash_trace::TraceRetryAttempt>,
-    /// Captures collected from the attempts that ran before this call parked,
-    /// carried across the park so the journaled pending row keeps them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub captures: Vec<crate::runtime::ToolAttemptCapture>,
-    /// Trigger receipts emitted before this call parked, carried likewise.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolCallLaunch {
     Done(Box<ToolDispatchOutcome>),
-    Pending(Box<PendingToolDispatchOutcome>),
     ControllerAborted(crate::RuntimeEffectControllerError),
 }
 

@@ -68,7 +68,7 @@ impl ApprovalDecision {
 #[derive(Clone, Debug)]
 pub(crate) struct DecidedApproval {
     pub key: String,
-    pub completion_key: lash::AwaitEventKey,
+    pub completion_key: lash::durable::PinnedKey,
     pub decision: ApprovalDecision,
     pub tool: String,
     pub arguments: Value,
@@ -83,8 +83,8 @@ pub(crate) enum ApprovalError {
     NotPending(String),
     #[error("approval ledger failed: {0}")]
     Database(#[from] rusqlite::Error),
-    #[error("approval completion key is invalid: {0}")]
-    Key(#[from] serde_json::Error),
+    #[error("approval arguments do not encode: {0}")]
+    Arguments(#[from] serde_json::Error),
 }
 
 impl WorkbenchApprovals {
@@ -102,8 +102,10 @@ impl WorkbenchApprovals {
             "PRAGMA journal_mode = WAL;
              PRAGMA busy_timeout = 15000;
              CREATE TABLE IF NOT EXISTS approval_waits (
+               -- The approval's id: the call that waits on it.
                key_id TEXT PRIMARY KEY,
-               completion_key_json TEXT NOT NULL,
+               -- The host key that resolves the call's completion wait.
+               completion_key TEXT NOT NULL,
                tool_name TEXT NOT NULL,
                arguments_json TEXT NOT NULL,
                session_id TEXT NOT NULL,
@@ -130,7 +132,8 @@ impl WorkbenchApprovals {
 
     fn record(
         &self,
-        key: &lash::AwaitEventKey,
+        call_id: &str,
+        key: &lash::durable::PinnedKey,
         args: &Value,
         session_id: &SessionId,
     ) -> Result<(), ApprovalError> {
@@ -140,13 +143,13 @@ impl WorkbenchApprovals {
             .map_err(|_| ApprovalError::Poisoned)?;
         connection.execute(
             "INSERT INTO approval_waits (
-               key_id, completion_key_json, tool_name, arguments_json,
+               key_id, completion_key, tool_name, arguments_json,
                session_id, requested_at_ms, decision, decided_at_ms
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL)
              ON CONFLICT(key_id) DO NOTHING",
             params![
-                key.key_id,
-                serde_json::to_string(key)?,
+                call_id,
+                key.as_str(),
                 APPROVAL_TOOL_NAME,
                 serde_json::to_string(args)?,
                 session_id.as_str(),
@@ -163,8 +166,7 @@ impl WorkbenchApprovals {
             .lock()
             .map_err(|_| ApprovalError::Poisoned)?;
         let mut statement = connection.prepare(
-            "SELECT key_id, tool_name, arguments_json, session_id, requested_at_ms,
-                    completion_key_json
+            "SELECT key_id, tool_name, arguments_json, session_id, requested_at_ms
              FROM approval_waits
              WHERE decision IS NULL
              ORDER BY requested_at_ms, key_id",
@@ -172,7 +174,6 @@ impl WorkbenchApprovals {
         let rows = statement.query_map([], |row| {
             let requested_at_ms: i64 = row.get(4)?;
             let arguments_json: String = row.get(2)?;
-            let completion_key_json: String = row.get(5)?;
             let corrupt = |len: usize, error: serde_json::Error| {
                 rusqlite::Error::FromSqlConversionFailure(
                     len,
@@ -180,16 +181,10 @@ impl WorkbenchApprovals {
                     Box::new(error),
                 )
             };
-            let completion_key: lash::AwaitEventKey = serde_json::from_str(&completion_key_json)
-                .map_err(|error| corrupt(completion_key_json.len(), error))?;
-            let call_id = match completion_key.wait {
-                lash::AwaitEventWaitIdentity::ToolCompletion { tool_call_id } => {
-                    Some(tool_call_id.to_string())
-                }
-                _ => None,
-            };
+            let key: String = row.get(0)?;
+            let call_id = Some(key.clone());
             Ok(PendingApproval {
-                key: row.get(0)?,
+                key,
                 tool: row.get(1)?,
                 call_id,
                 arguments: serde_json::from_str(&arguments_json)
@@ -205,21 +200,21 @@ impl WorkbenchApprovals {
     pub(crate) fn completion_key(
         &self,
         key_id: &str,
-    ) -> Result<lash::AwaitEventKey, ApprovalError> {
+    ) -> Result<lash::durable::PinnedKey, ApprovalError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| ApprovalError::Poisoned)?;
         let serialized = connection
             .query_row(
-                "SELECT completion_key_json FROM approval_waits
+                "SELECT completion_key FROM approval_waits
                  WHERE key_id = ?1 AND decision IS NULL",
                 [key_id],
                 |row| row.get::<_, String>(0),
             )
             .optional()?
             .ok_or_else(|| ApprovalError::NotPending(key_id.to_string()))?;
-        Ok(serde_json::from_str(&serialized)?)
+        Ok(lash::durable::PinnedKey::new(serialized))
     }
 
     pub(crate) fn mark_decided(
@@ -256,7 +251,7 @@ impl WorkbenchApprovals {
             .lock()
             .map_err(|_| ApprovalError::Poisoned)?;
         let mut statement = connection.prepare(
-            "SELECT key_id, completion_key_json, decision, tool_name,
+            "SELECT key_id, completion_key, decision, tool_name,
                     arguments_json, session_id
              FROM approval_waits
              WHERE decision IS NOT NULL
@@ -264,7 +259,7 @@ impl WorkbenchApprovals {
         )?;
         let rows = statement.query_map([], |row| {
             let key_id: String = row.get(0)?;
-            let completion_key_json: String = row.get(1)?;
+            let completion_key: String = row.get(1)?;
             let decision_stored: String = row.get(2)?;
             let arguments_json: String = row.get(4)?;
             let corrupt = |error: serde_json::Error| {
@@ -283,7 +278,7 @@ impl WorkbenchApprovals {
             })?;
             Ok(DecidedApproval {
                 key: key_id,
-                completion_key: serde_json::from_str(&completion_key_json).map_err(corrupt)?,
+                completion_key: lash::durable::PinnedKey::new(completion_key),
                 decision,
                 tool: row.get(3)?,
                 arguments: serde_json::from_str(&arguments_json).map_err(corrupt)?,
@@ -332,7 +327,7 @@ impl ApprovalToolProvider {
             ToolBinding::new(["ops"], "apply_change").with_authority_type("Ops"),
         )
         // The attempt parks on a human decision, so admission records that it
-        // may defer and the runtime pre-derives the completion key the body
+        // may defer and its round pins the completion wait whose key the body
         // reads from its `AttemptContext`.
         .with_declaration(lash::tools::ToolDeclaration::deferring())
     }
@@ -364,7 +359,12 @@ impl ToolProvider for ApprovalToolProvider {
                 Ok(session_id) => session_id.clone(),
                 Err(error) => return ToolOutcome::err_fmt(error),
             };
-            if let Err(error) = self.approvals.record(&key, call.args, &session_id) {
+            if let Err(error) = self.approvals.record(
+                call.context.call_id().as_str(),
+                &key,
+                call.args,
+                &session_id,
+            ) {
                 return ToolOutcome::err_fmt(error);
             }
             ToolOutcome::pending(PendingCompletion::new())
@@ -417,7 +417,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO approval_waits (
-                   key_id, completion_key_json, tool_name, arguments_json,
+                   key_id, completion_key, tool_name, arguments_json,
                    session_id, requested_at_ms, decision, decided_at_ms
                  ) VALUES ('k1', '{}', 'tool', '{}', 's', 0, 'approved', NULL)",
                 [],
@@ -426,7 +426,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO approval_waits (
-                   key_id, completion_key_json, tool_name, arguments_json,
+                   key_id, completion_key, tool_name, arguments_json,
                    session_id, requested_at_ms, decision, decided_at_ms
                  ) VALUES ('k2', '{}', 'tool', '{}', 's', 0, NULL, 1)",
                 [],
@@ -435,7 +435,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO approval_waits (
-                   key_id, completion_key_json, tool_name, arguments_json,
+                   key_id, completion_key, tool_name, arguments_json,
                    session_id, requested_at_ms, decision, decided_at_ms
                  ) VALUES ('k3', '{}', 'tool', '{}', 's', 0, 'shrugged', 1)",
                 [],

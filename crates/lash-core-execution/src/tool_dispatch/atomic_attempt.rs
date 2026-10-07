@@ -23,7 +23,6 @@ impl<'run> AtomicToolAttempt<'run> {
         context: &ToolDispatchContext<'run>,
         tool_context: ToolContext<'run>,
         invocation: crate::RuntimeInvocation,
-        completion_key: Option<crate::AwaitEventKey>,
         effect_attempt: Option<crate::EffectAttempt>,
     ) -> Self {
         let mut dispatch = context.clone();
@@ -39,7 +38,6 @@ impl<'run> AtomicToolAttempt<'run> {
         let mut tool_context =
             tool_context.with_attempt_dispatch(Arc::clone(&dispatch), invocation);
         tool_context.completion = crate::tool_provider::ToolCompletionState::default();
-        tool_context.install_prederived_completion_key(completion_key);
         Self {
             dispatch,
             tool_context,
@@ -84,7 +82,6 @@ impl<'run> AtomicToolAttempt<'run> {
                 record.provider_call_id = ids.provider_call_id;
                 crate::ToolAttemptLaunch::Done { record, intents }
             }
-            pending @ crate::ToolAttemptLaunch::Pending { .. } => pending,
         };
         let triggers = context.trigger_outcomes.drain();
         let capture = crate::runtime::ToolAttemptCapture {
@@ -189,10 +186,10 @@ impl<'grant> AttemptAuthority<'grant> {
 ///
 /// The declaration is dropped from the returned policy: it has been executed,
 /// and nothing downstream may replay it out of this seam.
-async fn announce_pending_park(
+pub(super) async fn announce_pending_park(
     context: &ToolContext<'_>,
     mut pending: crate::PendingCompletion,
-) -> Result<crate::PendingCompletion, ToolOutcome> {
+) -> Result<crate::PendingCompletion, Box<crate::ToolFailure>> {
     let Some(announcement) = pending.announcement.take() else {
         return Ok(pending);
     };
@@ -201,11 +198,11 @@ async fn announce_pending_park(
         .await
     {
         Ok(_) => Ok(pending),
-        Err(err) => Err(runtime_failure(
+        Err(err) => Err(Box::new(crate::ToolFailure::runtime(
             ToolFailureClass::Internal,
             "pending_tool_announcement_failed",
             format!("declared park announcement could not be appended: {err}"),
-        )),
+        ))),
     }
 }
 
@@ -364,7 +361,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
             }
         }
         crate::ToolAttemptOutcome::HostFailed(error) => return Err(*error),
-        crate::ToolAttemptOutcome::Pending(pending) => {
+        crate::ToolAttemptOutcome::Pending(_) => {
             // An undeclared Deferred never parks: no key was reserved for it,
             // and the refusal names the declaration rather than the key.
             if let Err(refusal) = declaration.admits(crate::OutcomeShape::Deferred) {
@@ -373,39 +370,23 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                     normalized_outcome(context, &ids, tool_name, args, refused).await,
                 ));
             }
-            let key =
-                match completion_context.take_completion_key() {
-                    Some(key) => key,
-                    None => {
-                        return Ok(attempt_done(normalized_outcome(
-                        context,
-                        &ids,
-                        tool_name,
-                        args,
-                        runtime_failure(
-                            ToolFailureClass::Internal,
-                            "pending_tool_missing_completion_key",
-                            "tool returned Pending without first obtaining a completion key",
-                        )).await));
-                    }
-                };
-            let pending = match announce_pending_park(&completion_context, pending).await {
-                Ok(pending) => pending,
-                Err(failure) => {
-                    return Ok(attempt_done(
-                        normalized_outcome(context, &ids, tool_name, args, failure).await,
-                    ));
-                }
-            };
-            return hold_declared_execution_environments(
-                context,
-                crate::ToolAttemptLaunch::Pending {
-                    key: Box::new(key),
-                    pending,
-                },
-                &completion_context.execution_env_spec,
-            )
-            .await;
+            // A call that runs outside a turn's tool round has no completion
+            // wait pinned for it, so it never parks: it took no key, and its
+            // Pending is refused as the missing key it is.
+            return Ok(attempt_done(
+                normalized_outcome(
+                    context,
+                    &ids,
+                    tool_name,
+                    args,
+                    runtime_failure(
+                        ToolFailureClass::Internal,
+                        "pending_tool_missing_completion_key",
+                        "tool returned Pending without first obtaining a completion key",
+                    ),
+                )
+                .await,
+            ));
         }
     };
 
@@ -457,12 +438,6 @@ async fn hold_declared_execution_environments(
                 .collect()
         }
         crate::ToolAttemptLaunch::Done { .. } => Vec::new(),
-        crate::ToolAttemptLaunch::Pending { pending, .. } => match &pending.resolved_by {
-            Some(crate::PendingResolver::DeclaredStart(start)) => {
-                start.start().declaration.env_ref.iter().cloned().collect()
-            }
-            _ => Default::default(),
-        },
     };
     env_refs.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
     env_refs.dedup();

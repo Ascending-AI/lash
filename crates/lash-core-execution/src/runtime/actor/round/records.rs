@@ -9,8 +9,8 @@ use lash_durable::{DomainWrite, DurableInstant};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use serde::{Deserialize, Serialize};
 
-use super::ExecutionDraft;
-use crate::runtime::actor::waits::WaitDeadline;
+use super::{ExecutionDraft, PinnedWait};
+use crate::runtime::actor::waits::{KeyVersion, WaitDeadline, WaitId};
 use crate::{ToolCallId, ToolId};
 
 /// The admission's ordinal.
@@ -40,6 +40,10 @@ pub(super) struct AdmittedMember {
     limit_expires_at_ms: u64,
     limit_max_slice_ms: u64,
     wait_deadline_ms: Option<i64>,
+    /// The completion wait pinned with the admission, by its id's hex.
+    wait_id: Option<String>,
+    /// The secret version that wait's key was minted under.
+    wait_key_version: Option<u16>,
 }
 
 impl AdmittedMember {
@@ -52,12 +56,26 @@ impl AdmittedMember {
             limit_expires_at_ms: draft.limit().expires_at,
             limit_max_slice_ms: millis(draft.limit().max_slice),
             wait_deadline_ms: draft.wait().map(|wait| wait.at().0),
+            wait_id: draft.pinned_wait().map(|pinned| pinned.id.to_hex()),
+            wait_key_version: draft.pinned_wait().map(|pinned| pinned.version.0),
         }
     }
 
     /// The draft the admission pinned, exactly: never refreshed.
-    pub(super) fn draft(&self) -> ExecutionDraft {
-        ExecutionDraft::new(
+    ///
+    /// # Errors
+    ///
+    /// A pinned wait whose id or key version does not decode.
+    pub(super) fn draft(&self) -> Result<ExecutionDraft, &'static str> {
+        let pinned = match (self.wait_id.as_deref(), self.wait_key_version) {
+            (None, None) => None,
+            (Some(id), Some(version)) => Some(PinnedWait {
+                id: WaitId::parse_hex(id).ok_or("a pinned wait id is not a wait id")?,
+                version: KeyVersion(version),
+            }),
+            _ => return Err("a pinned wait needs both its id and its key version"),
+        };
+        Ok(ExecutionDraft::new(
             self.call.clone(),
             ToolId::new(self.tool.clone()),
             self.request.clone(),
@@ -69,6 +87,7 @@ impl AdmittedMember {
             self.wait_deadline_ms
                 .map(|at| WaitDeadline::at_instant(DurableInstant(at))),
         )
+        .with_pinned_wait(pinned))
     }
 }
 

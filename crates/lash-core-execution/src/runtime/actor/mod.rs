@@ -22,7 +22,6 @@
 //! | [`projection`] | L7p |
 
 mod await_event_legacy;
-pub use await_event_legacy::completion_host_key;
 mod core;
 pub mod ingress;
 pub mod journal;

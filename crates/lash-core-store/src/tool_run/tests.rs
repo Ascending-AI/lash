@@ -42,15 +42,6 @@ fn run_material(role: MaterialRole) -> MaterialRef {
     }
 }
 
-fn source_key(call_id: &ToolCallId) -> AwaitEventKey {
-    AwaitEventKey {
-        scope: ExecutionScope::turn("session-1", "turn-1"),
-        wait: AwaitEventWaitIdentity::tool_completion(call_id.clone()),
-        key_id: "completion-1".into(),
-        signature: "signature-1".into(),
-    }
-}
-
 fn binding() -> AdmittedBinding {
     AdmittedBinding {
         executable: callback("tools", "tool_provider:0"),
@@ -478,114 +469,11 @@ fn material_references_refuse_typed_and_retention_keeps_identity() {
     }
 }
 
-#[test]
-fn a_source_seals_once_and_only_its_authority_resolves_it() {
-    let call_id = ToolCallId::fixture("deferred");
-    let process_id = ProcessId::fixture("worker");
-    let descriptor = SourceDescriptor {
-        source: source_key(&call_id),
-        call_id: call_id.clone(),
-        owner: opener(),
-        resolver: revision("tools"),
-        authority: SourceAuthority::ProcessTerminal {
-            process_id: process_id.clone(),
-        },
-        cancel: ExternalCancelPolicy::CancelExternalWork,
-    };
-    let source_output = MaterialRef {
-        owner: MaterialOwner::Source {
-            source: source_key(&call_id),
-        },
-        ..run_material(MaterialRole::AttemptOutput)
-    };
-    let resolved = SourceSeal::Resolved {
-        result: Box::new(source_output.retained(tool_material("bundle-1"))),
-    };
-    let worker = SealWriter::Process {
-        process_id: process_id.clone(),
-    };
-    assert_eq!(
-        descriptor.seal(None, &SealWriter::External, resolved.clone()),
-        Err(SealRefusal::WrongAuthority)
-    );
-    assert_eq!(
-        descriptor.seal(
-            None,
-            &SealWriter::Owner {
-                opener: EffectOpener::turn("session-2", "turn-1")
-            },
-            SourceSeal::Cancelled
-        ),
-        Err(SealRefusal::WrongAuthority)
-    );
-    assert_eq!(
-        descriptor.seal(
-            None,
-            &worker,
-            SourceSeal::Resolved {
-                result: Box::new(run_material(MaterialRole::AttemptOutput))
-            }
-        ),
-        Err(SealRefusal::ResultNotOwned)
-    );
-    assert_eq!(
-        descriptor.seal(
-            None,
-            &worker,
-            SourceSeal::Resolved {
-                result: Box::new(source_output)
-            }
-        ),
-        Err(SealRefusal::UnretainedResult),
-        "a seal publishes only material its source already retained"
-    );
-    assert_eq!(
-        descriptor.seal(None, &worker, resolved.clone()),
-        Ok(SealOutcome::Sealed {
-            seal: resolved.clone()
-        })
-    );
-    let cancelled = descriptor
-        .seal(
-            None,
-            &SealWriter::Owner { opener: opener() },
-            SourceSeal::Cancelled,
-        )
-        .unwrap();
-    assert_eq!(
-        cancelled,
-        SealOutcome::Sealed {
-            seal: SourceSeal::Cancelled
-        }
-    );
-    assert_eq!(
-        descriptor.seal(Some(&SourceSeal::Cancelled), &worker, resolved.clone()),
-        Ok(SealOutcome::AlreadySealed {
-            seal: SourceSeal::Cancelled
-        }),
-        "a late resolution cannot revive cancelled work"
-    );
-    assert_eq!(
-        serde_json::to_value(&cancelled).unwrap(),
-        json!({"outcome": "sealed", "seal": {"seal": "cancelled"}})
-    );
-    for timed_out in [json!({"seal": "timed_out"}), json!({"seal": "timeout"})] {
-        assert!(serde_json::from_value::<SourceSeal>(timed_out).is_err());
-    }
-}
-
-fn tool_material(artifact_ref: &str) -> ArtifactName {
-    ArtifactName {
-        store: ArtifactStoreId::ToolMaterial,
-        artifact_ref: artifact_ref.into(),
-    }
-}
-
 fn source_holder() -> MaterialHolder {
     MaterialHolder::Source {
         source: AwaitEventKey {
             scope: ExecutionScope::turn("s", "t"),
-            wait: AwaitEventWaitIdentity::tool_completion(ToolCallId::fixture("deferred")),
+            wait: AwaitEventWaitIdentity::SessionCommandCancelSignal,
             key_id: "key".into(),
             signature: "signature".into(),
         },

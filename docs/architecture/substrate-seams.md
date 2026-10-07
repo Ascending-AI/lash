@@ -40,7 +40,7 @@ L13 = FIG-5193.
 - **S9:** assembly is `Backend::assemble(BackendParts)` in `lash-core-execution`, with `DurableBuildError` beside it (`MissingCompletionSecrets`, `DuplicateEngine`, `DuplicateProvider`, `InvalidConfig`), re-exported through `lash-core`. The facade's `DurableBackendBuilder::build` is a thin wrapper over it. `Backend::durable` takes the store set's durable store once, on first use, so a test store set that serves none is never asked.
 - **S1:** the journal-era scaffolding that surviving code still calls (`DriveFrontier`, the command journal guard, the owner-step gate) moved from the deleted scoped controller to `runtime/actor/journal.rs`. It is documented for deletion by L4 and L7.
 - **S1:** the dispatch from a command to its group method is `turn_driver::issue::issue_effect`, an explicit match in `lash-core`; each other caller names its group method directly.
-- **S1:** `CompletionKeyPreparation`, the one survivor of `lash-core-effect`'s `await_event_resolver.rs`, moved to `completion_key.rs`.
+- **S1:** `CompletionKeyPreparation`, the one survivor of `lash-core-effect`'s `await_event_resolver.rs`, moved to `completion_key.rs`; L4 (FIG-5174) deleted it with the tool completion keys' port to L5's waits.
 - **S4:** `ExecutionDraft.limit` is L3a's (FIG-5171) `lash_sansio::ExecutionLimit`; I0 defines no copy.
 - **S9, facade:** `DurableBackendBuilder::new` keeps the `Arc<dyn StoreSet>` that L10a's skeleton landed with, because every host already hands it one. `config` takes `DurableSettings` (the unvalidated parameters) rather than a `DurableConfig`, so `build` is where they are validated and `InvalidConfig` is reachable. `projection_provider` exists with the `rlm` feature, which brings `lashlang`; `build` registers the providers into a `lashlang::ProjectionCatalog` (whose `register` is L7p's) and maps a refused registration, or a host provider of the lash-provided `history` type, to `DuplicateProvider`. The facade re-exports the build vocabulary from `lash::durable` (`CompletionKeySecrets`, `DurableBuildError`, `DurableConfig`, `DurableSettings`, `DurableStore`, `KeyVersion`, `SecretBytes`, `SecretsRefusal`) and the engine state machine from `lash::plugins` (`EngineAction`, `EngineEvent`, `EngineState`, `EngineStateFormat`, `HostWaitKind`, `KeyName`, `StepName`, `StepRequest`), so an external engine and store set can be written against the facade alone.
 - **S9, signals (L8, FIG-5178):** `StoreSet` gained `durable_signals() -> Option<Arc<dyn lash_durable::Signals>>`, agreed with the orchestrator. PostgreSQL answers `PostgresSignals` (after-commit `pg_notify` wake hints, a listener per node that holds the boot's session advisory lock, liveness probes and the reap of a boot whose lock is released); SQLite and the test store sets answer `None`, because one node per database keeps its wakes in process. `serve` passes it to `Runner::with_signals` when `DurableConfig`'s notifier is `AfterCommit`, and every mailbox commit through `Backend::commit_mail` hands what it woke to the shared `Hints`, which hint in process or publish.
@@ -104,7 +104,7 @@ Code the fold made unreachable, or nearly, that an owning lane is about to rewri
 
 - **L4:** the journal guard and owner-step gate in `runtime/actor/journal.rs`. (L4 deleted the generation-cut plumbing and the Run transfer.)
 - **L6 and L7b:** the `with_turn_hand_over(false)` plumbing (4 sites) and segment handover as process state; the process run-context builder (`process_runners/mod.rs`) and the capability items only it read (`session_runtime_store`, `execution_owner`, `turn_phase_probe`), kept under `#[expect(dead_code)]` for the advance-driven engine drive; `ProcessEngineRunContext` without effect accessors, and the lashlang run path (`run_lashlang_process`, which takes the context it will run under).
-- **L3, L4 and L6:** the await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, `prepare_completion_key`, `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`, and `completion_host_key`), kept by L5 in `runtime/actor/await_event_legacy.rs`. Each reaches `port_pending`, whose arm names the lane by wait identity: the plugin task cancel signal L3 (turn control's waits are deleted: a turn cancel is session mail), tool completion and custom L4, process signals L6. They are deleted with their callers' ports; no wait row serves a recomputable key.
+- **L3 and L6:** the await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, and `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`), kept by L5 in `runtime/actor/await_event_legacy.rs`. Each reaches `port_pending`, whose arm names the lane by wait identity: the plugin task cancel signal L3 (turn control's waits are deleted: a turn cancel is session mail), process signals L6. They are deleted with their callers' ports; no wait row serves a recomputable key. L4 (FIG-5174) deleted the tool completion and custom identities with `prepare_completion_key` and `completion_host_key`: a member that may park has its `tool_completion` wait pinned by its round's admission, its body re-derives the same `wk1` key with `waits::host_key`, and the host resolves it through `resolve_host`.
 - At the L10a rebase I0 ported every file that still named the deleted seam, deleted `replay_read_gate.rs` (its subject was replay paths) and the pending list, and dropped Rule 7's engine-crate exclusion; L10a itself removed `RecordedJournal` and `read_recorded_journal`.
 
 ## Table ownership
@@ -129,7 +129,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 
 Generated from the tree with `scripts/check-substrate-todos.py`'s scanner; each lane removes its rows as it fills them.
 
-Counts: L3 1, L4 1, L6 1 (3 in all).
+Counts: L3 1, L6 1 (2 in all).
 
 ### V0 (FIG-5170)
 
@@ -140,12 +140,6 @@ None: V0 filled its stubs. It re-tagged the journal-era ones its path never reac
 | Where | Function | Stub |
 |---|---|---|
 | `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the plugin task cancel signal's port to session mail |
-
-### L4 (FIG-5174)
-
-| Where | Function | Stub |
-|---|---|---|
-| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the tool completion keys' port to L5's pin, race and resolve_host (fig-5174-pending) |
 
 ### L6 (FIG-5175)
 
