@@ -1,28 +1,41 @@
-//! The change feeds' clocks, taken at a transaction's tail (FIG-5275).
+//! The change feeds' sequencing, after commit (FIG-5276).
 //!
 //! `turns_changed_since` and the process feed hand out cursors over a
-//! sequence that must never skip a lower number that commits late. Each feed
-//! keeps that law with one singleton clock row: a transaction that records a
-//! change bumps the row, and the row lock it takes orders the transactions
-//! that bump it by sequence, from the bump to `COMMIT`. The lock is
-//! fleet-wide, so where the bump sits decides how long every other writer of
-//! the feed waits.
+//! sequence that must never skip a lower number that commits late. A writer
+//! therefore never takes a feed sequence: it stages its change, which takes
+//! the next value of the feed's staging sequence (a PostgreSQL `SEQUENCE`,
+//! no row lock) and leaves its feed sequence empty. A writer holds nothing
+//! another writer waits on, so commits across the fleet no longer queue on
+//! the feed's clock.
 //!
-//! A guarded transaction therefore records its changes here as it goes, and
-//! [`ChangeFeeds::flush`] writes them as the transaction's last statements,
-//! right before `COMMIT`: each bumps its clock and writes the row it
-//! sequences in one statement. The clock is held for that statement and the
-//! `COMMIT` only, and the feed's ordering is the one it always had: no two
-//! transactions hold a clock at once, and the one that bumps first commits
-//! first. The turn clock is taken before the process clock, so two
-//! transactions that record both never wait on each other in a cycle.
+//! A sequencing transaction assigns the feed sequences. Under the clock row's
+//! write lock it gives every committed, staged change the clock's next
+//! numbers, in staging order, and moves the clock past them. Only committed
+//! changes are visible to it, and its own commit publishes the whole batch at
+//! once, so every change a reader can see has a sequence below every change
+//! still to be sequenced: a cursor never passes a change that appears later,
+//! and a change is read once. Two sequencing transactions are ordered by the
+//! clock lock, and the second's statements read snapshots taken after the
+//! first committed.
+//!
+//! The feed's order is staging order within a batch and batch order across
+//! batches. Both agree with commit precedence: a change whose transaction
+//! committed before another's began comes first.
+//!
+//! Readers sequence what is pending before they read, so a quiet feed costs a
+//! reader one probe. Maintenance that judges changes by their sequence
+//! (receipt retention, tombstone compaction) sequences first under the lock
+//! it takes anyway.
 
-use sqlx::PgConnection;
+use lash_core_execution::StoreError;
+use sqlx::{PgConnection, PgPool};
 
+use crate::guarded_tx::WriterFence;
 use crate::process_sql::process_sql;
 use crate::session_sql::session_sql;
+use crate::store_sqlx_error;
 
-/// A turn's commit receipt, sequenced at the tail.
+/// A turn's commit receipt, staged on the turn feed.
 #[derive(Debug)]
 pub(crate) struct TurnReceipt {
     pub(crate) session_id: String,
@@ -50,70 +63,102 @@ pub(crate) enum TurnChange {
     },
 }
 
-/// The changes one transaction recorded, not yet sequenced.
-#[derive(Debug, Default)]
-pub(crate) struct ChangeFeeds {
-    turns: Vec<TurnChange>,
-    /// Every process save, in order; a process saved twice holds the
-    /// sequence of its last save.
-    processes: Vec<String>,
-}
-
-impl ChangeFeeds {
-    pub(crate) fn record_turn(&mut self, change: TurnChange) {
-        self.turns.push(change);
-    }
-
-    pub(crate) fn record_process(&mut self, process_id: &str) {
-        self.processes.push(process_id.to_owned());
-    }
-
-    /// Write every recorded change, each with its feed's next sequence:
-    /// the transaction's last statements before `COMMIT`.
-    pub(crate) async fn flush(&mut self, tx: &mut PgConnection) -> Result<(), sqlx::Error> {
-        for change in std::mem::take(&mut self.turns) {
-            match change {
-                TurnChange::Receipt(receipt) => {
-                    sqlx::query(session_sql().turn_commits_postgres.insert_sequenced.sql())
-                        .bind(receipt.session_id)
-                        .bind(receipt.turn_id)
-                        .bind(receipt.turn_commit_hash)
-                        .bind(receipt.result_json)
-                        .bind(receipt.outcome_code)
-                        .bind(receipt.committed_at_ms)
-                        .bind(receipt.request_identity_hash)
-                        .bind(receipt.requested_node_count)
-                        .bind(receipt.identity_encoding_version)
-                        .bind(receipt.failure_evidence)
-                        .execute(crate::observed_sql::executor(&mut *tx))
-                        .await?;
-                }
-                TurnChange::SessionTerminal {
-                    session_id,
-                    fault_json,
-                    recorded_at_ms,
-                } => {
-                    sqlx::query(
-                        session_sql()
-                            .turn_commits_postgres
-                            .insert_session_terminal_sequenced
-                            .sql(),
-                    )
-                    .bind(session_id)
-                    .bind(fault_json)
-                    .bind(recorded_at_ms)
-                    .execute(crate::observed_sql::executor(&mut *tx))
-                    .await?;
-                }
-            }
-        }
-        let processes = std::mem::take(&mut self.processes);
-        if !processes.is_empty() {
-            sqlx::query(process_sql().clock_postgres.sequence_changes.sql())
-                .bind(&processes)
+/// Write `change`, staged on the turn feed.
+pub(crate) async fn stage_turn_change(
+    tx: &mut PgConnection,
+    change: TurnChange,
+) -> Result<(), sqlx::Error> {
+    let sql = &session_sql().turn_commits_postgres;
+    match change {
+        TurnChange::Receipt(receipt) => {
+            sqlx::query(sql.insert_staged.sql())
+                .bind(receipt.session_id)
+                .bind(receipt.turn_id)
+                .bind(receipt.turn_commit_hash)
+                .bind(receipt.result_json)
+                .bind(receipt.outcome_code)
+                .bind(receipt.committed_at_ms)
+                .bind(receipt.request_identity_hash)
+                .bind(receipt.requested_node_count)
+                .bind(receipt.identity_encoding_version)
+                .bind(receipt.failure_evidence)
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await?;
         }
-        Ok(())
+        TurnChange::SessionTerminal {
+            session_id,
+            fault_json,
+            recorded_at_ms,
+        } => {
+            sqlx::query(sql.insert_session_terminal_staged.sql())
+                .bind(session_id)
+                .bind(fault_json)
+                .bind(recorded_at_ms)
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await?;
+        }
     }
+    Ok(())
+}
+
+/// Lock the turn clock and sequence every committed, staged turn change, in
+/// the caller's transaction. Returns how many it sequenced.
+pub(crate) async fn sequence_turns(tx: &mut PgConnection) -> Result<i64, sqlx::Error> {
+    let sql = &session_sql().turn_commits_postgres;
+    sqlx::query(sql.lock_clock.sql())
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    sqlx::query_scalar(sql.sequence_committed.sql())
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
+        .await
+}
+
+/// Lock the process clock and sequence every committed, staged save and
+/// tombstone, in the caller's transaction. Returns how many it sequenced.
+pub(crate) async fn sequence_processes(tx: &mut PgConnection) -> Result<i64, sqlx::Error> {
+    let sql = &process_sql().clock_postgres;
+    sqlx::query(sql.lock_clock.sql())
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    sqlx::query_scalar(sql.sequence_committed.sql())
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
+        .await
+}
+
+/// Which feed a reader sequences.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Feed {
+    Turns,
+    Processes,
+}
+
+/// Sequence `feed`'s committed changes before a read, in a transaction of
+/// its own, when the probe finds any staged.
+pub(crate) async fn sequence_before_read(
+    pool: &PgPool,
+    fence: &WriterFence,
+    feed: Feed,
+) -> Result<(), StoreError> {
+    let probe = match feed {
+        Feed::Turns => session_sql().turn_commits_postgres.has_unsequenced.sql(),
+        Feed::Processes => process_sql().clock_postgres.has_unsequenced.sql(),
+    };
+    let pending: bool = sqlx::query_scalar(probe)
+        .fetch_one(pool)
+        .await
+        .map_err(store_sqlx_error)?;
+    if !pending {
+        return Ok(());
+    }
+    crate::guarded_tx::guarded(pool, fence, |tx| {
+        Box::pin(async move {
+            match feed {
+                Feed::Turns => sequence_turns(tx.as_mut()).await,
+                Feed::Processes => sequence_processes(tx.as_mut()).await,
+            }
+            .map(drop)
+            .map_err(store_sqlx_error)
+        })
+    })
+    .await
 }

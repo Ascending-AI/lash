@@ -693,11 +693,12 @@ impl PostgresStorage {
         self
     }
 
-    /// Pass every runtime commit of this storage, through any handle it
-    /// hands out, through `seam` once it recorded its turn receipt.
+    /// Pass every transaction of this storage that wrote a turn change,
+    /// through any handle it hands out, through `seam` right before its
+    /// `COMMIT`.
     #[cfg(any(test, feature = "testing"))]
-    pub fn with_after_receipt_for_testing(self, seam: testing::AfterReceipt) -> Self {
-        self.fence.install_after_receipt(seam);
+    pub fn with_before_turn_commit_for_testing(self, seam: testing::BeforeTurnCommit) -> Self {
+        self.fence.install_before_turn_commit(seam);
         self
     }
 

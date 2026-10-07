@@ -42,9 +42,9 @@
 //! first statement, with the clock and its other envelope reads
 //! ([`Locked`]); every other writer reads it as its first data statement.
 //!
-//! A transaction also sequences the change feeds it writes at its tail
-//! ([`crate::change_feed`]): a clock is bumped only by the last statements
-//! before `COMMIT`.
+//! A transaction stages the change-feed changes it writes; their feed
+//! sequences are assigned after it commits ([`crate::change_feed`]), so no
+//! writer takes a feed clock.
 
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
@@ -59,7 +59,7 @@ use lash_core_execution::store::plugin_writers::{
 use lash_core_execution::{FleetFormat, StoreError};
 use sqlx::{Acquire, PgConnection, PgPool, Postgres, Transaction};
 
-use crate::change_feed::{ChangeFeeds, TurnChange};
+use crate::change_feed::TurnChange;
 use crate::host::{RetryPolicies, RetryPolicy, TransactionPrelude};
 use crate::replayable::{Attempt, Settle, Uncommitted, XactId, commit_reconciled};
 use crate::session_sql::session_sql;
@@ -94,7 +94,7 @@ struct FenceState {
     #[cfg(any(test, feature = "testing"))]
     after_fence: std::sync::Mutex<Option<crate::testing::AfterFence>>,
     #[cfg(any(test, feature = "testing"))]
-    after_receipt: std::sync::Mutex<Option<crate::testing::AfterReceipt>>,
+    before_turn_commit: std::sync::Mutex<Option<crate::testing::BeforeTurnCommit>>,
 }
 
 impl WriterFence {
@@ -127,7 +127,7 @@ impl WriterFence {
                 #[cfg(any(test, feature = "testing"))]
                 after_fence: std::sync::Mutex::new(None),
                 #[cfg(any(test, feature = "testing"))]
-                after_receipt: std::sync::Mutex::new(None),
+                before_turn_commit: std::sync::Mutex::new(None),
             }),
         }
     }
@@ -196,18 +196,18 @@ impl WriterFence {
         self.state.after_fence.lock_recover().clone()
     }
 
-    /// Install the `AfterReceipt` seam every runtime commit of this storage
+    /// Install the `BeforeTurnCommit` seam every runtime commit of this storage
     /// passes once it recorded its turn receipt.
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn install_after_receipt(&self, seam: crate::testing::AfterReceipt) {
+    pub(crate) fn install_before_turn_commit(&self, seam: crate::testing::BeforeTurnCommit) {
         use lash_sansio::sync::MutexExt;
-        *self.state.after_receipt.lock_recover() = Some(seam);
+        *self.state.before_turn_commit.lock_recover() = Some(seam);
     }
 
     #[cfg(any(test, feature = "testing"))]
-    fn after_receipt(&self) -> Option<crate::testing::AfterReceipt> {
+    fn before_turn_commit(&self) -> Option<crate::testing::BeforeTurnCommit> {
         use lash_sansio::sync::MutexExt;
-        self.state.after_receipt.lock_recover().clone()
+        self.state.before_turn_commit.lock_recover().clone()
     }
 
     /// The fence's read, its transaction holding the fence lock: the
@@ -283,10 +283,11 @@ pub(crate) struct GuardedTx<'c> {
     /// The transaction's id, once read: what a lost `COMMIT` is reconciled
     /// by.
     xact: Option<XactId>,
-    /// The feed changes it writes at its tail, right before `COMMIT`.
-    feeds: ChangeFeeds,
+    /// Whether the transaction wrote a change of the turn feed.
     #[cfg(any(test, feature = "testing"))]
-    after_receipt: Option<crate::testing::AfterReceipt>,
+    wrote_turn_change: bool,
+    #[cfg(any(test, feature = "testing"))]
+    before_turn_commit: Option<crate::testing::BeforeTurnCommit>,
 }
 
 /// A plugin writer range the fleet record does not admit, as the store's
@@ -348,9 +349,10 @@ impl<'c> GuardedTx<'c> {
             fleet,
             finalized: fleet.version() == fence.state.writable.max(),
             xact: None,
-            feeds: ChangeFeeds::default(),
             #[cfg(any(test, feature = "testing"))]
-            after_receipt: fence.after_receipt(),
+            wrote_turn_change: false,
+            #[cfg(any(test, feature = "testing"))]
+            before_turn_commit: fence.before_turn_commit(),
         }
     }
 }
@@ -453,28 +455,34 @@ impl GuardedTx<'_> {
         read_plugin_writers(&mut self.tx).await
     }
 
-    /// Pass the `AfterReceipt` seam: a runtime commit recorded its receipt.
-    #[cfg(any(test, feature = "testing"))]
-    pub(crate) async fn pass_after_receipt(&self) {
-        if let Some(seam) = &self.after_receipt {
+    /// Pass the `BeforeTurnCommit` seam, right before `COMMIT`, when the
+    /// transaction wrote a turn change.
+    async fn pass_before_turn_commit(&self) {
+        #[cfg(any(test, feature = "testing"))]
+        if self.wrote_turn_change
+            && let Some(seam) = &self.before_turn_commit
+        {
             seam.pass().await;
         }
     }
 
-    /// Record a change of the turn feed, sequenced at the tail.
-    pub(crate) fn record_turn_change(&mut self, change: TurnChange) {
-        self.feeds.record_turn(change);
+    /// Write a change of the turn feed, staged: it is sequenced after this
+    /// transaction commits.
+    pub(crate) async fn stage_turn_change(
+        &mut self,
+        change: TurnChange,
+    ) -> Result<(), sqlx::Error> {
+        crate::change_feed::stage_turn_change(&mut self.tx, change).await?;
+        #[cfg(any(test, feature = "testing"))]
+        {
+            self.wrote_turn_change = true;
+        }
+        Ok(())
     }
 
-    /// Record a save of `process_id`, sequenced on the process feed at the
-    /// tail.
-    pub(crate) fn record_process_change(&mut self, process_id: &str) {
-        self.feeds.record_process(process_id);
-    }
-
-    /// Sequence the recorded feed changes, then `COMMIT`.
-    pub(crate) async fn commit(mut self) -> Result<(), sqlx::Error> {
-        self.feeds.flush(&mut self.tx).await?;
+    /// `COMMIT`.
+    pub(crate) async fn commit(self) -> Result<(), sqlx::Error> {
+        self.pass_before_turn_commit().await;
         crate::observed_sql::control("COMMIT", self.tx.commit()).await
     }
 
@@ -486,8 +494,7 @@ impl GuardedTx<'_> {
 
     /// `COMMIT`, reconciling a lost answer from the transaction's recorded
     /// outcome ([`commit_reconciled`]). The transaction's id is read first
-    /// when it is not yet known, and the recorded feed changes are
-    /// sequenced last.
+    /// when it is not yet known.
     pub(crate) async fn commit_reconciled(
         mut self,
         settle: &Settle<'_>,
@@ -498,10 +505,7 @@ impl GuardedTx<'_> {
                 .await
                 .map_err(Uncommitted::RolledBack)?,
         };
-        self.feeds
-            .flush(&mut self.tx)
-            .await
-            .map_err(Uncommitted::RolledBack)?;
+        self.pass_before_turn_commit().await;
         commit_reconciled(self.tx, &xact, settle).await
     }
 
@@ -637,7 +641,7 @@ pub(crate) async fn begin_migration<'c>(
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
-    let fleet = if recordable {
+    let recorded = if recordable {
         sqlx::query(
             crate::connection_sql::connection_sql()
                 .lock_xact_fleet_fence_shared
@@ -646,10 +650,15 @@ pub(crate) async fn begin_migration<'c>(
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(|error| fence.refused(store_sqlx_error(error)))?;
-        let recorded = fence.read(&mut tx).await?;
-        fence.admit(recorded).await?
+        fence.read(&mut tx).await?
     } else {
-        FleetFormat::current()
+        None
+    };
+    // A catalog that records no `F` is the one migration seeds: unlike a
+    // writer's fence, an absent row is not a refusal here.
+    let fleet = match recorded {
+        Some(recorded) => fence.admit(Some(recorded)).await?,
+        None => FleetFormat::current(),
     };
     Ok(GuardedTx::admitted(tx, fleet, fence))
 }

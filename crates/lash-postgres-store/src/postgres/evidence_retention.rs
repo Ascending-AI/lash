@@ -27,7 +27,12 @@ pub(crate) async fn reclaim(
         .await
         .map_err(store_sqlx_error)?;
         let sql = &session_sql().turn_commits;
-        let current: i64 = sqlx::query_scalar(sql.lock_change_clock.sql())
+        // Receipts are judged by their sequence: sequence the committed ones
+        // first, under the clock lock the sweep holds to its end.
+        crate::change_feed::sequence_turns(&mut tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let (current, _): (i64, i64) = sqlx::query_as(sql.change_clock.sql())
             .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;

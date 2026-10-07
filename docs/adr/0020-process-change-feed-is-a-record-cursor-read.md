@@ -41,11 +41,16 @@ filtered subscription listings do not supply a safe continuation cursor.
 
 `LashCore::turns_changed_since(cursor, limit)` reads the deployment's durable
 turn and session terminals in one bounded snapshot. `TurnChangeCursor` is
-opaque and store-scoped. Each terminal receipt has an indexed `change_seq`.
-Its accepting transaction raises `turn_change_clock`, so a later position
-cannot commit ahead of an earlier one. Committing the same receipt again
-raises no clock and creates no second change. Plain state commits consume a position but
-carry no terminal and are excluded by the partial index.
+opaque and store-scoped. Each terminal receipt has an indexed `change_seq`,
+and a reader never passes a position that is assigned later. SQLite's
+serialized writer raises `turn_change_clock` in the accepting transaction.
+PostgreSQL's writers take no clock: the accepting transaction stages the
+change in a lock-free staging order, and a sequencing transaction gives
+committed changes their positions under the clock's lock, publishing each
+batch at once (FIG-5276). Readers sequence what is pending before they read.
+Committing the same receipt again raises no clock and creates no second
+change. Plain state commits consume a position but carry no terminal and are
+excluded by the partial index.
 
 `TurnChangeKind::Committed` carries the operation and the existing typed
 `TurnCommitOutcome`. `SessionFault` keeps the typed code, cause and origin of

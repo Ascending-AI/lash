@@ -65,7 +65,6 @@ crate::statements! {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
 
         change_clock = "SELECT current_seq, retention_horizon FROM turn_change_clock WHERE singleton = 1";
-        lock_change_clock = "UPDATE turn_change_clock SET current_seq = current_seq WHERE singleton = 1 RETURNING current_seq";
         next_change_seq = "UPDATE turn_change_clock SET current_seq = current_seq + 1
              WHERE singleton = 1 AND current_seq < 9223372036854775807 RETURNING current_seq";
         insert_session_terminal = "INSERT INTO session_terminal_changes

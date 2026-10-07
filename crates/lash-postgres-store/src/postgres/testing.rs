@@ -375,43 +375,44 @@ impl Drop for FencePause {
     }
 }
 
-/// The `AfterReceipt` seam: pauses a runtime commit right after it recorded
-/// its turn receipt, with the rest of its transaction still to run.
+/// The `BeforeTurnCommit` seam: pauses a transaction that wrote a change of
+/// the turn feed (a receipt, a session's fault or deletion) right before its
+/// `COMMIT`, every statement run: a deliberately late committer.
 ///
 /// Install it on a storage with
-/// [`PostgresStorage::with_after_receipt_for_testing`](crate::PostgresStorage::with_after_receipt_for_testing).
-/// Each [`Self::pause_next`] arms one pause, taken by the next commit that
-/// records a receipt, in arming order; a commit that finds none armed passes.
+/// [`PostgresStorage::with_before_turn_commit_for_testing`](crate::PostgresStorage::with_before_turn_commit_for_testing).
+/// Each [`Self::pause_next`] arms one pause, taken by the next such
+/// transaction, in arming order; one that finds none armed passes.
 #[derive(Clone, Debug, Default)]
-pub struct AfterReceipt {
-    armed: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<ReceiptPause>>>,
+pub struct BeforeTurnCommit {
+    armed: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<TurnCommitPause>>>,
 }
 
-/// One armed [`AfterReceipt`] pause: the commit that takes it waits until
+/// One armed [`BeforeTurnCommit`] pause: the commit that takes it waits until
 /// [`Self::release`], or until this handle is dropped.
 #[derive(Clone, Debug)]
-pub struct ReceiptPause {
+pub struct TurnCommitPause {
     gate: std::sync::Arc<lash_core_execution::testing::Gate>,
 }
 
-impl AfterReceipt {
+impl BeforeTurnCommit {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Pause the next commit that records a receipt.
-    pub fn pause_next(&self) -> ReceiptPause {
+    /// Pause the next transaction that commits a turn change.
+    pub fn pause_next(&self) -> TurnCommitPause {
         use lash_sansio::sync::MutexExt;
-        let pause = ReceiptPause {
+        let pause = TurnCommitPause {
             gate: std::sync::Arc::new(lash_core_execution::testing::Gate::new(
-                "postgres turn receipt",
+                "postgres turn commit",
             )),
         };
         self.armed.lock_recover().push_back(pause.clone());
         pause
     }
 
-    /// Called by a commit that recorded its receipt: takes the next armed
+    /// Called by a transaction that wrote a turn change: takes the next armed
     /// pause, if any, and waits for its release.
     pub(crate) async fn pass(&self) {
         use lash_sansio::sync::MutexExt;
@@ -422,7 +423,7 @@ impl AfterReceipt {
     }
 }
 
-impl ReceiptPause {
+impl TurnCommitPause {
     /// Wait until a commit has taken this pause.
     pub async fn reached(&self) {
         self.gate.reached(1).await;

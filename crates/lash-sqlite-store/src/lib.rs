@@ -583,6 +583,8 @@ mod graph_error_tests;
 mod plugin_writer_tests;
 #[cfg(test)]
 mod read_failure_tests;
+#[cfg(all(test, feature = "testing"))]
+mod turn_feed_tests;
 
 #[cfg(test)]
 #[path = "tests.rs"]

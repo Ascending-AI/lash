@@ -259,13 +259,14 @@ table lash_process_observers
 table lash_process_tombstones
   column process_id text not-null
   column pruned_at_ms bigint not-null
-  column pruned_change_seq bigint not-null
+  column pruned_change_seq bigint nullable
+  column staged_seq bigint not-null default
   column terminal_label text not-null
   primary-key (process_id)
 table lash_processes
   column cancel_requested_at_ms bigint nullable
   column cascade_cursor text nullable
-  column change_seq bigint not-null
+  column change_seq bigint nullable
   column consumer_hold_cancels boolean nullable
   column consumer_hold_key text nullable
   column consumer_hold_scope_id text nullable
@@ -281,9 +282,11 @@ table lash_processes
   column originator_id text not-null
   column process_id text not-null
   column record_json text not-null
+  column staged_seq bigint not-null default
   column start_key text nullable
   column state_rev bigint not-null default
   column status text not-null
+  column unsequenced_saves integer not-null default
   column updated_at_ms bigint not-null
   column wake_session_id text nullable
   column written_epoch bigint nullable
@@ -359,7 +362,7 @@ table lash_run_records
   unique (owner_key, run_seq, call_id) where (kind = 'x_outcome'::text) and (call_id is not null)
   primary-key (owner_key, run_seq, ordinal)
 table lash_runtime_turn_commits
-  column change_seq bigint not-null
+  column change_seq bigint nullable
   column committed_at_ms bigint not-null
   column failure_evidence boolean not-null
   column identity_encoding_version integer nullable
@@ -368,6 +371,7 @@ table lash_runtime_turn_commits
   column requested_node_count bigint nullable
   column result_json text not-null
   column session_id text not-null
+  column staged_seq bigint not-null default
   column turn_commit_hash text not-null
   column turn_id text not-null
   unique (change_seq)
@@ -462,11 +466,13 @@ table lash_session_scope_ends
   column written_epoch bigint not-null
   primary-key (session_id, scope_key)
 table lash_session_terminal_changes
-  column change_seq bigint not-null
+  column change_seq bigint nullable
   column fault_json text nullable
   column recorded_at_ms bigint not-null
   column session_id text not-null
-  primary-key (change_seq)
+  column staged_seq bigint not-null default
+  unique (change_seq)
+  primary-key (staged_seq)
 table lash_tool_intent_retired_owners
   column owner text not-null
   primary-key (owner)

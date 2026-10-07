@@ -62,15 +62,21 @@ lash_store_sql::statements! {
              WHERE process_id = ?1
              FOR UPDATE";
 
-        /// Save process `?1`'s mutable columns, its change sequence left to
-        /// the transaction's tail (`process_change_clock.sequence_changes`).
-        update_mutable_columns_unsequenced = "UPDATE processes
+        /// Save process `?1`'s mutable columns, staged on the process feed:
+        /// the save takes the staging sequence's next value, counts itself
+        /// among the row's unsequenced saves and drops its feed sequence,
+        /// which is assigned after it commits
+        /// (`process_change_clock.sequence_committed`, FIG-5276).
+        update_mutable_columns_staged = "UPDATE processes
              SET updated_at_ms = ?2, status = ?3, last_event_sequence = ?4,
-                 cancel_requested_at_ms = ?5, record_json = ?6
+                 cancel_requested_at_ms = ?5, record_json = ?6,
+                 unsequenced_saves = CASE WHEN change_seq IS NULL
+                     THEN unsequenced_saves + 1 ELSE 1 END,
+                 change_seq = NULL, staged_seq = DEFAULT
              WHERE process_id = ?1";
 
-        /// Register a fresh process row, reporting no row when a concurrent
-        /// start under the same key won.
+        /// Register a fresh process row, staged on the process feed, reporting
+        /// no row when a concurrent start under the same key won.
         ///
         /// `ON CONFLICT DO NOTHING` on the start-key index is how that race is
         /// detected: under `READ COMMITTED` the read that found no retained
@@ -82,12 +88,12 @@ lash_store_sql::statements! {
                 process_id, start_key, originator_id, wake_session_id,
                 identity_kind, identity_label,
                 created_at_ms, updated_at_ms, last_event_sequence,
-                change_seq, status,
+                status,
                 lifetime_scope_kind, lifetime_scope_id, lifetime, cancel_requested_at_ms,
                 record_json, consumer_hold_key, consumer_hold_scope_kind, consumer_hold_scope_id,
                 consumer_hold_cancels
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
              ON CONFLICT (start_key) WHERE start_key IS NOT NULL DO NOTHING";
 
         /// How many processes are live.
@@ -308,11 +314,10 @@ lash_store_sql::statements! {
         /// tombstones `?2`; reports the events and the rows it removed.
         ///
         /// One statement for the whole prune, where SQLite issues eight under
-        /// its write lock. Every part has to see the same snapshot: the clock
-        /// is bumped once for the batch, the tombstones take their change
-        /// sequences from that bump in candidate order, and the process delete
-        /// runs only if the tombstone count matches. Splitting it would let a
-        /// status writer land between the parts.
+        /// its write lock. Every part has to see the same snapshot: the
+        /// tombstones are staged on the process feed in candidate order, and
+        /// the process delete runs only if the tombstone count matches.
+        /// Splitting it would let a status writer land between the parts.
         ///
         prune_rows = "WITH candidates AS (
              SELECT process_id, ordinality
@@ -328,23 +333,15 @@ lash_store_sql::statements! {
          event_count AS MATERIALIZED (
              SELECT count(*) AS value FROM deleted_events
          ),
-         advanced_clock AS (
-             UPDATE process_change_clock
-             SET current_seq = current_seq + (SELECT count(*) FROM candidates)
-             WHERE singleton = TRUE
-             RETURNING current_seq
-         ),
          inserted_tombstones AS (
              INSERT INTO process_tombstones (
-                 process_id, terminal_label, pruned_at_ms, pruned_change_seq
+                 process_id, terminal_label, pruned_at_ms
              )
              SELECT candidate.process_id,
                     process.status,
-                    ?2,
-                    clock.current_seq - (SELECT count(*) FROM candidates) + candidate.ordinality
+                    ?2
              FROM candidates AS candidate
              JOIN processes AS process USING (process_id)
-             CROSS JOIN advanced_clock AS clock
              CROSS JOIN event_count
              WHERE event_count.value >= 0
              ORDER BY candidate.ordinality
@@ -376,32 +373,64 @@ lash_store_sql::statements! {
     /// `process_change_clock` statements only PostgreSQL issues.
     ///
     /// Every one of them forks: the singleton flag is `BOOLEAN TRUE` here and
-    /// `INTEGER 1` on SQLite, and the bump reports its new value through
-    /// `RETURNING` where SQLite issues a second read.
+    /// `INTEGER 1` on SQLite, and only this store sequences its feed after
+    /// commit (FIG-5276).
     pub(crate) struct ChangeClockPostgresStatements @ "process_change_clock" {
-        /// Sequence the processes `?1` names, one save each in order: the
-        /// clock moves once per save and each process takes the sequence of
-        /// its last. The clock is bumped by this statement, a transaction's
-        /// last before `COMMIT` (FIG-5275).
-        sequence_changes = "WITH saves AS (
-             SELECT process_id, MAX(ord) AS last
-             FROM unnest(CAST(?1 AS TEXT[])) WITH ORDINALITY AS save(process_id, ord)
-             GROUP BY process_id
+        /// Whether a committed change of the process feed waits for its
+        /// sequence.
+        has_unsequenced = "SELECT EXISTS (
+                 SELECT 1 FROM processes WHERE change_seq IS NULL
+             ) OR EXISTS (
+                 SELECT 1 FROM process_tombstones WHERE pruned_change_seq IS NULL
+             )";
+
+        /// The process clock, under its write lock: what orders two
+        /// sequencing transactions, and tombstone compaction after them.
+        lock_clock = "SELECT current_seq FROM process_change_clock WHERE singleton = TRUE FOR UPDATE";
+
+        /// Give every committed save and tombstone that has no feed sequence
+        /// the next ones, in staging order, and move the clock past them; the
+        /// process feed's twin of the turn feed's sequencer (FIG-5276). The
+        /// clock moves once per save, as SQLite's does: a row saved several
+        /// times since it was last sequenced takes the position of its last
+        /// save. Run under [`Self::lock_clock`]. A row a writer holds locked
+        /// waits for the next run, and its writer's save stages it again
+        /// anyway.
+        sequence_committed = "WITH saves AS MATERIALIZED (
+             SELECT process_id, staged_seq, unsequenced_saves FROM processes
+             WHERE change_seq IS NULL
+             FOR UPDATE SKIP LOCKED
+         ), tombstones AS MATERIALIZED (
+             SELECT process_id, staged_seq FROM process_tombstones
+             WHERE pruned_change_seq IS NULL
+             FOR UPDATE SKIP LOCKED
+         ), staged AS MATERIALIZED (
+             SELECT staged_seq, sum(ticks) OVER (ORDER BY staged_seq) AS ordinal
+             FROM (
+                 SELECT staged_seq, unsequenced_saves AS ticks FROM saves
+                 UNION ALL
+                 SELECT staged_seq, 1 FROM tombstones
+             ) AS pending
          ), clock AS (
              UPDATE process_change_clock
-             SET current_seq = current_seq + cardinality(CAST(?1 AS TEXT[]))
-             WHERE singleton = TRUE
-             RETURNING current_seq
+             SET current_seq = current_seq + (SELECT max(ordinal) FROM staged)
+             WHERE singleton = TRUE AND EXISTS (SELECT 1 FROM staged)
+             RETURNING current_seq - (SELECT max(ordinal) FROM staged) AS base
+         ), sequenced_saves AS (
+             UPDATE processes AS process
+             SET change_seq = clock.base + staged.ordinal
+             FROM saves JOIN staged USING (staged_seq), clock
+             WHERE process.process_id = saves.process_id
+             RETURNING 1
+         ), sequenced_tombstones AS (
+             UPDATE process_tombstones AS tombstone
+             SET pruned_change_seq = clock.base + staged.ordinal
+             FROM tombstones JOIN staged USING (staged_seq), clock
+             WHERE tombstone.process_id = tombstones.process_id
+             RETURNING 1
          )
-         UPDATE processes AS p
-         SET change_seq = clock.current_seq - cardinality(CAST(?1 AS TEXT[])) + saves.last
-         FROM saves, clock
-         WHERE p.process_id = saves.process_id";
-
-        /// The current change sequence, under the row's write lock: the lock
-        /// that orders two concurrent registrations of one content-addressed
-        /// process id.
-        select_current_for_update = "SELECT current_seq FROM process_change_clock WHERE singleton = TRUE FOR UPDATE";
+         SELECT (SELECT count(*) FROM sequenced_saves)
+              + (SELECT count(*) FROM sequenced_tombstones)";
 
         /// How far tombstone compaction has run, under a share lock: a reader
         /// must not see the horizon move past its own cursor mid-read.

@@ -234,13 +234,19 @@ CREATE TABLE IF NOT EXISTS lash_session_meta_pending_observer_intents (
     FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
 );
 
+-- The turn feed's staging order: a change takes the next value when its
+-- transaction writes it, without a row lock. Its feed sequence (`change_seq`)
+-- is assigned after it commits (FIG-5276).
+CREATE SEQUENCE IF NOT EXISTS lash_turn_change_staging;
+
 CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits (
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,
     turn_commit_hash TEXT NOT NULL,
     result_json TEXT NOT NULL,
     outcome_code TEXT CONSTRAINT ck_runtime_turn_commits_outcome CHECK (outcome_code IN ('completed', 'frame_switch', 'cancelled', 'failed_incomplete', 'failed_invalid_input', 'failed_max_turns', 'failed_tool_failure', 'failed_provider_error', 'failed_context_overflow', 'failed_plugin_abort', 'failed_runtime_error', 'failed_submitted_error', 'failed_tool_error')),
-    change_seq BIGINT NOT NULL UNIQUE CONSTRAINT ck_runtime_turn_commits_change_seq CHECK (change_seq > 0),
+    change_seq BIGINT UNIQUE CONSTRAINT ck_runtime_turn_commits_change_seq CHECK (change_seq > 0),
+    staged_seq BIGINT NOT NULL DEFAULT nextval('lash_turn_change_staging'),
     committed_at_ms BIGINT NOT NULL,
     failure_evidence BOOLEAN NOT NULL,
     request_identity_hash TEXT,
@@ -259,8 +265,11 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_turn_commits_failure_evidence
 
 CREATE INDEX IF NOT EXISTS idx_lash_runtime_turn_commits_change_seq
     ON lash_runtime_turn_commits(change_seq) WHERE outcome_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_lash_runtime_turn_commits_unsequenced
+    ON lash_runtime_turn_commits(staged_seq) WHERE change_seq IS NULL;
 
--- Transactional clock: a cursor never overtakes an uncommitted terminal.
+-- The turn feed's clock: the last sequence a sequencing transaction assigned
+-- to committed changes. Writers never take it.
 CREATE TABLE IF NOT EXISTS lash_turn_change_clock (
     singleton INTEGER PRIMARY KEY CONSTRAINT ck_turn_change_clock_singleton CHECK (singleton = 1),
     current_seq BIGINT NOT NULL CONSTRAINT ck_turn_change_clock_current_seq CHECK (current_seq >= 0),
@@ -270,13 +279,16 @@ INSERT INTO lash_turn_change_clock VALUES (1, 0, 0) ON CONFLICT (singleton) DO N
 
 -- Session faults outlive their standing state and the session's physical delete.
 CREATE TABLE IF NOT EXISTS lash_session_terminal_changes (
-    change_seq BIGINT PRIMARY KEY CONSTRAINT ck_session_terminal_changes_change_seq CHECK (change_seq > 0),
+    staged_seq BIGINT PRIMARY KEY DEFAULT nextval('lash_turn_change_staging'),
+    change_seq BIGINT UNIQUE CONSTRAINT ck_session_terminal_changes_change_seq CHECK (change_seq > 0),
     session_id TEXT NOT NULL,
     fault_json TEXT,
     recorded_at_ms BIGINT NOT NULL CONSTRAINT ck_session_terminal_changes_recorded_at_ms CHECK (recorded_at_ms >= 0)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_session_terminal_changes_session
     ON lash_session_terminal_changes(session_id, change_seq);
+CREATE INDEX IF NOT EXISTS idx_lash_session_terminal_changes_unsequenced
+    ON lash_session_terminal_changes(staged_seq) WHERE change_seq IS NULL;
 
 CREATE TABLE IF NOT EXISTS lash_turn_cancel_requests (
     session_id TEXT NOT NULL,
@@ -489,6 +501,9 @@ CREATE TABLE IF NOT EXISTS lash_attachment_sweep_clock (
     CONSTRAINT ck_attachment_sweep_clock_singleton CHECK (singleton)
 );
 
+-- The process feed's staging order and clock, as the turn feed's (FIG-5276).
+CREATE SEQUENCE IF NOT EXISTS lash_process_change_staging;
+
 CREATE TABLE IF NOT EXISTS lash_process_change_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     current_seq BIGINT NOT NULL,
@@ -507,7 +522,11 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     created_at_ms BIGINT NOT NULL,
     updated_at_ms BIGINT NOT NULL,
     last_event_sequence BIGINT NOT NULL,
-    change_seq BIGINT NOT NULL,
+    change_seq BIGINT,
+    staged_seq BIGINT NOT NULL DEFAULT nextval('lash_process_change_staging'),
+    -- Saves since the row was last sequenced: the feed's clock moves once
+    -- per save, and the row takes the position of its last.
+    unsequenced_saves INTEGER NOT NULL DEFAULT 1 CONSTRAINT ck_processes_unsequenced_saves CHECK (unsequenced_saves >= 1),
     status TEXT NOT NULL,
     lifetime TEXT NOT NULL,
     lifetime_scope_kind TEXT,
@@ -554,6 +573,8 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_non_terminal
     ON lash_processes(process_id) WHERE status IN ('running', 'waiting');
 CREATE INDEX IF NOT EXISTS idx_lash_processes_change_seq
     ON lash_processes(change_seq);
+CREATE INDEX IF NOT EXISTS idx_lash_processes_unsequenced
+    ON lash_processes(staged_seq) WHERE change_seq IS NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_processes_originator
     ON lash_processes(originator_id);
 CREATE INDEX IF NOT EXISTS idx_lash_processes_identity
@@ -620,11 +641,14 @@ CREATE TABLE IF NOT EXISTS lash_process_tombstones (
     process_id TEXT COLLATE "C" PRIMARY KEY,
     terminal_label TEXT NOT NULL,
     pruned_at_ms BIGINT NOT NULL,
-    pruned_change_seq BIGINT NOT NULL,
+    pruned_change_seq BIGINT,
+    staged_seq BIGINT NOT NULL DEFAULT nextval('lash_process_change_staging'),
     CONSTRAINT ck_process_tombstones_terminal_label CHECK (terminal_label IN ('completed', 'failed', 'cancelled', 'abandoned'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_change
     ON lash_process_tombstones(pruned_change_seq);
+CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_unsequenced
+    ON lash_process_tombstones(staged_seq) WHERE pruned_change_seq IS NULL;
 
 -- One row per ended parent scope, keyed by the scope itself rather than by a
 -- process row: a turn-scoped parent has no process row at all, and a

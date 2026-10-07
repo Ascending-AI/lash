@@ -40,11 +40,13 @@ impl SessionFaultStore for PostgresStore {
             .await
             .map_err(store_sqlx_error)?;
         if changed.rows_affected() == 1 {
-            tx.record_turn_change(crate::session_factory::session_terminal(
+            tx.stage_turn_change(crate::session_factory::session_terminal(
                 session_id,
                 Some(record.to_stored()?),
                 sql_counter_value("fault_at_ms", at_ms)?,
-            ));
+            ))
+            .await
+            .map_err(store_sqlx_error)?;
         }
         let stored = session_fault_conn(&mut tx, session_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;

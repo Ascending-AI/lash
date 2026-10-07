@@ -60,6 +60,12 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         after: lash_core_execution::store::TurnChangeCursor,
         limit: std::num::NonZeroUsize,
     ) -> Result<lash_core_execution::store::TurnChangePage, StoreError> {
+        crate::change_feed::sequence_before_read(
+            &self.pool,
+            &self.fence,
+            crate::change_feed::Feed::Turns,
+        )
+        .await?;
         let mut tx = crate::runtime_persistence::read_tx(self).await?;
         let sql = &session_sql().turn_commits;
         let (current, horizon): (i64, i64) = sqlx::query_as(sql.change_clock.sql())
@@ -212,12 +218,17 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             .await
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
         let mut report = lash_core_execution::SessionBlobReclaimReport::default();
-        match delete_session_tx(&mut tx, session_id, &mut report, self.fence.fleet()).await {
-            Ok(terminal) => {
-                if let Some(terminal) = terminal {
-                    tx.record_turn_change(terminal);
-                }
-            }
+        let deleted =
+            match delete_session_tx(&mut tx, session_id, &mut report, self.fence.fleet()).await {
+                Ok(Some(terminal)) => tx
+                    .stage_turn_change(terminal)
+                    .await
+                    .map_err(store_sqlx_error),
+                Ok(None) => Ok(()),
+                Err(error) => Err(error),
+            };
+        match deleted {
+            Ok(()) => {}
             Err(error) => {
                 report.deleted_blob_count = 0;
                 return Err(lash_core_execution::MaintenanceFailure::failed(

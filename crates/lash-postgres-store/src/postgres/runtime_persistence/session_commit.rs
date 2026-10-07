@@ -752,13 +752,12 @@ pub(crate) async fn apply_runtime_commit_tx(
     let mut result = plan.result(checkpoint_ref, manifest, now, work_remaining);
     result.turn_cancel_input_outcome = turn_cancel_input_outcome;
     {
-        // The receipt takes the turn feed's next sequence at the
-        // transaction's tail, so the feed's clock is held from there to
-        // `COMMIT` only (FIG-5275).
+        // The receipt is staged on the turn feed: its sequence is assigned
+        // after this transaction commits (FIG-5276).
         let receipt = plan.receipt_write(&result);
         let (request_identity_hash, requested_node_count, identity_encoding_version) =
             append_identity_columns(receipt.append_request_identity)?;
-        tx.record_turn_change(crate::change_feed::TurnChange::Receipt(
+        tx.stage_turn_change(crate::change_feed::TurnChange::Receipt(
             crate::change_feed::TurnReceipt {
                 session_id: receipt.session_id.as_str().to_owned(),
                 turn_id: receipt.operation_key.to_owned(),
@@ -775,10 +774,10 @@ pub(crate) async fn apply_runtime_commit_tx(
                 identity_encoding_version,
                 failure_evidence: !receipt.result.failure_evidence.is_empty(),
             },
-        ));
+        ))
+        .await
+        .map_err(store_sqlx_error)?;
     }
-    #[cfg(any(test, feature = "testing"))]
-    tx.pass_after_receipt().await;
     // A plain-commit receipt writes three NULL append-identity columns.
     Ok(result)
 }

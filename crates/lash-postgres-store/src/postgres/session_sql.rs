@@ -388,30 +388,76 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `runtime_turn_commits` statements only PostgreSQL issues.
     pub(crate) struct TurnCommitPostgresStatements @ "turn_commit" {
-        /// Record a receipt under the turn clock's next sequence: the clock
-        /// is bumped by this statement, the last before `COMMIT`, so it is
-        /// held for that statement and the `COMMIT` only (FIG-5275).
-        insert_sequenced = "WITH clock AS (
-                 UPDATE turn_change_clock SET current_seq = current_seq + 1
-                 WHERE singleton = 1
-                 RETURNING current_seq
-             )
-             INSERT INTO runtime_turn_commits (
+        /// Record a receipt, staged on the turn feed: it takes the staging
+        /// sequence's next value and no feed sequence, so its transaction
+        /// takes no lock another writer waits on (FIG-5276).
+        insert_staged = "INSERT INTO runtime_turn_commits (
                 session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version,
-                failure_evidence, change_seq
+                failure_evidence
              )
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, clock.current_seq FROM clock";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
-        /// Record session `?1`'s terminal, with fault `?2` at `?3`, under the
-        /// turn clock's next sequence, as [`Self::insert_sequenced`] does.
-        insert_session_terminal_sequenced = "WITH clock AS (
-                 UPDATE turn_change_clock SET current_seq = current_seq + 1
-                 WHERE singleton = 1
-                 RETURNING current_seq
+        /// Record session `?1`'s terminal, with fault `?2` at `?3`, staged on
+        /// the turn feed as [`Self::insert_staged`] does.
+        insert_session_terminal_staged = "INSERT INTO session_terminal_changes
+             (session_id, fault_json, recorded_at_ms) VALUES (?1, ?2, ?3)";
+
+        /// Whether a committed change of the turn feed waits for its sequence.
+        has_unsequenced = "SELECT EXISTS (
+                 SELECT 1 FROM runtime_turn_commits WHERE change_seq IS NULL
+             ) OR EXISTS (
+                 SELECT 1 FROM session_terminal_changes WHERE change_seq IS NULL
+             )";
+
+        /// The turn clock, under its write lock: what orders two sequencing
+        /// transactions. Each later statement of the holder reads a snapshot
+        /// that already holds every change the previous holder sequenced.
+        lock_clock = "SELECT current_seq FROM turn_change_clock WHERE singleton = 1 FOR UPDATE";
+
+        /// Give every committed change that has no feed sequence the next
+        /// ones, in staging order, and move the clock past them. Run under
+        /// [`Self::lock_clock`], after commit: a change is sequenced only
+        /// once its transaction committed, and the sequencing transaction
+        /// makes the whole batch visible at once, so a reader's cursor never
+        /// passes a change that is sequenced later. A row a writer holds
+        /// locked waits for the next run. Reports how many it sequenced.
+        sequence_committed = "WITH receipts AS MATERIALIZED (
+                 SELECT session_id, turn_id, staged_seq FROM runtime_turn_commits
+                 WHERE change_seq IS NULL
+                 FOR UPDATE SKIP LOCKED
+             ), terminals AS MATERIALIZED (
+                 SELECT staged_seq FROM session_terminal_changes
+                 WHERE change_seq IS NULL
+                 FOR UPDATE SKIP LOCKED
+             ), staged AS MATERIALIZED (
+                 SELECT staged_seq, row_number() OVER (ORDER BY staged_seq) AS ordinal
+                 FROM (
+                     SELECT staged_seq FROM receipts
+                     UNION ALL
+                     SELECT staged_seq FROM terminals
+                 ) AS pending
+             ), clock AS (
+                 UPDATE turn_change_clock
+                 SET current_seq = current_seq + (SELECT count(*) FROM staged)
+                 WHERE singleton = 1 AND EXISTS (SELECT 1 FROM staged)
+                 RETURNING current_seq - (SELECT count(*) FROM staged) AS base
+             ), sequenced_receipts AS (
+                 UPDATE runtime_turn_commits AS receipt
+                 SET change_seq = clock.base + staged.ordinal
+                 FROM receipts JOIN staged USING (staged_seq), clock
+                 WHERE receipt.session_id = receipts.session_id
+                   AND receipt.turn_id = receipts.turn_id
+                 RETURNING 1
+             ), sequenced_terminals AS (
+                 UPDATE session_terminal_changes AS terminal
+                 SET change_seq = clock.base + staged.ordinal
+                 FROM terminals JOIN staged USING (staged_seq), clock
+                 WHERE terminal.staged_seq = terminals.staged_seq
+                 RETURNING 1
              )
-             INSERT INTO session_terminal_changes (change_seq, session_id, fault_json, recorded_at_ms)
-             SELECT clock.current_seq, ?1, ?2, ?3 FROM clock";
+             SELECT (SELECT count(*) FROM sequenced_receipts)
+                  + (SELECT count(*) FROM sequenced_terminals)";
 
         /// Drop every receipt of a deleted session older than `?1`.
         delete_retained = "DELETE FROM runtime_turn_commits AS receipt

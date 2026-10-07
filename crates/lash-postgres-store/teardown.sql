@@ -5,8 +5,8 @@
 -- `PostgresStorage::teardown_ddl()` returns this file verbatim. Every
 -- statement is idempotent (`IF EXISTS`), and `CASCADE` releases the intra-lash
 -- foreign keys so table order carries no meaning. Indexes, constraints, and
--- seed rows die with their tables; schema.sql declares no standalone
--- sequences, types, or functions, so there is nothing else to drop.
+-- seed rows die with their tables; each sequence schema.sql declares is
+-- dropped by name, and it declares no types or functions.
 --
 -- Like schema.sql, nothing here is schema-qualified: the file tears down
 -- whichever schema the session's `search_path` resolves. Regenerate it with
@@ -42,6 +42,8 @@ DROP TABLE IF EXISTS lash_session_meta CASCADE;
 
 DROP TABLE IF EXISTS lash_session_meta_pending_observer_intents CASCADE;
 
+DROP SEQUENCE IF EXISTS lash_turn_change_staging CASCADE;
+
 DROP TABLE IF EXISTS lash_runtime_turn_commits CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_change_clock CASCADE;
@@ -73,6 +75,8 @@ DROP TABLE IF EXISTS lash_attachment_uploads CASCADE;
 DROP TABLE IF EXISTS lash_attachment_condemnations CASCADE;
 
 DROP TABLE IF EXISTS lash_attachment_sweep_clock CASCADE;
+
+DROP SEQUENCE IF EXISTS lash_process_change_staging CASCADE;
 
 DROP TABLE IF EXISTS lash_process_change_clock CASCADE;
 

@@ -125,6 +125,13 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
         cursor: ProcessChangeCursor,
         limit: usize,
     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
+        crate::change_feed::sequence_before_read(
+            &self.pool,
+            &self.fence,
+            crate::change_feed::Feed::Processes,
+        )
+        .await
+        .map_err(plugin_store_error)?;
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let horizon = process_change_horizon_tx(&mut tx).await?;
         if cursor.store_sequence() < horizon {
@@ -263,7 +270,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                     record,
                 ))
             }
-            // The rollback takes the clock bump and the observer rows with
+            // The rollback takes the staged row and the observer rows with
             // it, so the loser adds no event and no `change_seq` of its own
             // (ADR 0046), and the caller gets the sequential answer — the
             // winner's process.
@@ -818,8 +825,10 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(plugin_store_error)?;
-        sqlx::query(process_sql().clock_postgres.select_current_for_update.sql())
-            .fetch_one(&mut **tx)
+        // Tombstones are judged by their sequence: sequence the committed
+        // ones first, under the clock lock that also orders this compaction
+        // against every reader's horizon.
+        crate::change_feed::sequence_processes(&mut tx)
             .await
             .map_err(plugin_sqlx_error)?;
         let compacted_through: Option<i64> = sqlx::query_scalar(

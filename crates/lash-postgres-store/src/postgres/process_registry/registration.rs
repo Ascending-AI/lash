@@ -6,10 +6,6 @@ use super::*;
 
 use crate::guarded_tx::GuardedTx;
 
-/// The change sequence a registered row holds until its transaction's tail
-/// sequences it on the process feed.
-const UNSEQUENCED: i64 = 0;
-
 /// What applying one prepared registration did.
 pub(crate) enum AppliedRegistration {
     /// The row this registration inserted, with its observers and its
@@ -139,7 +135,6 @@ pub(crate) async fn apply_registration_tx(
         .bind(record.created_at_ms as i64)
         .bind(record.updated_at_ms as i64)
         .bind(record.last_event_sequence as i64)
-        .bind(UNSEQUENCED)
         .bind(process_status_label(&record))
         .bind(
             record
@@ -185,7 +180,6 @@ pub(crate) async fn apply_registration_tx(
         let wake = wake_session_id_tx(tx, &winner.id).await?;
         return Ok(AppliedRegistration::LostRace { winner, wake });
     }
-    tx.record_process_change(record.id.as_str());
     // The process's actor commits with its row, ready: the start is a wake
     // of the actor, never a relayed obligation (ADR 0132 §12).
     crate::durable::processes::create_actor_within(

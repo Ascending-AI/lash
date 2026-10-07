@@ -142,8 +142,8 @@ pub(crate) async fn wake_session_id_tx(
         .map_err(PluginError::from)
 }
 
-/// Save `record`'s mutable columns. Its change sequence is taken at the
-/// transaction's tail, where the process feed's clock is bumped (FIG-5275).
+/// Save `record`'s mutable columns, staged on the process feed: its change
+/// sequence is assigned after the transaction commits (FIG-5276).
 pub(crate) async fn save_process_tx(
     tx: &mut GuardedTx<'_>,
     record: &ProcessRecord,
@@ -151,7 +151,7 @@ pub(crate) async fn save_process_tx(
     sqlx::query(
         process_sql()
             .process_postgres
-            .update_mutable_columns_unsequenced
+            .update_mutable_columns_staged
             .sql(),
     )
     .bind(record.id.as_str())
@@ -163,7 +163,6 @@ pub(crate) async fn save_process_tx(
     .execute(crate::observed_sql::executor(&mut ***tx))
     .await
     .map_err(plugin_sqlx_error)?;
-    tx.record_process_change(record.id.as_str());
     Ok(())
 }
 
@@ -288,7 +287,7 @@ impl ProcessEventBatch {
 
 /// Stage `requests` in order as one batch (FIG-3571): each goes through the
 /// append sequence against the in-memory projection, and the process is saved
-/// once, advancing the change clock once, when any of them moved it. The
+/// once, one save on the change feed, when any of them moved it. The
 /// caller owns the transaction, so a refusal of any request commits none.
 pub(crate) async fn append_process_event_batch_tx(
     tx: &mut GuardedTx<'_>,

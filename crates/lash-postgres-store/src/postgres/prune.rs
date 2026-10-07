@@ -7,10 +7,9 @@ pub(super) async fn prune_process_rows_tx(
     process_ids: &[ProcessId],
     pruned_at_ms: i64,
 ) -> Result<ProcessPruneReport, PluginError> {
-    // Each pruned process record is fenced and its cleanup armed first: the
-    // prune statement below advances the process feed's clock, so it is the
-    // transaction's last, and the clock is held from it to `COMMIT` only
-    // (FIG-5275).
+    // Each pruned process record is fenced and its cleanup armed, then the
+    // prune statement stages each tombstone on the process feed, whose
+    // sequence is assigned after the transaction commits (FIG-5276).
     let cleanup_due_at_ms = u64::try_from(pruned_at_ms)
         .map_err(|_| PluginError::Session("process prune time cannot be negative".into()))?;
 
