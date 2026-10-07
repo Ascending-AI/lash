@@ -39,7 +39,7 @@ law!(
     c1_a_waiting_child_ends_within_its_grace_with_one_cancelled_advance,
     c2_a_cancel_the_engine_ignores_is_forced_at_its_grace,
     w1_await_process_times_out_and_its_awaiters_cancel_ends_it,
-    w1_an_await_cycle_times_out_on_each_side_and_is_cancellable,
+    w1_an_await_cycle_ends_by_a_timeout_and_is_cancellable,
     engine_free_end_runs_no_engine_code,
     p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count,
     a_cascade_wider_than_its_batch_ends_a_tree_three_levels_deep,

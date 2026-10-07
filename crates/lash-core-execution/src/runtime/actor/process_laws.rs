@@ -862,13 +862,16 @@ async fn signal(backend: &Backend, process: &ProcessId, payload: Value) -> LawRe
     Ok(())
 }
 
-/// W1: an A↔B await cycle is bounded, each side timing out, and is
-/// cancellable: cancelling one side ends it and resolves the other's wait.
+/// W1: an A↔B await cycle is bounded and cancellable. A bounded cycle
+/// breaks by a timeout: a side ends timed out on the other, and the other
+/// either times out too or sees that end, whichever commits first (the
+/// first resolution of a wait wins, ADR 0132 §6). Cancelling one side of an
+/// unbounded cycle ends it and resolves the other's wait.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn w1_an_await_cycle_times_out_on_each_side_and_is_cancellable(
+pub async fn w1_an_await_cycle_ends_by_a_timeout_and_is_cancellable(
     backend: &Backend,
 ) -> LawResult {
     let backend = law_backend(backend)?;
@@ -894,11 +897,19 @@ pub async fn w1_an_await_cycle_times_out_on_each_side_and_is_cancellable(
         ended_all(&backend, &bounded)
     })
     .await?;
-    for (side, other) in [(&a, &b), (&b, &a)] {
-        let end = terminal(&backend, side).await?.unwrap_or_default();
+    let a_end = terminal(&backend, &a).await?.unwrap_or_default();
+    let b_end = terminal(&backend, &b).await?.unwrap_or_default();
+    let timed_out = |end: &Value, other: &ProcessId| {
+        find(end, "timed_out").and_then(Value::as_str) == Some(other.as_str())
+    };
+    let saw_end = |end: &Value, other: &ProcessId| {
+        find(end, "ended").and_then(Value::as_str) == Some(other.as_str())
+    };
+    for (side, end, other, other_end) in [(&a, &a_end, &b, &b_end), (&b, &b_end, &a, &a_end)] {
         ensure!(
-            find(&end, "timed_out").and_then(Value::as_str) == Some(other.as_str()),
-            "a side of the bounded cycle did not time out: {end}"
+            timed_out(end, other) || (saw_end(end, other) && timed_out(other_end, side)),
+            "a side of the bounded cycle neither timed out nor saw the other time out and \
+             end: {end} (the other: {other_end})"
         );
     }
     let c = root(&backend, payload(&tag("w1c"), "await_signal")).await?;

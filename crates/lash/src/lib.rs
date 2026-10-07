@@ -966,8 +966,8 @@ pub mod plugins {
     /// answers with.
     pub use lash_core::{
         EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind,
-        EngineStepRefusal, EngineStepRun, EngineSteps, HostWaitKind, KeyName, PinnedKey,
-        SettledOutcome, SettledOutcomeRefusal, StepName, StepRequest,
+        EngineStepRefusal, EngineStepRun, EngineSteps, HostWaitKind, KeyName, SettledOutcome,
+        SettledOutcomeRefusal, StepName, StepRequest,
     };
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};
