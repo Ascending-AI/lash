@@ -26,6 +26,7 @@ members = [
     "crates/lashctl",
     "crates/lash-s3-store",
     "crates/lash-durable-test",
+    "crates/lash-postgres-workers",
     "crates/lash",
     "crates/lash-protocol-rlm",
     "crates/lash-protocol-standard",

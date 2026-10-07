@@ -1,0 +1,38 @@
+# PostgreSQL 16 for running lash-postgres-workers nodes by hand (README, "By
+# hand"). The failover cases do not use it: each starts and restarts a server
+# of its own from the pinned PostgreSQL tree.
+#
+# The server provisions `lash` from the store's published schema and
+# `lash_witness` from the harness's witness.sql, and listens on an ephemeral loopback port:
+#   docker compose -f runbooks/lash-postgres-workers/docker-compose.yml port postgres 5432
+name: lash-postgres-workers
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: lash
+      POSTGRES_DB: lash
+      POSTGRES_HOST_AUTH_METHOD: trust
+    command: ["postgres", "-c", "max_connections=200", "-c", "max_locks_per_transaction=256"]
+    ports:
+      - "127.0.0.1::5432"
+    volumes:
+      - ../../crates/lash-postgres-store/schema.sql:/lash/schema.sql:ro
+      - ../../crates/lash-postgres-workers/witness.sql:/lash/witness.sql:ro
+    configs:
+      - source: provision
+        target: /docker-entrypoint-initdb.d/10-lash.sh
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "lash", "-d", "lash"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+configs:
+  provision:
+    content: |
+      set -e
+      psql -v ON_ERROR_STOP=1 -U lash -d lash -f /lash/schema.sql
+      psql -v ON_ERROR_STOP=1 -U lash -d lash -c 'CREATE DATABASE lash_witness'
+      psql -v ON_ERROR_STOP=1 -U lash -d lash_witness -f /lash/witness.sql

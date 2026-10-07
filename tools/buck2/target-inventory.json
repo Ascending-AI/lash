@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
-  "cargo_package_count": 52,
-  "cargo_target_count": 155,
+  "cargo_package_count": 53,
+  "cargo_target_count": 158,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_323c0170[static]",
     "//crates/lash-conformance:lash-conformance__fv_39401c96[static]",
@@ -42952,7 +42952,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 215,
+  "generated_label_count": 219,
   "packages": [
     {
       "declared_features": [
@@ -44356,6 +44356,75 @@
           "label": "//crates/lash-postgres-store:schema_constraints__test",
           "tags": [
             "hermetic-postgres"
+          ]
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
+        "async-trait",
+        "lash-internal-core",
+        "lash-internal-core-execution",
+        "lash-internal-core-store",
+        "lash-internal-durable",
+        "lash-internal-lashlang",
+        "lash-internal-postgres-store",
+        "lash-internal-sansio",
+        "lash-internal-typescript",
+        "lash-internal-vm-broker",
+        "serde",
+        "serde_json",
+        "sqlx",
+        "tempfile",
+        "tokio"
+      ],
+      "doc": "//crates/lash-postgres-workers:lash-postgres-workers__doc",
+      "manifest": "crates/lash-postgres-workers/Cargo.toml",
+      "package": "lash-internal-postgres-workers",
+      "resolved_features": [],
+      "targets": [
+        {
+          "build_label": "//crates/lash-postgres-workers:lash-postgres-workers[static]",
+          "cargo": "lash_postgres_workers",
+          "check_label": "//crates/lash-postgres-workers:lash-postgres-workers[check]",
+          "clippy_label": "//crates/lash-postgres-workers:lash-postgres-workers__clippy[clippy.txt]",
+          "doc_label": "//crates/lash-postgres-workers:lash-postgres-workers[doc]",
+          "kind": "lib",
+          "label": "//crates/lash-postgres-workers:lash-postgres-workers"
+        },
+        {
+          "build_label": "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
+          "cargo": "lash_postgres_workers",
+          "check_label": "//crates/lash-postgres-workers:lash-postgres-workers__unit_test[check]",
+          "clippy_label": "//crates/lash-postgres-workers:lash-postgres-workers__unit_test__clippy[clippy.txt]",
+          "kind": "unit-test",
+          "label": "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-postgres-workers:lash-postgres-workers-node__bin",
+          "cargo": "lash-postgres-workers-node",
+          "check_label": "//crates/lash-postgres-workers:lash-postgres-workers-node__bin[check]",
+          "clippy_label": "//crates/lash-postgres-workers:lash-postgres-workers-node__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//crates/lash-postgres-workers:lash-postgres-workers-node__bin",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-postgres-workers:failover__test",
+          "cargo": "failover",
+          "cargo_only": "seven multi-process failover cases over a private PostgreSQL server, two of which wait out a 15 s node lease; about two minutes serially",
+          "check_label": "//crates/lash-postgres-workers:failover__test[check]",
+          "clippy_label": "//crates/lash-postgres-workers:failover__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-postgres-workers:failover__test",
+          "tags": [
+            "dev-deferred"
           ]
         }
       ],
@@ -46993,6 +47062,8 @@
     "//crates/lash-postgres-store:schema_drift__test__fv_46d5b09f": 300,
     "//crates/lash-postgres-store:schema_drift__test__fv_519c127b": 300,
     "//crates/lash-postgres-store:schema_drift__test__fv_fe395eb4": 300,
+    "//crates/lash-postgres-workers:failover__test": 300,
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test": 300,
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test": 300,
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_88f331fd": 300,
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_92a077f2": 300,
@@ -47368,6 +47439,10 @@
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
+    "//crates/lash-postgres-workers:failover__test",
+    "//crates/lash-postgres-workers:lash-postgres-workers[static]",
+    "//crates/lash-postgres-workers:lash-postgres-workers-node__bin",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
     "//crates/lash-protocol-rlm:build_script",
     "//crates/lash-protocol-rlm:build_script__build",
     "//crates/lash-protocol-rlm:lash-protocol-rlm[static]",
@@ -47585,6 +47660,10 @@
     "//crates/lash-postgres-store:preflight_schema_status__test[check]",
     "//crates/lash-postgres-store:schema_constraints__test[check]",
     "//crates/lash-postgres-store:schema_drift__test[check]",
+    "//crates/lash-postgres-workers:failover__test[check]",
+    "//crates/lash-postgres-workers:lash-postgres-workers[check]",
+    "//crates/lash-postgres-workers:lash-postgres-workers-node__bin[check]",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test[check]",
     "//crates/lash-protocol-rlm:build_script__build[check]",
     "//crates/lash-protocol-rlm:lash-protocol-rlm[check]",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test[check]",
@@ -47801,6 +47880,10 @@
     "//crates/lash-postgres-store:preflight_schema_status__test__clippy[clippy.txt]",
     "//crates/lash-postgres-store:schema_constraints__test__clippy[clippy.txt]",
     "//crates/lash-postgres-store:schema_drift__test__clippy[clippy.txt]",
+    "//crates/lash-postgres-workers:failover__test__clippy[clippy.txt]",
+    "//crates/lash-postgres-workers:lash-postgres-workers__clippy[clippy.txt]",
+    "//crates/lash-postgres-workers:lash-postgres-workers-node__bin__clippy[clippy.txt]",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test__clippy[clippy.txt]",
     "//crates/lash-protocol-rlm:build_script__build__clippy[clippy.txt]",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__clippy[clippy.txt]",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__clippy[clippy.txt]",
@@ -48017,6 +48100,10 @@
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
+    "//crates/lash-postgres-workers:failover__test",
+    "//crates/lash-postgres-workers:lash-postgres-workers",
+    "//crates/lash-postgres-workers:lash-postgres-workers-node__bin",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
     "//crates/lash-protocol-rlm:build_script__build",
     "//crates/lash-protocol-rlm:lash-protocol-rlm",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
@@ -48233,6 +48320,10 @@
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
+    "//crates/lash-postgres-workers:failover__test",
+    "//crates/lash-postgres-workers:lash-postgres-workers",
+    "//crates/lash-postgres-workers:lash-postgres-workers-node__bin",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
     "//crates/lash-protocol-rlm:build_script",
     "//crates/lash-protocol-rlm:build_script__build",
     "//crates/lash-protocol-rlm:lash-protocol-rlm",
@@ -48414,6 +48505,7 @@
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "//crates/lash-protocol-rlm:protocol_drivers__test",
     "//crates/lash-protocol-standard:test_batch",
@@ -48508,6 +48600,7 @@
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "//crates/lash-protocol-rlm:protocol_drivers__test",
     "//crates/lash-protocol-standard:test_batch",
@@ -48618,6 +48711,7 @@
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "//crates/lash-protocol-rlm:protocol_drivers__test",
     "//crates/lash-protocol-standard:embedded_builder__test",
@@ -48719,6 +48813,7 @@
     "//crates/lash-plugin-process-controls:lash-plugin-process-controls__doc",
     "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__doc",
     "//crates/lash-postgres-store:lash-postgres-store__doc",
+    "//crates/lash-postgres-workers:lash-postgres-workers__doc",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__doc",
     "//crates/lash-protocol-standard:lash-protocol-standard__doc",
     "//crates/lash-provider-anthropic:lash-provider-anthropic__doc",
@@ -48768,6 +48863,7 @@
     "//crates/lash-plugin-process-controls:rust_sources",
     "//crates/lash-plugin-standard-compaction:rust_sources",
     "//crates/lash-postgres-store:rust_sources",
+    "//crates/lash-postgres-workers:rust_sources",
     "//crates/lash-protocol-rlm:rust_sources",
     "//crates/lash-protocol-standard:rust_sources",
     "//crates/lash-provider-anthropic:rust_sources",
@@ -48803,6 +48899,7 @@
     "//runbooks/rlm-smoke:rust_sources"
   ],
   "workspace_tail_suite_labels": [
+    "//crates/lash-postgres-workers:failover__test",
     "//crates/lash-sim:lash-sim__unit_test",
     "//crates/lash-typescript:carrier_laws__test",
     "//crates/lash-typescript:corpus_laws__test",
@@ -48933,6 +49030,8 @@
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
+    "//crates/lash-postgres-workers:failover__test",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "//crates/lash-protocol-rlm:protocol_drivers__test",
     "//crates/lash-protocol-standard:test_batch",
@@ -49050,6 +49149,8 @@
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
+    "//crates/lash-postgres-workers:failover__test",
+    "//crates/lash-postgres-workers:lash-postgres-workers__unit_test",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "//crates/lash-protocol-rlm:protocol_drivers__test",
     "//crates/lash-protocol-standard:embedded_builder__test",

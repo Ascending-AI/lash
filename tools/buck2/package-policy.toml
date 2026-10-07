@@ -58,6 +58,21 @@ kinds = ["test"]
 targets = ["vertical_crash_proof", "turn_phases"]
 tags = ["hermetic-postgres"]
 
+# The lash-postgres-workers runbook's harness (FIG-5199) owns its PostgreSQL server, so a
+# case can stop and restart it: the pinned tree, and the NSS wrapper `initdb`
+# needs on the pool, are data named to the test by path. Its cases boot node
+# processes and wait out real leases (two of them a 15 s TTL), so they run one
+# at a time and stay out of the developer loop.
+[[rule]]
+packages = ["lash-internal-postgres-workers"]
+kinds = ["test"]
+targets = ["failover"]
+tags = ["dev-deferred"]
+reason = "seven multi-process failover cases over a private PostgreSQL server, two of which wait out a 15 s node lease; about two minutes serially"
+data = ["native//:postgres", "native//:nss_wrapper"]
+env = { LASH_WORKERS_POSTGRES = "$(location native//:postgres)", LASH_WORKERS_NSS_WRAPPER = "$(location native//:nss_wrapper)" }
+serial = true
+
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
 # Each shard's action has a server of its own, so shards run in parallel

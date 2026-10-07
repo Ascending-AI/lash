@@ -4,7 +4,7 @@
 # 1214 rows over 728 files, 3384 laws.
 # By class: mechanical 143, semantic 99, delete 657, replace 315.
 # By lane: L1b 11, L3 16, L4 19, L5 2, L6b 9, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 475, ported 43, deleted 696.
+# By status: todo 473, ported 43, deleted 698.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -29,10 +29,6 @@
 #   a drain never strands work
 # - L8: runbooks/process-operations/runbook.md
 #   an operator can inspect and act on the process-operations surface on a multi-node PostgreSQL and S3 deployment, and every outcome stays truthful in durable state across a node kill (judged runbook)
-# - L8: runbooks/restate-postgres-workers/README.md
-#   a multi-node durable deployment over one PostgreSQL store serves sessions, survives a node kill and drains (runbook)
-# - L8: runbooks/restate-postgres-workers/tests/process_operations_replacement.rs
-#   a process's start key, feed and plugin state survive a node kill and resume on another node (lash-postgres-workers)
 # - L8: runbooks/session-operator/runbook.md
 #   session operator verbs (withdraw an input, cancel a running run, redrive, cancel or fork parked work, repeat a lost reply) act once on live PostgreSQL and refuse stale repeats with unchanged receipts
 # - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::attempt_context_provider_realizes_every_v2_intent_through_the_coordinator
@@ -9744,9 +9740,10 @@ lane = "L8"
 laws = [
   "start_key_feed_and_plugin_state_survive_worker_replacement",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-postgres-workers/tests/failover.rs::a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state"
+status = "deleted"
 owed = "a process's start key, feed and plugin state survive a node kill and resume on another node (lash-postgres-workers)"
+note = "L8b (FIG-5199): the start key still names the process and a second start under it answers it, the feed holds each emitted event once in order, and the host engine's state (what plugin state was) carries its count across the kill"
 
 [[row]]
 path = "crates/lash-core-execution/Cargo.toml"
@@ -16209,10 +16206,10 @@ lane = "L8"
 laws = [
   "Restate workers over one PostgreSQL store serve sessions, survive a worker kill and drain",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-postgres-workers/tests/failover.rs::a_turn_killed_mid_model_call_finishes_on_another_node"
+status = "deleted"
 owed = "a multi-node durable deployment over one PostgreSQL store serves sessions, survives a node kill and drains (runbook)"
-note = "FIG-5190 deleted the runbook with Restate. Its successor is L8b (FIG-5199); the gate's lane list has no L8b, so the row is held under L8."
+note = "FIG-5190 deleted the runbook with Restate; L8b (FIG-5199) replaced it with runbooks/lash-postgres-workers, whose README maps every live row of the old one. Its seven cases kill a node mid-turn (with and without the liveness lock), mid-step and mid-wait, hold a node's heartbeat, stop a node cleanly (the drain: it releases its actors) and restart PostgreSQL. The gate's lane list has no L8b, so the row is held under L8."
 
 [[row]]
 path = "runbooks/rolling-upgrade/runbook.md"

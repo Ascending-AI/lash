@@ -496,6 +496,29 @@ PACKAGE_DEPS = {
             "uuid": "//third-party/rust:p0409"
         }
     },
+    "lash-internal-postgres-workers": {
+        "build": {},
+        "dev": {
+            "tempfile": "//third-party/rust:p0362",
+            "tokio": "//third-party/rust:p0371"
+        },
+        "normal": {
+            "async_trait": "//third-party/rust:p0015",
+            "lash_core": "//crates/lash-core:lash-core",
+            "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
+            "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_durable": "//crates/lash-durable:lash-durable",
+            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_typescript": "//crates/lash-typescript:lash-typescript",
+            "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
+            "lashlang": "//crates/lashlang:lashlang",
+            "serde": "//third-party/rust:p0307",
+            "serde_json": "//third-party/rust:p0313",
+            "sqlx": "//third-party/rust:p0333",
+            "tokio": "//third-party/rust:p0371"
+        }
+    },
     "lash-internal-protocol-rlm": {
         "build": {
             "syn": "//third-party/rust:p0357"
