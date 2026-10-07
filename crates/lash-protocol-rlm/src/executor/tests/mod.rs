@@ -16,9 +16,10 @@ use std::sync::Mutex;
 mod deferred_and_processes;
 mod frame_referrers;
 mod lifecycle_and_diagnostics;
+mod output_retention;
 mod projections_and_snapshots;
+mod triggers;
 mod typescript_cells;
-mod typescript_runtime_values;
 
 fn test_render_context(ctx: RuntimeExecutionContext<'_>) -> RuntimeExecutionContext<'_> {
     ctx.with_recorded_render(crate::testing::recorded_test_render())
