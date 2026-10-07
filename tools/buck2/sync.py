@@ -903,6 +903,12 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
         for label in result["workspace_compile_targets"]
         if label in checks
     ]
+    result["facade_production_check_targets"] = [
+        label + "[check]" for label in result["feature_lanes"]["facade-production"]
+    ]
+    result["workspace_check_targets"] = sorted(set(
+        result["workspace_check_targets"] + result["facade_production_check_targets"]
+    ))
     result["feature_lane_build_targets"] = [
         output_label(label, kinds.get(label, ""))
         for label in result["feature_lane_compile_targets"]
@@ -953,6 +959,7 @@ def root_buck(inventory: dict) -> str:
             'load("//tools/buck2:source_tree.bzl", "lash_workspace_sources")\n\n',
             suite("workspace_compile", inventory["workspace_build_targets"]),
             suite("workspace_check", inventory["workspace_check_targets"]),
+            suite("facade_production_check", inventory["facade_production_check_targets"]),
             suite("workspace_tests", inventory["workspace_test_suite_labels"]),
             suite("dev_tests", inventory["workspace_dev_suite_labels"]),
             suite("deferred_tests", inventory["workspace_deferred_test_targets"]),

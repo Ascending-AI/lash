@@ -436,7 +436,7 @@ impl SnapshotStore for DurableSnapshotStore {
                 drafts.iter().map(|draft| draft.request.clone()).collect();
             admitted = round::admit_round(
                 &mut tx,
-                &waits::wait_scope(&self.cx),
+                &waits::wait_scope(&self.cx).map_err(refused)?,
                 RoundDraft {
                     owner: self.exec.owner(),
                     run: RunSeq(pending.run),

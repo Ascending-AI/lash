@@ -1937,7 +1937,20 @@ _LOCKED_PACKAGES: dict[str, list[str]] | None = None
 
 def feature_coverage_plan() -> dict:
     with FEATURE_COVERAGE_PLAN.open("rb") as handle:
-        return tomllib.load(handle)
+        plan = tomllib.load(handle)
+    # Host libraries must not inherit the workspace's development features.
+    # Exercise both the minimal facade and every production extension, so a
+    # new optional dependency joins this check automatically (FIG-5292).
+    host_features = sorted(
+        tomllib.loads((ROOT / "crates/lash/Cargo.toml").read_text())["features"].keys()
+        - {"testing", "synthetic-next"}
+    )
+    base = ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"]
+    plan["lane"].append({
+        "name": "facade-production",
+        "commands": [base, [*base, "--features", ",".join(host_features)]],
+    })
+    return plan
 
 
 def _variant_suffix(package_name: str, closure: list[tuple[str, list[str]]]) -> str:
@@ -2658,6 +2671,10 @@ class FeatureLaneGraph:
                     with_dev=command.with_dev,
                 )
                 resolution = resolved.sorted_features()
+                if lane_name == "facade-production":
+                    leaks = sorted(name for name, features in resolution.items() if "testing" in features)
+                    if leaks:
+                        raise SystemExit(f"facade production dependencies enable testing: {leaks}")
                 self.record_activations(resolved)
                 # Every first-party library in the closure, at its own resolved
                 # feature set. These are the units Cargo compiles for the

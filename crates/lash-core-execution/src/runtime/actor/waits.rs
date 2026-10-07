@@ -595,7 +595,7 @@ pub async fn await_process(
     process: &ProcessId,
     deadline: WaitDeadline,
 ) -> Result<ProcessWaitOutcome, DurableError> {
-    let wait = pin_process_terminal(cx, wait_scope(cx), process, Some(deadline)).await?;
+    let wait = pin_process_terminal(cx, wait_scope(cx)?, process, Some(deadline)).await?;
     Ok(match race(cx, &[wait]).await? {
         RaceWinner::Resolved { resolution, .. } => {
             ProcessWaitOutcome::Resolved(process_outcome(resolution)?)
@@ -765,9 +765,13 @@ pub async fn outstanding_keys(
 }
 
 /// The scope a wait minted by `cx` belongs to: its admitted scope, or its
-/// actor's for a scope that names neither a turn, a session nor a process.
-pub fn wait_scope(cx: &ActorContext) -> ScopeKey {
-    match cx.execution_scope() {
+/// actor's session or process scope for a runtime operation.
+///
+/// # Errors
+///
+/// A corrupt actor identity: a process actor never falls back to a session.
+pub fn wait_scope(cx: &ActorContext) -> Result<ScopeKey, DurableError> {
+    Ok(match cx.execution_scope() {
         ExecutionScope::Turn {
             session_id,
             turn_id,
@@ -775,19 +779,30 @@ pub fn wait_scope(cx: &ActorContext) -> ScopeKey {
         ExecutionScope::Process { process_id } => ScopeKey::Process(process_id.clone()),
         ExecutionScope::SessionOperation { session_id, .. }
         | ExecutionScope::SessionDelete { session_id } => ScopeKey::Session(session_id.clone()),
-        ExecutionScope::RuntimeOperation { .. } => actor_scope(cx.actor()),
-    }
+        ExecutionScope::RuntimeOperation { .. } => actor_scope(cx.actor())?,
+    })
 }
 
-fn actor_scope(actor: &lash_durable::ActorKey) -> ScopeKey {
-    // An actor's id is never empty, so it parses as either identity.
-    let session = || {
-        crate::SessionId::parse(actor.id()).unwrap_or_else(|_| crate::SessionId::from("unscoped"))
-    };
+fn actor_scope(actor: &lash_durable::ActorKey) -> Result<ScopeKey, DurableError> {
+    // ActorKey validates framing; decode the raw id according to its kind.
+    // It has not been escaped as a stored ScopeKey's path component.
     match actor.kind() {
-        ActorKind::Session => ScopeKey::Session(session()),
-        ActorKind::Process => ProcessId::parse(actor.id())
-            .map_or_else(|_| ScopeKey::Session(session()), ScopeKey::Process),
+        ActorKind::Session => crate::SessionId::parse(actor.id())
+            .map(ScopeKey::Session)
+            .map_err(|error| {
+                corrupt(&format!(
+                    "actor {actor} has no valid session scope: {error}"
+                ))
+            }),
+        ActorKind::Process => {
+            ProcessId::parse(actor.id())
+                .map(ScopeKey::Process)
+                .map_err(|error| {
+                    corrupt(&format!(
+                        "actor {actor} has no valid process scope: {error}"
+                    ))
+                })
+        }
     }
 }
 
@@ -869,4 +884,38 @@ fn stopped(cx: &ActorContext) -> DurableError {
         held: cx.epoch(),
         current: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_durable::ActorKey;
+
+    /// A runtime operation belongs to its actor, never to a fabricated
+    /// session. ActorKey framing alone does not prove a domain identity.
+    #[test]
+    fn runtime_operation_wait_scope_preserves_actor_identity() {
+        let session = crate::SessionId::parse("session/with%escapes").unwrap();
+        assert_eq!(
+            actor_scope(&ActorKey::session(session.as_str()).unwrap()).unwrap(),
+            ScopeKey::Session(session),
+        );
+        let process = crate::process_id_for_test("scope-owner");
+        assert_eq!(
+            actor_scope(&ActorKey::process(process.as_str()).unwrap()).unwrap(),
+            ScopeKey::Process(process),
+        );
+        for actor in [
+            ActorKey::session("   ").unwrap(),
+            ActorKey::process("not-a-process").unwrap(),
+        ] {
+            assert!(matches!(
+                actor_scope(&actor),
+                Err(DurableError::Store(StoreFailure {
+                    kind: StoreFailureKind::Corrupt,
+                    ..
+                })),
+            ));
+        }
+    }
 }

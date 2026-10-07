@@ -3,7 +3,6 @@
 use lash_core_execution::compat::{
     self, CompatAdmission, CompatRefusal, CompatStamp, StampRead, VersionRange,
 };
-#[cfg(any(test, feature = "testing"))]
 use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 

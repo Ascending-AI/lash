@@ -378,7 +378,7 @@ impl RoundOwner {
             let mut tx = cx.begin().await.map_err(Pass::from)?;
             let admitted = round::admit_round(
                 &mut tx,
-                &waits::wait_scope(cx),
+                &waits::wait_scope(cx).map_err(Pass::from)?,
                 RoundDraft {
                     owner: owner(),
                     run: RUN,

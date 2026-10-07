@@ -140,6 +140,7 @@ def check_inventory() -> None:
     required = {
         "workspace_compile",
         "workspace_check",
+        "facade_production_check",
         "workspace_tests",
         "dev_tests",
         "workspace_core_tests",
@@ -164,7 +165,11 @@ def check_inventory() -> None:
     assert "schema_check_group(\n    name = \"schema_checks\"" in root_buck
     assert 'load("//tools/buck2:source_tree.bzl", "lash_workspace_sources")' in root_buck
     assert 'lash_workspace_sources(\n    name = "workspace_rust_sources"' in root_buck
-    assert root_buck.count("[check]\"") == 2 * len(checks) + len(inventory["workspace_check_targets"])
+    assert root_buck.count("[check]\"") == (
+        2 * len(checks)
+        + len(inventory["workspace_check_targets"])
+        + len(inventory["facade_production_check_targets"])
+    )
 
 
 def check_sizing() -> None:

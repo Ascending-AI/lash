@@ -731,12 +731,23 @@ owning definition closure.
 
 ## Service and Cargo-owned gates
 
+`kiln check` includes `//:facade_production_check`: the facade's baseline
+library graph and its graph with every host extension enabled, both without
+`testing` or development dependencies. Its features come from the facade
+manifest, excluding the testing and synthetic-next harness features. Graph
+generation refuses a dependency that enables `testing`; compiling the resolved
+libraries catches production calls to testing-only APIs. Run the named target
+for a focused proof after changing those boundaries.
+
 Cargo build parity has a named landing gate:
 
 ```sh
 kiln gate lash <fork> -- bash scripts/ci/cargo-parity.sh
 ```
 
+It first checks the same two facade production library graphs and refuses a
+`testing` feature in their normal/build dependency trees. This witness can run
+alone with `kiln gate lash <fork> -- bash scripts/ci/facade-production.sh`.
 It runs real Cargo through the admission shim, with Buck routing disabled,
 using `check --workspace --all-targets --locked --offline` and the isolated
 development graphs of lashlang and integrator-contract. Cargo manifests remain the single

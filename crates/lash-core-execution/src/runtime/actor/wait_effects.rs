@@ -149,7 +149,7 @@ pub async fn timer(
     };
     Ok(WaitSpec {
         kind: WaitKind::Timer,
-        scope: waits::wait_scope(cx),
+        scope: waits::wait_scope(cx).map_err(durable_refusal)?,
         target_process: None,
         deadline: Some(WaitDeadline::at_instant(until)),
     })

@@ -155,7 +155,7 @@ async fn pin(
         &mut tx,
         WaitSpec {
             kind,
-            scope: waits::wait_scope(cx),
+            scope: waits::wait_scope(cx)?,
             target_process: target,
             deadline: deadline.map(|after| {
                 WaitDeadline::at_instant(

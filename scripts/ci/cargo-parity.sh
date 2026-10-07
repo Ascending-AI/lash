@@ -17,6 +17,8 @@ if [ -n "${LASH_CI_FEATURES:-}" ]; then
   args+=(--features "$LASH_CI_FEATURES")
 fi
 started=$SECONDS
+# --lib excludes development dependencies: a host must never need testing.
+bash scripts/ci/facade-production.sh
 # This publish-cycle development edge was hidden by workspace unification
 # (FIG-5015/FIG-5042). Exercise its isolated graph before the shared graph.
 cargo check --package lash-internal-lashlang "${args[@]}"
