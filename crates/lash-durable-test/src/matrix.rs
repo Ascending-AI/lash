@@ -3,11 +3,12 @@
 //!
 //! A [`Matrix`] runs its scenario once to record the writes it makes. Every
 //! write that changed something becomes a cut point, named by node, label
-//! and that node's occurrence. The matrix then re-runs a fresh scenario for
-//! each point under each [`Fault`] that means something for that kind of
-//! write, drives virtual time until the scenario is done (a paused node
-//! resumes only once its lease has expired and its actors moved), and asks
-//! the scenario's laws whether they held.
+//! and that node's occurrence, or, [across nodes](Matrix::across_nodes), by
+//! label and its occurrence among every node's writes. The matrix then
+//! re-runs a fresh scenario for each point under each [`Fault`] that means
+//! something for that kind of write, drives virtual time until the scenario
+//! is done (a paused node resumes only once its lease has expired and its
+//! actors moved), and asks the scenario's laws whether they held.
 
 use crate::clock::SimClock;
 use crate::nodes::{SimNodes, SimNodesConfig};
@@ -53,10 +54,11 @@ pub enum Verdict {
     Unreached,
 }
 
-/// One cut point: a node's `nth` write under a label.
+/// One cut point: a node's `nth` write under a label, or, with no node, the
+/// `nth` among every node's writes under it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CutPoint {
-    pub node: String,
+    pub node: Option<String>,
     pub label: CommitLabel,
     pub nth: usize,
     pub kind: WriteKind,
@@ -64,7 +66,10 @@ pub struct CutPoint {
 
 impl std::fmt::Display for CutPoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}#{}", self.node, self.label, self.nth)
+        if let Some(node) = &self.node {
+            write!(f, "{node}:")?;
+        }
+        write!(f, "{}#{}", self.label, self.nth)
     }
 }
 
@@ -134,6 +139,7 @@ pub struct Matrix {
     faults: Vec<Fault>,
     horizon_ms: u64,
     labels: Option<Vec<CommitLabel>>,
+    across_nodes: bool,
 }
 
 impl Default for Matrix {
@@ -158,6 +164,7 @@ impl Matrix {
             ],
             horizon_ms: 600_000,
             labels: None,
+            across_nodes: false,
         }
     }
 
@@ -170,6 +177,17 @@ impl Matrix {
     /// Cut only writes under these labels.
     pub fn labels(mut self, labels: &[CommitLabel]) -> Self {
         self.labels = Some(labels.to_vec());
+        self
+    }
+
+    /// Number each cut among every node's writes under its label, not among
+    /// one node's: for a scenario whose count of a label's writes is fixed
+    /// but whose split between the nodes is not. Which node claims an actor
+    /// first can turn on a store read the fault stores do not count, still
+    /// in flight when the clock moves, so a node's own occurrence may never
+    /// come in a re-run.
+    pub fn across_nodes(mut self) -> Self {
+        self.across_nodes = true;
         self
     }
 
@@ -190,11 +208,14 @@ impl Matrix {
             baseline.trace
         );
         let mut cells = Vec::new();
-        for point in cut_points(&baseline.writes).into_iter().filter(|point| {
-            self.labels
-                .as_ref()
-                .is_none_or(|labels| labels.contains(&point.label))
-        }) {
+        for point in cut_points(&baseline.writes, self.across_nodes)
+            .into_iter()
+            .filter(|point| {
+                self.labels
+                    .as_ref()
+                    .is_none_or(|labels| labels.contains(&point.label))
+            })
+        {
             for fault in self
                 .faults
                 .iter()
@@ -221,7 +242,10 @@ impl Matrix {
         let database = scenario.database(Arc::clone(&clock)).await;
         let script = Script::new();
         if let Some((point, fault)) = cut {
-            script.cut_on(&point.node, point.label, point.nth, fault);
+            match &point.node {
+                Some(node) => script.cut_on(node, point.label, point.nth, fault),
+                None => script.cut(point.label, point.nth, fault),
+            };
         }
         let config = scenario.config();
         let failover_ms = failover_ms(&config);
@@ -315,17 +339,22 @@ async fn actors_left<S: Scenario>(nodes: &SimNodes, scenario: &S, node: &str) ->
 }
 
 /// Every write of the uncut run that changed something, once per node,
-/// label and occurrence; a node's heartbeats only once, since a pause or
-/// a kill already covers every later one.
-fn cut_points(writes: &[Write]) -> Vec<CutPoint> {
+/// label and occurrence (`across_nodes`: once per label and occurrence
+/// among every node's writes); a node's heartbeats only once, since a pause
+/// or a kill already covers every later one.
+fn cut_points(writes: &[Write], across_nodes: bool) -> Vec<CutPoint> {
     let mut points: Vec<CutPoint> = writes
         .iter()
         .filter(|write| matches!(write.stored, Stored::Committed { effective: true }))
         .filter(|write| write.point.label != CommitLabel::HEARTBEAT || write.node_nth == 1)
         .map(|write| CutPoint {
-            node: write.node.to_string(),
+            node: (!across_nodes).then(|| write.node.to_string()),
             label: write.point.label,
-            nth: write.node_nth,
+            nth: if across_nodes {
+                write.point.nth
+            } else {
+                write.node_nth
+            },
             kind: write.kind,
         })
         .collect();

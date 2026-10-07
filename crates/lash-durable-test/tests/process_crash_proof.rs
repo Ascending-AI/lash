@@ -26,7 +26,9 @@
 //! The cascade scenario cancels the root of a tree three levels deep, every
 //! scope with three `Until` children and the cascade batch two, and cuts
 //! every `cascade.batch` commit with a crash before and after it lands: the
-//! whole tree ends, every descendant `ParentEnded`.
+//! whole tree ends, every descendant `ParentEnded`. A run always makes the
+//! same batches, but which node makes each depends on which claims an actor
+//! first, so the cuts are counted across both nodes.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -773,6 +775,7 @@ async fn a_cascade_three_levels_deep_ends_across_a_crash_at_each_batch() {
     let report = Matrix::new()
         .faults(&[Fault::Abort, Fault::CommitThenAbort])
         .labels(&[CommitLabel::CASCADE_BATCH])
+        .across_nodes()
         .horizon(Duration::from_secs(600))
         .run(|| Proof::new(Shape::Cascade))
         .await;
