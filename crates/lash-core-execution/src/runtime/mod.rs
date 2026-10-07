@@ -123,14 +123,15 @@ pub use process::{
     SettledOutcomeRefusal, StartCx, StartCxError, StartKey, StepName, StepRequest,
     StoreRealization, TerminalProcessStatus, UnavailableProcessService, WaitKind, WaitState,
     WakeId, WatchedRegistry, WeakProcessEngineRegistry, abandoned_consumer_refusal,
-    admitted_signal_wait, allocate_process_event_sequence, apply_process_event_projection,
-    artifact_referrer_ended, check_retained_start, current_epoch_ms, fold_process_record, lifetime,
-    load_process_execution_env, materialize_process_event_semantics, mint_process_id,
-    prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    prepare_process_transition, process_child_session_id, process_session_turn_id,
-    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
-    process_wake_delivery, process_wake_input_from_event_payload, process_wake_turn_cause,
-    process_wake_turn_text, publish_process_execution_env, reconcile_pruned_trigger_deliveries,
+    admit_process_signal_append, admitted_signal_wait, allocate_process_event_sequence,
+    apply_process_event_projection, artifact_referrer_ended, check_retained_start,
+    current_epoch_ms, fold_process_record, lifetime, load_process_execution_env,
+    materialize_process_event_semantics, mint_process_id, prepare_process_event_append,
+    prepare_process_registration, prepare_process_start, prepare_process_transition,
+    process_child_session_id, process_session_turn_id, process_signal_event_type,
+    process_signal_name_from_event_type, process_signal_wait_key, process_wake_delivery,
+    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
+    publish_process_execution_env, reconcile_pruned_trigger_deliveries,
     reconcile_session_process_observer_intents, release_process_event_payload,
     require_event_replay, restore_released_process_event_payload, terminal_append_request,
     terminal_event_type_name, validate_generic_process_event_append, validate_process_signal_name,
@@ -138,8 +139,9 @@ pub use process::{
 };
 pub use process::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,
-    ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StartStaging,
-    is_start_operation, register_process_start, stage_process_start, start_operation_journal,
+    ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StagedProcessStart,
+    StagedRegistration, StartStaging, is_start_operation, register_process_start,
+    stage_process_start, stage_store_local_start, start_operation_journal,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{

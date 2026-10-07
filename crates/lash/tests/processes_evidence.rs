@@ -676,9 +676,9 @@ fn processes_area_witnesses() {
     fn meth_0266<T: lash::process::ProcessService>(_: &T) {
         let _ = T::emit_event_recorded_intent;
     }
-    // W0267: lash::process::ProcessService::signal_recorded_intent [function]
+    // W0267: lash::process::ProcessService::stage_recorded_signal [function]
     fn meth_0267<T: lash::process::ProcessService>(_: &T) {
-        let _ = T::signal_recorded_intent;
+        let _ = T::stage_recorded_signal;
     }
     // W0268: lash::process::ProcessService::signal_possessed [function]
     fn meth_0268<T: lash::process::ProcessService>(_: &T) {
@@ -688,9 +688,9 @@ fn processes_area_witnesses() {
     fn meth_0269<T: lash::process::ProcessService>(_: &T) {
         let _ = T::start;
     }
-    // W0270: lash::process::ProcessService::start_from_recorded_intent [function]
+    // W0270: lash::process::ProcessService::stage_recorded_start [function]
     fn meth_0270<T: lash::process::ProcessService>(_: &T) {
-        let _ = T::start_from_recorded_intent;
+        let _ = T::stage_recorded_start;
     }
     // W0271: lash::process::ProcessService::start_from_request [function]
     fn meth_0271<T: lash::process::ProcessService>(_: &T) {

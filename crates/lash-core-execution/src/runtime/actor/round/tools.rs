@@ -325,7 +325,7 @@ pub async fn settle_cancelled(
                 AttemptOutcome::Cancelled {
                     evidence: AvailableEvidence::default(),
                 },
-                None,
+                Vec::new(),
             )?;
         }
     }

@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1568 rows over 850 files, 3919 laws.
-# By class: mechanical 163, semantic 111, delete 845, replace 449.
-# By lane: L1b 12, L3 19, L3s 57, L4 19, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
-# By status: todo 408, ported 87, deleted 1073.
+# 1569 rows over 851 files, 3921 laws.
+# By class: mechanical 163, semantic 111, delete 846, replace 449.
+# By lane: L1b 12, L3 19, L3s 57, L4 20, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
+# By status: todo 408, ported 87, deleted 1074.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -25086,3 +25086,19 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "deleted by FIG-5232 with load_pending_follow_on and raise_pending_follow_on_attempts: the store traits no longer carry the follow-on fact, so the differential case and its two sweep steps went with them"
+# FIG-5223: a tool's process start and signal are store-local effects of its outcome.
+
+[[row]]
+path = "crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs"
+test = "*"
+area = "tool-intents"
+needs = ["round", "process"]
+class = "delete"
+lane = "L4"
+laws = [
+  "signal_projection_rejects_a_malformed_tagged_tool_value",
+  "a_realized_signal_projects_its_sequence_onto_the_process_it_signalled",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5223 deleted the signal sequence projection these laws pinned: a tool's signal is a store-local effect staged by its realization and appended by the round.outcome commit that records the call, so no attempt reads a sequence before its outcome commits and a realized signal answers the signal it sent. That the signal is delivered exactly when its outcome commits is crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome; only these laws of the file are listed, the rest stay"

@@ -503,7 +503,7 @@ macro_rules! convert_realized_payload {
         (*$result).into()
     };
     (SignalProcess, $result:expr) => {
-        Box::new((*$result).try_into()?)
+        Box::new((*$result).into())
     };
     (EmitProcessEvent, $result:expr) => {
         Box::new((*$result).try_into()?)

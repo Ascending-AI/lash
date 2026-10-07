@@ -595,9 +595,16 @@ impl ToolIntentIngress {
                         lash_core::ProcessHandleView::from_record(*record),
                     )
                 }
-                lash_core::ProcessEffectOutcome::Signal { event } => {
-                    lash_core::ToolIntentRealized::SignalProcess(event)
-                }
+                // The realized signal is the one this submission sent.
+                lash_core::ProcessEffectOutcome::Signal { .. } => match &submitted_intent {
+                    lash_core::ToolIntent::SignalProcess(intent) => {
+                        lash_core::ToolIntentRealized::SignalProcess(Box::new(
+                            sent_signal(identity, intent)
+                                .map_err(|error| RealizationFailure::Command(kind, error))?,
+                        ))
+                    }
+                    _ => return Err(Self::outside_protocol_outcome("signal")),
+                },
                 lash_core::ProcessEffectOutcome::Cancel { record } => {
                     lash_core::ToolIntentRealized::CancelProcess(
                         lash_core::ProcessCancelReceipt::from_record(*record)
@@ -924,24 +931,11 @@ impl ToolIntentIngress {
                     execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
                 }
             }
-            lash_core::ToolIntent::SignalProcess(intent) => {
-                // The recorded append admission refuses an unknown or pruned
-                // target; no registry read comes ahead of it (ADR 0105 §1).
-                let process_id = intent.process_id.clone();
-                // The intent's replay key is the signal's id, as on core's
-                // recorded-intent seam: the append key is derived from the
-                // signal's identity, never spelled here (FIG-4299).
-                lash_core::ProcessCommand::Signal {
-                    signal: lash_core::ProcessSignal::new(
-                        lash_core::ProcessSignalIdentity::new(
-                            process_id,
-                            intent.signal_name,
-                            identity.replay_key.clone(),
-                        )?,
-                        intent.payload,
-                    ),
-                }
-            }
+            // The recorded append admission refuses an unknown or pruned
+            // target; no registry read comes ahead of it (ADR 0105 §1).
+            lash_core::ToolIntent::SignalProcess(intent) => lash_core::ProcessCommand::Signal {
+                signal: sent_signal(identity, &intent)?,
+            },
             lash_core::ToolIntent::CancelProcess(intent) => {
                 // The recorded cancel admission refuses an unknown or pruned
                 // target; no registry read comes ahead of it (ADR 0105 §1).
@@ -1236,4 +1230,21 @@ impl ToolIntentIngress {
         };
         Ok((result, replayed))
     }
+}
+
+/// The signal a host-submitted signal intent sends. The intent's replay key
+/// is the signal's id, as on core's recorded-intent seam: the append key is
+/// derived from the signal's identity, never spelled here (FIG-4299).
+fn sent_signal(
+    identity: &lash_core::ToolIntentIdentity,
+    intent: &lash_core::SignalProcessIntent,
+) -> Result<lash_core::ProcessSignal, lash_core::PluginError> {
+    Ok(lash_core::ProcessSignal::new(
+        lash_core::ProcessSignalIdentity::new(
+            intent.process_id.clone(),
+            intent.signal_name.clone(),
+            identity.replay_key.clone(),
+        )?,
+        intent.payload.clone(),
+    ))
 }

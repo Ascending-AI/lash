@@ -5,8 +5,9 @@ use tracing::Instrument as _;
 use super::ToolDispatchContext;
 
 /// The dispatch fields intent realization reads, carried without the rest of
-/// a [`ToolDispatchContext`]: a final realizes its intents in place, inside
-/// the admitted execution that runs its call (ADR 0132 §5).
+/// a [`ToolDispatchContext`]: a final realizes its intents inside the
+/// admitted execution that runs its call, and stages what they write to the
+/// lash store to commit with the call's outcome (ADR 0132 §5).
 pub struct IntentRealizationContext<'run> {
     pub effect_controller: crate::ActorContext,
     pub owner: crate::ExecutionOwner,
@@ -51,29 +52,37 @@ impl IntentRealizationContext<'_> {
     }
 }
 
+/// Realize a final's `intents`: each intent's outcome, and the store-local
+/// effects a process start or a signal stages, which commit with the call's
+/// outcome under its owner's epoch fence (ADR 0132 §5). Nothing here writes
+/// a process row, a signal or its mail.
+///
+/// # Errors
+///
+/// A replay divergence, which the call cannot settle.
 pub async fn execute_final_tool_intents(
     context: &IntentRealizationContext<'_>,
     tool_call_id: &lash_sansio::ToolCallId,
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+) -> Result<super::Realization, crate::RuntimeEffectControllerError> {
     let execution_scope_id = context.effect_controller.scope_id().to_string();
     if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V3 {
-        return Ok(Vec::new());
+        return Ok(super::Realization::default());
     }
     if let Some(refusal) = admit_batch(&context.owner.runtime_owner(), intents) {
-        return Ok(refuse_all(
-            context,
-            &execution_scope_id,
-            tool_call_id,
-            intents,
-            refusal,
-        ));
+        return Ok(super::Realization {
+            receipt: super::RealizationReceipt {
+                outcomes: refuse_all(context, &execution_scope_id, tool_call_id, intents, refusal),
+            },
+            store_local: Vec::new(),
+        });
     }
 
     // Once a semantic admission is cancelled, remaining intents cannot mint work.
     let mut minting_cancelled = false;
     let mut outcomes = Vec::with_capacity(intents.intents.len());
+    let mut store_local = Vec::new();
     for (index, intent) in intents.intents.iter().enumerate() {
         let identity = match derive_identity(context, &execution_scope_id, tool_call_id, index) {
             Ok(identity) => identity,
@@ -112,10 +121,10 @@ pub async fn execute_final_tool_intents(
             .await;
         let _entered = span.enter();
         let outcome = match result {
-            Ok(result) => crate::ToolIntentExecutionOutcome::Executed {
-                identity,
-                realized: result,
-            },
+            Ok((realized, effect)) => {
+                store_local.extend(effect);
+                crate::ToolIntentExecutionOutcome::Executed { identity, realized }
+            }
             Err(crate::PluginError::RuntimeEffectController(error))
                 if error.code.is_replay_mismatch() =>
             {
@@ -152,15 +161,19 @@ pub async fn execute_final_tool_intents(
         );
         outcomes.push(outcome);
     }
-    Ok(outcomes)
+    Ok(super::Realization {
+        receipt: super::RealizationReceipt { outcomes },
+        store_local,
+    })
 }
 
-/// The declared-start launch entry (ADR 0116 §3.2): realizes the one start a
-/// pending call declared exactly as a `StartProcess` drain realizes it — the
-/// same request under the same derived key, the same journaled admission and
-/// the same child-trace hook — and answers the call's launch receipt.
+/// The declared-start launch entry (ADR 0116 §3.2): stages the one start a
+/// pending call declared exactly as a `StartProcess` intent stages it — the
+/// same request under the same derived key, the same admission and the same
+/// child-trace hook — and answers the call's launch receipt with the rows
+/// that register the start with the call's park.
 ///
-/// `scope` carries the call's lineage as its parent. A realized start answers
+/// `scope` carries the call's lineage as its parent. A staged start answers
 /// `Executed`; a typed refusal answers `Refused` and settles the call. An
 /// `Err` is a fault the call cannot settle (see [`declared_start_fault`]).
 pub(crate) async fn realize_declared_start(
@@ -168,7 +181,13 @@ pub(crate) async fn realize_declared_start(
     start: &crate::DeclaredStart,
     scope: crate::ProcessOpScope<'_>,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<crate::ToolIntentExecutionOutcome, crate::RuntimeEffectControllerError> {
+) -> Result<
+    (
+        crate::ToolIntentExecutionOutcome,
+        Option<crate::runtime::actor::round::StoreLocalEffect>,
+    ),
+    crate::RuntimeEffectControllerError,
+> {
     let identity = start.identity().clone();
     let parent = scope.parent_invocation.clone().map(|parent| {
         parent.with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
@@ -184,10 +203,11 @@ pub(crate) async fn realize_declared_start(
             lash_trace::DurableTraceScope::parent_cause,
         ));
     match processes
-        .start_from_recorded_intent(&start.start().owner, request, scope)
+        .stage_recorded_start(&start.start().owner, request, scope)
         .await
     {
-        Ok(handle) => {
+        Ok(staged) => {
+            let handle = crate::ProcessHandleView::from_record(staged.record);
             // The declared kind names the child's entry, so a trace links the
             // call to a child it can name.
             if let Some(hook) = child_trace_hook {
@@ -202,20 +222,28 @@ pub(crate) async fn realize_declared_start(
                         .map(|identity| identity.kind.as_str().to_string()),
                 });
             }
-            Ok(crate::ToolIntentExecutionOutcome::Executed {
-                identity,
-                realized: crate::ToolIntentRealized::StartProcess(handle),
-            })
+            Ok((
+                crate::ToolIntentExecutionOutcome::Executed {
+                    identity,
+                    realized: crate::ToolIntentRealized::StartProcess(handle),
+                },
+                staged
+                    .rows
+                    .map(crate::runtime::actor::round::StoreLocalEffect::ProcessStart),
+            ))
         }
         Err(error) => match declared_start_fault(&error) {
             Some(fault) => Err(fault),
-            None => Ok(refused(
-                identity.intent_index as usize,
-                kind,
-                Some(identity),
-                crate::ToolIntentRefusalReason::CommandFailed {
-                    cause: crate::ToolIntentCommandFailure::from(&error),
-                },
+            None => Ok((
+                refused(
+                    identity.intent_index as usize,
+                    kind,
+                    Some(identity),
+                    crate::ToolIntentRefusalReason::CommandFailed {
+                        cause: crate::ToolIntentCommandFailure::from(&error),
+                    },
+                ),
+                None,
             )),
         },
     }
@@ -455,12 +483,20 @@ pub(super) fn validate_trigger_registration_authority(
     clippy::expect_used,
     reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
 )]
+/// Realize one intent: its outcome, and the store-local effect a process
+/// start or a signal stages instead of writing.
 async fn execute_one(
     context: &IntentRealizationContext<'_>,
     intent: &crate::ToolIntent,
     identity: &crate::ToolIntentIdentity,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<crate::ToolIntentRealized, crate::PluginError> {
+) -> Result<
+    (
+        crate::ToolIntentRealized,
+        Option<crate::runtime::actor::round::StoreLocalEffect>,
+    ),
+    crate::PluginError,
+> {
     let parent = context.parent_invocation.clone().unwrap_or_else(|| {
         crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
@@ -491,40 +527,54 @@ async fn execute_one(
                     lash_trace::DurableTraceScope::parent_cause,
                 ),
             );
-            let summary = context
+            let staged = context
                 .processes
-                .start_from_recorded_intent(&intent.owner, request, scope)
+                .stage_recorded_start(&intent.owner, request, scope)
                 .await?;
             if let Some(hook) = child_trace_hook {
                 hook.child_process_started(crate::tool_provider::ToolChildProcessStarted {
-                    process_id: summary.process_id.clone(),
+                    process_id: staged.record.id.clone(),
                     attempt: None,
                     child_entry_name: None,
                 });
             }
-            Ok(crate::ToolIntentRealized::StartProcess(summary))
+            Ok((
+                crate::ToolIntentRealized::StartProcess(crate::ProcessHandleView::from_record(
+                    staged.record,
+                )),
+                staged
+                    .rows
+                    .map(crate::runtime::actor::round::StoreLocalEffect::ProcessStart),
+            ))
         }
         crate::ToolIntent::SignalProcess(intent) => {
-            let event = context
-                .processes
-                .signal_recorded_intent(
-                    &intent.owner,
-                    &intent.process_id,
+            let signal = crate::ProcessSignal::new(
+                crate::ProcessSignalIdentity::new(
+                    intent.process_id.clone(),
                     intent.signal_name.clone(),
                     identity.replay_key.clone(),
-                    intent.payload.clone(),
-                    scope,
-                )
+                )?,
+                intent.payload.clone(),
+            );
+            let effect = context
+                .processes
+                .stage_recorded_signal(&intent.owner, &signal, scope)
                 .await?;
-            Ok(crate::ToolIntentRealized::SignalProcess(Box::new(event)))
+            Ok((
+                crate::ToolIntentRealized::SignalProcess(Box::new(signal)),
+                Some(effect),
+            ))
         }
         crate::ToolIntent::CancelProcess(intent) => {
             let record = context
                 .processes
                 .cancel_recorded_intent(&intent.owner, &intent.process_id, identity.clone(), scope)
                 .await?;
-            Ok(crate::ToolIntentRealized::CancelProcess(
-                crate::ProcessCancelReceipt::from_record(record)?,
+            Ok((
+                crate::ToolIntentRealized::CancelProcess(crate::ProcessCancelReceipt::from_record(
+                    record,
+                )?),
+                None,
             ))
         }
         crate::ToolIntent::EmitProcessEvent(intent) => {
@@ -539,7 +589,10 @@ async fn execute_one(
                     scope,
                 )
                 .await?;
-            Ok(crate::ToolIntentRealized::EmitProcessEvent(Box::new(event)))
+            Ok((
+                crate::ToolIntentRealized::EmitProcessEvent(Box::new(event)),
+                None,
+            ))
         }
         crate::ToolIntent::EmitTrigger(intent) => {
             // The router owns the whole emission, but the durable declaration
@@ -564,7 +617,7 @@ async fn execute_one(
             request.idempotency_key = identity.replay_key.clone();
             let report =
                 Box::pin(router.emit_recorded(request, &context.effect_controller)).await?;
-            Ok(crate::ToolIntentRealized::EmitTrigger(report))
+            Ok((crate::ToolIntentRealized::EmitTrigger(report), None))
         }
         crate::ToolIntent::PublishDefinition(intent) => realize_definition(
             context,
@@ -575,7 +628,12 @@ async fn execute_one(
             },
         )
         .await
-        .map(|definition| crate::ToolIntentRealized::PublishDefinition(Box::new(definition))),
+        .map(|definition| {
+            (
+                crate::ToolIntentRealized::PublishDefinition(Box::new(definition)),
+                None,
+            )
+        }),
         crate::ToolIntent::GetDefinition(intent) => realize_definition(
             context,
             identity,
@@ -584,15 +642,23 @@ async fn execute_one(
             },
         )
         .await
-        .map(|definition| crate::ToolIntentRealized::GetDefinition(Box::new(definition))),
+        .map(|definition| {
+            (
+                crate::ToolIntentRealized::GetDefinition(Box::new(definition)),
+                None,
+            )
+        }),
         crate::ToolIntent::RegisterTrigger(intent) => {
             let router = context.trigger_router.as_ref().ok_or_else(|| {
                 crate::PluginError::Session(
                     "trigger store is unavailable in this runtime".to_string(),
                 )
             })?;
-            Ok(crate::ToolIntentRealized::RegisterTrigger(
-                register_recorded_trigger(context, router, identity, intent).await?,
+            Ok((
+                crate::ToolIntentRealized::RegisterTrigger(
+                    register_recorded_trigger(context, router, identity, intent).await?,
+                ),
+                None,
             ))
         }
     }

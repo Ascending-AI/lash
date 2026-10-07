@@ -21,7 +21,9 @@ async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_prot
             None,
         )
         .await
-        .expect("empty unsupported batch is refused");
+        .expect("empty unsupported batch is refused")
+        .receipt
+        .outcomes;
         assert_eq!(
             outcomes,
             vec![crate::ToolIntentExecutionOutcome::ProtocolRefused {

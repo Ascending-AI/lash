@@ -2,12 +2,14 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::plugin::PluginError;
 
-use super::events::{ProcessAwaitOutput, ProcessEvent};
+use super::events::{ProcessAwaitOutput, ProcessEvent, ProcessSignal};
 use super::model::{
     ProcessCancelReceipt, ProcessHandleView, ProcessListMode, ProcessRecord, ProcessStartOptions,
     ProcessStartRegistration, ProcessStartRequest,
 };
 use super::op_scope::ProcessOpScope;
+use super::start_staging::StagedProcessStart;
+use crate::runtime::actor::round::StoreLocalEffect;
 
 /// Optional factory-scoped filter for the session process tools only.
 ///
@@ -58,31 +60,32 @@ pub trait ProcessService: Send + Sync {
         ))
     }
 
-    /// Issues the single process-start command for a recorded tool intent.
-    /// Implementations must not consult live visibility, existence, terminal,
-    /// or host policy state before crossing the effect-controller boundary.
+    /// Stage the single process start a recorded tool intent declares, as
+    /// a store-local effect of the call that declares it (ADR 0132 §5): it
+    /// is admitted and staged from the recorded intent payload alone, and
+    /// only the commit that records the call's outcome registers it.
+    /// Implementations must not consult live visibility, existence,
+    /// terminal, or host policy state.
     ///
-    /// The drain calls this from session-actor code, so a drain recomputed
-    /// after a crash calls it again for an intent it already landed. The
-    /// repeat carries the same recorded identity (the request's derived
-    /// process id) and the effect controller answers it with the recorded
-    /// outcome, so the start lands once. An implementation keys anything it
-    /// does outside that boundary by the same identity.
-    async fn start_from_recorded_intent(
+    /// A call rerun at its ordinal stages the start again under the same
+    /// derived key; its earlier staging registered nothing, because its
+    /// outcome never committed.
+    async fn stage_recorded_start(
         &self,
         owner: &crate::RuntimeOwner,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessHandleView, PluginError>;
+    ) -> Result<StagedProcessStart, PluginError>;
 
-    /// Launch the registration admitted by a logical Run, without repeating
-    /// the tool's preparation or lifetime policy. The service supplies the
-    /// process executor and storage ports inside the owning invocation.
-    async fn start_bound(
+    /// Stage the registration admitted by a logical Run, as a store-local
+    /// effect of the call that declared it, without repeating the tool's
+    /// preparation or lifetime policy. The service supplies the process
+    /// executor and storage ports inside the owning invocation.
+    async fn stage_bound(
         &self,
         registration: ProcessStartRegistration,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<StagedProcessStart, PluginError> {
         let _ = (registration, scope);
         Err(PluginError::Session(
             "bound process starts are unavailable in this runtime".to_owned(),
@@ -232,16 +235,16 @@ pub trait ProcessService: Send + Sync {
         Ok(cancelled)
     }
 
-    /// Journal-first signal used only by the recorded intent protocol.
-    async fn signal_recorded_intent(
+    /// Stage `signal`, a recorded tool intent's, as a store-local effect of
+    /// the call that sends it (ADR 0132 §5): its append is admitted against
+    /// the target as it stands, and only the commit that records the call's
+    /// outcome appends and mails it.
+    async fn stage_recorded_signal(
         &self,
         owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
+        signal: &ProcessSignal,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessEvent, PluginError>;
+    ) -> Result<StoreLocalEffect, PluginError>;
 
     async fn emit_event(
         &self,
@@ -262,7 +265,7 @@ pub trait ProcessService: Send + Sync {
     /// Called from shift code, so a replaying engine calls it again for an
     /// event the drain already landed, under the same `replay_key`; the effect
     /// controller answers the repeat with the recorded event. As for
-    /// [`Self::start_from_recorded_intent`], anything an implementation does
+    /// [`Self::stage_recorded_start`], anything an implementation does
     /// outside that boundary is keyed by the replay key.
     async fn emit_event_recorded_intent(
         &self,
@@ -297,12 +300,12 @@ pub struct UnavailableProcessService;
 
 #[async_trait::async_trait]
 impl ProcessService for UnavailableProcessService {
-    async fn start_from_recorded_intent(
+    async fn stage_recorded_start(
         &self,
         _owner: &crate::RuntimeOwner,
         _request: ProcessStartRequest,
         _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessHandleView, PluginError> {
+    ) -> Result<StagedProcessStart, PluginError> {
         Err(PluginError::Session(
             "processes are unavailable in this runtime".to_string(),
         ))
@@ -389,15 +392,12 @@ impl ProcessService for UnavailableProcessService {
         ))
     }
 
-    async fn signal_recorded_intent(
+    async fn stage_recorded_signal(
         &self,
         _owner: &crate::RuntimeOwner,
-        _process_id: &ProcessId,
-        _signal_name: String,
-        _signal_id: String,
-        _payload: serde_json::Value,
+        _signal: &ProcessSignal,
         _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessEvent, PluginError> {
+    ) -> Result<StoreLocalEffect, PluginError> {
         Err(PluginError::Session(
             "processes are unavailable in this runtime".to_string(),
         ))

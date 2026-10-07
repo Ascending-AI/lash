@@ -170,7 +170,7 @@ pub(super) async fn run(
                             outcome: lash_core_store::tool_run::AttemptOutcome::Completed(output),
                             material: Some(material),
                         },
-                        None,
+                        Vec::new(),
                     )
                     .map_err(exec)?;
                 }

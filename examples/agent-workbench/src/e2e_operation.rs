@@ -279,16 +279,8 @@ impl SingletonToolHandlers for Echo {
         Ok(capture.output().unwrap_or_default().to_owned())
     }
     fn emit_stream(&self, _: &lash::ToolCallId, _: &AttemptStream) {}
-    async fn launch_start(&self, _: &DeclaredStartObligation) -> Result<StartLaunch, String> {
+    async fn stage_start(&self, _: &DeclaredStartObligation) -> Result<StartLaunch, String> {
         Err("workbench echo admits no process start".into())
-    }
-    async fn discharge_start(
-        &self,
-        _: &DeclaredStartObligation,
-        _: &lash::ProcessId,
-        _: bool,
-    ) -> Result<(), String> {
-        Err("workbench echo has no consumer hold".into())
     }
 }
 

@@ -30,6 +30,9 @@ pub use lash_core_execution::formats;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_execution::process_id_for_test;
 pub use lash_core_execution::process_id_from_handle_json;
+pub use lash_core_execution::runtime::actor::round::{
+    SignalSendRows, StoreLocalEffect, StoreLocalRows,
+};
 /// Durable tool-effect format versions, re-exported for the format manifest.
 pub use lash_core_execution::waits;
 pub use lash_core_execution::{
@@ -728,17 +731,17 @@ pub use runtime::{
     SessionId, SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
     SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
     SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView, SleepSpec,
-    SlotId, StartCx, StartCxError, StartKey, StepName, StepRequest, StoreRealization,
-    StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode,
-    TurnCancelUndeliveredInputPolicy, TurnCancelWait, TurnContext, TurnEvent, TurnFailureCause,
-    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
-    TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
-    TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
-    TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore, WaitKind, WaitState,
-    WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
-    admit_session_state_generation, artifact_store_plugin_error, lifetime, mint_process_id,
-    tool_failure_code,
+    SlotId, StagedProcessStart, StartCx, StartCxError, StartKey, StepName, StepRequest,
+    StoreRealization, StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelInputOutcome,
+    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancelWait, TurnContext, TurnEvent,
+    TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement,
+    TurnInput, TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary,
+    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState,
+    TurnInputStateKind, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore,
+    WaitKind, WaitState, WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
+    WorkCadencePolicy, admit_session_state_generation, artifact_store_plugin_error, lifetime,
+    mint_process_id, tool_failure_code,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

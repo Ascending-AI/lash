@@ -12,12 +12,13 @@
 //!
 //! # Declared starts (ADR 0116 §3)
 //!
-//! A [`DeclaredStart`](crate::DeclaredStart) is launched before its call
-//! parks, under its own start key beneath the call's lineage: the registrar
-//! mints the child's id inside the registration, so a rerun of the call
-//! presents the same start key and gets the same child back. The realized
-//! start, or its typed refusal, is the call's launch receipt: its intent
-//! outcome for index 0.
+//! A [`DeclaredStart`](crate::DeclaredStart) is staged before its call
+//! parks, under its own start key beneath the call's lineage, and registered
+//! by the commit that records the park, with the park's process-terminal
+//! wait: a crash leaves the park, its child and its wait together or none of
+//! them. The registrar mints the child's id when it prepares the
+//! registration. The staged start, or its typed refusal, is the call's
+//! launch receipt: its intent outcome for index 0.
 //!
 //! A declaration decodes without its constructor, so its bytes may name
 //! another session, another call's identity or a nonzero index. The start
@@ -36,9 +37,10 @@ pub struct LaunchReceipt {
     pub process_id: Option<crate::ProcessId>,
 }
 
-/// Launch the start a parked call declared, under the start's own
-/// admission beneath `scope`, holding the child for the call under
-/// `hold_key` (see the module documentation).
+/// Stage the start a parked call declared, under the start's own admission
+/// beneath `scope`, holding the child for the call under `hold_key`: its
+/// launch receipt, and the rows that register it with the park (see the
+/// module documentation).
 ///
 /// # Errors
 ///
@@ -50,7 +52,13 @@ pub(crate) async fn launch_parked_start(
     hold_key: String,
     cancels: bool,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<LaunchReceipt, crate::RuntimeEffectControllerError> {
+) -> Result<
+    (
+        LaunchReceipt,
+        Option<crate::runtime::actor::round::StoreLocalEffect>,
+    ),
+    crate::RuntimeEffectControllerError,
+> {
     // The child is registered under the call's hold, owned by the scope the
     // call runs under, so the row outlives every rerun of the start.
     let hold = consumer_hold_owner(&scope).map(|owner| crate::ConsumerHold {
@@ -58,7 +66,7 @@ pub(crate) async fn launch_parked_start(
         owner,
         cancels,
     });
-    let outcome = super::intent_executor::realize_declared_start(
+    let (outcome, effect) = super::intent_executor::realize_declared_start(
         processes,
         start,
         scope.with_consumer_hold(hold),
@@ -72,10 +80,13 @@ pub(crate) async fn launch_parked_start(
         } => Some(handle.process_id.clone()),
         _ => None,
     };
-    Ok(LaunchReceipt {
-        outcome,
-        process_id,
-    })
+    Ok((
+        LaunchReceipt {
+            outcome,
+            process_id,
+        },
+        effect,
+    ))
 }
 
 /// The launch receipt of a declaration that does not belong to its call:

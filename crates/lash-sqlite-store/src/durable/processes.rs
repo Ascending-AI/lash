@@ -11,8 +11,8 @@
 
 use lash_core_execution::runtime::actor::process::{scope_id, scope_index, subtree_roots};
 use lash_durable::domain::{
-    CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessWrite,
-    SIGNAL_MAIL, ScopeKey,
+    CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessStartRows,
+    ProcessWrite, SIGNAL_MAIL, ScopeKey,
 };
 use lash_durable::{
     ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, StoreFailure, StoreFailureKind,
@@ -166,11 +166,101 @@ pub(crate) fn signal_mail_within(
     Ok(())
 }
 
+/// Register a store-local start on the commit's connection: its row, its
+/// observers and its actor, ready, as the registrar applies them. A start
+/// the registrar refuses, or whose key another process holds, refuses the
+/// commit.
+fn register_within(
+    tx: &Connection,
+    commit: &Committing<'_>,
+    rows: &ProcessStartRows,
+) -> Result<(), DurableError> {
+    let Ok(staged) = lash_core_execution::runtime::StagedRegistration::decode(rows) else {
+        return Err(super::corrupt(
+            "process start rows",
+            &rows.registration_json,
+        ));
+    };
+    let refused = |reason: String| {
+        DurableError::Domain(DomainRefusal::ProcessStartRefused {
+            process: rows.process.clone(),
+            reason,
+        })
+    };
+    match SqliteProcessRegistry::apply_registration_conn(
+        tx,
+        staged.registration,
+        staged.observers,
+        staged.process_id,
+        false,
+        staged.prepared_at_ms,
+        commit.fleet,
+    ) {
+        Ok(receipt) if receipt.record.id == rows.process => Ok(()),
+        Ok(receipt) => Err(refused(format!(
+            "process `{}` already holds its start key",
+            receipt.record.id
+        ))),
+        Err(error)
+            if matches!(
+                error.class(),
+                lash_core_execution::PluginErrorClass::Terminal
+            ) =>
+        {
+            Err(refused(error.to_string()))
+        }
+        Err(error) => Err(DurableError::Store(StoreFailure {
+            kind: StoreFailureKind::Unavailable,
+            message: error.to_string(),
+        })),
+    }
+}
+
+/// Send a store-local signal on the commit's connection: its event,
+/// exactly once under its identity, with its mail and its target's wake. A
+/// target that is unknown or already terminal takes nothing.
+fn signal_within(
+    tx: &Connection,
+    commit: &Committing<'_>,
+    now_ms: u64,
+    process: &ProcessId,
+    signal_json: &str,
+) -> Result<(), DurableError> {
+    let Ok(signal) = serde_json::from_str::<lash_core_execution::ProcessSignal>(signal_json) else {
+        return Err(super::corrupt("process signal", signal_json));
+    };
+    let Some(mut record) = SqliteProcessRegistry::load_process_conn(tx, process)
+        .map_err(|error| registry_failure(&error))?
+    else {
+        return Ok(());
+    };
+    if record.is_terminal() {
+        return Ok(());
+    }
+    SqliteProcessRegistry::append_event_conn(
+        tx,
+        &mut record,
+        signal.append_request(),
+        now_ms,
+        commit.fleet,
+    )
+    .map(drop)
+    .map_err(|error| registry_failure(&error))
+}
+
 pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWrite) -> Answer<()> {
     match write {
-        ProcessWrite::Register(rows) => {
-            create_actor_within(tx, &rows.process, rows.formats.as_str(), commit.now)
-        }
+        ProcessWrite::Register(rows) => Ok(register_within(tx, commit, rows)),
+        ProcessWrite::Signal {
+            process,
+            signal_json,
+        } => Ok(signal_within(
+            tx,
+            commit,
+            millis(commit.now)?,
+            process,
+            signal_json,
+        )),
         ProcessWrite::Advance {
             process,
             expected_rev,

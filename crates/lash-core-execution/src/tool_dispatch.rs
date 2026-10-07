@@ -26,7 +26,7 @@ pub use call_run::{
 };
 pub use context::{ToolDispatchContext, ToolTriggerEffectOutcome};
 pub use pending_resolver::{LaunchReceipt, model_visible_intent_outcomes};
-pub use realization::RealizationReceipt;
+pub use realization::{Realization, RealizationReceipt};
 pub use singleton_run::{
     BeforeCheckReply, IsolatedBinding, IsolatedProcessDescriptor, SingletonAttempt,
     SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest, SingletonPresentationError,

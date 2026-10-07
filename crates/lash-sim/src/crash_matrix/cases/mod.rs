@@ -12,6 +12,7 @@ pub mod cell;
 pub mod close;
 pub mod command;
 pub mod drain;
+pub mod effects;
 pub mod process;
 pub mod round;
 pub mod signal;

@@ -11,8 +11,8 @@
 
 use lash_core_execution::runtime::actor::process::{scope_id, scope_index, subtree_roots};
 use lash_durable::domain::{
-    CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessWrite,
-    SIGNAL_MAIL, ScopeKey,
+    CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessStartRows,
+    ProcessWrite, SIGNAL_MAIL, ScopeKey,
 };
 use lash_durable::{
     ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, StoreFailure, StoreFailureKind,
@@ -168,15 +168,104 @@ pub(crate) async fn cancel_within(
     Ok((answer, Some(woken)))
 }
 
+/// Register a store-local start on the commit's connection: its row, its
+/// observers and its actor, ready, as the registrar applies them. A start
+/// the registrar refuses, or whose key another process holds, refuses the
+/// commit.
+async fn register_within(
+    tx: &mut PgConnection,
+    commit: &Committing<'_>,
+    rows: &ProcessStartRows,
+) -> Result<(), DurableError> {
+    use crate::process_registry::registration::{AppliedRegistration, apply_registration_tx};
+    let Ok(staged) = lash_core_execution::runtime::StagedRegistration::decode(rows) else {
+        return Err(corrupt("process start rows", &rows.registration_json));
+    };
+    let refused = |reason: String| {
+        DurableError::Domain(DomainRefusal::ProcessStartRefused {
+            process: rows.process.clone(),
+            reason,
+        })
+    };
+    match apply_registration_tx(
+        tx,
+        staged.registration,
+        staged.observers,
+        staged.process_id,
+        false,
+        staged.prepared_at_ms,
+        commit.fleet,
+    )
+    .await
+    {
+        Ok(AppliedRegistration::Created(_)) => Ok(()),
+        Ok(AppliedRegistration::Retained { record, .. }) if record.id == rows.process => Ok(()),
+        Ok(
+            AppliedRegistration::Retained { record, .. }
+            | AppliedRegistration::LostRace { winner: record, .. },
+        ) => Err(refused(format!(
+            "process `{}` already holds its start key",
+            record.id
+        ))),
+        Err(error)
+            if matches!(
+                error.class(),
+                lash_core_execution::PluginErrorClass::Terminal
+            ) =>
+        {
+            Err(refused(error.to_string()))
+        }
+        Err(error) => Err(DurableError::Store(StoreFailure {
+            kind: StoreFailureKind::Unavailable,
+            message: error.to_string(),
+        })),
+    }
+}
+
+/// Send a store-local signal on the commit's connection: its event,
+/// exactly once under its identity, with its mail and its target's wake. A
+/// target that is unknown or already terminal takes nothing.
+async fn signal_within(
+    tx: &mut PgConnection,
+    commit: &Committing<'_>,
+    process: &ProcessId,
+    signal_json: &str,
+) -> Result<(), DurableError> {
+    let Ok(signal) = serde_json::from_str::<lash_core_execution::ProcessSignal>(signal_json) else {
+        return Err(corrupt("process signal", signal_json));
+    };
+    let Some(mut record) = crate::process_helpers::load_process_tx(tx, process)
+        .await
+        .map_err(|error| registry_failure(&error))?
+    else {
+        return Ok(());
+    };
+    if record.is_terminal() {
+        return Ok(());
+    }
+    crate::process_helpers::append_process_event_tx(
+        tx,
+        &mut record,
+        signal.append_request(),
+        millis(commit.now)?,
+        commit.fleet,
+    )
+    .await
+    .map(drop)
+    .map_err(|error| registry_failure(&error))
+}
+
 pub(super) async fn apply(
     tx: &mut PgConnection,
     commit: &Committing<'_>,
     write: &ProcessWrite,
 ) -> Result<(), DurableError> {
     match write {
-        ProcessWrite::Register(rows) => {
-            create_actor_within(tx, &rows.process, rows.formats.as_str(), commit.now).await
-        }
+        ProcessWrite::Register(rows) => register_within(tx, commit, rows).await,
+        ProcessWrite::Signal {
+            process,
+            signal_json,
+        } => signal_within(tx, commit, process, signal_json).await,
         ProcessWrite::Advance {
             process,
             expected_rev,

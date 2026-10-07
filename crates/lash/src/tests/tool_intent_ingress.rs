@@ -1655,7 +1655,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
     };
     let intents =
         lash_core::ToolIntents::v3(vec![engine_start_intent(INGRESS_ENGINE_KIND, payload)]);
-    let outcomes = lash_core::testing::execute_tool_intents_with_services(
+    let realization = lash_core::testing::execute_tool_intents_with_services(
         scoped,
         processes,
         &SessionId::from(SESSION),
@@ -1664,6 +1664,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
     )
     .await
     .map_err(lash_core::PluginError::from)?;
+    let outcomes = &realization.receipt.outcomes;
     let [
         lash_core::ToolIntentExecutionOutcome::Executed {
             realized: lash_core::ToolIntentRealized::StartProcess(result),
@@ -1673,11 +1674,18 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
     else {
         panic!("session recorded-intent route must execute: {outcomes:?}")
     };
-    let session_identity = registry
-        .get_process(&result.process_id)
-        .await?
-        .expect("session route registers a process")
-        .identity;
+    // The session route stages its start for the outcome commit of the call
+    // that declares it: the identity is the one that commit registers.
+    let [staged] = realization.store_local.as_slice() else {
+        panic!(
+            "the session route stages one start: {:?}",
+            realization.store_local
+        )
+    };
+    let staged = lash_core::testing::staged_start_record(staged)?
+        .expect("the session route stages a process start");
+    assert_eq!(staged.id, result.process_id);
+    let session_identity = staged.identity;
 
     assert_eq!(ingress_identity, session_identity);
     let expected = lash_core::ProcessDefinitionDraft::new(

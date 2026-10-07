@@ -490,6 +490,57 @@ fn repair_lifecycle_projection(
     Ok((repaired != *record).then_some(repaired))
 }
 
+/// Admit `request`, a signal's append, against `record` as it stands,
+/// writing nothing: what a store-local signal checks before its call's
+/// outcome commits it. The append in that commit applies the same rules;
+/// a target that ended meanwhile takes nothing.
+///
+/// # Errors
+///
+/// The refusal the append would answer: a malformed signal, a signal to
+/// another process, a terminal target, an undeclared signal, or a payload
+/// its declaration refuses.
+pub fn admit_process_signal_append(
+    record: &ProcessRecord,
+    request: &ProcessEventAppendRequest,
+) -> Result<(), PluginError> {
+    validate_process_signal_append(request)?;
+    if super::events::process_signal_name_from_event_type(&request.event_type).is_none()
+        || request
+            .signal_identity
+            .as_ref()
+            .is_none_or(|identity| *identity.process_id() != record.id)
+    {
+        return Err(PluginError::ReservedProcessEvent {
+            event_type: request.event_type.clone(),
+        });
+    }
+    if record.is_terminal() {
+        return Err(PluginError::ProcessAlreadyTerminal {
+            process_id: record.id.clone(),
+            status: record.status(),
+        });
+    }
+    let declared = record
+        .event_types
+        .iter()
+        .find(|declared| declared.name == request.event_type)
+        .ok_or_else(|| {
+            PluginError::Session(format!(
+                "process `{}` emitted undeclared event type `{}`",
+                record.id, request.event_type
+            ))
+        })?;
+    require_event_replay(&record.id, request, &declared.semantics)?;
+    declared
+        .payload_schema
+        .validate(&request.payload)
+        .map_err(|err| PluginError::ValueMismatch {
+            context: format!("`{}` payload", request.event_type),
+            source: Box::new(err),
+        })
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "the append plan carries the journal's own positional facts; fleet format joins them as one more stamped input (FIG-3796)"

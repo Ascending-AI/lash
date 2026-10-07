@@ -1339,13 +1339,15 @@ fn build_atomic_tool_dispatch<'run>(
 
 /// Execute a recorded tool-intent drain through the production process-command
 /// route while retaining a small, backend-neutral differential-test surface.
+/// Its starts and signals come back staged: the outcome commit that records
+/// the call, which this drain has none of, is what writes them.
 pub async fn execute_tool_intents_with_services(
     scoped_effect_controller: crate::ActorContext,
     processes: Arc<dyn crate::ProcessService>,
     session_id: &SessionId,
     tool_call_id: &crate::ToolCallId,
     intents: &crate::ToolIntents,
-) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+) -> Result<crate::tool_dispatch::Realization, crate::RuntimeEffectControllerError> {
     execute_tool_intents_with_services_and_hook(
         scoped_effect_controller,
         processes,
@@ -1355,6 +1357,25 @@ pub async fn execute_tool_intents_with_services(
         None,
     )
     .await
+}
+
+/// The record a staged process start registers once the outcome commit that
+/// carries it lands; `None` for any other effect.
+///
+/// # Errors
+///
+/// Rows that do not decode, or a registration its admission refuses.
+pub fn staged_start_record(
+    effect: &crate::runtime::actor::round::StoreLocalEffect,
+) -> Result<Option<crate::ProcessRecord>, PluginError> {
+    match effect {
+        crate::runtime::actor::round::StoreLocalEffect::ProcessStart(rows) => {
+            crate::runtime::StagedRegistration::decode(rows)?
+                .record()
+                .map(Some)
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Execute a recorded tool-intent drain with the production trigger router.
@@ -1369,7 +1390,7 @@ pub async fn execute_tool_intents_with_services_and_trigger_router(
     session_id: &SessionId,
     tool_call_id: &crate::ToolCallId,
     intents: &crate::ToolIntents,
-) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+) -> Result<crate::tool_dispatch::Realization, crate::RuntimeEffectControllerError> {
     execute_tool_intents_with_services_and_hook_and_trigger_router(
         scoped_effect_controller,
         processes,
@@ -1391,7 +1412,7 @@ pub async fn execute_tool_intents_with_services_and_hook(
     tool_call_id: &crate::ToolCallId,
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+) -> Result<crate::tool_dispatch::Realization, crate::RuntimeEffectControllerError> {
     execute_tool_intents_with_services_and_hook_and_trigger_router(
         scoped_effect_controller,
         processes,
@@ -1414,7 +1435,7 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
     tool_call_id: &crate::ToolCallId,
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+) -> Result<crate::tool_dispatch::Realization, crate::RuntimeEffectControllerError> {
     let parent_invocation = crate::RuntimeInvocation::effect(
         crate::EffectAddress::new(
             scoped_effect_controller.execution_scope().clone(),
@@ -1523,6 +1544,26 @@ impl EffectBackedProcessService {
             .await?;
         outcome.into_process().map_err(crate::PluginError::from)
     }
+
+    /// The process executor production stages a call's starts and signals
+    /// on, over this service's stores.
+    fn stager(
+        &self,
+        scope: &crate::ProcessOpScope<'_>,
+    ) -> Result<crate::runtime::ProcessLocalExecution, crate::PluginError> {
+        crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&self.registry),
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
+                &self.registry,
+            ))),
+            process_engine_fixture(),
+            crate::runtime::HostStartAdmission::default(),
+        )
+        .with_process_env_store(Arc::clone(&self.process_env_store))
+        .with_process_effect_controller(scope.effect_controller.clone())
+        .into_process()
+        .map_err(crate::PluginError::from)
+    }
 }
 
 #[async_trait::async_trait]
@@ -1570,14 +1611,23 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
-    async fn start_from_recorded_intent(
+    async fn stage_recorded_start(
         &self,
         owner: &crate::RuntimeOwner,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
-        let session_id = crate::plugin::require_session_owner(owner, "start_from_recorded_intent")?;
-        self.start_from_request(session_id, request, scope).await
+    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
+        crate::plugin::require_session_owner(owner, "stage_recorded_start")?;
+        let observers = request.observers.clone();
+        let registration = admitted_registration(request.into_registration(), &scope)?;
+        Ok(self
+            .stager(&scope)?
+            .stage_start(
+                registration,
+                observers.into_iter().collect(),
+                crate::ProcessExecutionContext::default(),
+            )
+            .await?)
     }
 
     async fn start(
@@ -1717,17 +1767,13 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
-    async fn signal_recorded_intent(
+    async fn stage_recorded_signal(
         &self,
-        owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
+        _owner: &crate::RuntimeOwner,
+        signal: &crate::ProcessSignal,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.signal_possessed(owner, process_id, signal_name, signal_id, payload, scope)
-            .await
+    ) -> Result<crate::runtime::actor::round::StoreLocalEffect, crate::PluginError> {
+        Ok(self.stager(&scope)?.stage_signal(signal).await?)
     }
 
     async fn emit_event(
@@ -2003,6 +2049,21 @@ impl MockSessionManager {
         })
     }
 
+    /// The process executor production stages a call's starts and signals
+    /// on, over the mock's registry.
+    fn stager(&self) -> Result<crate::runtime::ProcessLocalExecution, PluginError> {
+        crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(self.registry()?),
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
+                self.registry()?,
+            ))),
+            process_engine_fixture(),
+            crate::runtime::HostStartAdmission::default(),
+        )
+        .into_process()
+        .map_err(PluginError::from)
+    }
+
     /// Snapshot of the requests captured by `create_session`. Panics if
     /// the lock is poisoned (a panic from another test thread).
     pub fn created_snapshot(&self) -> Vec<SessionCreateRequest> {
@@ -2024,23 +2085,23 @@ impl crate::ProcessService for MockSessionManager {
         Ok(None)
     }
 
-    async fn start_from_recorded_intent(
+    async fn stage_recorded_start(
         &self,
         owner: &crate::RuntimeOwner,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleView, PluginError> {
-        let session_id = crate::plugin::require_session_owner(owner, "start_from_recorded_intent")?;
+    ) -> Result<crate::StagedProcessStart, PluginError> {
+        crate::plugin::require_session_owner(owner, "stage_recorded_start")?;
         let observers = request.observers.clone();
-        let record = self
-            .start(
-                session_id,
-                request.into_registration(),
-                crate::ProcessStartOptions::new().with_initial_observers(observers),
-                scope,
+        let registration = admitted_registration(request.into_registration(), &scope)?;
+        Ok(self
+            .stager()?
+            .stage_start(
+                registration,
+                observers.into_iter().collect(),
+                crate::ProcessExecutionContext::default(),
             )
-            .await?;
-        Ok(crate::ProcessHandleView::from_record(record))
+            .await?)
     }
 
     async fn start(
@@ -2199,17 +2260,13 @@ impl crate::ProcessService for MockSessionManager {
             .map(|result| result.event)
     }
 
-    async fn signal_recorded_intent(
+    async fn stage_recorded_signal(
         &self,
-        owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, PluginError> {
-        self.signal_possessed(owner, process_id, signal_name, signal_id, payload, scope)
-            .await
+        _owner: &crate::RuntimeOwner,
+        signal: &crate::ProcessSignal,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::runtime::actor::round::StoreLocalEffect, PluginError> {
+        Ok(self.stager()?.stage_signal(signal).await?)
     }
 
     async fn emit_event_recorded_intent(

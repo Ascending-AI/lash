@@ -18,6 +18,7 @@ use super::singleton_run::{
     SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest, SingletonPresentationError,
     SingletonRunError, SingletonToolCall, SingletonToolHandlers, StartLaunch,
 };
+use crate::runtime::actor::round::StoreLocalEffect;
 use crate::runtime::effect::AttemptStreamRecorder;
 use crate::runtime::process::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,
@@ -60,8 +61,11 @@ pub enum CallEnd {
         capture: SingletonCapture,
         /// Its model-facing presentation.
         presentation: String,
-        /// The process its declared start launched.
+        /// The process its declared start launches.
         launched: Option<ProcessId>,
+        /// The store-local effects its realization and its declared start
+        /// staged: they commit with the call's outcome.
+        store_local: Vec<StoreLocalEffect>,
     },
     /// A check or the Run's cancel withheld the result.
     Withheld {
@@ -107,6 +111,8 @@ pub enum AttemptEnd {
         completion: Box<crate::PendingCompletion>,
         /// The launch receipt of the start it declared to resolve it.
         launch: Option<Box<super::LaunchReceipt>>,
+        /// That start's store-local effect: it commits with the park.
+        store_local: Vec<StoreLocalEffect>,
     },
 }
 
@@ -118,6 +124,7 @@ enum Executed {
     Parked {
         completion: Box<crate::PendingCompletion>,
         launch: Option<Box<super::LaunchReceipt>>,
+        store_local: Vec<StoreLocalEffect>,
     },
 }
 
@@ -346,8 +353,16 @@ impl<'a> AdmittedToolCall<'a> {
             Selection::Execute => {
                 let capture = match self.execute(ordinal).await? {
                     Executed::Captured(capture) => capture,
-                    Executed::Parked { completion, launch } => {
-                        return Ok(AttemptEnd::Parked { completion, launch });
+                    Executed::Parked {
+                        completion,
+                        launch,
+                        store_local,
+                    } => {
+                        return Ok(AttemptEnd::Parked {
+                            completion,
+                            launch,
+                            store_local,
+                        });
                     }
                 };
                 if let SingletonCapture::Failed {
@@ -438,8 +453,16 @@ impl<'a> AdmittedToolCall<'a> {
             SingletonBodyOutcome::Cancelled { evidence } => {
                 SingletonCapture::Cancelled { evidence }
             }
-            SingletonBodyOutcome::Pending { completion, launch } => {
-                return Ok(Executed::Parked { completion, launch });
+            SingletonBodyOutcome::Pending {
+                completion,
+                launch,
+                store_local,
+            } => {
+                return Ok(Executed::Parked {
+                    completion,
+                    launch,
+                    store_local,
+                });
             }
         }))
     }
@@ -574,6 +597,8 @@ impl<'a> AdmittedToolCall<'a> {
     }
 
     /// Realize a final's declarations, then present and incorporate it (V).
+    /// What the declarations write to the lash store is staged: it commits
+    /// with the call's outcome.
     async fn present(
         &self,
         decision: CallDecision,
@@ -582,12 +607,18 @@ impl<'a> AdmittedToolCall<'a> {
     ) -> Result<CallEnd, SingletonRunError> {
         let handlers = self.handlers.as_ref();
         let call_id = &self.call.call_id;
+        let mut store_local = Vec::new();
         if !capture.intents().is_empty() {
-            let receipt = handlers.realize(call_id, &capture).await?;
-            handlers.adopt_realization(call_id, &receipt)?;
+            let realization = handlers.realize(call_id, &capture).await?;
+            handlers.adopt_realization(call_id, &realization.receipt)?;
+            store_local.extend(realization.store_local);
         }
         let launched = match capture.start() {
-            Some(obligation) => Some(self.launch(obligation, cancel).await?),
+            Some(obligation) => {
+                let (process_id, effect) = self.launch(obligation, cancel).await?;
+                store_local.extend(effect);
+                Some(process_id)
+            }
             None => None,
         };
         let presentation = match (&capture, &launched) {
@@ -622,35 +653,37 @@ impl<'a> AdmittedToolCall<'a> {
             capture,
             presentation,
             launched,
+            store_local,
         })
     }
 
-    /// Launch a final's declared start under its key, then discharge it: a
-    /// cancel of the Run that fired by now cancels the process when the
-    /// call's policy owes that, and the start's consumer hold is released.
+    /// Stage a final's declared start under its key: the process it
+    /// launches, and the rows that register it with the call's outcome. A
+    /// cancel of the Run that fired by now launches nothing when the call's
+    /// policy owes the start a cancel.
     async fn launch(
         &self,
         obligation: &DeclaredStartObligation,
         cancel: &CancellationToken,
-    ) -> Result<ProcessId, SingletonRunError> {
-        let handlers = self.handlers.as_ref();
-        let process_id = match handlers.launch_start(obligation).await.map_err(fault)? {
-            StartLaunch::Launched(handle) => handle.process_id,
-            StartLaunch::Refused(refusal) => return Err(fault(refusal.describe())),
-        };
-        let cancels = cancel.is_cancelled()
+    ) -> Result<(ProcessId, Option<StoreLocalEffect>), SingletonRunError> {
+        if cancel.is_cancelled()
             && matches!(
                 obligation.on_cancel(DeclaredStartPhase::Launched),
                 StartCancelDecision::RecoverAndDischarge {
                     cancel_process: true,
                     ..
                 }
-            );
-        handlers
-            .discharge_start(obligation, &process_id, cancels)
-            .await
-            .map_err(fault)?;
-        Ok(process_id)
+            )
+        {
+            return Err(fault(format!(
+                "the Run was cancelled before call {}'s declared start launched",
+                self.call.call_id
+            )));
+        }
+        match self.handlers.stage_start(obligation).await.map_err(fault)? {
+            StartLaunch::Staged { handle, effect } => Ok((handle.process_id, effect)),
+            StartLaunch::Refused(refusal) => Err(fault(refusal.describe())),
+        }
     }
 
     /// Discharge the call's external work when its Run closes before it
@@ -672,7 +705,8 @@ impl<'a> AdmittedToolCall<'a> {
 
 /// Run `call` to its end in memory: admitted, attempted under its sealed
 /// policy with each repeatable failure backed off on `clock`, decided,
-/// realized and presented.
+/// realized and presented. No round records its outcome, so the store-local
+/// effects of a final commit at once, in their own fenced transaction.
 ///
 /// # Errors
 ///
@@ -690,6 +724,24 @@ pub async fn run_call<'a>(
     loop {
         let last = ordinal.get() >= policy.max_attempts();
         match admitted.attempt(ordinal, !last, cancel).await? {
+            // No round records this call's outcome: its effects commit at
+            // once, before its end is answered.
+            AttemptEnd::Ended(CallEnd::Final {
+                capture,
+                presentation,
+                launched,
+                store_local,
+            }) => {
+                if !store_local.is_empty() {
+                    admitted.handlers.commit_store_local(store_local).await?;
+                }
+                return Ok(CallEnd::Final {
+                    capture,
+                    presentation,
+                    launched,
+                    store_local: Vec::new(),
+                });
+            }
             AttemptEnd::Ended(end) => return Ok(end),
             // Only a round member parks: its round pins the wait.
             AttemptEnd::Parked { .. } => return admitted.unarmed(cancel).await,

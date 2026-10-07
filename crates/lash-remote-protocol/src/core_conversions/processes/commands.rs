@@ -346,6 +346,24 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessSignal {
     }
 }
 
+/// The signal a call sent, as its realized intent reports it.
+impl From<lash_core::ProcessSignal> for RemoteProcessSignalRequest {
+    fn from(value: lash_core::ProcessSignal) -> Self {
+        let lash_core::ProcessSignal {
+            identity,
+            payload,
+            trace_cause,
+        } = value;
+        Self::new(
+            identity.process_id().clone(),
+            identity.signal_name(),
+            identity.signal_id(),
+            payload,
+        )
+        .with_trace_cause(trace_cause)
+    }
+}
+
 impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessCommand {
     type Error = RemoteProtocolError;
 

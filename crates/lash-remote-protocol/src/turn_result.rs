@@ -877,7 +877,7 @@ mod turn_result_tests;
 
 macro_rules! remote_realized_payload {
     (StartProcess) => { crate::RemoteProcessHandleView };
-    (SignalProcess) => { Box<crate::RemoteProcessEvent> };
+    (SignalProcess) => { Box<crate::RemoteProcessSignalRequest> };
     (CancelProcess) => { Box<crate::RemoteProcessCancelReceipt> };
     (EmitProcessEvent) => { Box<crate::RemoteProcessEvent> };
     (EmitTrigger) => { crate::RemoteTriggerEmitReport };

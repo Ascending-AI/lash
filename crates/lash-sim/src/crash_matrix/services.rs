@@ -61,16 +61,20 @@ pub enum TurnScript {
     /// [`Self::Cell`], whose operation's first body never returns: the host
     /// kills the node running it there and restarts it.
     CellKilled,
+    /// A round of two `Once` tools with store-local effects: one starts a
+    /// process, the other signals the session's target process.
+    Effects,
 }
 
 impl TurnScript {
     /// Every script.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Plain,
         Self::Round,
         Self::Hang,
         Self::Cell,
         Self::CellKilled,
+        Self::Effects,
     ];
 
     /// The script's name, the prefix of its sessions' ids.
@@ -82,6 +86,7 @@ impl TurnScript {
             Self::Hang => "hang",
             Self::Cell => "cell",
             Self::CellKilled => "cellkilled",
+            Self::Effects => "effects",
         }
     }
 
@@ -137,10 +142,22 @@ pub enum Tool {
     Flaky,
     /// A `Once` write that runs until the turn's cancel stops it.
     Hang,
+    /// A `Once` call that starts a process: a store-local effect.
+    Spawn,
+    /// A `Once` call that signals the session's target process: a
+    /// store-local effect.
+    Poke,
 }
 
 impl Tool {
-    const ALL: [Self; 4] = [Self::WriteSlow, Self::WriteNow, Self::Flaky, Self::Hang];
+    const ALL: [Self; 6] = [
+        Self::WriteSlow,
+        Self::WriteNow,
+        Self::Flaky,
+        Self::Hang,
+        Self::Spawn,
+        Self::Poke,
+    ];
 
     /// The tool's name.
     #[must_use]
@@ -150,6 +167,8 @@ impl Tool {
             Self::WriteNow => "write_now",
             Self::Flaky => "flaky",
             Self::Hang => "hang",
+            Self::Spawn => "spawn",
+            Self::Poke => "poke",
         }
     }
 
@@ -161,7 +180,9 @@ impl Tool {
     #[must_use]
     pub fn policy(self) -> ExecutionPolicy {
         match self {
-            Self::WriteSlow | Self::WriteNow | Self::Hang => ExecutionPolicy::Once,
+            Self::WriteSlow | Self::WriteNow | Self::Hang | Self::Spawn | Self::Poke => {
+                ExecutionPolicy::Once
+            }
             Self::Flaky => {
                 ExecutionPolicy::repeatable(NonZeroU32::MIN.saturating_add(2), 100, 1_000)
             }
@@ -577,6 +598,7 @@ impl TurnDrive for SimDrive {
             TurnScript::Plain | TurnScript::Cell | TurnScript::CellKilled => &[],
             TurnScript::Round => &[Tool::WriteSlow, Tool::Flaky, Tool::WriteNow],
             TurnScript::Hang => &[Tool::Hang],
+            TurnScript::Effects => &[Tool::Spawn, Tool::Poke],
         };
         let parts = if !tools.is_empty() {
             tools
@@ -660,6 +682,23 @@ fn unencodable() -> MemberResult {
     MemberResult::from(BodyOutput::from(AttemptOutcome::Interrupted))
 }
 
+/// A body whose effect was refused: its known failure, which a `Once` call
+/// records as its outcome.
+fn refused(opener: &EffectOpener, error: &str) -> MemberResult {
+    let text = format!("refused: {error}");
+    let Some(output) = turn_material(opener, MaterialRole::AttemptOutput, &text) else {
+        return unencodable();
+    };
+    MemberResult::from(BodyOutput {
+        outcome: AttemptOutcome::Failed(KnownFailure {
+            output,
+            reason: KnownFailureReason::Reported,
+            suggested_delay_ms: None,
+        }),
+        material: Some(text),
+    })
+}
+
 /// The deployment's catalog: each tool's policy, body and answer.
 struct Catalog {
     services: SimServices,
@@ -727,6 +766,7 @@ impl RoundTools for Catalog {
                         admitted,
                     },
                 );
+                let mut effects = Vec::new();
                 match tool {
                     Tool::WriteSlow => world.sleep(slow).await,
                     // The failing attempt finishes well after the others,
@@ -738,6 +778,26 @@ impl RoundTools for Catalog {
                         return MemberResult::from(BodyOutput::from(AttemptOutcome::Cancelled {
                             evidence: Default::default(),
                         }));
+                    }
+                    Tool::Spawn => match super::effects::spawn(&world, &call).await {
+                        Ok(staged) => effects = staged,
+                        Err(error) => {
+                            world.note(format!("effect.refused {error}"));
+                            return refused(&opener, &error);
+                        }
+                    },
+                    Tool::Poke => {
+                        let staged = match world.target(&session) {
+                            Some(target) => super::effects::signal(&world, &target, &call).await,
+                            None => Err(format!("session {session} has no target")),
+                        };
+                        match staged {
+                            Ok(staged) => effects = staged,
+                            Err(error) => {
+                                world.note(format!("effect.refused {error}"));
+                                return refused(&opener, &error);
+                            }
+                        }
                     }
                     Tool::WriteNow | Tool::Flaky => {}
                 }
@@ -755,10 +815,14 @@ impl RoundTools for Catalog {
                 } else {
                     AttemptOutcome::Completed(output)
                 };
-                MemberResult::from(BodyOutput {
-                    outcome,
-                    material: Some(text),
-                })
+                MemberResult {
+                    output: BodyOutput {
+                        outcome,
+                        material: Some(text),
+                    },
+                    store_local: effects,
+                    terminal: None,
+                }
             })
         })
     }

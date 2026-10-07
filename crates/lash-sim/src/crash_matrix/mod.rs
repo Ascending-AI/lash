@@ -2,10 +2,11 @@
 //! durable runtime cut at every commit label.
 //!
 //! A cell is {case} × {commit label and occurrence} × {mode} × {seed}. A case
-//! ([`Case`]) is one seam of the runtime: a turn, a tool round, a turn
-//! cancel, a code cell, a code cell killed inside its body, a process with
-//! its waits and cascade, a process's mail, a session close, a session's
-//! commands, a trigger occurrence and a node's drain by release. Each runs
+//! ([`Case`]) is one seam of the runtime: a turn, a tool round, a tool
+//! round's store-local effects, a turn cancel, a code cell, a code cell
+//! killed inside its body, a process with its waits and cascade, a
+//! process's mail, a session close, a session's commands, a trigger
+//! occurrence and a node's drain by release. Each runs
 //! as a [`deployment::Deployment`]: the production session and process
 //! activations behind one dispatch on simulated nodes `a` and `b` over one
 //! SQLite memory database, the host acting from outside through its own
@@ -33,6 +34,7 @@ pub mod cases;
 pub mod catalog_audit;
 pub mod cells;
 pub mod deployment;
+pub mod effects;
 pub mod engine;
 pub mod findings;
 pub mod invariants;
@@ -55,6 +57,9 @@ pub enum Case {
     /// A turn's tool round: `Once` and `Repeatable` members, a retry and the
     /// presentation.
     Round,
+    /// A turn's tool round whose members' store-local effects, a process
+    /// start and a signal, commit with their outcomes.
+    Effects,
     /// A turn cancelled by the host while its tool runs.
     Cancel,
     /// A turn's code cell: its snapshot, its `Once` operation and its
@@ -83,9 +88,10 @@ pub enum Case {
 
 impl Case {
     /// Every case, in registry order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Turn,
         Self::Round,
+        Self::Effects,
         Self::Cancel,
         Self::Cell,
         Self::CellKilled,
@@ -103,6 +109,7 @@ impl Case {
         match self {
             Self::Turn => "turn",
             Self::Round => "round",
+            Self::Effects => "effects",
             Self::Cancel => "cancel",
             Self::Cell => "cell",
             Self::CellKilled => "cell_killed",
@@ -128,6 +135,7 @@ impl Case {
         match self {
             Self::Turn => Box::new(cases::turn::TurnCase::tagged(tag)),
             Self::Round => Box::new(cases::round::RoundCase::tagged(tag)),
+            Self::Effects => Box::new(cases::effects::EffectsCase::tagged(tag)),
             Self::Cancel => Box::new(cases::cancel::CancelCase::tagged(tag)),
             Self::Cell => Box::new(cases::cell::CellCase::tagged(false, tag)),
             Self::CellKilled => Box::new(cases::cell::CellCase::tagged(true, tag)),

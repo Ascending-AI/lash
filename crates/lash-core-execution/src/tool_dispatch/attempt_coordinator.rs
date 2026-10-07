@@ -431,13 +431,22 @@ async fn drain_sealed_final(
         Some(minting_emission) => {
             let mut intent_context = context.intent_realization_context();
             intent_context.parent_invocation = Some(minting_emission);
-            let intent_outcomes = super::execute_final_tool_intents(
+            let realization = super::execute_final_tool_intents(
                 &intent_context,
                 &recorded_call_id,
                 &intents,
                 child_trace_hook,
             )
             .await?;
+            // No round records this call's outcome: its store-local effects
+            // commit at once.
+            if !realization.store_local.is_empty() {
+                context
+                    .effect_controller
+                    .commit_store_local(realization.store_local)
+                    .await?;
+            }
+            let intent_outcomes = realization.receipt.outcomes;
             project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
             intent_outcomes
         }
@@ -660,58 +669,6 @@ pub(super) fn project_recorded_intent_outcomes(
                 ));
             }
         }
-        return;
-    }
-    let answers = projected_intent_answers(outcomes);
-    if answers.is_empty() {
-        return;
-    }
-    // Only the attempt's own optimistic answer is rewritten. An attempt that
-    // answered something else keeps what it answered (FIG-3119).
-    let Some(projected) =
-        matching_answer(&value.to_json_value(), &answers).map(|answer| answer.fields.clone())
-    else {
-        return;
-    };
-    match value {
-        crate::ToolValue::Object(object) => {
-            for (name, field) in &projected {
-                object.insert(
-                    name.clone(),
-                    match serde_json::from_value(field.clone()) {
-                        Ok(decoded) => decoded,
-                        Err(_) => return,
-                    },
-                );
-            }
-        }
-        crate::ToolValue::UntrustedJson(serde_json::Value::Object(object)) => {
-            for (name, field) in &projected {
-                object.insert(name.clone(), field.clone());
-            }
-        }
-        _ => return,
-    }
-    let encoded = match serde_json::to_value(&*value) {
-        Ok(encoded) => encoded,
-        Err(error) => {
-            *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Internal,
-                "tool_value_encode_failed",
-                format!("failed to encode projected tool value: {error}"),
-            ));
-            return;
-        }
-    };
-    match serde_json::from_value(encoded) {
-        Ok(decoded) => *value = decoded,
-        Err(error) => {
-            *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Internal,
-                "tool_value_decode_failed",
-                format!("malformed projected tool value: {error}"),
-            ));
-        }
     }
 }
 
@@ -724,48 +681,6 @@ fn realized_start_handle(handle: &crate::ProcessHandleView) -> serde_json::Value
         "id": handle.id,
         "process_id": handle.process_id,
     })
-}
-
-/// The realized answer a signal contributes back to its declaring attempt's
-/// optimistic output: the `sequence` its append landed at, which no attempt
-/// can predict.
-///
-/// `process_id` is what makes this a merge into the right output: a realized
-/// answer belongs to the output that already named the same process, and any
-/// other output keeps what it answered (FIG-3119). A start's answer is not
-/// merged at all: its slot is replaced whole, by intent index.
-struct ProjectedIntentAnswer {
-    process_id: String,
-    fields: Vec<(String, serde_json::Value)>,
-}
-
-fn matching_answer<'a>(
-    current: &serde_json::Value,
-    answers: &'a [ProjectedIntentAnswer],
-) -> Option<&'a ProjectedIntentAnswer> {
-    let object = current.as_object()?;
-    let named = object
-        .get("process_id")
-        .and_then(serde_json::Value::as_str)?;
-    answers.iter().find(|answer| answer.process_id == named)
-}
-
-fn projected_intent_answers(
-    outcomes: &[crate::ToolIntentExecutionOutcome],
-) -> Vec<ProjectedIntentAnswer> {
-    outcomes
-        .iter()
-        .filter_map(|outcome| match outcome {
-            crate::ToolIntentExecutionOutcome::Executed {
-                realized: crate::ToolIntentRealized::SignalProcess(event),
-                ..
-            } => Some(ProjectedIntentAnswer {
-                process_id: event.process_id.to_string(),
-                fields: vec![("sequence".to_string(), serde_json::json!(event.sequence))],
-            }),
-            _ => None,
-        })
-        .collect()
 }
 
 #[allow(
@@ -863,24 +778,6 @@ mod projection_tests {
         }
     }
 
-    fn signal_outcome(label: &str, sequence: u64) -> crate::ToolIntentExecutionOutcome {
-        let process_id = crate::process_id_for_test(label);
-        let invocation =
-            crate::runtime::causal::process_event_invocation(&process_id, sequence, "signal", None);
-        executed_at(
-            crate::ToolIntentRealized::SignalProcess(Box::new(crate::ProcessEvent {
-                process_id,
-                sequence,
-                event_type: "signal".to_string(),
-                payload: serde_json::Value::Null,
-                invocation,
-                semantics: Default::default(),
-                occurred_at: 0,
-            })),
-            0,
-        )
-    }
-
     /// The slot a start answers before its declaration is realized, as
     /// `lash_plugin_process_controls::declarations` writes it.
     fn start_slot(intent_index: u32) -> serde_json::Value {
@@ -943,29 +840,6 @@ mod projection_tests {
             output.value_for_projection(),
             serde_json::json!("provider-terminal")
         );
-    }
-
-    #[test]
-    fn signal_projection_rejects_a_malformed_tagged_tool_value() {
-        let mut output = crate::ToolCallOutput::success_tool_value(crate::ToolValue::Object(
-            std::collections::BTreeMap::from([
-                (
-                    "$lash_tool_value".to_string(),
-                    crate::ToolValue::String("attachment".to_string()),
-                ),
-                (
-                    "process_id".to_string(),
-                    crate::ToolValue::String(crate::process_id_for_test("p-signalled").to_string()),
-                ),
-            ]),
-        ));
-
-        project_recorded_intent_outcomes(&mut output, &[signal_outcome("p-signalled", 7)]);
-
-        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
-            panic!("a malformed projected tag must become a typed decode failure");
-        };
-        assert_eq!(failure.code, "tool_value_decode_failed");
     }
 
     /// FIG-4255: the failed call names the refusal that kept the start from
@@ -1043,26 +917,5 @@ mod projection_tests {
         );
 
         assert_eq!(output.value_for_projection(), realized_handle("p-first"));
-    }
-
-    #[test]
-    fn a_realized_signal_projects_its_sequence_onto_the_process_it_signalled() {
-        let mut output = crate::ToolCallOutput::success(
-            serde_json::json!({ "process_id": crate::process_id_for_test("p-target"), "signal": "resume" }),
-        );
-
-        project_recorded_intent_outcomes(
-            &mut output,
-            &[signal_outcome("p-other", 3), signal_outcome("p-target", 11)],
-        );
-
-        assert_eq!(
-            output.value_for_projection(),
-            serde_json::json!({
-                "process_id": crate::process_id_for_test("p-target"),
-                "signal": "resume",
-                "sequence": 11,
-            })
-        );
     }
 }

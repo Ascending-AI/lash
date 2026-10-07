@@ -542,7 +542,7 @@ impl DurableSnapshotStore {
             ))
         })?;
         let mut tx = self.cx.begin().await.map_err(refused)?;
-        round::settle(&mut tx, &execution, output, None).map_err(refused)?;
+        round::settle(&mut tx, &execution, output, Vec::new()).map_err(refused)?;
         self.commit(tx, CommitLabel::ROUND_OUTCOME).await?;
         self.held().admitted.remove(&operation);
         Ok(())

@@ -49,34 +49,32 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
-    /// StartLaunched records this body. Only its local registry and relay
-    /// work belongs here; nested SDK commands cannot replay an unfinished body.
-    async fn start_in_run(
+    /// Stage a start as a store-local effect of the call that declares it:
+    /// admitted and staged on this runner's process executor, and
+    /// registered only by the commit that records the call's outcome.
+    async fn stage(
         &self,
         registration: crate::ProcessStartRegistration,
         observers: Vec<SessionId>,
         execution_context: crate::ProcessExecutionContext,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        // The owner admitted its launch/prepare record before running this body.
-        // This executor only writes the registry and outbox; asking to admit
-        // another journal command here rejects that owner step (FIG-5009).
-        let execution = self
+    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
+        Ok(self
             .local_executor(Some(self.scoped_effect_controller.clone()))
-            .into_process()?;
-        match execution
-            .execute(
-                self.scoped_effect_controller.execution_scope(),
-                crate::ProcessCommand::Start {
-                    registration,
-                    observers,
-                    execution_context: Box::new(execution_context),
-                },
-            )
-            .await?
-        {
-            crate::ProcessEffectOutcome::Start { record, .. } => Ok(*record),
-            _ => Err(wrong_process_outcome("start")),
-        }
+            .into_process()?
+            .stage_start(registration, observers, execution_context)
+            .await?)
+    }
+
+    /// Stage `signal` as a store-local effect of the call that sends it.
+    async fn stage_signal(
+        &self,
+        signal: &crate::ProcessSignal,
+    ) -> Result<crate::StoreLocalEffect, crate::PluginError> {
+        Ok(self
+            .local_executor(Some(self.scoped_effect_controller.clone()))
+            .into_process()?
+            .stage_signal(signal)
+            .await?)
     }
 
     #[expect(
@@ -345,14 +343,15 @@ impl ProcessCapability {
         Ok((Some(env_ref), Some(spec)))
     }
 
-    /// K5 launches the Run's admitted registration through the same process
-    /// command executor as recorded intents. No live tool policy is consulted.
-    pub(in crate::runtime::session_manager) async fn start_bound_process(
+    /// K5 stages the Run's admitted registration on the same process
+    /// executor as recorded intents, as a store-local effect of the call
+    /// that declared it. No live tool policy is consulted.
+    pub(in crate::runtime::session_manager) async fn stage_bound_process(
         &self,
         current: &CurrentOwnerCapability,
         registration: crate::ProcessStartRegistration,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
         let observers = match &registration.provenance.originator {
             crate::ProcessOriginator::Session { session_id, .. } => {
                 self.mark_current_process_sync_needed(current, session_id);
@@ -383,16 +382,16 @@ impl ProcessCapability {
             .await?;
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
-        let record = self
+        let staged = self
             .command_runner(current, &scope)?
-            .start_in_run(
+            .stage(
                 registration,
                 options.initial_observers.into_iter().collect(),
                 execution_context,
             )
             .await?;
-        scope.observe_process_started(&current.host.core.tracing, &record);
-        Ok(record)
+        scope.observe_process_started(&current.host.core.tracing, &staged.record);
+        Ok(staged)
     }
 
     pub(in crate::runtime::session_manager) async fn start_process(
@@ -451,15 +450,16 @@ impl ProcessCapability {
             .await
     }
 
-    /// Builds a start command only from the recorded intent payload and its
-    /// structural parent invocation, then crosses the journal immediately.
-    pub(in crate::runtime::session_manager) async fn start_process_from_recorded_intent(
+    /// Stages a start only from the recorded intent payload and its
+    /// structural parent invocation, as a store-local effect of the call
+    /// that declares it.
+    pub(in crate::runtime::session_manager) async fn stage_recorded_start_process(
         &self,
         current: &CurrentOwnerCapability,
         owner: &crate::RuntimeOwner,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
         if let Some(session_id) = owner.session_id() {
             self.mark_current_process_sync_needed(current, session_id);
         }
@@ -539,7 +539,7 @@ impl ProcessCapability {
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
         self.command_runner(current, &scope)?
-            .start(
+            .stage(
                 registration,
                 options.initial_observers.into_iter().collect(),
                 execution_context,
@@ -735,11 +735,10 @@ impl ProcessCapability {
             .await
     }
 
-    /// A Run's declared-start discharge (FIG-5080). It runs inside the owner
-    /// step whose `StartDischarged` record carries it, so like
-    /// [`ProcessCommandRunner::start_in_run`] it writes only the registry and
-    /// the engine's keyed delivery, never a journal command of its own: an
-    /// SDK command nested in that step cannot replay an unfinished body.
+    /// A Run's declared-start discharge (FIG-5080): a parked call that ends
+    /// cancelled cancels the child its declared start launched. It writes
+    /// only the registry's cancel request and the engine's keyed delivery,
+    /// never a journal command of its own.
     #[expect(
         clippy::expect_used,
         reason = "execution scopes are plain string identities"
@@ -859,22 +858,16 @@ impl ProcessCapability {
             .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(in crate::runtime::session_manager) async fn signal_recorded_intent(
+    /// Stages a recorded intent's signal as a store-local effect of the
+    /// call that sends it.
+    pub(in crate::runtime::session_manager) async fn stage_recorded_signal(
         &self,
         current: &CurrentOwnerCapability,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
+        signal: &crate::ProcessSignal,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let runner = self.command_runner(current, &scope)?;
-        runner
-            .signal(crate::ProcessSignal::new(
-                crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
-                payload,
-            ))
+    ) -> Result<crate::StoreLocalEffect, crate::PluginError> {
+        self.command_runner(current, &scope)?
+            .stage_signal(signal)
             .await
     }
 

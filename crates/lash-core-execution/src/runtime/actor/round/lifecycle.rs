@@ -78,14 +78,14 @@ use super::{
     StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry, start_retry,
 };
 
-/// What a member's body answers: its output, and the store-local effect its
-/// completion commits with.
+/// What a member's body answers: its output, and the store-local effects
+/// its completion or its park commits with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemberResult {
     /// The output.
     pub output: BodyOutput,
-    /// The store write that commits with a completion.
-    pub store_local: Option<StoreLocalEffect>,
+    /// The store writes that commit with the output.
+    pub store_local: Vec<StoreLocalEffect>,
     /// For a park, the process whose terminal the call also awaits: its
     /// `process_terminal` wait is pinned with the park.
     pub terminal: Option<crate::ProcessId>,
@@ -95,7 +95,7 @@ impl From<BodyOutput> for MemberResult {
     fn from(output: BodyOutput) -> Self {
         Self {
             output,
-            store_local: None,
+            store_local: Vec::new(),
             terminal: None,
         }
     }
@@ -472,7 +472,7 @@ impl Lifecycle {
         if !settlements.is_empty() {
             let mut tx = self.cx.begin().await?;
             for (execution, outcome) in settlements {
-                settle(&mut tx, &execution, outcome, None)?;
+                settle(&mut tx, &execution, outcome, Vec::new())?;
             }
             return Ok(Some(self.commit(tx, self.outcome_label).await?));
         }
@@ -645,6 +645,12 @@ impl Lifecycle {
         match self.cx.commit(tx, label).await {
             Ok(_) => Ok(Act::Committed(appended)),
             Err(error @ DurableError::OwnershipLost(_)) => Err(error.into()),
+            // A start its registrar refused after it was staged refuses
+            // every repeat of the commit: the activation ends, and the next
+            // owner settles the call as its records say, without the start.
+            Err(error @ DurableError::Domain(DomainRefusal::ProcessStartRefused { .. })) => {
+                Err(error.into())
+            }
             Err(error) => {
                 if let DurableError::Domain(DomainRefusal::RunOrdinalTaken {
                     owner,
@@ -667,7 +673,7 @@ impl Lifecycle {
         let cancel = self.token(execution.id().run);
         self.in_flight.insert(execution.id().clone());
         let attempt = async move {
-            type Carried = (Option<StoreLocalEffect>, Option<crate::ProcessId>);
+            type Carried = (Vec<StoreLocalEffect>, Option<crate::ProcessId>);
             let carried: Arc<Mutex<Carried>> = Arc::default();
             let slot = Arc::clone(&carried);
             let tool_body: ToolBody = Box::new(move |token| {
@@ -716,11 +722,11 @@ impl Lifecycle {
                     evidence: AvailableEvidence::default(),
                 }
                 .into(),
-                None,
+                Vec::new(),
                 None,
             ),
             Err(Stop::Cancelled | Stop::Activation | Stop::Lapsed) => {
-                (cancelled_outcome().into(), None, None)
+                (cancelled_outcome().into(), Vec::new(), None)
             }
             Err(Stop::Durable(error)) => return Err(error.into()),
         };

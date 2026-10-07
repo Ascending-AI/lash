@@ -6395,6 +6395,34 @@
         }
       ]
     },
+    "RemoteProcessSignalRequest": {
+      "additionalProperties": false,
+      "description": "One signal to one process. `signal_id` is the sender's id for this one\nsignal: with the process and the signal name it is the signal's whole\nidentity, and the append that delivers it is deduplicated by that\nidentity alone (FIG-4299). There is no separate replay key to supply; a\nrequest that carries one is refused, not silently re-keyed.",
+      "properties": {
+        "payload": {
+          "default": null
+        },
+        "process_id": {
+          "type": "string"
+        },
+        "signal_id": {
+          "type": "string"
+        },
+        "signal_name": {
+          "type": "string"
+        },
+        "trace_cause": {
+          "$ref": "#/$defs/TraceCause",
+          "description": "What caused the signal: its producer's trace context. No part of the\nsignal's identity."
+        }
+      },
+      "required": [
+        "process_id",
+        "signal_name",
+        "signal_id"
+      ],
+      "type": "object"
+    },
     "RemoteProcessSignalWaitBinding": {
       "additionalProperties": false,
       "description": "Wire mirror of the wait one signal event resolves: the ordinal of the\nprocess's wait for the signal's name (FIG-4298).",
@@ -8194,7 +8222,7 @@
               "type": "string"
             },
             "result": {
-              "$ref": "#/$defs/RemoteProcessEvent"
+              "$ref": "#/$defs/RemoteProcessSignalRequest"
             }
           },
           "required": [

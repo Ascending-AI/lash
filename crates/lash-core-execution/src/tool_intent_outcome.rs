@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 macro_rules! realized_payload {
     (StartProcess) => { crate::ProcessHandleView };
-    (SignalProcess) => { Box<crate::ProcessEvent> };
+    (SignalProcess) => { Box<crate::ProcessSignal> };
     (CancelProcess) => { crate::ProcessCancelReceipt };
     (EmitProcessEvent) => { Box<crate::ProcessEvent> };
     (EmitTrigger) => { crate::facade_support::TriggerEmitReport };

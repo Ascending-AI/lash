@@ -39,6 +39,9 @@ impl CommitLabel {
     /// `round.start`: A retried member's or process step's next attempt
     /// started, before its body runs.
     pub const ROUND_START: Self = Self::new("round.start");
+    /// `tool.effect`: The store-local effects of a call that no round
+    /// member runs (a code cell's), committed when the call ends.
+    pub const TOOL_EFFECT: Self = Self::new("tool.effect");
 
     // Waits (L5).
     /// `wait.mint`: A wait pinned.
@@ -129,7 +132,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 45] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -149,6 +152,7 @@ impl CommitLabel {
         Self::ROUND_OUTCOME,
         Self::ROUND_RETRY,
         Self::ROUND_START,
+        Self::TOOL_EFFECT,
         Self::WAIT_MINT,
         Self::WAIT_RESOLVE,
         Self::WAIT_TIMEOUT,

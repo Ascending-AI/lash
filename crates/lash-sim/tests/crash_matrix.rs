@@ -32,6 +32,7 @@ macro_rules! crash_matrix {
 crash_matrix! {
     a_turn_cut_at_every_label_commits_once => Turn;
     a_tool_round_cut_at_every_label_runs_no_once_body_twice => Round;
+    a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome => Effects;
     a_turn_cancel_cut_at_every_label_ends_the_turn_once => Cancel;
     a_code_cell_cut_at_every_label_resumes_from_its_snapshot => Cell;
     a_code_cell_killed_in_its_body_cut_at_every_label_settles_interrupted => CellKilled;
@@ -135,6 +136,26 @@ async fn a_stale_epoch_session_command_commits_nothing() {
         assert!(
             report.cells.iter().any(|cell| cell.fault == Fault::Zombie),
             "seed {seed}: no session command was cut under a zombie owner"
+        );
+        report.assert_held();
+    }
+}
+
+/// A stale owner's or a zombie's `round.outcome` commit, carrying a tool's
+/// process start and signal, commits nothing: the new owner settles both
+/// `Once` calls `Interrupted`, and neither the process nor the signal
+/// exists without its outcome (the case's laws).
+#[tokio::test]
+async fn a_stale_owner_s_tool_outcome_with_a_process_start_commits_nothing() {
+    for seed in 0..2 {
+        let report = Matrix::new()
+            .faults(&[Fault::StaleEpoch, Fault::Zombie])
+            .labels(&[CommitLabel::ROUND_OUTCOME])
+            .run(|| Deployment::new(Case::Effects, seed, Dialect::SqliteMemory))
+            .await;
+        assert!(
+            !report.cells.is_empty(),
+            "seed {seed}: no round.outcome was cut"
         );
         report.assert_held();
     }

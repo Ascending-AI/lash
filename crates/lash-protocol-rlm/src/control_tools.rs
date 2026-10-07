@@ -326,12 +326,12 @@ mod tests {
 
     #[async_trait]
     impl lash_core::ProcessService for BatonManager {
-        async fn start_from_recorded_intent(
+        async fn stage_recorded_start(
             &self,
             _owner: &lash_core::RuntimeOwner,
             _request: lash_core::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessHandleView, PluginError> {
+        ) -> Result<lash_core::StagedProcessStart, PluginError> {
             Err(PluginError::Session(
                 "recorded process starts are unavailable in this test".to_string(),
             ))
@@ -416,15 +416,12 @@ mod tests {
             ))
         }
 
-        async fn signal_recorded_intent(
+        async fn stage_recorded_signal(
             &self,
             _owner: &lash_core::RuntimeOwner,
-            _process_id: &ProcessId,
-            _signal_name: String,
-            _signal_id: String,
-            _payload: serde_json::Value,
+            _signal: &lash_core::ProcessSignal,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessEvent, PluginError> {
+        ) -> Result<lash_core::StoreLocalEffect, PluginError> {
             Err(PluginError::Session(
                 "recorded process signalling is unavailable in this test".to_string(),
             ))

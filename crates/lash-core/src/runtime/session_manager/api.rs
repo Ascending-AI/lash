@@ -204,28 +204,26 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         Ok(crate::ProcessHandleView::from_record(record))
     }
 
-    async fn start_from_recorded_intent(
+    async fn stage_recorded_start(
         &self,
         owner: &crate::RuntimeOwner,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
-        let record = self
-            .services
+    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
+        self.services
             .processes
-            .start_process_from_recorded_intent(&self.services.current, owner, request, scope)
-            .await?;
-        Ok(crate::ProcessHandleView::from_record(record))
+            .stage_recorded_start_process(&self.services.current, owner, request, scope)
+            .await
     }
 
-    async fn start_bound(
+    async fn stage_bound(
         &self,
         registration: crate::ProcessStartRegistration,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
         self.services
             .processes
-            .start_bound_process(&self.services.current, registration, scope)
+            .stage_bound_process(&self.services.current, registration, scope)
             .await
     }
 
@@ -401,25 +399,15 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
-    async fn signal_recorded_intent(
+    async fn stage_recorded_signal(
         &self,
         _owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
+        signal: &crate::ProcessSignal,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+    ) -> Result<crate::StoreLocalEffect, crate::PluginError> {
         self.services
             .processes
-            .signal_recorded_intent(
-                &self.services.current,
-                process_id,
-                signal_name,
-                signal_id,
-                payload,
-                scope,
-            )
+            .stage_recorded_signal(&self.services.current, signal, scope)
             .await
     }
 

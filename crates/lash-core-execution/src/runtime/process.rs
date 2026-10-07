@@ -129,18 +129,20 @@ pub use registry::{
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 pub use start_staging::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,
-    ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StartStaging,
-    is_start_operation, register_process_start, stage_process_start, start_operation_journal,
+    ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StagedProcessStart,
+    StagedRegistration, StartStaging, is_start_operation, register_process_start,
+    stage_process_start, stage_store_local_start, start_operation_journal,
 };
 pub use steps::{ProcessSteps, StepAdmission, StepRefusal};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
 pub use validation::{
     ProcessEventAppendPlan, ProcessRegistrationRefusal, ProcessStartPlan, ProcessTransition,
-    ProcessTransitionPlan, abandoned_consumer_refusal, allocate_process_event_sequence,
-    apply_process_event_projection, check_retained_start, fold_process_record,
-    prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    prepare_process_transition, require_event_replay, validate_generic_process_event_append,
+    ProcessTransitionPlan, abandoned_consumer_refusal, admit_process_signal_append,
+    allocate_process_event_sequence, apply_process_event_projection, check_retained_start,
+    fold_process_record, prepare_process_event_append, prepare_process_registration,
+    prepare_process_start, prepare_process_transition, require_event_replay,
+    validate_generic_process_event_append,
 };
 
 pub fn current_epoch_ms() -> u64 {

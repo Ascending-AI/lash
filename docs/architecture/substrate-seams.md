@@ -71,11 +71,11 @@ L13 = FIG-5193, L3t = FIG-5208, L9t = FIG-5210.
 | | `ObserveDrainMark` | deleted: drain is a release at a committed phase (L11) |
 | `tool_effect` (L4) | `ToolAttempt`, `PresentToolResult` | run in place, recorded nowhere: inside the admitted execution that runs the call (a round member between its `x_start` and `x_outcome`, or a code cell up to its next snapshot); a round's presentation record commits in `round.present+model.start` |
 | | `RestoreRunMaterial` | deleted: the fold reads committed records (S4) |
-| | `Trigger` | run in place until fig-5174-pending makes it a store-local effect of the call's settled outcome (`StoreLocalEffect::TriggerCreate`/`TriggerDelete`, F3) |
+| | `Trigger` | run in place, its own receipt-keyed idempotent commit. It is not yet a store-local effect: a mutation's receipt is evaluated against the live subscription row inside the store transaction, so staging it before the outcome needs a commit-time evaluation contract that FIG-5223 left open (`StoreLocalEffect::TriggerCreate`/`TriggerDelete` still refuse) |
 | | `IngestTriggerOccurrence`, `AdmitTriggerDelivery` | deleted: an emission records its occurrence, starts each delivery's process and binds it in one `trigger.start` mailbox commit (fig-5175-trigger) |
 | `wait_effect` (L5) | `AwaitEvent`, `Sleep` | phase-transaction write: a pinned wait row or timer, raced against cancel mail |
 | | `PeekAwaitEvent` | read of a wait row, recorded nowhere |
-| `process_effect` (L6) | `Process` (start, signal, await, cancel) | store-local effect (start, signal), wait (await), mail (cancel) |
+| `process_effect` (L6) | `Process` (start, signal, await, cancel) | store-local effect (start, signal): a tool's realization stages the start's registration (`StoreLocalEffect::ProcessStart`) and the signal (`StoreLocalEffect::SignalSend`), and they commit as `ProcessWrite`s in the fenced `round.outcome` that records the call (FIG-5223); a code cell's call, which no round member runs until FIG-5225, commits its effects alone under `tool.effect`. Wait (await), mail (cancel) |
 | | `LoadExecutionEnv` | admitted execution |
 | `vm_effect` (V0, then L7) | `ExecCode` | admitted execution from the cell's snapshot, operations admitted at quiet points |
 | | `LanguageRuntimeValue` | run in place, recorded nowhere: a cell resumed from its snapshot never asks again for a value its heap holds |

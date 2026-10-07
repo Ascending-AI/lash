@@ -388,7 +388,8 @@ pub enum AdmissionRefusal {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SettleRefusal {
     /// The store-local effect does not belong to this execution's outcome:
-    /// an effect commits only with the completion that performed it.
+    /// an effect commits only with the completion or the park that staged
+    /// it.
     #[error("call {0}'s store-local effect does not match its outcome")]
     ForeignEffect(ToolCallId),
     /// The fold names no started execution under this identity.
@@ -589,25 +590,51 @@ impl RunFold {
 }
 
 /// A store write whose effect is a lash store row, committed in the same
-/// transaction as its tool's outcome: exactly once (ADR 0132 §5). L4
-/// (FIG-5174) writes each; the process rows are L6's (FIG-5175).
+/// transaction as its tool's outcome, under its owner's epoch fence: exactly
+/// once (ADR 0132 §5). A call's realization stages each; nothing commits one
+/// before its outcome.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreLocalEffect {
-    /// Start a process: its registry row and its actor, ready.
+    /// Start a process: its registry row, its observers and its actor,
+    /// ready.
     ProcessStart(ProcessStartRows),
+    /// Send a signal: its event on the target, its mail and the target's
+    /// wake.
+    SignalSend(SignalSendRows),
     /// Create a trigger subscription.
     TriggerCreate(StoreLocalRows),
     /// Delete a trigger subscription.
     TriggerDelete(StoreLocalRows),
-    /// Send a signal: a mailbox row on the target plus a wake.
-    SignalSend(StoreLocalRows),
     /// Spawn a child session.
     ChildSessionSpawn(StoreLocalRows),
-    /// The store half of an intent realization.
-    RealizationStore(StoreLocalRows),
 }
 
-/// The rows of one store-local effect, encoded by L4 (FIG-5174).
+impl StoreLocalEffect {
+    /// The effect that sends `signal`.
+    ///
+    /// # Errors
+    ///
+    /// A signal that does not encode.
+    pub fn signal(signal: &crate::ProcessSignal) -> Result<Self, crate::PluginError> {
+        Ok(Self::SignalSend(SignalSendRows {
+            process: signal.identity.process_id().clone(),
+            signal_json: serde_json::to_string(signal).map_err(|error| {
+                crate::PluginError::Session(format!("failed to encode a signal: {error}"))
+            })?,
+        }))
+    }
+}
+
+/// The rows of one signal sent as a store-local effect.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignalSendRows {
+    /// The target.
+    pub process: crate::ProcessId,
+    /// The signal, encoded.
+    pub signal_json: String,
+}
+
+/// The rows of one store-local effect no producer stages yet.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoreLocalRows {
     /// The rows.
@@ -827,8 +854,9 @@ pub(crate) async fn run_bounded(
     }
 }
 
-/// Record `admitted`'s outcome on `tx`, with the store-local effect that
-/// commits with it, at its run's next ordinal.
+/// Record `admitted`'s outcome on `tx`, with the store-local effects that
+/// commit with it, at its run's next ordinal. Only a completion or a park
+/// carries effects: a park's declared start is what it waits on.
 ///
 /// # Errors
 ///
@@ -837,14 +865,19 @@ pub fn settle(
     tx: &mut ActorTx,
     admitted: &AdmittedExecution,
     output: impl Into<BodyOutput>,
-    store_local: Option<StoreLocalEffect>,
+    store_local: Vec<StoreLocalEffect>,
 ) -> Result<(), SettleRefusal> {
     let output = output.into();
-    if let Some(effect) = store_local {
-        if !matches!(output.outcome, AttemptOutcome::Completed(_)) {
+    if !store_local.is_empty() {
+        if !matches!(
+            output.outcome,
+            AttemptOutcome::Completed(_) | AttemptOutcome::Waiting(_)
+        ) {
             return Err(SettleRefusal::ForeignEffect(admitted.call().clone()));
         }
-        store_local::write(tx, admitted, effect)?;
+        for effect in store_local {
+            store_local::write(tx, admitted, effect)?;
+        }
     }
     record_outcome(tx, admitted, output);
     Ok(())

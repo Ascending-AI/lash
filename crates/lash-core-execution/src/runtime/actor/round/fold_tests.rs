@@ -201,8 +201,20 @@ fn a_gap_in_a_runs_ordinals_is_refused() {
 fn a_second_final_of_a_call_is_refused() {
     let mut tx = opened();
     let members = admitted(&mut tx, vec![draft("a", "once", ExecutionPolicy::Once)]);
-    settle(&mut tx, &members[0], AttemptOutcome::Interrupted, None).unwrap();
-    settle(&mut tx, &members[0], AttemptOutcome::Interrupted, None).unwrap();
+    settle(
+        &mut tx,
+        &members[0],
+        AttemptOutcome::Interrupted,
+        Vec::new(),
+    )
+    .unwrap();
+    settle(
+        &mut tx,
+        &members[0],
+        AttemptOutcome::Interrupted,
+        Vec::new(),
+    )
+    .unwrap();
     assert_eq!(
         fold(&rows(&tx), &PolicyView::default()),
         Err(FoldRefusal::SecondFinal(ToolCallId::fixture("a")))
@@ -252,7 +264,7 @@ fn a_call_whose_retry_is_due_ends_at_its_failed_attempt() {
     let due = fold(&rows(&tx), &PolicyView::default()).unwrap();
     let view = due.round(RUN).unwrap();
     let execution = view.execution(&view.members()[0]);
-    settle(&mut tx, &execution, failed(), None).unwrap();
+    settle(&mut tx, &execution, failed(), Vec::new()).unwrap();
     assert_eq!(
         recoveries(&fold(&rows(&tx), &PolicyView::default()).unwrap()),
         vec![Recovery::Settled(failed())]

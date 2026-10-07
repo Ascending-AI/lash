@@ -216,11 +216,13 @@ pub enum SingletonBodyOutcome {
     Cancelled {
         evidence: Option<String>,
     },
-    /// The body parked on its completion wait: its pending completion, and
-    /// the launch receipt of the start it declared to resolve it.
+    /// The body parked on its completion wait: its pending completion, the
+    /// launch receipt of the start it declared to resolve it, and that
+    /// start's store-local effect, which commits with the park.
     Pending {
         completion: Box<crate::PendingCompletion>,
         launch: Option<Box<super::LaunchReceipt>>,
+        store_local: Vec<crate::runtime::actor::round::StoreLocalEffect>,
     },
 }
 
@@ -343,14 +345,14 @@ pub trait SingletonToolHandlers: Send + Sync {
         Err("external cancellation requires an installed handler".to_owned())
     }
 
-    /// Realize the intents a final's capture declares, in place, and answer
-    /// each intent's outcome.
+    /// Realize the intents a final's capture declares: each intent's
+    /// outcome, and the store-local effects that commit with the call's.
     async fn realize(
         &self,
         _call_id: &ToolCallId,
         _capture: &SingletonCapture,
-    ) -> Result<super::RealizationReceipt, RuntimeEffectControllerError> {
-        Ok(super::RealizationReceipt::default())
+    ) -> Result<super::Realization, RuntimeEffectControllerError> {
+        Ok(super::Realization::default())
     }
 
     /// Adopt a final's realized intents before it is presented.
@@ -360,6 +362,21 @@ pub trait SingletonToolHandlers: Send + Sync {
         _receipt: &super::RealizationReceipt,
     ) -> Result<(), RuntimeEffectControllerError> {
         Ok(())
+    }
+
+    /// Commit `effects`, a call's store-local effects, at once in their own
+    /// fenced transaction: what a call that is no round member does with
+    /// them, since nothing else records its outcome (FIG-5225 admits a code
+    /// cell's calls as round members). The default refuses: only a handler
+    /// with a durable owner can commit.
+    async fn commit_store_local(
+        &self,
+        _effects: Vec<crate::runtime::actor::round::StoreLocalEffect>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeToolRunShape,
+            "a call's store-local effects need a durable owner to commit them",
+        ))
     }
 
     /// The model-facing presentation of a final result (V).
@@ -372,30 +389,27 @@ pub trait SingletonToolHandlers: Send + Sync {
     /// Emit the captured stream once the call is presented.
     fn emit_stream(&self, call_id: &ToolCallId, stream: &AttemptStream);
 
-    /// Register a final's declared start under its key: the registrar
-    /// answers the process it registered first under that key, or its typed
-    /// refusal of a start no retry could launch.
-    async fn launch_start(
+    /// Stage a final's declared start under its key, with no consumer hold:
+    /// its rows commit with the call's outcome, so nothing is left for a
+    /// hold to release. The registrar answers the process the key holds or
+    /// will, or its typed refusal of a start no retry could launch.
+    async fn stage_start(
         &self,
         obligation: &DeclaredStartObligation,
     ) -> Result<StartLaunch, String>;
-
-    /// Discharge a launched start: cancel `process_id` when `cancel`, then
-    /// release the obligation's consumer hold.
-    async fn discharge_start(
-        &self,
-        obligation: &DeclaredStartObligation,
-        process_id: &ProcessId,
-        cancel: bool,
-    ) -> Result<(), String>;
 }
 
 /// What a declared start's launch answered.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StartLaunch {
-    /// The registrar registered the process under the start's key, or
-    /// answered the one that key registered first.
-    Launched(crate::ProcessHandleView),
+    /// The start is staged under its key: the process its rows register,
+    /// or the one the key already holds, with no rows.
+    Staged {
+        /// The process.
+        handle: crate::ProcessHandleView,
+        /// The rows that register it with the call's outcome.
+        effect: Option<crate::runtime::actor::round::StoreLocalEffect>,
+    },
     /// The registrar refused the start for good, registering nothing.
     Refused(crate::ToolIntentRefusalReason),
 }

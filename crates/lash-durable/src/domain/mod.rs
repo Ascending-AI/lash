@@ -254,6 +254,16 @@ pub enum DomainRefusal {
         /// The registrar's refusal.
         reason: String,
     },
+    /// A process start's prepared registration was refused by the
+    /// registrar: its starter or its lifetime's scope closed, or its
+    /// consuming call was abandoned, since it was staged.
+    #[error("process {process} could not be registered: {reason}")]
+    ProcessStartRefused {
+        /// The process the start minted.
+        process: ProcessId,
+        /// The registrar's refusal.
+        reason: String,
+    },
     /// The session head moved past the revision the commit expected.
     #[error("session {session} head is at {found:?}, not the expected {expected}")]
     HeadMoved {

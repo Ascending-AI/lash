@@ -404,6 +404,152 @@ pub async fn register_process_start(
     staging.adopt(stores, committed).await
 }
 
+/// A process start staged as a store-local effect of the call that
+/// declares it (ADR 0132 §5): admitted and staged as every start is, its
+/// registration prepared, and nothing registered. Its [`Self::rows`]
+/// register it in the transaction that records the call's outcome, under
+/// the call's owner's epoch fence; what it staged under `Start(key)` its
+/// guard carries onto the record the rows commit, or ends once the starter
+/// settles without one.
+#[derive(Clone, Debug)]
+pub struct StagedProcessStart {
+    /// The row the rows register, or the one a process already holds under
+    /// the start's key.
+    pub record: ProcessRecord,
+    /// Whether committing the rows creates the row.
+    pub disposition: crate::ProcessRegistrationOutcome,
+    /// The rows that register the start; `None` when a process already
+    /// holds its key, and so is the start.
+    pub rows: Option<lash_durable::domain::ProcessStartRows>,
+}
+
+/// A prepared registration as a store-local start's rows carry it: what a
+/// dialect applies inside the commit that records the start's outcome.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StagedRegistration {
+    /// The registration, its trace anchor bound.
+    pub registration: ProcessRegistration,
+    /// The sessions that observe the process from its creation.
+    pub observers: Vec<SessionId>,
+    /// The process id the registrar minted.
+    pub process_id: super::ProcessId,
+    /// When the registration was prepared: the row's creation instant.
+    pub prepared_at_ms: u64,
+}
+
+impl StagedRegistration {
+    /// The record its rows register once they commit.
+    ///
+    /// # Errors
+    ///
+    /// A registration its admission refuses.
+    pub fn record(&self) -> Result<ProcessRecord, crate::PluginError> {
+        Ok(ProcessRecord::from_prepared_registration(
+            super::prepare_process_registration(self.registration.clone())?,
+            self.process_id.clone(),
+            self.prepared_at_ms,
+        ))
+    }
+
+    /// The rows a store-local start commits.
+    ///
+    /// # Errors
+    ///
+    /// A registration that does not encode.
+    pub fn rows(&self) -> Result<lash_durable::domain::ProcessStartRows, crate::PluginError> {
+        Ok(lash_durable::domain::ProcessStartRows {
+            process: self.process_id.clone(),
+            registration_json: serde_json::to_string(self).map_err(|error| {
+                crate::PluginError::Session(format!("failed to encode a process start: {error}"))
+            })?,
+        })
+    }
+
+    /// The registration `rows` carry.
+    ///
+    /// # Errors
+    ///
+    /// Rows that do not decode.
+    pub fn decode(
+        rows: &lash_durable::domain::ProcessStartRows,
+    ) -> Result<Self, crate::PluginError> {
+        serde_json::from_str(&rows.registration_json).map_err(|error| {
+            crate::PluginError::StoredDataCorrupt {
+                record_kind: "process start rows".to_owned(),
+                message: error.to_string(),
+            }
+        })
+    }
+}
+
+/// Stage one process start as a store-local effect: [`stage_process_start`],
+/// then the rows its call's outcome commits ([`StagedProcessStart`]).
+///
+/// A start whose key a process already holds is that process, with no rows.
+/// A start whose `Start(key)` was fenced before this attempt, while no
+/// process holds the key, is refused: the key's earlier attempt settled it,
+/// and nothing would hold what this one names once its row committed.
+///
+/// # Errors
+///
+/// [`stage_process_start`]'s refusals, the fenced key's, and any store
+/// failure.
+pub async fn stage_store_local_start(
+    stores: &ProcessStartStores<'_>,
+    registration: impl Into<ProcessStartRegistration>,
+    observers: &[SessionId],
+) -> Result<StagedProcessStart, RuntimeEffectControllerError> {
+    let PreparedProcessStart {
+        staging,
+        registration,
+    } = stage_process_start(stores, registration, observers).await?;
+    if registration.retained() {
+        let record = stores
+            .registry
+            .get_process(registration.process_id())
+            .await?
+            .ok_or_else(|| crate::StoreError::PreparedProcessRegistrationStale {
+                process_id: registration.process_id().clone(),
+            })
+            .map_err(crate::PluginError::from)?;
+        staging.settle_trace(lash_trace::TraceCandidateOutcome::Reused);
+        return Ok(StagedProcessStart {
+            record,
+            disposition: crate::ProcessRegistrationOutcome::Existing,
+            rows: None,
+        });
+    }
+    if staging.fenced() {
+        let start_key = staging.start_key.clone();
+        staging.abandon(stores).await?;
+        return Err(RuntimeEffectControllerError::foreign(
+            "process_start_key_settled",
+            TurnFailureCause::Outcome,
+            format!(
+                "{}: start key `{start_key}` was settled by an earlier attempt that registered no process",
+                stores.executor
+            ),
+        ));
+    }
+    let anchor = staging.anchor();
+    let (registration, observers, process_id, _, prepared_at_ms) = registration.into_commit(anchor);
+    let staged = StagedRegistration {
+        registration,
+        observers,
+        process_id,
+        prepared_at_ms,
+    };
+    let record = staged.record()?;
+    let rows = staged.rows()?;
+    staging.settle_trace(lash_trace::TraceCandidateOutcome::Selected);
+    Ok(StagedProcessStart {
+        record,
+        disposition: crate::ProcessRegistrationOutcome::Created,
+        rows: Some(rows),
+    })
+}
+
 /// A process start staged and its registration prepared, before the
 /// transaction that applies the registration: the registrar's own, or a
 /// trigger start's.
@@ -684,6 +830,24 @@ async fn stage<'a>(
 }
 
 impl StartStaging<'_> {
+    /// Whether `Start(key)` was fenced before this attempt staged: an
+    /// earlier attempt settled the key, so nothing was staged under it.
+    fn fenced(&self) -> bool {
+        self.definition
+            .as_ref()
+            .is_some_and(|definition| !definition.staged)
+            || self.env.as_ref().is_some_and(|env| !env.staged)
+            || self.engine.as_ref().is_some_and(|engine| !engine.staged)
+    }
+
+    /// End the start's trace candidate with `outcome`, for a start whose
+    /// row commits elsewhere.
+    fn settle_trace(self, outcome: lash_trace::TraceCandidateOutcome) {
+        if let Some(candidate) = self.candidate {
+            candidate.settle(outcome);
+        }
+    }
+
     /// The trace anchor the registration commits with.
     #[must_use]
     pub fn anchor(&self) -> lash_trace::TraceAnchor {

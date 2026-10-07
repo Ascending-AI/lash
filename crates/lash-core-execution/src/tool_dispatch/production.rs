@@ -299,14 +299,21 @@ impl<'run> ProductionToolHandlers<'run> {
         self
     }
 
-    /// Launch the start a parked call declared, under its start key beneath
-    /// the call's lineage, holding the child for the call.
+    /// Stage the start a parked call declared, under its start key beneath
+    /// the call's lineage, holding the child for the call: its launch
+    /// receipt, and the rows that register it with the park.
     async fn launch_parked(
         &self,
         call_id: &crate::ToolCallId,
         start: &crate::DeclaredStart,
         cancels: bool,
-    ) -> Result<super::LaunchReceipt, String> {
+    ) -> Result<
+        (
+            super::LaunchReceipt,
+            Option<crate::runtime::actor::round::StoreLocalEffect>,
+        ),
+        String,
+    > {
         let parent = self
             .context
             .language_runtime_invocation(&format!("run:start:{}", start.identity().replay_key));
@@ -782,9 +789,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                             });
                         }
                     };
+                    let mut store_local = Vec::new();
                     let launch = match &pending.resolved_by {
                         Some(crate::PendingResolver::DeclaredStart(start)) => {
-                            let receipt = self
+                            let (receipt, effect) = self
                                 .launch_parked(
                                     attempt.call_id,
                                     start,
@@ -816,6 +824,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                     suggested_delay_ms: None,
                                 });
                             }
+                            store_local.extend(effect);
                             Some(Box::new(receipt))
                         }
                         Some(crate::PendingResolver::ProcessTerminal { .. }) | None => None,
@@ -823,6 +832,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     Ok(SingletonBodyOutcome::Pending {
                         completion: Box::new(pending),
                         launch,
+                        store_local,
                     })
                 }
             }
@@ -974,7 +984,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         &self,
         call_id: &crate::ToolCallId,
         capture: &SingletonCapture,
-    ) -> Result<RealizationReceipt, RuntimeEffectControllerError> {
+    ) -> Result<super::Realization, RuntimeEffectControllerError> {
         let shape = |message: String| {
             RuntimeEffectControllerError::new(crate::RuntimeErrorCode::RuntimeToolRunShape, message)
         };
@@ -1008,14 +1018,23 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 .attempt_invocation(&dispatch, &prepared.call, attempt.get())
                 .into(),
         );
-        let outcomes = super::execute_final_tool_intents(
+        super::execute_final_tool_intents(
             &dispatch.intent_realization_context(),
             call_id,
             &captured.intents,
             None,
         )
-        .await?;
-        Ok(RealizationReceipt { outcomes })
+        .await
+    }
+    async fn commit_store_local(
+        &self,
+        effects: Vec<crate::runtime::actor::round::StoreLocalEffect>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.context
+            .dispatch()
+            .effect_controller
+            .commit_store_local(effects)
+            .await
     }
     fn adopt_realization(
         &self,
@@ -1057,19 +1076,22 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             }
         }
     }
-    async fn launch_start(
+    async fn stage_start(
         &self,
         obligation: &DeclaredStartObligation,
     ) -> Result<StartLaunch, String> {
         let parent = self
             .context
             .language_runtime_invocation(&format!("run:start:{}", obligation.start_key()));
-        let registration = obligation.registration.clone();
-        let started = self
+        // The start registers with the call's outcome, so no hold is left
+        // for the call to release.
+        let mut registration = obligation.registration.clone();
+        registration.consumer_hold = None;
+        let staged = self
             .context
             .dispatch()
             .processes
-            .start_bound(
+            .stage_bound(
                 registration,
                 self.context.process_scope_for_language_call(
                     parent.into_runtime_invocation(),
@@ -1077,10 +1099,13 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 ),
             )
             .await;
-        match started {
-            Ok(record) => Ok(StartLaunch::Launched(
-                crate::ProcessHandleView::from_record(record),
-            )),
+        match staged {
+            Ok(staged) => Ok(StartLaunch::Staged {
+                handle: crate::ProcessHandleView::from_record(staged.record),
+                effect: staged
+                    .rows
+                    .map(crate::runtime::actor::round::StoreLocalEffect::ProcessStart),
+            }),
             // A terminal refusal, such as a closed starter scope's, is the
             // start's own: a retry would only meet it again (ADR 0116 §3.2).
             Err(error) if super::intent_executor::declared_start_fault(&error).is_none() => Ok(
@@ -1094,32 +1119,5 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 Err(error.to_string())
             }
         }
-    }
-
-    async fn discharge_start(
-        &self,
-        obligation: &DeclaredStartObligation,
-        process_id: &crate::ProcessId,
-        cancel: bool,
-    ) -> Result<(), String> {
-        if cancel {
-            self.context
-                .dispatch()
-                .processes
-                .cancel_bound(process_id, self.context.process_scope(None))
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-        let hold = obligation
-            .registration
-            .consumer_hold
-            .as_ref()
-            .ok_or("declared start has no consumer hold")?;
-        self.context
-            .dispatch()
-            .processes
-            .release_consumer_hold(process_id, &hold.key)
-            .await
-            .map_err(|error| error.to_string())
     }
 }

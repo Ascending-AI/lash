@@ -459,6 +459,69 @@ impl ProcessLocalExecution {
     }
 }
 
+impl ProcessLocalExecution {
+    /// Stage `registration`'s start as a store-local effect of the call
+    /// that declares it (ADR 0132 §5): admitted and staged exactly as
+    /// [`ProcessCommand::Start`] is, and registered by nothing here. The
+    /// staged rows commit with the call's outcome.
+    ///
+    /// # Errors
+    ///
+    /// The start's refusal, and any store failure staging it.
+    pub async fn stage_start(
+        self,
+        registration: crate::ProcessStartRegistration,
+        observers: Vec<crate::SessionId>,
+        execution_context: crate::ProcessExecutionContext,
+    ) -> Result<crate::StagedProcessStart, RuntimeEffectControllerError> {
+        let starter = process_start_starter(&registration, &execution_context)?;
+        // Boxed: staging holds the start and the registration it resolves
+        // to, and inlining it would grow every caller's future by both.
+        Box::pin(crate::runtime::stage_store_local_start(
+            &crate::runtime::ProcessStartStores {
+                tracing: self.host_start.tracing.as_ref(),
+                registry: self.registry.as_ref(),
+                env_store: self.process_env_store.as_ref(),
+                engines: &self.process_engines,
+                session_catalog: self.host_start.session_catalog.as_deref(),
+                session_turn_admission: self.host_start.session_turn_admission.as_ref(),
+                executor: "process start staged by its call",
+                starter: &starter,
+                trigger_route: None,
+            },
+            registration,
+            &observers,
+        ))
+        .await
+    }
+
+    /// Stage `signal` as a store-local effect of the call that sends it:
+    /// its append is admitted against the target's row as it stands, and
+    /// nothing is appended or mailed here. The call's outcome commits the
+    /// signal's event, its mail and the target's wake.
+    ///
+    /// # Errors
+    ///
+    /// An unknown target, and the append's refusal.
+    pub async fn stage_signal(
+        &self,
+        signal: &crate::ProcessSignal,
+    ) -> Result<crate::runtime::actor::round::StoreLocalEffect, RuntimeEffectControllerError> {
+        let process_id = signal.identity.process_id();
+        let record = self
+            .registry
+            .get_process(process_id)
+            .await?
+            .ok_or_else(|| crate::PluginError::ProcessUnknown {
+                process_id: process_id.clone(),
+            })?;
+        crate::runtime::admit_process_signal_append(&record, &signal.append_request())?;
+        Ok(crate::runtime::actor::round::StoreLocalEffect::signal(
+            signal,
+        )?)
+    }
+}
+
 impl ProcessDefinitionLocalExecution {
     /// Runs the journaled immutable-definition command: `PublishDefinition`
     /// stores the descriptor and its closure's edges, `GetDefinition`

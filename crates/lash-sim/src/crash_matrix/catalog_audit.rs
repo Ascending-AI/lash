@@ -31,7 +31,7 @@ pub enum Coverage {
 }
 
 /// Every catalog label and how the matrix covers it.
-pub const COVERAGE: [(CommitLabel, Coverage); 44] = [
+pub const COVERAGE: [(CommitLabel, Coverage); 45] = [
     (CommitLabel::CLAIM, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::HEARTBEAT, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::REAP, Coverage::Cases(&[Case::CellKilled])),
@@ -69,10 +69,16 @@ pub const COVERAGE: [(CommitLabel, Coverage); 44] = [
     ),
     (
         CommitLabel::ROUND_OUTCOME,
-        Coverage::Cases(&[Case::Round, Case::Cell]),
+        Coverage::Cases(&[Case::Round, Case::Effects, Case::Cell]),
     ),
     (CommitLabel::ROUND_RETRY, Coverage::Cases(&[Case::Round])),
     (CommitLabel::ROUND_START, Coverage::Cases(&[Case::Round])),
+    (
+        CommitLabel::TOOL_EFFECT,
+        Coverage::Unemitted(
+            "only a code cell's tool call that stages a store-local effect commits under it (`ActorContext::commit_store_local`, reached from `run_call`), until FIG-5225 admits a cell's calls as round members; no case's cell stages one",
+        ),
+    ),
     (CommitLabel::WAIT_MINT, Coverage::Cases(&[Case::Close])),
     (CommitLabel::WAIT_RESOLVE, Coverage::Cases(&[Case::Process])),
     (CommitLabel::WAIT_TIMEOUT, Coverage::Cases(&[Case::Process])),

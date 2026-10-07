@@ -65,7 +65,7 @@ fn step(name: &str, tool: &str) -> StepRequest {
     }
 }
 
-fn event_type(name: &str) -> Result<ProcessEventType, ProcessInfraError> {
+pub(crate) fn event_type(name: &str) -> Result<ProcessEventType, ProcessInfraError> {
     Ok(ProcessEventType {
         name: name.to_owned(),
         payload_schema: lash_sansio::JsonSchema::admit(json!({ "type": "object" }))

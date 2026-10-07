@@ -39,27 +39,38 @@ pub struct ProcessActorRow {
     pub written_epoch: Option<Epoch>,
 }
 
-/// The rows a process start writes: the process actor, ready, in the
-/// transaction that admits the start. The registry row is the registry's
-/// own write in that transaction.
+/// The rows a process start writes: its registry row, its observers and
+/// its actor, ready, in the transaction that records the outcome of the
+/// call that started it (ADR 0132 §5). A start whose key a process already
+/// holds writes nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessStartRows {
     /// The process.
     pub process: ProcessId,
-    /// Its lifetime scope, when it is `Until` one.
-    pub until: Option<ScopeKey>,
-    /// The registration (definition, engine kind, engine config), encoded
-    /// by its owner.
+    /// The prepared registration (its observers, the minted process id and
+    /// the instant it was prepared at), encoded by its owner.
     pub registration_json: String,
-    /// The format set the actor is created in: its engine's unstarted set.
-    pub formats: crate::FormatSet,
 }
 
 /// A process write inside an owner commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessWrite {
-    /// Create a process's actor ready.
+    /// Register a process: its registry row, its observers and its actor,
+    /// ready. Refused with
+    /// [`DomainRefusal::ProcessStartRefused`](super::DomainRefusal::ProcessStartRefused)
+    /// when the registrar refuses the start.
     Register(ProcessStartRows),
+    /// Send a signal, encoded by its owner, to `process`: its event is
+    /// appended exactly once under the signal's identity, and its mail and
+    /// the process's wake ride the same commit. A process that is unknown
+    /// or already terminal takes nothing: the signal reached no live
+    /// process, as one sent just before the process ended.
+    Signal {
+        /// The process.
+        process: ProcessId,
+        /// The signal.
+        signal_json: String,
+    },
     /// Commit one engine transition: the state revision moves from
     /// `expected_rev` to `expected_rev + 1` and the driver state is
     /// replaced. Refused with

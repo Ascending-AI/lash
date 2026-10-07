@@ -14,12 +14,12 @@ use super::super::singleton_run::{
     SingletonToolHandlers, StartLaunch,
 };
 use super::{Answer, CallEnd, Consumer, Leaf, ToolRun};
+use crate::ToolCallId;
 use crate::store::plugin_writers::{PluginCallbackIdentity, PluginRevision};
 use crate::tool_run::{
     AdmittedBinding, AfterCheckVerdict, AttributedVerdict, CallDecision, CapacityScope,
     ExternalCancelPolicy, HookCause, PresentationBinding, ToolDeclaration,
 };
-use crate::{ProcessId, ToolCallId};
 
 fn callback(key: &str) -> PluginCallbackIdentity {
     PluginCallbackIdentity {
@@ -139,19 +139,10 @@ impl SingletonToolHandlers for Calls {
 
     fn emit_stream(&self, _call_id: &ToolCallId, _stream: &crate::runtime::effect::AttemptStream) {}
 
-    async fn launch_start(
+    async fn stage_start(
         &self,
         _obligation: &crate::runtime::process::DeclaredStartObligation,
     ) -> Result<StartLaunch, String> {
-        Err("no call here declares a start".into())
-    }
-
-    async fn discharge_start(
-        &self,
-        _obligation: &crate::runtime::process::DeclaredStartObligation,
-        _process_id: &ProcessId,
-        _cancel: bool,
-    ) -> Result<(), String> {
         Err("no call here declares a start".into())
     }
 }
@@ -382,22 +373,13 @@ impl SingletonToolHandlers for SlowOrdinary {
 
     fn emit_stream(&self, _call_id: &ToolCallId, _stream: &crate::runtime::effect::AttemptStream) {}
 
-    async fn launch_start(
+    async fn stage_start(
         &self,
         _obligation: &crate::runtime::process::DeclaredStartObligation,
     ) -> Result<StartLaunch, String> {
         self.launches
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Err("an ordinary call launches no process".into())
-    }
-
-    async fn discharge_start(
-        &self,
-        _obligation: &crate::runtime::process::DeclaredStartObligation,
-        _process_id: &ProcessId,
-        _cancel: bool,
-    ) -> Result<(), String> {
-        Err("an ordinary call discharges no start".into())
     }
 }
 

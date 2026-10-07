@@ -1,10 +1,12 @@
 //! A turn's tool round on the production tools: each member's attempt runs
 //! the call's admission, its attempt and its decision in memory, between
-//! the `x_start` and the `x_outcome` its round commits (ADR 0132 §5).
+//! the `x_start` and the `x_outcome` its round commits, and hands the round
+//! the store-local effects its realization staged, which commit with that
+//! `x_outcome` (ADR 0132 §5).
 use super::*;
 use crate::runtime::actor::round::{
     AdmittedExecution, BodyOutput, CompletedCall, Discharge, MemberBody, MemberPin, MemberResult,
-    PolicyView, RoundTools, completed_material, decode_completed,
+    PolicyView, RoundTools, StoreLocalEffect, completed_material, decode_completed,
 };
 use crate::runtime::actor::waits::{self, Resolution, WaitDeadline};
 use crate::session::tool_execution::ToolInvocation;
@@ -156,7 +158,7 @@ fn parked_output(
             }),
             material: Some(text),
         },
-        store_local: None,
+        store_local: Vec::new(),
         terminal: parked.awaited_process().cloned(),
     }
 }
@@ -199,7 +201,8 @@ fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> BodyOutput {
 
 impl ProductionToolHandlers<'_> {
     /// Run attempt `attempt` of the round member `call`, pinned to `tool`,
-    /// to its end or to a failure its policy repeats when `may_retry`.
+    /// to its end or to a failure its policy repeats when `may_retry`, with
+    /// the store-local effects its final or its park staged.
     async fn round_member(
         self: &Arc<Self>,
         owner: &crate::EffectOpener,
@@ -208,10 +211,10 @@ impl ProductionToolHandlers<'_> {
         attempt: AttemptOrdinal,
         may_retry: bool,
         cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<MemberEnd, SingletonRunError> {
+    ) -> Result<(MemberEnd, Vec<StoreLocalEffect>), SingletonRunError> {
         let invocation = ToolInvocation::from_pending(call.clone(), tool);
         let Some(definition) = self.leaf_definition(&invocation) else {
-            return Ok(MemberEnd::Final(answered(call, unavailable())));
+            return Ok((MemberEnd::Final(answered(call, unavailable())), Vec::new()));
         };
         let mut isolation_bound = false;
         if definition.manifest.declaration.isolated {
@@ -241,10 +244,13 @@ impl ProductionToolHandlers<'_> {
         if let Err(refusal) =
             super::super::admit_tool_round([Some((&definition.manifest, isolation_bound))])
         {
-            return Ok(MemberEnd::Final(answered(
-                call,
-                ToolCallOutput::failure(refusal.failure_for(0, &call.tool_name)),
-            )));
+            return Ok((
+                MemberEnd::Final(answered(
+                    call,
+                    ToolCallOutput::failure(refusal.failure_for(0, &call.tool_name)),
+                )),
+                Vec::new(),
+            ));
         }
         let mut environment = self.environment.clone();
         let singleton = self
@@ -270,19 +276,38 @@ impl ProductionToolHandlers<'_> {
             AttemptEnd::Ended(CallEnd::Withheld {
                 decision: CallDecision::Cancelled,
                 ..
-            }) => MemberEnd::Cancelled,
-            AttemptEnd::Ended(end) => MemberEnd::Final(self.completed_call(&call.call_id, &end)?),
+            }) => (MemberEnd::Cancelled, Vec::new()),
+            AttemptEnd::Ended(end) => {
+                let store_local = match &end {
+                    CallEnd::Final { store_local, .. } => store_local.clone(),
+                    CallEnd::Withheld { .. } => Vec::new(),
+                };
+                (
+                    MemberEnd::Final(self.completed_call(&call.call_id, &end)?),
+                    store_local,
+                )
+            }
             AttemptEnd::Retry {
                 capture,
                 suggested_delay_ms,
-            } => MemberEnd::Retry {
-                failure: retry_failure(call, &capture),
-                suggested_delay_ms,
-            },
-            AttemptEnd::Parked { completion, launch } => MemberEnd::Parked(ParkedCall {
-                completion: *completion,
-                launch: launch.map(|launch| *launch),
-            }),
+            } => (
+                MemberEnd::Retry {
+                    failure: retry_failure(call, &capture),
+                    suggested_delay_ms,
+                },
+                Vec::new(),
+            ),
+            AttemptEnd::Parked {
+                completion,
+                launch,
+                store_local,
+            } => (
+                MemberEnd::Parked(ParkedCall {
+                    completion: *completion,
+                    launch: launch.map(|launch| *launch),
+                }),
+                store_local,
+            ),
         })
     }
 }
@@ -482,23 +507,35 @@ impl RoundTools for ProductionRoundTools {
                     )
                     .with_completion_key(key),
                 );
-                let end = handlers
+                let (end, store_local) = handlers
                     .round_member(&owner, &call, tool, ordinal, may_retry, &token)
                     .await
                     .unwrap_or_else(|error| {
-                        MemberEnd::Final(answered(
-                            &call,
-                            ToolCallOutput::failure(crate::ToolFailure::runtime(
-                                crate::ToolFailureClass::Internal,
-                                "tool_run_fault",
-                                error.to_string(),
+                        (
+                            MemberEnd::Final(answered(
+                                &call,
+                                ToolCallOutput::failure(crate::ToolFailure::runtime(
+                                    crate::ToolFailureClass::Internal,
+                                    "tool_run_fault",
+                                    error.to_string(),
+                                )),
                             )),
-                        ))
+                            Vec::new(),
+                        )
                     });
-                match end {
+                let mut result = match end {
                     MemberEnd::Parked(parked) => parked_output(&call, &owner, &execution, &parked),
                     end => member_output(&owner, end).into(),
+                };
+                // The effects commit with the completion or the park that
+                // staged them; any other answer leaves them unwritten.
+                if matches!(
+                    result.output.outcome,
+                    AttemptOutcome::Completed(_) | AttemptOutcome::Waiting(_)
+                ) {
+                    result.store_local = store_local;
                 }
+                result
             })
         })
     }
