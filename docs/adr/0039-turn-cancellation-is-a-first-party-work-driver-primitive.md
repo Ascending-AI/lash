@@ -92,7 +92,7 @@ The mail row arbitrates the race with admission. Admission binds only an
 open, unbound row inside its fenced commit, and the withdraw changes only
 one, so exactly one takes it. When admission wins, the same request finds the
 open run and cancels it as above; when the withdraw wins, the admission is
-refused and the next drain no longer finds the input. An id that names no
+refused and the next drain does not find the input. An id that names no
 queued input and no turn, or one that already ended, still answers
 `UnknownOrRevoked` or `CompletionWonRace`. The facade's driver publishes the
 withdrawal's `QueueChanged { Cancelled }` once it committed, best-effort, as

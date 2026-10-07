@@ -442,7 +442,7 @@ impl Crash {
         // before the redrive's, but the call's start and completion arrive,
         // from the run that answers the call. A cut at `turn.commit` resumes
         // past the answered round and runs the call in no later run, and
-        // what a lost owner never published is not promised (ADR 0122 §4).
+        // what a lost owner never published is not promised (ADR 0122, decision 4).
         let provider = format!("call-{ACTIVITY}");
         let rerun = cut.is_none_or(|cut| cut.point.label != CommitLabel::TURN_COMMIT);
         let activities = sink.0.lock_recover().clone();
