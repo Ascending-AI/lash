@@ -37,6 +37,11 @@ name = "vm-snapshot"
 path = "src/bin/vm_snapshot.rs"
 test = false
 
+[[bin]]
+name = "durable-substrate"
+path = "src/bin/durable_substrate.rs"
+test = false
+
 [lints]
 workspace = true
 
@@ -53,6 +58,10 @@ libc = { workspace = true }
 lash-conformance = { workspace = true }
 lash-core = { workspace = true, features = ["perf-witness", "testing"] }
 lash-core-worker = { workspace = true }
+lash-core-execution = { workspace = true, features = ["testing"] }
+lash-core-store = { workspace = true, features = ["testing"] }
+lash-durable = { workspace = true }
+lash-vm-broker = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["perf-witness", "testing"] }
 lash = { workspace = true, features = ["rlm", "sqlite", "testing"] }
