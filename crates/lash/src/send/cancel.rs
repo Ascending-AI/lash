@@ -3,8 +3,8 @@
 //! through its cancellation gate (ADR 0039).
 
 use lash_core::facade_support::{
-    TurnAddress, TurnCancelMode, TurnCancelRequest, TurnCancelUndeliveredInputPolicy,
-    TurnWorkDriver,
+    QueueWithdrawalObservation, TurnAddress, TurnCancelMode, TurnCancelRequest,
+    TurnCancelUndeliveredInputPolicy, TurnWorkDriver,
 };
 use lash_core::runtime::{
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
@@ -131,7 +131,13 @@ async fn cancel_run(
             },
         );
     }
-    let driver = TurnWorkDriver::new(parts.effect_host.backend().clone());
+    let backend = parts.effect_host.backend().clone();
+    let withdrawals = QueueWithdrawalObservation::new(
+        backend.session_store_factory(),
+        std::sync::Arc::clone(&parts.live_replay_store),
+    );
+    let driver =
+        TurnWorkDriver::new(backend).publishing_withdrawals(std::sync::Arc::new(withdrawals));
     // The cancel addresses the run's running physical turn.
     let turn = driver
         .running_turn(&TurnAddress::new(parts.session_id.clone(), run.clone()))

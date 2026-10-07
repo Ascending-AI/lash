@@ -158,10 +158,10 @@ pub use queued_drain_policy::{
 pub use session_catalog::*;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 pub use turn_control::{
-    TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelAffectedWake,
-    TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
-    TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal,
-    TurnWorkDriver,
+    QueueWithdrawalPublisher, TurnAddress, TurnAttach, TurnCancelAffectedInput,
+    TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome,
+    TurnCancelReceipt, TurnCancelRequest, TurnCancelUndeliveredInputPolicy,
+    TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
 };
 #[cfg(feature = "testing")]
 pub use turn_queue::SessionCommandSettlement;

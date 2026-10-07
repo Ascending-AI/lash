@@ -1,5 +1,6 @@
 //! Transport-neutral foreground-turn cancellation envelopes.
 
+use lash_sansio::InputId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use schemars::JsonSchema;
@@ -100,6 +101,11 @@ pub enum RemoteTurnCancelOutcome {
         requested: RemoteTurnCancelUndeliveredInputPolicy,
         accepted: RemoteTurnCancellationEvidence,
     },
+    /// No run had opened the turn: its queued input was withdrawn and never
+    /// runs.
+    Withdrawn {
+        input_id: InputId,
+    },
     CompletionWonRace,
     UnknownOrRevoked,
 }
@@ -111,7 +117,7 @@ impl RemoteTurnCancelOutcome {
             | Self::AlreadyRequested { cancellation }
             | Self::Escalated { cancellation } => cancellation.validate(),
             Self::PolicyConflict { accepted, .. } => accepted.validate(),
-            Self::CompletionWonRace | Self::UnknownOrRevoked => Ok(()),
+            Self::Withdrawn { .. } | Self::CompletionWonRace | Self::UnknownOrRevoked => Ok(()),
         }
     }
 }

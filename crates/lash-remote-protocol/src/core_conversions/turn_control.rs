@@ -154,6 +154,9 @@ impl From<lash_core::facade_support::TurnCancelOutcome> for RemoteTurnCancelOutc
                 requested: requested.into(),
                 accepted: accepted.into(),
             },
+            lash_core::facade_support::TurnCancelOutcome::Withdrawn { input } => {
+                Self::Withdrawn { input_id: input }
+            }
             lash_core::facade_support::TurnCancelOutcome::CompletionWonRace => {
                 Self::CompletionWonRace
             }
@@ -183,6 +186,7 @@ impl From<RemoteTurnCancelOutcome> for lash_core::facade_support::TurnCancelOutc
                 requested: requested.into(),
                 accepted: accepted.into(),
             },
+            RemoteTurnCancelOutcome::Withdrawn { input_id } => Self::Withdrawn { input: input_id },
             RemoteTurnCancelOutcome::CompletionWonRace => Self::CompletionWonRace,
             RemoteTurnCancelOutcome::UnknownOrRevoked => Self::UnknownOrRevoked,
         }

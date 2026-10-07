@@ -47,6 +47,7 @@ pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
 pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
 pub use session_mail::{
     MailBatch, MailBatchKind, MailInput, SESSION_ACTOR_FORMATS, SessionMailWrite, SessionMailbox,
+    queued_input_run,
 };
 pub use snapshots::{SnapshotRev, SnapshotRow, SnapshotWrite};
 pub use triggers::{TriggerStart, TriggerStartAnswer};
@@ -108,7 +109,9 @@ pub enum MailDomainWrite {
     /// a parked actor.
     RequestProcessCancel(CancelRequest),
     /// L3: request a turn's cancel: its cancel-request row (first policy
-    /// wins, a stronger mode escalates) plus a control wake.
+    /// wins, a stronger mode escalates) plus a control wake. A turn no run
+    /// opened yet, whose input is still queued session mail, has that input
+    /// withdrawn instead, with a wake (FIG-5262).
     RequestTurnCancel(TurnCancelRequest),
     /// L6: redrive a parked actor: clear its park and its failed
     /// activations, record the redrive on the park feed, and control-wake

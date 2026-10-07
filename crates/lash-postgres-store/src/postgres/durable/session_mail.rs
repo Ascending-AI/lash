@@ -6,6 +6,7 @@
 
 use lash_durable::domain::{
     DomainRefusal, MailBatch, MailBatchKind, MailInput, SessionMailWrite, SessionMailbox,
+    queued_input_run,
 };
 use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
 use lash_sansio::{BatchId, InputId, SessionId, TurnId};
@@ -172,6 +173,42 @@ pub(super) async fn settle_held(
         .await
         .map_err(sqlx_failure)?;
     Ok(())
+}
+
+/// Withdraw the input session `session` would admit as run `run`, while it
+/// is still open and unbound session mail: into its `cancelled` tombstone at
+/// `now_ms`, so no run ever takes it (FIG-5262). `None` when no open input
+/// names the run, or an admission bound it first: the withdraw's `UPDATE`
+/// waits on the row an admission holds and then finds it bound.
+pub(super) async fn withdraw_queued(
+    tx: &mut PgConnection,
+    session: &SessionId,
+    run: &TurnId,
+    now_ms: i64,
+) -> Result<Option<InputId>, DurableError> {
+    let candidates: Vec<(String, Option<String>)> =
+        sqlx::query_as(SQL.session_mail.open_inputs_named.sql())
+            .bind(session.as_str())
+            .bind(run.as_str())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    for (input, source_key) in candidates {
+        let input = InputId::parse(input).map_err(|error| undecodable("input id", error))?;
+        if queued_input_run(&input, source_key.as_deref()).as_ref() != Some(run) {
+            continue;
+        }
+        let withdrawn: Option<String> = sqlx::query_scalar(SQL.session_mail.withdraw_input.sql())
+            .bind(session.as_str())
+            .bind(input.as_str())
+            .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+            .bind(now_ms)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+        return Ok(withdrawn.map(|_| input));
+    }
+    Ok(None)
 }
 
 /// Apply the owner's session-mail write: bind admitted mail to its run, or

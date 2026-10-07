@@ -275,6 +275,10 @@ impl AppState {
                 lash::TurnCancelOutcome::UnknownOrRevoked => TurnCancelReceipt::UnknownOrRevoked {
                     address: address.clone(),
                 },
+                lash::TurnCancelOutcome::Withdrawn { input } => TurnCancelReceipt::Withdrawn {
+                    address: address.clone(),
+                    input,
+                },
             };
             // A pending terminal keeps the claim: the run's follower releases
             // it once the run settles.
@@ -291,6 +295,7 @@ impl AppState {
                 }
                 TurnCancelReceipt::CompletionWonRace { .. }
                 | TurnCancelReceipt::UnknownOrRevoked { .. }
+                | TurnCancelReceipt::Withdrawn { .. }
                 | TurnCancelReceipt::PolicyConflict { .. } => request_id.as_str(),
             };
             record_unknown_turn_terminal(self, &address, &receipt, routing_retained);

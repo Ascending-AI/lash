@@ -141,10 +141,9 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<AdmittedInputs>, Session
     Ok(Some(match (head_input, head_batch) {
         (Some(input), Some(batch)) if batch.enqueue_seq < input.enqueue_seq => turn_batch(batch)?,
         (Some(input), _) => {
-            let run = match input.source_key.as_deref().map(TurnId::parse) {
-                Some(Ok(run)) => run,
-                _ => run_of(input.input.as_str())?,
-            };
+            let run = input
+                .run()
+                .ok_or_else(|| SessionMailError::Undecodable(format!("run id {}", input.input)))?;
             let ids = AdmittedInputIds::new(vec![input.input.clone()])
                 .map_err(|error| SessionMailError::Undecodable(error.to_string()))?;
             AdmittedInputs {

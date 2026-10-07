@@ -438,11 +438,23 @@ impl LashCore {
 
     /// Exact-turn cooperative control for this deployment's effect host.
     ///
-    /// The returned `SessionShifts` is independently usable from any session handle.
+    /// The returned driver is independently usable from any session handle.
+    /// Its `request_cancel` also withdraws an input still queued: a turn no
+    /// run opened yet is addressed by the run its input will open (its
+    /// source key, or else its input id), and its cancel answers
+    /// [`TurnCancelOutcome::Withdrawn`](facade_support::TurnCancelOutcome::Withdrawn),
+    /// with the queue change published to this core's Live Replay, instead
+    /// of `UnknownOrRevoked`. One request does exactly one of withdraw or
+    /// cancel: when the session admitted the input first, it cancels the run.
     /// Session and turn ids are routing identity, not authorization; authorize
     /// requests in the host API before forwarding them to Lash.
     pub fn turn_work_driver(&self) -> facade_support::TurnWorkDriver {
-        facade_support::TurnWorkDriver::new(self.effect_host().backend().clone())
+        let backend = self.effect_host().backend().clone();
+        let withdrawals = facade_support::QueueWithdrawalObservation::new(
+            backend.session_store_factory(),
+            Arc::clone(&self.live_replay_store),
+        );
+        facade_support::TurnWorkDriver::new(backend).publishing_withdrawals(Arc::new(withdrawals))
     }
 
     /// Create `request.session_id` at the state `target` of `session` names,

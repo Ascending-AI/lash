@@ -48,6 +48,25 @@ crate::statements! {
                AND state IN ('deferred_next_turn', 'pending_active')
              RETURNING input_id";
 
+        /// Session `?1`'s open, unbound inputs whose id or source key is
+        /// `?2`, in ingress order: the candidates for the input the session
+        /// admits as run `?2`, which the naming rule then picks among.
+        open_inputs_named = "SELECT input_id, source_key
+             FROM pending_turn_inputs
+             WHERE session_id = ?1 AND admitted_run IS NULL
+               AND state IN ('deferred_next_turn', 'pending_active')
+               AND (input_id = ?2 OR source_key = ?2)
+             ORDER BY enqueue_seq";
+
+        /// Withdraw input `?2` of session `?1` into state `?3` at `?4`, its
+        /// tombstone, while it is still open and unbound; no row when an
+        /// admission bound it first.
+        withdraw_input = "UPDATE pending_turn_inputs
+             SET state = ?3, terminal_at_ms = ?4
+             WHERE session_id = ?1 AND input_id = ?2 AND admitted_run IS NULL
+               AND state IN ('deferred_next_turn', 'pending_active')
+             RETURNING input_id";
+
         /// Record that run `?3` of session `?1` executes input `?2`.
         record_run_input = "INSERT INTO session_run_inputs (session_id, input_id, run)
              VALUES (?1, ?2, ?3)

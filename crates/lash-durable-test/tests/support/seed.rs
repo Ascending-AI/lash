@@ -6,7 +6,7 @@ use lash_core::runtime::durable::session::{TurnError, TurnRow};
 use lash_core::{Message, MessageRole, Part, facade_support::shared_parts};
 use lash_core_execution::Backend;
 use lash_core_execution::{InputItem, PendingTurnInputDraft, TurnInput, TurnInputIngress};
-use lash_sansio::{SessionId, TurnId};
+use lash_sansio::{InputId, SessionId, TurnId};
 
 /// Admit `session` to the catalog at its creation head, and send it `text`
 /// as the input run `run` takes.
@@ -15,11 +15,23 @@ pub async fn send_turn(
     session: &SessionId,
     run: &TurnId,
     text: &str,
-) -> Result<(), String> {
+) -> Result<InputId, String> {
     let catalog: std::sync::Arc<dyn lash_core_execution::RuntimeStore> =
         backend.session_store_factory();
     lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, session).await;
-    catalog
+    queue_turn(backend, session, run, text).await
+}
+
+/// Send the admitted `session` `text` as the input run `run` takes: it
+/// waits in the session's mail behind what the session already holds.
+pub async fn queue_turn(
+    backend: &Backend,
+    session: &SessionId,
+    run: &TurnId,
+    text: &str,
+) -> Result<InputId, String> {
+    backend
+        .session_store_factory()
         .enqueue_pending_turn_input(
             PendingTurnInputDraft::new(
                 session.clone(),
@@ -29,7 +41,7 @@ pub async fn send_turn(
             .with_source_key(run.as_str()),
         )
         .await
-        .map(drop)
+        .map(|input| input.input_id)
         .map_err(|error| format!("send the turn's input: {error}"))
 }
 

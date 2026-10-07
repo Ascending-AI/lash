@@ -596,14 +596,16 @@ impl Activation for SessionActivation {
 }
 
 /// Whether `error` may pass by itself, so the next pass can succeed with
-/// nothing changed: contention, an unreachable store or a lost
-/// acknowledgement. Such a failure does not count toward the session's
-/// park.
+/// nothing changed: contention, an unreachable store, a lost
+/// acknowledgement, or an admission whose mail a producer withdrew since the
+/// drain read it (FIG-5262), which the next drain no longer finds. Such a
+/// failure does not count toward the session's park.
 fn passes_by_itself(error: &TurnError) -> bool {
     matches!(
         error,
         TurnError::Durable(
             DurableError::AckLost { .. }
+                | DurableError::Domain(lash_durable::DomainRefusal::SessionMailMoved { .. })
                 | DurableError::Store(lash_durable::StoreFailure {
                     kind: lash_durable::StoreFailureKind::Contended
                         | lash_durable::StoreFailureKind::Unavailable,

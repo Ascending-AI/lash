@@ -200,7 +200,7 @@ pub use builder::EmbeddedRuntimeBuilder;
 pub use causal::process_event_invocation;
 pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
-pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION};
+pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
 pub use effect::TurnCancelWait;
 /// Presentation and attempt-stream vocabulary the effect
 /// contracts below name.
@@ -348,10 +348,10 @@ use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_
 #[cfg(feature = "testing")]
 pub use turn_boundary::{RecordedTurnAssembly, classify_output_state};
 pub use turn_control::{
-    TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelAffectedWake,
-    TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
-    TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal,
-    TurnWorkDriver,
+    QueueWithdrawalPublisher, TurnAddress, TurnAttach, TurnCancelAffectedInput,
+    TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome,
+    TurnCancelReceipt, TurnCancelRequest, TurnCancelUndeliveredInputPolicy,
+    TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
 };
 #[cfg(feature = "testing")]
 pub use turn_input_ingress::ingress_message_id;

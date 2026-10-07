@@ -7,7 +7,7 @@
 
 use crate::ids::{DurableInstant, Epoch};
 use lash_core_store::store::{RunAdmissionRecord, RunTerminalCause, RunTerminalKind};
-use lash_sansio::{SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
+use lash_sansio::{InputId, SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
 
 use super::keys::RunSeq;
 
@@ -228,6 +228,13 @@ pub struct SessionCommitWrite {
 ///
 /// The first request a turn accepts holds the undelivered-input policy; a
 /// later one with the same policy and a stronger mode escalates it.
+///
+/// A request for a turn no run has opened yet, whose input is still queued
+/// session mail, withdraws that input instead, in the same transaction
+/// (FIG-5262). The mail row decides a race with the session's admission:
+/// the admission binds only an open, unbound row, and the withdraw changes
+/// only one, so exactly one of them takes it. A withdrawn input never runs;
+/// an admitted one is the open run this request then cancels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnCancelRequest {
     /// The session.
@@ -277,6 +284,13 @@ pub enum TurnCancelAnswer {
     PolicyConflict {
         /// The accepted request.
         accepted: TurnCancelRequest,
+    },
+    /// No run had opened yet: the turn's input was still queued, open and
+    /// unbound session mail, and the request withdrew it. The input never
+    /// runs, and the session was woken.
+    Withdrawn {
+        /// The withdrawn input.
+        input: InputId,
     },
     /// The turn is not the session's unfinished turn; nothing was written.
     AlreadyEnded,

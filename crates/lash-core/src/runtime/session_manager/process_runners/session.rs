@@ -90,6 +90,8 @@ impl RuntimeSessionServices {
             | crate::TurnCancelOutcome::Escalated(_)
             | crate::TurnCancelOutcome::AlreadyRequested(_)
             | crate::TurnCancelOutcome::PolicyConflict { .. } => SessionTurnCancel::Requested,
+            // No run had taken the input: the cancel withdrew it.
+            crate::TurnCancelOutcome::Withdrawn { .. } => SessionTurnCancel::Withdrawn,
             // The run is not open: it ended, and its end resolved the
             // process's wait, or no run ever took the input, which the
             // withdrawal above cancelled.

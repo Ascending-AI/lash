@@ -38,6 +38,29 @@ pub struct MailInput {
     pub active_turn: Option<TurnId>,
 }
 
+/// The run session mail's next-turn input opens when the session admits it:
+/// the run its source key names, for a host-keyed input, and otherwise the
+/// run its own id names. `None` when neither is a run id.
+///
+/// The one naming rule the session's drain admits by and a turn cancel
+/// withdraws by (FIG-5262), so a host addresses a queued input by the run it
+/// will open.
+#[must_use]
+pub fn queued_input_run(input: &InputId, source_key: Option<&str>) -> Option<TurnId> {
+    source_key
+        .and_then(|key| TurnId::parse(key).ok())
+        .or_else(|| TurnId::parse(input.as_str()).ok())
+}
+
+impl MailInput {
+    /// The run this input opens when the session admits it
+    /// ([`queued_input_run`]).
+    #[must_use]
+    pub fn run(&self) -> Option<TurnId> {
+        queued_input_run(&self.input, self.source_key.as_deref())
+    }
+}
+
 /// What a queued work batch asks the session for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MailBatchKind {

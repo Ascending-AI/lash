@@ -1376,8 +1376,10 @@ pub enum CancelReceipt {
     /// The input was still queued: its row is cancelled and no turn applied
     /// it. Its handle answers Cancelled with no output.
     Withdrawn(Box<PendingTurnInputCancelReceipt>),
-    /// The input's run is running: a durable cancel request was placed on
-    /// the run's cancellation gate.
+    /// A durable cancel request addressed the run. Its receipt says what it
+    /// did: placed on the running run's cancellation gate, or, for a run its
+    /// queued input had not opened yet, withdrew that input
+    /// ([`TurnCancelOutcome::Withdrawn`](crate::TurnCancelOutcome::Withdrawn)).
     Requested {
         run: TurnId,
         receipt: Box<TurnCancelReceipt>,

@@ -209,6 +209,16 @@ pub(super) async fn request_cancel(
 ) -> Result<(TurnCancelAnswer, Option<Woken>), DurableError> {
     let session = request.session.as_str();
     let run = request.run.as_str();
+    let actor = ActorKey::session(session).map_err(|_| corrupt("session id", session))?;
+    // A turn no run opened yet is its queued input: the withdraw takes the
+    // open row first, and an admission that bound it first leaves the open
+    // run this request cancels, which the read below then sees (FIG-5262).
+    if let Some(input) =
+        super::session_mail::withdraw_queued(tx, &request.session, &request.run, now.0).await?
+    {
+        let (woken, _) = super::wake_within(tx, &actor, false, now).await?;
+        return Ok((TurnCancelAnswer::Withdrawn { input }, Some(woken)));
+    }
     let open: Option<String> = sqlx::query_scalar(SQL.open_named_run.sql())
         .bind(session)
         .bind(run)
@@ -249,7 +259,6 @@ pub(super) async fn request_cancel(
         }
         Some(accepted) => return Ok((TurnCancelAnswer::AlreadyRequested { accepted }, None)),
     };
-    let actor = ActorKey::session(session).map_err(|_| corrupt("session id", session))?;
     let (woken, _) = super::wake_within(tx, &actor, true, now).await?;
     Ok((answer, Some(woken)))
 }

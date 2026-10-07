@@ -106,6 +106,9 @@ fn remote_cancel_roundtrip_preserves_all_modes_and_checkpoint_evidence() {
                             requested: TurnCancelUndeliveredInputPolicy::Drop,
                             accepted: evidence.clone(),
                         },
+                        TurnCancelOutcome::Withdrawn {
+                            input: lash_core::InputId::from("ti:queued"),
+                        },
                         TurnCancelOutcome::CompletionWonRace,
                         TurnCancelOutcome::UnknownOrRevoked,
                     ] {

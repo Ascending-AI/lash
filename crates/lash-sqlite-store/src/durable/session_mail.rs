@@ -6,6 +6,7 @@
 
 use lash_durable::domain::{
     DomainRefusal, MailBatch, MailBatchKind, MailInput, SessionMailWrite, SessionMailbox,
+    queued_input_run,
 };
 use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
 use lash_sansio::{BatchId, InputId, SessionId, TurnId};
@@ -172,6 +173,47 @@ pub(super) fn settle_held(
     tx.prepare_cached(SQL.session_mail.settle_held_batches.sql())?
         .execute(rusqlite::params![session.as_str(), run.as_str(), now_ms])?;
     Ok(())
+}
+
+/// Withdraw the input session `session` would admit as run `run`, while it
+/// is still open and unbound session mail: into its `cancelled` tombstone at
+/// `now_ms`, so no run ever takes it (FIG-5262). `None` when no open input
+/// names the run, or an admission bound it first.
+pub(super) fn withdraw_queued(
+    tx: &Connection,
+    session: &SessionId,
+    run: &TurnId,
+    now_ms: i64,
+) -> Answer<Option<InputId>> {
+    let candidates = tx
+        .prepare_cached(SQL.session_mail.open_inputs_named.sql())?
+        .query_map([session.as_str(), run.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (input, source_key) in candidates {
+        let input = match InputId::parse(input) {
+            Ok(input) => input,
+            Err(error) => return Ok(Err(undecodable("input id", error))),
+        };
+        if queued_input_run(&input, source_key.as_deref()).as_ref() != Some(run) {
+            continue;
+        }
+        let withdrawn = tx
+            .prepare_cached(SQL.session_mail.withdraw_input.sql())?
+            .query_row(
+                rusqlite::params![
+                    session.as_str(),
+                    input.as_str(),
+                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                    now_ms,
+                ],
+                |_| Ok(()),
+            )
+            .optional()?;
+        return Ok(Ok(withdrawn.map(|()| input)));
+    }
+    Ok(Ok(None))
 }
 
 /// Apply the owner's session-mail write: bind admitted mail to its run, or

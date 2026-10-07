@@ -260,6 +260,22 @@ pub(super) fn request_cancel(
 ) -> Answer<(TurnCancelAnswer, Option<Woken>)> {
     let session = request.session.as_str();
     let run = request.run.as_str();
+    let actor = match ActorKey::session(session) {
+        Ok(actor) => actor,
+        Err(_) => return Ok(Err(corrupt("session id", session))),
+    };
+    // A turn no run opened yet is its queued input: the withdraw takes the
+    // open row first, and an admission that bound it first leaves the open
+    // run this request cancels (FIG-5262).
+    let withdrawn =
+        match super::session_mail::withdraw_queued(tx, &request.session, &request.run, now.0)? {
+            Ok(withdrawn) => withdrawn,
+            Err(error) => return Ok(Err(error)),
+        };
+    if let Some(input) = withdrawn {
+        return Ok(super::wake_within(tx, &actor, false, now)?
+            .map(|(woken, _)| (TurnCancelAnswer::Withdrawn { input }, Some(woken))));
+    }
     let open = tx
         .prepare_cached(SQL.open_named_run.sql())?
         .query_row([session, run], |_| Ok(()))
@@ -303,10 +319,6 @@ pub(super) fn request_cancel(
         Some(accepted) => {
             return Ok(Ok((TurnCancelAnswer::AlreadyRequested { accepted }, None)));
         }
-    };
-    let actor = match ActorKey::session(session) {
-        Ok(actor) => actor,
-        Err(_) => return Ok(Err(corrupt("session id", session))),
     };
     Ok(super::wake_within(tx, &actor, true, now)?.map(|(woken, _)| (answer, Some(woken))))
 }

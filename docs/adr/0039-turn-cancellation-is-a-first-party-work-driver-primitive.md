@@ -78,6 +78,26 @@ checkpoint evidence. Their conversions preserve `Immediate`, `AfterStep`,
 JSON transport. These shapes change in place under the pre-1.0 version
 freeze (FIG-3846).
 
+## A queued input: withdrawn before its run opens
+
+A host addresses a turn whose input is still queued by the run that input
+will open: the run its source key names, or else its input id, the rule the
+session actor's admission uses. Cancelling such a turn withdraws the input
+instead (FIG-5262): the same mailbox transaction moves the open, unbound mail
+row to its cancelled tombstone and wakes the session, and the receipt is
+`Withdrawn { input }`. A withdrawn input never runs. Hosts keep `Withdrawn`
+apart from a cancelled run: nothing of the input was applied or interrupted.
+
+The mail row arbitrates the race with admission. Admission binds only an
+open, unbound row inside its fenced commit, and the withdraw changes only
+one, so exactly one takes it. When admission wins, the same request finds the
+open run and cancels it as above; when the withdraw wins, the admission is
+refused and the next drain no longer finds the input. An id that names no
+queued input and no turn, or one that already ended, still answers
+`UnknownOrRevoked` or `CompletionWonRace`. The facade's driver publishes the
+withdrawal's `QueueChanged { Cancelled }` once it committed, best-effort, as
+the queue's own withdrawal does.
+
 ## Terminal product-event ownership
 
 The turn execution publisher owns the observer-facing terminal event. A stop

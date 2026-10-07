@@ -129,7 +129,7 @@ pub use lash_core_execution::triggers;
 
 pub mod facade_support {
     pub use crate::runtime::effect::scope_status;
-    pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};
+    pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
     /// The shift-tracing seam a durable substrate implements against (the trace runtime,
     /// a step's issue and its standing), public in every feature variant.
     pub use lash_core_execution::trace::{
@@ -320,6 +320,7 @@ pub mod facade_support {
     pub use crate::runtime::SessionScopeId;
     pub use crate::runtime::load_durable_observation_head;
 
+    pub use crate::runtime::QueueWithdrawalPublisher;
     pub use crate::runtime::SystemClock;
     pub use crate::runtime::TerminationPolicy;
     pub use crate::runtime::TurnActivitySink;

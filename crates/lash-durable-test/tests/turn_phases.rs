@@ -30,6 +30,12 @@
 //!   head while the turn runs, the head commit over the head the owner
 //!   cached is refused once, the cache is evicted, and the turn commits over
 //!   the moved head.
+//! - **Queued withdraw (FIG-5262):** a host's cancel of a second input,
+//!   queued behind the running turn, answers `Withdrawn`, and that input
+//!   never runs.
+//! - **Withdraw or cancel (FIG-5262):** a cancel sent at the admission cut
+//!   either withdraws the input, which never runs, or cancels the run that
+//!   took it: never both, never neither.
 
 // Test code.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -62,11 +68,11 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
-use lash_durable::domain::TurnWrite;
+use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnWrite};
 use lash_durable::runner::Activation;
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite, DurableError, DurableStore,
-    LeaseConfig,
+    LeaseConfig, MailTx,
 };
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
@@ -113,6 +119,18 @@ enum Mode {
     /// Another writer moves the session head while the second model call
     /// streams its first attempt.
     HeadMovesUnderTheTurn,
+    /// A second input waits behind the turn; the turn's first model call
+    /// has the host cancel it, then the turn runs as [`Mode::Plain`].
+    QueuedCancel,
+    /// A host cancels the turn's run as its admission is cut; the model
+    /// streams until a cancel stops it.
+    CancelAtAdmission,
+}
+
+const QUEUED_RUN: &str = "l3-queued-turn";
+
+fn queued_run() -> TurnId {
+    TurnId::try_from(QUEUED_RUN.to_owned()).unwrap()
 }
 
 /// The scripted protocol: an "again" answer closes the iteration and calls
@@ -198,6 +216,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
 /// One attempt the model saw.
 #[derive(Clone, Debug)]
 struct Call {
+    /// The run that called.
+    run: TurnId,
     /// Whether the transcript already held the first answer: which call of
     /// the turn this is.
     second: bool,
@@ -218,6 +238,12 @@ struct Seen {
     answered_after_request: usize,
     /// The head revisions another writer moved the head from and to.
     moved: Option<(u64, u64)>,
+    /// The input the host cancels, as the store accepted it.
+    queued: Option<lash_core::InputId>,
+    /// What the host's cancel of the queued input answered.
+    queued_cancel: Option<lash_core::facade_support::TurnCancelOutcome>,
+    /// What the cancel sent at the admission cut answered.
+    admission_cancel: Option<Result<TurnCancelAnswer, String>>,
 }
 
 #[derive(Clone)]
@@ -276,7 +302,9 @@ impl TurnServices for L3Services {
             Mode::Plain
             | Mode::CancelWhileStreaming
             | Mode::AfterStepWhileStreaming
-            | Mode::HeadMovesUnderTheTurn => ExecutionBudgets::default(),
+            | Mode::HeadMovesUnderTheTurn
+            | Mode::QueuedCancel
+            | Mode::CancelAtAdmission => ExecutionBudgets::default(),
         }
     }
 
@@ -415,6 +443,7 @@ impl TurnDrive for L3Drive {
             let mut seen = self.services.seen.lock_recover();
             let after_cancel = seen.cancel_requested;
             seen.calls.push(Call {
+                run: self.run.clone(),
                 second,
                 attempt,
                 request: rendered,
@@ -457,6 +486,29 @@ impl TurnDrive for L3Drive {
             // answering: an after-step request must not stop the call.
             tokio::time::sleep(Duration::from_millis(50)).await;
             self.services.seen.lock_recover().answered_after_request += 1;
+        }
+        match self.services.mode {
+            // The stream never ends on its own: only the cancel stops it.
+            Mode::CancelAtAdmission => return std::future::pending().await,
+            // While its turn runs, the host withdraws the queued input,
+            // once, as Figments withdraws a chat message the user took back.
+            Mode::QueuedCancel if self.run == run() => {
+                let unasked = self.services.seen.lock_recover().queued_cancel.is_none();
+                if unasked {
+                    let request = lash_core::facade_support::TurnCancelRequest::new(
+                        lash_core::facade_support::TurnAddress::new(session(), queued_run()),
+                        "l3-withdraw",
+                        None,
+                    );
+                    let receipt =
+                        lash_core::facade_support::TurnWorkDriver::new(self.services.backend())
+                            .request_cancel(request)
+                            .await
+                            .map_err(|error| TurnError::Exec(error.to_string()))?;
+                    self.services.seen.lock_recover().queued_cancel = Some(receipt.outcome);
+                }
+            }
+            _ => {}
         }
         let text = if second { "done" } else { AGAIN };
         self.machine.handle_response(Response::LlmComplete {
@@ -627,7 +679,19 @@ impl Scenario for L3 {
             .lock_recover()
             .clone()
             .expect("the database is built first");
-        seed::send_turn(&backend, &session(), &run(), "think twice").await?;
+        let input = seed::send_turn(&backend, &session(), &run(), "think twice").await?;
+        match self.mode {
+            Mode::QueuedCancel => {
+                let queued =
+                    seed::queue_turn(&backend, &session(), &queued_run(), "taken back").await?;
+                self.seen.lock_recover().queued = Some(queued);
+            }
+            Mode::CancelAtAdmission => self.seen.lock_recover().queued = Some(input),
+            _ => {}
+        }
+        if self.mode == Mode::CancelAtAdmission {
+            cancel_at_admission(Arc::clone(nodes), Arc::clone(&self.seen));
+        }
         nodes.start("a");
         nodes.quiesce().await;
         nodes.start("b");
@@ -757,6 +821,18 @@ impl Scenario for L3 {
                     ));
                 }
             }
+            Mode::QueuedCancel => {
+                // The running turn commits once; the queued input never runs.
+                let commits = committed(CommitLabel::TURN_COMMIT);
+                if commits != 1 {
+                    violations.push(format!("the turn committed {commits} times"));
+                }
+                violations.extend(queued_withdraw_laws(database.as_ref(), &seen).await);
+            }
+            Mode::CancelAtAdmission => {
+                violations
+                    .extend(withdraw_or_cancel_laws(database.as_ref(), &trace, &seen, cut).await);
+            }
         }
 
         if self.mode == Mode::HeadMovesUnderTheTurn {
@@ -770,6 +846,168 @@ impl Scenario for L3 {
         }
         violations
     }
+}
+
+/// Queued withdraw (FIG-5262): the host's cancel of the input queued behind
+/// the running turn answered `Withdrawn`, and the input never ran: no run
+/// took it, no model call was made for its run, and the session holds no
+/// open mail.
+async fn queued_withdraw_laws(database: &dyn DurableStore, seen: &Seen) -> Vec<String> {
+    let mut violations = Vec::new();
+    match &seen.queued_cancel {
+        Some(lash_core::facade_support::TurnCancelOutcome::Withdrawn { input })
+            if Some(input) == seen.queued.as_ref() => {}
+        other => violations.push(format!(
+            "queued withdraw: the cancel of queued input {:?} answered {other:?}",
+            seen.queued
+        )),
+    }
+    if seen.calls.iter().any(|call| call.run == queued_run()) {
+        violations.push(format!(
+            "queued withdraw: the withdrawn input's run called the model: {:?}",
+            seen.calls
+        ));
+    }
+    match database.turn_end(&session(), &queued_run()).await {
+        Ok(None) => {}
+        other => violations.push(format!(
+            "queued withdraw: the withdrawn input's run ended: {other:?}"
+        )),
+    }
+    match database.session_mailbox(&session()).await {
+        Ok(mailbox) if mailbox.inputs.is_empty() => {}
+        other => violations.push(format!(
+            "queued withdraw: the session still holds open input: {other:?}"
+        )),
+    }
+    violations
+}
+
+/// Send the host's cancel of the turn's run at the cut of its admission, or,
+/// uncut, once the admission left the store: from a producer outside every
+/// node, as Figments cancels an input it queued (FIG-5262).
+fn cancel_at_admission(nodes: Arc<SimNodes>, seen: Arc<Mutex<Seen>>) {
+    tokio::spawn(async move {
+        let script = nodes.script();
+        let admitted = async {
+            loop {
+                let trace = script.trace();
+                if trace.iter().any(|write| {
+                    write.point.label == CommitLabel::TURN_ADMIT && write.stored != Stored::Pending
+                }) {
+                    return;
+                }
+                let settled = trace
+                    .iter()
+                    .filter(|write| write.stored != Stored::Pending)
+                    .count();
+                script.settled(settled + 1).await;
+            }
+        };
+        tokio::select! {
+            _ = script.first_cut() => {}
+            () = admitted => {}
+        }
+        let mut tx = MailTx::new();
+        tx.write(MailDomainWrite::RequestTurnCancel(TurnCancelRequest {
+            session: session(),
+            run: run(),
+            request_id: "l3-at-admission".to_owned(),
+            origin: None,
+            reason: Some("the host took the input back".to_owned()),
+            undelivered: TurnCancelUndeliveredInputPolicy::Defer,
+            mode: TurnCancelMode::Immediate,
+        }));
+        let answer = match nodes
+            .producer("host")
+            .commit_mail(tx, CommitLabel::MAIL_SESSION)
+            .await
+        {
+            Ok(mut commit) => match commit.answers.pop() {
+                Some(MailAnswer::RequestTurnCancel(answer)) => Ok(answer),
+                other => Err(format!("the cancel was answered {other:?}")),
+            },
+            Err(error) => Err(error.to_string()),
+        };
+        seen.lock_recover().admission_cancel = Some(answer);
+    });
+}
+
+/// Withdraw or cancel (FIG-5262): the cancel sent at the admission cut did
+/// exactly one thing. Withdrawn, no admission of the input landed, its run
+/// never called the model and has no end; a cancelled run, the input's
+/// one admission landed and its run ended `Cancelled` with no head commit.
+/// A cut that holds the admission out of the store until a failover leaves
+/// the withdraw to win, and an uncut cancel, sent once the admission left
+/// the store, cancels the run.
+async fn withdraw_or_cancel_laws(
+    database: &dyn DurableStore,
+    trace: &[lash_durable_test::Write],
+    seen: &Seen,
+    cut: Option<&Cut>,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let committed = |label: CommitLabel| {
+        trace
+            .iter()
+            .filter(|write| write.point.label == label && write.committed())
+            .count()
+    };
+    let (admits, cancels, commits) = (
+        committed(CommitLabel::TURN_ADMIT),
+        committed(CommitLabel::TURN_CANCEL),
+        committed(CommitLabel::TURN_COMMIT),
+    );
+    let end = database.turn_end(&session(), &run()).await;
+    let ended_cancelled = matches!(
+        &end,
+        Ok(Some(end)) if matches!(end.cause, lash_core_store::store::RunTerminalCause::Cancelled { .. })
+    );
+    match &seen.admission_cancel {
+        Some(Ok(TurnCancelAnswer::Withdrawn { input })) => {
+            if Some(input) != seen.queued.as_ref() {
+                violations.push(format!(
+                    "withdraw: {input} was withdrawn, not the input {:?}",
+                    seen.queued
+                ));
+            }
+            if admits != 0 || cancels != 0 || commits != 0 || !seen.calls.is_empty() {
+                violations.push(format!(
+                    "both: the input was withdrawn, yet {admits} admissions, {cancels} cancel \
+                     terminals, {commits} head commits and {} model calls landed",
+                    seen.calls.len()
+                ));
+            }
+            if !matches!(end, Ok(None)) {
+                violations.push(format!("both: the withdrawn input's run ended: {end:?}"));
+            }
+        }
+        Some(Ok(TurnCancelAnswer::Requested)) => {
+            if admits != 1 || cancels != 1 || commits != 0 || !ended_cancelled {
+                violations.push(format!(
+                    "cancelled run: {admits} admissions, {cancels} cancel terminals and \
+                     {commits} head commits landed, and the run ended {end:?}"
+                ));
+            }
+        }
+        other => violations.push(format!(
+            "neither: the cancel at the admission cut answered {other:?}"
+        )),
+    }
+    let withdrawn = matches!(
+        seen.admission_cancel,
+        Some(Ok(TurnCancelAnswer::Withdrawn { .. }))
+    );
+    match cut.map(|cut| cut.fault) {
+        Some(Fault::Abort | Fault::Zombie) if !withdrawn => violations.push(format!(
+            "an admission held out of the store did not leave the withdraw to win: {:?}",
+            seen.admission_cancel
+        )),
+        None if withdrawn => violations
+            .push("a cancel sent after the admission left the store withdrew its input".to_owned()),
+        _ => {}
+    }
+    violations
 }
 
 /// The laws of one cut: a node killed after `model.start` committed.
@@ -805,7 +1043,9 @@ fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
         }
         Mode::CancelWhileStreaming
         | Mode::AfterStepWhileStreaming
-        | Mode::HeadMovesUnderTheTurn => {}
+        | Mode::HeadMovesUnderTheTurn
+        | Mode::QueuedCancel
+        | Mode::CancelAtAdmission => {}
     }
     violations
 }
@@ -1006,6 +1246,85 @@ async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_ne
 async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary_on_postgres()
  {
     prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::Postgres).await;
+}
+
+/// The labels the queued withdraw is cut at: the running turn's commit,
+/// after which the session's next drain finds the withdrawn input.
+const QUEUED: &[CommitLabel] = &[CommitLabel::TURN_COMMIT];
+
+/// Queued withdraw (FIG-5262): a host's cancel of an input queued behind
+/// the running turn answers `Withdrawn`, and the input never runs, at every
+/// cut of the running turn's commit.
+#[tokio::test]
+async fn a_cancelled_queued_input_is_withdrawn_and_never_runs() {
+    prove_on(
+        matrix().labels(QUEUED),
+        Mode::QueuedCancel,
+        QUEUED,
+        Dialect::SqliteMemory,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_cancelled_queued_input_is_withdrawn_and_never_runs_on_sqlite_file() {
+    prove_on(
+        matrix().labels(QUEUED),
+        Mode::QueuedCancel,
+        QUEUED,
+        Dialect::SqliteFile,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_cancelled_queued_input_is_withdrawn_and_never_runs_on_postgres() {
+    prove_on(
+        matrix().labels(QUEUED),
+        Mode::QueuedCancel,
+        QUEUED,
+        Dialect::Postgres,
+    )
+    .await;
+}
+
+/// The admission is the cut the withdraw races.
+const ADMISSION: &[CommitLabel] = &[CommitLabel::TURN_ADMIT];
+
+/// Withdraw or cancel (FIG-5262): a cancel sent at every cut of the input's
+/// admission withdraws the input or cancels the run that took it, exactly
+/// one of the two.
+#[tokio::test]
+async fn a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once() {
+    prove_on(
+        matrix().labels(ADMISSION),
+        Mode::CancelAtAdmission,
+        ADMISSION,
+        Dialect::SqliteMemory,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_sqlite_file() {
+    prove_on(
+        matrix().labels(ADMISSION),
+        Mode::CancelAtAdmission,
+        ADMISSION,
+        Dialect::SqliteFile,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_postgres() {
+    prove_on(
+        matrix().labels(ADMISSION),
+        Mode::CancelAtAdmission,
+        ADMISSION,
+        Dialect::Postgres,
+    )
+    .await;
 }
 
 /// C1 (FIG-5230): a session whose unfinished turn names a checkpoint no

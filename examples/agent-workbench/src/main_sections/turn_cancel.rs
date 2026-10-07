@@ -75,6 +75,12 @@ pub(crate) enum TurnCancelReceipt {
     UnknownOrRevoked {
         address: lash::TurnAddress,
     },
+    /// No run had opened the turn: its queued input was withdrawn and never
+    /// runs.
+    Withdrawn {
+        address: lash::TurnAddress,
+        input: lash::InputId,
+    },
     PolicyConflict {
         address: lash::TurnAddress,
         requested: lash::TurnCancelUndeliveredInputPolicy,
@@ -94,20 +100,24 @@ impl TurnCancelReceipt {
             | Self::CancellationRecordedTerminalPending { address, .. }
             | Self::CompletionWonRace { address }
             | Self::UnknownOrRevoked { address }
+            | Self::Withdrawn { address, .. }
             | Self::PolicyConflict { address, .. } => address,
         }
     }
 
     /// Whether a cancellation is in force for this turn.
     ///
-    /// A completion that won the race and an address the driver does not know
-    /// both leave nothing cancelled, so neither may cancel the turn's children.
+    /// A completion that won the race, an address the driver does not know
+    /// and a withdrawn input that never ran all leave nothing cancelled, so
+    /// none may cancel the turn's children.
     pub(crate) fn cancellation_is_in_force(&self) -> bool {
         match self {
             Self::TerminalAttached { .. }
             | Self::CancellationRecordedTerminalPending { .. }
             | Self::PolicyConflict { .. } => true,
-            Self::CompletionWonRace { .. } | Self::UnknownOrRevoked { .. } => false,
+            Self::CompletionWonRace { .. }
+            | Self::UnknownOrRevoked { .. }
+            | Self::Withdrawn { .. } => false,
         }
     }
 }

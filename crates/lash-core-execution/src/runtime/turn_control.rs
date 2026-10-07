@@ -4,9 +4,12 @@
 //! A cancel is session mail: one mailbox transaction records the turn's
 //! cancel request (the first policy wins, a stronger mode escalates it) and
 //! control-wakes the session, whose owner honours it at its next fenced read
-//! and ends the turn `Cancelled`. A turn's terminal is its run row's: the
-//! terminal, its typed cause and the head revision its commit published.
+//! and ends the turn `Cancelled`. A cancel of a turn no run opened yet, whose
+//! input is still queued, withdraws that input in the same transaction
+//! instead (FIG-5262). A turn's terminal is its run row's: the terminal, its
+//! typed cause and the head revision its commit published.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use lash_durable::domain::{
@@ -21,6 +24,7 @@ pub use lash_sansio::{TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCanc
 
 use super::RuntimeError;
 use crate::{Backend, TurnOutcome, TurnStop};
+use lash_sansio::{InputId, SessionId};
 
 /// What a cancel request did.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,9 +44,16 @@ pub enum TurnCancelOutcome {
         requested: TurnCancelUndeliveredInputPolicy,
         accepted: TurnCancellationEvidence,
     },
+    /// No run had opened the turn yet: its input was still queued, and the
+    /// request withdrew it. The input never runs. Distinct from a cancelled
+    /// run: nothing of the input was applied or interrupted.
+    Withdrawn {
+        /// The withdrawn input.
+        input: InputId,
+    },
     /// The turn already ended: nothing was written.
     CompletionWonRace,
-    /// The session holds no such turn: nothing was written.
+    /// The session holds no such turn, open or queued: nothing was written.
     UnknownOrRevoked,
 }
 
@@ -100,6 +111,15 @@ pub fn turn_stop_cause(stop: &TurnStop) -> Result<String, RuntimeError> {
 /// turn's row: from the first interval, doubling to the last.
 const TERMINAL_POLL: (Duration, Duration) = (Duration::from_millis(20), Duration::from_secs(1));
 
+/// Where a [`TurnWorkDriver`] publishes the queue change its withdrawal made:
+/// best-effort, after the withdrawal committed, so a publication that fails
+/// never fails the cancel.
+#[async_trait::async_trait]
+pub trait QueueWithdrawalPublisher: Send + Sync {
+    /// Publish that `input` left `session`'s queue, withdrawn.
+    async fn publish_withdrawn(&self, session: &SessionId, input: &InputId);
+}
+
 /// Exact-turn control over the durable backend.
 ///
 /// `Requested` means the request was recorded on the turn's row and the
@@ -107,11 +127,19 @@ const TERMINAL_POLL: (Duration, Duration) = (Duration::from_millis(20), Duration
 /// turn `Cancelled` without starting new work. Lash cannot guarantee that
 /// detached tasks or non-cooperative providers have stopped.
 ///
+/// A turn no run opened yet is addressed by the run its queued input will
+/// open: the run its source key names, or else its input id. Cancelling it
+/// withdraws the input instead and answers
+/// [`Withdrawn`](TurnCancelOutcome::Withdrawn). One mailbox transaction does
+/// exactly one of the two: when the session's admission bound the input
+/// first, the request cancels the run that took it.
+///
 /// Session and turn ids are routing identity, not authorization. Hosts must
 /// enforce authorization before exposing this driver across a trust boundary.
 #[derive(Clone)]
 pub struct TurnWorkDriver {
     backend: Backend,
+    withdrawals: Option<Arc<dyn QueueWithdrawalPublisher>>,
 }
 
 impl std::fmt::Debug for TurnWorkDriver {
@@ -124,7 +152,18 @@ impl TurnWorkDriver {
     /// Turn control over `backend`.
     #[must_use]
     pub fn new(backend: Backend) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            withdrawals: None,
+        }
+    }
+
+    /// This driver, publishing each withdrawal's queue change to
+    /// `publisher` once it committed.
+    #[must_use]
+    pub fn publishing_withdrawals(mut self, publisher: Arc<dyn QueueWithdrawalPublisher>) -> Self {
+        self.withdrawals = Some(publisher);
+        self
     }
 
     /// The turn a cancel of the run `run` addresses: on the durable path a
@@ -138,7 +177,8 @@ impl TurnWorkDriver {
         Ok(run.clone())
     }
 
-    /// Request a cancel of `request`'s turn.
+    /// Request a cancel of `request`'s turn, or withdraw its input while no
+    /// run has opened it.
     ///
     /// # Errors
     ///
@@ -183,6 +223,14 @@ impl TurnWorkDriver {
                     requested: request.undelivered,
                     accepted: accepted(&existing),
                 }
+            }
+            TurnCancelAnswer::Withdrawn { input } => {
+                if let Some(publisher) = &self.withdrawals {
+                    publisher
+                        .publish_withdrawn(&request.address.session_id, &input)
+                        .await;
+                }
+                TurnCancelOutcome::Withdrawn { input }
             }
             TurnCancelAnswer::AlreadyEnded => {
                 let ended = self

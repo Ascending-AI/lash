@@ -348,6 +348,52 @@ impl DurableSessionOps {
     }
 }
 
+/// The queue publication of a turn cancel that withdrew a queued input
+/// (FIG-5262): one `QueueChanged { Cancelled }` event naming the input,
+/// stamped and published as the queue's own withdrawal publishes it, so an
+/// observer of the session's queue sees the input leave it.
+pub struct QueueWithdrawalObservation {
+    catalog: Arc<dyn crate::store::RuntimeStore>,
+    live_replay_store: Arc<dyn LiveReplayStore>,
+}
+
+impl QueueWithdrawalObservation {
+    /// Publish through `live_replay_store`, stamping each event with the
+    /// session head `catalog` holds.
+    pub fn new(
+        catalog: Arc<dyn crate::store::RuntimeStore>,
+        live_replay_store: Arc<dyn LiveReplayStore>,
+    ) -> Self {
+        Self {
+            catalog,
+            live_replay_store,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl super::QueueWithdrawalPublisher for QueueWithdrawalObservation {
+    async fn publish_withdrawn(&self, session: &SessionId, input: &crate::InputId) {
+        let ops = DurableSessionOps::new(session.clone(), Arc::clone(&self.live_replay_store));
+        match crate::store::SessionStore::new(Arc::clone(&self.catalog), session.clone()) {
+            Ok(store) => {
+                ops.publish_queue_changed(
+                    &store,
+                    SessionQueueEventKind::Cancelled,
+                    vec![input.to_string()],
+                    None,
+                )
+                .await;
+            }
+            Err(error) => tracing::warn!(
+                session_id = %session,
+                %error,
+                "a withdrawn input's session has no store view; its queue event is not published",
+            ),
+        }
+    }
+}
+
 pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     session_id: SessionId,
     store: crate::store::SessionStore,
