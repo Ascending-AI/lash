@@ -14,6 +14,10 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
+#[path = "pool_laws/native_oom.rs"]
+mod native_oom;
+
 /// Counts the bytes each thread allocates, for the laws that bound what the
 /// parent copies (FIG-4433).
 struct CountingAllocator;

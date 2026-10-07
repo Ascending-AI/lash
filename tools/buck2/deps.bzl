@@ -934,6 +934,9 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "async_trait": "//third-party/rust:p0015",
+            "lash_durable": "//crates/lash-durable:lash-durable",
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "lashlang": "//crates/lashlang:lashlang",

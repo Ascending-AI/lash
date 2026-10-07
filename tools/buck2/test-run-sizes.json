@@ -1183,7 +1183,7 @@
     "peak_bytes": 93216768,
     "samples": 232
   },
-  "//crates/lash-vm-worker:pool_laws__test__fv_a94bb659": {
+  "//crates/lash-vm-worker:pool_laws__test__fv_56d24aae": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.06,

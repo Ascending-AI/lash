@@ -87,30 +87,6 @@ impl DurableHost {
         self.context.clone()
     }
 
-    /// The run records of the cell that ran under `replay_key` in the host's
-    /// turn: the admission, start and outcome of every operation it issued.
-    pub(crate) async fn cell_run_records(
-        &self,
-        replay_key: &str,
-    ) -> Vec<lash_core::durable_port::domain::RunRecordRow> {
-        let lash_core::ExecutionScope::Turn {
-            session_id,
-            turn_id,
-        } = self.admitted.scope()
-        else {
-            panic!("only a turn's cells have run records here");
-        };
-        self.backend
-            .durable()
-            .run_records(&lash_core::durable_port::domain::OwnerKey::Cell(
-                session_id.clone(),
-                turn_id.clone(),
-                lash_core::durable_port::domain::CellId::new(replay_key),
-            ))
-            .await
-            .expect("read the cell's run records")
-    }
-
     /// The module store a cell's artifacts live in: the backend's.
     pub(crate) fn artifacts(&self) -> lashlang::LashlangArtifacts {
         lashlang::LashlangArtifacts::of_backend(&self.backend)

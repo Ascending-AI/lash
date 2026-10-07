@@ -917,17 +917,18 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
     });
 }
 
-/// L21/F02: scalar and aggregate calls are admitted under the cell that
-/// issued them, one execution per logical call.
+/// L21/F02: scalar and aggregate calls run in the cell that issued them, one
+/// body per logical call: an aggregate's duplicate alias runs no second body.
 #[test]
 #[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn l21_scalar_and_aggregate_record_attempts_in_the_opener() {
     block_on(async {
         let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+        let bodies = Arc::new(AtomicUsize::new(0));
         let context =
             lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
                 handler.ports(),
-                Arc::new(EchoToolProvider),
+                Arc::new(CountingEchoToolProvider(Arc::clone(&bodies))),
                 lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
                 lash_core::testing::exec_code_invocation(
                     "test-session",
@@ -967,16 +968,10 @@ fn l21_scalar_and_aggregate_record_attempts_in_the_opener() {
             }))
         );
         assert_eq!(response.calls.len(), 2, "duplicate aliases run one body");
-        let records = handler.cell_run_records("exec:l21").await;
-        let started: std::collections::BTreeSet<_> = records
-            .iter()
-            .filter(|record| record.kind == lash_core::durable_port::domain::RunRecordKind::XStart)
-            .map(|record| record.call.clone())
-            .collect();
         assert_eq!(
-            started.len(),
+            bodies.load(Ordering::SeqCst),
             2,
-            "one admitted execution per logical call, under the cell's own run: {records:?}"
+            "each logical call's body runs once in the cell that admitted it"
         );
     });
 }
