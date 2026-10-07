@@ -26,6 +26,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use lash_core::llm::types::{LlmContentBlock, LlmRequest, LlmRole};
+use lash_core::prompt_sections::PromptPlacement;
 use lash_core::sync::MutexExt as _;
 use lash_core_store::store::RunTerminalKind;
 use lash_durable::CommitLabel;
@@ -74,6 +76,32 @@ fn expected(call: u32) -> String {
     }
 }
 
+/// Read the received request at the section's recorded placement (ADR 0133).
+/// Current context must be in the trailing User message, not elsewhere in
+/// the instructions or conversation.
+fn prompt_at(request: &LlmRequest, placement: PromptPlacement) -> Option<String> {
+    match placement {
+        PromptPlacement::InitialInstructions => request.instructions.as_deref().map(str::to_owned),
+        PromptPlacement::CurrentContext => {
+            let tail = request.messages.last()?;
+            if tail.role != LlmRole::User {
+                return None;
+            }
+            Some(
+                tail.blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        }
+        PromptPlacement::Excluded => None,
+    }
+}
+
 /// The call a `model.start` cut admits: a turn's first call starts at
 /// `model.start`, and each later one with its round's presentation.
 fn cut_call(cut: &Cut) -> Option<u32> {
@@ -116,12 +144,12 @@ impl Workload for PromptCase {
         let rendered_prefix = format!("{RENDERED} {session} call=");
         // T-NEXT, NO-SPECULATION, decisions at admission and identity: every
         // attempt of call k carries call k's one prompt.
-        let mut sent = [0_usize; CALLS as usize];
+        let mut sent: [Vec<LlmRequest>; CALLS as usize] = std::array::from_fn(|_| Vec::new());
         for note in &notes {
             let Some(rest) = note.strip_prefix(&sent_prefix) else {
                 continue;
             };
-            let Some((head, prompt)) = rest.split_once(" :: ") else {
+            let Some((head, request_json)) = rest.split_once(" :: ") else {
                 violations.push(format!("prompt: unreadable note {note}"));
                 continue;
             };
@@ -134,16 +162,16 @@ impl Workload for PromptCase {
                 violations.push(format!("prompt: the model saw a call {call}: {note}"));
                 continue;
             }
-            sent[call as usize - 1] += 1;
-            if !prompt.contains(&expected(call)) {
-                violations.push(format!(
-                    "prompt T: call {call} was sent {prompt:?}, not {:?}",
-                    expected(call)
-                ));
+            match serde_json::from_str(request_json) {
+                Ok(request) => sent[call as usize - 1].push(request),
+                Err(error) => violations.push(format!(
+                    "prompt: call {call} has an unreadable received request: {error}"
+                )),
             }
         }
-        if sent.contains(&0) {
-            violations.push(format!("prompt: the model saw calls {sent:?} times"));
+        let counts = sent.each_ref().map(Vec::len);
+        if counts.contains(&0) {
+            violations.push(format!("prompt: the model saw calls {counts:?} times"));
         }
         // Composition: once per call, and again only for a call cut before
         // its admission landed.
@@ -211,20 +239,33 @@ impl Workload for PromptCase {
                 .iter()
                 .map(|wrap| loaded.text(&wrap.output).unwrap_or_default())
                 .collect::<Vec<_>>();
-            let received = notes.iter().find_map(|note| {
-                note.strip_prefix(&sent_prefix)?
-                    .split_once(" :: ")
-                    .filter(|(head, _)| head.split_whitespace().next() == Some(&call.to_string()))
-                    .map(|(_, prompt)| prompt.to_owned())
-            });
-            if wrapped != [value]
-                || value != format!("{base} (framed)")
-                || !received.is_some_and(|received| received.contains(value))
-            {
+            if wrapped != [value] || value != format!("{base} (framed)") {
                 violations.push(format!(
                     "prompt snapshot: call {call} recorded base {base:?}, wraps {wrapped:?} and \
-                     value {value:?}, which the model did not receive"
+                     value {value:?}, not the frame's wrapping"
                 ));
+            }
+            // T-NEXT, NO-SPECULATION, decisions at admission, identity and
+            // snapshot: inspect every attempt at its committed placement.
+            for request in &sent[call as usize - 1] {
+                let received = prompt_at(request, section.placement);
+                if !received
+                    .as_ref()
+                    .is_some_and(|text| text.contains(&expected(call)))
+                {
+                    violations.push(format!(
+                        "prompt T: call {call} was sent {received:?} at {:?}, not {:?}",
+                        section.placement,
+                        expected(call)
+                    ));
+                }
+                if !received.as_ref().is_some_and(|text| text.contains(value)) {
+                    violations.push(format!(
+                        "prompt snapshot: call {call} recorded value {value:?} at {:?}, \
+                         which the model did not receive",
+                        section.placement
+                    ));
+                }
             }
         }
         // The turn commits the T it set and every checkpoint decision; the

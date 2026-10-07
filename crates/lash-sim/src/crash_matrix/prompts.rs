@@ -20,7 +20,7 @@ use std::sync::{Arc, Weak};
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::facade_support::ProviderHandle;
-use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole};
+use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core::plugin::prompt::{
     PromptInput, PromptRenderError, PromptSectionSpec, PromptWrapSpec, PromptWrapTarget,
     SectionText,
@@ -49,7 +49,7 @@ pub const NEXT_T: &str = "two";
 /// What a render notes: `{RENDERED} {session} call={call}`.
 pub const RENDERED: &str = "prompt.render";
 /// What a model request notes: `{SENT} {session} call={call}
-/// attempt={attempt} :: {prompt}`.
+/// attempt={attempt} :: {request_json}`.
 pub const SENT: &str = "prompt.sent";
 
 /// The memo section, as the session's calls render it.
@@ -140,30 +140,12 @@ fn call_of(request: &LlmRequest) -> usize {
         .count()
 }
 
-/// Everything `request` instructs: its instructions and every system
-/// message after the conversation, where current-context sections go.
-fn prompt_of(request: &LlmRequest) -> String {
-    let mut prompt = request
-        .instructions
-        .as_deref()
-        .unwrap_or_default()
-        .to_owned();
-    for message in &request.messages {
-        if message.role != LlmRole::System {
-            continue;
-        }
-        for block in message.blocks.iter() {
-            if let LlmContentBlock::Text { text, .. } = block {
-                prompt.push('\n');
-                prompt.push_str(text);
-            }
-        }
-    }
-    prompt
-}
-
 /// The scripted model: `set_t` on the first call, `speculate` on the
 /// second, [`FINAL`] after. It notes every request it receives.
+#[expect(
+    clippy::expect_used,
+    reason = "the simulator's model requests must serialize for its oracle"
+)]
 fn model(world: Weak<World>) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("lash-sim-prompt")
@@ -176,7 +158,7 @@ fn model(world: Weak<World>) -> ProviderHandle {
                         "{SENT} {} call={call} attempt={} :: {}",
                         request.scope.session_id,
                         request.scope.attempt.unwrap_or(0),
-                        prompt_of(&request)
+                        serde_json::to_string(&request).expect("record the received request")
                     ));
                 }
                 let part = |tool: &str| LlmOutputPart::ToolCall {
