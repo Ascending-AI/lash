@@ -5,10 +5,7 @@
 //! when that run ends (completed, or cancelled with it); or it is cancelled
 //! unexecuted. At the end of a history no input is still open, no completed
 //! input lacks its one run, and no input is settled while the run bound to
-//! it still runs. An input left open because its delivery stalled with a
-//! typed reason (its ingress obligation is `stalled`: an operator's to act
-//! on, ADR 0109 §1.5) is surfaced, not lost; the settled-or-stalled checker
-//! judges that stall. A queued-work batch a run admitted is
+//! it still runs. A queued-work batch a run admitted is
 //! settled with it, so none is left behind an ended run or unadmitted.
 
 use std::collections::BTreeMap;
@@ -67,11 +64,6 @@ impl HistoryChecker for InputSettlement {
                                 "cancelled, and bound to run {run}, which has no row"
                             )),
                         })
-                    }
-                    ("pending_turn_inputs", _)
-                        if input.obligation_state.as_deref() == Some("stalled") =>
-                    {
-                        None
                     }
                     ("pending_turn_inputs", state) => Some(format!(
                         "left {} at the end of the history",

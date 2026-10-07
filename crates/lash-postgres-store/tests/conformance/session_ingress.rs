@@ -21,19 +21,19 @@ lash_conformance::session_ingress_tests!({
     let admission_snapshot: lash_conformance::IngressAdmissionProbe = Arc::new(move || {
         let pool = pool.clone();
         Box::pin(async move {
-            let (inputs, batches, run_specs, obligations, sequence): (i64, i64, i64, i64, i64) = sqlx::query_as(
+            let (inputs, batches, run_specs, sequence): (i64, i64, i64, i64) = sqlx::query_as(
                 "SELECT (SELECT count(*) FROM lash_pending_turn_inputs),
                         (SELECT count(*) FROM lash_queued_work_batches),
                         (SELECT count(*) FROM lash_session_run_specs),
-                        (SELECT count(*) FROM lash_pending_turn_inputs WHERE obligation_id IS NOT NULL)
-                          + (SELECT count(*) FROM lash_queued_work_batches WHERE obligation_id IS NOT NULL),
                         (SELECT coalesce(max(enqueue_seq), 0) FROM lash_session_ingress_sequence)",
-            ).fetch_one(&pool).await.expect("observe ingress allocations");
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("observe ingress allocations");
             lash_conformance::IngressAdmissionSnapshot {
                 inputs,
                 batches,
                 run_specs,
-                obligations,
                 sequence,
             }
         })

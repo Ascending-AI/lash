@@ -20,8 +20,6 @@ mod fleet_format;
 mod orphaned_tombstone_reclaim;
 #[path = "parent_end_payload.rs"]
 mod parent_end_payload;
-#[path = "parent_end_registration_race.rs"]
-mod parent_end_registration_race;
 #[path = "postgres_clock_contract.rs"]
 mod postgres_clock_contract;
 #[path = "pre_submission_digest_cutover.rs"]

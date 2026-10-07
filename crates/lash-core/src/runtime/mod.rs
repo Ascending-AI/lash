@@ -57,7 +57,6 @@ pub mod durable;
 mod durable_queue;
 mod lifecycle;
 pub mod obligations;
-pub mod process_terminal;
 pub mod recovery_lease;
 mod turn_config;
 use turn_settlement::TurnIngressSettlement;
@@ -309,12 +308,11 @@ pub use process::{
     ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessSignature, ProcessSpawnProvenance,
     ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartPlan,
     ProcessStartReceipt, ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminal,
-    ProcessTerminalPublication, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone,
-    ProcessToolIntents, ProcessToolVisibilityFilter, ProcessTransition, ProcessTransitionPlan,
-    ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
-    ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot, ProjectionWatermark,
-    RegistryScopeClose, ResolvedProcessDefinition, RetiredProcessStatus,
+    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminal, ProcessTerminalSemantics,
+    ProcessTerminalSpec, ProcessTombstone, ProcessToolIntents, ProcessToolVisibilityFilter,
+    ProcessTransition, ProcessTransitionPlan, ProcessValueSelector, ProcessWake,
+    ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeSpec, ProcessWorkObserver,
+    ProcessWorkSnapshot, ProjectionWatermark, ResolvedProcessDefinition, RetiredProcessStatus,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
     StepName, StepRequest, StoreRealization, TerminalProcessStatus, UnavailableProcessService,
@@ -335,7 +333,7 @@ pub use process::{
 pub use process::{
     ConformanceProcessRegistry, EffectSummaryAppendFaults, PROCESS_REFUSAL_FIXTURE_START_KEY,
     ProcessEventLogTestSupport, ProcessRegistryTestSupport, TestProcessRegistryWriteExt,
-    accepted_process_registration, fail_parent_end_once, refused_process_registrations,
+    accepted_process_registration, refused_process_registrations,
 };
 pub use process::{ConsumerHold, SessionTurnOutcome};
 pub use process::{DeclaredStartPhase, StartCancelDecision};

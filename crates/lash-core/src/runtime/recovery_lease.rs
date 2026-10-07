@@ -8,7 +8,7 @@
 //!
 //! [`RecoveryLease::step`] makes one acquire-or-renew attempt against the
 //! store; the host repeats it on [`RecoveryLease::next_delay`]'s cadence. The
-//! reconcile tick asks [`RecoveryLease::duties`] before each arm: a leader
+//! artifact-cleanup pass asks [`RecoveryLease::duties`] before it claims: a leader
 //! whose last renew is older than its trust window acts as a follower until
 //! it renews again, so it stops leading before its row can expire.
 

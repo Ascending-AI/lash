@@ -919,14 +919,6 @@
     "peak_bytes": 922075136,
     "samples": 46
   },
-  "lash-sim/parent_end_detection_bounds": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 104218624,
-    "peak_bytes": 104267776,
-    "samples": 110
-  },
   "lash-sim/signal_replay_key_constructor": {
     "cpu_count": 1,
     "memory_kb": 524288,

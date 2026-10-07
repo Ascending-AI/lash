@@ -51,7 +51,6 @@ pub use registration::{
     process_registry_fresh_instances, registration_and_observers_are_atomic,
 };
 pub mod status_filters;
-mod terminal_publication;
 mod turn_parent_end;
 
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
@@ -698,13 +697,6 @@ pub async fn terminal_completion_atomically_retains_parent_end_plan(
     parent_end::terminal_completion_atomically_retains_parent_end_plan(registry).await;
 }
 
-/// Every transaction that makes a process terminal arms its `ProcessTerminal`
-/// obligation once (ADR 0109 §3), whichever completion wrote it, and the
-/// engine that published the terminal settles it delivered, once.
-pub async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn ProcessRegistry>) {
-    terminal_publication::a_terminal_write_arms_its_publication_once(registry).await;
-}
-
 /// ADR 0027: each workflow authority commits on a process lash executes, and
 /// the committed terminal event records it as audit evidence.
 pub async fn a_completion_authority_commits_and_records_its_evidence(
@@ -714,7 +706,7 @@ pub async fn a_completion_authority_commits_and_records_its_evidence(
 }
 
 /// A turn scope has no terminal row to ride, so its ledger row is recorded
-/// on its own: the write, its fence, its scoping and its settlement.
+/// on its own: the write, its fence and its scoping.
 pub async fn a_turn_scope_ends_through_its_recorded_ledger_row(registry: Arc<dyn ProcessRegistry>) {
     turn_parent_end::a_turn_scope_ends_through_its_recorded_ledger_row(registry).await;
 }
@@ -726,7 +718,7 @@ pub async fn an_abandoned_consumer_hold_fences_registration(registry: Arc<dyn Pr
 }
 
 /// Two scopes whose components render to one stored id under the retired
-/// delimiter codec must share no ledger key, children page or fence.
+/// delimiter codec must share no ledger key or fence.
 pub async fn scopes_that_collide_in_rendering_share_no_ledger_key(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -734,38 +726,26 @@ pub async fn scopes_that_collide_in_rendering_share_no_ledger_key(
 }
 
 /// A turn scope that never became a run is closed by its session's close:
-/// the session's row refuses every later start inside the session, and its
-/// plan cancels the live children of every scope inside it with no row of its
-/// own (FIG-3948).
-pub async fn a_session_close_reaps_the_turn_scopes_that_never_became_runs(
+/// the session's row refuses every later start inside the session
+/// (FIG-3948).
+pub async fn a_session_close_fences_the_turn_scopes_that_never_became_runs(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    turn_parent_end::a_session_close_reaps_the_turn_scopes_that_never_became_runs(registry).await;
+    turn_parent_end::a_session_close_fences_the_turn_scopes_that_never_became_runs(registry).await;
 }
 
-/// A turn that committed without its ledger row is a recovery candidate until
-/// the row exists, and no other shape of row ever is.
-pub async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_written(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    turn_parent_end::an_unrecorded_turn_parent_is_reported_until_its_row_is_written(registry).await;
-}
-
-/// A session's `Session` scope closes only through its close row, which its
-/// `CloseSession` intent writes, never through the deletion of its process
-/// state; the row owes its cancels and refuses later starts naming it
-/// (FIG-3607 R10, R11).
+/// A session's `Session` scope closes only through its close row, never
+/// through the deletion of its process state; the row refuses later starts
+/// naming it (FIG-3607 R10, R11).
 pub async fn a_session_scope_closes_only_through_its_close_row(registry: Arc<dyn ProcessRegistry>) {
     parent_end::a_session_scope_closes_only_through_its_close_row(registry).await;
 }
 
-/// Retention reclaims a settled parent-end ledger row once no live child
+/// Retention reclaims a parent-end ledger row once no live child
 /// names its scope, so the ledger does not grow by one row per ended scope
 /// forever.
-pub async fn settled_parent_end_plans_are_reclaimed_by_retention(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    parent_end::settled_parent_end_plans_are_reclaimed_by_retention(registry).await;
+pub async fn parent_end_plans_are_reclaimed_by_retention(registry: Arc<dyn ProcessRegistry>) {
+    parent_end::parent_end_plans_are_reclaimed_by_retention(registry).await;
 }
 
 /// Prove bounded keyset pagination and its page-boundary completion contract.
@@ -2091,17 +2071,6 @@ impl crate::ProcessWorkSubstrate for ReattachingWorkPort {
     ) -> Result<(), PluginError> {
         Err(PluginError::Invoke(
             "unexpected cancel delivery".to_string(),
-        ))
-    }
-
-    async fn publish_process_terminal(
-        &self,
-        _: &ProcessId,
-        _: &ProcessAwaitOutput,
-        _: &str,
-    ) -> Result<(), PluginError> {
-        Err(PluginError::Invoke(
-            "unexpected terminal publication".to_string(),
         ))
     }
 }

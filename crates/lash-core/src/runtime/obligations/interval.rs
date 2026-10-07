@@ -6,9 +6,8 @@
 //! pass before it spent, so a pass that returns within the period never
 //! moves the next one. A pass that overran its period fires the next at
 //! once and the grid moves on from there: consecutive passes start at most
-//! `max(period, previous pass)` apart. A pass itself is bounded by its
-//! tick's wait on the obligation lanes ([`RelayLanes`](super::RelayLanes))
-//! and its leader arms, never by an obligation delivery.
+//! `max(period, previous pass)` apart. A pass claims at most one page, and
+//! each delivery in it runs under the relay policy's attempt budget.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

@@ -85,16 +85,6 @@ crate::statements! {
     /// 0113 §2.5). Both backends issue them verbatim; every settling write
     /// compares the state and, while claimed, the claim token.
     pub struct CleanupObligationLedgerStatements @ "artifact_cleanup" {
-        /// Arm the row keyed `?1`, `?2` as obligation `?3`, due at `?4`, if
-        /// it owes nothing. A row of this table always owes, so this arms
-        /// nothing; it keeps the shared ledger's shape.
-        obligation_arm = "UPDATE artifact_cleanup_obligations
-             SET obligation_id = ?3, obligation_state = 'due', obligation_attempts = 0,
-                 obligation_due_at_ms = ?4, obligation_claim_token = NULL,
-                 obligation_stall_reason = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
-                 obligation_settled_at_ms = NULL
-             WHERE referrer_kind = ?1 AND referrer_id = ?2 AND obligation_state IS NULL";
-
         /// At most `?2` obligations due at `?1`, a lapsed claim included,
         /// oldest due first.
         obligation_select_due = "SELECT obligation_id FROM artifact_cleanup_obligations
@@ -182,7 +172,6 @@ impl crate::obligation::ObligationStatementSet for CleanupObligationLedgerStatem
     fn obligation_sql(&self) -> crate::obligation::ObligationSql<'_> {
         crate::obligation::ObligationSql {
             key_columns: 2,
-            arm: &self.obligation_arm,
             select_due: &self.obligation_select_due,
             claim_due_row: &self.obligation_claim_due_row,
             claim: &self.obligation_claim,

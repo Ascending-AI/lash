@@ -68,13 +68,6 @@ pub async fn later_segment_recovery_refuses_without_terminal_mutation(
             .expect("serialize events"),
             events
         );
-        assert!(
-            registry
-                .terminal_publication(&id)
-                .await
-                .expect("publication")
-                .is_none()
-        );
     }
     registry
         .complete_process(
@@ -301,13 +294,6 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
             )
             .expect("serialize events"),
             events
-        );
-        assert!(
-            registry
-                .terminal_publication(&id)
-                .await
-                .expect("publication")
-                .is_none()
         );
         registry
             .clear_process_wait_with_authority(&id, Vec::new(), &current)

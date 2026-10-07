@@ -26,13 +26,8 @@ lash_store_sql::statements! {
              WHERE session_id = ?1 AND batch_id = ?2 AND terminal_cause IS NULL
              LIMIT 1 FOR UPDATE";
 
-        /// Batch `?2` of session `?1`, if it is open and not yet read by the
-        /// command lane, locked for the caller's transaction.
-        ///
-        /// The command lane takes no binding: a shift that reads a command
-        /// run delivers each row's obligation in its fenced read, and that
-        /// read is the command's admission (FIG-4202). A delivered open
-        /// command is being applied, so a withdrawal no longer reaches it.
+        /// Batch `?2` of session `?1`, if it is open and no run admitted it,
+        /// locked for the caller's transaction.
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
                     admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
@@ -40,8 +35,6 @@ lash_store_sql::statements! {
              WHERE session_id = ?1
                AND batch_id = ?2
                AND admitted_run IS NULL AND terminal_cause IS NULL
-               AND NOT (work_kind = 'control'
-                   AND obligation_state IS NOT DISTINCT FROM 'delivered')
              FOR UPDATE";
 
         /// Session `?1`'s admission candidates with no turn in progress, up to

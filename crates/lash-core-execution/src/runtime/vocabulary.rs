@@ -461,10 +461,10 @@ pub trait DeploymentStore:
 
     /// End an open run `SubstrateLost` on the engine's evidence `loss` that
     /// its execution is gone ([`RunLoss`](crate::engine::RunLoss)).
-    /// The write settles the run's ingress and arms scope close
-    /// atomically. An already terminal or deleted run is a no-op, and so is
-    /// a run with no execution on the engine that never recorded its admission:
-    /// it started nothing, and its ingress obligation still executes it.
+    /// The write makes the run and its inputs terminal atomically. An
+    /// already terminal or deleted run is a no-op, and so is a run with no
+    /// execution on the engine that never recorded its admission: it started
+    /// nothing, and its session admits its input again.
     async fn end_lost_run(
         &self,
         target: &crate::engine::RunRef,

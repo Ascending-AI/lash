@@ -1,77 +1,7 @@
-//! The scope-close seam (FIG-3607 item 7, R10): what a logical run's end
-//! and a session's close tell the owner of lifetime scopes.
-//!
-//! A run's `Turn(run)` scope, and a session's `Session` scope, own work
-//! that outlives a single step (processes started under them, among others).
-//! The shift calls this seam only after the end is durable: a run's terminal
-//! evidence, or a session's `CloseSession` intent. It names no engine and no
-//! registry: the process registry's scope-close adapter implements it, and
-//! [`NoScopeClose`] stands in until one is installed.
+//! The engine control vocabulary: run references, run loss and refusals.
 
-use crate::store::{ControlIntentId, RunTerminal, StoreError};
-
+use crate::store::StoreError;
 use crate::{SessionId, TurnId};
-
-/// Where the shift reports a closed run scope or session scope.
-///
-/// Guarantees a caller of this trait keeps:
-///
-/// - it is called only after the run's terminal evidence (or the session's
-///   close intent) is durable;
-/// - it is called at least once per terminal run: a crash between the
-///   evidence and the call re-runs the recorded step that calls it;
-/// - it is never called for a parked run, which holds its scope open.
-///
-/// An implementor must be idempotent per `(session, run)` and per intent.
-#[async_trait::async_trait]
-pub trait ScopeCloseSink: Send + Sync {
-    /// Whether this sink owns any scope. The shift records a run's close
-    /// only for a sink that does: with no owner there is nothing to close,
-    /// so no step is recorded and a run's journal ends at its commit.
-    fn owns_scopes(&self) -> bool {
-        true
-    }
-
-    /// Close `Turn(run)` after its terminal evidence.
-    async fn close_run_scope(&self, terminal: &RunTerminal) -> Result<(), StoreError>;
-
-    /// Close `Session(session)` and the listed runs after its
-    /// `CloseSession` intent.
-    ///
-    /// Closing the session closes every scope inside it: a closed session
-    /// admits no run, so a turn id it never admitted can no longer become
-    /// one, and no start may name it any more (FIG-3948).
-    async fn close_session_scope(
-        &self,
-        session: &SessionId,
-        intent: ControlIntentId,
-        runs: &[TurnId],
-    ) -> Result<(), StoreError>;
-}
-
-/// The sink of a host that installed no scope owner: closing is a no-op.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoScopeClose;
-
-#[async_trait::async_trait]
-impl ScopeCloseSink for NoScopeClose {
-    fn owns_scopes(&self) -> bool {
-        false
-    }
-
-    async fn close_run_scope(&self, _terminal: &RunTerminal) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    async fn close_session_scope(
-        &self,
-        _session: &SessionId,
-        _intent: ControlIntentId,
-        _runs: &[TurnId],
-    ) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
 
 /// One logical run, as an engine's control verbs address it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -120,9 +50,8 @@ pub enum RefusalClass {
 
 /// Why an engine could not carry out a control verb or accept a shift: its
 /// retry class beside the typed code of its cause. A retryable refusal is
-/// retained on the `ControlIntent` or ingress obligation and retried after a
-/// backoff (ADR 0109); a permanent one refuses the intent and stalls the
-/// obligation, visible to an operator under its code.
+/// retained on the `ControlIntent` and retried after a backoff; a permanent
+/// one refuses the intent, visible to an operator under its code.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{code}: {message}")]
 pub struct EngineRefusal {

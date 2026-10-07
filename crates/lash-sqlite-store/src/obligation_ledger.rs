@@ -2,8 +2,7 @@
 //! each table's shared obligation statements.
 //!
 //! Every ledger's table lives in the deployment's one database, and each
-//! ledger holds a connection to it. Ingress spans two tables, one ledger
-//! each, composed by [`crate::ingress_obligation`]. SQLite has one writer, so
+//! ledger holds a connection to it. SQLite has one writer, so
 //! a due claim is one `BEGIN IMMEDIATE` transaction that reads the due page
 //! and claims each row with its compare-and-set; the recovery leader runs it
 //! (ADR 0109 §1.7).
@@ -22,24 +21,12 @@ use lash_store_sql::artifact::cleanup_obligations::{
     CleanupObligationLedgerStatements, CleanupObligationStatements,
 };
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
-use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
-use lash_store_sql::process::processes::ProcessObligationStatements;
-use lash_store_sql::session::meta::SessionMetaObligationStatements;
-use lash_store_sql::session_runs::runs::SessionRunObligationStatements;
+use rusqlite::Row;
 use rusqlite::types::Value;
-use rusqlite::{Row, params_from_iter};
 
 use crate::conn::SqliteConnection;
 use crate::{StoreError, sqlite_conversion_error, sqlite_error, stored_data_corrupt};
 
-static RUNS: LazyLock<SessionRunObligationStatements> =
-    LazyLock::new(|| SessionRunObligationStatements::render(crate::schema_layout::MAIN));
-static META: LazyLock<SessionMetaObligationStatements> =
-    LazyLock::new(|| SessionMetaObligationStatements::render(crate::schema_layout::MAIN));
-static PLANS: LazyLock<ParentEndPlanObligationStatements> =
-    LazyLock::new(|| ParentEndPlanObligationStatements::render(crate::schema_layout::MAIN));
-static PROCESSES: LazyLock<ProcessObligationStatements> =
-    LazyLock::new(|| ProcessObligationStatements::render(crate::schema_layout::MAIN));
 static CLEANUPS: LazyLock<CleanupObligationStatements> =
     LazyLock::new(|| CleanupObligationStatements::render(crate::schema_layout::MAIN));
 static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
@@ -48,10 +35,6 @@ static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
 /// `kind`'s statements, rendered for the connection's own database.
 pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
     match kind {
-        ObligationKind::ScopeClose => RUNS.obligation_sql(),
-        ObligationKind::SessionDelete => META.obligation_sql(),
-        ObligationKind::ParentEnd => PLANS.obligation_sql(),
-        ObligationKind::ProcessTerminal => PROCESSES.obligation_sql(),
         ObligationKind::ArtifactCleanup => CLEANUP_LEDGER.obligation_sql(),
     }
 }
@@ -59,16 +42,6 @@ pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
 fn sql_i64(field: &'static str, value: u64) -> Result<i64, StoreError> {
     i64::try_from(value)
         .map_err(|_| StoreError::Backend(format!("{field} {value} exceeds the stored range")))
-}
-
-fn key_values(key: &ObligationKey) -> Vec<Value> {
-    key.columns()
-        .into_iter()
-        .map(|column| match column {
-            KeyColumn::Text(text) => Value::Text(text),
-            KeyColumn::Integer(integer) => Value::Integer(integer),
-        })
-        .collect()
 }
 
 /// The stored error of a failed attempt: its message and its code are
@@ -167,60 +140,10 @@ impl SqliteObligationLedger {
     }
 }
 
-/// Arm `key`'s row as a fresh obligation due at `now_ms` inside a producer's
-/// own transaction: the helper a slice's producer calls on its transaction.
-/// Every kind uses its typed key's id. `None` when the row is missing or
-/// already carries an obligation.
-pub(crate) fn arm_obligation_tx(
-    conn: &rusqlite::Connection,
-    key: &ObligationKey,
-    now_ms: u64,
-) -> Result<Option<ObligationId>, StoreError> {
-    arm_table_tx(conn, obligation_sql(key.kind()), key, now_ms)
-}
-
-/// Arm `key`'s row in the table `sql` addresses as obligation `id`, due at
-/// `now_ms`, inside the caller's transaction. `None` when the row is missing
-/// or already carries an obligation.
-pub(crate) fn arm_table_tx(
-    conn: &rusqlite::Connection,
-    sql: ObligationSql<'static>,
-    key: &ObligationKey,
-    now_ms: u64,
-) -> Result<Option<ObligationId>, StoreError> {
-    let id = key.id();
-    let mut values = key_values(key);
-    values.push(Value::Text(id.as_str().to_owned()));
-    values.push(Value::Integer(sql_i64("obligation due instant", now_ms)?));
-    let changed = conn
-        .execute(sql.arm.sql(), params_from_iter(values))
-        .map_err(sqlite_error)?;
-    Ok((changed == 1).then_some(id))
-}
-
 #[async_trait::async_trait]
 impl ObligationLedger for SqliteObligationLedger {
     fn kind(&self) -> ObligationKind {
         self.kind
-    }
-
-    async fn arm(
-        &self,
-        key: &ObligationKey,
-        now_ms: u64,
-    ) -> Result<Option<ObligationId>, StoreError> {
-        if key.kind() != self.kind {
-            return Err(StoreError::Backend(format!(
-                "a {} key cannot arm the {} ledger",
-                key.kind(),
-                self.kind
-            )));
-        }
-        let key = key.clone();
-        self.conn
-            .write(move |tx| Ok(arm_obligation_tx(tx, &key, now_ms)))
-            .await
-            .map_err(sqlite_error)?
     }
 
     async fn claim_due(
@@ -567,21 +490,6 @@ impl SqliteArtifactCleanupLedger {
 impl ObligationLedger for SqliteArtifactCleanupLedger {
     fn kind(&self) -> ObligationKind {
         ObligationKind::ArtifactCleanup
-    }
-
-    async fn arm(
-        &self,
-        key: &ObligationKey,
-        _now_ms: u64,
-    ) -> Result<Option<ObligationId>, StoreError> {
-        if key.kind() != ObligationKind::ArtifactCleanup {
-            return Err(StoreError::Backend(format!(
-                "a {} key cannot arm the artifact cleanup ledger",
-                key.kind()
-            )));
-        }
-        // A cleanup must carry a plan; use ArtifactCleanupLedger::arm_cleanup.
-        Ok(None)
     }
 
     async fn claim_due(

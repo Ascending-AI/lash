@@ -17,13 +17,11 @@ mod model_filter_tests;
 mod observation;
 mod observer_intent;
 mod op_scope;
-mod parent_end;
 mod references;
 mod registry;
 mod registry_concerns;
 pub(crate) mod registry_delegate;
 pub mod registry_transitions;
-mod scope_close;
 mod service;
 mod start_staging;
 pub mod steps;
@@ -115,10 +113,6 @@ pub use observer_intent::{
 };
 pub use op_scope::ProcessOpScope;
 pub(crate) use op_scope::{LanguageCallAttribution, LanguageCallAttributions};
-pub use parent_end::{
-    ParentEndApplication, apply_parent_end_plan, end_parent_scope, end_session_runs,
-    parent_end_delivery_key, parent_end_requester,
-};
 pub use references::ProcessLiveReferenceView;
 #[cfg(any(test, feature = "testing"))]
 pub use registry::reconcile_pruned_trigger_deliveries_interleaved;
@@ -129,11 +123,9 @@ pub use registry::{
 pub use registry::{
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ParentEndPlan, ProcessClockRebind,
     ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry, ProcessPruneReport, ProcessQuery,
-    ProcessRegistrar, ProcessRegistry, ProcessRegistryCursor, ProcessRetention,
-    ProcessTerminalPublication, ProcessToolIntents, ProjectionWatermark,
-    reconcile_pruned_trigger_deliveries,
+    ProcessRegistrar, ProcessRegistry, ProcessRegistryCursor, ProcessRetention, ProcessToolIntents,
+    ProjectionWatermark, reconcile_pruned_trigger_deliveries,
 };
-pub use scope_close::RegistryScopeClose;
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 pub use start_staging::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,

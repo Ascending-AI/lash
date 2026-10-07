@@ -5,9 +5,9 @@ use super::*;
 use lash_core_execution::store_backend_support::turn_cancel::*;
 
 /// Withdraw one row for the host at `now` (FIG-3927): an open row is
-/// cancelled, its ingress obligation settled in the same write (FIG-4098); a
-/// row a run admitted is that run's to settle or release, so the cancel
-/// changes nothing and answers the run that holds it.
+/// cancelled in one write (FIG-4098); a row a run admitted is that run's to
+/// settle or release, so the cancel changes nothing and answers the run that
+/// holds it.
 pub(super) fn cancel_pending_turn_input_row_conn(
     conn: &Connection,
     row: PendingTurnInputRow,

@@ -30,11 +30,6 @@ pub enum EmbedError {
     /// it names another plugin than its factory, or cannot write the format
     /// it reads natively (FIG-4744). Nothing is built.
     PluginDeclaration(#[from] lash_core::plugin::PluginDeclarationError),
-    #[error(transparent)]
-    /// Returned when the core would build without some obligation kind's
-    /// relay: its store set arms every kind, and a kind nothing delivers
-    /// stays owed forever (ADR 0109 §1.4).
-    ObligationRelayUnavailable(#[from] lash_core::runtime::obligations::ObligationRelayUnavailable),
     #[error("a model key is required; a root session's spec must name a registered model")]
     /// Returned when a creation's spec states no model: an overlay
     /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
@@ -336,7 +331,6 @@ impl EmbedError {
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
-            | Self::ObligationRelayUnavailable(_)
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. }
             | Self::MissingLlmProfile
@@ -391,7 +385,6 @@ impl EmbedError {
             Self::MissingProtocolPlugin
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
-            | Self::ObligationRelayUnavailable(_)
             | Self::MissingLlmProfile
             | Self::LlmProfileUnknown(_)
             | Self::ReasoningRefused(_)

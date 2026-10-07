@@ -73,7 +73,6 @@ pub use session_config_views::{
     recorded_session_policy_from_state, root_snapshot_config_from_state,
 };
 mod lease_owner;
-pub mod session_delete;
 mod session_fault;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
@@ -876,13 +875,6 @@ pub trait TurnInputStore: Send + Sync {
     ///
     /// Any refusal refuses the whole batch: nothing is stored, spec rows
     /// included.
-    ///
-    /// Every new row is armed as its session's ingress obligation in the
-    /// same transaction (ADR 0109 §3). A batch
-    /// [`held_by_acceptor`](crate::PendingTurnInputBatch::held_by_acceptor)
-    /// also takes each row's still-due claim there, held for the batch's
-    /// TTL: its acceptor executes the rows itself, and no relay pass may find
-    /// them due before that shift admits them.
     async fn enqueue_pending_turn_inputs(
         &self,
         batch: crate::PendingTurnInputBatch,

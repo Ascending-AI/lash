@@ -475,12 +475,6 @@ impl StoreSet for RecordedStores {
         self.inner.obligation_ledger(kind)
     }
 
-    fn session_delete_ledger(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::session_delete::SessionDeleteLedger> {
-        self.inner.session_delete_ledger()
-    }
-
     fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
         self.inner.artifact_cleanup()
     }

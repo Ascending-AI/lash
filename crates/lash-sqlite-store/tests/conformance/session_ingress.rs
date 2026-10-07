@@ -14,25 +14,30 @@ lash_conformance::session_ingress_tests!({
         .await
         .expect("create the SQLite session-ingress session");
     let observed = backend.clone();
-    let admission_snapshot: lash_conformance::IngressAdmissionProbe = std::sync::Arc::new(
-        move || {
+    let admission_snapshot: lash_conformance::IngressAdmissionProbe =
+        std::sync::Arc::new(move || {
             let backend = observed.clone();
             Box::pin(async move {
-                backend.raw().query_row(
-                "SELECT (SELECT count(*) FROM pending_turn_inputs),
+                backend
+                    .raw()
+                    .query_row(
+                        "SELECT (SELECT count(*) FROM pending_turn_inputs),
                         (SELECT count(*) FROM queued_work_batches),
                         (SELECT count(*) FROM session_run_specs),
-                        (SELECT count(*) FROM pending_turn_inputs WHERE obligation_id IS NOT NULL)
-                          + (SELECT count(*) FROM queued_work_batches WHERE obligation_id IS NOT NULL),
                         (SELECT coalesce(max(enqueue_seq), 0) FROM session_ingress_sequence)",
-                [], |row| Ok(lash_conformance::IngressAdmissionSnapshot {
-                    inputs: row.get(0)?, batches: row.get(1)?,
-                    run_specs: row.get(2)?, obligations: row.get(3)?, sequence: row.get(4)?,
-                }),
-            ).expect("observe ingress allocations")
+                        [],
+                        |row| {
+                            Ok(lash_conformance::IngressAdmissionSnapshot {
+                                inputs: row.get(0)?,
+                                batches: row.get(1)?,
+                                run_specs: row.get(2)?,
+                                sequence: row.get(3)?,
+                            })
+                        },
+                    )
+                    .expect("observe ingress allocations")
             })
-        },
-    );
+        });
     (
         backend,
         lash_conformance::SessionIngressHandles {

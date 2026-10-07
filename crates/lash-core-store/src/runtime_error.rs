@@ -547,12 +547,6 @@ runtime_error_codes! {
         // the turn was admitted under another executable generation; only a build of it serves it.
         /// Unfinished work requires a declared plugin revision this build cannot execute.
         PluginRevisionUnavailable = "plugin_revision_unavailable" => Parked,
-        // the controller cannot answer the frontier read; wiring, not the attempt.
-        /// A durable effect controller that does not answer the recorded-frontier
-        /// read was asked for it: a replayed lashlang run cannot know which of its
-        /// commands the journal holds, so it refuses to run rather than dispatch
-        /// blind (FIG-3586).
-        RecordedJournalReadUnsupported = "recorded_journal_read_unsupported" => Terminal,
         // the redrive diverged from the engine's journal; only the build that wrote it serves it.
         /// A redriven effect's reconstructed envelope differs from the one its
         /// engine journal recorded. The
@@ -621,9 +615,6 @@ runtime_error_codes! {
         // the process parked again; the caller must act on the current park.
         /// A process redrive named a park the process has since replaced.
         ProcessParkSuperseded = "process_park_superseded" => Terminal,
-        // the row's key names another ledger; no retry rewrites it.
-        /// A relay was handed an obligation whose key belongs to another ledger.
-        ObligationKeyMismatch = "obligation_key_mismatch" => Terminal,
         // the row lacks what its obligation needs; a retry reads the same row.
         /// The row an obligation lives on lacks the durable evidence its delivery
         /// needs, so the delivery can never be made as armed.
@@ -763,8 +754,6 @@ runtime_error_codes! {
         ToolDeferralNotDeclared = "tool_deferral_not_declared" => Terminal,
         // the cancel watch failed transiently.
         TransientCancelWatch = "transient_cancel_watch" => Retryable,
-        // terminal publication failed transiently.
-        TransientTerminalPublication = "transient_terminal_publication" => Retryable,
         // the cancel gate does not decode.
         TurnCancelGateDecode = "turn_cancel_gate_decode" => Terminal,
         // the same gate fails to encode again.

@@ -1,5 +1,6 @@
-//! The parent-end ledger row a terminal parent writes, and what retention may
-//! do to the process row it was written for.
+//! The parent-end ledger row a terminal parent writes: the late-start fence
+//! of its scope, and what retention may do to it and to the process row it
+//! was written for.
 
 use super::*;
 use pretty_assertions::assert_eq;
@@ -30,7 +31,8 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         ),
         parent_scope.clone(),
     );
-    let child = registry
+    // A live child keeps the ended scope's row through the parent's prune.
+    let _live_child = registry
         .register_process(child)
         .await
         .expect("register cancel child under the live parent");
@@ -56,28 +58,6 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         parent_scope.clone(),
         "the row is keyed by the scope it ends"
     );
-    assert!(
-        pending.obligation_state != crate::ObligationState::Delivered,
-        "a freshly written ledger row is unsettled"
-    );
-    assert!(
-        pending.obligation_state == lash_core::store::ObligationState::Due,
-        "the record arms the row's ParentEnd obligation due immediately (ADR 0109 §3)"
-    );
-
-    // The sweep's children query is index-served and returns exactly the
-    // Cancel children that still owe a cancel.
-    assert_eq!(
-        registry
-            .list_parent_end_children(&parent_scope, None, std::num::NonZeroUsize::MIN)
-            .await
-            .expect("page parent-end children")
-            .into_iter()
-            .map(|record| record.id)
-            .collect::<Vec<_>>(),
-        vec![child.id.clone()]
-    );
-
     let pending_prune = registry
         .prune_terminal_processes(
             u64::MAX,
@@ -112,18 +92,6 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
             .is_some(),
         "the ledger row outlives the process row it was written for"
     );
-    assert_eq!(
-        registry
-            .list_parent_end_children(&parent_scope, None, std::num::NonZeroUsize::MIN)
-            .await
-            .expect("page parent-end children after the parent row is pruned")
-            .into_iter()
-            .map(|record| record.id)
-            .collect::<Vec<_>>(),
-        vec![child.id.clone()],
-        "the sweep reads children by their own parent scope, not through the parent row"
-    );
-
     // A `Cancel` child registering after the ledger row exists is fenced.
     let late = crate::started_until_starter(
         lash_core::testing::held_engine_registration(
@@ -140,81 +108,20 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         ),
         "a Cancel child that registers after the ledger row is refused"
     );
-
-    registry
-        .request_process_cancel(
-            &child.id.clone(),
-            crate::CancelOrigin::ParentEnded,
-            "conformance".to_string(),
-            None,
-        )
-        .await
-        .expect("request the child cancel the sweep would request");
-    assert!(
-        registry
-            .list_parent_end_children(&parent_scope, None, std::num::NonZeroUsize::MIN)
-            .await
-            .expect("page parent-end children after the cancel request")
-            .is_empty(),
-        "a child already carrying a cancel request is settled by definition"
-    );
-
-    registry
-        .settle_parent_end_plan(&parent_scope)
-        .await
-        .expect("settle parent-end ledger row");
-    registry
-        .settle_parent_end_plan(&parent_scope)
-        .await
-        .expect("settling a parent-end ledger row is idempotent");
-    let settled = registry
-        .get_parent_end_plan(&parent_scope)
-        .await
-        .expect("read settled ledger row")
-        .expect("a settled row is retained, not deleted");
-    assert!(
-        settled.obligation_state == crate::ObligationState::Delivered,
-        "settlement stamps the row rather than deleting the fence"
-    );
-    assert_eq!(
-        settled.obligation_state,
-        lash_core::store::ObligationState::Delivered,
-        "the settle that applied the plan also delivered the due obligation \
-         the row owed (ADR 0109)"
-    );
-    let settled_prune = registry
-        .prune_terminal_processes(
-            u64::MAX,
-            Some(ProcessListFilter {
-                status: ProcessStatusFilter::Any,
-                originator: Some(ProcessOriginatorFilter::session(
-                    originator.session_id.clone(),
-                )),
-                ..ProcessListFilter::default()
-            }),
-            crate::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect("prune again after the end plan settles");
-    assert_eq!(
-        settled_prune.pruned_processes, 0,
-        "the parent was already reclaimed; settlement adds no new prune-eligible row"
-    );
 }
 
-/// Retention reclaims a settled ledger row once no live child names its scope.
+/// Retention reclaims a ledger row once no live child names its scope.
 ///
 /// The row deliberately outlives the scope it records — it is what refuses a
-/// late `Cancel` child — so nothing in the sweep may delete it. Retention is
-/// what bounds it: past the same cutoff process rows are pruned under, a
-/// settled scope with no live child can no longer parent anything lash will
-/// act on. Without this every committed turn would leave one row behind
-/// forever.
+/// late `Cancel` child. Retention is what bounds it: past the same cutoff
+/// process rows are pruned under, an ended scope with no live child can no
+/// longer parent anything lash will act on. Without this every ended scope
+/// would leave one row behind forever.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
+pub(super) async fn parent_end_plans_are_reclaimed_by_retention(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let originator = SessionScope::new("parent-end-reclaim-session");
@@ -240,10 +147,6 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
         .expect("register cancel child under the live parent");
 
     complete_process(&registry, &parent.id).await;
-    registry
-        .settle_parent_end_plan(&parent_scope)
-        .await
-        .expect("settle the parent-end ledger row");
 
     let filter = ProcessListFilter {
         status: ProcessStatusFilter::Any,
@@ -266,7 +169,7 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
             .await
             .expect("read the ledger row while a live child names the scope")
             .is_some(),
-        "a settled row is retained while a live child still names its scope"
+        "a row is retained while a live child still names its scope"
     );
 
     complete_process(&registry, &child.id).await;
@@ -284,7 +187,7 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
             .await
             .expect("read the ledger row after retention"),
         None,
-        "retention reclaims a settled row once no live child names its scope"
+        "retention reclaims a row once no live child names its scope"
     );
 }
 
@@ -306,11 +209,9 @@ async fn complete_process(registry: &Arc<dyn ProcessRegistry>, process_id: &Proc
 
 /// A session's `Session` scope closes only through its close row (FIG-3607
 /// R10, ADR 0108 §5). Deleting the session's process state writes none: the
-/// session's `CloseSession` intent is the one owner of that row, and its
-/// scope owner writes it. Once the row is there, a process living `Until` the
-/// session is owed its cancel, and a start that names the closed session — as
-/// its lifetime or its starter — is refused (R11). A process started by the
-/// session's turn but `Detached` owes nothing.
+/// session's close is the one owner of that row. Once the row is there, a
+/// start that names the closed session — as its lifetime or its starter — is
+/// refused (R11).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -371,53 +272,26 @@ pub(super) async fn a_session_scope_closes_only_through_its_close_row(
         .await
         .expect("a session that is not closed still admits a start living until it");
 
-    // What the session's close intent does through the registry's scope owner.
-    lash_core::engine::ScopeCloseSink::close_session_scope(
-        &crate::RegistryScopeClose::new(
-            Arc::clone(&registry),
-            Arc::new(crate::facade_support::SystemClock),
-        ),
-        &session,
-        lash_core::store::ControlIntentId::from_sequence(1),
-        &[],
-    )
-    .await
-    .expect("close the session's scope");
+    registry
+        .record_parent_end(&session_scope)
+        .await
+        .expect("close the session's scope");
     let closed = registry
         .get_parent_end_plan(&session_scope)
         .await
         .expect("read the session's close row")
         .expect("the scope close writes the session scope's close row");
     assert_eq!(closed.parent, session_scope);
-    let mut owed = registry
-        .list_parent_end_children(
-            &session_scope,
-            None,
-            std::num::NonZeroUsize::new(8).expect("non-zero page"),
-        )
-        .await
-        .expect("page the closed session's children")
-        .into_iter()
-        .map(|record| record.id)
-        .collect::<Vec<_>>();
-    owed.sort();
-    let mut expected = vec![until_session.id.clone(), until_unclosed.id.clone()];
-    expected.sort();
-    assert_eq!(
-        owed, expected,
-        "the sweep owes each child living until the session its cancel, and nothing \
-         to the detached one"
-    );
-    assert!(
-        registry
-            .get_process(&detached.id)
-            .await
-            .expect("read the detached child")
-            .expect("the detached child survives the delete")
-            .cancel_request
-            .is_none(),
-        "a detached child owes the closed session nothing"
-    );
+    for survivor in [&until_session, &until_unclosed, &detached] {
+        assert!(
+            registry
+                .get_process(&survivor.id)
+                .await
+                .expect("read a child of the session")
+                .is_some(),
+            "the close row deletes no process"
+        );
+    }
     assert!(
         matches!(
             registry

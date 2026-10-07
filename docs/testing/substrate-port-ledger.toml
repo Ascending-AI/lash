@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1480 rows over 819 files, 3797 laws.
-# By class: mechanical 163, semantic 110, delete 781, replace 426.
-# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 77, L9e 129, L9f 125, L9g 101, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 427, ported 85, deleted 968.
+# 1520 rows over 834 files, 3846 laws.
+# By class: mechanical 163, semantic 110, delete 821, replace 426.
+# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 77, L9e 129, L9f 125, L9g 101, L9h 102, L11 92, L8 26, L10a 184, L10b 40, L10g 15, I0 49.
+# By status: todo 427, ported 85, deleted 1008.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -23790,7 +23790,7 @@ laws = [
 disposition = "replaced-by:crates/lash-conformance/src/conformance/obligation_relay.rs::armed_obligations_are_claimed_through_every_page"
 status = "deleted"
 owed = "every armed obligation is claimed exactly once across claim pages"
-note = "FIG-5175: processes arm no obligation; the paging law runs over SessionDelete rows"
+note = "FIG-5175: processes arm no obligation; the paging law runs over armed rows of the one kind left, ArtifactCleanup (FIG-5191)"
 
 [[row]]
 path = "crates/lash-sqlite-store/src/schema_check_constraint_tests.rs"
@@ -23805,3 +23805,572 @@ laws = [
 disposition = "covered-by:planned:TS1"
 status = "deleted"
 note = "FIG-5175 deleted the delivery's obligation columns; process_id is NOT NULL, and TS1 checks every delivery's process"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_registry/terminal_publication.rs"
+test = "*"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_terminal_write_arms_its_publication_once",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the file's subject was the replaced obligation machinery (ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_registry/terminal_publication.rs"
+test = "a_terminal_write_arms_its_publication_once"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "every terminal write arms its ProcessTerminal obligation once and the publishing engine settles it",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the ProcessTerminal obligation is deleted (ADR 0132 §12): a terminal transaction resolves its waiters itself"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs"
+test = "*"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "an_unrecorded_turn_parent_is_reported_until_its_row_is_written",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs"
+test = "an_unrecorded_turn_parent_is_reported_until_its_row_is_written"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a turn whose commit outran its ledger row is a recovery candidate until the row exists",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): list_unrecorded_opener_parents fed the ParentEnd relay's recovery sweep, deleted with the relay; the session actor ends a turn's Until children in its own commit (L6b)"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "*"
+area = "declared-start"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "declared_start_scope_close_cancels_until_children",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::ending_a_turn_ends_its_waiting_child_and_the_grandchild_by_parent_end"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_scope_close_cancels_until_children"
+area = "declared-start"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "closing the scope a child lives Until cancels it while the call is parked on it",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::ending_a_turn_ends_its_waiting_child_and_the_grandchild_by_parent_end"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the ParentEnd relay delivery it drove is deleted; the turn's end cascades through the session actor (L6b)"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/helpers.rs"
+test = "*"
+area = "obligation-relay"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_law_tick_reports_a_pass_that_outlasts_a_deployments_tick_wait",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/helpers.rs"
+test = "a_law_tick_reports_a_pass_that_outlasts_a_deployments_tick_wait"
+area = "obligation-relay"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a law's tick reports the pass it started even when the delivery outlasts a deployment's tick wait",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): RelayLanes and the multi-kind reconcile tick are deleted; the artifact-cleanup pass is one kind's relay_due"
+
+[[row]]
+path = "crates/lash-core-execution/src/runtime/process/registry.rs"
+test = "*"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_plan_row_missing_its_obligation_pair_fails_decode",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core-execution/src/runtime/process/registry.rs"
+test = "a_plan_row_missing_its_obligation_pair_fails_decode"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a parent-end plan row without its obligation pair fails decode",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the plan row carries no obligation (ADR 0132 §12); it is only the ended scope's late-start fence"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/obligation_relay.rs"
+test = "arming_takes_only_an_idle_row"
+area = "obligation-relay"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "arming outside a producer transaction takes only a row that owes nothing, and a missing row arms nothing",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): ObligationLedger::arm served the leader's repair pass, which is deleted; producers arm in their own transactions"
+
+[[row]]
+path = "crates/lash-sim/src/process_terminal_bounds.rs"
+test = "*"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_lost_immediate_publication_is_delivered_within_one_tick",
+    "a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick",
+    "retryable_failures_back_off_and_stall_at_the_ceiling",
+    "a_refused_publication_stalls_in_its_pass_without_blocking_the_page",
+    "postgres_variants_never_pass_without_a_database_url",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the file's subject was the replaced obligation machinery (ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash-sim/src/process_terminal_bounds.rs"
+test = "a_lost_immediate_publication_is_delivered_within_one_tick"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a lost immediate terminal publication is delivered within one reconcile tick",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the ProcessTerminal obligation and its relay are deleted (ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash-sim/src/process_terminal_bounds.rs"
+test = "a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a lapsed publication claim is retaken within its ttl and one tick",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/obligation_relay.rs::a_stale_claimant_cannot_take_back_a_retaken_claim"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the claim machinery survives for ArtifactCleanup, whose ledger laws pin the lapse"
+
+[[row]]
+path = "crates/lash-sim/src/process_terminal_bounds.rs"
+test = "retryable_failures_back_off_and_stall_at_the_ceiling"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "retryable publication failures back off and stall at the ceiling",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/obligation_relay.rs::the_attempt_ceiling_stalls"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the backoff and ceiling rule survives for ArtifactCleanup"
+
+[[row]]
+path = "crates/lash-sim/src/process_terminal_bounds.rs"
+test = "a_refused_publication_stalls_in_its_pass_without_blocking_the_page"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a refused publication stalls in its pass without blocking the page",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/obligation_relay.rs::a_refused_or_undecodable_row_stalls_without_failing_the_page"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the stall rule survives for ArtifactCleanup"
+
+[[row]]
+path = "crates/lash-sim/src/process_terminal_bounds.rs"
+test = "postgres_variants_never_pass_without_a_database_url"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "the module's postgres variants never pass without a database url",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the module is deleted with the ProcessTerminal relay"
+
+[[row]]
+path = "crates/lash-sim/tests/parent_end_detection_bounds.rs"
+test = "*"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_due_plan_is_claimed_and_delivered_within_one_tick",
+    "a_lapsed_claim_is_retaken_on_the_next_tick",
+    "a_retryable_delivery_is_reattempted_at_its_backoff",
+    "retryable_failures_stall_at_the_attempt_ceiling",
+    "an_undecodable_row_stalls_alone_and_its_page_delivers",
+    "the_due_index_serves_the_earliest_due_row_first",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the file's subject was the replaced obligation machinery (ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash-sim/tests/parent_end_detection_bounds.rs"
+test = "a_due_plan_is_claimed_and_delivered_within_one_tick"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a due parent-end plan is claimed and delivered within one tick",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the ParentEnd obligation and its relay are deleted; an ended scope's Until children end through the actor cascade (ADR 0132 §11)"
+
+[[row]]
+path = "crates/lash-sim/tests/parent_end_detection_bounds.rs"
+test = "a_lapsed_claim_is_retaken_on_the_next_tick"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a lapsed parent-end claim is retaken on the next tick",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/obligation_relay.rs::a_stale_claimant_cannot_take_back_a_retaken_claim"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the claim machinery survives for ArtifactCleanup"
+
+[[row]]
+path = "crates/lash-sim/tests/parent_end_detection_bounds.rs"
+test = "a_retryable_delivery_is_reattempted_at_its_backoff"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a retryable parent-end delivery is reattempted at its backoff",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/obligation_relay.rs::a_failure_with_delay_backs_off"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the backoff rule survives for ArtifactCleanup"
+
+[[row]]
+path = "crates/lash-sim/tests/parent_end_detection_bounds.rs"
+test = "retryable_failures_stall_at_the_attempt_ceiling"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "retryable parent-end failures stall at the attempt ceiling",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/obligation_relay.rs::the_attempt_ceiling_stalls"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the ceiling rule survives for ArtifactCleanup"
+
+[[row]]
+path = "crates/lash-sim/tests/parent_end_detection_bounds.rs"
+test = "an_undecodable_row_stalls_alone_and_its_page_delivers"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "an undecodable parent-end row stalls alone and its page delivers",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/obligation_relay.rs::a_refused_or_undecodable_row_stalls_without_failing_the_page"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the stall rule survives for ArtifactCleanup"
+
+[[row]]
+path = "crates/lash-sim/tests/parent_end_detection_bounds.rs"
+test = "the_due_index_serves_the_earliest_due_row_first"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "the parent-end due index serves the earliest due row first",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the parent-end obligation columns and due index are deleted"
+
+[[row]]
+path = "crates/lash-sim/tests/cross_backend_store_differential/session_delete_cases.rs"
+test = "*"
+area = "session-delete"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a session's delete obligation and its undelivered cleanup counts agree across the three backends",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): SessionDeleteLedger and the SessionDelete obligation are deleted; a session's delete is the session actor's close (L6b)"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/schema_check_constraint_tests.rs"
+test = "parent_end_delivery_atomically_arms_reclaim"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "applying a due parent-end plan delivers its obligation and arms reclaim atomically, fenced by the claim token",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the parent-end plan carries no obligation and has no settle; reclaim keys on its end instant"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/parent_end_payload.rs"
+test = "*"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_pre_cutover_ledger_row_is_refused_not_migrated",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/parent_end_payload.rs"
+test = "a_pre_cutover_ledger_row_is_refused_not_migrated"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a pre-cutover parent-end row keyed by its rendered id is refused through the obligation's by-key read",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the by-key read served the ParentEnd relay; pre-1.0 rows are never read (#68)"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/parent_end_payload.rs"
+test = "*"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_pre_cutover_ledger_row_is_refused_not_migrated",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/parent_end_payload.rs"
+test = "a_pre_cutover_ledger_row_is_refused_not_migrated"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a pre-cutover parent-end row keyed by its rendered id is refused through the obligation's by-key read",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the by-key read served the ParentEnd relay; pre-1.0 rows are never read (#68)"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/parent_end_registration_race.rs"
+test = "*"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_child_registering_as_its_parent_scope_ends_is_refused_or_swept",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs::a_turn_scope_ends_through_its_recorded_ledger_row"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the file's subject was the replaced obligation machinery (ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/parent_end_registration_race.rs"
+test = "a_child_registering_as_its_parent_scope_ends_is_refused_or_swept"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "an Until child registering while its parent scope ends is refused or swept",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs::a_turn_scope_ends_through_its_recorded_ledger_row"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the sweep half was the ParentEnd relay's, deleted; the fence half (a start after the row is refused) is the conformance law, and the advisory lock that orders them is unchanged"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/parent_end_registration_race.rs"
+test = "*"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_child_registering_as_its_parent_scope_ends_is_refused_or_swept",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs::a_turn_scope_ends_through_its_recorded_ledger_row"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the file's subject was the replaced obligation machinery (ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/parent_end_registration_race.rs"
+test = "a_child_registering_as_its_parent_scope_ends_is_refused_or_swept"
+area = "parent-end"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "an Until child registering while its parent scope ends is refused or swept",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/turn_parent_end.rs::a_turn_scope_ends_through_its_recorded_ledger_row"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the sweep half was the ParentEnd relay's, deleted; the fence half (a start after the row is refused) is the conformance law, and the advisory lock that orders them is unchanged"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance/obligation_relay.rs"
+test = "*"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_registry_armed_obligation_is_due_for_a_relay_clock_behind_the_database",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance/obligation_relay.rs"
+test = "a_registry_armed_obligation_is_due_for_a_relay_clock_behind_the_database"
+area = "process-terminal-publication"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a registry-armed terminal publication and parent-end plan are due for a relay whose clock is behind the database",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): neither obligation exists any more (ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash-core-execution/src/runtime/obligations/relay.rs"
+test = "*"
+area = "obligation-relay"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_consumer_settled_ask_keeps_its_claim_and_stalls_past_the_ceiling",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core-execution/src/runtime/obligations/relay.rs"
+test = "a_consumer_settled_ask_keeps_its_claim_and_stalls_past_the_ceiling"
+area = "obligation-relay"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a consumer-settled ask keeps its claim for the consumer and stalls past the attempt ceiling",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the consumer-settled verdict served the session-delete and scope-close kinds, both deleted; the cleanup relay settles every delivery itself"
+
+[[row]]
+path = "crates/lash-core/src/runtime/obligations/relays.rs"
+test = "*"
+area = "obligation-relay"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a_supply_missing_a_kinds_delivery_names_that_kind",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the file's subject was the replaced obligation machinery (ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash-core/src/runtime/obligations/relays.rs"
+test = "a_supply_missing_a_kinds_delivery_names_that_kind"
+area = "obligation-relay"
+needs = ["process"]
+class = "delete"
+lane = "L10b"
+laws = [
+    "a relay supply missing one kind's delivery names that kind when assembled",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by L10b (FIG-5191): the multi-kind relay assembly is deleted; the core builds the one artifact-cleanup relay directly"

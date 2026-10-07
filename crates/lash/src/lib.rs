@@ -233,7 +233,6 @@ pub use lash_core::runtime::{DeltaCoalescing, DeltaCoalescingError};
 pub use lash_core::store::{
     DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, SessionFault,
     SessionFaultOrigin, SessionFaultRecord, StallReason, StalledObligation, UndecodableObligation,
-    session_delete::SessionCleanup,
 };
 pub use lash_core::{
     AdmissionRefusal as IngressAdmissionRefusal, AwaitEventKey, AwaitEventWaitIdentity, BatchId,
@@ -303,7 +302,6 @@ pub use lash_core::runtime::ConfigTransactionSubmitError;
 pub use lash_core::runtime::obligations::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay,
 };
-pub use lash_core::runtime::obligations::{ObligationRelayUnavailable, RelayNeed};
 pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
@@ -622,7 +620,6 @@ pub mod persistence {
         ClaimToken, ClaimedObligation, HolderId, KeyColumn, KeyColumnType, LeaseAnswer, LeaseClaim,
         LeaseName, LeaseRow, ObligationLedger, ObligationSettlement, RecoveryLeaderStore,
         SettleOutcome,
-        session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
     pub use lash_core::store::{StoreTransition, TurnTraceReceipt};
     /// Artifact ownership supplied to protocol engines and effect controllers.
@@ -1126,11 +1123,11 @@ pub mod process {
         ProcessRetention, ProcessService, ProcessSessionDeleteReport, ProcessSignal,
         ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessSignature, ProcessStartOptions,
         ProcessStartReceipt, ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget,
-        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication,
-        ProcessTerminalWait, ProcessToolIntents, ProcessWakeDelivery, ProcessWakeSpec,
-        ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus,
-        ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionScope, StartCx, StartCxError,
-        StartKey, TerminalProcessStatus, WakeId, WatchedRegistry, facade_support::ObservedProcess,
+        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait,
+        ProcessToolIntents, ProcessWakeDelivery, ProcessWakeSpec, ProcessWorkSubstrate,
+        ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus, ScopeGrant, ScopeId,
+        ScopeRef, ScopeStorageError, SessionScope, StartCx, StartCxError, StartKey,
+        TerminalProcessStatus, WakeId, WatchedRegistry, facade_support::ObservedProcess,
         facade_support::ObservedProcessEvent, facade_support::ObservedProcessEventLite,
         facade_support::ObservedProcessEventPage, facade_support::ObservedProcessEventReadOutcome,
         facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,
@@ -1195,7 +1192,7 @@ pub mod runtime {
     pub use lash_core::facade_support::TraceBoundaryReceipt;
     pub use lash_core::runtime::{AttemptStreamRecorder, DeclaredStartPhase, StartCancelDecision};
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::engine::{EngineRefusal, ReconcileCursor, RefusalClass, ScopeCloseSink};
+    pub use lash_core::engine::{EngineRefusal, RefusalClass};
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
     pub use lash_core::runtime::SessionTurnAdmission;
     pub use lash_core::runtime::obligations::relay::RelayPolicy;

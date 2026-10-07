@@ -10,7 +10,6 @@
 use std::num::NonZeroUsize;
 
 use crate::artifact_referrer::ArtifactReferrer;
-use crate::{ProcessId, SessionId, TurnId};
 
 use super::StoreError;
 
@@ -21,10 +20,6 @@ use super::StoreError;
 ///     items(
 ///         path = "crates/lash-core-store/src/artifact_referrer.rs", canonical_id, decode, as_str,
 ///         parse,
-///     ),
-///     file(
-///         path = "crates/lash-sansio/src/identity.rs",
-///         cover("string_identity!", SessionId, ProcessId, TurnId),
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
@@ -48,27 +43,13 @@ pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 2;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ObligationKind {
-    /// A terminal run owes its scope close.
-    ScopeClose,
-    /// A closed scope's plan owes each child its cancel.
-    ParentEnd,
-    /// A closing session owes its physical delete.
-    SessionDelete,
-    /// A terminal process owes its terminal publication.
-    ProcessTerminal,
     /// An ended or guarded artifact referrer owes its cleanup (ADR 0113 §2.5).
     ArtifactCleanup,
 }
 
 impl ObligationKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 5] = [
-        Self::ScopeClose,
-        Self::ParentEnd,
-        Self::SessionDelete,
-        Self::ProcessTerminal,
-        Self::ArtifactCleanup,
-    ];
+    pub const ALL: [Self; 1] = [Self::ArtifactCleanup];
 
     /// Decode a stored kind without treating a newer build's label as corrupt.
     pub fn from_label(label: &str) -> Result<Self, StoreError> {
@@ -82,10 +63,6 @@ impl ObligationKind {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::ScopeClose => "scope_close",
-            Self::ParentEnd => "parent_end",
-            Self::SessionDelete => "session_delete",
-            Self::ProcessTerminal => "process_terminal",
             Self::ArtifactCleanup => "artifact_cleanup",
         }
     }
@@ -95,10 +72,7 @@ impl ObligationKind {
     #[must_use]
     pub const fn key_column_types(self) -> &'static [KeyColumnType] {
         match self {
-            Self::ScopeClose | Self::ParentEnd | Self::ArtifactCleanup => {
-                &[KeyColumnType::Text, KeyColumnType::Text]
-            }
-            Self::SessionDelete | Self::ProcessTerminal => &[KeyColumnType::Text],
+            Self::ArtifactCleanup => &[KeyColumnType::Text, KeyColumnType::Text],
         }
     }
 }
@@ -127,17 +101,6 @@ impl std::fmt::Display for ObligationKind {
 /// carrying that ledger's primary key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ObligationKey {
-    /// A `session_runs` row.
-    ScopeClose { session_id: SessionId, run: TurnId },
-    /// A `parent_end_plans` row: the scope's stored kind label and id.
-    ParentEnd {
-        parent_kind: String,
-        parent_id: String,
-    },
-    /// A `session_meta` row.
-    SessionDelete { session_id: SessionId },
-    /// A `processes` row.
-    ProcessTerminal { process_id: ProcessId },
     /// An `artifact_cleanup_obligations` row: the referrer's stored pair.
     ArtifactCleanup { referrer: ArtifactReferrer },
 }
@@ -176,10 +139,6 @@ impl ObligationKey {
     #[must_use]
     pub const fn kind(&self) -> ObligationKind {
         match self {
-            Self::ScopeClose { .. } => ObligationKind::ScopeClose,
-            Self::ParentEnd { .. } => ObligationKind::ParentEnd,
-            Self::SessionDelete { .. } => ObligationKind::SessionDelete,
-            Self::ProcessTerminal { .. } => ObligationKind::ProcessTerminal,
             Self::ArtifactCleanup { .. } => ObligationKind::ArtifactCleanup,
         }
     }
@@ -190,23 +149,6 @@ impl ObligationKey {
     #[must_use]
     pub fn columns(&self) -> Vec<KeyColumn> {
         match self {
-            Self::ScopeClose { session_id, run } => vec![
-                KeyColumn::Text(session_id.as_str().to_owned()),
-                KeyColumn::Text(run.as_str().to_owned()),
-            ],
-            Self::ParentEnd {
-                parent_kind,
-                parent_id,
-            } => vec![
-                KeyColumn::Text(parent_kind.clone()),
-                KeyColumn::Text(parent_id.clone()),
-            ],
-            Self::SessionDelete { session_id } => {
-                vec![KeyColumn::Text(session_id.as_str().to_owned())]
-            }
-            Self::ProcessTerminal { process_id } => {
-                vec![KeyColumn::Text(process_id.as_str().to_owned())]
-            }
             Self::ArtifactCleanup { referrer } => vec![
                 KeyColumn::Text(referrer.kind().as_str().to_owned()),
                 KeyColumn::Text(referrer.canonical_id()),
@@ -227,17 +169,6 @@ impl ObligationKey {
     ) -> Result<Self, UndecodableObligation> {
         let mut columns = columns.into_iter();
         Ok(match kind {
-            ObligationKind::ScopeClose => Self::ScopeClose {
-                session_id: next_identity(&mut columns, kind, "session_id")?,
-                run: next_identity(&mut columns, kind, "run")?,
-            },
-            ObligationKind::ParentEnd => Self::ParentEnd {
-                parent_kind: next_text(&mut columns, kind, "parent_kind")?,
-                parent_id: next_text(&mut columns, kind, "parent_id")?,
-            },
-            ObligationKind::SessionDelete => Self::SessionDelete {
-                session_id: next_identity(&mut columns, kind, "session_id")?,
-            },
             ObligationKind::ArtifactCleanup => {
                 let referrer_kind = next_text(&mut columns, kind, "referrer_kind")?;
                 let referrer_id = next_text(&mut columns, kind, "referrer_id")?;
@@ -251,10 +182,6 @@ impl ObligationKey {
                     )?,
                 }
             }
-            ObligationKind::ProcessTerminal => Self::ProcessTerminal {
-                process_id: ProcessId::parse(&next_text(&mut columns, kind, "process_id")?)
-                    .map_err(|error| UndecodableObligation::malformed(error.to_string()))?,
-            },
         })
     }
 }
@@ -271,22 +198,6 @@ fn next_text(
             "{kind} obligation key column `{name}` is {other:?}, not text"
         ))),
     }
-}
-
-/// The next key column as an identity, or why it is not one.
-fn next_identity<T>(
-    columns: &mut impl Iterator<Item = KeyColumn>,
-    kind: ObligationKind,
-    name: &str,
-) -> Result<T, UndecodableObligation>
-where
-    T: std::str::FromStr<Err = crate::BlankIdentity>,
-{
-    next_text(columns, kind, name)?.parse().map_err(|error| {
-        UndecodableObligation::malformed(format!(
-            "{kind} obligation key column `{name}` is no identity: {error}"
-        ))
-    })
 }
 
 /// The stable id of one obligation, derived from its owning typed key.
@@ -593,15 +504,6 @@ pub trait ObligationLedger: Send + Sync {
     /// The kind this ledger holds.
     fn kind(&self) -> ObligationKind;
 
-    /// Arm `key`'s row outside a producer transaction (the leader's repair
-    /// pass): only a row that owes nothing is armed, due at `now_ms`.
-    /// `None` if the row is missing or already carries an obligation.
-    async fn arm(
-        &self,
-        key: &ObligationKey,
-        now_ms: u64,
-    ) -> Result<Option<ObligationId>, StoreError>;
-
     /// Claim at most `limit` rows due at `now_ms` (a lapsed claim included),
     /// oldest due first, each held for `claim_ttl_ms`. A row whose key does
     /// not decode is returned claimed with `key: Err`, never failing the
@@ -710,14 +612,13 @@ mod tests {
     #[test]
     fn a_column_set_this_build_cannot_name_is_undecodable() {
         for (kind, columns) in [
-            (ObligationKind::SessionDelete, vec![KeyColumn::Integer(7)]),
             (
-                ObligationKind::ScopeClose,
-                vec![KeyColumn::Text("s".to_owned())],
+                ObligationKind::ArtifactCleanup,
+                vec![KeyColumn::Integer(7), KeyColumn::Text("x".to_owned())],
             ),
             (
-                ObligationKind::ProcessTerminal,
-                vec![KeyColumn::Text("not a process id".to_owned())],
+                ObligationKind::ArtifactCleanup,
+                vec![KeyColumn::Text("session".to_owned())],
             ),
             (
                 ObligationKind::ArtifactCleanup,

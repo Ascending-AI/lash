@@ -32,7 +32,6 @@ impl ProcessEventAppendArm {
 pub(crate) struct ProcessEventBatch {
     fleet_format: lash_core_execution::FleetFormat,
     record_changed: bool,
-    arms_obligations: bool,
 }
 
 impl ProcessEventBatch {
@@ -41,19 +40,6 @@ impl ProcessEventBatch {
         Self {
             fleet_format,
             record_changed: false,
-            arms_obligations: true,
-        }
-    }
-
-    /// Start an empty batch for a process actor's own terminal
-    /// transaction: it arms no terminal publication, since that transaction
-    /// resolves the process's waiters itself, and its parent-end plan is
-    /// only the late-start fence, settled at once, since its actor runs the
-    /// cascade (ADR 0132 §11; L6, FIG-5175).
-    pub(crate) fn for_actor(fleet_format: lash_core_execution::FleetFormat) -> Self {
-        Self {
-            arms_obligations: false,
-            ..Self::for_fleet(fleet_format)
         }
     }
 
@@ -85,7 +71,6 @@ impl ProcessEventBatch {
             request,
             occurred_at_ms,
             self.fleet_format,
-            self.arms_obligations,
         )?;
         self.record_changed |= arm.record_changed();
         Ok((receipt, arm))
@@ -98,7 +83,7 @@ impl ProcessEventBatch {
         record: &ProcessRecord,
     ) -> Result<(), lash_core_execution::PluginError> {
         if self.record_changed {
-            SqliteProcessRegistry::save_process_conn(conn, record, self.arms_obligations)?;
+            SqliteProcessRegistry::save_process_conn(conn, record)?;
         }
         Ok(())
     }
@@ -380,7 +365,6 @@ impl SqliteProcessRegistry {
     pub(crate) fn save_process_conn(
         conn: &Connection,
         record: &ProcessRecord,
-        arms_obligations: bool,
     ) -> Result<(), lash_core_execution::PluginError> {
         let change_seq = Self::next_change_seq_conn(conn)?;
         crate::conn::cached_execute(
@@ -397,14 +381,7 @@ impl SqliteProcessRegistry {
             ],
         )
         .map_err(process_sqlite_error)?;
-        // The transaction that makes a process terminal arms its terminal
-        // publication (ADR 0109 §3): the row is the obligation. An actor's
-        // own terminal resolves its waiters instead.
-        if arms_obligations {
-            super::terminal_publication::arm_conn(conn, record)
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     pub(crate) fn next_change_seq_conn(
@@ -480,10 +457,9 @@ impl SqliteProcessRegistry {
             request,
             occurred_at_ms,
             fleet_format,
-            true,
         )?;
         if arm.record_changed() {
-            Self::save_process_conn(conn, record, true)?;
+            Self::save_process_conn(conn, record)?;
         }
         Ok((receipt, arm))
     }
@@ -541,16 +517,13 @@ impl SqliteProcessRegistry {
     /// prologue, transaction lifetime and outcome mapping.
     ///
     /// `occurred_at_ms` is the caller's clock and the only clock this function
-    /// sees; it never reads one itself. Without `arms_obligations` (an
-    /// actor's own terminal) a terminal append's parent-end plan is settled
-    /// at once: the actor runs the cascade.
+    /// sees; it never reads one itself.
     pub(crate) fn stage_process_event_append_conn(
         conn: &Connection,
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
         fleet_format: lash_core_execution::FleetFormat,
-        arms_obligations: bool,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
         let process_id = record.id.clone();
@@ -654,7 +627,6 @@ impl SqliteProcessRegistry {
                         &lash_core_execution::ScopeId::process(process_id.clone()),
                         occurred_at_ms,
                         fleet_format,
-                        !arms_obligations,
                     )?;
                 }
                 Self::deliver_process_wake_conn(conn, wake_delivery.as_ref(), occurred_at_ms)?;

@@ -624,13 +624,6 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(value, lash::runtime::RuntimeErrorCode::TransientCancelWatch)
     });
-    // W0193: lash::runtime::RuntimeErrorCode::TransientTerminalPublication [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::TransientTerminalPublication
-        )
-    });
     // W0194: lash::runtime::RuntimeErrorCode::TurnCancelGateDecode [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(value, lash::runtime::RuntimeErrorCode::TurnCancelGateDecode)

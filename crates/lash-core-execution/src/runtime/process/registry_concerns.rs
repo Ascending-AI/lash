@@ -448,26 +448,10 @@ pub trait ProcessEventLog: ProcessQuery {
     ) -> Result<Vec<ProcessEvent>, PluginError>;
 }
 
-/// Where one terminal process's publication to its engine waiters stands
-/// (ADR 0109 §3, `ProcessTerminal`).
-///
-/// The terminal transaction arms it on the process row; the engine settles it
-/// when the process's terminal promise resolved, from the journal that
-/// published it or from the relay that retries a publication the journal
-/// never made.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessTerminalPublication {
-    /// The obligation the terminal transaction armed.
-    pub id: crate::store::ObligationId,
-    /// Where it stands.
-    pub state: crate::store::ObligationState,
-}
-
 /// Durable execution lifecycle transitions.
 ///
 /// The started fact, wait markers, the abandon request, authority-bound
-/// terminal completion, and the
-/// parent-end teardown plans retained atomically with a terminal outcome.
+/// terminal completion, and the ended-scope rows that fence a late start.
 #[async_trait::async_trait]
 pub trait ProcessLifecycle: Send + Sync {
     /// Complete a process under an explicit, auditable completion authority.
@@ -512,31 +496,10 @@ pub trait ProcessLifecycle: Send + Sync {
     /// must ride the same transaction as the fact that ended the scope, so a
     /// child either commits before the row and is swept, or after it and is
     /// refused at registration. Repetition on an existing row is an idempotent
-    /// no-op that preserves the first `ended_at_ms`, including on a row that
-    /// is already settled.
+    /// no-op that preserves the first `ended_at_ms`.
     async fn record_parent_end(&self, parent: &crate::ScopeId) -> Result<(), PluginError>;
 
-    /// Record that the engine published `process_id`'s stored terminal to its
-    /// waiters itself (ADR 0109 §3, `ProcessTerminal`). Every transaction that
-    /// makes a process terminal arms the row's terminal-publication
-    /// obligation; an engine that resolved the process's terminal promise in
-    /// the journal that stored the terminal settles it here, delivered,
-    /// whatever claim a relay holds on it (that relay then settles
-    /// `ClaimLost`), so no relay publishes it again. `false` when the row owes
-    /// no publication: not terminal, already delivered, or gone.
-    async fn settle_terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<bool, PluginError>;
-
-    /// `process_id`'s terminal publication, or `None` while the row owes
-    /// none: not terminal, or gone.
-    async fn terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<ProcessTerminalPublication>, PluginError>;
-
-    /// Load the ledger row for one parent scope, settled or not.
+    /// Load the ledger row for one parent scope.
     ///
     /// Registration reads this to fence a late start: a start whose starter
     /// or lifetime scope has closed is refused rather than left unvisited.
@@ -544,75 +507,6 @@ pub trait ProcessLifecycle: Send + Sync {
         &self,
         parent: &crate::ScopeId,
     ) -> Result<Option<ParentEndPlan>, PluginError>;
-
-    /// Load the ledger row keyed `(parent_kind, parent_id)` — the key a
-    /// `ParentEnd` obligation's claim names (ADR 0109). `None` when no row
-    /// carries the key. A row whose typed payload this build cannot decode
-    /// is [`PluginError::StoredDataCorrupt`], which the relay stalls
-    /// `undecodable` rather than failing its due page.
-    async fn get_parent_end_plan_by_key(
-        &self,
-        parent_kind: &str,
-        parent_id: &str,
-    ) -> Result<Option<ParentEndPlan>, PluginError>;
-
-    /// Page the children this parent-end plan still has to cancel.
-    ///
-    /// Returns nonterminal rows whose recorded lifetime is `Until(parent)`
-    /// and that do not already carry a cancel request, ordered by process id and resumed after `after`. A terminal
-    /// child and a child already carrying a request are settled by definition,
-    /// so two concurrent passes converge instead of conflicting.
-    ///
-    /// A session's plan also owes every such child of a turn or session-operation
-    /// scope inside the session that has no ledger row of its own (FIG-3948).
-    /// Such a scope is a turn the session never admitted as a root: no run
-    /// close records its row, and the session's close is the proof that it
-    /// can no longer become one. A scope inside the session that has its own
-    /// row is its own plan's to sweep.
-    async fn list_parent_end_children(
-        &self,
-        parent: &crate::ScopeId,
-        after: Option<&ProcessId>,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<ProcessRecord>, PluginError>;
-
-    /// Deliver a due plan and arm reclaim atomically. A claimed plan waits
-    /// for its token-fenced obligation settlement; a stalled plan stays retained.
-    /// Repetition is idempotent.
-    async fn settle_parent_end_plan(&self, parent: &crate::ScopeId) -> Result<(), PluginError>;
-
-    /// Page turn and session-operation parent scopes that still owe a ledger row.
-    ///
-    /// A turn's ledger row is written immediately after the turn commit rather
-    /// than inside it, and a drain's row after its end receipt, because a
-    /// session store and a process registry are separate stores on every SQL
-    /// tier. A crash between the two leaves live children naming an owner that
-    /// will never end again, so recovery re-derives the row: these are the
-    /// candidates, and the caller decides which of them actually ended before
-    /// writing anything.
-    ///
-    /// Returns distinct turn and session-operation scopes named by at least one
-    /// nonterminal child row and carrying no ledger row, ordered by scope id,
-    /// resumed strictly after `after` and bounded by `limit`.
-    ///
-    /// The cursor is what keeps the pass from head-of-line blocking: a
-    /// candidate can be unresolvable for a long time — an uncommitted turn
-    /// that is never redriven, a session whose store this worker cannot open —
-    /// and without a cursor a full page of such scopes would occupy every pass
-    /// forever, so no later scope's row would ever be re-derived.
-    ///
-    /// The default is the empty page, which is the correct answer for a tier
-    /// whose end evidence and ledger row are steps of one durable execution:
-    /// the substrate replays the second step, so there is no window to
-    /// re-derive and no candidate to report.
-    async fn list_unrecorded_opener_parents(
-        &self,
-        after: Option<&str>,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<crate::ScopeId>, PluginError> {
-        let _ = (after, limit);
-        Ok(Vec::new())
-    }
 
     /// Record the durable "execution started" fact (ADR 0110).
     ///
@@ -788,8 +682,8 @@ pub trait ProcessRetention: Send + Sync {
     /// Session-scoped trigger-mutation receipts follow their owner's ADR 0049
     /// deletion frontier during reconciliation; host and platform receipts
     /// remain owned by the trigger store's explicit cutoff lever. A process owns
-    /// no session store: the attachments it held are released by the cleanup
-    /// its terminal publication planned (ADR 0124), never by the prune.
+    /// no session store: the attachments it held are released by its
+    /// artifact cleanup (ADR 0124), never by the prune.
     /// Backends must fail toward retaining the terminal process if the prune
     /// cannot complete.
     /// Host-scheduled retention: hosts that project results/events into their

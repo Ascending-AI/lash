@@ -17,9 +17,7 @@ use std::sync::Arc;
 use super::obligations::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, plugin_delivery_error,
 };
-use crate::store::{
-    ArtifactCleanupLedger, DeliveryError, ObligationKey, ObligationKind, ObligationLedger,
-};
+use crate::store::{ArtifactCleanupLedger, DeliveryError, ObligationKey, ObligationLedger};
 use crate::{
     ArtifactCarry, ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreError,
     ArtifactStoreId, ModuleArtifactStore, PluginError, ProcessDefinitionDraft, ProcessDefinitionId,
@@ -191,6 +189,27 @@ impl ArtifactCleanupRelay {
             policy: RelayPolicy::default(),
             metrics: Default::default(),
         }
+    }
+
+    /// The relay over `backend`'s store set, its referrers' authorities read
+    /// from that same store set, with `engines` for each engine's own store.
+    #[must_use]
+    pub fn over_backend(backend: &crate::Backend, engines: ProcessEngineRegistry) -> Self {
+        Self::new(ArtifactCleanupPorts {
+            ledger: backend.artifact_cleanup(),
+            authorities: Arc::new(StoreSetAuthorities {
+                sessions: backend.session_store_factory(),
+                processes: backend.process_registry(),
+                triggers: backend.trigger_store(),
+            }),
+            process_env: backend.process_env_store(),
+            modules: backend.module_artifacts(),
+            definitions: backend.definition_store(),
+            turn_preludes: backend.turn_prelude_store(),
+            engines,
+            attachments: backend.attachment_referrers(),
+            clock: backend.clock(),
+        })
     }
 
     /// The same relay under a non-default policy (a host lever, ADR 0014).
@@ -655,12 +674,7 @@ impl ObligationRelay for ArtifactCleanupRelay {
 
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
         let ObligationDelivery { id, key, .. } = delivery;
-        let ObligationKey::ArtifactCleanup { referrer } = key else {
-            return Err(DeliveryFailure::key_mismatch(
-                ObligationKind::ArtifactCleanup,
-                key,
-            ));
-        };
+        let ObligationKey::ArtifactCleanup { referrer } = key;
         // 1. A missing row was settled by another relay.
         let Some(cleanup) = self
             .ports

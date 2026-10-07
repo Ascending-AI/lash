@@ -207,19 +207,9 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     owning_process_id TEXT,
     retention_kind TEXT NOT NULL DEFAULT 'until_gc',
     retention_last_turns BIGINT,
-    obligation_id TEXT,
-    obligation_state TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_session_meta_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
     -- The session's standing fault (ADR 0109 §9) and when it was recorded.
     fault_json TEXT,
     fault_at_ms BIGINT CONSTRAINT ck_session_meta_fault CHECK ((fault_json IS NULL) = (fault_at_ms IS NULL)),
-    CONSTRAINT ck_session_meta_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_session_meta_retention CHECK ((retention_kind IN ('until_gc', 'head_only') AND retention_last_turns IS NULL) OR (retention_kind = 'last_turns' AND retention_last_turns > 0)),
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
@@ -227,16 +217,6 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     CONSTRAINT ck_session_meta_caused_by_family CHECK ((caused_by_kind IS NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'turn' AND caused_by_session_id IS NOT NULL AND caused_by_turn_id IS NOT NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'effect_address' AND caused_by_effect_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'tool_call' AND caused_by_session_id IS NOT NULL AND caused_by_call_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process' AND caused_by_process_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process_event' AND caused_by_process_id IS NOT NULL AND caused_by_process_event_sequence IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'trigger_occurrence' AND caused_by_occurrence_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'session_node' AND caused_by_session_id IS NOT NULL AND caused_by_node_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL) OR (caused_by_kind IS NOT NULL AND NOT (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node'))))
 );
 
--- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
--- and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_session_meta_obligation_id
-    ON lash_session_meta(obligation_id);
-CREATE INDEX IF NOT EXISTS idx_lash_session_meta_obligation_due
-    ON lash_session_meta(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_lash_session_meta_obligation_stalled
-    ON lash_session_meta(obligation_id)
-    WHERE obligation_state = 'stalled';
 -- The fault listing (ADR 0109 §9).
 CREATE INDEX IF NOT EXISTS idx_lash_session_meta_fault
     ON lash_session_meta(session_id)
@@ -330,16 +310,6 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     terminal_cause TEXT, -- NULL while open or admitted; the tombstone's cause after.
     terminal_at_ms BIGINT,
     trace_cause_json TEXT, -- The batch's trace cause, written once at enqueue; NULL is a root cause.
-    obligation_id TEXT,
-    obligation_state TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_queued_work_batches_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
-    CONSTRAINT ck_queued_work_batches_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_queued_work_batches_work_kind CHECK ((jsonb_typeof(payload_json::jsonb) = 'object' AND ((work_kind = 'turn' AND payload_json::jsonb ->> 'type' = 'process_wake') OR (work_kind = 'control' AND payload_json::jsonb ->> 'type' = 'session_command'))) IS TRUE),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),
@@ -347,16 +317,6 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
--- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
--- and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_queued_work_batches_obligation_id
-    ON lash_queued_work_batches(obligation_id);
-CREATE INDEX IF NOT EXISTS idx_lash_queued_work_batches_obligation_due
-    ON lash_queued_work_batches(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_lash_queued_work_batches_obligation_stalled
-    ON lash_queued_work_batches(obligation_id)
-    WHERE obligation_state = 'stalled';
 -- Both scans range over live batches only: a tombstone never lengthens an
 -- open-work scan (ADR 0101 §8).
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_admission_order
@@ -381,16 +341,6 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     run_spec_hash TEXT,
     terminal_at_ms BIGINT, -- When the input's tombstone was written; NULL until then.
     trace_cause_json TEXT, -- The submission's trace cause, written once at acceptance; NULL is a root cause.
-    obligation_id TEXT,
-    obligation_state TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_pending_turn_inputs_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
-    CONSTRAINT ck_pending_turn_inputs_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
     CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),
@@ -399,16 +349,6 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
--- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
--- and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_obligation_id
-    ON lash_pending_turn_inputs(obligation_id);
-CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_obligation_due
-    ON lash_pending_turn_inputs(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_obligation_stalled
-    ON lash_pending_turn_inputs(obligation_id)
-    WHERE obligation_state = 'stalled';
 -- All undelivered inputs, including ones a run already holds. Settled rows
 -- cannot lengthen an open-input scan, and the key retains enqueue order.
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_open_state
@@ -456,33 +396,13 @@ CREATE TABLE IF NOT EXISTS lash_session_runs (
     terminal_cause_json TEXT,
     terminal_head_revision BIGINT,
     terminal_at_ms BIGINT,
-    obligation_id TEXT,
-    obligation_state TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_session_runs_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
-    CONSTRAINT ck_session_runs_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_session_runs_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
 );
 
--- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
--- and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_session_runs_obligation_id
-    ON lash_session_runs(obligation_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_session_runs_unfinished
     ON lash_session_runs(session_id)
     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL;
-CREATE INDEX IF NOT EXISTS idx_lash_session_runs_obligation_due
-    ON lash_session_runs(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_lash_session_runs_obligation_stalled
-    ON lash_session_runs(obligation_id)
-    WHERE obligation_state = 'stalled';
 CREATE INDEX IF NOT EXISTS idx_lash_session_runs_open
     ON lash_session_runs(session_id, run)
     WHERE terminal_kind IS NULL;
@@ -502,29 +422,9 @@ CREATE TABLE IF NOT EXISTS lash_control_intents (
     kind_json TEXT NOT NULL,
     state TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged')),
     state_json TEXT NOT NULL,
-    created_at_ms BIGINT NOT NULL,
-    obligation_id TEXT,
-    obligation_state TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_control_intents_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
-    CONSTRAINT ck_control_intents_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE)
+    created_at_ms BIGINT NOT NULL
 );
 
--- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
--- and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_control_intents_obligation_id
-    ON lash_control_intents(obligation_id);
-CREATE INDEX IF NOT EXISTS idx_lash_control_intents_obligation_due
-    ON lash_control_intents(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_lash_control_intents_obligation_stalled
-    ON lash_control_intents(obligation_id)
-    WHERE obligation_state = 'stalled';
 CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
     ON lash_control_intents(session_id, kind);
 
@@ -602,21 +502,11 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     cascade_cursor TEXT,
     written_epoch BIGINT,
     record_json TEXT NOT NULL,
-    obligation_id TEXT,
-    obligation_state TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_processes_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
     consumer_hold_key TEXT,
     consumer_hold_scope_kind TEXT,
     consumer_hold_scope_id TEXT COLLATE "C",
     consumer_hold_cancels BOOLEAN,
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
-    CONSTRAINT ck_processes_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'session_operation', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
@@ -639,16 +529,6 @@ CREATE TABLE IF NOT EXISTS lash_abandoned_consumer_holds (
 CREATE INDEX IF NOT EXISTS idx_lash_abandoned_consumer_holds_owner
     ON lash_abandoned_consumer_holds(owner_scope_kind, owner_scope_id);
 
--- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
--- and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_processes_obligation_id
-    ON lash_processes(obligation_id);
-CREATE INDEX IF NOT EXISTS idx_lash_processes_obligation_due
-    ON lash_processes(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_lash_processes_obligation_stalled
-    ON lash_processes(obligation_id)
-    WHERE obligation_state = 'stalled';
 -- A start key maps to the one retained process minted for it (ADR 0107).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_processes_start_key
     ON lash_processes(start_key) WHERE start_key IS NOT NULL;
@@ -738,30 +618,10 @@ CREATE TABLE IF NOT EXISTS lash_parent_end_plans (
     parent_id TEXT COLLATE "C" NOT NULL,
     parent_payload TEXT NOT NULL,
     ended_at_ms BIGINT NOT NULL,
-    obligation_id TEXT,
-    obligation_state TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_parent_end_plans_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
-    CONSTRAINT ck_parent_end_plans_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     PRIMARY KEY (parent_kind, parent_id),
     CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'session_operation', 'process', 'session'))
 );
 
--- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
--- and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_parent_end_plans_obligation_id
-    ON lash_parent_end_plans(obligation_id);
-CREATE INDEX IF NOT EXISTS idx_lash_parent_end_plans_obligation_due
-    ON lash_parent_end_plans(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_lash_parent_end_plans_obligation_stalled
-    ON lash_parent_end_plans(obligation_id)
-    WHERE obligation_state = 'stalled';
 
 CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     replay_key TEXT PRIMARY KEY,

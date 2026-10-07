@@ -21,52 +21,13 @@ use lash_store_sql::artifact::cleanup_obligations::{
     CleanupObligationLedgerStatements, CleanupObligationStatements,
 };
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
-use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
-use lash_store_sql::process::processes::ProcessObligationStatements;
-use lash_store_sql::session::meta::SessionMetaObligationStatements;
-use lash_store_sql::session_runs::runs::SessionRunObligationStatements;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Postgres, Row};
+use sqlx::{PgPool, Row};
 
 use crate::StoreError;
 use crate::begin_guarded;
-use crate::process_sql::{
-    ParentEndPlanObligationPostgresStatements, ProcessObligationPostgresStatements,
-};
-use crate::session_runs::SessionRunObligationPostgresStatements;
-use crate::session_sql::SessionMetaObligationPostgresStatements;
 use crate::support::store_sqlx_error;
 
-/// One ledger's statements: the shared set and PostgreSQL's locking due read.
-struct LedgerSql<S, P> {
-    shared: S,
-    locking: P,
-}
-
-static RUNS: LazyLock<
-    LedgerSql<SessionRunObligationStatements, SessionRunObligationPostgresStatements>,
-> = LazyLock::new(|| LedgerSql {
-    shared: SessionRunObligationStatements::render(Dialect::postgres()),
-    locking: SessionRunObligationPostgresStatements::render(Dialect::postgres()),
-});
-static META: LazyLock<
-    LedgerSql<SessionMetaObligationStatements, SessionMetaObligationPostgresStatements>,
-> = LazyLock::new(|| LedgerSql {
-    shared: SessionMetaObligationStatements::render(Dialect::postgres()),
-    locking: SessionMetaObligationPostgresStatements::render(Dialect::postgres()),
-});
-static PLANS: LazyLock<
-    LedgerSql<ParentEndPlanObligationStatements, ParentEndPlanObligationPostgresStatements>,
-> = LazyLock::new(|| LedgerSql {
-    shared: ParentEndPlanObligationStatements::render(Dialect::postgres()),
-    locking: ParentEndPlanObligationPostgresStatements::render(Dialect::postgres()),
-});
-static PROCESSES: LazyLock<
-    LedgerSql<ProcessObligationStatements, ProcessObligationPostgresStatements>,
-> = LazyLock::new(|| LedgerSql {
-    shared: ProcessObligationStatements::render(Dialect::postgres()),
-    locking: ProcessObligationPostgresStatements::render(Dialect::postgres()),
-});
 static CLEANUP: LazyLock<CleanupObligationStatements> =
     LazyLock::new(|| CleanupObligationStatements::render(Dialect::postgres()));
 static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
@@ -76,22 +37,6 @@ const CLEANUP_DUE_LOCKING: &str = "SELECT obligation_id FROM lash_artifact_clean
 /// `kind`'s shared statements and its locking due read.
 fn obligation_sql(kind: ObligationKind) -> (ObligationSql<'static>, &'static str) {
     match kind {
-        ObligationKind::ScopeClose => (
-            RUNS.shared.obligation_sql(),
-            RUNS.locking.obligation_select_due_locking.sql(),
-        ),
-        ObligationKind::SessionDelete => (
-            META.shared.obligation_sql(),
-            META.locking.obligation_select_due_locking.sql(),
-        ),
-        ObligationKind::ParentEnd => (
-            PLANS.shared.obligation_sql(),
-            PLANS.locking.obligation_select_due_locking.sql(),
-        ),
-        ObligationKind::ProcessTerminal => (
-            PROCESSES.shared.obligation_sql(),
-            PROCESSES.locking.obligation_select_due_locking.sql(),
-        ),
         ObligationKind::ArtifactCleanup => (CLEANUP_LEDGER.obligation_sql(), CLEANUP_DUE_LOCKING),
     }
 }
@@ -232,59 +177,6 @@ fn read_claim(
     })
 }
 
-fn key_query<'q>(
-    mut query: sqlx::query::Query<'q, Postgres, sqlx::postgres::PgArguments>,
-    key: &ObligationKey,
-) -> sqlx::query::Query<'q, Postgres, sqlx::postgres::PgArguments> {
-    for column in key.columns() {
-        query = match column {
-            KeyColumn::Text(text) => query.bind(text),
-            KeyColumn::Integer(integer) => query.bind(integer),
-        };
-    }
-    query
-}
-
-/// The due instant of an obligation armed by a transaction that reads the
-/// database clock — the process registry's (ADR 0044): due at once. The
-/// relays claim on their host clock, so an arm stamped by a database clock
-/// ahead of a relay would defer the row's first attempt until that relay's
-/// clock caught up; a row due at once is taken by the first pass of any
-/// relay.
-pub(crate) const DUE_AT_ONCE_MS: u64 = 0;
-
-/// Arm `key`'s row as a fresh obligation due at `now_ms` inside a producer's
-/// own transaction: the helper a slice's producer calls on its transaction.
-/// Every kind uses its typed key's id. `None` when the row is missing or
-/// already carries an obligation.
-pub(crate) async fn arm_obligation_tx(
-    conn: &mut sqlx::PgConnection,
-    key: &ObligationKey,
-    now_ms: u64,
-) -> Result<Option<ObligationId>, StoreError> {
-    arm_table_tx(conn, obligation_sql(key.kind()).0, key, now_ms).await
-}
-
-/// Arm `key`'s row in the table `sql` addresses as obligation `id`, due at
-/// `now_ms`, on the caller's connection. `None` when the row is missing or
-/// already carries an obligation.
-pub(crate) async fn arm_table_tx(
-    conn: &mut sqlx::PgConnection,
-    sql: ObligationSql<'static>,
-    key: &ObligationKey,
-    now_ms: u64,
-) -> Result<Option<ObligationId>, StoreError> {
-    let id = key.id();
-    let changed = key_query(sqlx::query(sql.arm.sql()), key)
-        .bind(id.as_str())
-        .bind(sql_i64("obligation due instant", now_ms)?)
-        .execute(conn)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
-    Ok((changed == 1).then_some(id))
-}
-
 /// One PostgreSQL ledger: `kind`'s statements over the store's pool.
 #[derive(Clone)]
 pub(crate) struct PostgresObligationLedger {
@@ -292,7 +184,6 @@ pub(crate) struct PostgresObligationLedger {
     sql: ObligationSql<'static>,
     locking: &'static str,
     pool: PgPool,
-    observer: crate::StoreObserver,
     fence: crate::guarded_tx::WriterFence,
 }
 
@@ -301,28 +192,13 @@ impl PostgresObligationLedger {
         kind: ObligationKind,
         pool: PgPool,
         fence: crate::guarded_tx::WriterFence,
-        observer: crate::StoreObserver,
     ) -> Self {
         let (sql, locking) = obligation_sql(kind);
-        Self::over_table(kind, sql, locking, pool, fence, observer)
-    }
-
-    /// The ledger of one table of `kind`, through that table's statements
-    /// and its locking due read.
-    pub(crate) fn over_table(
-        kind: ObligationKind,
-        sql: ObligationSql<'static>,
-        locking: &'static str,
-        pool: PgPool,
-        fence: crate::guarded_tx::WriterFence,
-        observer: crate::StoreObserver,
-    ) -> Self {
         Self {
             kind,
             sql,
             locking,
             pool,
-            observer,
             fence,
         }
     }
@@ -332,22 +208,6 @@ impl PostgresObligationLedger {
 impl ObligationLedger for PostgresObligationLedger {
     fn kind(&self) -> ObligationKind {
         self.kind
-    }
-
-    async fn arm(
-        &self,
-        key: &ObligationKey,
-        now_ms: u64,
-    ) -> Result<Option<ObligationId>, StoreError> {
-        if key.kind() != self.kind {
-            return Err(StoreError::Backend(format!(
-                "a {} key cannot arm the {} ledger",
-                key.kind(),
-                self.kind
-            )));
-        }
-        let mut conn = crate::acquire_runtime_connection(&self.pool, &self.observer).await?;
-        arm_obligation_tx(&mut conn, key, now_ms).await
     }
 
     async fn claim_due(

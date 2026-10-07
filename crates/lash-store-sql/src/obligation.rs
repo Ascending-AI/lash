@@ -13,9 +13,8 @@ use crate::Rendered;
 /// One ledger's rendered obligation statements.
 #[derive(Clone, Copy, Debug)]
 pub struct ObligationSql<'a> {
-    /// How many key columns the arm binds first and the projections end with.
+    /// How many key columns the projections end with.
     pub key_columns: usize,
-    pub arm: &'a Rendered,
     pub select_due: &'a Rendered,
     pub claim_due_row: &'a Rendered,
     pub claim: &'a Rendered,

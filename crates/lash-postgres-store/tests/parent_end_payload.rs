@@ -4,9 +4,7 @@
 //!
 //! The projection is index material only: injective, comparable, never
 //! parsed. Rows are injected straight into `lash_parent_end_plans` so each
-//! refusal reaches `get_parent_end_plan_by_key`/`get_parent_end_plan`
-//! exactly as a stored row would — the keyed read is the one the ParentEnd
-//! obligation's relay makes, and a row that refuses it stalls `undecodable`.
+//! refusal reaches `get_parent_end_plan` exactly as a stored row would.
 
 use std::sync::Arc;
 
@@ -68,7 +66,7 @@ async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage, PgPool)> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_ledger_row_decodes_its_typed_payload() {
-    let Some((_database_lock, storage, _pool)) = storage().await else {
+    let Some((_database_lock, storage, pool)) = storage().await else {
         eprintln!("skipping PostgreSQL parent-end payload test: database URL is not set");
         return;
     };
@@ -100,43 +98,8 @@ async fn a_ledger_row_decodes_its_typed_payload() {
         "the ledger decodes the typed parent from its payload"
     );
 
-    // Leave no pending row behind on the shared database: a later ledger
-    // listing on it must not meet a scope it did not end.
-    registry
-        .settle_parent_end_plan(&scope)
-        .await
-        .expect("settle the row the test ended");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_pre_cutover_ledger_row_is_refused_not_migrated() {
-    let Some((_database_lock, storage, pool)) = storage().await else {
-        eprintln!("skipping PostgreSQL parent-end payload test: database URL is not set");
-        return;
-    };
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-
-    // The pre-FIG-3418 row: a `ParentScope` serialized without the version
-    // wrapper, keyed by the rendered `{session}/{turn}` id it used to parse.
-    let (kind, id) = ("turn", "pg-old-session/pg-old-turn");
-    clean_injected(&pool, kind, id).await;
-    let old_payload = serde_json::json!({
-        "kind": "turn",
-        "session_id": "pg-old-session",
-        "turn_id": "pg-old-turn",
-    })
-    .to_string();
-    inject(&pool, kind, id, &old_payload).await;
-
-    let error = registry
-        .get_parent_end_plan_by_key(kind, id)
-        .await
-        .expect_err("an old-format row must fail closed, not decode");
-    clean_injected(&pool, kind, id).await;
-    assert!(
-        error.to_string().contains("malformed scope payload"),
-        "the refusal names the payload shape: {error}"
-    );
+    // Leave no row behind on the shared database.
+    clean_injected(&pool, scope.storage_kind(), &scope.storage_id()).await;
 }
 
 /// ADR 0094's version-2 row keyed a parent scope (`Host` included) rather
@@ -163,7 +126,7 @@ async fn a_parent_scope_row_is_refused_as_malformed() {
     inject(&pool, kind, &id, &payload).await;
 
     let error = registry
-        .get_parent_end_plan_by_key(kind, &id)
+        .get_parent_end_plan(&scope)
         .await
         .expect_err("a parent-scope row must refuse");
     clean_injected(&pool, kind, &id).await;
@@ -193,7 +156,7 @@ async fn an_unsupported_payload_version_is_refused() {
     inject(&pool, kind, &id, &payload).await;
 
     let error = registry
-        .get_parent_end_plan_by_key(kind, &id)
+        .get_parent_end_plan(&scope)
         .await
         .expect_err("a newer payload version must refuse");
     clean_injected(&pool, kind, &id).await;
@@ -219,15 +182,16 @@ async fn a_payload_that_disagrees_with_its_projection_is_refused() {
         .expect("encode the payload");
     // The payload names one turn; the projection names another. A reader that
     // trusted either side alone would resurrect the wrong scope.
-    let (kind, id) = ("turn", "pg-mismatch-session/other-turn");
-    clean_injected(&pool, kind, id).await;
-    inject(&pool, kind, id, &payload).await;
+    let other = turn_scope("pg-mismatch-session", "other-turn");
+    let (kind, id) = (other.storage_kind(), other.storage_id());
+    clean_injected(&pool, kind, &id).await;
+    inject(&pool, kind, &id, &payload).await;
 
     let error = registry
-        .get_parent_end_plan_by_key(kind, id)
+        .get_parent_end_plan(&other)
         .await
         .expect_err("a projection/payload disagreement must refuse");
-    clean_injected(&pool, kind, id).await;
+    clean_injected(&pool, kind, &id).await;
     assert!(
         error
             .to_string()

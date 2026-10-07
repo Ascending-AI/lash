@@ -377,10 +377,6 @@ impl StoreSet for LayeredStoreSet {
         }
     }
 
-    fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {
-        self.inner.session_delete_ledger()
-    }
-
     fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger> {
         Arc::clone(&self.artifact_cleanup)
     }

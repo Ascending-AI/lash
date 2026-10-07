@@ -1168,29 +1168,14 @@ pub async fn a_cascade_wider_than_its_batch_ends_a_tree_three_levels_deep(
     })
     .await?;
     serving.stop().await;
-    // The actors ran the cascade: no ended scope left a relay anything to
-    // publish or cascade.
+    // Every ended scope left its late-start fence.
     let registry = backend.process_registry();
     for process in &everyone {
-        let owed = |error: crate::PluginError| LawBroken(error.to_string());
-        ensure!(
-            registry
-                .terminal_publication(process)
-                .await
-                .map_err(owed)?
-                .is_none(),
-            "{process}'s terminal armed a terminal publication"
-        );
         let plan = registry
             .get_parent_end_plan(&ScopeId::process(process.clone()))
             .await
-            .map_err(owed)?;
-        ensure!(
-            plan.as_ref().is_some_and(|plan| {
-                plan.obligation_state == crate::store::ObligationState::Delivered
-            }),
-            "{process}'s scope left no settled parent-end fence: {plan:?}"
-        );
+            .map_err(|error| LawBroken(error.to_string()))?;
+        ensure!(plan.is_some(), "{process}'s scope left no parent-end fence");
     }
     let mut origins = BTreeMap::<String, usize>::new();
     for process in &everyone[1..] {

@@ -221,20 +221,10 @@ pub struct RuntimeControlConfig {
     /// config of the runtime that executes the run, so a session's resident
     /// open applies the policy its open stated.
     pub tool_source_policy: crate::ToolSourcePolicy,
-    /// Where the shift reports a logical run's closed scope, after the
-    /// run's terminal evidence is durable (FIG-3607 item 7). Defaults to
-    /// [`NoScopeClose`](crate::engine::NoScopeClose); a host composition that
-    /// owns lifetime scopes installs the process registry's
-    /// [`RegistryScopeClose`](crate::runtime::process::RegistryScopeClose).
-    ///
-    /// A close reaches this sink only as the delivery of the `ScopeClose`
-    /// obligation the terminal transaction armed on the run's row, through
-    /// the backend's ledger of that kind (ADR 0109 §3).
-    pub scope_close: Arc<dyn crate::engine::ScopeCloseSink>,
     /// The host's bound on one obligation delivery (ADR 0109 §1.8). This is
     /// the one source every relay reads: [`relay_policy`](Self::relay_policy)
-    /// derives the policy a reconcile tick's due pass and a producer's
-    /// immediate `deliver_now` run under alike, so a delivery honors the
+    /// derives the policy the leader's artifact-cleanup due pass and a
+    /// producer's immediate `deliver_now` run under alike, so a delivery honors the
     /// host's bound however it is reached.
     pub recovery_pass: crate::engine::RecoveryPassBudget,
 }
@@ -299,7 +289,6 @@ impl RuntimeHostConfig {
                 trigger_route_restorer: None,
                 process_tool_visibility_filter: None,
                 tool_source_policy: crate::ToolSourcePolicy::default(),
-                scope_close: Arc::new(crate::engine::NoScopeClose),
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),

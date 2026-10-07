@@ -5,10 +5,7 @@
 //! may be pruned before its children settle, so a foreign key onto
 //! `processes` cannot express the fact this table records.
 
-use std::num::NonZeroUsize;
-
-use lash_core_execution::{EffectOpener, ParentEndPlan, PluginError, ProcessRecord, ScopeId};
-use lash_sansio::ProcessId;
+use lash_core_execution::{ParentEndPlan, PluginError, ScopeId};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::sql::process_sql;
@@ -50,16 +47,13 @@ fn ledger_payload(
         .map_err(process_decode_error)
 }
 
-/// The row `parent`'s record writes is also its `ParentEnd` obligation, due
-/// immediately (ADR 0109 §3): the record arms it in the same transaction, so
-/// no crash window can leave a plan nothing will ever deliver. A replayed
-/// record keeps the first row — and the obligation it already owes.
+/// Record that `parent` ended at `ended_at_ms`, in the caller's
+/// transaction. A repeated record keeps the first row.
 pub(super) fn record_conn(
     conn: &Connection,
     parent: &ScopeId,
     ended_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
-    cascaded_by_actor: bool,
 ) -> Result<(), PluginError> {
     let (kind, id) = ledger_key(parent);
     crate::conn::cached_execute(
@@ -73,26 +67,6 @@ pub(super) fn record_conn(
         ],
     )
     .map_err(process_sqlite_error)?;
-    crate::obligation_ledger::arm_obligation_tx(
-        conn,
-        &lash_core_execution::store::ObligationKey::ParentEnd {
-            parent_kind: kind.to_string(),
-            parent_id: id.clone(),
-        },
-        ended_at_ms,
-    )
-    .map_err(PluginError::from)?;
-    if cascaded_by_actor {
-        // The ended process's actor runs its cascade (ADR 0132 §11): the
-        // row stays as the late-start fence and settles at once, so no
-        // relay runs it.
-        crate::conn::cached_execute(
-            conn,
-            process_sql().plan.settle.sql(),
-            params![kind, id, ended_at_ms as i64],
-        )
-        .map_err(process_sqlite_error)?;
-    }
     // The close ends every wait the scope's calls still hold (ADR 0116
     // §3.6): an abandoned call leaks no hold, and a late start under the
     // closed scope is refused above, so no redrive needs the row pinned.
@@ -142,97 +116,32 @@ pub(super) async fn record(
                 &parent,
                 ended_at_ms,
                 fleet_format,
-                false,
             )))
         })
         .await
         .map_err(process_sqlite_error)?
 }
 
-/// One stored row's plan. A row whose typed payload does not decode is
-/// corrupt stored data: the obligation relay stalls it `undecodable` rather
-/// than failing its due page (ADR 0109 §1.4).
-#[allow(clippy::too_many_arguments)]
+/// One stored row's plan. A typed payload that does not decode is corrupt
+/// stored data.
 fn decode_plan(
-    kind: String,
-    id: String,
-    payload: String,
+    kind: &str,
+    id: &str,
+    payload: &str,
     ended: i64,
-    obligation_id: Option<String>,
-    obligation_state: Option<String>,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<ParentEndPlan, PluginError> {
     let parent =
-        ScopeId::from_storage_columns(&kind, &id, &payload, fleet_format).map_err(|error| {
+        ScopeId::from_storage_columns(kind, id, payload, fleet_format).map_err(|error| {
             PluginError::StoredDataCorrupt {
                 record_kind: "parent_end_plan".to_string(),
                 message: error.to_string(),
             }
         })?;
-    // The record arms the row in the transaction that writes it, so a
-    // committed row always names its obligation and where it stands.
-    let (Some(obligation_id), Some(obligation_state)) = (obligation_id, obligation_state) else {
-        return Err(PluginError::StoredDataCorrupt {
-            record_kind: "parent_end_plan".to_string(),
-            message: format!("scope `{kind}`/`{id}` closed without its obligation"),
-        });
-    };
-    let obligation_state = lash_core_execution::store::ObligationState::from_label(
-        &obligation_state,
-    )
-    .map_err(|error| PluginError::StoredDataCorrupt {
-        record_kind: "parent_end_plan".to_string(),
-        message: error.to_string(),
-    })?;
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended.max(0) as u64,
-        obligation_id: lash_core_execution::store::ObligationId::new(obligation_id),
-        obligation_state,
     })
-}
-
-/// The row `(kind, id)` names, as the read any caller gets: `get` names it
-/// by scope, `get_by_key` by the stored columns a `ParentEnd` obligation's
-/// claim carries.
-async fn get_by_columns(
-    registry: &SqliteProcessRegistry,
-    kind: String,
-    id: String,
-) -> Result<Option<ParentEndPlan>, PluginError> {
-    let lookup = (kind, id);
-    let inside = lookup.clone();
-    let row = registry
-        .conn
-        .call(move |conn| {
-            conn.query_row(
-                process_sql().plan.select_stamps.sql(),
-                params![inside.0, inside.1],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                    ))
-                },
-            )
-            .optional()
-        })
-        .await
-        .map_err(process_sqlite_error)?;
-    row.map(|(payload, ended, obligation_id, obligation_state)| {
-        decode_plan(
-            lookup.0.clone(),
-            lookup.1.clone(),
-            payload,
-            ended,
-            obligation_id,
-            obligation_state,
-            registry.conn.fleet(),
-        )
-    })
-    .transpose()
 }
 
 pub(super) async fn get(
@@ -240,176 +149,19 @@ pub(super) async fn get(
     parent: &ScopeId,
 ) -> Result<Option<ParentEndPlan>, PluginError> {
     let (kind, id) = ledger_key(parent);
-    get_by_columns(registry, kind.to_string(), id).await
-}
-
-/// The row a `ParentEnd` obligation's claim names. Its claim reads only the
-/// stored key columns, so this read is what decodes the typed payload —
-/// and a payload that does not decode is corrupt, not a page failure.
-pub(super) async fn get_by_key(
-    registry: &SqliteProcessRegistry,
-    parent_kind: &str,
-    parent_id: &str,
-) -> Result<Option<ParentEndPlan>, PluginError> {
-    get_by_columns(registry, parent_kind.to_string(), parent_id.to_string()).await
-}
-
-/// Turn and session-operation scopes with live `Until` children and no ledger row
-/// yet.
-///
-/// An opener's ledger row is written right after its end evidence rather than
-/// inside it — the turn commit for a turn, the drain-end receipt for a drain —
-/// so a crash in between leaves exactly this shape: children that still name
-/// an owner scope no row has ended. The recovery sweep confirms the owner
-/// actually ended before writing the row, so an interrupted turn or drain is
-/// reported here and then left alone for its redrive.
-///
-/// The predicate is the pending-cancel partial index, so a scope whose
-/// children are all terminal or already cancelled needs no row and is not
-/// reported.
-pub(super) async fn list_unrecorded_opener_parents(
-    registry: &SqliteProcessRegistry,
-    after: Option<&str>,
-    limit: NonZeroUsize,
-) -> Result<Vec<ScopeId>, PluginError> {
-    let after = after.map(str::to_string);
-    let rows = registry
+    let inside = (kind, id.clone());
+    let row = registry
         .conn
         .call(move |conn| {
-            let mut statement = conn.prepare_cached(
-                process_sql()
-                    .process_sqlite
-                    .list_unrecorded_opener_parents
-                    .sql(),
-            )?;
-            let rows = statement.query_map(params![after, limit.get() as i64], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?;
-            rows.collect::<Result<Vec<_>, _>>()
+            conn.query_row(
+                process_sql().plan.select_stamps.sql(),
+                params![inside.0, inside.1],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
         })
         .await
         .map_err(process_sqlite_error)?;
-    rows.into_iter()
-        .map(|(id, kind, record_json)| {
-            let record: ProcessRecord =
-                serde_json::from_str(&record_json).map_err(process_decode_error)?;
-            let parent = record.lifetime.scope().cloned();
-            parent
-                .filter(|parent| {
-                    matches!(parent.storage_kind(), "turn" | "session_operation")
-                        && parent.storage_kind() == kind
-                        && parent.storage_id() == id
-                })
-                .ok_or_else(|| {
-                    PluginError::Session(format!(
-                        "opener parent-scope candidate `{id}` names a different scope in its record"
-                    ))
-                })
-        })
-        .collect()
-}
-
-/// Processes living `Until` one closed scope that still owe a cancel.
-///
-/// The predicate is exactly the pending-cancel partial index: `Until` lifetime,
-/// no cancel request yet, and a live status.
-///
-/// A session's plan also owes the children of every scope inside the
-/// session that has no row of its own (FIG-3948): a turn that never became
-/// a run is closed by its session's close, which no run close precedes.
-pub(super) fn children_conn(
-    conn: &Connection,
-    parent: &ScopeId,
-    after: Option<&ProcessId>,
-    limit: NonZeroUsize,
-) -> Result<Vec<ProcessRecord>, PluginError> {
-    let (kind, id) = ledger_key(parent);
-    let after = after.map(|value| value.to_string());
-    let limit = limit.get() as i64;
-    let rows = match parent {
-        ScopeId::Session(session_id) => {
-            let (turns_from, turns_to) = EffectOpener::session_turn_encoding_range(session_id);
-            let (drains_from, drains_to) =
-                EffectOpener::session_operation_encoding_range(session_id);
-            record_json_rows(
-                conn,
-                process_sql().process_sqlite.list_session_end_children.sql(),
-                params![
-                    id,
-                    turns_from,
-                    turns_to,
-                    drains_from,
-                    drains_to,
-                    after,
-                    limit
-                ],
-            )?
-        }
-        ScopeId::Opener(_) => record_json_rows(
-            conn,
-            process_sql().process_sqlite.list_parent_end_children.sql(),
-            params![kind, id, after, limit],
-        )?,
-    };
-    rows.into_iter()
-        .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
-        .collect()
-}
-
-fn record_json_rows(
-    conn: &Connection,
-    sql: &str,
-    params: impl rusqlite::Params,
-) -> Result<Vec<String>, PluginError> {
-    let mut statement = conn.prepare(sql).map_err(process_sqlite_error)?;
-    statement
-        .query_map(params, |row| row.get::<_, String>(0))
-        .map_err(process_sqlite_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(process_sqlite_error)
-}
-
-pub(super) async fn children(
-    registry: &SqliteProcessRegistry,
-    parent: &ScopeId,
-    after: Option<&ProcessId>,
-    limit: NonZeroUsize,
-) -> Result<Vec<ProcessRecord>, PluginError> {
-    let parent = parent.clone();
-    let after = after.cloned();
-    registry
-        .conn
-        .call(move |conn| Ok(children_conn(conn, &parent, after.as_ref(), limit)))
-        .await
-        .map_err(process_sqlite_error)?
-}
-
-/// Deliver a due plan and arm reclaim atomically. Claimed delivery waits
-/// for its token-fenced settlement; a stalled plan remains unreclaimable.
-pub(super) async fn settle(
-    registry: &SqliteProcessRegistry,
-    parent: &ScopeId,
-) -> Result<(), PluginError> {
-    let (kind, id) = ledger_key(parent);
-    let kind = kind.to_string();
-    let settled_at_ms = registry.clock.timestamp_ms();
-    registry
-        .conn
-        .write_flow(move |tx| {
-            Ok(tx_outcome((|| {
-                crate::conn::cached_execute(
-                    tx,
-                    process_sql().plan.settle.sql(),
-                    params![kind, id, settled_at_ms as i64],
-                )
-                .map_err(process_sqlite_error)?;
-                Ok(())
-            })()))
-        })
-        .await
-        .map_err(process_sqlite_error)?
+    row.map(|(payload, ended)| decode_plan(kind, &id, &payload, ended, registry.conn.fleet()))
+        .transpose()
 }

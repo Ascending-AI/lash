@@ -170,7 +170,9 @@ affected state while investigating the refusal.
    are gone (FIG-5200). Stopping N waits for the drain by release that
    replaces them.
 
-   Until then, read the stalled obligations before you stop N.
+   Until then, read the stalled artifact cleanups before you stop N (the
+   one obligation kind left, `artifact_cleanup`; every other kind is a
+   mailbox write in its producer's transaction, ADR 0132 §12).
    `lashctl stalled list <kind>` lists each one of a kind in id order, with
    its `obligation_id`, typed `reason` (`attempts_exhausted`, `refused` or
    `undecodable`), the `row` it lives on, and, when this build cannot name
@@ -181,13 +183,6 @@ affected state while investigating the refusal.
    loses nor settles them. Settle each obligation through the owning host
    (re-arm it once its cause is fixed), and keep the ones no build can decode,
    with the listing, in the release record.
-
-   A `scope_close` obligation stalled as `refused` under
-   `runtime_store_corrupt` also left a fault on its session (ADR 0109 §9):
-   the session admits nothing until the owning host repairs the stored
-   data, clears the fault (`LashCore::clear_session_fault`) and re-arms the
-   close. `LashCore::session_faults` lists every faulted session, including
-   one whose shift admission met the corruption with no obligation to stall.
 
 ## Finalize the release
 

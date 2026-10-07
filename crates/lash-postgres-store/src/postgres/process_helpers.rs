@@ -144,7 +144,6 @@ pub(crate) async fn wake_session_id_tx(
 pub(crate) async fn save_process_tx(
     tx: &mut sqlx::PgConnection,
     record: &ProcessRecord,
-    arms_obligations: bool,
 ) -> Result<(), PluginError> {
     let change_seq = next_process_change_seq_tx(tx).await?;
     sqlx::query(process_sql().process.update_mutable_columns.sql())
@@ -158,13 +157,7 @@ pub(crate) async fn save_process_tx(
         .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
-    // The transaction that makes a process terminal arms its terminal
-    // publication (ADR 0109 §3): the row is the obligation. An actor's own
-    // terminal resolves its waiters instead.
-    if !arms_obligations {
-        return Ok(());
-    }
-    crate::process_registry::terminal_publication::arm_tx(tx, record).await
+    Ok(())
 }
 
 pub(crate) async fn next_process_change_seq_tx(
@@ -243,7 +236,6 @@ pub(crate) enum ProcessEventAppendArm {
 pub(crate) struct ProcessEventBatch {
     fleet_format: lash_core_execution::FleetFormat,
     record_changed: bool,
-    arms_obligations: bool,
 }
 
 impl ProcessEventBatch {
@@ -252,19 +244,6 @@ impl ProcessEventBatch {
         Self {
             fleet_format,
             record_changed: false,
-            arms_obligations: true,
-        }
-    }
-
-    /// Start an empty batch for a process actor's own terminal
-    /// transaction: it arms no terminal publication, since that transaction
-    /// resolves the process's waiters itself, and its parent-end plan is
-    /// only the late-start fence, settled at once, since its actor runs the
-    /// cascade (ADR 0132 §11; L6, FIG-5175).
-    pub(crate) fn for_actor(fleet_format: lash_core_execution::FleetFormat) -> Self {
-        Self {
-            arms_obligations: false,
-            ..Self::for_fleet(fleet_format)
         }
     }
 
@@ -290,15 +269,9 @@ impl ProcessEventBatch {
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
-        let (receipt, arm, record_changed) = stage_process_event_append_tx(
-            tx,
-            record,
-            request,
-            occurred_at_ms,
-            self.fleet_format,
-            self.arms_obligations,
-        )
-        .await?;
+        let (receipt, arm, record_changed) =
+            stage_process_event_append_tx(tx, record, request, occurred_at_ms, self.fleet_format)
+                .await?;
         self.record_changed |= record_changed;
         Ok((receipt, arm))
     }
@@ -310,7 +283,7 @@ impl ProcessEventBatch {
         record: &ProcessRecord,
     ) -> Result<(), PluginError> {
         if self.record_changed {
-            save_process_tx(tx, record, self.arms_obligations).await?;
+            save_process_tx(tx, record).await?;
         }
         Ok(())
     }
@@ -347,10 +320,9 @@ pub(crate) async fn apply_process_event_append_tx(
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
     let (receipt, arm, record_changed) =
-        stage_process_event_append_tx(tx, record, request, occurred_at_ms, fleet_format, true)
-            .await?;
+        stage_process_event_append_tx(tx, record, request, occurred_at_ms, fleet_format).await?;
     if record_changed {
-        save_process_tx(tx, record, true).await?;
+        save_process_tx(tx, record).await?;
     }
     Ok((receipt, arm))
 }
@@ -369,16 +341,13 @@ pub(crate) async fn apply_process_event_append_tx(
 ///
 /// `occurred_at_ms` is the caller's clock and the only clock this function
 /// sees: each entry point keeps its own source (the injected store clock), and
-/// this function never reads one. Without `arms_obligations` (an actor's own
-/// terminal) a terminal append's parent-end plan is settled at once: the
-/// actor runs the cascade.
+/// this function never reads one.
 async fn stage_process_event_append_tx(
     tx: &mut sqlx::PgConnection,
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
-    arms_obligations: bool,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm, bool), PluginError> {
     let process_id = record.id.clone();
     let replay_lookup =
@@ -477,7 +446,6 @@ async fn stage_process_event_append_tx(
                     &lash_core_execution::ScopeId::process(process_id.clone()),
                     occurred_at_ms,
                     fleet_format,
-                    !arms_obligations,
                 )
                 .await?;
             }
@@ -640,7 +608,7 @@ pub(crate) async fn record_terminal_tx(
             .map(|request| request.origin),
     );
     let authority = lash_core_execution::ProcessCompletionAuthority::ActorEpoch { epoch };
-    let mut batch = ProcessEventBatch::for_actor(fleet_format);
+    let mut batch = ProcessEventBatch::for_fleet(fleet_format);
     let request = lash_core_execution::facade_support::terminal_append_request(
         process_id,
         &output,

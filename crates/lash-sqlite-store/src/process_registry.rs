@@ -17,8 +17,6 @@ mod retention;
 #[path = "process_registry/sql.rs"]
 pub(crate) mod sql;
 mod support;
-#[path = "process_registry/terminal_publication.rs"]
-mod terminal_publication;
 #[path = "process_registry/tool_intent_submission.rs"]
 mod tool_intent_submission;
 
@@ -662,60 +660,11 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         parent_end::record(self, parent).await
     }
 
-    async fn settle_terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<bool, lash_core_execution::PluginError> {
-        terminal_publication::settle(self, process_id).await
-    }
-
-    async fn terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<
-        Option<lash_core_execution::ProcessTerminalPublication>,
-        lash_core_execution::PluginError,
-    > {
-        terminal_publication::get(self, process_id).await
-    }
-
     async fn get_parent_end_plan(
         &self,
         parent: &lash_core_execution::ScopeId,
     ) -> Result<Option<lash_core_execution::ParentEndPlan>, lash_core_execution::PluginError> {
         parent_end::get(self, parent).await
-    }
-
-    async fn get_parent_end_plan_by_key(
-        &self,
-        parent_kind: &str,
-        parent_id: &str,
-    ) -> Result<Option<lash_core_execution::ParentEndPlan>, lash_core_execution::PluginError> {
-        parent_end::get_by_key(self, parent_kind, parent_id).await
-    }
-
-    async fn list_parent_end_children(
-        &self,
-        parent: &lash_core_execution::ScopeId,
-        after: Option<&ProcessId>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::ProcessRecord>, lash_core_execution::PluginError> {
-        parent_end::children(self, parent, after, limit).await
-    }
-
-    async fn settle_parent_end_plan(
-        &self,
-        parent: &lash_core_execution::ScopeId,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        parent_end::settle(self, parent).await
-    }
-
-    async fn list_unrecorded_opener_parents(
-        &self,
-        after: Option<&str>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::ScopeId>, lash_core_execution::PluginError> {
-        parent_end::list_unrecorded_opener_parents(self, after, limit).await
     }
 
     async fn record_first_started_with_authority(

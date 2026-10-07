@@ -109,7 +109,6 @@ fn host_history() -> History {
                 .to_string(),
                 state: Some("completed".to_owned()),
                 admitted_run: Some(run.to_owned()),
-                obligation_state: None,
             })
             .collect(),
         transcripts: vec![TranscriptSession {

@@ -10,7 +10,6 @@
 macro_rules! obligation_relay_tests {
     ($fixture:block) => {
         $crate::obligation_relay_tests!(@catalogue $fixture; [
-            (arming_takes_only_an_idle_row, "obligation-arm"),
             (the_claim_token_fences_settlement, "obligation-fencing"),
             (a_claimant_rederives_its_own_claim, "obligation-rederive"),
             (

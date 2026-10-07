@@ -3,9 +3,9 @@
 //! lease, whatever engine delivers.
 //!
 //! The relay laws run the kernel's relay ([`relay_due`], [`deliver_now`]) over
-//! a backend's `session_delete` ledger — the `session_meta` row of a session
-//! the fixture creates — with a scripted delivery, on a test clock, so each
-//! law pins one rule of the settlement: the claim token fences settlement,
+//! a backend's artifact-cleanup ledger — an ended host pin's cleanup row the
+//! fixture arms — with a scripted delivery, on a test clock, so each law
+//! pins one rule of the settlement: the claim token fences settlement,
 //! a retryable failure backs off, the ceiling stalls, a refused or
 //! undecodable delivery stalls at once without failing the page, and only
 //! an explicit re-arm puts a stalled obligation back.
@@ -14,7 +14,6 @@
 //! holder, failover after expiry, preemption by a higher rank only after the
 //! holder's minimum tenure, and resignation.
 
-use crate::conformance::DeploymentViewExt as _;
 use std::collections::BTreeMap;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::{Arc, Mutex};
@@ -35,7 +34,6 @@ use lash_core::store::{
     StallReason,
 };
 use lash_core::testing::TestClock;
-use lash_sansio::SessionId;
 
 const MISSING_CARRY_ENGINE: &str = "missing-carry-engine";
 
@@ -252,71 +250,55 @@ impl ObligationRelay for ScriptedRelay {
     }
 }
 
+/// An ended host pin's cleanup row, armed due at `now_ms`, and its key.
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: a session the law cannot create is a harness defect"
+    reason = "conformance-law fixture: a row the law cannot arm is a harness defect"
 )]
-async fn armed_session(
+async fn armed_cleanup(
     fixture: &ObligationLawFixture,
-    ledger: &dyn ObligationLedger,
-    name: &str,
     now_ms: u64,
 ) -> (ObligationKey, ObligationId) {
-    let session_id = SessionId::fixture(format!("{}-{name}", fixture.prefix));
-    fixture
+    let referrer = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
+    let id = fixture
         .stores
-        .session_store_factory()
-        .admit_view(&crate::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: crate::SessionRelation::Root,
-            config: crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            )
-            .into(),
-            head: crate::SessionCreationHead::Config,
-        })
+        .artifact_cleanup()
+        .arm_cleanup(
+            &crate::ArtifactCleanup::ended(referrer.clone(), Vec::new(), None),
+            now_ms,
+        )
         .await
-        .expect("create the session whose catalog row carries the obligation");
-    let key = ObligationKey::SessionDelete { session_id };
-    let id = ledger
-        .arm(&key, now_ms)
-        .await
-        .expect("arm the session's obligation")
-        .expect("a row that owes nothing arms");
-    (key, id)
+        .expect("arm the cleanup");
+    (ObligationKey::ArtifactCleanup { referrer }, id)
 }
 
 fn ledger_of(fixture: &ObligationLawFixture) -> Arc<dyn ObligationLedger> {
     fixture
         .stores
-        .obligation_ledger(ObligationKind::SessionDelete)
+        .obligation_ledger(ObligationKind::ArtifactCleanup)
 }
 
-/// A bounded due pass reaches every armed row, page by page, each once:
-/// more rows than one page holds, and more than the ledger's own batch.
+/// A bounded due pass reaches every armed row, page by page, and a
+/// delivered row leaves the due set.
 #[expect(
     clippy::expect_used,
     reason = "conformance law: every store result is asserted"
 )]
 pub async fn armed_obligations_are_claimed_through_every_page(fixture: ObligationLawFixture) {
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
 
     let ledger = ledger_of(&fixture);
-    let mut armed = HashSet::new();
-    for index in 0..260 {
-        let (key, _) = armed_session(&fixture, ledger.as_ref(), &format!("page-{index}"), T0).await;
-        armed.insert(key);
+    let mut armed = BTreeSet::new();
+    for _ in 0..260 {
+        let (_, id) = armed_cleanup(&fixture, T0).await;
+        armed.insert(id);
     }
 
-    let mut delivered = HashSet::new();
+    let mut delivered = BTreeSet::new();
     let mut pages = 0;
-    let now = T0 + 1;
     loop {
         let claims = ledger
-            .claim_due(now, 60_000, page(17))
+            .claim_due(T0, 60_000, page(17))
             .await
             .expect("claim one bounded page");
         if claims.is_empty() {
@@ -325,20 +307,18 @@ pub async fn armed_obligations_are_claimed_through_every_page(fixture: Obligatio
         pages += 1;
         assert!(claims.len() <= 17);
         for claim in claims {
-            let key = claim.key.expect("decode the row's key");
-            assert!(armed.contains(&key), "{key:?} was never armed");
+            assert!(
+                matches!(claim.key, Ok(ObligationKey::ArtifactCleanup { .. })),
+                "an artifact-cleanup ledger returned another key"
+            );
+            assert!(armed.contains(&claim.id));
             assert_eq!(claim.attempts, 1);
-            assert!(delivered.insert(key));
+            assert!(delivered.insert(claim.id.clone()));
             assert_eq!(
                 ledger
-                    .settle(
-                        &claim.id,
-                        &claim.token,
-                        ObligationSettlement::Delivered,
-                        now
-                    )
+                    .settle(&claim.id, &claim.token, ObligationSettlement::Delivered, T0)
                     .await
-                    .expect("settle the row"),
+                    .expect("settle the cleanup"),
                 SettleOutcome::Applied
             );
         }
@@ -347,55 +327,12 @@ pub async fn armed_obligations_are_claimed_through_every_page(fixture: Obligatio
     assert_eq!(delivered, armed);
 }
 
-/// Arming touches only a row that owes nothing, and a missing row arms
-/// nothing.
-#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
-pub async fn arming_takes_only_an_idle_row(fixture: ObligationLawFixture) {
-    let ledger = ledger_of(&fixture);
-    let (key, id) = armed_session(&fixture, ledger.as_ref(), "arm", T0).await;
-    let ObligationKey::SessionDelete { session_id } = &key else {
-        unreachable!()
-    };
-    assert_eq!(
-        id.as_str(),
-        format!(
-            "session_delete:{}:{}",
-            session_id.as_str().len(),
-            session_id.as_str()
-        ),
-        "generic arming uses the typed key's stable identity"
-    );
-    assert_eq!(
-        ledger.state(&id).await.expect("read the armed state"),
-        Some(ObligationState::Due)
-    );
-    assert_eq!(
-        ledger.arm(&key, T0).await.expect("re-arm"),
-        None,
-        "a row that already owes an obligation is not armed again"
-    );
-    let missing = ObligationKey::SessionDelete {
-        session_id: SessionId::fixture(format!("{}-never-created", fixture.prefix)),
-    };
-    assert_eq!(
-        ledger.arm(&missing, T0).await.expect("arm a missing row"),
-        None
-    );
-    assert_eq!(
-        ledger
-            .state(&ObligationId::new("session_delete:never-minted"))
-            .await
-            .expect("read an unknown id"),
-        None
-    );
-}
-
 /// A claim's token fences its settlement: once a lapsed claim is retaken,
 /// the first claimant's settle is refused and the second one's applies.
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
 pub async fn the_claim_token_fences_settlement(fixture: ObligationLawFixture) {
     let ledger = ledger_of(&fixture);
-    let (key, id) = armed_session(&fixture, ledger.as_ref(), "fence", T0).await;
+    let (key, id) = armed_cleanup(&fixture, T0).await;
     let first = ledger
         .claim_due(T0, 1_000, page(64))
         .await
@@ -457,7 +394,8 @@ pub async fn the_claim_token_fences_settlement(fixture: ObligationLawFixture) {
     );
     assert_eq!(
         ledger.state(&id).await.expect("state after delivery"),
-        Some(ObligationState::Delivered)
+        None,
+        "a delivered cleanup's row is deleted"
     );
     assert_eq!(
         ledger
@@ -482,7 +420,7 @@ pub async fn the_claim_token_fences_settlement(fixture: ObligationLawFixture) {
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
 pub async fn a_claimant_rederives_its_own_claim(fixture: ObligationLawFixture) {
     let ledger = ledger_of(&fixture);
-    let (key, id) = armed_session(&fixture, ledger.as_ref(), "rederive", T0).await;
+    let (key, id) = armed_cleanup(&fixture, T0).await;
     let token = ClaimToken::derive("claim-step", &id);
     let first = ledger
         .claim(&id, &token, T0, 60_000)
@@ -534,6 +472,17 @@ pub async fn a_claimant_rederives_its_own_claim(fixture: ObligationLawFixture) {
     );
     assert_eq!(
         ledger
+            .standing(&id)
+            .await
+            .expect("standing before delivery"),
+        Some(crate::store::ObligationStanding {
+            state: ObligationState::Claimed,
+            attempts: 1,
+        }),
+        "held by the one claim, with no lapse and no retake"
+    );
+    assert_eq!(
+        ledger
             .settle(&id, &token, ObligationSettlement::Delivered, T0 + 1_002)
             .await
             .expect("settle the re-derived claim"),
@@ -541,11 +490,8 @@ pub async fn a_claimant_rederives_its_own_claim(fixture: ObligationLawFixture) {
     );
     assert_eq!(
         ledger.standing(&id).await.expect("standing after delivery"),
-        Some(crate::store::ObligationStanding {
-            state: ObligationState::Delivered,
-            attempts: 1,
-        }),
-        "delivered by the one claim, with no lapse and no retake"
+        None,
+        "a delivered cleanup's row is deleted"
     );
     assert!(
         ledger
@@ -564,7 +510,7 @@ pub async fn a_claimant_rederives_its_own_claim(fixture: ObligationLawFixture) {
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
 pub async fn a_stale_claimant_cannot_take_back_a_retaken_claim(fixture: ObligationLawFixture) {
     let ledger = ledger_of(&fixture);
-    let (_, id) = armed_session(&fixture, ledger.as_ref(), "stale-claimant", T0).await;
+    let (_, id) = armed_cleanup(&fixture, T0).await;
     let stale = ClaimToken::derive("claim-step", &id);
     ledger
         .claim(&id, &stale, T0, 1_000)
@@ -638,7 +584,7 @@ pub async fn a_stale_claimant_cannot_take_back_a_retaken_claim(fixture: Obligati
 pub async fn a_failure_with_delay_backs_off(fixture: ObligationLawFixture) {
     let ledger = ledger_of(&fixture);
     let clock = TestClock::new(T0);
-    let (key, id) = armed_session(&fixture, ledger.as_ref(), "backoff", T0).await;
+    let (key, id) = armed_cleanup(&fixture, T0).await;
     let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(16));
     relay.fail(
         &key,
@@ -679,7 +625,8 @@ pub async fn a_failure_with_delay_backs_off(fixture: ObligationLawFixture) {
         .expect("pass after the engine heals");
     assert_eq!(
         ledger.state(&id).await.expect("state after delivery"),
-        Some(ObligationState::Delivered)
+        None,
+        "a delivered cleanup's row is deleted"
     );
 }
 
@@ -689,7 +636,7 @@ pub async fn a_failure_with_delay_backs_off(fixture: ObligationLawFixture) {
 pub async fn the_attempt_ceiling_stalls(fixture: ObligationLawFixture) {
     let ledger = ledger_of(&fixture);
     let clock = TestClock::new(T0);
-    let (key, id) = armed_session(&fixture, ledger.as_ref(), "ceiling", T0).await;
+    let (key, id) = armed_cleanup(&fixture, T0).await;
     let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(3));
     relay.fail(
         &key,
@@ -717,7 +664,7 @@ pub async fn the_attempt_ceiling_stalls(fixture: ObligationLawFixture) {
         .expect("the stalled obligation is listed");
     assert_eq!(stalled.reason, StallReason::AttemptsExhausted);
     assert_eq!(stalled.attempts, 3);
-    assert_eq!(stalled.kind, ObligationKind::SessionDelete);
+    assert_eq!(stalled.kind, ObligationKind::ArtifactCleanup);
     assert_eq!(stalled.key.as_ref().ok(), Some(&key));
     assert_eq!(
         stalled
@@ -749,9 +696,9 @@ pub async fn a_refused_or_undecodable_row_stalls_without_failing_the_page(
 ) {
     let ledger = ledger_of(&fixture);
     let clock = TestClock::new(T0);
-    let (refused, refused_id) = armed_session(&fixture, ledger.as_ref(), "page-refused", T0).await;
-    let (poison, poison_id) = armed_session(&fixture, ledger.as_ref(), "page-poison", T0).await;
-    let (_, healthy_id) = armed_session(&fixture, ledger.as_ref(), "page-healthy", T0).await;
+    let (refused, refused_id) = armed_cleanup(&fixture, T0).await;
+    let (poison, poison_id) = armed_cleanup(&fixture, T0).await;
+    let (_, healthy_id) = armed_cleanup(&fixture, T0).await;
     let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(16));
     relay.fail(
         &refused,
@@ -772,7 +719,8 @@ pub async fn a_refused_or_undecodable_row_stalls_without_failing_the_page(
     assert!(pass.stalled >= 2 && pass.delivered >= 1, "{pass:?}");
     assert_eq!(
         ledger.state(&healthy_id).await.expect("healthy state"),
-        Some(ObligationState::Delivered)
+        None,
+        "the healthy cleanup was delivered and its row deleted"
     );
     let stalled = ledger
         .list_stalled(None, page(1_000))
@@ -946,7 +894,7 @@ pub async fn a_missing_engine_carry_stalls_the_cleanup_row(fixture: ObligationLa
 pub async fn a_rearm_returns_a_stalled_obligation_to_due(fixture: ObligationLawFixture) {
     let ledger = ledger_of(&fixture);
     let clock = TestClock::new(T0);
-    let (key, id) = armed_session(&fixture, ledger.as_ref(), "rearm", T0).await;
+    let (key, id) = armed_cleanup(&fixture, T0).await;
     let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(16));
     relay.fail(
         &key,
@@ -1014,7 +962,7 @@ pub async fn a_rearm_returns_a_stalled_obligation_to_due(fixture: ObligationLawF
 pub async fn immediate_delivery_takes_only_a_due_obligation(fixture: ObligationLawFixture) {
     let ledger = ledger_of(&fixture);
     let clock = TestClock::new(T0);
-    let (key, id) = armed_session(&fixture, ledger.as_ref(), "immediate", T0 + 30_000).await;
+    let (key, id) = armed_cleanup(&fixture, T0 + 30_000).await;
     let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(16));
     assert_eq!(
         deliver_now(&relay, &id, &clock).await.expect("deliver now"),

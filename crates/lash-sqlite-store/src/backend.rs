@@ -379,9 +379,6 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
             lash_core_execution::store::ObligationKind::ArtifactCleanup => Arc::new(
                 crate::obligation_ledger::SqliteArtifactCleanupLedger::new(conn),
             ),
-            kind => Arc::new(crate::obligation_ledger::SqliteObligationLedger::new(
-                kind, conn,
-            )),
         }
     }
 
@@ -389,16 +386,6 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
             self.inner.process_env_store.conn.clone(),
         ))
-    }
-
-    fn session_delete_ledger(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::session_delete::SessionDeleteLedger> {
-        Arc::new(
-            crate::session_delete_ledger::SqliteSessionDeleteLedger::new(
-                self.inner.process_env_store.conn.clone(),
-            ),
-        )
     }
 }
 

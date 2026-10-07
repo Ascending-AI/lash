@@ -1,6 +1,6 @@
 //! Obligation ledgers and the recovery leader lease (ADR 0109 §1) compared
 //! across the three backends: one scripted sequence of arm, claim, settle,
-//! re-arm and listing calls on the `session_delete` ledger, and of acquire,
+//! re-arm and listing calls on the `artifact_cleanup` ledger, and of acquire,
 //! renew and resign calls on one lease, must read back identically.
 //!
 //! The Postgres database is shared with every other case and every earlier
@@ -12,7 +12,7 @@ use std::num::NonZeroUsize;
 
 use lash_core::StoreSet;
 use lash_core::store::{
-    HolderId, LeaseAnswer, LeaseClaim, LeaseName, ObligationId, ObligationKey, ObligationKind,
+    HolderId, LeaseAnswer, LeaseClaim, LeaseName, ObligationId, ObligationKind,
     ObligationSettlement, StallReason,
 };
 
@@ -33,8 +33,8 @@ fn page() -> NonZeroUsize {
 )]
 async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
     let mut out = Transcript::new();
-    let ledger = stores.obligation_ledger(ObligationKind::SessionDelete);
-    let factory = stores.session_store_factory();
+    let ledger = stores.obligation_ledger(ObligationKind::ArtifactCleanup);
+    let cleanups = stores.artifact_cleanup();
     let aliases = ["a", "b", "c"];
     let mut ids = BTreeMap::<&str, ObligationId>::new();
     let alias_of = |ids: &BTreeMap<&str, ObligationId>, id: &ObligationId| {
@@ -43,47 +43,17 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
             .map(|(alias, _)| (*alias).to_owned())
     };
     for alias in aliases {
-        let session_id = SessionId::fixture(format!("{prefix}-obligation-{alias}"));
-        factory
-            .admit_session(&SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: SessionRelation::Root,
-                config: lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                    lash_core::MaxToolCalls::new(1024),
-                )
-                .into(),
-                head: SessionCreationHead::Config,
-            })
+        let referrer = lash_core::ArtifactReferrer::HostPin(lash_core::HostArtifactPin::mint());
+        let id = cleanups
+            .arm_cleanup(
+                &lash_core::ArtifactCleanup::ended(referrer, Vec::new(), None),
+                T0,
+            )
             .await
-            .expect("create the session whose catalog row carries the obligation");
-        let key = ObligationKey::SessionDelete { session_id };
-        let id = ledger.arm(&key, T0).await.expect("arm");
-        out.push(format!("arm {alias} -> {}", id.is_some()));
-        ids.insert(alias, id.expect("a fresh row arms"));
+            .expect("arm");
+        out.push(format!("arm {alias}"));
+        ids.insert(alias, id);
     }
-    let rearmed = ledger
-        .arm(
-            &ObligationKey::SessionDelete {
-                session_id: SessionId::fixture(format!("{prefix}-obligation-a")),
-            },
-            T0,
-        )
-        .await
-        .expect("arm an armed row");
-    out.push(format!("arm a again -> {rearmed:?}"));
-    let missing = ledger
-        .arm(
-            &ObligationKey::SessionDelete {
-                session_id: SessionId::fixture(format!("{prefix}-obligation-missing")),
-            },
-            T0,
-        )
-        .await
-        .expect("arm a missing row");
-    out.push(format!("arm missing -> {missing:?}"));
     let stalled_before = ledger.count_stalled().await.expect("count stalled");
 
     let mut claimed = ledger
@@ -227,7 +197,7 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
     }
     let unknown = ledger
         .state(&ObligationId::new(format!(
-            "session_delete:{prefix}-unknown"
+            "artifact_cleanup:{prefix}-unknown"
         )))
         .await
         .expect("state of an unknown id");

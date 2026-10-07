@@ -44,10 +44,6 @@ pub(crate) fn recorded_llm_profile(
 
 /// A fresh SQLite memory store set: storage ports only, no engine. For a
 /// test whose every use is a store port.
-#[allow(
-    dead_code,
-    reason = "a PREP-F twin the S5c batches move their fixtures onto"
-)]
 pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
     Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
@@ -58,10 +54,6 @@ pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteSt
 
 /// A backend over a fresh SQLite memory store set whose effect host only
 /// records: for a test that needs a backend value but runs no effect.
-#[allow(
-    dead_code,
-    reason = "a PREP-F twin the S5c batches move their fixtures onto"
-)]
 pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
     let stores = sqlite_memory_store_set().await;
     lash_conformance::backend_over(stores)

@@ -99,71 +99,6 @@ lash_store_sql::statements! {
        AND process_id <= ?1 AND process_id > ?2
      ORDER BY process_id ASC LIMIT ?3";
 
-        /// Processes living `Until` closed scope `?1` / `?2` that still owe a cancel:
-        /// after `?3`, at most `?4`.
-        ///
-        /// The predicate is exactly `idx_processes_lifetime_pending`.
-        /// PostgreSQL's twin casts its cursor parameter, which is the fork.
-        list_parent_end_children = "SELECT record_json FROM processes
-     WHERE lifetime_scope_kind = ?1
-       AND lifetime_scope_id = ?2
-       AND lifetime = 'until'
-       AND cancel_requested_at_ms IS NULL
-       AND {{live_process_status(status)}}
-       AND (?3 IS NULL OR process_id > ?3)
-     ORDER BY process_id ASC
-     LIMIT ?4";
-
-        /// Processes closed session `?1` still owes a cancel (FIG-3948): those
-        /// living `Until` the session itself, and those living `Until` a turn
-        /// in `[?2, ?3)` or a session operation in `[?4, ?5)` of it whose scope has
-        /// no ledger row of its own — a turn the session never admitted as a
-        /// run, which its close proved can no longer become one. A scope
-        /// with its own row is its own plan's to sweep. After `?6`, at most
-        /// `?7`.
-        ///
-        /// Each arm is a range of `idx_processes_lifetime_pending`.
-        /// PostgreSQL's twin casts its cursor parameter, which is the fork.
-        list_session_end_children = "SELECT child.record_json FROM processes AS child
-     WHERE child.lifetime = 'until'
-       AND child.cancel_requested_at_ms IS NULL
-       AND {{live_process_status(child.status)}}
-       AND ((child.lifetime_scope_kind = 'session' AND child.lifetime_scope_id = ?1)
-         OR (((child.lifetime_scope_kind = 'turn'
-               AND child.lifetime_scope_id >= ?2 AND child.lifetime_scope_id < ?3)
-             OR (child.lifetime_scope_kind = 'session_operation'
-               AND child.lifetime_scope_id >= ?4 AND child.lifetime_scope_id < ?5))
-           AND NOT EXISTS (
-               SELECT 1 FROM parent_end_plans AS plan
-               WHERE plan.parent_kind = child.lifetime_scope_kind
-                 AND plan.parent_id = child.lifetime_scope_id
-           )))
-       AND (?6 IS NULL OR child.process_id > ?6)
-     ORDER BY child.process_id ASC
-     LIMIT ?7";
-
-        /// Turn scopes with live `Until` children and no ledger row yet:
-        /// after `?1`, at most `?2`.
-        ///
-        /// The projection id is never parsed back: `lifetime_scope_id` is a
-        /// collision-free canonical key, so one `record_json` per group —
-        /// any child's, since every row sharing the key names the same
-        /// typed parent — carries the authority.
-        list_unrecorded_opener_parents = "SELECT child.lifetime_scope_id, child.lifetime_scope_kind, MIN(child.record_json) FROM processes AS child
-                 WHERE child.lifetime_scope_kind IN ('turn', 'session_operation')
-                   AND child.lifetime = 'until'
-                   AND child.cancel_requested_at_ms IS NULL
-                   AND {{live_process_status(child.status)}}
-                   AND NOT EXISTS (
-                       SELECT 1 FROM parent_end_plans AS plan
-                       WHERE plan.parent_kind = child.lifetime_scope_kind
-                         AND plan.parent_id = child.lifetime_scope_id
-                   )
-                   AND (?1 IS NULL OR child.lifetime_scope_id > ?1)
-                 GROUP BY child.lifetime_scope_kind, child.lifetime_scope_id
-                 ORDER BY child.lifetime_scope_id
-                 LIMIT ?2";
-
         /// Prune candidates: retired rows older than `?1`, at or below change
         /// sequence `?2`, with no consumer hold.
         list_prunable_terminal = "SELECT process_id, record_json FROM processes
@@ -591,11 +526,10 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `parent_end_plans` statements only SQLite issues.
     pub(crate) struct ParentEndPlanSqliteStatements @ "parent_end_plan" {
-        /// Reclaim settled plans older than `?1` that no live child still
-        /// names.
+        /// Reclaim plans of scopes that ended before `?1` and that no live
+        /// child still names.
         delete_reclaimable = "DELETE FROM parent_end_plans
-         WHERE obligation_state = 'delivered'
-           AND obligation_settled_at_ms < ?1
+         WHERE ended_at_ms < ?1
            AND NOT EXISTS (
                SELECT 1 FROM processes AS child
                WHERE child.lifetime_scope_kind = parent_end_plans.parent_kind

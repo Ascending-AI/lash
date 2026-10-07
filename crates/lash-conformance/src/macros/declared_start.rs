@@ -34,8 +34,6 @@ macro_rules! declared_start_tests {
             declared_start_discarded_retry_launches_nothing);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_refusal_settles_the_call);
-        $crate::declared_start_tests!(@law [$($attr)*] $fixture;
-            declared_start_scope_close_cancels_until_children);
     };
     (@law [$($attr:tt)*] $fixture:block; $law:ident) => {
         $($attr)*

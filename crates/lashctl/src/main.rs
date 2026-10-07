@@ -304,15 +304,6 @@ fn migration_result(report: &MigrationReport, dry_run: bool) -> Value {
 /// `None` when this build cannot name it.
 fn stalled_row(key: &ObligationKey) -> Value {
     match key {
-        ObligationKey::ScopeClose { session_id, run } => {
-            json!({"session_id":session_id.as_str(),"root":run.as_str()})
-        }
-        ObligationKey::ParentEnd {
-            parent_kind,
-            parent_id,
-        } => json!({"parent_kind":parent_kind,"parent_id":parent_id}),
-        ObligationKey::SessionDelete { session_id } => json!({"session_id":session_id.as_str()}),
-        ObligationKey::ProcessTerminal { process_id } => json!({"process_id":process_id.as_str()}),
         ObligationKey::ArtifactCleanup { referrer } => {
             json!({"referrer_kind":referrer.kind().as_str(),"referrer_id":referrer.canonical_id()})
         }
@@ -490,13 +481,13 @@ mod tests {
             vec![
                 "stalled",
                 "list",
-                "scope_close",
+                "artifact_cleanup",
                 "--after",
                 "delivery",
                 "--limit",
                 "1",
             ],
-            vec!["stalled", "rearm", "scope_close", "delivery"],
+            vec!["stalled", "rearm", "artifact_cleanup", "delivery"],
             vec!["deployment-status", "--accepting-new-work", "false"],
         ];
         for words in valid {
@@ -507,7 +498,7 @@ mod tests {
         }
         for words in [
             vec!["stalled", "list", "unknown"],
-            vec!["stalled", "rearm", "scope_close"],
+            vec!["stalled", "rearm", "artifact_cleanup"],
             vec!["deployment-status"],
         ] {
             let error = parse(words.iter().map(|word| (*word).to_owned()))
@@ -626,11 +617,14 @@ mod tests {
         };
 
         let decoded = StalledObligation {
-            kind: ObligationKind::ScopeClose,
+            kind: ObligationKind::ArtifactCleanup,
             id: ObligationId::new("obligation-decoded"),
             key: ObligationKey::decode(
-                ObligationKind::ScopeClose,
-                vec![KeyColumn::Text("s".into()), KeyColumn::Text("r".into())],
+                ObligationKind::ArtifactCleanup,
+                vec![
+                    KeyColumn::Text("session".into()),
+                    KeyColumn::Text("s".into()),
+                ],
             ),
             reason: StallReason::AttemptsExhausted,
             attempts: 3,
@@ -643,10 +637,10 @@ mod tests {
         assert_eq!(
             stalled_result(&decoded),
             json!({
-                "kind": "scope_close",
+                "kind": "artifact_cleanup",
                 "obligation_id": "obligation-decoded",
                 "reason": "attempts_exhausted",
-                "row": {"session_id": "s", "root": "r"},
+                "row": {"referrer_kind": "session", "referrer_id": "s"},
                 "undecodable": null,
                 "attempts": 3,
                 "last_error": {

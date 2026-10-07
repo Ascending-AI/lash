@@ -569,10 +569,6 @@ pub use lash_core_execution::{
     ProjectorContext, ProtocolDriverState, SansIoTurnInput, TurnDriverConfig, TurnDriverPreamble,
     TurnMachine, TurnMachineConfig,
 };
-pub use lash_core_execution::{
-    ParentEndApplication, apply_parent_end_plan, end_parent_scope, end_session_runs,
-    parent_end_delivery_key, parent_end_requester,
-};
 pub use lash_sansio::{
     BuildNewestWriterFormats, WriterFormats, build_newest_writer_formats, driver_writer_version,
 };
@@ -654,7 +650,6 @@ pub use runtime::ProcessRegistryTestSupport;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;
 #[cfg(any(test, feature = "testing"))]
-pub use runtime::fail_parent_end_once;
 pub use runtime::{ObservationSource, work_with_observations};
 
 // This block includes the effect / process-control types consumed by host
@@ -717,37 +712,37 @@ pub use runtime::{
     ProcessSessionDeleteReport, ProcessSignal, ProcessSignalIdentity, ProcessSignalWaitBinding,
     ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions,
     ProcessStartOutcome, ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus,
-    ProcessStatusFilter, ProcessTerminalPublication, ProcessTerminalSpec, ProcessTerminalWait,
-    ProcessTombstone, ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery,
-    ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
-    ProtocolSessionExtension, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy,
-    QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig,
-    QueuedWorkKind, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender,
-    RefusedWriteRange, RegistryScopeClose, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
-    ResolvedProcessDefinition, ResolvedRun, RetainedRevision, Retention, RunAggregateWakePolicy,
-    RunDefinition, RunDefinitionRefusal, RunDefinitions, RunOptionsOwner, RunOverrides,
-    RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
-    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
-    RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
-    ScopeStorageError, SegmentProgress, ServedOnly, ServedOnlyRange, SessionAdministration,
-    SessionCreationHead, SessionCursor, SessionCursorError, SessionDeleteContext,
-    SessionDeleteExecution, SessionEntry, SessionId, SessionListFilter, SessionObservationEvent,
-    SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
-    SessionRelationKind, SessionRevision, SessionScope, SessionStateVersionRefusal,
-    SessionStoreCreateRequest, SessionView, SleepSpec, SlotId, StartCx, StartCxError, StartKey,
-    StepName, StepRequest, StoreRealization, StoredDataCorruption, Target, ToolAttemptLaunch,
-    TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelAffectedWake,
-    TurnCancelInputOutcome, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancelWait,
-    TurnContext, TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef,
-    TurnPreludeStore, WaitKind, WaitState, WakeId, WatchedRegistry, WeakProcessEngineRegistry,
-    WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
-    artifact_store_plugin_error, lifetime, mint_process_id, tool_failure_code,
+    ProcessStatusFilter, ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone,
+    ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
+    ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, ProtocolSessionExtension,
+    QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
+    QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkKind,
+    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender, RefusedWriteRange,
+    RenderFault, RenderRefusal, Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun,
+    RetainedRevision, Retention, RunAggregateWakePolicy, RunDefinition, RunDefinitionRefusal,
+    RunDefinitions, RunOptionsOwner, RunOverrides, RunResolveError, RunShapeRefusal, RunSpec,
+    RunSpecHash, RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
+    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
+    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError,
+    SegmentProgress, ServedOnly, ServedOnlyRange, SessionAdministration, SessionCreationHead,
+    SessionCursor, SessionCursorError, SessionDeleteContext, SessionDeleteExecution, SessionEntry,
+    SessionId, SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
+    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView, SleepSpec,
+    SlotId, StartCx, StartCxError, StartKey, StepName, StepRequest, StoreRealization,
+    StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity, TurnActivityId,
+    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode,
+    TurnCancelUndeliveredInputPolicy, TurnCancelWait, TurnContext, TurnEvent, TurnFailureCause,
+    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
+    TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
+    TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
+    TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore, WaitKind, WaitState,
+    WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
+    admit_session_state_generation, artifact_store_plugin_error, lifetime, mint_process_id,
+    tool_failure_code,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

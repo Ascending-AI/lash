@@ -183,12 +183,6 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
     fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
         self.inner.storage.artifact_cleanup()
     }
-
-    fn session_delete_ledger(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::session_delete::SessionDeleteLedger> {
-        self.inner.storage.session_delete_ledger()
-    }
 }
 
 impl std::fmt::Debug for PostgresStoreSet {

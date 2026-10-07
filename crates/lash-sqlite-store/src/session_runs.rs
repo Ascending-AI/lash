@@ -10,9 +10,9 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    ObligationKey, RunAdmission, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause,
-    RunTerminalWriteDecision, RunTurns, UnfinishedRun, decide_run_terminal_write,
-    run_binding_conflict, stored_intent_kind, stored_intent_state,
+    RunAdmission, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause, RunTerminalWriteDecision,
+    RunTurns, UnfinishedRun, decide_run_terminal_write, run_binding_conflict, stored_intent_kind,
+    stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_runs::{
@@ -160,16 +160,6 @@ pub(crate) fn write_run_terminal_conn(
             terminal.run, terminal.session_id
         )));
     }
-    // A terminal run owes its scope close (ADR 0109 §3): the terminal
-    // transaction arms the row's obligation, due at the terminal instant.
-    crate::obligation_ledger::arm_obligation_tx(
-        tx,
-        &ObligationKey::ScopeClose {
-            session_id: terminal.session_id.clone(),
-            run: terminal.run.clone(),
-        },
-        columns.at_ms,
-    )?;
     release_run_rows_conn(tx, &terminal.session_id, &terminal.run, terminal.at_ms)
 }
 
@@ -184,9 +174,9 @@ pub(crate) fn write_run_terminal_conn(
 /// cancellation request if it has one, else `Defer`. `Defer` writes
 /// nothing: the row is next-turn input at its own position by rule, its
 /// submitted delivery unchanged (ADR 0101 §5.1). `Drop` withdraws it into
-/// its tombstone, settling its ingress obligation at the terminal instant
-/// `at_ms` (FIG-4098). Either is recorded once on the request's outcome. No
-/// open row is bound to a run with terminal evidence.
+/// its tombstone at the terminal instant `at_ms` (FIG-4098). Either is
+/// recorded once on the request's outcome. No open row is bound to a run
+/// with terminal evidence.
 ///
 /// An input the run's admission took as its own (`session_run_inputs`)
 /// that is still open is unbound from the run too, so a later run can
@@ -279,8 +269,8 @@ fn release_run_rows_conn(
 }
 
 /// The engine proved the run's execution is lost (`loss`). This
-/// transaction makes its inputs and run terminal together, so the existing
-/// scope-close obligation takes over before recovery acknowledges the loss.
+/// transaction makes its inputs and run terminal together before recovery
+/// acknowledges the loss.
 /// A run that already has terminal evidence, or no row, is left as it is.
 /// A run the engine holds no execution of that never recorded its admission
 /// started nothing: it is not ended, and its session admits its input

@@ -59,8 +59,6 @@ mod process_event_pages;
 mod raw_durable_reader;
 #[path = "cross_backend_store_differential/residue.rs"]
 mod residue;
-#[path = "cross_backend_store_differential/session_delete_cases.rs"]
-mod session_delete_cases;
 #[path = "cross_backend_store_differential/session_lifecycle_cases.rs"]
 mod session_lifecycle_cases;
 #[path = "cross_backend_store_differential/session_meta_layout.rs"]
@@ -1487,9 +1485,7 @@ impl BackendRunner {
         // A deliberately undecodable row cannot be read through the decoded
         // digest; the raw changed-table set is the comparison instead.
         let durable_state = match comparison {
-            ComparisonMode::Decoded => {
-                Some(self.raw_reader.observe(self.clock.timestamp_ms()).await)
-            }
+            ComparisonMode::Decoded => Some(self.raw_reader.observe().await),
             ComparisonMode::RawOnly => None,
         };
         let surface_answer = self.surface.answer.clone();
@@ -1963,7 +1959,6 @@ async fn cross_backend_store_differential_agrees() {
     verify_independent_session_meta_layout(sqlite_root.path(), &postgres).await;
     let run_nonce = run_nonce();
     obligation_cases::compare_obligation_ledgers(sqlite_root.path(), &postgres, &run_nonce).await;
-    session_delete_cases::compare_session_deletes(sqlite_root.path(), &postgres, &run_nonce).await;
 
     process_event_pages::compare_bounded_process_event_pages(
         sqlite_root.path(),

@@ -319,63 +319,11 @@ macro_rules! delegate_process_lifecycle {
                 self.$inner.record_parent_end(parent).await
             }
 
-            async fn settle_terminal_publication(
-                &self,
-                process_id: &$crate::ProcessId,
-            ) -> Result<bool, $crate::PluginError> {
-                self.$inner.settle_terminal_publication(process_id).await
-            }
-
-            async fn terminal_publication(
-                &self,
-                process_id: &$crate::ProcessId,
-            ) -> Result<Option<$crate::ProcessTerminalPublication>, $crate::PluginError> {
-                self.$inner.terminal_publication(process_id).await
-            }
-
             async fn get_parent_end_plan(
                 &self,
                 parent: &$crate::ScopeId,
             ) -> Result<Option<$crate::ParentEndPlan>, $crate::PluginError> {
                 self.$inner.get_parent_end_plan(parent).await
-            }
-
-            async fn get_parent_end_plan_by_key(
-                &self,
-                parent_kind: &str,
-                parent_id: &str,
-            ) -> Result<Option<$crate::ParentEndPlan>, $crate::PluginError> {
-                self.$inner
-                    .get_parent_end_plan_by_key(parent_kind, parent_id)
-                    .await
-            }
-
-            async fn list_parent_end_children(
-                &self,
-                parent: &$crate::ScopeId,
-                after: Option<&$crate::ProcessId>,
-                limit: std::num::NonZeroUsize,
-            ) -> Result<Vec<$crate::ProcessRecord>, $crate::PluginError> {
-                self.$inner
-                    .list_parent_end_children(parent, after, limit)
-                    .await
-            }
-
-            async fn settle_parent_end_plan(
-                &self,
-                parent: &$crate::ScopeId,
-            ) -> Result<(), $crate::PluginError> {
-                self.$inner.settle_parent_end_plan(parent).await
-            }
-
-            async fn list_unrecorded_opener_parents(
-                &self,
-                after: Option<&str>,
-                limit: std::num::NonZeroUsize,
-            ) -> Result<Vec<$crate::ScopeId>, $crate::PluginError> {
-                self.$inner
-                    .list_unrecorded_opener_parents(after, limit)
-                    .await
             }
 
             async fn record_first_started_with_authority(

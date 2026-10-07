@@ -149,10 +149,7 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
     }
     // The release catalog carries no step; a later step's CHECK is exercised
     // by the same loop and must match the published DDL.
-    assert_eq!(
-        published, 8,
-        "exercise all eight published PostgreSQL CHECKs"
-    );
+    assert_eq!(published, 1, "exercise the one published PostgreSQL CHECK");
     connection
         .close()
         .await

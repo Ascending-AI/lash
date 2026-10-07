@@ -211,10 +211,6 @@ impl crate::StoreSet for StoreLawStores {
     fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger> {
         Arc::new(UnavailableArtifactCleanup)
     }
-
-    fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {
-        Self::no_second_substrate("session delete ledger")
-    }
 }
 
 // Host construction captures these ports even in store-only laws. Any use of
@@ -299,14 +295,6 @@ struct UnavailableArtifactCleanup;
 impl crate::store::ObligationLedger for UnavailableArtifactCleanup {
     fn kind(&self) -> crate::store::ObligationKind {
         crate::store::ObligationKind::ArtifactCleanup
-    }
-
-    async fn arm(
-        &self,
-        _: &crate::store::ObligationKey,
-        _: u64,
-    ) -> Result<Option<crate::store::ObligationId>, crate::StoreError> {
-        StoreLawStores::no_second_substrate("artifact cleanup ledger")
     }
 
     async fn claim_due(

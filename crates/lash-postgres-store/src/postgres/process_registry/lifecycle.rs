@@ -67,63 +67,11 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         parent_end::record(&self.pool, &self.fence, parent, self.clock.timestamp_ms()).await
     }
 
-    async fn settle_terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<bool, PluginError> {
-        super::terminal_publication::settle(
-            &self.pool,
-            &self.fence,
-            process_id,
-            self.clock.timestamp_ms(),
-        )
-        .await
-    }
-
-    async fn terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<lash_core_execution::ProcessTerminalPublication>, PluginError> {
-        super::terminal_publication::get(&self.pool, process_id).await
-    }
-
     async fn get_parent_end_plan(
         &self,
         parent: &lash_core_execution::ScopeId,
     ) -> Result<Option<lash_core_execution::ParentEndPlan>, PluginError> {
         parent_end::get(&self.pool, parent, self.fence.fleet()).await
-    }
-
-    async fn get_parent_end_plan_by_key(
-        &self,
-        parent_kind: &str,
-        parent_id: &str,
-    ) -> Result<Option<lash_core_execution::ParentEndPlan>, PluginError> {
-        parent_end::get_by_key(&self.pool, parent_kind, parent_id, self.fence.fleet()).await
-    }
-
-    async fn list_parent_end_children(
-        &self,
-        parent: &lash_core_execution::ScopeId,
-        after: Option<&ProcessId>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        parent_end::children(&self.pool, parent, after, limit).await
-    }
-
-    async fn settle_parent_end_plan(
-        &self,
-        parent: &lash_core_execution::ScopeId,
-    ) -> Result<(), PluginError> {
-        parent_end::settle(&self.pool, &self.fence, parent, self.clock.timestamp_ms()).await
-    }
-
-    async fn list_unrecorded_opener_parents(
-        &self,
-        after: Option<&str>,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::ScopeId>, PluginError> {
-        parent_end::list_unrecorded_opener_parents(&self.pool, after, limit).await
     }
 
     async fn record_first_started_with_authority(

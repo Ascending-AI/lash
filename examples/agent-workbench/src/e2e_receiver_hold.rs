@@ -94,10 +94,6 @@ impl lash::StoreSet for ReceiverHoldStores {
         self.inner.obligation_ledger(kind)
     }
 
-    fn session_delete_ledger(&self) -> Arc<dyn SessionDeleteLedger> {
-        self.inner.session_delete_ledger()
-    }
-
     fn artifact_cleanup(&self) -> Arc<dyn ArtifactCleanupLedger> {
         self.inner.artifact_cleanup()
     }
@@ -423,54 +419,11 @@ impl ProcessLifecycle for ReceiverHoldRegistry {
     async fn record_parent_end(&self, parent: &ScopeId) -> Result<(), PluginError> {
         self.inner.record_parent_end(parent).await
     }
-    async fn settle_terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<bool, PluginError> {
-        self.inner.settle_terminal_publication(process_id).await
-    }
-    async fn terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<ProcessTerminalPublication>, PluginError> {
-        self.inner.terminal_publication(process_id).await
-    }
     async fn get_parent_end_plan(
         &self,
         parent: &ScopeId,
     ) -> Result<Option<ParentEndPlan>, PluginError> {
         self.inner.get_parent_end_plan(parent).await
-    }
-    async fn get_parent_end_plan_by_key(
-        &self,
-        parent_kind: &str,
-        parent_id: &str,
-    ) -> Result<Option<ParentEndPlan>, PluginError> {
-        self.inner
-            .get_parent_end_plan_by_key(parent_kind, parent_id)
-            .await
-    }
-    async fn list_parent_end_children(
-        &self,
-        parent: &ScopeId,
-        after: Option<&ProcessId>,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        self.inner
-            .list_parent_end_children(parent, after, limit)
-            .await
-    }
-    async fn settle_parent_end_plan(&self, parent: &ScopeId) -> Result<(), PluginError> {
-        self.inner.settle_parent_end_plan(parent).await
-    }
-    async fn list_unrecorded_opener_parents(
-        &self,
-        after: Option<&str>,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<ScopeId>, PluginError> {
-        self.inner
-            .list_unrecorded_opener_parents(after, limit)
-            .await
     }
     async fn record_first_started_with_authority(
         &self,

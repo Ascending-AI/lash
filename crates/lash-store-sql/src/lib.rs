@@ -230,15 +230,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(durable::park_events::ParkEventStatements::NEUTRAL);
     statements.extend_from_slice(durable::session_close::SessionCloseStatements::NEUTRAL);
     statements.extend_from_slice(durable::session_mail::SessionMailStatements::NEUTRAL);
-    statements.extend_from_slice(session_runs::runs::SessionRunObligationStatements::NEUTRAL);
-    statements.extend_from_slice(session::meta::SessionMetaObligationStatements::NEUTRAL);
-    statements
-        .extend_from_slice(process::parent_end_plans::ParentEndPlanObligationStatements::NEUTRAL);
-    statements.extend_from_slice(process::processes::ProcessObligationStatements::NEUTRAL);
-    statements.extend_from_slice(session::meta::SessionMetaDeleteStatements::NEUTRAL);
-    statements.extend_from_slice(session_runs::runs::SessionRunCleanupStatements::NEUTRAL);
-    statements
-        .extend_from_slice(process::parent_end_plans::ParentEndPlanCleanupStatements::NEUTRAL);
     statements
 }
 

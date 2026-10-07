@@ -42,21 +42,6 @@ pub trait ProcessWorkSubstrate: Send + Sync {
         request: &crate::CancelRequest,
         key: &str,
     ) -> Result<(), PluginError>;
-
-    /// Publish `process`'s stored terminal `output` to the engine's waiters
-    /// under `key`: the delivery of its `ProcessTerminal` obligation (ADR
-    /// 0109 §3). `key` is the obligation's stable dedupe identity; a repeat
-    /// must be a no-op, and a terminal already published stays as it was.
-    ///
-    /// The engine's waiters wait on the engine, so it resolves them here. A port
-    /// that wraps another forwards it, or the relay settles publications no
-    /// waiter ever saw.
-    async fn publish_process_terminal(
-        &self,
-        process_id: &crate::ProcessId,
-        output: &crate::ProcessAwaitOutput,
-        key: &str,
-    ) -> Result<(), PluginError>;
 }
 
 /// Outcome of one bounded terminal wait.
@@ -206,15 +191,6 @@ impl ProcessWorkSubstrate for NoProcessWork {
         &self,
         _process_id: &crate::ProcessId,
         _request: &crate::CancelRequest,
-        _key: &str,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    async fn publish_process_terminal(
-        &self,
-        _process_id: &crate::ProcessId,
-        _output: &crate::ProcessAwaitOutput,
         _key: &str,
     ) -> Result<(), PluginError> {
         Ok(())

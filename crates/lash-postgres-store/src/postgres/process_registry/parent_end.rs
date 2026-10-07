@@ -5,10 +5,7 @@
 //! may be pruned before its children settle, so a foreign key onto
 //! `lash_processes` cannot express the fact this table records.
 
-use std::num::NonZeroUsize;
-
-use lash_core_execution::{EffectOpener, ParentEndPlan, PluginError, ProcessRecord, ScopeId};
-use lash_sansio::ProcessId;
+use lash_core_execution::{ParentEndPlan, PluginError, ScopeId};
 use sqlx::{PgPool, Row};
 
 use crate::process_sql::process_sql;
@@ -29,45 +26,25 @@ fn ledger_payload(
         .map_err(process_decode_error)
 }
 
-/// One stored row's plan. A row whose typed payload does not decode is
-/// corrupt stored data: the obligation relay stalls it `undecodable` rather
-/// than failing its due page (ADR 0109 §1.4).
+/// One stored row's plan. A typed payload that does not decode is corrupt
+/// stored data.
 fn decode_plan(
-    kind: String,
-    id: String,
-    payload: String,
+    kind: &str,
+    id: &str,
+    payload: &str,
     ended_at_ms: i64,
-    obligation_id: Option<String>,
-    obligation_state: Option<String>,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<ParentEndPlan, PluginError> {
     let parent =
-        ScopeId::from_storage_columns(&kind, &id, &payload, fleet_format).map_err(|error| {
+        ScopeId::from_storage_columns(kind, id, payload, fleet_format).map_err(|error| {
             PluginError::StoredDataCorrupt {
                 record_kind: "parent_end_plan".to_string(),
                 message: error.to_string(),
             }
         })?;
-    // The record arms the row in the transaction that writes it, so a
-    // committed row always names its obligation and where it stands.
-    let (Some(obligation_id), Some(obligation_state)) = (obligation_id, obligation_state) else {
-        return Err(PluginError::StoredDataCorrupt {
-            record_kind: "parent_end_plan".to_string(),
-            message: format!("scope `{kind}`/`{id}` closed without its obligation"),
-        });
-    };
-    let obligation_state = lash_core_execution::store::ObligationState::from_label(
-        &obligation_state,
-    )
-    .map_err(|error| PluginError::StoredDataCorrupt {
-        record_kind: "parent_end_plan".to_string(),
-        message: error.to_string(),
-    })?;
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended_at_ms.max(0) as u64,
-        obligation_id: lash_core_execution::store::ObligationId::new(obligation_id),
-        obligation_state,
     })
 }
 
@@ -81,8 +58,8 @@ fn decode_plan(
 /// the ledger row commits, the sweep pages children without seeing the
 /// uncommitted child, settles the row, and the child then commits live with an
 /// ended scope that no later pass revisits. Taking the lock in registration,
-/// in the ledger write and in settle orders those two writes: the child either
-/// commits before the row and is swept, or sees the row and is refused.
+/// and in the ledger write orders those two writes: the child either commits
+/// before the row, or sees the row and is refused.
 pub(crate) async fn lock_parent_scope_tx(
     tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
@@ -100,19 +77,13 @@ pub(crate) async fn lock_parent_scope_tx(
     .map_err(plugin_sqlx_error)
 }
 
-/// The row `parent`'s record writes is also its `ParentEnd` obligation, due
-/// immediately (ADR 0109 §3): the record arms it in the same transaction, so
-/// no crash window can leave a plan nothing will ever deliver. A replayed
-/// record keeps the first row — and the obligation it already owes. The
-/// plan's `ended_at_ms` is the registry's database-clock instant, so the
-/// obligation is due at once rather than at it: a relay whose host clock is
-/// behind the database takes it in its first pass.
+/// Record that `parent` ended at `ended_at_ms`, in the caller's
+/// transaction. A repeated record keeps the first row.
 pub(crate) async fn record_tx(
     tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
     ended_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
-    cascaded_by_actor: bool,
 ) -> Result<(), PluginError> {
     lock_parent_scope_tx(tx, parent).await?;
     let (kind, id) = ledger_key(parent);
@@ -125,28 +96,6 @@ pub(crate) async fn record_tx(
         .await
         .map(drop)
         .map_err(plugin_sqlx_error)?;
-    crate::obligation_ledger::arm_obligation_tx(
-        tx,
-        &lash_core_execution::store::ObligationKey::ParentEnd {
-            parent_kind: kind.to_string(),
-            parent_id: id.clone(),
-        },
-        crate::obligation_ledger::DUE_AT_ONCE_MS,
-    )
-    .await
-    .map_err(PluginError::from)?;
-    if cascaded_by_actor {
-        // The ended process's actor runs its cascade (ADR 0132 §11): the
-        // row stays as the late-start fence and settles at once, so no
-        // relay runs it.
-        sqlx::query(process_sql().plan.settle.sql())
-            .bind(kind)
-            .bind(id.clone())
-            .bind(ended_at_ms as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-    }
     // The close ends every wait the scope's calls still hold (ADR 0116
     // §3.6): an abandoned call leaks no hold, and a late start under the
     // closed scope is refused, so no redrive needs the row pinned.
@@ -221,37 +170,8 @@ pub(super) async fn record(
         .await
         .map_err(crate::plugin_store_error)?;
     let fleet_format = tx.fleet();
-    record_tx(&mut tx, parent, ended_at_ms, fleet_format, false).await?;
+    record_tx(&mut tx, parent, ended_at_ms, fleet_format).await?;
     tx.commit().await.map_err(plugin_sqlx_error)
-}
-
-/// The row `(kind, id)` names, as the read any caller gets: `get` names it
-/// by scope, `get_by_key` by the stored columns a `ParentEnd` obligation's
-/// claim carries.
-async fn get_by_columns(
-    pool: &PgPool,
-    kind: &str,
-    id: &str,
-    fleet_format: lash_core_execution::FleetFormat,
-) -> Result<Option<ParentEndPlan>, PluginError> {
-    let row = sqlx::query(process_sql().plan.select_stamps.sql())
-        .bind(kind)
-        .bind(id)
-        .fetch_optional(pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-    row.map(|row| {
-        decode_plan(
-            kind.to_string(),
-            id.to_string(),
-            row.get(0),
-            row.get(1),
-            row.get(2),
-            row.get(3),
-            fleet_format,
-        )
-    })
-    .transpose()
 }
 
 pub(super) async fn get(
@@ -260,156 +180,15 @@ pub(super) async fn get(
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<Option<ParentEndPlan>, PluginError> {
     let (kind, id) = ledger_key(parent);
-    get_by_columns(pool, kind, &id, fleet_format).await
-}
-
-/// The row a `ParentEnd` obligation's claim names. Its claim reads only the
-/// stored key columns, so this read is what decodes the typed payload —
-/// and a payload that does not decode is corrupt, not a page failure.
-pub(super) async fn get_by_key(
-    pool: &PgPool,
-    parent_kind: &str,
-    parent_id: &str,
-    fleet_format: lash_core_execution::FleetFormat,
-) -> Result<Option<ParentEndPlan>, PluginError> {
-    get_by_columns(pool, parent_kind, parent_id, fleet_format).await
-}
-
-/// Turn and session-operation scopes with live `Cancel` children and no ledger row
-/// yet.
-///
-/// An opener's ledger row is written right after its end evidence rather than
-/// inside it — the turn commit for a turn, the drain-end receipt for a drain —
-/// so a crash in between leaves exactly this shape: children that still name
-/// an owner scope no row has ended. The recovery sweep confirms the owner
-/// actually ended before writing the row, so an interrupted turn or drain is
-/// reported here and then left alone for its redrive.
-///
-/// The predicate is the pending-cancel partial index, so a scope whose
-/// children are all terminal or already cancelled needs no row and is not
-/// reported.
-pub(super) async fn list_unrecorded_opener_parents(
-    pool: &PgPool,
-    after: Option<&str>,
-    limit: NonZeroUsize,
-) -> Result<Vec<ScopeId>, PluginError> {
-    let rows = sqlx::query(
-        process_sql()
-            .process_postgres
-            .list_unrecorded_opener_parents
-            .sql(),
-    )
-    .bind(after)
-    .bind(limit.get() as i64)
-    .fetch_all(pool)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    rows.into_iter()
-        .map(|row| {
-            let id: String = row.get(0);
-            let kind: String = row.get(1);
-            let record_json: String = row.get(2);
-            let record: ProcessRecord =
-                serde_json::from_str(&record_json).map_err(process_decode_error)?;
-            record
-                .lifetime
-                .scope()
-                .cloned()
-                .filter(|parent| {
-                    matches!(parent.storage_kind(), "turn" | "session_operation")
-                        && parent.storage_kind() == kind
-                        && parent.storage_id() == id
-                })
-                .ok_or_else(|| {
-                    PluginError::Session(format!(
-                        "opener parent-scope candidate `{id}` names a different scope in its record"
-                    ))
-                })
-        })
-        .collect()
-}
-
-/// Processes living `Until` one closed scope that still owe a cancel.
-///
-/// The predicate is exactly the pending-cancel partial index: `Until` lifetime,
-/// no cancel request yet, and a live status.
-pub(super) async fn children(
-    pool: &PgPool,
-    parent: &ScopeId,
-    after: Option<&ProcessId>,
-    limit: NonZeroUsize,
-) -> Result<Vec<ProcessRecord>, PluginError> {
-    let (kind, id) = ledger_key(parent);
-    let after = after.map(|value| value.to_string());
-    let limit = limit.get() as i64;
-    // A session's plan also owes the children of every scope inside the
-    // session that has no row of its own (FIG-3948).
-    let query = match parent {
-        ScopeId::Session(session_id) => {
-            let (turns_from, turns_to) = EffectOpener::session_turn_encoding_range(session_id);
-            let (drains_from, drains_to) =
-                EffectOpener::session_operation_encoding_range(session_id);
-            sqlx::query(
-                process_sql()
-                    .process_postgres
-                    .list_session_end_children
-                    .sql(),
-            )
-            .bind(id)
-            .bind(turns_from)
-            .bind(turns_to)
-            .bind(drains_from)
-            .bind(drains_to)
-        }
-        ScopeId::Opener(_) => sqlx::query(
-            process_sql()
-                .process_postgres
-                .list_parent_end_children
-                .sql(),
-        )
+    let row = sqlx::query(process_sql().plan.select_stamps.sql())
         .bind(kind)
-        .bind(id),
-    };
-    let rows = query
-        .bind(after)
-        .bind(limit)
-        .fetch_all(pool)
+        .bind(&id)
+        .fetch_optional(pool)
         .await
         .map_err(plugin_sqlx_error)?;
-    rows.into_iter()
-        .map(|row| {
-            let json: String = row.get(0);
-            serde_json::from_str(&json).map_err(process_decode_error)
-        })
-        .collect()
-}
-
-/// Mark one ledger row settled, under the parent-scope advisory lock.
-///
-/// A registration that read "no row" and has not committed yet still holds the
-/// lock, so settle waits for it and the child it commits is already visible to
-/// the sweep that follows.
-///
-/// The settle also delivers a `due` obligation the row owes (ADR 0109): the
-/// apply that ends here is the delivery that obligation carries. A `claimed`
-/// row's claim owns its own settle, and a `stalled` row keeps its stall.
-pub(super) async fn settle(
-    pool: &PgPool,
-    fence: &crate::guarded_tx::WriterFence,
-    parent: &ScopeId,
-    settled_at_ms: u64,
-) -> Result<(), PluginError> {
-    let (kind, id) = ledger_key(parent);
-    let mut tx = crate::begin_guarded(pool, fence)
-        .await
-        .map_err(crate::plugin_store_error)?;
-    lock_parent_scope_tx(&mut tx, parent).await?;
-    sqlx::query(process_sql().plan.settle.sql())
-        .bind(kind)
-        .bind(id)
-        .bind(settled_at_ms as i64)
-        .execute(&mut **tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-    tx.commit().await.map_err(plugin_sqlx_error)
+    row.map(|row| {
+        let payload: String = row.get(0);
+        decode_plan(kind, &id, &payload, row.get(1), fleet_format)
+    })
+    .transpose()
 }

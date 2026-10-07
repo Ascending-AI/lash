@@ -761,7 +761,6 @@ impl PostgresStorage {
             kind,
             self.pool.clone(),
             self.fence.clone(),
-            self.observer.clone(),
         ))
     }
 
@@ -770,16 +769,7 @@ impl PostgresStorage {
             lash_core_execution::store::ObligationKind::ArtifactCleanup,
             self.pool.clone(),
             self.fence.clone(),
-            self.observer.clone(),
         ))
-    }
-
-    /// The two-phase session delete's ledger over this catalog (ADR 0109
-    /// §4): the closing sessions a generation drain status counts.
-    pub fn session_delete_ledger(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::session_delete::SessionDeleteLedger> {
-        Arc::new(crate::session_delete_ledger::PostgresSessionDeleteLedger::new(self.pool.clone()))
     }
 }
 
@@ -876,8 +866,6 @@ mod schema_shape;
 mod session_blob_reclaim;
 #[path = "postgres/session_catalog.rs"]
 mod session_catalog;
-#[path = "postgres/session_delete_ledger.rs"]
-mod session_delete_ledger;
 #[path = "postgres/session_factory.rs"]
 mod session_factory;
 #[path = "postgres/session_ingress.rs"]

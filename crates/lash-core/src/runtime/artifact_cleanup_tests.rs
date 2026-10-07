@@ -45,14 +45,6 @@ impl ObligationLedger for Ledger {
         ObligationKind::ArtifactCleanup
     }
 
-    async fn arm(
-        &self,
-        _key: &ObligationKey,
-        _now_ms: u64,
-    ) -> Result<Option<ObligationId>, StoreError> {
-        Ok(None)
-    }
-
     async fn claim_due(
         &self,
         _now_ms: u64,

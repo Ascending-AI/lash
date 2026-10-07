@@ -56,20 +56,18 @@ pub struct InputRow {
     /// tombstone, and none while it is open.
     pub state: Option<String>,
     pub admitted_run: Option<String>,
-    pub obligation_state: Option<String>,
 }
 
 impl InputRow {
     #[must_use]
     pub fn render(&self) -> String {
         format!(
-            "{} {}/{}: state={} admitted_run={} obligation={}",
+            "{} {}/{}: state={} admitted_run={}",
             self.table,
             self.session,
             self.id,
             self.state.as_deref().unwrap_or("-"),
             self.admitted_run.as_deref().unwrap_or("NULL"),
-            self.obligation_state.as_deref().unwrap_or("NULL"),
         )
     }
 }
@@ -230,7 +228,7 @@ impl StoreSnapshot {
         snapshot.read_obligations(stores)?;
         for row in read(
             stores,
-            "SELECT session_id, input_id, state, admitted_run, obligation_state \
+            "SELECT session_id, input_id, state, admitted_run \
              FROM pending_turn_inputs ORDER BY session_id, enqueue_seq",
         )? {
             snapshot.inputs.push(InputRow {
@@ -239,12 +237,11 @@ impl StoreSnapshot {
                 id: required(&row, "input_id"),
                 state: text(&row, "state"),
                 admitted_run: text(&row, "admitted_run"),
-                obligation_state: text(&row, "obligation_state"),
             });
         }
         for row in read(
             stores,
-            "SELECT session_id, batch_id, terminal_cause, admitted_run, obligation_state \
+            "SELECT session_id, batch_id, terminal_cause, admitted_run \
              FROM queued_work_batches ORDER BY session_id, enqueue_seq",
         )? {
             snapshot.inputs.push(InputRow {
@@ -253,7 +250,6 @@ impl StoreSnapshot {
                 id: required(&row, "batch_id"),
                 state: text(&row, "terminal_cause"),
                 admitted_run: text(&row, "admitted_run"),
-                obligation_state: text(&row, "obligation_state"),
             });
         }
         for row in read(

@@ -29,10 +29,6 @@ const CONTROL_INTENT_SOURCE: &str =
 const OBLIGATION_SOURCE: &str = include_str!("../../../lash-core-store/src/store/obligation.rs");
 const RECOVERY_LEADER_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/recovery_leader.rs");
-/// A session's two-phase delete reads (ADR 0109 §4): every method is executed
-/// by `session_delete_cases`, none is excluded.
-const SESSION_DELETE_SOURCE: &str =
-    include_str!("../../../lash-core-store/src/store/session_delete.rs");
 
 /// Every source file that makes up this test binary: the root file and every
 /// `*.rs` under its module directory, read from the package at run time. A
@@ -298,7 +294,6 @@ fn store_trait_surface_is_fully_gated() {
     for (source, trait_name) in [
         (OBLIGATION_SOURCE, "ObligationLedger"),
         (RECOVERY_LEADER_SOURCE, "RecoveryLeaderStore"),
-        (SESSION_DELETE_SOURCE, "SessionDeleteLedger"),
     ] {
         for method in fallible_trait_methods(source, trait_name) {
             if harness_drives(&sources, &method) {

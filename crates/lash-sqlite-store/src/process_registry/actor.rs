@@ -70,7 +70,7 @@ impl SqliteProcessRegistry {
                 .map(|request| request.origin),
         );
         let authority = lash_core_execution::ProcessCompletionAuthority::ActorEpoch { epoch };
-        let mut batch = ProcessEventBatch::for_actor(fleet_format);
+        let mut batch = ProcessEventBatch::for_fleet(fleet_format);
         let request = lash_core_execution::facade_support::terminal_append_request(
             process_id,
             &output,

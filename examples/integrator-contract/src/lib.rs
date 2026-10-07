@@ -766,47 +766,10 @@ impl ProcessLifecycle for Integrator {
     async fn record_parent_end(&self, parent: &ScopeId) -> Result<(), PluginError> {
         unreachable!("external signature witness")
     }
-    async fn settle_terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<bool, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn terminal_publication(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<ProcessTerminalPublication>, PluginError> {
-        unreachable!("external signature witness")
-    }
     async fn get_parent_end_plan(
         &self,
         parent: &ScopeId,
     ) -> Result<Option<ParentEndPlan>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn get_parent_end_plan_by_key(
-        &self,
-        parent_kind: &str,
-        parent_id: &str,
-    ) -> Result<Option<ParentEndPlan>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_parent_end_children(
-        &self,
-        parent: &ScopeId,
-        after: Option<&ProcessId>,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn settle_parent_end_plan(&self, parent: &ScopeId) -> Result<(), PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_unrecorded_opener_parents(
-        &self,
-        after: Option<&str>,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<ScopeId>, PluginError> {
         unreachable!("external signature witness")
     }
     async fn record_first_started_with_authority(

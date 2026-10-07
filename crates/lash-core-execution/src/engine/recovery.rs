@@ -13,11 +13,6 @@ pub struct RecoveryPassBudget {
     /// Default 30 s. Keep it below the relay's 60 s claim TTL, so a claim
     /// never lapses under an attempt still running.
     pub attempt: std::time::Duration,
-    /// The longest a recovery tick waits on its kinds' due passes before its
-    /// leader-only arms run. A pass still delivering then finishes on its
-    /// kind's lane, and the next tick reports it. The leader arms run
-    /// concurrently under a guard of twice this duration. Default 1 s.
-    pub tick_wait: std::time::Duration,
 }
 
 impl Default for RecoveryPassBudget {
@@ -26,7 +21,6 @@ impl Default for RecoveryPassBudget {
             attempt: std::time::Duration::from_millis(
                 crate::runtime::obligations::relay::RelayPolicy::DEFAULT_ATTEMPT_BUDGET_MS,
             ),
-            tick_wait: std::time::Duration::from_secs(1),
         }
     }
 }

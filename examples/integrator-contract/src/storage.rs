@@ -579,13 +579,6 @@ impl ObligationLedger for Integrator {
     fn kind(&self) -> ObligationKind {
         unreachable!("external signature witness")
     }
-    async fn arm(
-        &self,
-        key: &ObligationKey,
-        now_ms: u64,
-    ) -> Result<Option<ObligationId>, StoreError> {
-        unreachable!("external signature witness")
-    }
     async fn claim_due(
         &self,
         now_ms: u64,
@@ -650,25 +643,6 @@ impl RecoveryLeaderStore for Integrator {
         unreachable!("external signature witness")
     }
     fn due_claims_need_leader(&self) -> bool {
-        unreachable!("external signature witness")
-    }
-}
-
-#[lash::async_trait]
-impl SessionDeleteLedger for Integrator {
-    async fn delete_obligation(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionDeleteObligation>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn undelivered_cleanup(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionCleanup, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn count_closing(&self) -> Result<u64, StoreError> {
         unreachable!("external signature witness")
     }
 }

@@ -11,10 +11,6 @@ use lash_core_worker::DurableProcessWorkerConfig;
 use lash_sansio::SessionId;
 
 mod drain;
-#[expect(
-    dead_code,
-    reason = "no reconcile tick runs the election since the shift is deleted (L3s, FIG-5196); L10b decides what drives the relays it keeps"
-)]
 mod recovery;
 mod runtime_host_config;
 mod session_deletion;
@@ -888,13 +884,11 @@ impl LashCoreBuilder {
     }
 
     /// Bound every obligation delivery this core runs (ADR 0109 §1.8): each
-    /// delivery attempt's budget — past it the attempt is abandoned and
-    /// retried — and how long a recovery tick waits on its kinds' due passes
-    /// before its leader arms run. The one policy source: the reconcile
-    /// tick's relays and a producer's immediate `deliver_now` attempts run
-    /// under it alike (FIG-4246). Defaults to a 30 s attempt budget and a
-    /// 1 s tick wait. Keep the attempt budget below the relay's 60 s claim
-    /// TTL.
+    /// delivery attempt's budget, past which the attempt is abandoned and
+    /// retried. The one policy source: the artifact-cleanup due pass and a
+    /// producer's immediate `deliver_now` attempts run under it alike
+    /// (FIG-4246). Defaults to a 30 s attempt budget. Keep it below the
+    /// relay's 60 s claim TTL.
     pub fn recovery_pass_budget(mut self, budget: lash_core::engine::RecoveryPassBudget) -> Self {
         self.recovery_pass = budget;
         self
@@ -1001,6 +995,16 @@ impl LashCoreBuilder {
         let recovery = Arc::new(recovery::RecoverySlot::new(
             &env,
             self.recovery_lease.unwrap_or_default(),
+        ));
+        // The artifact-cleanup outbox's due pass (ADR 0132 §12): a cleanup
+        // whose producer died before its immediate attempt is delivered here.
+        recovery.start_cleanup(Arc::new(
+            lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+                &backend,
+                host_process_engines.clone(),
+            )
+            .with_policy(env.core.control.relay_policy())
+            .with_metrics(env.core.tracing.metrics().clone()),
         ));
         let substrate = CoreWorkSetup {
             process: process_work,

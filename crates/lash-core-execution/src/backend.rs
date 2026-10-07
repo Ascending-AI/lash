@@ -404,13 +404,6 @@ impl Backend {
     pub fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger> {
         self.inner.stores.artifact_cleanup()
     }
-
-    /// The store set's session-delete reads (ADR 0109 §4).
-    pub fn session_delete_ledger(
-        &self,
-    ) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger> {
-        self.inner.stores.session_delete_ledger()
-    }
 }
 
 impl std::fmt::Debug for Backend {
@@ -485,9 +478,6 @@ pub trait StoreSet: Send + Sync {
         &self,
         kind: crate::store::ObligationKind,
     ) -> Arc<dyn crate::store::ObligationLedger>;
-
-    /// The reads of a session's two-phase delete (ADR 0109 §4).
-    fn session_delete_ledger(&self) -> Arc<dyn crate::store::session_delete::SessionDeleteLedger>;
 
     /// The artifact-cleanup ledger (ADR 0113 §2.5): the ledger
     /// [`Self::obligation_ledger`] answers for

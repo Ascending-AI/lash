@@ -67,15 +67,4 @@ impl ProcessWorkSubstrate for DurableProcessWork {
             .map(drop)
             .map_err(|error| PluginError::Invoke(error.to_string()))
     }
-
-    /// Nothing to publish: the process's terminal transaction resolves its
-    /// waiters' rows itself (`waits::resolve_process_terminal_waits`).
-    async fn publish_process_terminal(
-        &self,
-        _process_id: &crate::ProcessId,
-        _output: &crate::ProcessAwaitOutput,
-        _key: &str,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 }

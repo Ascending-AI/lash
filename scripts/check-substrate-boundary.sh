@@ -379,6 +379,29 @@ if [[ -s "$tmp_dir/rule7c.hits" ]]; then
   failed=1
 fi
 
+# Rule 7e — the obligation relay is gone (ADR 0132 §12; L10b, FIG-5191).
+# Every replaced obligation kind is a mailbox write and a wake in its
+# producer's transaction: the kinds, their relays and ledgers, the
+# multi-kind relay assembly and the scope-close, parent-end, session-delete,
+# terminal-publication, trigger-delivery and process-start machinery are
+# deleted, and none of their names may come back. `ArtifactCleanup` keeps its outbox and its relay (ADR 0113). A
+# comment line is history, not a path, so it is not a hit.
+obligation_kinds='Ingress|ControlIntent|ScopeClose|ParentEnd|SessionDelete|ProcessTerminal|TriggerDelivery|ProcessStart'
+obligation_names='ProcessWakeOutbox|RecordedJournal[A-Za-z]*|ScopeCloseSink|NoScopeClose|RegistryScopeClose|ReconcileCursor|RelayNeed|ObligationRelayUnavailable|SessionDeleteLedger|SessionDeleteObligation|SessionCleanup|ProcessTerminalPublication|TransientTerminalPublication|settle_terminal_publication|list_parent_end_children|settle_parent_end_plan|get_parent_end_plan_by_key|list_unrecorded_opener_parents|apply_parent_end_plan|session_delete_ledger|relay_kind|consumer_settles|deliver_claimed|law_tick_lanes'
+obligation_forbidden="(^|[^[:alnum:]_])(Obligation(Kind|Key)::(${obligation_kinds})|${obligation_names})([^[:alnum:]_]|$)"
+capture_search "deleted obligation relay" "$obligation_forbidden" "$tmp_dir/rule7e.raw" "${rule4_runs[@]}"
+: >"$tmp_dir/rule7e.hits"
+while IFS=: read -r file line source; do
+  [[ -n "$file" ]] || continue
+  [[ $source =~ ^[[:space:]]*// ]] && continue
+  printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$tmp_dir/rule7e.hits"
+done <"$tmp_dir/rule7e.raw"
+if [[ -s "$tmp_dir/rule7e.hits" ]]; then
+  cat "$tmp_dir/rule7e.hits" >&2
+  echo "substrate boundary rule 7e failed: a deleted obligation-relay name was found; the replaced kinds are mailbox writes (ADR 0132 §12)" >&2
+  failed=1
+fi
+
 if [[ $failed -ne 0 ]]; then
   exit 1
 fi

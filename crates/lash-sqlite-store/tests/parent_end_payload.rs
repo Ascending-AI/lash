@@ -4,9 +4,7 @@
 //!
 //! The projection is index material only: injective, comparable, never
 //! parsed. Rows are injected straight into `parent_end_plans` so each refusal
-//! reaches `get_parent_end_plan_by_key`/`get_parent_end_plan` exactly as a
-//! stored row would — the keyed read is the one the ParentEnd obligation's
-//! relay makes, and a row that refuses it stalls `undecodable`.
+//! reaches `get_parent_end_plan` exactly as a stored row would.
 
 use std::sync::Arc;
 
@@ -69,43 +67,6 @@ async fn a_ledger_row_decodes_its_typed_payload() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_pre_cutover_ledger_row_is_refused_not_migrated() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let registry = Arc::new(
-        SqliteProcessRegistry::open_standalone_for_testing(&dir.path().join("processes.db"))
-            .await
-            .expect("process registry"),
-    ) as Arc<dyn ProcessRegistry>;
-
-    // The pre-FIG-3418 row: a `ParentScope` serialized without the version
-    // wrapper, keyed by the rendered `{session}/{turn}` id it used to parse.
-    let old_payload = serde_json::json!({
-        "kind": "turn",
-        "session_id": "old-session",
-        "turn_id": "old-turn",
-    })
-    .to_string();
-    inject(dir.path(), "turn", "old-session/old-turn", &old_payload);
-
-    let error = registry
-        .get_parent_end_plan_by_key("turn", "old-session/old-turn")
-        .await
-        .expect_err("an old-format row must fail closed, not decode");
-    assert!(
-        matches!(
-            error,
-            lash_core_execution::PluginError::StoredDataCorrupt { .. }
-        ),
-        "a row this build cannot decode is corrupt, so the relay stalls it \
-         undecodable rather than failing its page: {error}"
-    );
-    assert!(
-        error.to_string().contains("malformed scope payload"),
-        "the refusal names the payload shape: {error}"
-    );
-}
-
 /// ADR 0094's version-2 row keyed a parent scope (`Host` included) rather
 /// than a lifetime scope. FIG-3607 re-keys the ledger by `ScopeId` in place,
 /// under the same payload version; the old row's scope is not a `ScopeId`, so
@@ -133,7 +94,7 @@ async fn a_parent_scope_row_is_refused_as_malformed() {
     );
 
     let error = registry
-        .get_parent_end_plan_by_key(scope.storage_kind(), &scope.storage_id())
+        .get_parent_end_plan(&scope)
         .await
         .expect_err("a parent-scope row must refuse");
     assert!(
@@ -165,7 +126,7 @@ async fn an_unsupported_payload_version_is_refused() {
     );
 
     let error = registry
-        .get_parent_end_plan_by_key(scope.storage_kind(), &scope.storage_id())
+        .get_parent_end_plan(&scope)
         .await
         .expect_err("a newer payload version must refuse");
     assert!(
@@ -191,10 +152,16 @@ async fn a_payload_that_disagrees_with_its_projection_is_refused() {
         .expect("encode the payload");
     // The payload names one turn; the projection names another. A reader that
     // trusted either side alone would resurrect the wrong scope.
-    inject(dir.path(), "turn", "mismatch-session/other-turn", &payload);
+    let other = turn_scope("mismatch-session", "other-turn");
+    inject(
+        dir.path(),
+        other.storage_kind(),
+        &other.storage_id(),
+        &payload,
+    );
 
     let error = registry
-        .get_parent_end_plan_by_key("turn", "mismatch-session/other-turn")
+        .get_parent_end_plan(&other)
         .await
         .expect_err("a projection/payload disagreement must refuse");
     assert!(

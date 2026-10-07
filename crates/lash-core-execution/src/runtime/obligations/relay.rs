@@ -1,10 +1,10 @@
 //! The obligation relay (ADR 0109 §1.4): the engine half of store→engine
 //! delivery.
 //!
-//! A producer arms an obligation in the transaction that makes an engine
-//! effect owed, then calls [`deliver_now`] for its own commit. The reconcile
-//! tick runs [`relay_due`] over every kind's partial due index, retrying what
-//! the immediate attempt did not deliver. Both entry points settle a claim by
+//! A producer arms an obligation in the transaction that makes an effect
+//! owed, then may call [`deliver_now`] for its own commit. The leader's
+//! recovery tick runs [`relay_due`] over the kind's partial due index,
+//! retrying what an immediate attempt did not deliver. Both entry points settle a claim by
 //! one rule: delivered; refused for good, stalled; undecodable, stalled;
 //! retryable, retried after a capped exponential backoff until the kind's
 //! attempt ceiling, then stalled. A stalled obligation is never dropped and
@@ -27,8 +27,8 @@ use std::num::{NonZeroU32, NonZeroUsize};
 
 use crate::Clock;
 use crate::store::{
-    ClaimToken, ClaimedObligation, DeliveryError, ObligationId, ObligationKey, ObligationKind,
-    ObligationLedger, ObligationSettlement, SettleOutcome, StallReason, StoreError,
+    ClaimToken, ClaimedObligation, DeliveryError, ObligationId, ObligationKey, ObligationLedger,
+    ObligationSettlement, SettleOutcome, StallReason, StoreError,
 };
 use crate::{PluginError, RuntimeErrorCode};
 
@@ -61,16 +61,6 @@ impl DeliveryFailure {
     /// A failure no later attempt repairs.
     pub fn refused(error: impl Into<DeliveryError>) -> Self {
         Self::Refused(error.into())
-    }
-
-    /// The relay of `ledger` was handed `key`, which names another ledger's
-    /// row.
-    #[must_use]
-    pub fn key_mismatch(ledger: ObligationKind, key: &ObligationKey) -> Self {
-        Self::Undecodable(DeliveryError::new(
-            RuntimeErrorCode::ObligationKeyMismatch,
-            format!("a {} key on the {ledger} ledger", key.kind()),
-        ))
     }
 
     /// The row the obligation lives on lacks what its delivery needs.
@@ -188,18 +178,8 @@ pub trait ObligationRelay: Send + Sync {
         RelayPolicy::default()
     }
 
-    /// Whether the kind's consumer, not the relay, settles a delivery (ADR
-    /// 0109 §3, ingress): the engine accepting [`deliver`](Self::deliver)'s
-    /// ask leaves the claim standing, the consumer's own transaction settles
-    /// the obligation, and a claim nobody settled lapses and is asked again.
-    fn consumer_settles(&self) -> bool {
-        false
-    }
-
     /// Deliver the obligation `delivery` names, under the claim that owns
-    /// this attempt. Idempotent under a repeated obligation id: the engine
-    /// dedupes on a key derived from it (and from the attempt, for a kind
-    /// whose consumer settles, so a lapsed claim's retry is a new ask).
+    /// this attempt. Idempotent under a repeated obligation id.
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure>;
 
     /// What the kind owes once `delivery`'s obligation stalled: called after
@@ -241,9 +221,6 @@ pub enum RelayVerdict {
     Deferred {
         due_at_ms: u64,
     },
-    /// The engine accepted the ask of a kind whose consumer settles it; the
-    /// claim stands until the consumer's transaction settles it or it lapses.
-    Requested,
     /// Another relay retook the row, or the delivery settled it itself.
     ClaimLost,
     /// Immediate delivery found the obligation not `due`: already claimed,
@@ -258,10 +235,6 @@ pub struct RelayPass {
     pub claimed: usize,
     /// Claims the engine accepted.
     pub delivered: usize,
-    /// Claims whose delivery asked the engine and left the claim for the
-    /// kind's consumer to settle in its own transaction; a claim nobody
-    /// settles lapses and the relay asks again.
-    pub requested: usize,
     /// Claims handed back for a later attempt.
     pub retried: usize,
     /// Claims that stalled: refused, undecodable, or at the attempt ceiling.
@@ -275,7 +248,6 @@ fn count(pass: &mut RelayPass, verdict: &RelayVerdict) {
         RelayVerdict::Delivered => pass.delivered += 1,
         RelayVerdict::Retried { .. } => pass.retried += 1,
         RelayVerdict::Stalled(_) => pass.stalled += 1,
-        RelayVerdict::Requested => pass.requested += 1,
         RelayVerdict::ClaimLost => pass.claim_lost += 1,
         // A deferred guard was claimed and owes nothing yet: `claimed`
         // counts it, and no outcome does.
@@ -353,7 +325,6 @@ fn outcome_label(verdict: &RelayVerdict) -> Option<&'static str> {
         RelayVerdict::Retried { .. } => Some("retried"),
         RelayVerdict::Stalled(_) => Some("stalled"),
         RelayVerdict::Deferred { .. } => Some("deferred"),
-        RelayVerdict::Requested => Some("requested"),
         RelayVerdict::ClaimLost => Some("claim_lost"),
         RelayVerdict::NotDue => None,
     }
@@ -368,20 +339,8 @@ async fn attempt(
     let ledger = relay.ledger();
     let kind = ledger.kind();
     let policy = relay.policy();
-    let consumer_settles = relay.consumer_settles();
     let started_ms = clock.timestamp_ms();
     let result = match &claimed.key {
-        // A consumer-settled claim is retaken only when its last ask lapsed
-        // unsettled: past the ceiling, it stalls instead of asking again.
-        Ok(_) if consumer_settles && claimed.attempts > policy.attempt_ceiling.get() => {
-            Err(DeliveryFailure::Retryable(DeliveryError::new(
-                RuntimeErrorCode::ObligationAskUnadmitted,
-                format!(
-                    "the engine accepted {} asks and nothing admitted the row",
-                    claimed.attempts.saturating_sub(1)
-                ),
-            )))
-        }
         Ok(key) => {
             within_budget(
                 &policy,
@@ -401,18 +360,6 @@ async fn attempt(
         )),
     };
     let now_ms = clock.timestamp_ms();
-    if consumer_settles && result.is_ok() {
-        let verdict = RelayVerdict::Requested;
-        if let Some(outcome) = outcome_label(&verdict) {
-            crate::operational_metrics::record_obligation_attempt(
-                &relay.metrics(),
-                Some(&lash_trace::EmissionPermit::new_transition()),
-                kind.label(),
-                outcome,
-            );
-        }
-        return Ok(verdict);
-    }
     let settlement = settlement_for(&policy, &claimed, result, started_ms);
     let planned = match &settlement {
         ObligationSettlement::Delivered => RelayVerdict::Delivered,
@@ -496,22 +443,6 @@ pub async fn deliver_now(
     attempt(relay, claimed, clock).await
 }
 
-/// Deliver an obligation the producer's own transaction already claimed
-/// (FIG-3975): a fused admission takes the claim inside its commit, so the
-/// only work left is the attempt and its settlement — identical to the claim
-/// [`deliver_now`] takes then hands here.
-///
-/// # Errors
-///
-/// Only a store failure; a failed delivery is a settlement, not an error.
-pub async fn deliver_claimed(
-    relay: &dyn ObligationRelay,
-    claimed: ClaimedObligation,
-    clock: &dyn Clock,
-) -> Result<RelayVerdict, StoreError> {
-    attempt(relay, claimed, clock).await
-}
-
 /// One bounded due pass: claim at most `limit` due obligations and attempt
 /// them together, each under the kind's attempt budget, so the pass ends
 /// within one budget of its claim and no claimed row waits behind another's
@@ -548,12 +479,6 @@ pub async fn relay_due(
     Ok(pass)
 }
 
-/// The kind a relay serves.
-#[must_use]
-pub fn relay_kind(relay: &dyn ObligationRelay) -> ObligationKind {
-    relay.ledger().kind()
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -561,7 +486,7 @@ mod tests {
     use lash_sansio::SessionId;
 
     use super::*;
-    use crate::store::{ClaimToken, StalledObligation, UndecodableObligation};
+    use crate::store::{ClaimToken, ObligationKind, StalledObligation, UndecodableObligation};
     use crate::testing::TestClock;
 
     /// A ledger that hands out one scripted page and records every
@@ -574,15 +499,7 @@ mod tests {
     #[async_trait::async_trait]
     impl ObligationLedger for PageLedger {
         fn kind(&self) -> ObligationKind {
-            ObligationKind::SessionDelete
-        }
-
-        async fn arm(
-            &self,
-            _key: &ObligationKey,
-            _now_ms: u64,
-        ) -> Result<Option<ObligationId>, StoreError> {
-            Ok(None)
+            ObligationKind::ArtifactCleanup
         }
 
         async fn claim_due(
@@ -669,9 +586,9 @@ mod tests {
         }
     }
 
-    fn session_delete(session: &str) -> Result<ObligationKey, UndecodableObligation> {
-        Ok(ObligationKey::SessionDelete {
-            session_id: SessionId::fixture(session),
+    fn cleanup(session: &str) -> Result<ObligationKey, UndecodableObligation> {
+        Ok(ObligationKey::ArtifactCleanup {
+            referrer: crate::ArtifactReferrer::Session(SessionId::fixture(session)),
         })
     }
 
@@ -706,7 +623,7 @@ mod tests {
     async fn a_row_whose_key_does_not_decode_stalls_and_the_page_goes_on() {
         let relay = AlwaysDelivers(PageLedger {
             page: Mutex::new(vec![
-                claimed("before", session_delete("s-before")),
+                claimed("before", cleanup("s-before")),
                 claimed(
                     "poison",
                     Err(UndecodableObligation {
@@ -714,7 +631,7 @@ mod tests {
                         detail: "key column `session_id` is Integer(7), not text".to_owned(),
                     }),
                 ),
-                claimed("after", session_delete("s-after")),
+                claimed("after", cleanup("s-after")),
             ]),
             settled: Mutex::new(Vec::new()),
         });
@@ -756,94 +673,6 @@ mod tests {
         );
     }
 
-    /// A kind whose consumer settles its deliveries (ingress): it records
-    /// the attempt each ask named.
-    struct ConsumerSettled {
-        ledger: PageLedger,
-        asked: Mutex<Vec<(ObligationId, u32)>>,
-    }
-
-    #[async_trait::async_trait]
-    impl ObligationRelay for ConsumerSettled {
-        fn ledger(&self) -> &dyn ObligationLedger {
-            &self.ledger
-        }
-
-        fn consumer_settles(&self) -> bool {
-            true
-        }
-
-        async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
-            self.asked
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push((delivery.id.clone(), delivery.attempt));
-            Ok(())
-        }
-    }
-
-    /// ADR 0109 §3 (D19): an ask the engine accepted leaves the claim for the
-    /// consumer's own transaction, never settling it here; a retaken claim
-    /// asks under its own attempt, and one retaken past the ceiling stalls
-    /// typed without asking again.
-    #[tokio::test]
-    async fn a_consumer_settled_ask_keeps_its_claim_and_stalls_past_the_ceiling() {
-        let ceiling = RelayPolicy::default().attempt_ceiling.get();
-        let with_attempts = |id: &str, attempts: u32| ClaimedObligation {
-            attempts,
-            ..claimed(id, session_delete("s"))
-        };
-        let relay = ConsumerSettled {
-            ledger: PageLedger {
-                page: Mutex::new(vec![
-                    with_attempts("asked", 3),
-                    with_attempts("spent", ceiling + 1),
-                ]),
-                settled: Mutex::new(Vec::new()),
-            },
-            asked: Mutex::new(Vec::new()),
-        };
-        let clock = TestClock::new(1_000);
-        let pass = relay_due(&relay, &clock, NonZeroUsize::MIN)
-            .await
-            .expect("a pass over a consumer-settled page");
-        assert_eq!(
-            pass,
-            RelayPass {
-                claimed: 2,
-                requested: 1,
-                stalled: 1,
-                ..RelayPass::default()
-            }
-        );
-        assert_eq!(
-            *relay
-                .asked
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-            vec![(ObligationId::new("asked"), 3)],
-            "only the claim within the ceiling asked, under its attempt"
-        );
-        assert_eq!(
-            *relay
-                .ledger
-                .settled
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-            vec![(
-                ObligationId::new("spent"),
-                ObligationSettlement::Stall {
-                    reason: StallReason::AttemptsExhausted,
-                    error: DeliveryError::new(
-                        RuntimeErrorCode::ObligationAskUnadmitted,
-                        format!("the engine accepted {ceiling} asks and nothing admitted the row"),
-                    ),
-                }
-            )],
-            "the accepted ask settled nothing; the spent claim stalled"
-        );
-    }
-
     struct NeverYet(PageLedger);
 
     #[async_trait::async_trait]
@@ -866,7 +695,7 @@ mod tests {
         let relay = NeverYet(PageLedger {
             page: Mutex::new(vec![ClaimedObligation {
                 attempts: ceiling + 5,
-                ..claimed("guard", session_delete("s"))
+                ..claimed("guard", cleanup("s"))
             }]),
             settled: Mutex::new(Vec::new()),
         });
@@ -901,7 +730,7 @@ mod tests {
     #[test]
     fn a_delivery_not_owed_before_an_instant_defers_to_it() {
         let policy = RelayPolicy::default();
-        let claim = claimed("upload-guard", session_delete("s"));
+        let claim = claimed("upload-guard", cleanup("s"));
         assert_eq!(
             settlement_for(
                 &policy,
@@ -963,7 +792,7 @@ mod tests {
             let clock = Arc::new(TestClock::new(1_000));
             let relay = Slow {
                 ledger: PageLedger {
-                    page: Mutex::new(vec![claimed("slow", session_delete("s"))]),
+                    page: Mutex::new(vec![claimed("slow", cleanup("s"))]),
                     settled: Mutex::new(Vec::new()),
                 },
                 clock: Arc::clone(&clock),

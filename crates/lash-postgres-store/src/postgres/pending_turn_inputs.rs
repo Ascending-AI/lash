@@ -185,9 +185,9 @@ pub(crate) async fn lock_cancel_rows_in_queue_order(
 }
 
 /// Withdraw one locked row for the host at `now` (FIG-3927): an open row is
-/// cancelled, its ingress obligation settled in the same write (FIG-4098); a
-/// row a run admitted is that run's to settle or release, so the cancel
-/// changes nothing and answers the run that holds it.
+/// cancelled in one write (FIG-4098); a row a run admitted is that run's to
+/// settle or release, so the cancel changes nothing and answers the run that
+/// holds it.
 pub(crate) async fn cancel_pending_turn_input_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     row: PendingTurnInputRow,

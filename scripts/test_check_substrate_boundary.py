@@ -52,6 +52,15 @@ SHIFT_NAMES = (
     "lash_turn_park_events", "TurnParkWrite",
 )
 FIXTURE_DEFAULTS_FILE = "crates/lash-core-execution/src/runtime/effect/engine.rs"
+OBLIGATION_NAMES = (
+    "ObligationKind::ScopeClose", "ObligationKind::ParentEnd", "ObligationKind::SessionDelete",
+    "ObligationKind::ProcessTerminal", "ObligationKind::Ingress", "ObligationKey::ControlIntent",
+    "ObligationKind::TriggerDelivery", "ObligationKey::ProcessStart",
+    "ProcessWakeOutbox", "RecordedJournal", "RecordedJournalReadUnsupported", "ScopeCloseSink",
+    "RegistryScopeClose", "ReconcileCursor", "RelayNeed", "ObligationRelayUnavailable",
+    "SessionDeleteLedger", "SessionDeleteObligation", "ProcessTerminalPublication",
+    "settle_parent_end_plan", "get_parent_end_plan_by_key", "relay_kind",
+)
 
 
 class SubstrateBoundaryTests(unittest.TestCase):
@@ -137,6 +146,30 @@ class SubstrateBoundaryTests(unittest.TestCase):
                 "fn lift(result: Result<(), RuntimeEffectControllerError>) {",
                 "    let _ = result.map_err(crate::PluginError::RuntimeEffectController);",
                 "}",
+            ])
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_deleted_obligation_relay_name_fails(self) -> None:
+        for name in OBLIGATION_NAMES:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.build_fixture(root)
+                self.write_rust(root, FIXTURE_COLLAPSE_FILE, [f"fn relay() {{ let _ = {name}; }}"])
+                result = self.run_check(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("rule 7e failed: a deleted obligation-relay name", result.stderr)
+
+    def test_surviving_obligation_vocabulary_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root)
+            self.write_rust(root, FIXTURE_COLLAPSE_FILE, [
+                "// The ParentEnd relay and ObligationKind::ScopeClose are gone.",
+                "fn relay(_: &dyn ObligationRelay, _: ParentEndPlan, _: ControlIntentStore) {}",
+                "fn kind() -> ObligationKind { ObligationKind::ArtifactCleanup }",
+                "fn origin() -> CancelOrigin { CancelOrigin::ParentEnded }",
+                "fn report(_: SessionDeleteCompletion, _: ProcessSessionDeleteReport) {}",
             ])
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)

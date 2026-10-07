@@ -24,8 +24,6 @@ pub mod invariants;
 pub mod minimize;
 pub mod oracles;
 mod postgres_test_isolation;
-#[cfg(test)]
-mod process_terminal_bounds;
 pub mod provider;
 pub mod provider_mutations;
 #[cfg(test)]

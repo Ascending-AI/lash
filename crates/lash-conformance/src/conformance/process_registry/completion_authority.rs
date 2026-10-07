@@ -118,10 +118,6 @@ pub(super) async fn terminal_completion_replay_keeps_original_authority_and_writ
                 .await
                 .expect("original events");
             let evidence = completion_authority_evidence(&registry, &id).await;
-            let publication = registry
-                .terminal_publication(&id)
-                .await
-                .expect("original publication");
             let replay_authorities = [
                 ProcessCompletionAuthority::workflow_key("different-workflow"),
                 ProcessCompletionAuthority::WorkflowKeyRecovery {
@@ -200,13 +196,6 @@ pub(super) async fn terminal_completion_replay_keeps_original_authority_and_writ
                     assert_eq!(
                         completion_authority_evidence(&registry, &id).await,
                         evidence
-                    );
-                    assert_eq!(
-                        registry
-                            .terminal_publication(&id)
-                            .await
-                            .expect("read publication"),
-                        publication
                     );
                 }
             }

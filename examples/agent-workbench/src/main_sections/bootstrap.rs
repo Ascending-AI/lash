@@ -567,7 +567,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //         generation_rank: 1, ..Default::default()
     //     })
     //     .recovery_pass_budget(lash::RecoveryPassBudget {
-    //         attempt: Duration::from_secs(30), tick_wait: Duration::from_secs(1),
+    //         attempt: Duration::from_secs(30),
     //     })
     //     .termination(lash::runtime::TerminationPolicy::default())
     //     .execution_budgets(lash::ExecutionBudgets::default())

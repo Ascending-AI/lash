@@ -61,9 +61,6 @@ pub struct DeclaredStartTier {
     /// The RLM protocol plugin factories the `Promise.all` width runs under.
     pub rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     pub subagents: SubagentPlugin,
-    /// The engine's process port, which a scope close delivers each `Until`
-    /// child's `ParentEnded` cancel through.
-    pub delivery: Arc<dyn crate::ProcessWorkSubstrate>,
 }
 
 /// A gate a scripted model step waits on until the law opens it.
@@ -1392,7 +1389,7 @@ pub async fn spawn_agent_record_carries_child_identity(tier: DeclaredStartTier) 
 }
 
 /// L08: a session-owned subagent outlives cancellation and close of the turn
-/// that observes it. Its recorded session lifetime still ends it.
+/// that observes it.
 #[expect(
     clippy::expect_used,
     reason = "the law fixture establishes these results"
@@ -1414,14 +1411,11 @@ pub async fn a_session_lifetime_subagent_survives_its_waiting_turn(tier: Declare
         child.outcome().is_none() && child.cancel_request.is_none(),
         "the observing turn must not cancel session-lifetime work: {child:#?}"
     );
-    crate::end_parent_scope(
-        world.registry.as_ref(),
-        tier.delivery.as_ref(),
-        &crate::ScopeId::turn(&world.session_id, &world.turn_id),
-        crate::current_epoch_ms(),
-    )
-    .await
-    .expect("close the observing turn");
+    world
+        .registry
+        .record_parent_end(&crate::ScopeId::turn(&world.session_id, &world.turn_id))
+        .await
+        .expect("close the observing turn");
     let child = world
         .registry
         .get_process(&child.id)
@@ -1432,25 +1426,7 @@ pub async fn a_session_lifetime_subagent_survives_its_waiting_turn(tier: Declare
         child.outcome().is_none() && child.cancel_request.is_none(),
         "turn close must preserve the child's session lifetime: {child:#?}"
     );
-    crate::end_parent_scope(
-        world.registry.as_ref(),
-        tier.delivery.as_ref(),
-        &crate::ScopeId::Session(world.session_id.clone()),
-        crate::current_epoch_ms(),
-    )
-    .await
-    .expect("close the child's recorded owner");
     world.release_children();
-    let terminal = world.terminal(&child.id).await;
-    assert_eq!(terminal.status(), crate::ProcessStatus::Cancelled);
-    assert_eq!(
-        terminal
-            .cancel_request
-            .as_ref()
-            .expect("recorded lifetime cancel")
-            .origin,
-        crate::CancelOrigin::ParentEnded
-    );
 }
 
 /// A spawned child and the process that runs it run under the facts their
@@ -2061,65 +2037,6 @@ pub async fn declared_start_refusal_settles_the_call(tier: DeclaredStartTier) {
     let children = world.children().await;
     assert!(children.is_empty(), "no child registered: {children:#?}");
     assert_eq!(world.script.child_calls(), 0, "no child ran");
-}
-
-/// Closing the scope a child lives `Until` cancels it while the call is
-/// still parked on it, through its lifetime: the cancel names the ended
-/// scope, and the call resolves on the cancelled child.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn declared_start_scope_close_cancels_until_children(tier: DeclaredStartTier) {
-    let world = World::new(&tier, "scope-close", Shape::one_child()).await;
-    world.script.child_gate.0.send_replace(false);
-    let closed = {
-        let world = world.clone();
-        let delivery = Arc::clone(&tier.delivery);
-        tokio::spawn(async move {
-            let child = world.started(1).await.remove(0);
-            let scope = child
-                .lifetime
-                .scope()
-                .cloned()
-                .expect("a spawned child lives until its starter ends");
-            crate::end_parent_scope(
-                world.registry.as_ref(),
-                delivery.as_ref(),
-                &scope,
-                crate::current_epoch_ms(),
-            )
-            .await
-            .expect("end the child's starter scope");
-            world.release_children();
-            (child.id, scope)
-        })
-    };
-    let turn = finished(&world, world.run().await);
-    let (child, scope) = closed.await.expect("the scope closed");
-    let child = world.terminal(&child).await;
-    assert_eq!(
-        child.status(),
-        crate::ProcessStatus::Cancelled,
-        "the child is cancelled: {child:#?}"
-    );
-    let request = child
-        .cancel_request
-        .as_deref()
-        .expect("the child carries a cancel request");
-    assert_eq!(request.origin, crate::CancelOrigin::ParentEnded);
-    assert_eq!(
-        request.requester,
-        scope.storage_id(),
-        "the cancel names the ended scope"
-    );
-    let spawns = spawn_records(&turn);
-    assert_eq!(spawns.len(), 1, "one spawn record");
-    assert!(
-        !matches!(spawns[0].output.outcome, crate::ToolCallOutcome::Success(_)),
-        "the call resolved on the cancelled child: {:?}",
-        spawns[0].output
-    );
 }
 
 /// A declared start is durable, so it decodes without its constructor. A

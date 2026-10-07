@@ -709,14 +709,6 @@ impl crate::ObligationLedger for RelayOnEnd {
         self.inner.kind()
     }
 
-    async fn arm(
-        &self,
-        key: &crate::ObligationKey,
-        now_ms: u64,
-    ) -> Result<Option<crate::ObligationId>, crate::StoreError> {
-        self.inner.arm(key, now_ms).await
-    }
-
     async fn claim_due(
         &self,
         now_ms: u64,

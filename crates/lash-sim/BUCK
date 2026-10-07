@@ -180,30 +180,6 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
-    name = "parent_end_detection_bounds__test",
-    crate_features = [],
-    crate_name = "parent_end_detection_bounds",
-    crate_root = "tests/parent_end_detection_bounds.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-sim", "parent_end_detection_bounds", "//crates/lash-sim:parent_end_detection_bounds__test"),
-    extra_compile_data = [
-        "//crates/lash-postgres-store:package_files",
-        "//crates/lash-sqlite-store:package_files",
-    ],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = ":lash-sim",
-    library_crate_name = "lash_sim",
-    manifest_dir = "crates/lash-sim",
-    package_name = "lash-sim",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
     name = "signal_replay_key_constructor__test",
     crate_features = [],
     crate_name = "signal_replay_key_constructor",

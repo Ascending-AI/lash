@@ -108,72 +108,6 @@ lash_store_sql::statements! {
        AND process_id <= ?1 AND process_id > ?2
      ORDER BY process_id ASC LIMIT ?3";
 
-        /// Processes living `Until` closed scope `?1` / `?2` that still owe a cancel:
-        /// after `?3`, at most `?4`.
-        ///
-        /// The cursor parameter carries its type cast, which is the fork: a
-        /// bare `NULL` parameter has no type PostgreSQL can compare.
-        list_parent_end_children = "SELECT record_json FROM processes
-         WHERE lifetime_scope_kind = ?1
-           AND lifetime_scope_id = ?2
-           AND lifetime = 'until'
-           AND cancel_requested_at_ms IS NULL
-           AND {{live_process_status(status)}}
-           AND (?3::text IS NULL OR process_id > ?3::text)
-         ORDER BY process_id ASC
-         LIMIT ?4";
-
-        /// Processes closed session `?1` still owes a cancel (FIG-3948): those
-        /// living `Until` the session itself, and those living `Until` a turn
-        /// in `[?2, ?3)` or a session operation in `[?4, ?5)` of it whose scope has
-        /// no ledger row of its own — a turn the session never admitted as a
-        /// run, which its close proved can no longer become one. A scope
-        /// with its own row is its own plan's to sweep. After `?6`, at most
-        /// `?7`. Same cursor-cast fork.
-        ///
-        /// Each arm is a range of `idx_lash_processes_lifetime_pending`,
-        /// whose `lifetime_scope_id` compares bytewise under `COLLATE "C"`.
-        list_session_end_children = "SELECT child.record_json FROM processes AS child
-         WHERE child.lifetime = 'until'
-           AND child.cancel_requested_at_ms IS NULL
-           AND {{live_process_status(child.status)}}
-           AND ((child.lifetime_scope_kind = 'session' AND child.lifetime_scope_id = ?1)
-             OR (((child.lifetime_scope_kind = 'turn'
-                   AND child.lifetime_scope_id >= ?2 AND child.lifetime_scope_id < ?3)
-                 OR (child.lifetime_scope_kind = 'session_operation'
-                   AND child.lifetime_scope_id >= ?4 AND child.lifetime_scope_id < ?5))
-               AND NOT EXISTS (
-                   SELECT 1 FROM parent_end_plans AS plan
-                   WHERE plan.parent_kind = child.lifetime_scope_kind
-                     AND plan.parent_id = child.lifetime_scope_id
-               )))
-           AND (?6::text IS NULL OR child.process_id > ?6::text)
-         ORDER BY child.process_id ASC
-         LIMIT ?7";
-
-        /// Turn scopes with live `Until` children and no ledger row yet:
-        /// after `?1`, at most `?2`. Same cursor-cast fork.
-        ///
-        /// The projection id is never parsed back: `lifetime_scope_id` is a
-        /// collision-free canonical key, so `DISTINCT ON` keeps one row per
-        /// scope — any child's, since every row sharing the key names the
-        /// same typed parent — and `record_json` carries the authority.
-        list_unrecorded_opener_parents = "SELECT DISTINCT ON (child.lifetime_scope_id)
-               child.lifetime_scope_id, child.lifetime_scope_kind, child.record_json
-         FROM processes AS child
-         WHERE child.lifetime_scope_kind IN ('turn', 'session_operation')
-           AND child.lifetime = 'until'
-           AND child.cancel_requested_at_ms IS NULL
-           AND {{live_process_status(child.status)}}
-           AND NOT EXISTS (
-               SELECT 1 FROM parent_end_plans AS plan
-               WHERE plan.parent_kind = child.lifetime_scope_kind
-                 AND plan.parent_id = child.lifetime_scope_id
-           )
-           AND (?1::text IS NULL OR child.lifetime_scope_id > ?1::text)
-         ORDER BY child.lifetime_scope_id, child.process_id
-         LIMIT ?2";
-
         /// Prune candidates: retired rows older than `?1`, at or below change
         /// sequence `?2`, with no consumer hold. The survey half, which locks
         /// nothing.
@@ -488,15 +422,14 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `parent_end_plans` statements only PostgreSQL issues.
     pub(crate) struct ParentEndPlanPostgresStatements @ "parent_end_plan" {
-        /// Reclaim settled plans older than `?1` that no live child still
-        /// names.
+        /// Reclaim plans of scopes that ended before `?1` and that no live
+        /// child still names.
         ///
         /// The alias is the fork: PostgreSQL cannot name the table it is
         /// deleting from inside a correlated subquery without one, and SQLite
         /// cannot use one at all in a `DELETE`.
         delete_reclaimable = "DELETE FROM parent_end_plans AS plan
-         WHERE plan.obligation_state = 'delivered'
-           AND plan.obligation_settled_at_ms < ?1
+         WHERE plan.ended_at_ms < ?1
            AND NOT EXISTS (
                SELECT 1 FROM processes AS child
                WHERE child.lifetime_scope_kind = plan.parent_kind
@@ -577,33 +510,5 @@ pub(crate) fn list_processes_sql(filter: &lash_core_execution::ProcessListFilter
         (true, false) => statements.list_by_lifetime_scope.sql(),
         (false, true) => statements.list_pending_cancel.sql(),
         (true, true) => statements.list_by_lifetime_scope_pending_cancel.sql(),
-    }
-}
-
-lash_store_sql::statements! {
-    /// `parent_end_plans` obligation statements only PostgreSQL issues (ADR 0109 §1.1).
-    pub(crate) struct ParentEndPlanObligationPostgresStatements @ "parent_end_plan" {
-        /// At most `?2` obligations due at `?1`, oldest due first, each row
-        /// locked for the caller's claim and skipped by every concurrent
-        /// claimant: two deployments' relays take disjoint pages.
-        obligation_select_due_locking = "SELECT obligation_id FROM parent_end_plans
-             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
-             ORDER BY obligation_due_at_ms, obligation_id
-             LIMIT ?2
-             FOR UPDATE SKIP LOCKED";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `processes` obligation statements only PostgreSQL issues (ADR 0109 §1.1).
-    pub(crate) struct ProcessObligationPostgresStatements @ "process" {
-        /// At most `?2` obligations due at `?1`, oldest due first, each row
-        /// locked for the caller's claim and skipped by every concurrent
-        /// claimant: two deployments' relays take disjoint pages.
-        obligation_select_due_locking = "SELECT obligation_id FROM processes
-             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
-             ORDER BY obligation_due_at_ms, obligation_id
-             LIMIT ?2
-             FOR UPDATE SKIP LOCKED";
     }
 }

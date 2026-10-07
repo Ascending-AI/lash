@@ -153,17 +153,6 @@ pub(crate) async fn write_run_terminal_conn(
             terminal.run, terminal.session_id
         )));
     }
-    // A terminal run owes its scope close (ADR 0109 §3): the terminal
-    // transaction arms the row's obligation, due at the terminal instant.
-    crate::obligation_ledger::arm_obligation_tx(
-        conn,
-        &lash_core_execution::store::ObligationKey::ScopeClose {
-            session_id: terminal.session_id.clone(),
-            run: terminal.run.clone(),
-        },
-        columns.at_ms,
-    )
-    .await?;
     release_run_rows_conn(conn, &terminal.session_id, &terminal.run, terminal.at_ms).await
 }
 
@@ -178,9 +167,9 @@ pub(crate) async fn write_run_terminal_conn(
 /// cancellation request if it has one, else `Defer`. `Defer` writes
 /// nothing: the row is next-turn input at its own position by rule, its
 /// submitted delivery unchanged (ADR 0101 §5.1). `Drop` withdraws it into
-/// its tombstone, settling its ingress obligation at the terminal instant
-/// `at_ms` (FIG-4098). Either is recorded once on the request's outcome. No
-/// open row is bound to a run with terminal evidence.
+/// its tombstone at the terminal instant `at_ms` (FIG-4098). Either is
+/// recorded once on the request's outcome. No open row is bound to a run
+/// with terminal evidence.
 ///
 /// An input the run's admission took as its own (`session_run_inputs`)
 /// that is still open is unbound from the run too, so a later run can
@@ -276,8 +265,8 @@ async fn release_run_rows_conn(
 }
 
 /// Store half of recovery after the engine proves a run's execution is lost
-/// (`loss`). The terminal, ingress settlement and scope-close arm commit
-/// together under the session history lock. A run that already has
+/// (`loss`). The terminal and its inputs' settlement commit together under
+/// the session history lock. A run that already has
 /// terminal evidence, or no row, is left as it is. A run the engine holds
 /// no execution of that never recorded its admission started nothing: it
 /// is not ended, and its session admits its input again.
@@ -976,19 +965,5 @@ impl RunStore for PostgresStore {
         crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         bind_run_inputs_conn(&mut tx, session_id, run, inputs).await?;
         tx.commit().await.map_err(store_sqlx_error)
-    }
-}
-
-lash_store_sql::statements! {
-    /// `session_runs` obligation statements only PostgreSQL issues (ADR 0109 §1.1).
-    pub(crate) struct SessionRunObligationPostgresStatements @ "session_run" {
-        /// At most `?2` obligations due at `?1`, oldest due first, each row
-        /// locked for the caller's claim and skipped by every concurrent
-        /// claimant: two deployments' relays take disjoint pages.
-        obligation_select_due_locking = "SELECT obligation_id FROM session_runs
-             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
-             ORDER BY obligation_due_at_ms, obligation_id
-             LIMIT ?2
-             FOR UPDATE SKIP LOCKED";
     }
 }

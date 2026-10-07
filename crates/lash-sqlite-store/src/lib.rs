@@ -124,7 +124,6 @@ mod release_stamp;
 mod schema;
 mod schema_fragments;
 mod schema_layout;
-mod session_delete_ledger;
 mod session_ingress;
 mod session_listing;
 mod session_meta;

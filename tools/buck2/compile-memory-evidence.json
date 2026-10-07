@@ -720,12 +720,6 @@
       "p99_anon_peak_bytes": 922075136,
       "samples": 46
     },
-    "lash-sim/parent_end_detection_bounds": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 69967872,
-      "samples": 9
-    },
     "lash-sim/signal_replay_key_constructor": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1513,12 +1507,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 1836142592,
       "samples": 153
-    },
-    "lash-sim/parent_end_detection_bounds": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 583098368,
-      "samples": 16
     },
     "lash-sim/signal_replay_key_constructor": {
       "legacy_peak_bytes": 0,
