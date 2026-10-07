@@ -241,6 +241,7 @@ async fn a_cut_commit_cuts_the_domain_rows_it_carries() {
     assert_eq!(a_life.get(), Life::Dead);
     committed_then_died.abort();
     let aborted = tokio::spawn(owned(&b, "aborted"));
+    script.settled(script.trace().len() + 1).await;
     settle().await;
     assert_eq!(b_life.get(), Life::Dead);
     aborted.abort();
