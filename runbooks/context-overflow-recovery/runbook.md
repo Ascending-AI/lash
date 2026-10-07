@@ -52,7 +52,7 @@ provider: a live model cannot be made to overflow on demand.
 For PostgreSQL acceptance, use a private provisioned service:
 
 ```sh
-kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
+kiln gate lash <fork> -- scripts/ci/with-service.sh pg -- \
   env LASH_CONTEXT_OVERFLOW_STORE=postgres \
   LASH_CONTEXT_OVERFLOW_ARTIFACT_DIR=<fresh-dir> \
   bash scripts/context-overflow-recovery-e2e.sh

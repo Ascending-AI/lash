@@ -25,7 +25,7 @@
 #   scripts/ci/with-service.sh all -- <command...>   # each store service in turn
 #
 # Example:
-#   scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store
+#   scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-store
 set -euo pipefail
 
 readonly PROGRAM="scripts/ci/with-service.sh"
@@ -43,9 +43,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/s3-service.sh"
 # final server, never its socket-only temporary init server.
 # shellcheck source=scripts/ci/pg-service.sh
 source "$(dirname "${BASH_SOURCE[0]}")/pg-service.sh"
-readonly SERVICES=(pg14 pg16 pg18 s3)
+readonly SERVICES=(pg s3)
 # The services `all` expands to: the store containers.
-readonly ALL_SERVICES=(pg14 pg16 pg18 s3)
+readonly ALL_SERVICES=(pg s3)
 # Databases a PostgreSQL service carries beside the default `lash`, one per
 # test that `scripts/ci/store-tests.sh pg-store` runs at once. Each is named
 # `lash_slot_<index>`; `tools/buck2/postgres_slot_runner.sh` hands one to each
@@ -54,25 +54,21 @@ readonly POSTGRES_SLOT_COUNT=4
 
 service_description() {
   case "$1" in
-    pg14) echo "PostgreSQL 14 compatibility lane (catalog artifact + version stamp)" ;;
-    pg16) echo "PostgreSQL 16 primary lane (conformance, pool-wait, agent scenario, cross-backend)" ;;
-    pg18) echo "PostgreSQL 18 compatibility lane (catalog artifact + version stamp)" ;;
+    pg) echo "PostgreSQL 18, the one supported major (conformance, pool-wait, agent scenario, cross-backend)" ;;
     s3) echo "Garage S3 object store (S3 conformance + attachment blob-store differential)" ;;
   esac
 }
 
 service_image() {
   case "$1" in
-    pg14) echo "postgres:14-alpine" ;;
-    pg16) echo "postgres:16-alpine" ;;
-    pg18) echo "postgres:18-alpine" ;;
+    pg) echo "postgres:18-alpine" ;;
     s3) echo "$LASH_S3_IMAGE" ;;
   esac
 }
 
 service_container_port() {
   case "$1" in
-    pg*) echo 5432 ;;
+    pg) echo 5432 ;;
     s3) echo "$LASH_S3_CONTAINER_PORT" ;;
   esac
 }
@@ -81,21 +77,17 @@ service_container_port() {
 # Sets RUN_ARGS and RUN_COMMAND.
 service_run_spec() {
   case "$1" in
-    pg*)
+    pg)
+      # A linguistic default collation, so the suites that compare key order
+      # against the database's own locale have one to compare against: the
+      # alpine images' libc locale sorts bytewise even when named en_US.utf8
+      # (replay_key_collation, FIG-3586).
       RUN_ARGS=(
         --env POSTGRES_USER=lash
         --env POSTGRES_PASSWORD=lash
         --env POSTGRES_DB=lash
+        --env "POSTGRES_INITDB_ARGS=--locale-provider=icu --icu-locale=en-US"
       )
-      # A linguistic default collation, so the suites that compare key order
-      # against the database's own locale have one to compare against: the
-      # alpine images' libc locale sorts bytewise even when named en_US.utf8
-      # (replay_key_collation, FIG-3586). ICU as the cluster's default
-      # provider exists from PostgreSQL 15; PG14 runs only the catalog
-      # compatibility checks and keeps its default.
-      if [ "$1" != pg14 ]; then
-        RUN_ARGS+=(--env "POSTGRES_INITDB_ARGS=--locale-provider=icu --icu-locale=en-US")
-      fi
       # pg_stat_statements is what the statement-count tests measure through.
       # The default 100 connections and lock table fit one test process; the
       # store job runs POSTGRES_SLOT_COUNT at once, each with its own pools and
@@ -104,21 +96,16 @@ service_run_spec() {
         -c shared_preload_libraries=pg_stat_statements
         -c "max_connections=$((100 * POSTGRES_SLOT_COUNT))"
         -c max_locks_per_transaction=256
+        # The container is throwaway: lash's crash tests kill lash processes
+        # or the engine, never the host OS, so data in the page cache
+        # survives anything a suite does and fsync only matters for a host
+        # power loss (FIG-4721). With ~30 lanes each creating a database per
+        # test, the durable defaults made PostgreSQL the shared host's top
+        # CPU consumer.
+        -c fsync=off
+        -c synchronous_commit=off
+        -c full_page_writes=off
       )
-      # The primary lane's container is throwaway: lash's crash tests kill
-      # lash processes or the engine, never the host OS, so data in the page
-      # cache survives anything a suite does and fsync only matters for a
-      # host power loss (FIG-4721). With ~30 lanes each creating a database
-      # per test, the durable defaults made PostgreSQL the shared host's top
-      # CPU consumer. The compatibility lanes run one fixed catalog artifact
-      # against pg14/pg18 and keep the durable defaults.
-      if [ "$1" = pg16 ]; then
-        RUN_COMMAND+=(
-          -c fsync=off
-          -c synchronous_commit=off
-          -c full_page_writes=off
-        )
-      fi
       ;;
     s3)
       mapfile -t RUN_ARGS < <(lash_s3_run_args)
@@ -133,7 +120,7 @@ service_run_spec() {
 service_test_env() {
   local name="$1" port="$2"
   case "$name" in
-    pg*)
+    pg)
       TEST_ENV=(
         "LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:${port}/lash"
         "LASH_POSTGRES_SLOT_COUNT=${POSTGRES_SLOT_COUNT}"
@@ -148,14 +135,14 @@ service_test_env() {
 # The readiness budget: 30 x 2s for PostgreSQL, 60 x 1s for the S3 service.
 service_ready_attempts() {
   case "$1" in
-    pg*) echo 30 ;;
+    pg) echo 30 ;;
     s3) echo 60 ;;
   esac
 }
 
 service_ready_interval() {
   case "$1" in
-    pg*) echo 2 ;;
+    pg) echo 2 ;;
     s3) echo 1 ;;
   esac
 }
@@ -167,7 +154,7 @@ service_ready_interval() {
 service_ready_probe() {
   local name="$1" container="$2" port="$3"
   case "$name" in
-    pg*)
+    pg)
       lash_pg_ready docker exec "$container"
       ;;
     s3)
@@ -181,7 +168,7 @@ service_setup() {
   local name="$1" container="$2" port="$3"
   local index
   case "$name" in
-    pg*)
+    pg)
       for ((index = 0; index < POSTGRES_SLOT_COUNT; index++)); do
         docker exec "$container" psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
           -c "CREATE DATABASE lash_slot_${index}" >/dev/null

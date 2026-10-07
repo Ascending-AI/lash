@@ -20,7 +20,7 @@ constant or generated table, and keep the copied dry-run corpus disposable.
 
 ```sh
 kiln gate lash <fork> -- python3 scripts/release_reset.py --dry-run
-kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
+kiln gate lash <fork> -- scripts/ci/with-service.sh pg -- \
   python3 scripts/release_reset.py --apply
 kiln gate lash <fork> -- python3 scripts/release_baseline.py check
 kiln fmt

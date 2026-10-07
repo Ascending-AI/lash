@@ -103,7 +103,7 @@ quality. This runbook is authored for a deliberate token-spending browser run.
   Gate `GET /healthz` → 200. Teardown:
   `just agent-workbench-down <port>`.
 - To judge the same flow on Postgres, add `AGENT_WORKBENCH_POSTGRES=1` to the boot
-  command. The dev helper starts a Postgres 16 container on a port derived from
+  command. The dev helper starts a Postgres 18 container on a port derived from
   `<port>`, passes its URL as `AGENT_WORKBENCH_DATABASE_URL`, and records a managed-container
   marker. The persistence contract requires the container to remain unchanged across the
   Phase 2 `agent-workbench-restart` replacement; `agent-workbench-down` removes it. Record the Postgres

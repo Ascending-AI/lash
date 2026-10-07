@@ -98,7 +98,7 @@ replay store, in a schema of the case's namespace (FIG-5101). Its durable
 store stays the row's `store`. S01/S02/S17/S18/S26 carry such a row in full
 and release; S30's host is the external consumer, which has no live replay
 seam. For `--store postgresql` the
-runner supplies PostgreSQL through `scripts/ci/with-service.sh pg16`, and the
+runner supplies PostgreSQL through `scripts/ci/with-service.sh pg`, and the
 case creates a fresh database and applies the committed schema itself.
 
 A `resume` leg replaces the old forced-replay leg and keeps its crash

@@ -126,7 +126,7 @@ into the macro, name no test, and matched nothing. Because the SQLite line comes
 "Abort if PostgreSQL reports a skip" could never fire.)
 
 Run the SQLite witness directly, then the PostgreSQL witness against a disposable database
-supplied by the repository's service owner, `scripts/ci/with-service.sh pg16`. Do not
+supplied by the repository's service owner, `scripts/ci/with-service.sh pg`. Do not
 hand-roll the container: `with-service.sh` already derives a unique name, lets Docker allocate
 the host port, exports `LASH_POSTGRES_DATABASE_URL`, removes the container on exit, **and**
 labels it so the gate's leftover-refusal machinery can see it — a hand-rolled container
@@ -140,7 +140,7 @@ kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
   cargo nextest run -p lash-internal-sqlite-store \
     -E "test(session_tool_access_durable_recovery)"
 
-  scripts/ci/with-service.sh pg16 -- \
+  scripts/ci/with-service.sh pg -- \
     cargo nextest run -p lash-internal-postgres-store \
       -E "test(session_tool_access_durable_recovery)"
 ' | tee "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR/tool-access-durable-readback.log"

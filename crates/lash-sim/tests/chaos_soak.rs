@@ -81,7 +81,7 @@ async fn chaos_soak_smoke() {
 /// The short profile on PostgreSQL, with lock-timeout storms and database
 /// restarts applied.
 #[tokio::test]
-#[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+#[ignore = "requires PostgreSQL; select inside a with-service.sh pg gate"]
 async fn chaos_soak_on_postgres() {
     let dialect = Dialect::postgres_from_env().expect("LASH_POSTGRES_DATABASE_URL names a server");
     let config = SoakConfig::from_env(SMOKE_SEED, SMOKE_EPOCHS, SMOKE_STEPS, SMOKE_CAP, dialect);

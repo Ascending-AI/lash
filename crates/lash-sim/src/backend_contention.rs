@@ -372,7 +372,7 @@ mod tests {
         assert!(body.contains("runtime-persistence.idempotent-retry-and-stale-write-conflict"));
     }
     #[tokio::test]
-    #[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+    #[ignore = "requires PostgreSQL; select inside a with-service.sh pg gate"]
     async fn backend_contention_report_runs_postgres_and_records_artifact() {
         let database = crate::postgres_test_isolation::isolated_database().await;
         let tmp = tempfile::tempdir().expect("tempdir");

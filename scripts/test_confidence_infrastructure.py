@@ -362,7 +362,7 @@ cargo() {
 }
 bash() {
     [ "$1" = "$repo/scripts/ci/with-service.sh" ]
-    [ "$2" = pg16 ]
+    [ "$2" = pg ]
     [ "$3" = -- ]
     printf '%s\\n' "$*" >> "$CONFIDENCE_CALLS"
 }

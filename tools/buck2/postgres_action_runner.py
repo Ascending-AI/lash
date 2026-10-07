@@ -11,9 +11,8 @@ database, applies SCHEMA to it, runs COMMAND with
 `LASH_POSTGRES_DATABASE_URL` naming that database, and stops the server and
 deletes the cluster however COMMAND ends.
 
-A caller that supplies `LASH_POSTGRES_DATABASE_URL` itself owns the server
-(the PostgreSQL 14/18 lanes of `scripts/ci/with-service.sh`); COMMAND then
-runs unchanged and nothing is started.
+A caller that supplies `LASH_POSTGRES_DATABASE_URL` itself owns the server;
+COMMAND then runs unchanged and nothing is started.
 
 `initdb` looks its user up in the password database, and a pool action runs
 as a user its read-only image does not list. NSS_WRAPPER, the pinned
@@ -37,7 +36,7 @@ USER = "lash"
 DATABASE = "lash"
 READY_SECONDS = 60
 STOP_SECONDS = 5
-# The settings of `scripts/ci/with-service.sh pg16`: the statement-count tests
+# The settings of `scripts/ci/with-service.sh pg`: the statement-count tests
 # read pg_stat_statements, applying the schema takes more locks than the
 # default table holds, and a throwaway cluster has nothing to make durable.
 SETTINGS = {

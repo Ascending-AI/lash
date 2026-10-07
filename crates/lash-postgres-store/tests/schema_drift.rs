@@ -34,9 +34,7 @@ use support::database_url;
 #[path = "schema_drift/harness.rs"]
 mod harness;
 
-use harness::{
-    ScratchSchema, assert_mutation_is_rejected, pool_with_search_path, postgres_server_version_num,
-};
+use harness::{ScratchSchema, assert_mutation_is_rejected, pool_with_search_path};
 
 /// Append-request replay depends on one durable receipt per session and turn.
 /// Dropping the receipt table's primary key would silently admit conflicting
@@ -199,10 +197,6 @@ async fn a_stored_generated_column_lash_writes_explicitly_is_rejected() {
 async fn a_nulls_not_distinct_rebuild_of_a_nullable_guard_is_rejected() {
     if database_url().is_none() {
         eprintln!("skipping NULLS NOT DISTINCT drift: database URL is not set");
-        return;
-    }
-    if postgres_server_version_num().await < 150_000 {
-        eprintln!("skipping NULLS NOT DISTINCT drift: needs PostgreSQL 15 or newer");
         return;
     }
     assert_mutation_is_rejected(

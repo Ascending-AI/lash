@@ -675,7 +675,7 @@ and name the replacement where one exists.
 ## Hermetic PostgreSQL tests
 
 A test tagged `hermetic-postgres` in `tools/buck2/package-policy.toml` runs
-against a PostgreSQL 16 that its own action starts, so it executes on the pool
+against a PostgreSQL 18 that its own action starts, so it executes on the pool
 and its verdict is cached like any other test's: an unchanged test is a cache
 hit in every fork and in CI. Today that is every test of
 `lash-internal-postgres-store` and its feature-lane variants.
@@ -684,14 +684,14 @@ hit in every fork and in CI. Today that is every test of
 kiln test //crates/lash-postgres-store:conformance__test
 ```
 
-- **Server.** `native-tools-lock.json` pins a self-contained PostgreSQL 16
+- **Server.** `native-tools-lock.json` pins a self-contained PostgreSQL 18
   build (`native//:postgres`: server, `initdb`, ICU and `pg_stat_statements`)
   and `libnss_wrapper.so` (`native//:nss_wrapper`). Both are declared inputs
   of the test; the pool image has no PostgreSQL.
 - **Runner.** `tools/buck2/postgres_action_runner.py` is prefixed to the test
   command inside the launcher's watchdog. It runs `initdb` into the action's
   temporary directory (ICU `en-US`, trust authentication), starts the server
-  on a free loopback port with the settings of `with-service.sh pg16`
+  on a free loopback port with the settings of `with-service.sh pg`
   (`fsync=off`, `pg_stat_statements` preloaded), creates the `lash` database,
   applies `crates/lash-postgres-store/schema.sql` and exports
   `LASH_POSTGRES_DATABASE_URL` to the test. It stops the server and deletes
@@ -710,13 +710,11 @@ kiln test //crates/lash-postgres-store:conformance__test
   shards of `conformance` and `integration` need no database slots.
 - **An external server.** A run that is handed `LASH_POSTGRES_DATABASE_URL`
   (`--test_env`) starts nothing and uses that server, locally and uncached as
-  for any service input. The PostgreSQL 14/18 compatibility lanes run these
-  labels that way.
+  for any service input.
 
 To convert another package, tag its tests `hermetic-postgres`, add it to
-`service_floor` and run `kiln sync`. A test that needs a second service, a
-PostgreSQL major other than 16, or a server shared with another process stays
-on `with-service.sh`.
+`service_floor` and run `kiln sync`. A test that needs a second service or a
+server shared with another process stays on `with-service.sh`.
 
 ## Tool-run proof selection
 
@@ -758,23 +756,22 @@ the container on success, failure or interruption:
 
 ```sh
 scripts/ci/with-service.sh
-scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store
+scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-store
 scripts/ci/with-service.sh all -- bash scripts/ci/store-tests.sh s3-store
 ```
 
 Trusted store jobs compile through the pool and execute locally against the
 private service; the package-wide `pg-store` suites are the exception and run
 their [hermetic](#hermetic-postgresql-tests) labels on the pool. Service
-settings are runtime inputs only; PG 14/16/18 reuse compiled artifacts. Tests
+settings are runtime inputs only, so they reuse compiled artifacts. Tests
 run against a service are never cached. Driver controls are
 `--local-test-execution`, `--no-test-cache` and repeated `--test_env KEY=VALUE`.
 Untrusted jobs keep their Cargo commands and receive no pool credentials.
 Local runs list service-shaped contracts they did not exercise, with recipes.
 
-PG 16 is the pull-request primary. Merge groups add PG 14/18 compatibility
-witnesses for schema diffs; full dispatch runs all three. Compatibility compares
-live catalog artifacts and version stamps. Use `kiln gate lash <fork> -- <cmd>`
-for other live gates, with identities and ports derived from `KILN_GATE_ID`.
+PostgreSQL 18 is the one supported and tested major; there is no compatibility
+lane. Use `kiln gate lash <fork> -- <cmd>` for other live gates, with
+identities and ports derived from `KILN_GATE_ID`.
 
 The ordinary partition retains ignored-test selection and exclusions. The five
 `durable_fault_matrix_real_cargo_filters_chunk_0..4` cases remain in the named

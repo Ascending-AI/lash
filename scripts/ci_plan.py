@@ -44,7 +44,6 @@ FAMILIES = (
     "feature_lanes",
     "workbench",
     "regress",
-    "schema",
     "facade",
     "tooling",
 )
@@ -301,8 +300,8 @@ FEATURE_LANES_JOB = "feature-lanes"
 # There is no automatic trunk run to carry them any more — an automatic push to
 # main triggers no CI at all — so a dispatch is their sole home, and it is the
 # profile release.yml certifies against.
-# postgres-store is not dispatch-only. Selected store PRs run PG16 and the
-# cross-backend differential; merge groups and dispatches retain their suites.
+# postgres-store is not dispatch-only. Selected store PRs run the store suites
+# and the cross-backend differential; merge groups and dispatches retain theirs.
 DISPATCH_ONLY_JOBS = {
     "heavy-tests",
     "stack-budget",
@@ -320,29 +319,6 @@ DEFERRED_EVENTS = {"pull_request", "merge_group"}
 # variant -- so each has a runner and PostgreSQL slots of its own. They share
 # one job condition, so the conclusion holds them to one rule.
 POSTGRES_STORE_JOBS = ("postgres-store", "postgres-store-synthetic-next")
-
-# The PostgreSQL majors. One `postgres-store` job builds the store binaries
-# once and runs every selected major against its own container, so a second
-# major costs a container and a test run, not another runner and Buck2 client.
-# PG16 is the sole primary lane. PG14/PG18 compare catalog shape
-# only; they are merge-group breadth when the diff touches a durable schema
-# crate, and part of the full profile on workflow_dispatch (weekly/release
-# certification).
-POSTGRES_PRIMARY_LEG = {"postgres": "16", "role": "primary"}
-POSTGRES_COMPATIBILITY_LEGS = [
-    {"postgres": "14", "role": "compatibility"},
-    {"postgres": "18", "role": "compatibility"},
-]
-
-
-def postgres_matrix(event_name: str, schema: bool = False) -> list[dict[str, str]]:
-    if event_name == "workflow_dispatch" or (event_name == "merge_group" and schema):
-        return [
-            POSTGRES_COMPATIBILITY_LEGS[0],
-            POSTGRES_PRIMARY_LEG,
-            POSTGRES_COMPATIBILITY_LEGS[1],
-        ]
-    return [POSTGRES_PRIMARY_LEG]
 
 UNGATED_JOBS = {
     "plan",
@@ -517,17 +493,14 @@ SHARD_DIR_READERS: Mapping[str, str] = {}
 
 # The plan outputs a `ci.yml` job may read that are not families. A job's
 # families are the family outputs it reads (`_job_families`); an output in
-# neither set counts as every family. `postgres_compatibility` is the schema
-# family's PG14/PG18 selection; `pr_tail_labels`, `pr_test_labels` and
+# neither set counts as every family. `pr_tail_labels`, `pr_test_labels` and
 # `pr_build_targets` are label lists, not gates.
 PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     **{family: frozenset({family}) for family in FAMILIES},
-    "postgres_compatibility": frozenset({"schema"}),
     "buck2_trusted": frozenset(),
     "fail_open": frozenset(),
     "docs_only": frozenset(),
     "reason": frozenset(),
-    "postgres_primary": frozenset(),
     "pr_tail_labels": frozenset(),
     "pr_test_labels": frozenset(),
     "pr_build_targets": frozenset(),
@@ -890,10 +863,6 @@ def _is_workbench_dependency_path(path: str, workbench_dirs: frozenset[str]) -> 
 
 def _is_regress_path(path: str) -> bool:
     return path.startswith("crates/lash-regress/")
-
-
-def _is_schema_path(path: str) -> bool:
-    return path.startswith(("crates/lash-postgres-store/", "crates/lash-sqlite-store/"))
 
 
 # `stores` gates `Test Postgres store`, whose pull-request and merge-group
@@ -2161,7 +2130,6 @@ def classify(
         "feature_lanes": any(
             _is_feature_gate_path(path, classes[path], lane_dirs) for path in build
         ),
-        "schema": any(_is_schema_path(path) for path in build),
         "facade": any(_is_facade_path(path) for path in build),
         "tooling": any(_is_tooling_class(classes[path]) for path in build),
         # `stores` follows the Postgres store closure for merge groups and
@@ -2383,14 +2351,6 @@ def main() -> int:
     fail_parser = subparsers.add_parser("fail-open")
     fail_parser.add_argument("--reason", required=True)
 
-    matrix_parser = subparsers.add_parser("postgres-matrix")
-    matrix_parser.add_argument("--event", required=True)
-    matrix_parser.add_argument(
-        "--schema",
-        choices=("true", "false"),
-        default="false",
-    )
-
     scope_parser = subparsers.add_parser(
         "gate-scope", help="classify a branch into the push-gate families it can affect"
     )
@@ -2458,20 +2418,6 @@ def main() -> int:
 
     if args.command == "fail-open":
         _write_outputs(fail_open(args.reason))
-        return 0
-
-    if args.command == "postgres-matrix":
-        legs = postgres_matrix(args.event, args.schema == "true")
-        _write_outputs(
-            {
-                "postgres_primary": " ".join(
-                    leg["postgres"] for leg in legs if leg["role"] == "primary"
-                ),
-                "postgres_compatibility": " ".join(
-                    leg["postgres"] for leg in legs if leg["role"] == "compatibility"
-                ),
-            }
-        )
         return 0
 
     try:

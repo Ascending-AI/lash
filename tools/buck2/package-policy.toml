@@ -38,12 +38,12 @@ kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["manual", "cargo-service-gate"]
 reason = "proves nothing without a live S3 server; the service job executes this label uncached against a real service"
 
-# Each test action of this package starts the pinned PostgreSQL 16
+# Each test action of this package starts the pinned PostgreSQL 18
 # (`native//:postgres`) on its own loopback, applies the published schema and
 # runs against it (`tools/buck2/postgres_action_runner.py`). The server is a
 # declared input, so these run on the pool and their verdicts are cached. A
 # run that is handed `LASH_POSTGRES_DATABASE_URL` uses that server instead,
-# locally and uncached: the PostgreSQL 14/18 lanes of `with-service.sh`.
+# locally and uncached.
 [[rule]]
 packages = ["lash-internal-postgres-store"]
 kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]

@@ -72,7 +72,7 @@ async fn every_emitted_commit_label_is_cut_by_some_case() {
 
 /// Every case's matrix on PostgreSQL.
 #[tokio::test]
-#[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+#[ignore = "requires PostgreSQL; select inside a with-service.sh pg gate"]
 async fn the_crash_matrix_holds_on_postgres() {
     let dialect = Dialect::postgres_from_env().expect("LASH_POSTGRES_DATABASE_URL names a server");
     for case in Case::ALL {

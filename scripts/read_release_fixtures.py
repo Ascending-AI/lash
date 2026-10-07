@@ -46,7 +46,7 @@ def main(argv=None) -> int:
     if args.runs_per_test < 1:
         parser.error("--runs-per-test must be positive")
     if not os.environ.get("KILN_GATE_ID") or not os.environ.get("LASH_POSTGRES_DATABASE_URL"):
-        parser.error("run just release-fixtures-read-back inside kiln gate on owned pg16")
+        parser.error("run just release-fixtures-read-back inside kiln gate on owned pg")
     try:
         for run in range(1, args.runs_per_test + 1):
             count = read_corpus(args.corpus)

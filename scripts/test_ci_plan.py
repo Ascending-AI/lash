@@ -134,7 +134,6 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual("true", plan["stores"])
         self.assertEqual("true", plan["workbench"])
         self.assertEqual("false", plan["regress"])
-        self.assertEqual("false", plan["schema"])
         self.assertEqual("false", plan["facade"])
         self.assertEqual("false", plan["tooling"])
 
@@ -327,13 +326,12 @@ class PathClassifierTests(unittest.TestCase):
         # The repository gates read every manifest (feature-lane resolution,
         # dependency boundary); nothing else widens.
         self.assertEqual("true", plan["tooling"])
-        for family in ("schema", "facade", "regress"):
+        for family in ("facade", "regress"):
             self.assertEqual("false", plan[family], family)
         # lash-core is in the Postgres store tests' closure.
         self.assertEqual("true", plan["stores"])
         store = ci_plan.classify([("M", "crates/lash-postgres-store/Cargo.toml")])
         self.assertEqual("true", store["stores"])
-        self.assertEqual("true", store["schema"])
 
     def test_the_root_manifests_stay_global(self) -> None:
         for path in ("Cargo.toml", "Cargo.lock"):
@@ -1886,20 +1884,18 @@ class ConclusionTests(unittest.TestCase):
 
 
 POSTGRES_TEST_STEPS = {
-    "Test PostgreSQL catalog compatibility",
     "Test Postgres store (conformance and attempt atomicity)",
     "Test runtime pool-wait binding",
     "Test cross-backend store differential",
 }
 
 
-def selected_postgres_test_steps(event: str, compatibility: bool) -> set[str]:
+def selected_postgres_test_steps(event: str) -> set[str]:
     """Evaluate the small fixed condition vocabulary of the one PostgreSQL job."""
 
     pr_class = event in {"pull_request", "merge_group"}
     selectors = {
         None: True,
-        "needs.plan.outputs.postgres_compatibility != ''": compatibility,
         "github.event_name != 'merge_group'": event != "merge_group",
         (
             "github.event_name != 'pull_request'"
@@ -1921,166 +1917,36 @@ def selected_postgres_test_steps(event: str, compatibility: bool) -> set[str]:
     return selected
 
 
-class PostgresMatrixTests(unittest.TestCase):
-    COMPATIBILITY = {"Test PostgreSQL catalog compatibility"}
+class PostgresJobTests(unittest.TestCase):
     # Every event runs the whole store package (FIG-3572): FIG-3595 and
     # FIG-3550 broke it while it was dispatch-only.
-    PRIMARY_PR = {
-        "Test Postgres store (conformance and attempt atomicity)",
-        "Test cross-backend store differential",
+    SELECTED = {
+        "pull_request": {
+            "Test Postgres store (conformance and attempt atomicity)",
+            "Test cross-backend store differential",
+        },
+        "merge_group": {"Test Postgres store (conformance and attempt atomicity)"},
+        "workflow_dispatch": {
+            "Test Postgres store (conformance and attempt atomicity)",
+            "Test runtime pool-wait binding",
+            "Test cross-backend store differential",
+        },
     }
-    PRIMARY_MERGE = {"Test Postgres store (conformance and attempt atomicity)"}
-    PRIMARY_TRUNK = {
-        "Test Postgres store (conformance and attempt atomicity)",
-        "Test runtime pool-wait binding",
-        "Test cross-backend store differential",
-    }
 
-    def test_one_job_runs_every_major_the_plan_selects(self) -> None:
-        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-        postgres = jobs["postgres-store"]
-        # One runner and one Buck2 client for every major: no matrix.
-        self.assertNotIn("strategy", postgres)
-        self.assertEqual(
-            "${{ needs.plan.outputs.postgres_primary }}", postgres["env"]["POSTGRES_PRIMARY"]
-        )
-        for output in ("postgres_primary", "postgres_compatibility"):
-            self.assertEqual(
-                f"${{{{ steps.postgres-matrix.outputs.{output} }}}}",
-                jobs["plan"]["outputs"][output],
-            )
-        step = next(
-            candidate
-            for candidate in jobs["plan"]["steps"]
-            if candidate.get("id") == "postgres-matrix"
-        )
-        self.assertIn("scripts/ci_plan.py postgres-matrix", step["run"])
-        compatibility = next(
-            candidate for candidate in postgres["steps"]
-            if candidate.get("name") == "Test PostgreSQL catalog compatibility"
-        )
-        self.assertIn('for major in ${POSTGRES_COMPATIBILITY}; do', compatibility["run"])
-        self.assertIn('"pg${major}"', compatibility["run"])
-        for candidate in postgres["steps"]:
-            if candidate.get("name") in POSTGRES_TEST_STEPS - {compatibility["name"]}:
-                self.assertIn('"pg${POSTGRES_PRIMARY}"', candidate["run"])
-
-    def test_the_plan_writes_the_majors_as_outputs(self) -> None:
-        for event, schema, primary, compatibility in (
-            ("pull_request", "true", "16", ""),
-            ("merge_group", "false", "16", ""),
-            ("merge_group", "true", "16", "14 18"),
-            ("workflow_dispatch", "false", "16", "14 18"),
-        ):
-            with self.subTest(event=event, schema=schema):
-                result = subprocess.run(
-                    ["python3", str(ROOT / "scripts/ci_plan.py"), "postgres-matrix",
-                     "--event", event, "--schema", schema],
-                    capture_output=True, text=True, check=True,
-                )
-                self.assertEqual(
-                    [f"postgres_primary={primary}", f"postgres_compatibility={compatibility}"],
-                    result.stdout.splitlines(),
-                )
-
-    def test_compatibility_lanes_are_deferred_off_the_pull_request_path(self) -> None:
-        """PG16 alone on PRs; PG14/PG18 on schema merge groups or dispatch."""
-        self.assertEqual(
-            [{"postgres": "16", "role": "primary"}],
-            ci_plan.postgres_matrix("pull_request"),
-        )
-        self.assertEqual(
-            [{"postgres": "16", "role": "primary"}],
-            ci_plan.postgres_matrix("merge_group"),
-        )
-        self.assertEqual(
-            [
-                {"postgres": "14", "role": "compatibility"},
-                {"postgres": "16", "role": "primary"},
-                {"postgres": "18", "role": "compatibility"},
-            ],
-            ci_plan.postgres_matrix("workflow_dispatch"),
-        )
-        self.assertEqual(
-            [
-                {"postgres": "14", "role": "compatibility"},
-                {"postgres": "16", "role": "primary"},
-                {"postgres": "18", "role": "compatibility"},
-            ],
-            ci_plan.postgres_matrix("merge_group", schema=True),
-        )
-        # A pull request gets fast signal: one major even for a schema diff.
-        self.assertEqual(
-            [{"postgres": "16", "role": "primary"}],
-            ci_plan.postgres_matrix("pull_request", schema=True),
-        )
-
-    def test_event_and_role_selection_runs_the_right_real_tests(self) -> None:
-        for event in ("pull_request", "merge_group", "workflow_dispatch"):
-            for schema in (False, True):
-                roles = {leg["role"] for leg in ci_plan.postgres_matrix(event, schema)}
-                compatibility = "compatibility" in roles
-                with self.subTest(event=event, schema=schema):
-                    self.assertIn("primary", roles)
-                    self.assertEqual(
-                        compatibility,
-                        event == "workflow_dispatch" or (event == "merge_group" and schema),
-                    )
-                    primary = {
-                        "pull_request": self.PRIMARY_PR,
-                        "merge_group": self.PRIMARY_MERGE,
-                        "workflow_dispatch": self.PRIMARY_TRUNK,
-                    }[event]
-                    expected = primary | (self.COMPATIBILITY if compatibility else set())
-                    self.assertEqual(
-                        expected, selected_postgres_test_steps(event, compatibility)
-                    )
-
-    def test_commands_pin_live_catalog_version_oracles(self) -> None:
-        """The named oracles must survive the Buck2/Cargo dispatch, on both paths.
-
-        The steps delegate to scripts/ci/store-tests.sh, so the pin follows the
-        test names into that script's branch for the suite each step selects,
-        and each name must appear on the Buck2 side and the Cargo side.
-        """
-        job = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
+    def test_every_postgres_step_runs_on_the_one_service(self) -> None:
+        """PostgreSQL 18 is the one supported major: one job, one service, no matrix."""
+        postgres = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
             "postgres-store"
         ]
-        steps = {step["name"]: step for step in job["steps"]}
-        script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
+        self.assertNotIn("strategy", postgres)
+        for candidate in postgres["steps"]:
+            if candidate.get("name") in POSTGRES_TEST_STEPS:
+                self.assertIn("scripts/ci/with-service.sh pg --", candidate["run"])
 
-        def suite_body(step_name: str) -> tuple[str, str]:
-            run = steps[step_name]["run"]
-            self.assertIn("scripts/ci/store-tests.sh", run)
-            suite = run.split("scripts/ci/store-tests.sh", 1)[1].split()[0]
-            if f"\n  {suite})\n" in script:
-                # A shaped suite writes both halves itself.
-                body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
-                buck2, cargo = body.split("\n    else\n", 1)
-                return buck2, cargo
-            # A uniform suite states its selection once and renders it into
-            # both dialects, so the row *is* both halves: a name present here
-            # reaches the Buck2 and the Cargo command by construction.
-            row = re.search(
-                rf'^\s*\[{re.escape(suite)}\]="([^"]*)"$', script, re.MULTILINE
-            )
-            self.assertIsNotNone(row, f"no store suite {suite}")
-            return row.group(1), row.group(1)
-
-        for oracle, step_name in (
-            (
-                "committed_shape_artifact_matches_the_ddl_artifact",
-                "Test PostgreSQL catalog compatibility",
-            ),
-            (
-                "a_compatible_expansion_still_reports_column_drift",
-                "Test PostgreSQL catalog compatibility",
-            ),
-        ):
-            with self.subTest(oracle=oracle):
-                buck2, cargo = suite_body(step_name)
-                self.assertIn(oracle, buck2)
-                self.assertIn(oracle, cargo)
+    def test_event_selection_runs_the_right_real_tests(self) -> None:
+        for event, expected in self.SELECTED.items():
+            with self.subTest(event=event):
+                self.assertEqual(expected, selected_postgres_test_steps(event))
 
     def test_postgres_conclusion_fails_closed_for_every_supported_event(self) -> None:
         # A pull request runs no store suite: skipped is its only valid

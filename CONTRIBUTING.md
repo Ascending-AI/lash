@@ -58,7 +58,7 @@ portable default-feature run.
 | Command | Coverage |
 | --- | --- |
 | `kiln test` | `//:dev_tests`: the deterministic developer suite; `//:workspace_tests` adds the dev-deferred binaries for the PR partition. |
-| `scripts/ci/with-service.sh <pg14\|pg16\|pg18\|s3\|all> -- bash scripts/ci/store-tests.sh <suite>` | One PostgreSQL or S3 (Garage) suite, against a container this command starts and removes. |
+| `scripts/ci/with-service.sh <pg\|s3\|all> -- bash scripts/ci/store-tests.sh <suite>` | One PostgreSQL or S3 (Garage) suite, against a container this command starts and removes. |
 | `python3 scripts/dev-test.py` | `//:dev_tests` narrowed to owning and affected tests from the inventory; a shared input widens to the whole suite. Refuses live store URLs. |
 | Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
 

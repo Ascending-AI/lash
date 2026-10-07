@@ -158,6 +158,9 @@ timeouts so a hung call ends.
 
 ## 2. PostgreSQL topology
 
+PostgreSQL 18 is the one supported version for lash 1.0; lash tests no other
+major.
+
 ### Connections
 
 Each node opens three kinds of connection:

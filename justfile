@@ -19,7 +19,7 @@ release-fixtures-read-back corpus *args:
   : "${KILN_GATE_ID:?release read-back requires kiln gate}"
   cd "{{repo}}"
   source ./env.sh
-  scripts/ci/with-service.sh pg16 -- python3 scripts/read_release_fixtures.py "{{corpus}}" {{args}}
+  scripts/ci/with-service.sh pg -- python3 scripts/read_release_fixtures.py "{{corpus}}" {{args}}
 
 agent-workbench port='3030':
   ./scripts/agent-workbench-dev.sh up --port "{{port}}"

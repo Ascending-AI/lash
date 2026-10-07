@@ -35,14 +35,14 @@ kiln test //crates/lash-postgres-workers:failover__test \
   --test_arg=--exact --test_arg=<case> --test_arg=--nocapture --test_output all
 ```
 
-Each case boots its own PostgreSQL 16 (`native//:postgres`, handed to the
+Each case boots its own PostgreSQL 18 (`native//:postgres`, handed to the
 test as `LASH_WORKERS_POSTGRES`; `LASH_WORKERS_NSS_WRAPPER` lets `initdb`
 run as a user the pool image does not list), so a case can stop and restart
 the server. Nothing else is needed: no Docker, no live services. The cases run
 one at a time (`RUST_TEST_THREADS=1`) and the target is `dev-deferred`: two
 cases wait out a 15 s node lease. Each passing case prints one `case=` line
 with what it measured. Outside kiln, point `LASH_WORKERS_POSTGRES` at any
-PostgreSQL 16 installation directory (one with `bin/initdb`, `bin/postgres`
+PostgreSQL 18 installation directory (one with `bin/initdb`, `bin/postgres`
 and `bin/pg_ctl`).
 
 ## What runs
@@ -134,7 +134,7 @@ transaction (see [connecting PostgreSQL nodes](../../docs/operations/deploying-a
 
 ## By hand
 
-`docker-compose.yml` starts PostgreSQL 16 with `lash` and `lash_witness`
+`docker-compose.yml` starts PostgreSQL 18 with `lash` and `lash_witness`
 provisioned, for watching nodes by hand; the cases above do not use it.
 
 ```sh
@@ -190,7 +190,7 @@ the law elsewhere that now carries the property.
 | `fig1126_pending_tool_redrives_after_worker_loss_and_resumes_once` (endpoint-protocol journal splice) | deleted: engine mechanics |
 | Stall watchdog (unfinished engine invocations after 240 s) | deleted: engine mechanics; every wait in the cases has its own timeout |
 | Coverage scoring (`write_completed_workflow_manifest`, `EXPECTED_WORKFLOW_INVENTORY_LEN` and its coverage-check script) | deleted: engine mechanics (it scored segments of the engine's workflow inventory); each case here is its own test |
-| "Local Postgres conformance" (`with-service.sh pg16` for the registry conformance) | not a runbook row: the PostgreSQL store's own laws run on its hermetic server (`//crates/lash-postgres-store`) |
+| "Local Postgres conformance" (`with-service.sh pg` for the registry conformance) | not a runbook row: the PostgreSQL store's own laws run on its hermetic server (`//crates/lash-postgres-store`) |
 | Load witness contracts (`src/load/*`, `just loadtest-ledger`) | not a failover row: load measurement is L12b's (FIG-5188) |
 | The session-operator paragraph (withdrawal, running cancel, parked redrive/cancel/fork, lost-reply repeat) | not covered here: owed by the `runbooks/session-operator/runbook.md` ledger row |
 

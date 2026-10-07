@@ -277,8 +277,7 @@ fn column_lines_round_trip_through_the_artifact_format() {
 /// The single drift gate over the DDL artifact: the committed expectation must be
 /// exactly what `schema.sql` produces in a live database. Because it reads the
 /// catalog rather than the DDL text, it also proves the expectation is
-/// reproducible on whichever PostgreSQL major CI points it at — the matrix
-/// asserts 14, 16, and 18 all render the same artifact.
+/// reproducible on PostgreSQL 18, the one supported major.
 #[tokio::test]
 async fn committed_shape_artifact_matches_the_ddl_artifact() {
     let Some(rendered) = schema_shape_artifact().await else {

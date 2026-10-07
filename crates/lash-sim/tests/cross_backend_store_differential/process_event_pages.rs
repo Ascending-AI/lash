@@ -614,7 +614,7 @@ async fn prepared_registration_race_keeps_the_first_scope() {
     );
 }
 #[tokio::test]
-#[ignore = "compares three durable backends; requires PostgreSQL in a pg16 gate"]
+#[ignore = "compares three durable backends; requires PostgreSQL in a with-service.sh pg gate"]
 async fn prepared_registration_scope_matches_across_backends() {
     let (_lock, postgres, _url) = open_postgres_differential()
         .await

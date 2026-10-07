@@ -69,13 +69,13 @@ universal `subject` or optional duplicate `replay` slot, while refusing the old 
 
 For an owned PostgreSQL gate, let the repository's service owner provide the database rather
 than hand-rolling a container, and run it inside `kiln gate` so the container lands in your
-gate's namespace: `scripts/ci/with-service.sh pg16 -- <cmd>` binds an ephemeral
+gate's namespace: `scripts/ci/with-service.sh pg -- <cmd>` binds an ephemeral
 loopback port, exports `LASH_POSTGRES_DATABASE_URL` into the command, and labels the container
 so the gate's leftover-refusal can see it. Require the test to run rather than print its
 `LASH_POSTGRES_DATABASE_URL is not set` skip message:
 
 ```sh
-kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
+kiln gate lash <fork> -- scripts/ci/with-service.sh pg -- \
   cargo test -p lash-internal-postgres-store --locked --test conformance session_ingress -- --nocapture
 ```
 

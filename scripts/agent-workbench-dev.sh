@@ -3561,7 +3561,7 @@ if [[ -n "$agent_workbench_database_url" ]]; then
 fi
 postgres_port="${AGENT_WORKBENCH_POSTGRES_PORT:-$default_postgres_port}"
 postgres_host="${AGENT_WORKBENCH_POSTGRES_HOST:-127.0.0.1}"
-postgres_image="${AGENT_WORKBENCH_POSTGRES_IMAGE:-postgres:16-alpine}"
+postgres_image="${AGENT_WORKBENCH_POSTGRES_IMAGE:-postgres:18-alpine}"
 postgres_container="${AGENT_WORKBENCH_POSTGRES_CONTAINER:-lash-agent-workbench-dev-postgres-$workbench_port}"
 if (( postgres_enabled )) && [[ -z "$agent_workbench_database_url" ]]; then
   agent_workbench_database_url="postgres://lash:lash@$postgres_host:$postgres_port/lash"

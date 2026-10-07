@@ -37,10 +37,8 @@
 //! Deliberately out of scope: `CHECK` constraints,
 //! non-unique indexes, triggers,
 //! row-level security, constraint and index names, column ordinal positions, and
-//! default expression text. Every attribute that remains renders identically on
-//! PostgreSQL 14 through 18, which the version matrix in CI asserts —
-//! `indnullsnotdistinct` is read through `to_jsonb`, which yields `NULL` on 14
-//! where the catalog column does not yet exist and is normalized to `false`.
+//! default expression text. The artifact is rendered on PostgreSQL 18, the one
+//! supported major for lash 1.0.
 //!
 //! Host additions outside lash's tables are invisible to the check: only the
 //! tables named by the artifact are introspected. Additions *on* a lash table —
@@ -345,8 +343,9 @@ pub enum ColumnValueSource {
     /// `GENERATED ALWAYS AS IDENTITY`. Supplies a value but rejects an explicit
     /// one without `OVERRIDING SYSTEM VALUE`.
     IdentityAlways,
-    /// A generated column — stored (`attgenerated = 's'`) or, from PostgreSQL 18,
-    /// virtual. Supplies a value and rejects any explicit one outright.
+    /// A generated column — stored (`attgenerated = 's'`) or virtual
+    /// (`attgenerated = 'v'`). Supplies a value and rejects any explicit one
+    /// outright.
     Generated,
 }
 
@@ -464,16 +463,14 @@ pub struct UniqueGuard {
     /// only free-text element in the whole comparison; it is lower-cased with
     /// collapsed whitespace and outer parentheses stripped.
     pub predicate: Option<String>,
-    /// Whether the guard treats `NULL`s as equal (`UNIQUE NULLS NOT DISTINCT`,
-    /// PostgreSQL 15+).
+    /// Whether the guard treats `NULL`s as equal (`UNIQUE NULLS NOT DISTINCT`).
     ///
     /// lash's own guards never set it, and two of them —
     /// `UNIQUE (session_id, source_key)` on `lash_queued_work_batches` and on
     /// `lash_pending_turn_inputs` — depend on the default: `source_key` is
     /// nullable and lash writes `NULL` for every batch or input without a source
     /// key, so under `NULLS NOT DISTINCT` only one such row per session would be
-    /// permitted. Read as `false` on PostgreSQL 14, where the catalog column does
-    /// not exist and the feature does not either.
+    /// permitted.
     pub nulls_not_distinct: bool,
 }
 
@@ -725,8 +722,8 @@ const ARTIFACT_HEADER: &str = "\
 # Generated artifact -- never edit by hand. Regenerate after any change to
 # schema.sql by running the crate's `schema_shape` suite against a live
 # PostgreSQL with LASH_REGENERATE=1, which rewrites this file from the
-# catalog the DDL artifact actually produces. Every attribute recorded here
-# renders identically on PostgreSQL 14 through 18; CI asserts that on all three.
+# catalog the DDL artifact actually produces, on PostgreSQL 18, the one
+# supported major for lash 1.0.
 #
 # Columns are matched by name, never by ordinal position; constraint and index names
 # are never compared at all. A uniqueness guard is matched by its kind and its key

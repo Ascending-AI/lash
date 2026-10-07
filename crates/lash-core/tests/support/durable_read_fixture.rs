@@ -55,7 +55,7 @@
 //!
 //! The PostgreSQL generator writes only the dedicated `lash_durable_read_fixture`
 //! schema of a caller-owned throwaway database, and uses Docker only for the
-//! pinned `postgres:16-alpine` `pg_dump` client.
+//! pinned `postgres:18-alpine` `pg_dump` client.
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
 // access is sanctioned here (the workspace clippy ban targets production

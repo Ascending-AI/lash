@@ -1,4 +1,4 @@
-# PostgreSQL 16 for running lash-postgres-workers nodes by hand (README, "By
+# PostgreSQL 18 for running lash-postgres-workers nodes by hand (README, "By
 # hand"). The failover cases do not use it: each starts and restarts a server
 # of its own from the pinned PostgreSQL tree.
 #
@@ -9,7 +9,7 @@ name: lash-postgres-workers
 
 services:
   postgres:
-    image: postgres:16
+    image: postgres:18
     environment:
       POSTGRES_USER: lash
       POSTGRES_DB: lash
@@ -24,7 +24,8 @@ services:
       - source: provision
         target: /docker-entrypoint-initdb.d/10-lash.sh
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "lash", "-d", "lash"]
+      # TCP only: the image's temporary init server answers the unix socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U lash -d lash"]
       interval: 1s
       timeout: 2s
       retries: 30

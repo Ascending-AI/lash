@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the S2 SQL spike on the repository's private, pinned PostgreSQL 16.
+"""Run the S2 SQL spike on the repository's private, pinned PostgreSQL 18.
 
 Build first, then run through kiln gate; see the lash-perf substrate README.
 The default enables durability on the same test server. --test-settings keeps

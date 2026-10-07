@@ -131,7 +131,7 @@ fi
 
 leftover_container="lash-gate-proof-leftover-${LASH_GATE_WORKTREE_SLUG}"
 docker create --name "$leftover_container" --label "$LASH_GATE_LABEL" \
-  postgres:16-alpine true >/dev/null
+  postgres:18-alpine true >/dev/null
 set +e
 run_smoke "$repo" "$proof_root/leftover-refusal.log" "$primary_slug" "$primary_slot"
 leftover_status=$?
@@ -151,7 +151,7 @@ compose_leftover_container="lash-gate-proof-compose-leftover-${LASH_GATE_WORKTRE
 docker create --name "$compose_leftover_container" --label "$LASH_GATE_LABEL" \
   --label "com.docker.compose.project=$compose_project" \
   --label "com.docker.compose.project.config_files=$compose_file" \
-  postgres:16-alpine true >/dev/null
+  postgres:18-alpine true >/dev/null
 set +e
 run_smoke "$repo" "$proof_root/compose-leftover-refusal.log" "$primary_slug" "$primary_slot"
 compose_leftover_status=$?

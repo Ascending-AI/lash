@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run durable-substrate cases on the repository's private, pinned PostgreSQL 16.
+"""Run durable-substrate cases on the repository's private, pinned PostgreSQL 18.
 
 Each case gets a fresh cluster and database provisioned with the store's 1.0
 schema, under L12a's server settings: fsync, synchronous_commit and

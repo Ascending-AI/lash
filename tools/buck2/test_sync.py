@@ -723,7 +723,7 @@ def check_native_inputs() -> None:
     # The hermetic PostgreSQL tests: the pinned server and the NSS wrapper are
     # the inputs the wrapper macro prefixes, and only tagged tests carry them.
     postgres = lock["tools"]["postgres"]
-    assert postgres["version"].startswith("16.") and len(postgres["sha256"]) == 64
+    assert postgres["version"].startswith("18.") and len(postgres["sha256"]) == 64
     assert {"bin/initdb", "bin/postgres", "lib/postgresql/pg_stat_statements.so"} <= set(postgres["required"])
     assert lock["tools"]["nss_wrapper"]["required"] == ["libnss_wrapper.so"]
     assert 'name = "postgres"' in bootstrap and 'name = "nss_wrapper"' in bootstrap

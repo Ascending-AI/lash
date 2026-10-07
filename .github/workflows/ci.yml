@@ -31,7 +31,7 @@ name: CI
 # request only when the diff touches feature-gated code (`feature_lanes`; see
 # the selection rule in scripts/ci_plan.py). The merge group runs the full
 # core partition, the test tail, the lane tests and the selected Postgres
-# store suites and, for a schema diff, the PG14/PG18 compatibility legs.
+# store suites.
 # Cached Buck2 results mean a merge group re-executes only what its combined
 # tree changed.
 # "CI conclusion" is the one required check; scripts/ci/conclusion.py holds
@@ -43,15 +43,13 @@ name: CI
 # * Test heavy suites, Test S3 store against Garage, the non-host Functional
 #   E2E legs, the stack budget and the PostgreSQL pool-wait and simulator
 #   backend-fault steps: deferred for their runner cost. Store PRs also run
-#   the PG16 cross-backend differential.
+#   the cross-backend differential.
 # * Fuzz smoke: a bounded libFuzzer run on the nightly toolchain, kept off
 #   the pull-request critical path by design (FIG-878).
 # * Test deferred Unicode suites: slow regress suites, excluded from the PR
 #   Buck2 partition.
 # * Lashlang Git consumer: a compile configuration no other job resolves,
 #   carried by the release dispatch (FIG-2854).
-# * The PG14/PG18 compatibility legs on a non-schema diff: they compare
-#   catalog rendering, which only a schema diff can move.
 
 on:
   # The full profile, and the only home of the heavy families. A manual
@@ -152,15 +150,12 @@ jobs:
       regress: ${{ steps.classify.outputs.regress }}
       facade: ${{ steps.classify.outputs.facade }}
       tooling: ${{ steps.classify.outputs.tooling }}
-      schema: ${{ steps.classify.outputs.schema }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
       pr_tail_labels: ${{ steps.classify.outputs.pr_tail_labels }}
       pr_test_labels: ${{ steps.classify.outputs.pr_test_labels }}
       pr_build_targets: ${{ steps.classify.outputs.pr_build_targets }}
-      postgres_primary: ${{ steps.postgres-matrix.outputs.postgres_primary }}
-      postgres_compatibility: ${{ steps.postgres-matrix.outputs.postgres_compatibility }}
       buck2_trusted: >-
         ${{ github.event_name == 'merge_group'
         || github.event_name == 'workflow_dispatch'
@@ -241,16 +236,6 @@ jobs:
           python3 scripts/ci_plan.py classify \
             --event "${GITHUB_EVENT_NAME}" \
             --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
-
-      # PG16 is the primary major everywhere the job runs. PG14/PG18 run on a merge
-      # group whose diff touches a durable schema crate, and on
-      # workflow_dispatch. scripts/ci_plan.py owns the rule.
-      - name: Resolve PostgreSQL matrix
-        id: postgres-matrix
-        run: |
-          python3 scripts/ci_plan.py postgres-matrix \
-            --event "${GITHUB_EVENT_NAME}" \
-            --schema "${{ steps.classify.outputs.schema }}" >> "${GITHUB_OUTPUT}"
 
       - name: Summarize plan
         env:
@@ -1393,18 +1378,16 @@ jobs:
     timeout-minutes: 45
     needs: plan
     # Trusted events build every binary below from the shared cache; the
-    # PostgreSQL version and connection settings are execution-only inputs, so
-    # every major reuses one set of compiled outputs -- and, because every
-    # major runs in this one job, one Buck2 client and one analysis. Untrusted
-    # events receive no credentials and keep the Cargo compile. See
-    # scripts/ci/store-tests.sh.
+    # connection settings are execution-only inputs, so the suites reuse one
+    # set of compiled outputs. Untrusted events receive no credentials and
+    # keep the Cargo compile. See scripts/ci/store-tests.sh.
     #
     # This job runs the default build of the store package. Each feature
     # variant of it has a job, a runner and a PostgreSQL service of its own
     # (`postgres-store-synthetic-next` below), so the variants run side by
     # side instead of queueing for one runner's slots.
     #
-    # Each suite runs inside `scripts/ci/with-service.sh pg<major>`, which owns
+    # Each suite runs inside `scripts/ci/with-service.sh pg`, which owns
     # the image, the container environment, the readiness probe and the
     # connection URL, publishes the database on a free ephemeral port of the
     # loopback interface, and removes the container on every exit path. A
@@ -1412,36 +1395,21 @@ jobs:
     # path and one copy of these facts rather than a workflow `services:` block
     # and a second local runner.
     environment: build-cache
-    # The service wrapper exports the required database URL for each selected
-    # PostgreSQL variant after choosing its private port.
+    # The service wrapper exports the required database URL after choosing its
+    # private port.
     env:
       BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
-      POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}
-    # PRs run PG16 for store crates, lash-sim and migrations. The broader
-    # dependency closure still selects merge-group and full-profile work.
+    # PRs run the store suites for store crates, lash-sim and migrations. The
+    # broader dependency closure still selects merge-group and full-profile
+    # work.
     if: >-
       (github.event_name == 'pull_request' && needs.plan.outputs.pr_pg_store == 'true')
       || (github.event_name != 'pull_request' && needs.plan.outputs.stores == 'true')
 
-    # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
-    # compares the live catalog against a generated expectation artifact, so a
-    # catalog attribute that renders differently on a major lash has not tested
-    # would reject every host on that major with no remedy but a lash release.
-    # 14 and 18 bracket the supported range — 18 is where NOT NULL became
-    # `pg_constraint` rows, 14 is before `pg_index.indnullsnotdistinct` existed —
-    # and the shape suite asserts all three produce the byte-identical artifact.
-    # PG14 and PG18 are compatibility lanes: they run only the live catalog
-    # artifact comparison and a focused version-stamp gate, so they stay off
-    # the pull-request path. A merge group whose diff touches a durable schema
-    # crate runs them, and so does workflow_dispatch: no schema change reaches
-    # trunk without all three majors. They run here, after the primary major's
-    # compile, each against its own container: a separate runner per major
-    # re-analysed the graph and re-queued the same build three times.
-    # scripts/ci_plan.py `postgres-matrix` owns the per-event majors. PG16 is
-    # the sole primary lane and runs on every event. Every event runs the
-    # package-wide store suites on it; full-profile runs add the pool-wait,
-    # simulator and cross-backend coverage without triplicating it across
-    # majors.
+    # PostgreSQL 18 is the one supported major for lash 1.0, so there is one
+    # PostgreSQL lane. Every event runs the package-wide store suites on it;
+    # full-profile runs add the pool-wait, simulator and cross-backend
+    # coverage.
     steps:
       - *checkout
 
@@ -1484,8 +1452,7 @@ jobs:
             pg-facade-laws \
             pg-pool-wait \
             pg-sim-backend-faults \
-            pg-cross-backend \
-            pg-catalog-compatibility
+            pg-cross-backend
 
       # Selected PostgreSQL variants require the URL exported by with-service.sh
       # and fail if it is missing or unreachable.
@@ -1511,65 +1478,50 @@ jobs:
       # queued retry scenarios a narrower pull-request step used to filter.
       # Trusted events shard the conformance and integration binaries and run
       # the shards and the other binaries in parallel on the pool, each test
-      # action against a PostgreSQL 16 of its own
+      # action against a PostgreSQL 18 of its own
       # (`tools/buck2/postgres_action_runner.py`), reusing the verdicts the
       # workspace partition cached; the step then proves the shards ran every
       # listed case exactly once. The service this step starts serves the
       # untrusted Cargo path.
       - name: Test Postgres store (conformance and attempt atomicity)
         run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+          bash scripts/ci/with-service.sh pg -- \
             bash scripts/ci/store-tests.sh pg-store
 
       # The facade's PostgreSQL-only laws are `#[ignore]`d tests across five
       # //crates/lash binaries; before FIG-4743 no CI job selected them and
       # they only ran by hand. The suite derives the cases by name -- every
-      # law a pg16 container alone satisfies carries `postgres` in its libtest
+      # law a `pg` container alone satisfies carries `postgres` in its libtest
       # path -- and skips the ones that also need a managed service, which
       # their own suites own.
       # scripts/check_postgres_gate_coverage.py fails the checks job if a new
       # PostgreSQL-gated test in the crate escapes the selection.
       - name: Test facade laws on Postgres
         run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+          bash scripts/ci/with-service.sh pg -- \
             bash scripts/ci/store-tests.sh pg-facade-laws
 
       - name: Test runtime pool-wait binding
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+          bash scripts/ci/with-service.sh pg -- \
             bash scripts/ci/store-tests.sh pg-pool-wait
 
-      # The simulator's backend-fault scenarios against a real PostgreSQL. They
-      # compare fault semantics, not catalog rendering, so they run once on the
-      # primary major instead of three times.
+      # The simulator's backend-fault scenarios against a real PostgreSQL.
       - name: Test simulator backend faults on Postgres
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+          bash scripts/ci/with-service.sh pg -- \
             bash scripts/ci/store-tests.sh pg-sim-backend-faults
 
-      # The full differential compares backend semantics, not catalog rendering,
-      # so it runs once on the primary major instead of three times.
+      # The full differential compares backend semantics.
       - name: Test cross-backend store differential
         if: github.event_name != 'merge_group'
         run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+          bash scripts/ci/with-service.sh pg -- \
             bash scripts/ci/store-tests.sh pg-cross-backend
         env:
           LASH_CROSS_BACKEND_CASES: "4"
-
-      # The compatibility majors run last, so the primary major's verdict
-      # comes first; every major after the first reuses its compile.
-      - name: Test PostgreSQL catalog compatibility
-        if: needs.plan.outputs.postgres_compatibility != ''
-        env:
-          POSTGRES_COMPATIBILITY: ${{ needs.plan.outputs.postgres_compatibility }}
-        run: |
-          for major in ${POSTGRES_COMPATIBILITY}; do
-            bash scripts/ci/with-service.sh "pg${major}" -- \
-              bash scripts/ci/store-tests.sh pg-catalog-compatibility
-          done
 
       - name: Upload PostgreSQL Buck2 reports and event logs
         if: always() && needs.plan.outputs.buck2_trusted == 'true'
@@ -1592,16 +1544,15 @@ jobs:
     timeout-minutes: 45
     needs: plan
     # The synthetic successor's build (FIG-4262) of every binary the package
-    # step of `postgres-store` runs, on the primary major: the same package
-    # with `synthetic-next`, in a job of its own. Trusted events run its test
-    # actions on the pool, each against its own PostgreSQL 16; the service the
+    # step of `postgres-store` runs: the same package with `synthetic-next`,
+    # in a job of its own. Trusted events run its test
+    # actions on the pool, each against its own PostgreSQL 18; the service the
     # step starts is the untrusted Cargo path's.
     # It runs whenever `postgres-store` does, and `CI conclusion` holds both to
     # one rule (scripts/ci_plan.py `POSTGRES_STORE_JOBS`).
     environment: build-cache
     env:
       BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
-      POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}
     if: >-
       (github.event_name == 'pull_request' && needs.plan.outputs.pr_pg_store == 'true')
       || (github.event_name != 'pull_request' && needs.plan.outputs.stores == 'true')
@@ -1640,7 +1591,7 @@ jobs:
 
       - name: Test Postgres store (synthetic-next)
         run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+          bash scripts/ci/with-service.sh pg -- \
             bash scripts/ci/store-tests.sh pg-store-synthetic-next
 
       - name: Upload PostgreSQL Buck2 reports and event logs

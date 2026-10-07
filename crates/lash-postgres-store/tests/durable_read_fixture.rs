@@ -301,7 +301,7 @@ fn pg_dump(database_url: &str) -> Vec<u8> {
             "host",
             "--env",
             "PGCLIENTENCODING=UTF8",
-            "postgres:16-alpine",
+            "postgres:18-alpine",
             "pg_dump",
             "--format=plain",
             "--no-owner",
@@ -312,10 +312,10 @@ fn pg_dump(database_url: &str) -> Vec<u8> {
             database_url,
         ])
         .output()
-        .expect("run postgres:16 pg_dump fixture generator");
+        .expect("run postgres:18 pg_dump fixture generator");
     assert!(
         output.status.success(),
-        "postgres:16 pg_dump failed: {}",
+        "postgres:18 pg_dump failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let dump = String::from_utf8(output.stdout).expect("pg_dump output is UTF-8");

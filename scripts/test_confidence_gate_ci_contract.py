@@ -721,50 +721,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         dispatch_needs["workspace-tests"]["result"] = "skipped"
         dispatch_needs["check"]["result"] = "skipped"
         self.assertEqual(evaluate(dispatch_needs, "workflow_dispatch"), [])
-        # The matrix now comes from `scripts/ci_plan.py postgres-matrix`, so the
-        # bracket is asserted where it is decided. PG16 is the sole primary lane
-        # and runs on every event; the PG14/PG18 compatibility lanes only compare
-        # the live catalog artifact, so they never run on a pull request and
-        # run on a schema merge group and on workflow_dispatch — no schema
-        # change reaches trunk without all three majors. The focused contract
-        # tests in test_ci_plan.py evaluate per-role step selection.
+        # PostgreSQL 18 is the one supported major: the job names no major
+        # of its own, and every step runs on the one `pg` service. The
+        # focused contract tests in test_ci_plan.py evaluate step selection.
         postgres = workflow_job_block(workflow, "postgres-store")
-        self.assertIn("POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}", postgres)
-        self.assertIn(
-            "POSTGRES_COMPATIBILITY: ${{ needs.plan.outputs.postgres_compatibility }}",
-            postgres,
-        )
-        for event, expected in (
-            ("pull_request", [("16", "primary")]),
-            ("merge_group", [("16", "primary")]),
-            (
-                "workflow_dispatch",
-                [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")],
-            ),
-        ):
-            with self.subTest(event=event):
-                self.assertEqual(
-                    expected,
-                    [
-                        (leg["postgres"], leg["role"])
-                        for leg in plan["postgres_matrix"](event)
-                    ],
-                )
-        for event, expected in (
-            ("pull_request", [("16", "primary")]),
-            (
-                "merge_group",
-                [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")],
-            ),
-        ):
-            with self.subTest(event=event, schema=True):
-                self.assertEqual(
-                    expected,
-                    [
-                        (leg["postgres"], leg["role"])
-                        for leg in plan["postgres_matrix"](event, True)
-                    ],
-                )
+        self.assertNotIn("POSTGRES_PRIMARY", postgres)
+        self.assertNotIn("POSTGRES_COMPATIBILITY", postgres)
 
         # postgres-store is gated on the path-derived stores family, so on a
         # docs-only diff a skipped matrix job is accepted.
@@ -1805,10 +1767,10 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             self.assertIn(command, perf)
             self.assertIn(command, release)
 
-        self.assertIn("image: postgres:16-alpine", perf)
+        self.assertIn("image: postgres:18-alpine", perf)
         self.assertRegex(
             release,
-            r"image: postgres@sha256:[0-9a-f]{64} # postgres:16-alpine",
+            r"image: postgres@sha256:[0-9a-f]{64} # postgres:18-alpine",
         )
         for workflow_with_postgres in (perf, release):
             self.assertIn("LASH_POSTGRES_DATABASE_URL:", workflow_with_postgres)
@@ -2179,7 +2141,7 @@ derive_mutation_jobs() {{
         definition = shell_function_definition(gate, "start_gate_postgres")
         self.assertIn("-c shared_preload_libraries=pg_stat_statements", definition)
         self.assertIn('bash scripts/docker-pull-with-retry.sh "$gate_postgres_image"', definition)
-        self.assertIn('gate_postgres_image="postgres:16-alpine"', gate)
+        self.assertIn('gate_postgres_image="postgres:18-alpine"', gate)
 
         # `start_gate_postgres` is the only thing in the gate that starts one.
         docker_runs = [
@@ -2218,7 +2180,6 @@ derive_mutation_jobs() {{
         )
         self.assertIn("LASH_POSTGRES_DATABASE_URL=postgres://", wrapper)
         for step_name in (
-            "Test PostgreSQL catalog compatibility",
             "Test Postgres store (conformance and attempt atomicity)",
             "Test runtime pool-wait binding",
             "Test simulator backend faults on Postgres",
@@ -2226,18 +2187,9 @@ derive_mutation_jobs() {{
         ):
             with self.subTest(step=step_name):
                 step = workflow_step_block(postgres_store_job, step_name)
-                major = (
-                    "${major}"
-                    if step_name == "Test PostgreSQL catalog compatibility"
-                    else "${POSTGRES_PRIMARY}"
-                )
-                self.assertIn(
-                    f'bash scripts/ci/with-service.sh "pg{major}" --',
-                    step,
-                )
+                self.assertIn("bash scripts/ci/with-service.sh pg --", step)
 
         for step_name in (
-            "Test PostgreSQL catalog compatibility",
             "Test Postgres store (conformance and attempt atomicity)",
             "Test runtime pool-wait binding",
             "Test cross-backend store differential",
@@ -2392,8 +2344,7 @@ derive_mutation_jobs() {{
         three arms and "both halves non-empty" for the rest.
 
         Every workflow suite participates, including newly registered suites.
-        Four keep explicit arms because their shape varies
-        (`pg-catalog-compatibility` runs two invocations; `pg-store`,
+        Three keep explicit arms because their shape varies (`pg-store`,
         `pg-store-synthetic-next` and `s3-store` take generated inventory
         labels rather than one label).
         """
@@ -2414,7 +2365,6 @@ derive_mutation_jobs() {{
         self.assertTrue(uniform)
         self.assertEqual(
             {
-                "pg-catalog-compatibility",
                 "pg-store",
                 "pg-store-synthetic-next",
                 "s3-store",

@@ -21,15 +21,12 @@ reachable without claiming a backend law ran.
 | --- | --- | --- |
 | SQLite file | `crates/lash-sqlite-store/tests/conformance.rs` loads `conformance/suite.rs`; `//crates/lash-sqlite-store:conformance__test` | `kiln test //crates/lash-sqlite-store:conformance__test`. The cacheable CI workspace partition includes it. File-only schema, WAL and cross-process witnesses stay in this binary. |
 | SQLite memory | `crates/lash-sqlite-store/tests/conformance_memory.rs` loads the same `conformance/suite.rs`; `//crates/lash-sqlite-store:conformance_memory__test` | `kiln test //crates/lash-sqlite-store:conformance_memory__test`. The cacheable CI workspace partition includes it. This is a named SQLite memdb store set, with SQL transactions and constraints. |
-| PostgreSQL | `crates/lash-postgres-store/tests/conformance.rs`; `//crates/lash-postgres-store:conformance__test` and its service shards | CI's `postgres-store` job runs `scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store`. It executes the package's service binaries, including integration, schema and atomicity suites, with an explicit PostgreSQL URL and ignored-test selection. Locally run `kiln gate lash <fork> -- env BAZEL_TRUSTED=true bash scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store`. |
+| PostgreSQL | `crates/lash-postgres-store/tests/conformance.rs`; `//crates/lash-postgres-store:conformance__test` and its service shards | CI's `postgres-store` job runs `scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-store`. It executes the package's service binaries, including integration, schema and atomicity suites, with an explicit PostgreSQL URL and ignored-test selection. Locally run `kiln gate lash <fork> -- env BAZEL_TRUSTED=true bash scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-store`. |
 
-PostgreSQL 16 is the primary law lane. PostgreSQL 14 and 18 bracket catalog
-compatibility; they run `pg-catalog-compatibility`, which selects
-`committed_shape_artifact_matches_the_ddl_artifact` and
-`a_compatible_expansion_still_reports_column_drift`, rather than
-repeating every law.
-`scripts/ci_plan.py` selects these additional majors for schema changes on merge
-groups and for dispatches. The commands and test selection live in
+PostgreSQL 18 is the one supported version for lash 1.0, and the only one
+lash tests: the hermetic server (`native//:postgres`), the `pg` service of
+`with-service.sh` and every workflow pin name 18. There is no compatibility
+lane and no older minimum. The commands and test selection live in
 [store-tests.sh](../../scripts/ci/store-tests.sh) and the
 [CI workflow](../../.github/workflows/ci.yml). Service tests need their require
 flags and a live service; a skipped service test is not law execution evidence.
@@ -45,7 +42,7 @@ suite with the same wrapper.
 
 The facade's remaining PostgreSQL-only laws -- ignored tests spread across
 `//crates/lash:lash__unit_test` and the integration binaries -- run in the
-same job as `pg-facade-laws`, which selects them by name: a law a pg16
+same job as `pg-facade-laws`, which selects them by name: a law a `pg`
 container alone satisfies carries `postgres` in its libtest path. A law that
 also needs a managed service is named and skipped there;
 its own suite owns it.

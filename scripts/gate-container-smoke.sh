@@ -23,7 +23,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-bash scripts/docker-pull-with-retry.sh postgres:16-alpine
+bash scripts/docker-pull-with-retry.sh postgres:18-alpine
 bash scripts/docker-pull-with-retry.sh "$LASH_S3_IMAGE"
 
 docker run -d --name "$postgres_container" \
@@ -33,7 +33,7 @@ docker run -d --name "$postgres_container" \
   -e POSTGRES_PASSWORD=lash \
   -e POSTGRES_DB=lash \
   -p "127.0.0.1:${postgres_port}:5432" \
-  postgres:16-alpine >/dev/null
+  postgres:18-alpine >/dev/null
 lash_s3_start "$s3_container" "$s3_port" \
   --label "$LASH_GATE_LABEL" \
   --network "$LASH_E2E_NETWORK"

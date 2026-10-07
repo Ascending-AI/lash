@@ -85,7 +85,6 @@ impl PostgresStorePreflight {
     }
 
     /// Read server-wide capacity, including slots unavailable to normal clients.
-    /// `reserved_connections` is absent before PostgreSQL 16.
     pub async fn connection_capacity(
         &self,
     ) -> Result<crate::PostgresConnectionCapacity, StoreError> {

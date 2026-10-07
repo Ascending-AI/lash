@@ -124,7 +124,7 @@ _sharded_test_suite = rule(
 )
 
 # A test tagged `hermetic-postgres` runs under `postgres_action_runner.py`,
-# inside the launcher's watchdog: its action starts the pinned PostgreSQL 16
+# inside the launcher's watchdog: its action starts the pinned PostgreSQL 18
 # on loopback, applies the published schema and hands the test the URL. The
 # server, the schema and the runner are declared inputs, so the action runs on
 # the pool and its verdict is cached like any other test's.

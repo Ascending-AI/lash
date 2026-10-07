@@ -351,7 +351,7 @@ async fn host_register_trigger_realizes_and_fires_in_sqlite() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 #[allow(
     clippy::disallowed_methods,
     reason = "the test host reads the optional PostgreSQL service URL"

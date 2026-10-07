@@ -139,7 +139,7 @@ async def run_stage(stage: Stage, output: Path, root: Path) -> dict:
     command = stage.command
     if stage.name in {'backends', 'coverage'}:
         environment.pop('LASH_POSTGRES_DATABASE_URL', None)
-        command = ('bash', 'scripts/ci/with-service.sh', 'pg16', '--', *command)
+        command = ('bash', 'scripts/ci/with-service.sh', 'pg', '--', *command)
     started = time.monotonic()
     process = None
     status = 'failure'

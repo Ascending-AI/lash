@@ -297,7 +297,7 @@ run_postgres_conformance() {
   step "Postgres conformance"
   postgres_container="lash-postgres-push-gate-${LASH_GATE_WORKTREE_SLUG}"
   local port="${LASH_PUSH_GATE_POSTGRES_PORT:-$((port_base + 10))}"
-  bash scripts/docker-pull-with-retry.sh postgres:16-alpine
+  bash scripts/docker-pull-with-retry.sh postgres:18-alpine
   docker run -d --name "$postgres_container" \
     --label "$LASH_GATE_LABEL" \
     --network "$LASH_E2E_NETWORK" \
@@ -305,7 +305,7 @@ run_postgres_conformance() {
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
     -p "127.0.0.1:${port}:5432" \
-    postgres:16-alpine -c shared_preload_libraries=pg_stat_statements >/dev/null
+    postgres:18-alpine -c shared_preload_libraries=pg_stat_statements >/dev/null
 
   local deadline=$((SECONDS + 60))
   until lash_pg_ready docker exec "$postgres_container"; do
@@ -369,13 +369,12 @@ run_s3_conformance() {
 #
 #   scripts/ci-stack-budget.sh, scripts/confidence-gate.sh fast shards,
 #   scripts/profile_runtime.py, scripts/profile_lashlang.py,
-#   the Postgres 14/18 majors,
 #   the browser E2E leg, and the package feature checks
 #     Breadth this gate trades for wall-clock. Each resolves a feature graph
 #     or a container stack of its own — a `-p` build is a different
 #     feature-unified graph, not a slice of the workspace one — and CI shards
 #     them across jobs that this script would have to run in series. What it
-#     runs instead is the workspace suite and the Postgres-16 and S3 store
+#     runs instead is the workspace suite and the Postgres and S3 store
 #     lanes.
 #
 #   scripts/test-worktree-gate-env.sh

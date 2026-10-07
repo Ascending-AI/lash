@@ -11,7 +11,7 @@
 #
 #   fork="$(kiln fork lash cut-rehearsal)"
 #   kiln gate lash cut-rehearsal -- env BAZEL_TRUSTED=true \
-#       bash scripts/ci/with-service.sh pg16 -- scripts/release-rehearsal.sh
+#       bash scripts/ci/with-service.sh pg -- scripts/release-rehearsal.sh
 #   kiln rm lash cut-rehearsal
 #
 # Arguments are the labels to build; the default is the whole workspace.

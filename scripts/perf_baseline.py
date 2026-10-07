@@ -20,7 +20,7 @@ by hand and therefore inconsistently:
 PostgreSQL is not managed here: wrap the invocation the way the perf workflow
 does, e.g.
 
-    scripts/ci/with-service.sh pg16 -- python3 scripts/perf_baseline.py \\
+    scripts/ci/with-service.sh pg -- python3 scripts/perf_baseline.py \\
         --archive-root /workspace/notes/lash/perf-campaign-2026-08-23/baselines \\
         --scenario durable_standard_tool_turn_sqlite
 

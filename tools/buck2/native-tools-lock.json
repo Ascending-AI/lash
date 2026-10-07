@@ -39,9 +39,9 @@
       ]
     },
     "postgres": {
-      "version": "16.15.0",
-      "url": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/16.15.0/embedded-postgres-binaries-linux-amd64-16.15.0.jar",
-      "sha256": "653abc065c682b85d3da50168fb95dc524bd85426cdec9ce3695a550ef431df2",
+      "version": "18.6.0",
+      "url": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/18.6.0/embedded-postgres-binaries-linux-amd64-18.6.0.jar",
+      "sha256": "008ee189eaa7ca2b58bd01dd950291e638b998392cf982297acd4779ec898ac1",
       "inner": "postgres-linux-x86_64.txz",
       "archive_prefix": "",
       "exclude": [

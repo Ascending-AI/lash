@@ -1184,7 +1184,7 @@ mod tests {
     ///
     /// Ignored without the service gate; an explicit run requires PostgreSQL.
     #[tokio::test]
-    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
     async fn postgres_backend_fault_seed_set_covers_every_fault_and_oracle() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let Some(report) = run_backend_fault_profile(
@@ -1329,7 +1329,7 @@ mod tests {
 
     /// The PostgreSQL leg of the same law.
     #[tokio::test]
-    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
     async fn postgres_backend_fault_arm_faults_the_same_commit_as_sqlite() {
         for fault in [BackendFault::Refused, BackendFault::ReplyLost] {
             let postgres = arm_effect(BackendFaultKind::Postgres, fault).await;

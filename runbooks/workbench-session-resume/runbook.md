@@ -77,7 +77,7 @@ shift it. Retain the executing prompt and verdict with the run artifacts.
 - Postgres boot variant:
   `AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`.
   Gate the startup trace's `store_backend: "postgres"`. The helper owns a port-isolated
-  Postgres 16 container and marker file. The acceptance contract preserves it across the
+  Postgres 18 container and marker file. The acceptance contract preserves it across the
   `agent-workbench-restart` phase and removes it on
   `agent-workbench-down`. For store evidence,
   query `lash_graph_nodes` through the managed database coordinates recorded as

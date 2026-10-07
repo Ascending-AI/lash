@@ -33,7 +33,7 @@ WRAPPER = ROOT / "scripts" / "ci" / "with-service.sh"
 STORE_TESTS = ROOT / "scripts" / "ci" / "store-tests.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
-SERVICES = ("pg14", "pg16", "pg18", "s3")
+SERVICES = ("pg", "s3")
 
 
 def workflow_text() -> str:
@@ -68,24 +68,15 @@ class WithServiceContract(unittest.TestCase):
         self.assertEqual([], bare, "a store suite runs outside with-service.sh")
         for service, suite in wrapped:
             with self.subTest(suite=suite):
-                if suite == "pg-catalog-compatibility":
-                    # Every compatibility major, one container each.
-                    self.assertEqual("pg${major}", service)
-                elif suite.startswith("pg"):
-                    self.assertEqual("pg${POSTGRES_PRIMARY}", service)
+                if suite.startswith("pg"):
+                    self.assertEqual("pg", service)
                 else:
                     self.assertEqual("s3", service)
 
-    def test_every_matrix_major_is_a_declared_service(self) -> None:
-        """`pg<major>` must name a service for every major the plan selects."""
-        plan = (ROOT / "scripts" / "ci_plan.py").read_text(encoding="utf-8")
-        majors = set(re.findall(r'"postgres":\s*"(\d+)"', plan))
-        self.assertTrue(majors)
+    def test_postgresql_18_is_the_one_postgres_service(self) -> None:
+        """PostgreSQL 18 is the one supported major for lash 1.0."""
         table = wrapper_text()
-        for major in sorted(majors):
-            with self.subTest(major=major):
-                self.assertIn(f"pg{major})", table)
-                self.assertIn(f"postgres:{major}-alpine", table)
+        self.assertEqual(["postgres:18-alpine"], re.findall(r"postgres:[0-9a-z.-]+", table))
 
     def test_images_are_declared_once_and_only_in_the_wrapper(self) -> None:
         """CI starts nothing itself, so it names no image."""
@@ -259,7 +250,7 @@ class WithServiceBehaviour(unittest.TestCase):
             directory = pathlib.Path(raw)
             result, docker = self.run_wrapper(
                 directory,
-                ["pg16", "--", "bash", "-c", 'echo "$LASH_POSTGRES_DATABASE_URL"'],
+                ["pg", "--", "bash", "-c", 'echo "$LASH_POSTGRES_DATABASE_URL"'],
             )
             self.assertEqual(0, result.returncode, result.stderr)
             url = result.stdout.strip()
@@ -277,37 +268,28 @@ class WithServiceBehaviour(unittest.TestCase):
             self.assertEqual(1, len(published))
             self.assertIn(f"--publish 127.0.0.1:{port}:5432", published[0])
 
-    def test_pg16_trades_durability_for_speed_and_the_compat_lanes_do_not(self) -> None:
-        """pg16's container runs without fsync/synchronous_commit/full_page_writes.
+    def test_pg_trades_durability_for_speed(self) -> None:
+        """pg's container runs without fsync/synchronous_commit/full_page_writes.
 
-        The primary lane's database is throwaway, and its crash tests kill
-        lash processes or the engine, never the host OS, so the page cache is
-        all the durability it needs. The compatibility lanes run one fixed
-        catalog artifact, not per-test database churn, and keep the defaults.
+        Its database is throwaway, and its crash tests kill lash processes or
+        the engine, never the host OS, so the page cache is all the
+        durability it needs.
         """
-        for name, traded in (("pg16", True), ("pg14", False), ("pg18", False)):
-            with self.subTest(service=name), tempfile.TemporaryDirectory() as raw:
-                result, docker = self.run_wrapper(
-                    pathlib.Path(raw), [name, "--", "true"]
-                )
-                self.assertEqual(0, result.returncode, result.stderr)
-                published = [
-                    call
-                    for call in docker.logged()
-                    if call.startswith("run --detach")
-                ]
-                self.assertEqual(1, len(published))
-                for flag in ("fsync", "synchronous_commit", "full_page_writes"):
-                    with self.subTest(service=name, flag=flag):
-                        if traded:
-                            self.assertIn(f"-c {flag}=off", published[0])
-                        else:
-                            self.assertNotIn(f"{flag}=off", published[0])
+        with tempfile.TemporaryDirectory() as raw:
+            result, docker = self.run_wrapper(pathlib.Path(raw), ["pg", "--", "true"])
+            self.assertEqual(0, result.returncode, result.stderr)
+            published = [
+                call for call in docker.logged() if call.startswith("run --detach")
+            ]
+            self.assertEqual(1, len(published))
+            for flag in ("fsync", "synchronous_commit", "full_page_writes"):
+                with self.subTest(flag=flag):
+                    self.assertIn(f"-c {flag}=off", published[0])
 
     def test_the_container_is_removed_after_a_passing_command(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             directory = pathlib.Path(raw)
-            result, docker = self.run_wrapper(directory, ["pg16", "--", "true"])
+            result, docker = self.run_wrapper(directory, ["pg", "--", "true"])
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertTrue(
                 any(call.startswith("rm --force") for call in docker.logged()),
@@ -320,7 +302,7 @@ class WithServiceBehaviour(unittest.TestCase):
             marker = pathlib.Path(raw) / "ran"
             result, docker = self.run_wrapper(
                 directory,
-                ["pg16", "--", "bash", "-c", f"touch '{marker}'"],
+                ["pg", "--", "bash", "-c", f"touch '{marker}'"],
                 ready=False,
             )
             self.assertEqual(1, result.returncode)
@@ -348,7 +330,7 @@ class WithServiceBehaviour(unittest.TestCase):
                 [
                     "bash",
                     str(WRAPPER),
-                    "pg16",
+                    "pg",
                     "--",
                     "bash",
                     "-c",
@@ -396,9 +378,9 @@ class WithServiceBehaviour(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stderr)
             seen = log.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(4, len(seen), seen)
+            self.assertEqual(2, len(seen), seen)
             self.assertEqual("s3", seen[-1])
-            self.assertIn("passed: pg14 pg16 pg18 s3", result.stderr)
+            self.assertIn("passed: pg s3", result.stderr)
 
     def test_a_failing_command_fails_the_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -411,15 +393,15 @@ class WithServiceBehaviour(unittest.TestCase):
     def test_an_unknown_service_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             result, docker = self.run_wrapper(
-                pathlib.Path(raw), ["pg15", "--", "true"]
+                pathlib.Path(raw), ["mysql", "--", "true"]
             )
             self.assertEqual(2, result.returncode)
-            self.assertIn("unknown service 'pg15'", result.stderr)
+            self.assertIn("unknown service 'mysql'", result.stderr)
             self.assertEqual([], docker.logged())
 
     def test_a_service_without_a_command_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            result, _ = self.run_wrapper(pathlib.Path(raw), ["pg16"])
+            result, _ = self.run_wrapper(pathlib.Path(raw), ["pg"])
             self.assertEqual(2, result.returncode)
             self.assertIn("no command given", result.stderr)
 

@@ -335,26 +335,16 @@ impl IsolatedDatabase {
             .expect("connect Postgres maintenance database for test isolation");
         // Identifiers are generated here, never caller-supplied, so the quoted
         // interpolation cannot carry an injection; `CREATE DATABASE` also
-        // refuses to run as a bound-parameter statement. On PostgreSQL 15+ the
-        // FILE_COPY strategy copies template1's files instead of WAL-logging
-        // every copied block; the harness only ever clones template1, so the
-        // semantics a test observes are unchanged (FIG-4721).
-        let server_version_num: i32 =
-            sqlx::query_scalar("SELECT current_setting('server_version_num')::int")
-                .fetch_one(&mut connection)
-                .await
-                .expect("read the test server's version");
-        let strategy = if server_version_num >= 150000 {
-            " WITH STRATEGY = FILE_COPY"
-        } else {
-            ""
-        };
-        sqlx::query(&format!("CREATE DATABASE \"{database_name}\"{strategy}"))
-            .execute(&mut connection)
-            .await
-            .unwrap_or_else(|error| {
-                panic!("create isolated test database {database_name}: {error}")
-            });
+        // refuses to run as a bound-parameter statement. The FILE_COPY
+        // strategy copies template1's files instead of WAL-logging every copied
+        // block; the harness only ever clones template1, so the semantics a
+        // test observes are unchanged (FIG-4721).
+        sqlx::query(&format!(
+            "CREATE DATABASE \"{database_name}\" WITH STRATEGY = FILE_COPY"
+        ))
+        .execute(&mut connection)
+        .await
+        .unwrap_or_else(|error| panic!("create isolated test database {database_name}: {error}"));
         connection
             .close()
             .await

@@ -10,7 +10,7 @@
 #
 # The package-wide PostgreSQL suites (`pg-store`, `pg-store-synthetic-next`)
 # are the exception to "against the service the job stood up": each of their
-# test actions starts the pinned PostgreSQL 16 itself
+# test actions starts the pinned PostgreSQL 18 itself
 # (`tools/buck2/postgres_action_runner.py`), so on trusted events they run on
 # the pool and reuse cached verdicts like any other test, and the service this
 # script runs under is not theirs.
@@ -18,10 +18,9 @@
 # These properties hold for every other Buck2 invocation here and must keep
 # holding:
 #
-#   * PostgreSQL version and connection settings reach the test only through
-#     `--test_env`, which is part of the test spawn and of nothing else. Every
-#     compile action key is therefore identical across the PG 14/16/18 matrix
-#     legs, and the three jobs share one set of compiled outputs.
+#   * Connection settings reach the test only through `--test_env`, which is
+#     part of the test spawn and of nothing else, so every compile action key
+#     is the one `kiln build` and the workspace partition produce.
 #   * `--no-test-cache` prevents service-dependent verdicts from entering the
 #     shared cache while leaving compilation cacheable.
 #   * `--local-test-execution` keeps test processes on the runner whose
@@ -140,10 +139,6 @@ print(*selected)
 PY
 }
 
-# The labels the shaped suites below name outside the generated inventory.
-readonly catalog_shape_label=//crates/lash-postgres-store:lash-postgres-store__unit_test
-readonly catalog_drift_label=//crates/lash-postgres-store:schema_drift__test
-
 # A test that shares the job's server with others running beside it goes
 # through the slot wrapper, which gives every test action a database of its
 # own out of the LASH_POSTGRES_SLOT_COUNT slots `with-service.sh` created
@@ -183,13 +178,13 @@ postgres_slot_test() {
 # `target`, which must therefore name the union of the labels' test targets
 # (an empty `target` selects the whole package's).
 #
-# Three suites are deliberately absent and stay explicit arms below:
-# `pg-catalog-compatibility` runs different targets; `pg-store` and
-# `s3-store` take a generated label file rather than one label. Forcing a shape
-# variation into the table for those buys nothing.
+# The suites that take a generated label list rather than one label --
+# `pg-store`, `pg-store-synthetic-next` and `s3-store` -- are deliberately
+# absent and stay explicit arms below. Forcing a shape variation into the
+# table for those buys nothing.
 declare -A uniform_store_suites=(
   # The facade's PostgreSQL-only laws: every `#[ignore]`d test in
-  # //crates/lash that a pg16 container alone satisfies. The `postgres` name
+  # //crates/lash that a `pg` container alone satisfies. The `postgres` name
   # filter derives them -- scripts/check_postgres_gate_coverage.py fails on a
   # PostgreSQL-gated law whose name or binary escapes it, and on a law that
   # also needs a second service unless a skip here names it.
@@ -310,7 +305,6 @@ suite_labels() {
   fi
   local listed
   case "$1" in
-    pg-catalog-compatibility) echo "$catalog_shape_label" "$catalog_drift_label" ;;
     pg-store) labels postgres default ;;
     pg-store-synthetic-next) labels postgres synthetic-next ;;
     s3-store) labels s3 ;;
@@ -333,24 +327,6 @@ if [ -n "${uniform_store_suites[$suite]+set}" ]; then
 fi
 
 case "${suite}" in
-  # The compatibility lanes provision the published DDL and compare its live
-  # catalog rendering byte-for-byte with schema-shape.txt. The second test is a
-  # distinct version-stamp gate.
-  pg-catalog-compatibility)
-    if [ "${trusted}" = true ]; then
-      buck2_test --test_arg=committed_shape_artifact_matches_the_ddl_artifact \
-        "$catalog_shape_label"
-      buck2_test \
-        --test_arg=a_compatible_expansion_still_reports_column_drift \
-        "$catalog_drift_label"
-    else
-      cargo_test cargo test -p lash-internal-postgres-store --locked --lib \
-        committed_shape_artifact_matches_the_ddl_artifact
-      cargo_test cargo test -p lash-internal-postgres-store --locked --test schema_drift \
-        a_compatible_expansion_still_reports_column_drift
-    fi
-    ;;
-
   # Package-wide by design: the integration and schema binaries are part of
   # this gate, so narrowing to the conformance binary would silently drop them.
   # The suites self-serialize on a per-process guard, and two processes on one

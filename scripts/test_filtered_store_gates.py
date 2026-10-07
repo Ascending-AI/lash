@@ -291,8 +291,6 @@ class FilteredRunnerTests(Fixture):
 
 class StoreGateTests(Fixture):
     SUITES = {
-        "pg-catalog-compatibility": ["committed_shape_artifact_matches_the_ddl_artifact",
-                                     "a_compatible_expansion_still_reports_column_drift"],
         "pg-pool-wait": ["postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads"],
         "pg-sim-backend-faults": ["postgres_backend_fault_seed_set_covers_every_fault_and_oracle"],
         "pg-facade-laws": ["a_facade_law_on_postgres"],
@@ -310,13 +308,6 @@ class StoreGateTests(Fixture):
                         FIXTURE_NO_REPORT="1")
         self.assert_failed(self.gate("pg-pool-wait"), "No such file or directory")
 
-    def test_ignored_only_selection_without_include_ignored_fails(self):
-        self.env["FIXTURE_CASES"] = json.dumps(
-            [[name, True] for name in self.SUITES["pg-catalog-compatibility"]]
-        )
-        self.assert_failed(self.gate("pg-catalog-compatibility"),
-                           "no executable tests matched the runner arguments")
-
     def test_pg_service_gate_executes_ignored_selection(self):
         self.env["FIXTURE_CASES"] = json.dumps([[name, True] for name in self.SUITES["pg-pool-wait"]])
         self.assert_passed(self.gate("pg-pool-wait"))
@@ -324,8 +315,7 @@ class StoreGateTests(Fixture):
     def test_pg_s3_empty_shard_union_fails(self):
         for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
-                ignored = suite != "pg-catalog-compatibility"
-                self.env.update(FIXTURE_CASES=json.dumps([[name, ignored] for name in names]),
+                self.env.update(FIXTURE_CASES=json.dumps([[name, True] for name in names]),
                                 FIXTURE_EMPTY_EXECUTION="1")
                 self.assert_failed(self.gate(suite),
                                    "no non-ignored test execution observed in the selected shard union")
@@ -333,8 +323,7 @@ class StoreGateTests(Fixture):
     def test_pg_s3_one_case_union_with_empty_shard_passes(self):
         for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
-                ignored = suite != "pg-catalog-compatibility"
-                self.env["FIXTURE_CASES"] = json.dumps([[name, ignored] for name in names])
+                self.env["FIXTURE_CASES"] = json.dumps([[name, True] for name in names])
                 result = self.gate(suite)
                 self.assert_passed(result)
                 self.assertIn("PASS: 1 non-ignored test executions across 2 test results", result.stdout)
@@ -342,8 +331,6 @@ class StoreGateTests(Fixture):
 
 class CargoStoreGateTests(Fixture):
     SUITES = {
-        "pg-catalog-compatibility": ["committed_shape_artifact_matches_the_ddl_artifact",
-                                     "a_compatible_expansion_still_reports_column_drift"],
         "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],
         "pg-facade-laws": ["a_facade_law_on_postgres"],
     }
@@ -355,10 +342,20 @@ class CargoStoreGateTests(Fixture):
                 self.assert_failed(self.gate(suite, trusted=False),
                                    "no executable tests matched the Cargo gate selection")
 
-    def test_pg_untrusted_ignored_only_selection_fails(self):
-        self.env["FIXTURE_CASES"] = json.dumps([[name, True] for name in self.SUITES["pg-catalog-compatibility"]])
-        self.assert_failed(self.gate("pg-catalog-compatibility", trusted=False),
-                           "no executable tests matched the Cargo gate selection")
+    def test_untrusted_ignored_only_selection_fails(self):
+        """A Cargo selection that matches only ignored cases, without an ignore flag, runs nothing."""
+        self.env["FIXTURE_CASES"] = '[["law", true]]'
+        cargo = self.root / "cargo"
+        cargo.write_text(CARGO)
+        cargo.chmod(0o755)
+        log = self.root / "cargo.log"
+        log.write_text("")
+        self.env["FIXTURE_MEMBER"] = str(self.member)
+        self.assert_failed(
+            self.run_command(["python3", str(TOOLS / "libtest_selection.py"), "cargo", str(log),
+                              str(cargo), "test", "-p", "fixture", "law"]),
+            "no executable tests matched the Cargo gate selection",
+        )
 
     def test_pg_s3_untrusted_empty_execution_fails(self):
         for suite, names in self.SUITES.items():
@@ -374,7 +371,7 @@ class CargoStoreGateTests(Fixture):
     def test_pg_s3_untrusted_one_case_passes(self):
         for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
-                self.env["FIXTURE_CASES"] = json.dumps([[name, suite != "pg-catalog-compatibility"] for name in names])
+                self.env["FIXTURE_CASES"] = json.dumps([[name, True] for name in names])
                 result = self.gate(suite, trusted=False)
                 self.assert_passed(result)
                 for name in names:

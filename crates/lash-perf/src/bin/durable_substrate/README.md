@@ -44,7 +44,7 @@ L12a's teardown did.
 
 Build once, then run SQLite cases through `kiln run` and PostgreSQL cases
 through `bench.py` under `kiln gate`, which gives each case a fresh private
-PostgreSQL 16.15 cluster with L12a's durable settings:
+PostgreSQL 18 cluster with L12a's durable settings:
 
 ```sh
 . ./env.sh

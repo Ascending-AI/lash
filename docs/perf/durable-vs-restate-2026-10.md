@@ -9,6 +9,10 @@ on the same machine and the same default developer build profile as L12a's
 turn, batch, resume, block, process, idle and store record. The tables below
 are its output under `report.py`.
 
+**PostgreSQL version.** These numbers were taken on PostgreSQL 16.15, the
+version the repository pinned then. Lash 1.0 supports and tests PostgreSQL 18
+only (FIG-5209); the PostgreSQL rows here were not re-measured on 18.
+
 **What these numbers include.** On main, no host can run a turn through
 `send()` yet: `LashCore` builds no `SessionActivation`, and L3's facade wiring
 and L9h's follow-up pass are pending. So these runs drive the **production

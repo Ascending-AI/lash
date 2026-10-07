@@ -359,7 +359,7 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
         command.extend(f"--test_env={key}" for key in sorted(keys))
         if postgres:
             command = [
-                str(ROOT / "scripts/ci/with-service.sh"), "pg16", "--", *command,
+                str(ROOT / "scripts/ci/with-service.sh"), "pg", "--", *command,
             ]
         code = subprocess.call(command, cwd=ROOT, env=env)
         counts = test_counts(report, label, name)

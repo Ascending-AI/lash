@@ -33,11 +33,11 @@ jobs:
     steps:
       - name: Test facade laws on Postgres
         run: |
-          bash scripts/ci/with-service.sh "pg16" -- \\
+          bash scripts/ci/with-service.sh pg -- \\
             bash scripts/ci/store-tests.sh pg-facade-laws
       - name: Test model-key laws on Postgres
         run: |
-          bash scripts/ci/with-service.sh "pg16" -- \\
+          bash scripts/ci/with-service.sh pg -- \\
             bash scripts/ci/store-tests.sh pg-model-keys
 """
 

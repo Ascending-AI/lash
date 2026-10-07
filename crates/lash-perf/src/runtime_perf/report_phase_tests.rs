@@ -31,7 +31,7 @@ fn postgres_database_url() -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
     let database =
         lash_postgres_store::testing::IsolatedDatabase::create(&postgres_database_url()).await;
@@ -57,7 +57,7 @@ async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 async fn affected_postgres_scenarios_leave_base_database_clean() {
     let base_database =
         lash_postgres_store::testing::IsolatedDatabase::create(&postgres_database_url()).await;

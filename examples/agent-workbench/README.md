@@ -139,7 +139,7 @@ Configuration is read from `.env` or the process environment:
   trigger, artifact, and process-environment stores at this URL. Unset defaults to
   SQLite.
 - `AGENT_WORKBENCH_POSTGRES`: set to `1` to have the dev entrypoint start a managed
-  Postgres 16 container and synthesize `AGENT_WORKBENCH_DATABASE_URL`.
+  Postgres 18 container and synthesize `AGENT_WORKBENCH_DATABASE_URL`.
 - `AGENT_WORKBENCH_POSTGRES_PORT`, `AGENT_WORKBENCH_POSTGRES_IMAGE`, and
   `AGENT_WORKBENCH_POSTGRES_CONTAINER`: managed Postgres overrides. The default port
   and container name are derived from the workbench port so concurrent runs remain

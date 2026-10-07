@@ -77,7 +77,8 @@ at each sample, not unique waits; zero observations do not exclude short waits.
 
 `measurements-20261006.json` is the compact receipt (raw samples omitted).
 The full evidence is `.kiln/FIG-5167/final.jsonl`, collected with the lane.
-Pinned PostgreSQL **16.15**, 128 MiB shared buffers, `fdatasync`, all three
+Pinned PostgreSQL **16.15** (the pin before FIG-5209 moved it to 18; not
+re-measured), 128 MiB shared buffers, `fdatasync`, all three
 durability settings **on**, loopback TCP; AMD Ryzen 9 5950X (16 cores / 32
 threads), about 126 GiB RAM, ext4 on local NVMe. This shared development host,
 with a default Buck build and no replicas, is not a production capacity SLA.
@@ -173,7 +174,7 @@ LISTEN needs a direct, dedicated session or **session pooling**. PgBouncer's
 pooling and excludes it from transaction pooling; NOTIFY is supported in both.
 Use session pooling for listeners and a separate transaction-pooled write pool.
 Keep listeners out of long transactions: PostgreSQL delivers notifications
-between transactions ([PostgreSQL 16 NOTIFY documentation](https://www.postgresql.org/docs/16/sql-notify.html)).
+between transactions ([PostgreSQL 18 NOTIFY documentation](https://www.postgresql.org/docs/18/sql-notify.html)).
 Neither this spike nor its pooler conclusion depends on running PgBouncer.
 
 ## Recommended starting defaults

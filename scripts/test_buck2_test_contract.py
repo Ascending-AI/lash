@@ -522,7 +522,6 @@ class WorkflowTests(unittest.TestCase):
                 "pg-pool-wait",
                 "pg-sim-backend-faults",
                 "pg-cross-backend",
-                "pg-catalog-compatibility",
                 "pg-store-synthetic-next",
                 "s3-store",
                 "s3-attachment-differential",
@@ -595,7 +594,7 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(store_suites(job), command[2:])
 
     def test_the_store_build_is_one_remote_build_at_the_default_jobs(self) -> None:
-        suites = ["pg-store", "pg-facade-laws", "pg-catalog-compatibility"]
+        suites = ["pg-store", "pg-facade-laws", "pg-pool-wait"]
         with tempfile.TemporaryDirectory() as directory:
             recorder = Path(directory) / "hermetic-build"
             calls = Path(directory) / "calls.jsonl"

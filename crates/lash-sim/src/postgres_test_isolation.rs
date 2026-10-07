@@ -11,7 +11,7 @@
 use lash_postgres_store::testing::IsolatedDatabase;
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+#[ignore = "requires PostgreSQL; select inside a with-service.sh pg gate"]
 async fn postgres_isolation_requires_a_database_url() {
     let _database = isolated_database().await;
 }

@@ -357,10 +357,10 @@ pub(crate) async fn read_live_shape(
     }
     let table_of = |oid: i64| by_oid.get(&oid).copied();
 
-    // Nullability comes from `pg_attribute.attnotnull`, which is stable across
-    // every supported major. PostgreSQL 18 additionally materializes NOT NULL as
-    // `pg_constraint` rows with `contype = 'n'`; nothing here enumerates
-    // `pg_constraint` unfiltered, so those rows cannot enter the comparison.
+    // Nullability comes from `pg_attribute.attnotnull`. PostgreSQL 18 also
+    // materializes NOT NULL as `pg_constraint` rows with `contype = 'n'`;
+    // nothing here enumerates `pg_constraint` unfiltered, so those rows cannot
+    // enter the comparison.
     let column_rows = sqlx::query(
         "SELECT attribute.attrelid::bigint AS table_oid,
                 attribute.attname::text AS column_name,
@@ -409,10 +409,6 @@ pub(crate) async fn read_live_shape(
     // The `indnkeyatts` bound trims trailing INCLUDE columns, which carry no
     // uniqueness. `indkey` is an `int2vector` with a zero lower bound, so the
     // ordinality of `unnest` — always one-based — is what the bound applies to.
-    // `indnullsnotdistinct` is read through `to_jsonb` rather than named directly:
-    // the column does not exist before PostgreSQL 15, where naming it is a parse
-    // error, and `->>` on an absent key yields NULL, which normalizes to the
-    // pre-15 behaviour of NULLs always being distinct.
     let index_rows = sqlx::query(
         "SELECT index_catalog.indrelid::bigint AS table_oid,
                 index_catalog.indisprimary AS is_primary,
@@ -427,10 +423,7 @@ pub(crate) async fn read_live_shape(
                     ORDER BY key.ordinality
                 ) AS columns,
                 pg_catalog.pg_get_expr(index_catalog.indpred, index_catalog.indrelid) AS predicate,
-                COALESCE(
-                    (pg_catalog.to_jsonb(index_catalog) ->> 'indnullsnotdistinct')::boolean,
-                    false
-                ) AS nulls_not_distinct
+                index_catalog.indnullsnotdistinct AS nulls_not_distinct
          FROM pg_catalog.pg_index AS index_catalog
          WHERE index_catalog.indrelid::bigint = ANY($1::bigint[])
            AND index_catalog.indisunique

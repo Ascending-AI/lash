@@ -55,8 +55,9 @@ backup goes with the error. A component opened on its own
 (`SqliteStore::open`, `SqliteTriggerStore::open` and the like) never migrates
 and refuses an older database with `migration_pending`.
 
-**PostgreSQL workers.** Workers share one PostgreSQL store. Run `lashctl` with
-`LASH_POSTGRES_DATABASE_URL` pointing at that store. The host owns traffic
+**PostgreSQL workers.** PostgreSQL 18 is the one supported version for lash
+1.0; lash tests no other major. Workers share one PostgreSQL store. Run
+`lashctl` with `LASH_POSTGRES_DATABASE_URL` pointing at that store. The host owns traffic
 routing, backups and worker lifecycle.
 
 ## Connect PostgreSQL nodes

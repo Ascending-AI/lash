@@ -117,7 +117,7 @@ does not match its selection is an infrastructure failure. Timeouts,
 cancellation and malformed reports preserve failure evidence. Service inputs force local uncached test
 execution while compilation remains remote and cacheable. A `hermetic-postgres`
 test brings its service with it: `postgres_action_runner.py` starts the pinned
-PostgreSQL 16 inside the test action, which therefore stays remote and cached
+PostgreSQL 18 inside the test action, which therefore stays remote and cached
 ([hermetic PostgreSQL tests](../../docs/agents/hermetic-build.md#hermetic-postgresql-tests)).
 
 Callers that execute build outputs request `--materializations final` and use

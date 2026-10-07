@@ -67,7 +67,7 @@ fn operator_json_contract() {
 }
 
 #[test]
-#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
 fn rolling_preflight_refuses_an_oversubscribed_budget() {
     let url = lash_postgres_store::testing::required_database_url();
     let (code, body) = run(

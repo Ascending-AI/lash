@@ -18,7 +18,7 @@ pub fn required_database_url() -> String {
         .unwrap_or_else(|| {
             panic!(
                 "PostgreSQL test requires a non-empty LASH_POSTGRES_DATABASE_URL; \
-                 run it inside kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- ..."
+                 run it inside kiln gate lash <fork> -- scripts/ci/with-service.sh pg -- ..."
             )
         })
 }

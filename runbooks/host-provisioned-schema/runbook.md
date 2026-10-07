@@ -14,11 +14,11 @@ PgBouncer — never needs DDL privileges, or DDL at all, on the application pool
 **Deterministic companion.**
 
 ```sh
-kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
+kiln gate lash <fork> -- scripts/ci/with-service.sh pg -- \
   cargo test -p lash-internal-postgres-store --locked --test host_provisioned_rollout
 ```
 
-`with-service.sh` owns the disposable instance: `postgres:16-alpine` on an ephemeral
+`with-service.sh` owns the disposable instance: `postgres:18-alpine` on an ephemeral
 loopback port, removed on exit, with `LASH_POSTGRES_DATABASE_URL` exported.
 PostgreSQL tests are ignored without service selection; an explicitly selected
 test fails if its database URL is missing or blank.

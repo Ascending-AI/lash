@@ -47,7 +47,7 @@ CRATE = Path("crates/lash")
 STORE_TESTS = Path("scripts/ci/store-tests.sh")
 
 POSTGRES = re.compile(r"postgres", re.IGNORECASE)
-# A reason naming one of these means a pg16 container alone does not satisfy
+# A reason naming one of these means a `pg` container alone does not satisfy
 # the law, so the Postgres suite must not select it.
 SECOND_SERVICE = re.compile(r"managed|\bs3\b|minio", re.IGNORECASE)
 

@@ -354,7 +354,7 @@ finish_current_step() {
   fi
 }
 
-gate_postgres_image="postgres:16-alpine"
+gate_postgres_image="postgres:18-alpine"
 
 # Every Postgres this gate starts is the CI image started the CI way. The
 # statement-count tests read pg_stat_statements, which exists only when the
@@ -1028,7 +1028,7 @@ run_cargo_tests() {
   fi
   command+=("$@")
   if [[ " $* " == *" -p lash-internal-postgres-store "* ]] && [ -z "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-    bash "$repo/scripts/ci/with-service.sh" pg16 -- "${command[@]}"
+    bash "$repo/scripts/ci/with-service.sh" pg -- "${command[@]}"
   else
     "${command[@]}"
   fi
@@ -1813,7 +1813,7 @@ EOF
   "schema": "lash.confidence.postgres-conformance.v1",
   "status": "passed",
   "mode": "docker",
-  "image": "postgres:16-alpine",
+  "image": "postgres:18-alpine",
   "port": "${port}"
 }
 EOF
@@ -1892,7 +1892,7 @@ EOF
   "schema": "lash.confidence.postgres-conformance.v1",
   "status": "passed",
   "mode": "docker",
-  "image": "postgres:16-alpine",
+  "image": "postgres:18-alpine",
   "port": "${port}"
 }
 EOF
@@ -1958,7 +1958,7 @@ EOF
   "schema": "lash.confidence.postgres-current-contention.v1",
   "status": "passed",
   "mode": "docker",
-  "image": "postgres:16-alpine",
+  "image": "postgres:18-alpine",
   "port": "${port}",
   "report": "../backend-contention/backend-contention.json",
   "full_lane_status": "not_run_in_default_lane"

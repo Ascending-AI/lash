@@ -95,21 +95,6 @@ impl ScratchSchema {
     }
 }
 
-/// Reads `server_version_num`, for the one assertion that needs a PostgreSQL
-/// feature not present on every major in the support matrix.
-pub async fn postgres_server_version_num() -> i32 {
-    let database_url = database_url().expect("configured Postgres URL");
-    let mut connection = PgConnection::connect(&database_url)
-        .await
-        .expect("connect server-version probe");
-    sqlx::query_scalar::<_, String>("SELECT current_setting('server_version_num')")
-        .fetch_one(&mut connection)
-        .await
-        .expect("read server_version_num")
-        .parse()
-        .expect("server_version_num is numeric")
-}
-
 pub async fn pool_with_search_path(database_url: &str, search_path: &str) -> PgPool {
     let search_path = search_path.to_string();
     PgPoolOptions::new()

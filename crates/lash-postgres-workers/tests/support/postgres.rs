@@ -51,7 +51,7 @@ fn tree() -> PathBuf {
     match std::env::var_os("LASH_WORKERS_POSTGRES") {
         Some(tree) => PathBuf::from(tree),
         None => panic!(
-            "LASH_WORKERS_POSTGRES is not set: point it at a PostgreSQL 16 tree with bin/initdb \
+            "LASH_WORKERS_POSTGRES is not set: point it at a PostgreSQL 18 tree with bin/initdb \
              (the kiln target sets it to native//:postgres)"
         ),
     }
