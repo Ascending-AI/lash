@@ -684,10 +684,8 @@ pub async fn await_external(
 }
 
 /// Wait for `process` to end, bounded by `deadline`, raced against the
-/// awaiter's cancel mail, so a cycle of waits is cancellable. It pins a
-/// `process_terminal` wait (`wait.mint`); a process that had already ended
-/// resolves it from its registry outcome, first winner beside the
-/// process's own terminal transaction.
+/// awaiter's cancel mail, so a cycle of waits is cancellable. The wait is
+/// [`pin_process_terminal`]'s.
 ///
 /// # Errors
 ///
@@ -697,22 +695,57 @@ pub async fn await_process(
     process: &ProcessId,
     deadline: WaitDeadline,
 ) -> Result<ProcessWaitOutcome, DurableError> {
+    let wait = pin_process_terminal(cx, wait_scope(cx), process, Some(deadline)).await?;
+    Ok(match race(cx, &[wait]).await? {
+        RaceWinner::Resolved { resolution, .. } => {
+            ProcessWaitOutcome::Resolved(process_outcome(resolution)?)
+        }
+        RaceWinner::TimedOut(_) => ProcessWaitOutcome::TimedOut,
+        RaceWinner::Cancelled => ProcessWaitOutcome::Cancelled,
+    })
+}
+
+/// Pin a `process_terminal` wait of `scope` on `process`, bounded by
+/// `deadline`, and commit it (`wait.mint`). A process whose terminal
+/// committed before the wait resolved no wait of it, so the registry is
+/// read after the commit: a process that already ended resolves the wait
+/// from its outcome at once, first winner beside the process's own
+/// terminal transaction, and that resolution wakes the wait's owner.
+///
+/// # Errors
+///
+/// A store or registry failure; [`DurableError::OwnershipLost`].
+pub async fn pin_process_terminal(
+    cx: &ActorContext,
+    scope: ScopeKey,
+    process: &ProcessId,
+    deadline: Option<WaitDeadline>,
+) -> Result<WaitRef, DurableError> {
     let mut tx = cx.begin().await?;
     let (wait, _) = pin(
         &mut tx,
         cx.backend().completion_secrets(),
         WaitSpec {
             kind: WaitKind::ProcessTerminal,
-            scope: wait_scope(cx),
+            scope,
             target_process: Some(process.clone()),
-            deadline: Some(deadline),
+            deadline,
         },
     )
     .map_err(|refusal| corrupt(&refusal.to_string()))?;
     cx.commit(tx, CommitLabel::WAIT_MINT).await?;
-    if let Ok(Some(record)) = cx.backend().process_registry().get_process(process).await
-        && let Some(outcome) = record.outcome()
-    {
+    let record = cx
+        .backend()
+        .process_registry()
+        .get_process(process)
+        .await
+        .map_err(|error| {
+            DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Unavailable,
+                message: error.to_string(),
+            })
+        })?;
+    if let Some(outcome) = record.and_then(|record| record.outcome()) {
         let (digest, resolution_ref) = encode_process_outcome(&outcome)?;
         resolve_row(
             cx.backend(),
@@ -725,13 +758,7 @@ pub async fn await_process(
         )
         .await?;
     }
-    Ok(match race(cx, &[wait]).await? {
-        RaceWinner::Resolved { resolution, .. } => {
-            ProcessWaitOutcome::Resolved(process_outcome(resolution)?)
-        }
-        RaceWinner::TimedOut(_) => ProcessWaitOutcome::TimedOut,
-        RaceWinner::Cancelled => ProcessWaitOutcome::Cancelled,
-    })
+    Ok(wait)
 }
 
 /// Resolve every pending process-terminal wait on `process` with `outcome`

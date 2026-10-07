@@ -28,13 +28,14 @@
 //! not mean its children have stopped, so step 4 reads
 //! `live_until_descendants` and, while one remains, pins a
 //! `process_terminal` wait on it and releases as waiting; the terminal wakes
-//! the session. The deletion steps are idempotent, so a crash between a
-//! delete and its step's commit repeats the delete, which finds nothing.
+//! the session. A process that ended between that read and the wait's
+//! commit resolved no wait, so the pin reads the registry after its commit
+//! and resolves the wait itself. The deletion steps are idempotent, so a
+//! crash between a delete and its step's commit repeats the delete, which
+//! finds nothing.
 
-use lash_core_execution::runtime::actor::waits::{self, WaitSpec};
-use lash_durable::domain::{
-    ScopeKey, SessionCloseRow, SessionCloseStep, SessionCloseWrite, WaitKind,
-};
+use lash_core_execution::runtime::actor::waits;
+use lash_durable::domain::{ScopeKey, SessionCloseRow, SessionCloseStep, SessionCloseWrite};
 use lash_durable::{
     ActorKey, ActorTx, CommitLabel, DomainWrite, DurableError, MailKind, MailRefusal, MailTx,
     Release,
@@ -135,9 +136,6 @@ pub enum SessionCloseError {
     /// The open turn's cancel failed.
     #[error("the open turn's cancel: {0}")]
     Turn(#[from] TurnError),
-    /// The wait on a live process could not be pinned.
-    #[error(transparent)]
-    Pin(#[from] waits::PinRefusal),
     /// The trigger store did not delete the session's subscriptions.
     #[error("trigger subscriptions: {0}")]
     Triggers(crate::PluginError),
@@ -200,18 +198,9 @@ pub async fn run_session_close(
                     .into_iter()
                     .next()
                 {
-                    let mut tx = cx.begin().await?;
-                    waits::pin(
-                        &mut tx,
-                        backend.completion_secrets(),
-                        WaitSpec {
-                            kind: WaitKind::ProcessTerminal,
-                            scope: scope.clone(),
-                            target_process: Some(live),
-                            deadline: None,
-                        },
-                    )?;
-                    cx.commit(tx, CommitLabel::WAIT_MINT).await?;
+                    // A process that ended after the read resolves the wait
+                    // here, which wakes the session.
+                    waits::pin_process_terminal(cx, scope.clone(), &live, None).await?;
                     return Ok(Some(SessionCloseExit::Waiting));
                 }
                 backend

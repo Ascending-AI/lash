@@ -44,6 +44,11 @@ use crate::{
 /// The format set the laws' session actors are written in.
 const SESSION_FORMATS: &str = "law-session";
 
+/// Work a law runs just before the first commit under its label applies:
+/// another actor's commit that lands in between.
+type BeforeCommit =
+    Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>;
+
 /// A durable store that refuses one chosen commit before it applies: a
 /// crash just before that commit.
 struct CutStore {
@@ -51,6 +56,7 @@ struct CutStore {
     /// The label to cut and how many of its commits to let through first.
     cut: Mutex<Option<(CommitLabel, usize)>>,
     fired: AtomicBool,
+    before: Mutex<Option<(CommitLabel, BeforeCommit)>>,
 }
 
 impl CutStore {
@@ -59,7 +65,13 @@ impl CutStore {
             inner,
             cut: Mutex::new(None),
             fired: AtomicBool::new(false),
+            before: Mutex::new(None),
         })
+    }
+
+    /// Run `work` just before the next commit under `label` applies.
+    fn before(&self, label: CommitLabel, work: BeforeCommit) {
+        *self.before.lock().expect("the before lock") = Some((label, work));
     }
 
     /// Cut the commit under `label` after `skip` of them went through.
@@ -189,6 +201,19 @@ impl DurableStore for CutStore {
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
+        let before = {
+            let mut before = self.before.lock().expect("the before lock");
+            match before.take() {
+                Some((before_label, work)) if before_label == label => Some(work),
+                other => {
+                    *before = other;
+                    None
+                }
+            }
+        };
+        if let Some(work) = before {
+            work().await;
+        }
         let fire = {
             let mut cut = self.cut.lock().expect("the cut lock");
             match cut.as_mut() {
@@ -467,6 +492,92 @@ async fn a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while
             "{cut:?}: the session's ArtifactCleanup is not owed: {standing:?}"
         );
     }
+}
+
+/// The close's process ends between the close's read of the session's live
+/// processes and the commit of the wait it pins on it: the process's
+/// terminal resolved no wait, so the close resolves its own from the
+/// registry, and the session, released as waiting, is woken and closes
+/// (FIG-5176).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_session_close_whose_process_ends_before_its_wait_commits_still_closes() {
+    let world = World::new("racing-close", DurableSettings::default(), Vec::new()).await;
+    world
+        .backend
+        .session_store_factory()
+        .admit_session(
+            &lash_core_store::testing::store_fixtures::root_session_request(&world.session),
+        )
+        .await
+        .expect("materialize the session");
+    let child = start_process(
+        &world.backend,
+        ScopeId::Session(world.session.clone()),
+        lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+    )
+    .await;
+    let cx = world.claim().await;
+    request_session_close(&world.backend, &world.session)
+        .await
+        .expect("request the close");
+    let mut tx = cx.begin().await.expect("begin");
+    begin_session_close(&mut tx, &world.session);
+    tx.ack_seen();
+    cx.commit(tx, CommitLabel::SESSION_CLOSE_BEGIN)
+        .await
+        .expect("drain the close request");
+    {
+        let backend = world.backend.clone();
+        let child = child.clone();
+        world.cut.before(
+            CommitLabel::WAIT_MINT,
+            Box::new(move || Box::pin(async move { end_process(&backend, &child).await })),
+        );
+    }
+
+    assert_eq!(
+        run_session_close(&cx, &world.session)
+            .await
+            .expect("the close runs"),
+        Some(SessionCloseExit::Waiting),
+        "the close did not wait on its process"
+    );
+    assert!(
+        world.process(&child).await.terminal,
+        "the law's process did not end before the wait committed"
+    );
+    // What the session's activation commits on `Waiting`.
+    let mut tx = cx.begin().await.expect("begin");
+    tx.give_up(lash_durable::Release::Waiting {
+        next_due: cx.next_due(),
+    });
+    let released = cx
+        .commit(tx, CommitLabel::SESSION_RELEASE)
+        .await
+        .expect("release the session");
+    assert_eq!(
+        released.state,
+        ActorState::Ready,
+        "the session waits on a process that already ended, and nothing wakes it"
+    );
+
+    let cx = world.claim().await;
+    assert_eq!(
+        run_session_close(&cx, &world.session)
+            .await
+            .expect("the woken close runs"),
+        Some(SessionCloseExit::Closed)
+    );
+    assert!(
+        world
+            .backend
+            .durable()
+            .session_close(&world.session)
+            .await
+            .expect("read the close")
+            .is_some_and(|row| row.is_tombstone()),
+        "the woken close did not reach its tombstone"
+    );
 }
 
 /// While a process of the session lives, nothing of the session is deleted.
