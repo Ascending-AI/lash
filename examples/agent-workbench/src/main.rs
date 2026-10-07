@@ -25,6 +25,7 @@ mod mcp_host;
 mod mcp_policy;
 #[path = "../../shared/shutdown_marker.rs"]
 mod shutdown_marker;
+mod story;
 mod ttt;
 mod turns;
 mod ui;

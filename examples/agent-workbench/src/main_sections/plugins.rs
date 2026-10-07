@@ -4,6 +4,7 @@ use lash::SessionId;
 pub(crate) struct WorkbenchPluginFactory {
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) ttt: Option<ttt::TttWorld>,
+    pub(crate) story: Option<story::StoryWorld>,
     pub(crate) config_changes: WorkbenchConfigChanges,
     pub(crate) context_budget: WorkbenchContextBudget,
     pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
@@ -20,6 +21,7 @@ impl WorkbenchPluginFactory {
         Self {
             mail_world: mail::MailWorld::new(),
             ttt: None,
+            story: None,
             config_changes: WorkbenchConfigChanges::default(),
             context_budget: WorkbenchContextBudget::default(),
             deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
@@ -31,6 +33,11 @@ impl WorkbenchPluginFactory {
 
     pub(crate) fn with_mail_world(mut self, mail_world: mail::MailWorld) -> Self {
         self.mail_world = mail_world;
+        self
+    }
+
+    pub(crate) fn with_story(mut self, story: Option<story::StoryWorld>) -> Self {
+        self.story = story;
         self
     }
 
@@ -87,6 +94,7 @@ impl PluginFactory for WorkbenchPluginFactory {
         Ok(Arc::new(WorkbenchSessionPlugin {
             mail_world: self.mail_world.clone(),
             ttt: self.ttt.clone(),
+            story: self.story.clone(),
             config_changes: self.config_changes.clone(),
             context_budget: self.context_budget.clone(),
             deferred_tools: self.deferred_tools.clone(),
@@ -104,6 +112,7 @@ impl lash::plugins::PluginDefinition for WorkbenchPluginFactory {
 pub(crate) struct WorkbenchSessionPlugin {
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) ttt: Option<ttt::TttWorld>,
+    pub(crate) story: Option<story::StoryWorld>,
     pub(crate) config_changes: WorkbenchConfigChanges,
     pub(crate) context_budget: WorkbenchContextBudget,
     pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
@@ -139,6 +148,10 @@ impl SessionPlugin for WorkbenchSessionPlugin {
         if let Some(world) = &self.ttt {
             reg.tools()
                 .provider(Arc::new(ttt::TttProvider::new(world.clone())))?;
+        }
+        if let Some(world) = &self.story {
+            reg.tools()
+                .provider(Arc::new(story::StoryProvider::new(world.clone())))?;
         }
         reg.context()
             .prepare_turn(0, Arc::new(self.context_budget.clone()))?;
@@ -461,15 +474,19 @@ impl AppState {
         let protocol = crate::session_protocol::selected().map_err(serde::de::Error::custom)?;
         // The tic-tac-toe world is fixed at boot, so its tools are taught
         // from a session's creation on.
-        let ttt_instructions: Vec<String> =
-            self.ttt.iter().map(|_| ttt::prompt(protocol)).collect();
+        let instructions: Vec<String> = self
+            .ttt
+            .iter()
+            .map(|_| ttt::prompt(protocol))
+            .chain(self.story.iter().map(|_| story::prompt(protocol)))
+            .collect();
         let spec = match protocol {
             crate::session_protocol::SessionProtocol::Standard => spec.plugin(
                 lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
                 lash::standard::StandardTurnOptions {
                     prompt: Some(lash::standard::StandardPrompt {
                         intro: Some("You are the Agent Workbench assistant.".to_owned()),
-                        instructions: ttt_instructions,
+                        instructions,
                         context: workbench_prompt_context(&self.mail_world),
                         ..Default::default()
                     }),
@@ -487,7 +504,7 @@ impl AppState {
                     }),
                     prompt: Some({
                         let mut prompt = workbench_rlm_prompt(&self.mail_world);
-                        prompt.instructions.extend(ttt_instructions);
+                        prompt.instructions.extend(instructions);
                         prompt
                     }),
                     ..Default::default()

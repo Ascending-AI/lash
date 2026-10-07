@@ -266,3 +266,105 @@ scripts/agent-workbench-dev.sh down --port <port>
 ```
 
 with the same environment as launch. Keep the trace and extracts as evidence.
+
+## Choose-your-own-adventure memory
+
+The agent explores a seeded story tree for 12 rounds, then answers 12 questions
+about its journey. Facts are independent vocabulary draws: names, places, items,
+five-digit door codes and coin deltas. The tree is generated lazily from the
+seed, vocabulary seed and option path; no subtree is allocated. Each name has
+4,096 possible values. Coins start at zero and a passage's delta is applied when
+the agent leaves it. Each round permits exactly one choice; `choose` returns the
+next round's passage, whose delta has not yet been applied.
+
+At boot, `AGENT_WORKBENCH_STORY=on` registers the tools and their prompt for every
+new session. RLM uses `await story.read({})` and
+`await story.choose({ option: "A" })`; standard uses `story__read` and
+`story__choose`. `read` returns top-level `passage`, `facts`, `choices` (option and label),
+`coins`, `round`, `passage_round`, `round_finished`, `choice` and `path`; `choose` returns the new passage with `round_finished=true`; work steps
+are never new user rounds. Invalid options are errors
+and change nothing. Tools never expose the path log, questions or answer key.
+
+| Workbench variable | Default | Meaning |
+|---|---|---|
+| `AGENT_WORKBENCH_STORY` | `off` | `on` enables the scenario |
+| `AGENT_WORKBENCH_STORY_SEED` | `1` | u64 tree seed |
+| `AGENT_WORKBENCH_STORY_BRANCHING` | `3` | number of choices, 2–26, labelled A–Z |
+| `AGENT_WORKBENCH_STORY_VOCABULARY_SEED` | `1` | u64 vocabulary draw seed |
+
+The driver `runbooks/relay/cyoa_live.py` starts a fresh workbench, sends one user
+turn per round and stops the workbench after the quiz. A round that ends without
+a choice gets `Round r is not finished. Choose one option.` up to five times.
+A round still unfinished makes the run invalid: it gets no score. All turn
+outcomes and continuation counts are retained, including failed initial turns.
+
+| Driver flag | Default | Meaning |
+|---|---|---|
+| `--out DIR` | required | evidence directory, with fresh data/session |
+| `--seed`, `--branching`, `--vocabulary-seed` | `1`, `3`, `1` | world variables; seed also seeds the quiz |
+| `--rounds`, `--questions` | `12`, `12` | positive counts |
+| `--types` | `recall,order,state,negative` | cyclic type mix; repeat entries for weights |
+| `--told` | false | round 1 adds “At the end I will quiz you on details of your journey: names, codes, coins and the order of places.” |
+| `--delivery` | `tool` | `tool`: read through tools; `message`: passage and choices in the round's user message |
+| `--policy`, `--channel` | `relay`, `native` | relay, chronological `rlm`, standard; relay requires native, standard has no channel |
+| `--model`, `--upstream` | `z-ai/glm-5.3-flash`, `z-ai` | model and OpenRouter provider pin |
+| `--port`, `--env-file`, `--budget` | `4492`, none, `$0.15` | port, key file, budget guard; reserve enough for the next turn before starting it |
+
+The generator refuses more order questions than distinct place pairs on the
+path, an empty type mix, zero questions and an unfinished path. The driver
+refuses impossible counts before launch; place collisions are checked after
+play. All questions derive from the completed rounds. Negative questions
+alternate unvisited sibling destinations (`NO`) and visited places (`YES`).
+
+Run every policy/told variant with `env.sh` sourced and a key exported, or with
+`--env-file /workspace/code/lash/.env`. Both RLM baselines use native:
+
+```sh
+for policy in relay rlm standard; do
+  python3 runbooks/relay/cyoa_live.py --out .kiln/FIG-4441/cyoa/$policy-told-no \
+    --policy "$policy" --env-file /workspace/code/lash/.env
+  python3 runbooks/relay/cyoa_live.py --out .kiln/FIG-4441/cyoa/$policy-told-yes \
+    --policy "$policy" --told --env-file /workspace/code/lash/.env
+done
+```
+
+Add `--delivery message` to test message delivery. Use `--types recall,state`
+for a restricted mix or `--types recall,recall,order,state,negative` to weight
+recall. `--rounds`, `--questions`, seeds, branching, model and upstream are
+independent settings subject to the validation above.
+
+`results.json` records each question's type, lookback, expected/given answer
+and correctness; overall accuracy and breakdowns by type and lookback; each
+round's turns, continuation count, work steps, requests, tokens, cache reads
+and provider cost; the final turn and totals. `log.json` is the authoritative
+path log; `questions.json` holds the generated answer key. Per-round and final
+directories contain `extract_live.py`'s request/response files, `transcript.md`
+and `usage.md`. `GET /api/story`, `POST /api/story/rounds`,
+`POST /api/story/questions` and `POST /api/story/score` are driver-only routes;
+the last two take `{seed, questions, types}` (score also takes `answer`).
+
+**Answer key: choose-your-own-adventure memory.** State this before observing:
+
+- Each completed round's logged node supplies its names, item and code; `coins`
+  is the total after its choice. Order answers are the full name of the first
+  visited place in a sampled pair of distinct places.
+- Negative answers are exactly `YES` or `NO`. A `NO` place is generated from an
+  unchosen sibling and excluded if its name occurs anywhere in the path log.
+- Lookback is R minus the fact round: round R is 0 rounds before the end,
+  round 1 is R−1 rounds before the end. Order uses the earlier place's round. An unvisited negative uses the
+  round where its parent choice was offered; it has no visited fact round.
+- The scorer reads the first well-formed JSON object, including inside fences.
+  It scores each key independently: missing, nonscalar or malformed values
+  score zero for that question. Names ignore case and repeated whitespace;
+  numbers normalize signs, decimal formatting and separators; yes/no aliases
+  (`y/n`, `true/false`, `1/0`) normalize to the typed key. Additional keys do
+  not change the score. Buckets are 0–3, 4–7 and 8+ rounds back.
+- An unfinished round invalidates the run and is never scored. Every failed
+  turn must be explained from the preserved response and workbench log.
+- Spend uses provider-reported usage, and every request must be served by the
+  configured model/upstream. No human or model judge contributes to accuracy.
+
+The six named laws are in `story::tests` in
+`//examples/agent-workbench:agent-workbench__unit_test`: same seeded tree,
+invalid choice leaves state unchanged, log matches moves, reproducible quiz
+with permitted sources, normalization/malformed answers, and lookback.
