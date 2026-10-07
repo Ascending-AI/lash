@@ -138,9 +138,6 @@ pub const TABLES: &[&str] = &[
     turn_ingress::queued_batches::TABLE,
     turn_ingress::tool_intent_submissions::TABLE,
     turn_ingress::tool_intent_submissions::RETIRED_OWNERS_TABLE,
-    turn_ingress::turn_park_clock::TABLE,
-    turn_ingress::turn_park_events::TABLE,
-    turn_ingress::turn_parks::TABLE,
     session::checkpoint_blob_refs::TABLE,
     session::deleted_sessions::TABLE,
     session::fleet_format::TABLE,
@@ -159,7 +156,6 @@ pub const TABLES: &[&str] = &[
     session_runs::control_intents::TABLE,
     session_runs::run_inputs::TABLE,
     session_runs::runs::TABLE,
-    "session_shift_admissions",
     session_ingress::sequence::TABLE,
 ];
 
@@ -213,11 +209,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(session::turn_commits::TurnCommitStatements::NEUTRAL);
     statements.extend_from_slice(session_ingress::SessionIngressStatements::NEUTRAL);
     statements.extend_from_slice(session_runs::runs::SessionRunStatements::NEUTRAL);
-    statements.extend_from_slice(session_runs::run_inputs::RunInputVerbStatements::NEUTRAL);
-    statements.extend_from_slice(session_runs::control_intents::ControlVerbStatements::NEUTRAL);
-    statements.extend_from_slice(session::meta::MetaRunVerbStatements::NEUTRAL);
-    statements.extend_from_slice(turn_ingress::pending_inputs::PendingRunVerbStatements::NEUTRAL);
-    statements.extend_from_slice(turn_ingress::queued_batches::BatchRunVerbStatements::NEUTRAL);
     statements.extend_from_slice(session_runs::run_inputs::SessionRunInputStatements::NEUTRAL);
     statements.extend_from_slice(session_runs::control_intents::ControlIntentStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::TurnIngressStatements::NEUTRAL);
@@ -227,8 +218,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(
         turn_ingress::tool_intent_submissions::ToolIntentSubmissionStatements::NEUTRAL,
     );
-    statements.extend_from_slice(turn_ingress::turn_parks::TurnParkStatements::NEUTRAL);
-    statements.extend_from_slice(turn_ingress::turn_park_events::TurnParkEventStatements::NEUTRAL);
     statements.extend_from_slice(recovery_leader::RecoveryLeaderStatements::NEUTRAL);
     statements.extend_from_slice(durable::NodeStatements::NEUTRAL);
     statements.extend_from_slice(durable::ActorStatements::NEUTRAL);
@@ -241,14 +230,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(durable::processes::ActorParkStatements::NEUTRAL);
     statements.extend_from_slice(durable::park_events::ParkEventStatements::NEUTRAL);
     statements.extend_from_slice(durable::session_close::SessionCloseStatements::NEUTRAL);
-    statements.extend_from_slice(
-        turn_ingress::pending_inputs::PendingTurnInputObligationStatements::NEUTRAL,
-    );
-    statements
-        .extend_from_slice(turn_ingress::queued_batches::QueuedBatchObligationStatements::NEUTRAL);
-    statements.extend_from_slice(
-        session_runs::control_intents::ControlIntentObligationStatements::NEUTRAL,
-    );
+    statements.extend_from_slice(durable::session_mail::SessionMailStatements::NEUTRAL);
     statements.extend_from_slice(session_runs::runs::SessionRunObligationStatements::NEUTRAL);
     statements.extend_from_slice(session::meta::SessionMetaObligationStatements::NEUTRAL);
     statements

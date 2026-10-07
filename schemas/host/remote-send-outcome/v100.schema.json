@@ -11956,7 +11956,7 @@
       "type": "string"
     },
     "SessionHeadOwner": {
-      "description": "What owns a session's head, refusing a head write outside the shift.",
+      "description": "What owns a session's head, refusing a head write outside every run.",
       "oneOf": [
         {
           "description": "An admitted run without terminal evidence.",

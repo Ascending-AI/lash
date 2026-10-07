@@ -232,28 +232,11 @@ impl std::error::Error for StoreFault {}
 pub enum StoreError {
     #[error("prepared registration for process {process_id} is stale")]
     PreparedProcessRegistrationStale { process_id: crate::ProcessId },
-    #[error("prepared run admission for {run} of {session_id} is stale")]
-    PreparedRunAdmissionStale {
-        session_id: crate::SessionId,
-        run: crate::TurnId,
-    },
+
     #[error("session {session_id} already has unfinished run {run}")]
     UnfinishedRunConflict {
         session_id: crate::SessionId,
         run: crate::TurnId,
-    },
-    /// The run's admission is recorded under an executor whose engine holds
-    /// its run, and another execution asked to admit it (FIG-4765). The
-    /// recorded executor executes the run; the asker waits for its end.
-    #[error(
-        "run {run} of session {session_id} is run by {recorded:?}; {admitting:?} does not \
-         admit it"
-    )]
-    RunHeldByAnotherExecutor {
-        session_id: crate::SessionId,
-        run: crate::TurnId,
-        recorded: Box<super::RunExecutor>,
-        admitting: Box<super::RunExecutor>,
     },
     /// A pending follow-on owns the session (ADR 0101 §3, FIG-3542): no other
     /// turn commits and no other head write changes the fact until the
@@ -661,11 +644,6 @@ pub enum StoreError {
         run: crate::TurnId,
         row: Box<super::IngressRowId>,
     },
-    /// A commit that settles admitted rows or applies session commands
-    /// presented no shift fence: only a sealed shift's fenced commit may
-    /// (FIG-3927).
-    #[error("a commit of session `{session_id}` settles ingress rows without a shift fence")]
-    IngressSettlementUnfenced { session_id: SessionId },
     /// A commit carries both a run's ingress settlement and a
     /// session-command run (ADR 0101 §4): a run's turn commit settles the
     /// rows it admitted, and a command run's applying commit settles its
@@ -697,17 +675,6 @@ pub enum StoreError {
         session_id: SessionId,
         owner: super::SessionHeadOwner,
     },
-    /// A storage operation fenced by a shift presented a fence that is not
-    /// the session's current shift epoch: a later admission superseded it
-    /// (ADR 0105 §2). Nothing was written.
-    #[error(
-        "shift fence epoch {fence_epoch} for session `{session_id}` is stale; the session is at shift epoch {current_epoch}"
-    )]
-    StaleShiftFence {
-        session_id: SessionId,
-        fence_epoch: u64,
-        current_epoch: u64,
-    },
     /// A terminal write named a logical run that already has a different
     /// terminal. The stored terminal stands and nothing was written (ADR 0105
     /// law L-S6): a later execution adopts it instead of ending the run
@@ -736,18 +703,6 @@ pub enum StoreError {
     /// No control intent has this id.
     #[error("control intent {intent} is unknown")]
     ControlIntentUnknown { intent: super::ControlIntentId },
-    /// A shift-fenced storage operation found no `session_meta` row for its
-    /// session, so the session has no shift epoch to fence against (ADR 0105
-    /// §2). Nothing was written.
-    #[error("session `{session_id}` has no shift epoch: no session_meta row")]
-    ShiftEpochUnavailable { session_id: SessionId },
-    /// A shift-fenced storage operation named a session other than the one
-    /// its shift fence authorizes. Nothing was written.
-    #[error("shift fence for session `{fence_session_id}` cannot act on session `{session_id}`")]
-    ShiftFenceSessionMismatch {
-        session_id: SessionId,
-        fence_session_id: SessionId,
-    },
     /// A turn-addressed item named a turn that is neither the session's
     /// running turn nor one of its ended turns. Nothing was stored: no row,
     /// no tombstone and no sequence number (ADR 0101 §5.1).
@@ -1034,7 +989,6 @@ impl StoreError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::PreparedProcessRegistrationStale { .. }
-            | Self::PreparedRunAdmissionStale { .. }
             | Self::Contended
             | Self::MigrationOpenElsewhere { .. }
             | Self::StorageFailure { .. }
@@ -1065,7 +1019,6 @@ impl StoreError {
             | Self::BlankIdentity(_)
             | Self::SessionDeleted { .. }
             | Self::UnsupportedStoreOperation { .. }
-            | Self::RunHeldByAnotherExecutor { .. }
             | Self::FollowOnPending { .. }
             | Self::FollowOnFrameNotCurrent { .. }
             | Self::FollowOnHeadInvariant { .. }
@@ -1097,16 +1050,12 @@ impl StoreError {
             | Self::IngressTurnAddressUnknown { .. }
             | Self::IngressRowNotAdmitted { .. }
             | Self::IngressSettlementDuplicate { .. }
-            | Self::IngressSettlementUnfenced { .. }
             | Self::IngressAndSessionCommandRun { .. }
             | Self::SessionCommandWithdrawn { .. }
-            | Self::StaleShiftFence { .. }
             | Self::RunAlreadyTerminal { .. }
             | Self::RunInputWithdrawn { .. }
             | Self::SessionClosing { .. }
             | Self::ControlIntentUnknown { .. }
-            | Self::ShiftEpochUnavailable { .. }
-            | Self::ShiftFenceSessionMismatch { .. }
             | Self::IngressReservedSourceKey { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::PendingTurnInputSourceKeyConflict { .. }
@@ -1157,9 +1106,9 @@ impl StoreError {
     pub fn runtime_code(&self) -> crate::RuntimeErrorCode {
         use crate::RuntimeErrorCode as Code;
         match self {
-            Self::PreparedProcessRegistrationStale { .. }
-            | Self::PreparedRunAdmissionStale { .. }
-            | Self::Contended => Code::StoreCommitContended,
+            Self::PreparedProcessRegistrationStale { .. } | Self::Contended => {
+                Code::StoreCommitContended
+            }
             Self::MigrationOpenElsewhere { .. }
             | Self::StorageFailure { .. }
             | Self::Backend(_) => Code::RuntimeStore,
@@ -1167,10 +1116,8 @@ impl StoreError {
             Self::UnfinishedRunConflict { .. } => Code::SessionRunPending,
 
             Self::HeadRevisionConflict { .. }
-            | Self::StaleShiftFence { .. }
             | Self::SessionCommandWithdrawn { .. }
             | Self::CheckpointRootMissing { .. }
-            | Self::RunHeldByAnotherExecutor { .. }
             | Self::StaleWritePermit { .. } => Code::StoreCommitSuperseded,
             Self::SessionExecutionLeaseExpired { .. } => Code::SessionExecutionLeaseLost,
             Self::FollowOnPending { .. }
@@ -1247,13 +1194,10 @@ impl StoreError {
             | Self::MissingFrameOpenAncestor { .. }
             | Self::IngressRowNotAdmitted { .. }
             | Self::IngressSettlementDuplicate { .. }
-            | Self::IngressSettlementUnfenced { .. }
             | Self::IngressAndSessionCommandRun { .. }
             | Self::RunAlreadyTerminal { .. }
             | Self::RunInputWithdrawn { .. }
             | Self::ControlIntentUnknown { .. }
-            | Self::ShiftEpochUnavailable { .. }
-            | Self::ShiftFenceSessionMismatch { .. }
             | Self::PendingTurnInputBatchForeignSession { .. }
             | Self::RunSpecMissing { .. }
             | Self::UnfencedHeadPublication { .. }
@@ -1351,7 +1295,6 @@ impl StoreError {
             Self::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
             Self::TurnOutcomeMaterializationRefused { .. } => "TurnOutcomeMaterializationRefused",
             Self::PreparedProcessRegistrationStale { .. } => "PreparedProcessRegistrationStale",
-            Self::PreparedRunAdmissionStale { .. } => "PreparedRunAdmissionStale",
             Self::Contended => "Contended",
             Self::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
             Self::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",
@@ -1381,7 +1324,6 @@ impl StoreError {
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
 
             Self::UnfinishedRunConflict { .. } => "UnfinishedRunConflict",
-            Self::RunHeldByAnotherExecutor { .. } => "RunHeldByAnotherExecutor",
             Self::FollowOnPending { .. } => "FollowOnPending",
             Self::FollowOnFrameNotCurrent { .. } => "FollowOnFrameNotCurrent",
             Self::FollowOnHeadInvariant { .. } => "FollowOnHeadInvariant",
@@ -1415,17 +1357,13 @@ impl StoreError {
             Self::IngressTurnAddressUnknown { .. } => "IngressTurnAddressUnknown",
             Self::IngressRowNotAdmitted { .. } => "IngressRowNotAdmitted",
             Self::IngressSettlementDuplicate { .. } => "IngressSettlementDuplicate",
-            Self::IngressSettlementUnfenced { .. } => "IngressSettlementUnfenced",
             Self::IngressAndSessionCommandRun { .. } => "IngressAndSessionCommandRun",
             Self::SessionCommandWithdrawn { .. } => "SessionCommandWithdrawn",
             Self::SessionHeadOwned { .. } => "SessionHeadOwned",
-            Self::StaleShiftFence { .. } => "StaleShiftFence",
             Self::RunAlreadyTerminal { .. } => "RunAlreadyTerminal",
             Self::RunInputWithdrawn { .. } => "RunInputWithdrawn",
             Self::SessionClosing { .. } => "SessionClosing",
             Self::ControlIntentUnknown { .. } => "ControlIntentUnknown",
-            Self::ShiftEpochUnavailable { .. } => "ShiftEpochUnavailable",
-            Self::ShiftFenceSessionMismatch { .. } => "ShiftFenceSessionMismatch",
             Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",

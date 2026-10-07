@@ -10,14 +10,12 @@ use std::num::NonZeroUsize;
 use super::DeploymentStore;
 use crate::StoreError;
 use crate::store::{
-    ControlIntent, ControlIntentId, MaintenanceResult, ParkFeedCursor, ParkFeedPage,
-    RetentionBound, RetentionReport, RunTerminal, RuntimeStoreDecorator, TurnChangeCursor,
-    TurnChangePage, TurnPark, TurnParkQuery, TurnParkTarget, UnsettledTurnCounts,
+    ControlIntent, ControlIntentId, MaintenanceResult, RetentionBound, RetentionReport,
+    RunTerminal, RuntimeStoreDecorator, TurnChangeCursor, TurnChangePage, UnsettledTurnCounts,
 };
 
-/// Every asynchronous [`DeploymentStore`] operation: the single place each
-/// deployment signature is written. `bind_effect_host`, the one synchronous
-/// operation, is forwarded by hand below.
+/// Every [`DeploymentStore`] operation: the single place each deployment
+/// signature is written.
 ///
 /// The `decorator_surface_covers_every_deployment_method` lint fails when
 /// this list and the trait disagree.
@@ -26,10 +24,7 @@ macro_rules! deployment_operations {
         $emit! {
             fn artifact_frame_is_retained(&self, frame: &crate::FrameEnvironmentId) -> Result<bool, StoreError>;
             fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError>;
-            fn list_turn_parks(&self, query: &TurnParkQuery) -> Result<Vec<TurnPark>, StoreError>;
             fn turns_changed_since(&self, after: TurnChangeCursor, limit: NonZeroUsize) -> Result<TurnChangePage, StoreError>;
-            fn turn_park_feed(&self, after: ParkFeedCursor, limit: NonZeroUsize) -> Result<ParkFeedPage<TurnParkTarget>, StoreError>;
-            fn compact_turn_park_feed(&self, through: ParkFeedCursor) -> Result<(), StoreError>;
             fn non_terminal_runs_page(&self, after: Option<&crate::engine::RunRef>, limit: NonZeroUsize) -> Result<Vec<crate::engine::OpenRun>, StoreError>;
             fn end_lost_run(&self, target: &crate::engine::RunRef, loss: crate::engine::RunLoss, at_ms: u64) -> Result<Option<RunTerminal>, StoreError>;
             fn list_control_intents(&self, after: Option<ControlIntentId>, limit: NonZeroUsize) -> Result<Vec<ControlIntent>, StoreError>;
@@ -180,11 +175,10 @@ mod tests {
             );
             declared.insert(name);
         }
-        let mut listed: std::collections::BTreeSet<String> = super::DEPLOYMENT_OPERATIONS
+        let listed: std::collections::BTreeSet<String> = super::DEPLOYMENT_OPERATIONS
             .iter()
             .map(|name| (*name).to_string())
             .collect();
-        listed.insert("bind_effect_host".to_string());
         assert_eq!(
             declared, listed,
             "`deployment_operations!` must list exactly the `DeploymentStore` operations"

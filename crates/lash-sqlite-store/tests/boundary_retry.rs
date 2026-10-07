@@ -37,7 +37,6 @@ async fn a_commit_receipt_keeps_its_queue_decision_after_later_ingress_and_reope
                 )],
             )
             .expect("input batch"),
-            60_000,
         )
         .await
         .expect("enqueue after the empty commit");

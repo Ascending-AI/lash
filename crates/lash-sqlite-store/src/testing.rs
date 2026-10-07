@@ -8,6 +8,16 @@ use std::sync::{Arc, Condvar, Mutex};
 
 pub use crate::migration::{SqliteMigrationFault, SqliteMigrationHook, SqliteMigrationStep};
 
+/// Arm (`true`) or disarm a cut of every session-mail producer transaction
+/// at the session actor's wake, over `conn`: the producer's transaction
+/// rolls back before it commits.
+///
+/// # Errors
+///
+/// The trigger's DDL failed.
+pub fn cut_session_wakes(conn: &rusqlite::Connection, armed: bool) -> rusqlite::Result<()> {
+    crate::durable::cut_session_wakes(conn, armed)
+}
 /// Returns the production trigger-subscription listing SQL for conformance assertions.
 ///
 /// The filter no longer builds the statement; it selects one (FIG-3385). The

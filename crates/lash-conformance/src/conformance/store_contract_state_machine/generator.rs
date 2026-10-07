@@ -78,8 +78,8 @@ fn operation() -> impl Strategy<Value = StoreContractOp> {
             .prop_map(|(process, session)| StoreContractOp::Retarget { process, session }),
         3 => (0..PROCESS_COUNT)
             .prop_map(|process| StoreContractOp::EnqueueWake { process }),
-        3 => (any::<u8>(), any::<bool>(), any::<bool>())
-            .prop_map(|(selection, highest_in_group, stale)| StoreContractOp::ConsumeWake { selection, highest_in_group, stale }),
+        3 => (any::<u8>(), any::<bool>())
+            .prop_map(|(selection, highest_in_group)| StoreContractOp::ConsumeWake { selection, highest_in_group }),
         3 => any::<bool>().prop_map(|watermark| StoreContractOp::Prune { watermark }),
         2 => any::<bool>().prop_map(|caught_up| StoreContractOp::CompactTombstones { caught_up }),
     ]

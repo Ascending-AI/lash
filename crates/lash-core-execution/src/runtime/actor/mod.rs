@@ -14,7 +14,7 @@
 //! | `core.rs` | I0 (real) |
 //! | [`turn`] | L3 |
 //! | [`round`] | V0, then L4 |
-//! | [`shift`] | L3s |
+//! | [`ingress`] | L3s |
 //! | [`waits`], `wait_effects.rs` | L5 |
 //! | `await_event_legacy.rs` | L3, L4, L6 (deleted with their ports) |
 //! | [`process`] | L6 |
@@ -24,13 +24,13 @@
 mod await_event_legacy;
 pub use await_event_legacy::completion_host_key;
 mod core;
+pub mod ingress;
 pub mod journal;
 pub mod process;
 #[cfg(feature = "testing")]
 pub mod process_laws;
 pub mod projection;
 pub mod round;
-pub mod shift;
 pub mod turn;
 pub mod vm;
 mod wait_effects;

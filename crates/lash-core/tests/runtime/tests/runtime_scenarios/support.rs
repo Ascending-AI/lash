@@ -6,9 +6,8 @@ pub(crate) use std::collections::HashMap;
 pub(crate) use helpers::RecordingStore;
 pub(crate) use lash_core::store::{
     AdmittedHead, CheckpointAdmission, QueuedWorkStore, RunAdmission, RunStore, SessionCommitStore,
-    ShiftFence, TurnInputStore,
+    TurnInputStore,
 };
-pub(crate) use lash_core::testing::RuntimeStoreTestShiftExt;
 pub(crate) use lash_core::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit, StoreError,
     TurnInput, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,

@@ -56,7 +56,6 @@
 //! configured Live Replay store — in-memory, and therefore process-local, by
 //! default.
 
-use crate::core::ResolvedQueuedWork;
 use crate::support::{Arc, DeploymentStore, EmbedError, Result, TurnInput};
 use lash_core::ActorContext;
 use lash_core::LiveReplayStore;
@@ -91,10 +90,9 @@ pub struct DurableSession {
     catalog: Arc<dyn DeploymentStore>,
     /// Shared by every clone so concurrent operations acquire the store once.
     store: Arc<OnceCell<lash_core::store::SessionStore>>,
-    /// What a [`send`](Self::send) needs beyond the queue: the engine a
-    /// handle waits on, the effect host its terminal reads and cancels go
-    /// through, and the live replay its events come from.
-    work: Arc<ResolvedQueuedWork>,
+    /// What a [`send`](Self::send) needs beyond the queue: the effect host
+    /// its terminal reads and cancels go through, and the live replay its
+    /// events come from.
     effect_host: ActorContext,
     live_replay_store: Arc<dyn LiveReplayStore>,
     /// The host's models a [`send`](Self::send) checks a per-run model key
@@ -159,8 +157,6 @@ impl DurableSession {
     pub(crate) fn from_catalog(
         session_id: SessionId,
         catalog: Arc<dyn DeploymentStore>,
-        work: Arc<ResolvedQueuedWork>,
-        ingress: lash_core::shift::IngressRelay,
         effect_host: ActorContext,
         live_replay_store: Arc<dyn LiveReplayStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
@@ -168,16 +164,11 @@ impl DurableSession {
     ) -> Self {
         Self {
             transcript_options: Default::default(),
-            ops: DurableSessionOps::new(
-                session_id.clone(),
-                ingress,
-                Arc::clone(&live_replay_store),
-            ),
+            ops: DurableSessionOps::new(session_id.clone(), Arc::clone(&live_replay_store)),
             acquisition: DurableAcquisition::Catalog,
             catalog,
             store: Arc::new(OnceCell::new()),
             session_id,
-            work,
             effect_host,
             live_replay_store,
             models,
@@ -195,8 +186,6 @@ impl DurableSession {
     pub(crate) fn from_binding(
         session_id: SessionId,
         store: lash_core::store::SessionStore,
-        work: Arc<ResolvedQueuedWork>,
-        ingress: lash_core::shift::IngressRelay,
         effect_host: ActorContext,
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn DeploymentStore>,
@@ -205,16 +194,11 @@ impl DurableSession {
     ) -> Self {
         Self {
             transcript_options: Default::default(),
-            ops: DurableSessionOps::new(
-                session_id.clone(),
-                ingress,
-                Arc::clone(&live_replay_store),
-            ),
+            ops: DurableSessionOps::new(session_id.clone(), Arc::clone(&live_replay_store)),
             acquisition: DurableAcquisition::Bound(Arc::new(store)),
             catalog,
             store: Arc::new(OnceCell::new()),
             session_id,
-            work,
             effect_host,
             live_replay_store,
             models,
@@ -230,7 +214,6 @@ impl DurableSession {
             session_id: self.session_id.clone(),
             store: self.store().await?.clone(),
             ops: self.ops.clone(),
-            work: self.work.clone(),
             effect_host: self.effect_host.clone(),
             live_replay_store: Arc::clone(&self.live_replay_store),
             models: Arc::clone(&self.models),

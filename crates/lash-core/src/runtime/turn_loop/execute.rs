@@ -36,7 +36,6 @@ pub(in crate::runtime) struct PreparedTurnExecuteContext<'sinks, 'run> {
     pub(in crate::runtime) scoped_effect_controller: ActorContext,
     pub(in crate::runtime) local_stop: LocalTurnStop,
     pub(in crate::runtime) initial_admissions: LogicalTurnAdmissions,
-    pub(in crate::runtime) shift_fence: Option<&'sinks ShiftFence>,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'run ()>,
 }
@@ -255,7 +254,6 @@ impl LashRuntime {
             scoped_effect_controller,
             local_stop,
             mut initial_admissions,
-            shift_fence,
         } = context;
         // A later physical turn runs under its Run's turn scope; its waits
         // race this turn's own cancellation gate, the one a cancel of the
@@ -270,7 +268,7 @@ impl LashRuntime {
         // the protocol namespace of the configuration it was admitted under.
         let effective_protocol_turn_options = self.state.effective_protocol_turn_options();
         let manager = self
-            .runtime_session_services_for_turn(shift_fence, &turn_graph_appends)
+            .runtime_session_services_for_turn(&turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -359,13 +357,7 @@ impl LashRuntime {
             )
             .await
         {
-            let error = super::runtime_error_from_store_commit(error);
-            let run = self.park_run(
-                scoped_effect_controller.execution_scope().logical_run(),
-                &trace_turn_id,
-            );
-            self.record_turn_park_after_abort(&error, &run).await;
-            return Err(error);
+            return Err(super::runtime_error_from_store_commit(error));
         }
         // The model binding is the turn's recorded config (D3 §2.1). Nothing
         // binds it here: the body of an unjournaled model call does, so a
@@ -373,9 +365,9 @@ impl LashRuntime {
         let resolved_turn_policy = self
             .host
             .resolve_session_policy(&self.state.session_id, turn_policy.clone())
-            .map_err(crate::runtime::shift::llm_profile_unconfigured)?;
+            .map_err(crate::runtime::turn_config::llm_profile_unconfigured)?;
         let manager = self
-            .runtime_session_services_for_turn(shift_fence, &turn_graph_appends)
+            .runtime_session_services_for_turn(&turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -407,16 +399,7 @@ impl LashRuntime {
             .transpose()
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?
             .unwrap_or_default();
-        let segment = crate::runtime::turn_driver::TurnSegment::new(
-            shift_fence.is_some()
-                && self.shift_run.is_some()
-                && carried_withheld.is_none()
-                && matches!(
-                    scoped_effect_controller.execution_scope(),
-                    crate::ExecutionScope::Turn { .. }
-                ),
-            continuation,
-        );
+        let segment = crate::runtime::turn_driver::TurnSegment::new(false, continuation);
         let session = self
             .session
             .take()
@@ -446,8 +429,6 @@ impl LashRuntime {
             pending_checkpoint_turn_inputs: None,
             withheld_terminal_work: Default::default(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-            shift_fence: shift_fence.cloned(),
-            shift_run: self.shift_run.as_ref().map(|run| run.run().clone()),
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_control: turn_control.clone(),
             protocol_reply: Default::default(),
@@ -507,7 +488,7 @@ impl LashRuntime {
                             opener,
                             cancellation_messages,
                             finish_scoped_effect_controller: &finish_scoped_effect_controller,
-                            shift_fence,
+
                             turn_index,
                             trace_turn_id,
                             observer,
@@ -520,15 +501,6 @@ impl LashRuntime {
                 // (FIG-3927 §2.5).
                 drop(driver.reclaim());
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
-                // The park names the logical run, never this physical turn
-                // (D2 §1.3).
-                let run = self.park_run(
-                    finish_scoped_effect_controller
-                        .execution_scope()
-                        .logical_run(),
-                    &trace_turn_id,
-                );
-                Box::pin(self.record_turn_park_after_abort(&err, &run)).await;
                 return Err(err);
             }
         };
@@ -573,7 +545,7 @@ impl LashRuntime {
                 admissions: &pending_admissions,
                 scoped_effect_controller: &finish_scoped_effect_controller,
                 honoured_cancel: turn_cancel,
-                shift_fence,
+
                 observer,
             }),
         )

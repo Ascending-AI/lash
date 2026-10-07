@@ -185,7 +185,6 @@ async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
                 &parts.store,
                 parts.session_id.clone(),
             ))
-            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await
@@ -274,7 +273,7 @@ pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
         crate::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
-    let receipts = Arc::new(super::frame_open_redrive::receipts::CommitReceipts::new(
+    let receipts = Arc::new(super::commit_receipts::CommitReceipts::new(
         crate::conformance::law_session_store(stores.as_ref(), &session_id).await,
     ));
     let store: Arc<dyn crate::RuntimeStore> = receipts.clone();

@@ -120,8 +120,6 @@ table lash_checkpoint_blob_refs
   foreign-key (checkpoint_ref) references lash_blobs (hash) on delete cascade
 table lash_control_intents
   column created_at_ms bigint not-null
-  column engine_half_owed boolean not-null generated
-  column engine_ref text nullable
   column format bigint not-null
   column intent_id bigint not-null default
   column kind text not-null
@@ -472,9 +470,6 @@ table lash_session_meta
   column retention_last_turns bigint nullable
   column session_id text not-null
   column session_state_version integer nullable
-  column shift_admission_id text nullable
-  column shift_epoch bigint not-null default
-  column shift_run_start text nullable
   column source_node_id text nullable
   column source_session_id text nullable
   unique (obligation_id)
@@ -505,7 +500,6 @@ table lash_session_run_specs
   primary-key (session_id, spec_hash)
 table lash_session_runs
   column admission_json text nullable
-  column executor_json text nullable
   column obligation_attempts integer not-null default
   column obligation_claim_token text nullable
   column obligation_due_at_ms bigint nullable
@@ -530,11 +524,6 @@ table lash_session_scope_ends
   column session_id text not-null
   column written_epoch bigint not-null
   primary-key (session_id, scope_key)
-table lash_session_shift_admissions
-  column admission text not-null
-  column receipt_json text not-null
-  column session_id text not-null
-  primary-key (session_id, admission)
 table lash_session_terminal_changes
   column change_seq bigint not-null
   column fault_json text nullable
@@ -642,35 +631,6 @@ table lash_turn_change_clock
   column retention_horizon bigint not-null
   column singleton integer not-null
   primary-key (singleton)
-table lash_turn_park_clock
-  column compaction_horizon bigint not-null default
-  column current_seq bigint not-null default
-  column singleton boolean not-null default
-  primary-key (singleton)
-table lash_turn_park_events
-  column at_ms bigint not-null
-  column cause_json text nullable
-  column kind text not-null
-  column park_id bigint not-null
-  column reason_json text nullable
-  column redrive_intent bigint nullable
-  column seq bigint not-null
-  column session_id text not-null
-  column turn_id text not-null
-  primary-key (seq)
-table lash_turn_parks
-  column attempts bigint not-null
-  column engine_ref text nullable
-  column last_refused_ms bigint not-null
-  column park_executable_generation text nullable
-  column park_id bigint not-null
-  column reason_code text not-null
-  column reason_json text not-null
-  column resume_intent bigint nullable
-  column session_id text not-null
-  column since_ms bigint not-null
-  column turn_id text not-null
-  primary-key (session_id)
 table lash_turn_phases
   column checkpoint_ref text nullable
   column iteration bigint not-null

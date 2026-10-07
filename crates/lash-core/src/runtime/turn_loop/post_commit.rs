@@ -19,13 +19,12 @@ impl LashRuntime {
     pub(super) async fn emit_turn_persisted_event(
         &self,
         returned_turn: &AssembledTurn,
-        shift_fence: Option<&ShiftFence>,
     ) -> Result<Option<crate::PluginError>, RuntimeError> {
         let Some(session) = self.session.as_ref() else {
             return Ok(None);
         };
         let manager = self
-            .runtime_session_services_after_commit(shift_fence)
+            .runtime_session_services_after_commit()
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;

@@ -25,7 +25,6 @@ pub(super) fn generated_prefix() -> Vec<StoreContractOp> {
         StoreContractOp::ConsumeWake {
             selection: 0,
             highest_in_group: true,
-            stale: false,
         },
         StoreContractOp::Register {
             process: 1,

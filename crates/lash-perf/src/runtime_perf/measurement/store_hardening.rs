@@ -7,9 +7,6 @@ const HARDENING_PRUNE_BATCH: usize = 16;
 
 #[derive(Clone, Copy)]
 struct StoreHardeningPhaseNames {
-    seal_shift_epoch: &'static str,
-    admit_queued_work: &'static str,
-    complete_queued_work: &'static str,
     attachment_intent: &'static str,
     attachment_adopt: &'static str,
     append_receipt_fresh: &'static str,
@@ -21,9 +18,6 @@ struct StoreHardeningPhaseNames {
 }
 
 const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
-    seal_shift_epoch: "store_hardening.memory.seal_shift_epoch",
-    admit_queued_work: "store_hardening.memory.admit_queued_work",
-    complete_queued_work: "store_hardening.memory.complete_queued_work",
     attachment_intent: "store_hardening.memory.attachment_intent",
     attachment_adopt: "store_hardening.memory.attachment_adopt",
     append_receipt_fresh: "store_hardening.memory.append_receipt_fresh",
@@ -35,9 +29,6 @@ const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
 };
 
 const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
-    seal_shift_epoch: "store_hardening.sqlite.seal_shift_epoch",
-    admit_queued_work: "store_hardening.sqlite.admit_queued_work",
-    complete_queued_work: "store_hardening.sqlite.complete_queued_work",
     attachment_intent: "store_hardening.sqlite.attachment_intent",
     attachment_adopt: "store_hardening.sqlite.attachment_adopt",
     append_receipt_fresh: "store_hardening.sqlite.append_receipt_fresh",
@@ -49,9 +40,6 @@ const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
 };
 
 const POSTGRES_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
-    seal_shift_epoch: "store_hardening.postgres.seal_shift_epoch",
-    admit_queued_work: "store_hardening.postgres.admit_queued_work",
-    complete_queued_work: "store_hardening.postgres.complete_queued_work",
     attachment_intent: "store_hardening.postgres.attachment_intent",
     attachment_adopt: "store_hardening.postgres.attachment_adopt",
     append_receipt_fresh: "store_hardening.postgres.append_receipt_fresh",
@@ -350,51 +338,6 @@ async fn measure_store_hardening_backend_turn(
     names: StoreHardeningPhaseNames,
 ) -> anyhow::Result<BTreeMap<String, RuntimePerfPhaseRunResult>> {
     let mut phases = BTreeMap::new();
-    let (lease, phase) = measure_runtime_perf_async_phase(names.seal_shift_epoch, async {
-        seal_perf_shift(store.as_ref(), session_id).await
-    })
-    .await?;
-    phases.insert(phase.0, phase.1);
-
-    let head = store
-        .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(
-            super::queued_work::queued_work_stress_wake(
-                session_id,
-                &format!("hardening task {turn_index}"),
-                turn_index as u64 + 1,
-                store.fleet_format(),
-            ),
-        ))
-        .await?
-        .batch_id;
-    let run = lash_core::TurnId::fixture(format!("hardening-run-{turn_index}"));
-    let (admission, phase) = measure_runtime_perf_async_phase(names.admit_queued_work, async {
-        let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
-            &lease,
-            &run,
-            lash_core::store::AdmittedHead::Batch(head.clone()),
-        );
-        request.policy = lash_core::testing::queued_work_admission_policy(1);
-        store
-            .admit_run(&request)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("store-hardening expected a queued-work admission"))
-    })
-    .await?;
-    phases.insert(phase.0, phase.1);
-
-    let mut state = load_store_hardening_state(store, session_id).await?;
-    let (_, phase) = measure_runtime_perf_async_phase(names.complete_queued_work, async {
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-        commit.shift_fence = Some(Box::new(lease.clone()));
-        let commit = super::queued_work::finishing_perf_run(commit, &run, &admission);
-        let result = store.commit_runtime_state(commit).await?;
-        state.apply_persisted_commit_result(result);
-        Ok::<(), anyhow::Error>(())
-    })
-    .await?;
-    phases.insert(phase.0, phase.1);
-
     let attachment_id =
         lash_core::AttachmentId::parse(format!("hardening-attachment-{session_id}-{turn_index}"))
             .expect("valid attachment id");
@@ -418,7 +361,7 @@ async fn measure_store_hardening_backend_turn(
     .await?;
     phases.insert(phase.0, phase.1);
 
-    state = load_store_hardening_state(store, session_id).await?;
+    let mut state = load_store_hardening_state(store, session_id).await?;
     let operation_id = format!("hardening-append-{turn_index}");
     let nodes = vec![lash_core::SessionAppendNode::plugin(
         "perf-hardening",

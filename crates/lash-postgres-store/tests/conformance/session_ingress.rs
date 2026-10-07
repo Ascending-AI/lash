@@ -17,7 +17,6 @@ lash_conformance::session_ingress_tests!({
         .admit_session(&lash_conformance::session_ingress_session_request())
         .await
         .expect("admit the Postgres session-ingress session");
-    let ingress = Arc::clone(&runtime);
     let pool = storage.pool().clone();
     let admission_snapshot: lash_conformance::IngressAdmissionProbe = Arc::new(move || {
         let pool = pool.clone();
@@ -43,7 +42,6 @@ lash_conformance::session_ingress_tests!({
         database_fixture,
         lash_conformance::SessionIngressHandles {
             runtime,
-            ingress,
             admission_snapshot,
         },
     )

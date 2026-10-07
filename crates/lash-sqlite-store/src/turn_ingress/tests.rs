@@ -110,7 +110,6 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.queued_batches.list_open.sql(),
         sql.queued_batches.select_admitted_by_step.sql(),
         sql.queued_batches.admit.sql(),
-        sql.queued_batches.deliver_open_command.sql(),
         sql.queued_batches.select_admitted_batch_payload.sql(),
         sql.queued_batches.settle_admitted.sql(),
         sql.queued_batches.settle_command.sql(),

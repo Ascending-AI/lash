@@ -1,9 +1,6 @@
-//! Turn ingress for a child session's in-process turn: accepting it as durable
-//! admission evidence and executing the run that admits the row it just wrote
-//! (ADR 0069).
-//!
-//! Everything here runs before the prepare phase and hands it the admitted
-//! rows, the shift fence, and the input the admission materialized.
+//! Turn ingress for a child session's turn: accepting it as durable admission
+//! evidence (ADR 0069), whose transaction wakes the session actor, and
+//! answering from the run that took the row it just wrote.
 
 use super::*;
 use crate::TurnId;
@@ -32,7 +29,6 @@ impl LashRuntime {
             local_stop,
             admissions,
             materialize_initial_admissions,
-            shift_fence,
         } = context;
         if input.trace_turn_id.is_none() {
             input.trace_turn_id = Some(TurnId::parse(scoped_effect_controller.scope_id())?);
@@ -77,7 +73,6 @@ impl LashRuntime {
             local_stop: local_stop.clone(),
             admissions,
             materialize_initial_admissions,
-            shift_fence,
         }))
         .await
     }
@@ -85,8 +80,8 @@ impl LashRuntime {
     /// Run one child session's turn inside its parent's execution, following
     /// foreground AgentFrame switches until a terminal outcome is reached.
     ///
-    /// A host never executes a run: it sends an input and the engine's session
-    /// shift executes it (FIG-3600). The one turn the kernel executes in process is
+    /// A host never executes a run: it sends an input and the session actor
+    /// executes it (FIG-3600). The one turn the kernel executes in process is
     /// a child session's, which runs under its parent's process or turn
     /// controller (`session_init`). The turn is still *accepted* first:
     /// `input`'s durable projection is committed as a `NextTurn` Pending Turn
@@ -94,8 +89,8 @@ impl LashRuntime {
     /// ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)),
     /// whose id derives from the acceptance address and whose source key is
     /// the turn id, so a replay adopts the row the first run wrote. The
-    /// session shift body then runs it in arrival order, and the call returns
-    /// the execution of the run that drove it, with the acceptance identity on
+    /// session actor then runs it in arrival order, and the call returns
+    /// the execution of the run that took it, with the acceptance identity on
     /// [`AgentFrameRun::acceptance`] and on the admitted turn's
     /// [`AssembledTurn::turn_input_acceptance`]. The live `TurnContext`
     /// (the parent's process correlation and lineage) cannot be persisted, so
@@ -121,7 +116,6 @@ impl LashRuntime {
                 opts.scoped_effect_controller(),
                 opts.local_stop().clone(),
                 LogicalTurnAdmissions::new(Vec::new(), Vec::new()),
-                None,
                 stopwatch,
             ))
             .await;
@@ -149,7 +143,7 @@ impl LashRuntime {
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         // The turn id names the run the accepted input starts: it is the
-        // row's host id, so the shift runs the turn under this id (ADR 0069
+        // row's host id, so the session runs the turn under this id (ADR 0069
         // §6, FIG-3600 ruling Q4).
         let trace_turn_id = match input.trace_turn_id.clone() {
             Some(trace_turn_id) => trace_turn_id,
@@ -167,7 +161,7 @@ impl LashRuntime {
             &trace_turn_id,
         );
         let accepted = scoped_effect_controller
-            .shift_effect(
+            .ingress_effect(
                 crate::RuntimeEffectEnvelope::new(
                     acceptance_invocation.clone(),
                     crate::RuntimeEffectCommand::AcceptTurnInput {
@@ -175,7 +169,7 @@ impl LashRuntime {
                         // before the body runs, so a body re-run because its
                         // outcome was never recorded names the row the first
                         // run wrote and the store adopts it (ADR 0069 §6). The
-                        // source key is the turn id: the shift runs the row
+                        // source key is the turn id: the session runs the row
                         // under it.
                         draft: Box::new(
                             crate::PendingTurnInputDraft::new(
@@ -190,13 +184,10 @@ impl LashRuntime {
                         ),
                     },
                 ),
-                // This call's own shift, below, is the ask the accepted
-                // row's ingress obligation owes: the acceptance holds the
-                // row's claim, so no relay pass asks the session for a second
-                // shift of it before this one admits it (FIG-4728).
+                // The acceptance's transaction wakes the session actor,
+                // which admits and runs the row (ADR 0132 §12).
                 crate::RuntimeEffectLocalExecutor::turn_acceptance(
-                    Arc::clone(store.store()) as Arc<dyn crate::TurnInputStore>,
-                    self.ingress_relay().claim_ttl_ms(),
+                    Arc::clone(store.store()) as Arc<dyn crate::TurnInputStore>
                 ),
             )
             .await
@@ -224,96 +215,12 @@ impl LashRuntime {
                 )
             });
 
-        // The accepted row is executed by the session shift, in arrival order:
-        // any run admitted ahead of it runs first, and the shift stops once
-        // the run that drove this row has run. The request is named by the
-        // turn, so a redrive of the turn replays the same admissions.
-        let request = crate::engine::ShiftRequest {
-            session: self.state.session_id.clone(),
-            request: crate::engine::ShiftRequestId::new(format!("turn:{trace_turn_id}")),
-        };
-        let sinks = crate::runtime::shift::ShiftSinks {
-            events: opts.events_or_noop(),
-            turn_events: opts.turn_events_or_noop(),
-            local_stop: opts.local_stop().clone(),
-            settled: &crate::runtime::shift::NoopRunSettledSink,
-        };
-        let accepted_id = accepted.input_id.clone();
-        // A follow-on the head owes is recovered by the session's shift, not
-        // by a direct turn: this shift stops where admission names it, and
-        // the accepted row waits behind it (ADR 0101 §3, FIG-3542).
-        let crate::runtime::shift::ShiftLoopEnd {
-            outcome,
-            runs,
-            declined_follow_on,
-            ..
-        } = Box::pin(self.work_until(
-            &scoped_effect_controller,
-            &request,
-            &sinks,
-            Some((&accepted_id, &input)),
-            crate::runtime::shift::ShiftLimits {
-                follow_on: crate::runtime::shift::FollowOnRecovery::Decline,
-                max_runs: None,
-                acceptor: true,
-            },
-            |run| run.executed_inputs.contains(&accepted_id),
-        ))
-        .await
-        .map_err(|abort| aborted(abort.into_error()))?;
-        let Some(mut run) = runs
-            .into_iter()
-            .find(|run| run.executed_inputs.contains(&accepted_id))
-            .and_then(|run| run.run)
-        else {
-            if let crate::engine::ShiftStop::Parked(park) = &outcome.stop {
-                // A parked run holds the session: the input stays accepted
-                // and is executed once the park is resolved.
-                return Err(aborted(RuntimeError::new(
-                    RuntimeErrorCode::SessionRunPending,
-                    format!(
-                        "accepted turn input `{accepted_id}` waits behind parked run `{}` \
-                         (park {}); it is executed once that park is resolved",
-                        park.run, park.park
-                    ),
-                )));
-            }
-            // A follow-on the head owes blocks every other admission (ADR 0101
-            // §3, FIG-3542), so the accepted row stays pending behind it: no
-            // turn runs. The shift that recovers the follow-on answers the row
-            // after it; a send's handle waits for that (FIG-3600).
-            if let Some(ahead) = Box::pin(self.queued_behind_pending_follow_on(
-                &store,
-                &accepted_id,
-                declined_follow_on,
-            ))
+        // The session actor runs the accepted row, in arrival order; the run
+        // that took it answers it (FIG-4814). Until that run has ended the
+        // acceptor fails retryably, and the input stays accepted.
+        let mut run = Box::pin(self.adopt_recorded_outcome(&store, &accepted.input_id))
             .await
-            .map_err(aborted)?
-            {
-                return Err(aborted(RuntimeError::new(
-                    RuntimeErrorCode::SessionRunPending,
-                    format!(
-                        "accepted turn input `{accepted_id}` waits behind the follow-on the \
-                         session head owes, with {ahead} earlier inputs ahead of it; the shift \
-                         that recovers the follow-on answers it"
-                    ),
-                )));
-            }
-            // Another execution executes the input, or drove it: the run
-            // that took it answers it (FIG-4814).
-            let superseded = matches!(
-                outcome.ran.last(),
-                Some(crate::engine::RunOutcome::Refused { .. })
-            );
-            let mut run = Box::pin(self.adopt_recorded_outcome(&store, &accepted_id, superseded))
-                .await
-                .map_err(aborted)?;
-            if let Some(adopted) = run.turns.first_mut() {
-                adopted.turn_input_acceptance = Some(acceptance.clone());
-            }
-            run.acceptance = Some(acceptance);
-            return Ok(run);
-        };
+            .map_err(aborted)?;
         // Only the physical turn this acceptance admitted carries it. An
         // agent-frame run's follow-on turns were started by the frame switch,
         // not by this admission, and stamping them would report an acceptance
@@ -325,49 +232,46 @@ impl LashRuntime {
         Ok(run)
     }
 
-    /// The run of accepted input `accepted_id` as its run's recorded
-    /// executor left it, for an acceptor whose own shift did not run that
-    /// run (FIG-4814).
+    /// The run of accepted input `accepted_id` as the session actor's run of
+    /// it left it (FIG-4814).
     ///
-    /// A run's recorded executor decides who runs it, so an acceptor that
-    /// lost its ingress claim to a relay pass is refused the run and waits
-    /// for it. Once the run has ended, its terminal evidence is the answer
-    /// of every input it took: a committed run answers its committed
-    /// outcome on the durable head, honest and thin, as the facade's durable
-    /// report does, and a refused run its refusal. While the run has not
-    /// ended, or the admission that `superseded` this shift's seal has yet
-    /// to take the input, the acceptor fails retryably and its engine's
-    /// retry asks again. An input no run took and no admission is about to
-    /// take was cancelled, and the acceptor cedes it. Nothing here reads a
-    /// pending row: the run's evidence is the answer of record.
+    /// Once the run has ended, its terminal evidence is the answer of every
+    /// input it took: a committed run answers its committed outcome on the
+    /// durable head, honest and thin, as the facade's durable report does,
+    /// and a refused run its refusal. While no run has taken the open input,
+    /// or its run has not ended, the acceptor fails retryably and asks
+    /// again. An input no run took that is no longer open was cancelled, and
+    /// the acceptor cedes it.
     async fn adopt_recorded_outcome(
         &mut self,
         store: &crate::store::SessionStore,
         accepted_id: &crate::InputId,
-        superseded: bool,
     ) -> Result<AgentFrameRun, RuntimeError> {
         let run = store
             .run_of_input(accepted_id)
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         let Some(run) = run else {
-            // No run took the input. A shift whose seal another admission
-            // superseded left it to that admission's run; any other shift
-            // found it no longer open.
-            return Err(if superseded {
+            let open = store
+                .list_pending_turn_inputs()
+                .await
+                .map_err(super::runtime_error_from_store_commit)?
+                .iter()
+                .any(|read| read.input.input_id == *accepted_id);
+            return Err(if open {
                 RuntimeError::new(
                     RuntimeErrorCode::SessionRunPending,
                     format!(
-                        "accepted turn input `{accepted_id}` waits for the admission that \
-                         superseded this shift's; the run that takes it answers it"
+                        "accepted turn input `{accepted_id}` waits for the session to admit it; \
+                         the run that takes it answers it"
                     ),
                 )
             } else {
                 RuntimeError::new(
                     RuntimeErrorCode::AcceptedTurnInputCeded,
                     format!(
-                        "accepted turn input `{accepted_id}` was no longer open when the shift \
-                         reached it: the host cancelled it"
+                        "accepted turn input `{accepted_id}` is no longer open and no run took \
+                         it: the host cancelled it"
                     ),
                 )
             });
@@ -381,8 +285,8 @@ impl LashRuntime {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::SessionRunPending,
                     format!(
-                        "accepted turn input `{accepted_id}` is executed by run `{run}` under \
-                         its recorded executor; that run's end answers it"
+                        "accepted turn input `{accepted_id}` is executed by run `{run}`; that \
+                         run's end answers it"
                     ),
                 ));
             }
@@ -442,47 +346,6 @@ impl LashRuntime {
             }],
             acceptance: None,
         })
-    }
-
-    /// How many accepted rows wait ahead of `accepted_id` when a follow-on
-    /// held it back, or `None` when nothing did: the row is no longer
-    /// pending, or no follow-on was owed. A follow-on held it back when the
-    /// shift `declined` the recovery its admission named, or when the
-    /// refreshed head still owes one.
-    async fn queued_behind_pending_follow_on(
-        &self,
-        store: &crate::store::SessionStore,
-        accepted_id: &crate::InputId,
-        declined: bool,
-    ) -> Result<Option<u64>, RuntimeError> {
-        if !declined && self.state.pending_follow_on.is_none() {
-            return Ok(None);
-        }
-        let open = store
-            .list_pending_turn_inputs()
-            .await
-            .map_err(super::runtime_error_from_store_commit)?;
-        let Some(own) = open.iter().find(|read| read.input.input_id == *accepted_id) else {
-            return Ok(None);
-        };
-        if !matches!(own.status, crate::PendingTurnInputReadStatus::Open) {
-            return Ok(None);
-        }
-        // The owed follow-on is the turn that runs next; input addressed to
-        // it waits for its checkpoints, not for a next turn.
-        let running = self
-            .state
-            .pending_follow_on
-            .as_ref()
-            .map(|owed| &owed.follow_on_turn_id);
-        let ahead = open
-            .iter()
-            .filter(|earlier| {
-                earlier.input.state.is_next_turn_input(running)
-                    && earlier.input.enqueue_seq < own.input.enqueue_seq
-            })
-            .count();
-        Ok(Some(u64::try_from(ahead).unwrap_or(u64::MAX)))
     }
 }
 

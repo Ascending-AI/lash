@@ -1,11 +1,8 @@
-use lash_core::ActorContext;
 use lash_sansio::TurnId;
-use lash_sansio::sync::MutexExt;
 
 use crate::support::{
-    Arc, LlmCallRecord, LocalTurnStop, Message, MessageRole, RuntimeHandle, SessionSnapshot,
-    StdMutex, TokenUsage, ToolCallRecord, TurnActivity, TurnActivitySink, TurnExecutionMetrics,
-    TurnOutcome, async_trait,
+    Arc, LlmCallRecord, Message, MessageRole, SessionSnapshot, TokenUsage, ToolCallRecord,
+    TurnActivity, TurnActivitySink, TurnExecutionMetrics, TurnOutcome, async_trait,
 };
 
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
@@ -17,131 +14,6 @@ pub use lash_core::{TurnFailureCode, TurnFailureKind};
 
 pub(crate) fn fresh_turn_id() -> TurnId {
     TurnId::from_uuid(uuid::Uuid::new_v4().as_u128())
-}
-
-/// Run one admitted run on `runtime`'s session (FIG-3600), recording every
-/// turn activity on the session's observation.
-///
-/// `unsettled` marks a runtime a shift holds across its runs (FIG-3825):
-/// the run discards what an earlier run that did not end left on it, and
-/// the mark follows this run, both under the runtime's writer.
-pub(crate) async fn execute_admitted_run_observed(
-    runtime: &RuntimeHandle,
-    binding: &lash_core::StoreBindingId,
-    controller: &ActorContext,
-    admitted: lash_core::engine::Admitted,
-    unsettled: Option<&crate::core::held_shifts::UnsettledRun>,
-) -> lash_core::engine::RunEnd {
-    let session = admitted.session().clone();
-    // Marked before the run can commit: a handle that sees its commit waits
-    // for the deposit while the run is under way, or while its replay owes
-    // it after this execution stops short (FIG-5128).
-    let running = crate::send::running(binding, &session, admitted.run());
-    let writer_handle = runtime.writer();
-    let mut writer = writer_handle.lock().await;
-    if unsettled.is_some_and(crate::core::held_shifts::UnsettledRun::enter) {
-        lash_core::shift::discard_run_residue(&mut writer);
-    }
-    let observation_sink = SessionObservationTurnActivitySink::new(runtime.clone(), None);
-    let settled = DepositSettledRun {
-        runtime,
-        running: &running,
-    };
-    let sinks = lash_core::shift::ShiftSinks {
-        events: &lash_core::runtime::NoopEventSink,
-        turn_events: &observation_sink,
-        local_stop: LocalTurnStop::default(),
-        settled: &settled,
-    };
-    // The run's scope close is the engine's to run beside the session's
-    // next run (FIG-4035): the run returns, and releases the writer, once
-    // the run's report is handed over.
-    let end = lash_core::shift::execute_admitted_run_owing_close(
-        &mut writer,
-        controller,
-        admitted,
-        sinks,
-    )
-    .await;
-    if end.result.is_ok()
-        && let Some(unsettled) = unsettled
-    {
-        unsettled.settle();
-    }
-    runtime.publish_from(&writer).await;
-    // A retried attempt replays the run, and the replay deposits.
-    if !matches!(end.result, Err(lash_core::engine::ShiftAbort::Retry(_))) {
-        running.ended();
-    }
-    end
-}
-
-/// Deposits a committed run's report the moment the shift hands it over,
-/// before the run's scope closes (FIG-3979), and publishes the runtime's
-/// observation of the commit first, so a handle answered from the deposit
-/// reads the committed head without waiting for the shift to return.
-struct DepositSettledRun<'a> {
-    runtime: &'a RuntimeHandle,
-    running: &'a crate::send::RunningHere,
-}
-
-#[async_trait]
-impl lash_core::shift::RunSettledSink for DepositSettledRun<'_> {
-    async fn settled(
-        &self,
-        runtime: &crate::support::LashRuntime,
-        run: lash_core::shift::SettledRun<'_>,
-    ) {
-        self.runtime.publish_from(runtime).await;
-        self.running.deposit(run, self.runtime);
-    }
-}
-
-/// Records every turn activity on the session's observation, addressed to
-/// the physical turn that produced it, so a send handle can adopt the
-/// activity of its input's run (FIG-3600 S5b). An activity published
-/// without a turn is addressed to the last turn this sink saw.
-pub(crate) struct SessionObservationTurnActivitySink<'a> {
-    runtime: RuntimeHandle,
-    live: Option<&'a dyn TurnActivitySink>,
-    current_turn: StdMutex<Option<TurnId>>,
-}
-
-impl<'a> SessionObservationTurnActivitySink<'a> {
-    pub(crate) fn new(runtime: RuntimeHandle, live: Option<&'a dyn TurnActivitySink>) -> Self {
-        Self {
-            runtime,
-            live,
-            current_turn: StdMutex::new(None),
-        }
-    }
-}
-
-#[async_trait]
-impl TurnActivitySink for SessionObservationTurnActivitySink<'_> {
-    fn is_noop(&self) -> bool {
-        false
-    }
-
-    async fn emit(&self, activity: TurnActivity) {
-        let current = self.current_turn.lock_recover().clone();
-        self.runtime
-            .record_turn_activity(current.as_ref(), activity.clone())
-            .await;
-        if let Some(live) = self.live {
-            live.emit(activity).await;
-        }
-    }
-
-    async fn emit_for_turn(&self, turn_id: &TurnId, activity: TurnActivity) {
-        *self.current_turn.lock_recover() = Some(turn_id.clone());
-        self.runtime
-            .record_turn_activity(Some(turn_id), activity.clone())
-            .await;
-        if let Some(live) = self.live {
-            live.emit_for_turn(turn_id, activity).await;
-        }
-    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -219,43 +91,6 @@ pub enum ReportSource {
 }
 
 impl TurnReport {
-    pub(crate) fn from_assembled(turn: lash_core::facade_support::AssembledTurn) -> Self {
-        // Keep this exhaustive so adding a core turn-result field forces the
-        // facade projection to be reviewed alongside the remote projection.
-        let lash_core::facade_support::AssembledTurn {
-            state,
-            turn_input_acceptance,
-            turn_cancel_input_outcome,
-            outcome,
-            assistant_output,
-            execution,
-            token_usage,
-            llm_calls,
-            tool_calls,
-            omitted,
-            // The turn's commit names each retained output; history holds
-            // its witness and reference, which the report's state carries.
-            retained_outputs: _,
-            failure_evidence,
-            errors,
-        } = turn;
-        Self {
-            state,
-            outcome,
-            assistant_output,
-            usage: token_usage,
-            llm_calls,
-            failure_evidence,
-            tool_calls,
-            omitted,
-            execution,
-            errors,
-            acceptance: turn_input_acceptance,
-            cancel_input_outcome: turn_cancel_input_outcome,
-            source: ReportSource::Live,
-        }
-    }
-
     /// This report as the remote protocol's settled turn, under `turn_id`
     /// (a send's run), carrying `activities` as its activity list. An
     /// activity the remote vocabulary cannot carry is left out.

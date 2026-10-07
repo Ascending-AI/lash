@@ -34,18 +34,6 @@ where
         .head_revision
 }
 
-/// Admit a scope for a host entry point: conformance suites mint scopes
-/// directly, so this stands in for the admission authority's answer — a
-/// process scope pins the fabricated first-registration incarnation the
-/// fixture fabricates for it.
-/// The key of a recorded model selection, or `"<no model>"` when the
-/// session records none; laws compare it against the key they selected.
-pub(crate) fn recorded_profile_key(model: &Option<crate::LlmProfileConfig>) -> &str {
-    model
-        .as_ref()
-        .map_or("<no model>", |model| model.key().as_str())
-}
-
 /// The record of a default-spec run over a fresh session's config, under
 /// the default host policies: what a fixture's pending follow-on carries
 /// when the law does not turn on the shape.
@@ -351,41 +339,6 @@ pub(crate) fn started_detached(
     registration
 }
 
-/// One due-obligation pass over `stores`' `ParentEnd` ledger, built the way
-/// the deployment's reconcile tick wires it (ADR 0109 §1.5): a
-/// [`ParentEndRelay`](lash_core::runtime::shift::ParentEndRelay) over the
-/// store set's ledger, the registry the claims name rows in, and a native
-/// process port — the same `deliver_cancel` the law's native executions read
-/// their cancel request from.
-///
-/// This is the obligation's delivery half: the `ScopeClose` delivery records
-/// the missing ledger rows (ADR 0094), and this claims each armed `ParentEnd`
-/// row, applies its plan and settles it — or retries it under its backoff when
-/// the delivery cannot run.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: the store set's ports and the pass bound are established"
-)]
-pub(crate) async fn deliver_due_parent_end_obligations(
-    stores: &Arc<dyn crate::StoreSet>,
-) -> lash_core::engine::RelayPass {
-    let registry = stores.process_registry();
-    let clock = stores.clock();
-    let relay = lash_core::runtime::shift::ParentEndRelay::new(
-        stores.obligation_ledger(crate::store::ObligationKind::ParentEnd),
-        Arc::clone(&registry),
-        Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
-        Arc::clone(&clock),
-    );
-    lash_core::runtime::shift::relay::relay_due(
-        &relay,
-        clock.as_ref(),
-        std::num::NonZeroUsize::new(256).expect("parent-end page bound is non-zero"),
-    )
-    .await
-    .expect("the parent-end obligation pass runs")
-}
-
 /// The due-pass lanes of one law tick. A law reads the pass its tick ran, so
 /// its tick waits until that pass ends, however long the backend takes under
 /// load. A deployment's tick bounds that wait at
@@ -395,8 +348,8 @@ pub(crate) async fn deliver_due_parent_end_obligations(
 /// pass the tick outwaited is reported under no kind, and dropping the lanes
 /// aborts it under the claim it took.
 #[must_use]
-pub fn law_tick_lanes(clock: Arc<dyn crate::Clock>) -> lash_core::runtime::shift::RelayLanes {
-    lash_core::runtime::shift::RelayLanes::new(
+pub fn law_tick_lanes(clock: Arc<dyn crate::Clock>) -> lash_core::runtime::obligations::RelayLanes {
+    lash_core::runtime::obligations::RelayLanes::new(
         clock,
         lash_core::engine::RecoveryPassBudget {
             tick_wait: std::time::Duration::from_secs(3_600),
@@ -405,22 +358,13 @@ pub fn law_tick_lanes(clock: Arc<dyn crate::Clock>) -> lash_core::runtime::shift
     )
 }
 
-/// Persistent lanes for a law of the deployment schedule (ADR 0109 §1.8).
-/// Unlike a single-pass fixture, it runs successive ticks on the same lanes
-/// and observes busy passes, bounded leader arms and later completions.
-#[must_use]
-pub fn deployment_tick_lanes(
-    clock: Arc<dyn crate::Clock>,
-    budget: lash_core::engine::RecoveryPassBudget,
-) -> lash_core::runtime::shift::RelayLanes {
-    lash_core::runtime::shift::RelayLanes::new(clock, budget)
-}
-
 #[cfg(test)]
 mod law_tick_tests {
     use super::*;
     use lash_core::engine::{RecoveryPassBudget, RelayPass};
-    use lash_core::runtime::shift::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
+    use lash_core::runtime::obligations::relay::{
+        DeliveryFailure, ObligationDelivery, ObligationRelay,
+    };
     use lash_core::store::{ObligationKey, ObligationKind, ObligationLedger};
 
     /// A delivery that takes `takes` to answer: a store or an engine under

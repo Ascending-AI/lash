@@ -73,7 +73,6 @@ pub(in crate::runtime) struct CurrentSession {
     /// Explicit lane context for services scoped to a running parent turn.
     /// `None` identifies a lane-less host/service call and selects the fresh
     /// acquisition path at the persistence call site.
-    held_shift_fence: Option<ShiftFence>,
     resident_graph_head_stale: Arc<AtomicBool>,
 }
 
@@ -348,7 +347,6 @@ impl CurrentOwnerCapability {
         runtime: &LashRuntime,
         plugins: Arc<crate::PluginSession>,
         turn_graph_appends: Option<&TurnGraphAppendDraft>,
-        held_shift_fence: Option<&ShiftFence>,
     ) -> Self {
         Self {
             owner: CurrentOwner::Session(Box::new(CurrentSession {
@@ -365,7 +363,6 @@ impl CurrentOwnerCapability {
                     }
                 },
                 store: runtime.services.store.clone(),
-                held_shift_fence: held_shift_fence.cloned(),
                 resident_graph_head_stale: Arc::clone(
                     runtime.resident_session.graph_head_stale_flag(),
                 ),
@@ -523,11 +520,8 @@ impl RuntimeSessionServices {
     /// Host-scoped services: they own a persistence snapshot and commit graph
     /// writes against the store themselves; turn-scoped services come from
     /// [`Self::for_turn`].
-    pub(super) fn new(
-        runtime: &LashRuntime,
-        held_shift_fence: Option<&ShiftFence>,
-    ) -> Result<Self, PluginOperationInvokeError> {
-        Self::with_scope(runtime, None, held_shift_fence)
+    pub(super) fn new(runtime: &LashRuntime) -> Result<Self, PluginOperationInvokeError> {
+        Self::with_scope(runtime, None)
     }
 
     /// The services a process runtime runs its body through, keyed by the
@@ -573,23 +567,20 @@ impl RuntimeSessionServices {
     /// committed once by the turn.
     pub(super) fn for_turn(
         runtime: &LashRuntime,
-        held_shift_fence: Option<&ShiftFence>,
         turn_graph_appends: &TurnGraphAppendDraft,
     ) -> Result<Self, PluginOperationInvokeError> {
-        Self::with_scope(runtime, Some(turn_graph_appends), held_shift_fence)
+        Self::with_scope(runtime, Some(turn_graph_appends))
     }
 
     fn with_scope(
         runtime: &LashRuntime,
         turn_graph_appends: Option<&TurnGraphAppendDraft>,
-        held_shift_fence: Option<&ShiftFence>,
     ) -> Result<Self, PluginOperationInvokeError> {
         Ok(Self {
             current: CurrentOwnerCapability::new(
                 runtime,
                 Arc::clone(&runtime.services.plugins),
                 turn_graph_appends,
-                held_shift_fence,
             ),
             processes: ProcessCapability::new(runtime),
             direct: DirectCompletionCapability,

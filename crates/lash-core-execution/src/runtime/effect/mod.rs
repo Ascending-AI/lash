@@ -21,10 +21,9 @@ pub use attempt_stream::{
 mod tool_attempt_capture;
 pub use tool_attempt_capture::{TOOL_ATTEMPT_CAPTURE_VERSION, ToolAttemptCapture};
 mod outcome;
-mod shift_outcome;
+mod session_outcome;
 mod validation;
 
-pub use crate::store::AdmittedHeadVerdict;
 pub use envelope::tool_cancel_work_replay_suffix;
 pub use envelope::{
     AssistantResponseHookEvents, CheckpointAdmittedSet, CompactionBase, LlmRequestSpec,

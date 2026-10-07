@@ -25,8 +25,8 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
 use lash_core::runtime::ClockWallTime as _;
+use lash_core::runtime::obligations::relay::{RelayPolicy, relay_due};
 use lash_core::runtime::process_terminal::ProcessTerminalRelay;
-use lash_core::runtime::shift::relay::{RelayPolicy, relay_due};
 use lash_core::store::{ObligationKind, ObligationLedger, ObligationState, StallReason};
 use lash_core::testing::TestClock;
 use lash_core::{

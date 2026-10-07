@@ -289,7 +289,7 @@ mod tests {
         for store_error in [
             crate::StoreError::StoredDataCorrupt {
                 record_kind: "RuntimeEffectReplay",
-                message: "negative shift_epoch".to_string(),
+                message: "negative head revision".to_string(),
             },
             crate::StoreError::MonotonicCounterOverflow {
                 counter: "effect_replay_fence",

@@ -28,6 +28,7 @@ use lash_durable::{
 };
 use lash_store_sql::durable::park_events::ParkEventStatements;
 use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
+use lash_store_sql::durable::session_mail::SessionMailStatements;
 use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
 use rusqlite::{Connection, OptionalExtension};
 
@@ -37,6 +38,9 @@ mod park_events;
 pub(crate) mod processes;
 mod run_records;
 mod session_close;
+mod session_mail;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use session_mail::cut_session_wakes;
 mod snapshots;
 mod turns;
 mod waits;
@@ -137,6 +141,7 @@ struct Sql {
     park: ActorParkStatements,
     process: ProcessActorStatements,
     park_events: ParkEventStatements,
+    session_mail: SessionMailStatements,
     sqlite: SqliteDurableStatements,
 }
 
@@ -149,6 +154,7 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
         park: ActorParkStatements::render(dialect),
         process: ProcessActorStatements::render(dialect),
         park_events: ParkEventStatements::render(dialect),
+        session_mail: SessionMailStatements::render(dialect),
         sqlite: SqliteDurableStatements::render(dialect),
     }
 });
@@ -472,6 +478,63 @@ pub(crate) fn wake_within(
     }))
 }
 
+/// Wake session `session`'s actor inside the caller's transaction, creating
+/// it first when this is its first work: the one call every producer of
+/// session work makes beside its row (L3s, FIG-5196). The caller has
+/// already refused an absent or deleted session, so the actor it creates
+/// belongs to a live one. `control` marks a cancel.
+pub(crate) fn wake_session_within(
+    tx: &Connection,
+    session: &lash_sansio::SessionId,
+    control: bool,
+    now: DurableInstant,
+) -> Answer<Woken> {
+    let actor = match ActorKey::session(session.as_str()) {
+        Ok(actor) => actor,
+        Err(error) => return Ok(Err(corrupt("session actor key", &error.to_string()))),
+    };
+    tx.prepare_cached(SQL.actor.create.sql())?
+        .query_row(
+            rusqlite::params![
+                actor.as_str(),
+                actor.kind().as_str(),
+                lash_durable::domain::SESSION_ACTOR_FORMATS,
+                now.0
+            ],
+            |_| Ok(()),
+        )
+        .optional()?;
+    Ok(wake_within(tx, &actor, control, now)?.map(|(woken, _)| woken))
+}
+
+/// [`wake_session_within`] for a session store transaction at `at_ms`. An
+/// absent or deleted session, and one whose actor already ended (its close
+/// finished), wakes nobody and creates nothing; that is no refusal of the
+/// producer's write, which refuses such a session itself.
+pub(crate) fn wake_session_tx(
+    tx: &Connection,
+    session: &lash_sansio::SessionId,
+    control: bool,
+    at_ms: u64,
+) -> Result<(), lash_core_execution::StoreError> {
+    let (meta, deleted): (i64, i64) = tx
+        .prepare_cached(SQL.session_mail.standing.sql())
+        .and_then(|mut statement| {
+            statement.query_row([session.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
+        })
+        .map_err(crate::sqlite_error)?;
+    if meta == 0 || deleted > 0 {
+        return Ok(());
+    }
+    let now = DurableInstant(i64::try_from(at_ms).unwrap_or(i64::MAX));
+    match wake_session_within(tx, session, control, now).map_err(crate::sqlite_error)? {
+        Ok(_) | Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => Ok(()),
+        Err(error) => Err(lash_core_execution::StoreError::Backend(format!(
+            "session {session} was not woken: {error}"
+        ))),
+    }
+}
+
 /// Apply one owner-commit domain write by its domain's module.
 fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWrite) -> Answer<()> {
     match write {
@@ -483,6 +546,7 @@ fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWr
         DomainWrite::Process(write) => processes::apply(tx, committing, write),
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write),
         DomainWrite::ParkEvent(write) => park_events::apply(tx, committing, write),
+        DomainWrite::SessionMail(write) => session_mail::apply(tx, committing, write),
     }
 }
 
@@ -1007,6 +1071,14 @@ impl DurableReads for SqliteDurableStore {
         let session = session.clone();
         self.read(move |tx| session_close::ending_scopes(tx, &session))
             .await
+    }
+
+    async fn session_mailbox(
+        &self,
+        session: &lash_sansio::SessionId,
+    ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
+        let session = session.clone();
+        self.read(move |tx| session_mail::read(tx, &session)).await
     }
 
     async fn park_events(

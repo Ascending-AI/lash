@@ -201,28 +201,22 @@ impl SessionCommitStore for PostgresStore {
 
     async fn admit_session_state(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
-            .await?;
-        require_shift_fence_tx(&mut tx, fence).await?;
         let version =
-            read_session_state_version_tx(&mut tx, fence.session(), true, self.fence.fleet())
-                .await?;
+            read_session_state_version_tx(&mut tx, session_id, true, self.fence.fleet()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::store::SessionStateAdmission {
-            session_id: fence.session().clone(),
+            session_id: session_id.clone(),
             version,
-            shift_epoch: fence.epoch(),
         })
     }
 
     async fn retain_admission_base(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
         base: &lash_core_execution::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
@@ -230,9 +224,8 @@ impl SessionCommitStore for PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        require_shift_fence_tx(&mut tx, fence).await?;
         sqlx::query(session_sql().meta.retain_admission_base.sql())
-            .bind(fence.session().as_str())
+            .bind(session_id.as_str())
             .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
             .execute(&mut **tx)
             .await
@@ -243,7 +236,7 @@ impl SessionCommitStore for PostgresStore {
 
     async fn raise_pending_follow_on_attempts(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
         follow_on_turn_id: &lash_core_execution::TurnId,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
@@ -251,8 +244,6 @@ impl SessionCommitStore for PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        require_shift_fence_tx(&mut tx, fence).await?;
-        let session_id = fence.session();
         let not_pending = || StoreError::FollowOnNotPending {
             session_id: session_id.clone(),
             follow_on_turn_id: follow_on_turn_id.clone(),
@@ -363,40 +354,6 @@ impl SessionCommitStore for PostgresStore {
         tx.commit().await.map_err(store_sqlx_error)?;
         self.load_session_meta(session_id).await
     }
-
-    async fn record_turn_park(
-        &self,
-        park: &lash_core_execution::store::TurnParkWrite,
-    ) -> Result<
-        lash_core_execution::store::StoreTransition<lash_core_execution::store::TurnPark>,
-        StoreError,
-    > {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
-        ensure_session_not_deleted_tx(&mut tx, &park.session_id).await?;
-        let recorded = super::turn_park::record_turn_park_tx(&mut tx, park).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(recorded)
-    }
-
-    async fn load_turn_park(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<lash_core_execution::store::TurnPark>, StoreError> {
-        sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .turn_parks
-                .select_by_session
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(store_sqlx_error)?
-        .as_ref()
-        .map(super::turn_park::decode_turn_park_row)
-        .transpose()
-    }
 }
 
 impl PostgresStore {
@@ -457,40 +414,18 @@ pub(crate) async fn apply_runtime_commit_tx(
             session_id: commit.session_id.clone(),
         });
     }
-    // A run's commit is fenced by the admission its run was sealed
-    // under: a successor's seal refuses it before anything is written
-    // (ADR 0105 §2). A commit already stored still answers from its
-    // receipt below, since a shift that runs several runs in one journal
-    // replays an earlier run's commit after a later run's seal
-    // (FIG-4498).
-    let superseded = super::shift_epoch::commit_fence_superseded_tx(&mut *tx, commit).await?;
     // Read without a lock for early validation and receipt replay. Before
     // mutating graph reachability, existing sessions lock and recheck this
     // revision so commit, maintenance, and deletion share one authority.
     let existing = load_session_head_meta_tx(&mut *tx, &commit.session_id, false, fleet).await?;
     planner.validate_node_derivation()?;
     {
-        // A run's commit settles its park (FIG-3586, FIG-3600 S7) in the
-        // same round trip as its receipt read, whichever of its physical
-        // turns committed; another run's commit leaves it, and so does a
-        // commit under a superseded fence.
-        let prior = sqlx::query(
-            session_sql()
-                .turn_commits_postgres
-                .select_receipt_settling_turn_park
-                .sql(),
-        )
-        .bind(commit.session_id.as_str())
-        .bind(planner.operation_key())
-        .bind(
-            commit
-                .settled_park_run()
-                .filter(|_| superseded.is_none())
-                .map(|run| run.as_str()),
-        )
-        .fetch_optional(&mut ***tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let prior = sqlx::query(session_sql().turn_commits.select_receipt.sql())
+            .bind(commit.session_id.as_str())
+            .bind(planner.operation_key())
+            .fetch_optional(&mut ***tx)
+            .await
+            .map_err(store_sqlx_error)?;
         if let Some(row) = prior {
             let hash: String = row.get(0);
             let result_json: String = row.get(1);
@@ -525,35 +460,22 @@ pub(crate) async fn apply_runtime_commit_tx(
                 result,
                 append_request_identity,
             };
-            let replay = match planner.decide_receipt(Some(prior)) {
-                Ok(replay) => replay,
-                // Only the stored commit's exact replay answers under a
-                // superseded fence.
-                Err(conflict) => return Err(superseded.unwrap_or(conflict)),
-            };
+            let replay = planner.decide_receipt(Some(prior))?;
             if let Some(replay) = replay {
                 return Ok(replay.into_result());
             }
         }
     }
-    if let Some(superseded) = superseded {
-        return Err(superseded);
-    }
-    // The bound turn owns the head (FIG-4202): a write outside every
-    // shift is refused while a run, an owed follow-on or an open command
-    // owns it. The shift epoch's row lock, taken before the head's in the
-    // order a fenced commit takes them, serializes the read with every
-    // admission, which is fenced. A replayed receipt above answered its
-    // first outcome already; the plan's own refusals (a follow-on the
-    // commit would drop, a moved head) answer before the ownership's.
+    // The bound turn owns the head (FIG-4202): a write outside every run
+    // is refused while a run, an owed follow-on or an open command owns
+    // it. The session history lock taken above serializes the read with
+    // every admission. A replayed receipt above answered its first
+    // outcome already; the plan's own refusals (a follow-on the commit
+    // would drop, a moved head) answer before the ownership's.
     let head_ownership = if lash_core_execution::store::head_write_needs_ownership(
-        commit.shift_fence.is_some(),
+        commit.committing_run().is_some(),
         existing.as_ref().is_some_and(|head| !head.is_created()),
     ) {
-        match super::shift_epoch::shift_epoch_locked_tx(&mut *tx, &commit.session_id).await {
-            Ok(_) | Err(StoreError::ShiftEpochUnavailable { .. }) => {}
-            Err(error) => return Err(error),
-        }
         let owed_follow_on = lash_core_execution::store::follow_on_owning_the_head(
             pending_follow_on_tx(&mut *tx, &commit.session_id, false)
                 .await?

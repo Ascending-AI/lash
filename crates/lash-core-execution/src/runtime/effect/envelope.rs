@@ -477,17 +477,7 @@ pub enum RuntimeEffectCommand {
         follow_on: crate::TurnId,
         attempts: u32,
     },
-    /// Admit the next run of a session shift (ADR 0105 §2, FIG-3600); every
-    /// replay decodes the recorded verdict instead of re-reading the store.
-    AdmitShift {
-        request: Box<crate::engine::AdmitRequest>,
-    },
-    /// Draw an OS-random start marker before the root's atomic admission
-    /// (ADR 0105 §2, L-S8). A retry replays this marker; a purged invocation
-    /// draws a new one, which the retained admission refuses.
-    DrawRunStart {
-        admission: crate::engine::AdmissionId,
-    },
+
     /// Resolve the shape `run` runs under (FIG-3600 S6, FIG-3838): once per
     /// run, keyed by it, so every redrive replays the recorded shape.
     ResolveTurnConfig {
@@ -625,9 +615,8 @@ impl RuntimeEffectCommand {
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
-            Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
+
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
-            Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::RenderCompactionPrompt { .. } => RuntimeEffectKind::RenderCompactionPrompt,
@@ -1224,14 +1213,7 @@ pub enum RuntimeEffectOutcome {
     RecoverFollowOn {
         answer: Box<crate::store::FollowOnRecoveryAnswer>,
     },
-    /// The shift admission's recorded verdict.
-    AdmitShift {
-        verdict: Box<crate::engine::AdmitVerdict>,
-    },
-    /// The start marker this execution of a run drew.
-    DrawRunStart {
-        run_start: crate::engine::RunStartNonce,
-    },
+
     /// The run's recorded shape: its spec resolved against its snapshot
     /// of the durable head's config (FIG-3838).
     ResolveTurnConfig {

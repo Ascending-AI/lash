@@ -80,7 +80,7 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
 }
 
 pub(crate) async fn load_queued_batch(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     batch_id: &str,
 ) -> Result<Option<QueuedWorkBatch>, StoreError> {
     let row = sqlx::query(
@@ -90,7 +90,7 @@ pub(crate) async fn load_queued_batch(
             .sql(),
     )
     .bind(batch_id)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
     let Some(row) = row else {

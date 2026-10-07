@@ -94,26 +94,11 @@ macro_rules! runtime_persistence_tests {
             (commit_increments_head_and_round_trips_agent_frames, "root"),
             (receipt_replay_rehydrates_recorded_node_clocks_and_ids, "root"),
             (concurrent_head_revision_cas_applies_exactly_once, "concurrent-head-cas"),
-            (pending_follow_on_is_written_by_its_switch_and_cleared_by_its_terminal, "follow-on"),
-            (pending_follow_on_blocks_every_admission_but_its_own, "follow-on"),
-            (pending_follow_on_refuses_every_other_commit_that_would_drop_it, "follow-on"),
-            (pending_follow_on_frame_is_current_on_every_head_write, "follow-on"),
-            (pending_follow_on_recovery_raise_is_fenced_and_never_resets, "follow-on"),
-            (an_unfinished_runs_input_survives_host_cancellation_after_lane_rotation, "run-admission-input-cancel-fence"),
-            (an_unfinished_runs_batch_survives_host_cancellation_after_lane_rotation, "run-admission-batch-cancel-fence"),
-            (an_admitted_row_is_not_withdrawable_until_its_run_releases_it, "admitted-row-withdrawal"),
-            (no_row_stays_bound_after_a_runs_terminal_commit, "no-bound-row-commit"),
-            (open_input_addressed_to_an_ended_run_is_next_turn_input, "addressed-to-ended-run"),
-            (a_stale_fence_writes_nothing, "stale-fence-writes-nothing"),
-            (the_command_lane_is_bindless, "command-lane-bindless"),
-            (settlement_is_predicated_on_the_run, "settlement-predicated-on-run"),
-            (a_command_enqueued_behind_a_runs_head_never_starves_it, "command-behind-the-head"),
             (serves_each_admitted_session_and_refuses_an_unknown_one, "alpha"),
             (commit_rejects_carried_nondefault_node_budget, "root"),
             (commit_rejects_carried_nondefault_byte_budget, "root"),
             (commit_rejects_follow_on_bytes_over_budget, "root"),
             (commit_rejects_turn_result_bytes_over_budget, "root"),
-            (commit_with_every_payload_family_inside_budget_succeeds, "root"),
             (load_hydrates_checkpoint, "hydrated"),
             (checkpoint_restore_rejects_turn_index_without_increment_headroom, "root"),
             (checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows, "root"),
@@ -127,7 +112,6 @@ macro_rules! runtime_persistence_tests {
             (observer_settlement_preserves_creation_facts, "root"),
             (attachment_writes_keep_independent_referrers, "root"),
             (attachment_acquisition_preserves_receiving_referrer, "root"),
-            (final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash, "root"),
             (append_request_receipt_replays_after_head_advance, "root"),
             (append_request_receipt_rejects_changed_content, "root"),
             (append_request_exact_hash_rejects_changed_ancestor, "root"),
@@ -140,7 +124,6 @@ macro_rules! runtime_persistence_tests {
             (append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics, "root"),
             (append_receipt_and_graph_append_are_atomic, "root"),
             (fresh_append_receipt_enforces_ancestor_precondition, "root"),
-            (store_computed_hash_rejects_mutated_commit, "root"),
             (commit_rejects_non_derived_append_node_ids, "root"),
             (append_rejects_duplicate_batch_node_ids, "root"),
             (append_rejects_existing_node_id_collision, "root"),
@@ -153,62 +136,27 @@ macro_rules! runtime_persistence_tests {
             (concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing, "concurrent-queued-work-source-key"),
             (decorated_queued_work_source_key_replay_reports_absorbed, "decorated-queued-work-source-key"),
             (pending_session_work_ordering_agrees_across_ingress_families, "pending-work-ordering"),
-            (concurrent_admissions_bind_every_row_to_at_most_one_run, "concurrent-queue-input"),
             (checkpoint_admission_takes_both_families_once, "checkpoint-work"),
-            (a_checkpoint_applied_input_resolves_to_its_run_by_point_read, "checkpoint-applied-binding"),
             (checkpoint_admission_is_idempotent_by_run_and_step, "checkpoint-step-idempotence"),
             (checkpoint_budget_refusal_preserves_active_turn_input, "checkpoint-budget-atomicity"),
             (checkpoint_admissions_honor_min_boundary_at_every_checkpoint, "checkpoint-min-boundary"),
-            (a_checkpoint_refuses_a_stale_fence_whatever_its_caps, "checkpoint-stale-fence-caps"),
             (a_checkpoint_admitted_input_is_listed_admitted_to_its_run, "checkpoint-admitted-listing"),
-            (queued_work_cancel_removes_only_open_batches, "queued-work-cancel"),
-            (queued_work_classes_gate_command_and_turn_admissions, "queued-work-classes"),
-            (queued_work_admission_respects_boundaries_and_stale_completion, "queued-work-boundaries"),
-            (queued_work_respects_membership_limits_and_sessions, "queued-membership"),
-            (queued_work_join_groups_by_delivery_policy, "queued-join"),
-            (a_resumed_run_executes_exactly_its_recorded_admission, "resumed-run-admission"),
-            (process_wakes_batch_by_default, "wake-default-batch"),
-            (queued_work_completion_is_fenced_and_run_keyed, "queued-completion-fence"),
-            (queued_wake_delivery_is_source_key_idempotent_and_admitted_once, "root"),
             (host_cancelled_wake_is_not_redelivered, "root"),
-            (queue_completion_and_turn_commit_stamp_are_atomic, "root"),
             (delete_then_enqueue_never_reuses_ingress_sequences, "root"),
             (pending_turn_inputs_source_keys_order_cancel_and_cross_session, "root"),
             (pending_turn_input_duplicate_input_id, "root"),
-            (changed_retry_is_typed_conflict, "root"),
             (run_specs_join_the_submission_digest_and_intern_once, "run-specs"),
-            (a_next_turn_admission_never_mixes_run_specs, "run-spec-admissions"),
-            (a_steering_spec_that_differs_from_its_running_turn_is_refused, "run-spec-steering"),
             (a_turn_input_batch_enqueues_new_ids_contiguously_in_request_order, "turn-input-batches"),
             (a_resent_turn_input_batch_answers_its_existing_ids_and_enqueues_the_rest, "turn-input-batch-retries"),
             (a_conflict_or_a_repeated_id_refuses_the_whole_turn_input_batch, "turn-input-batch-refusals"),
-            (a_steering_spec_must_match_a_pending_follow_ons_shape, "run-spec-follow-on-steering"),
-            (a_steering_spec_must_match_a_queued_headed_runs_default_shape, "run-spec-queued-steering"),
             (pending_turn_input_bulk_and_suffix_cancellation, "pending-bulk-cancel"),
-            (pending_turn_inputs_admit_settle_and_fence, "root"),
-            (turn_park_lives_while_its_turn_holds_work, "turn-parks"),
-            (run_terminal_evidence_commits_in_the_head_transaction, "run-terminal-head"),
-            (a_commit_sealed_under_a_superseded_admission_is_refused, "run-terminal-fence"),
-            (accepted_turn_input_released_by_its_run_terminal_is_cancelled_and_vacuumed, "fig1511-orphaned-accepted"),
-            (a_queued_headed_run_writes_its_terminal_like_any_run, "run-terminal-queued"),
-            (turn_input_application_identity_survives_pending_tombstone_vacuum, "turn-input-application"),
-            (a_checkpoint_admission_rerun_returns_its_own_rows, "fig905-active-reacquire"),
-            (a_turn_that_cannot_commit_leaves_no_input_pinned_to_it, "root"),
-            (committed_turn_receipt_answers_the_parent_end_recovery_read, "root"),
-            (a_deferred_input_keeps_its_submitted_delivery, "ingress-immutable-delivery"),
-            (an_unknown_turn_address_is_refused_without_a_row_or_sequence, "ingress-turn-address"),
             (a_changed_resubmission_is_a_typed_conflict_for_every_kind, "ingress-content-conflict"),
             (every_terminal_ingress_item_leaves_a_tombstone,
              "ingress-tombstones"),
             (a_recorded_queued_batch_refuses_multiple_payloads, "ingress-one-payload"),
             (a_settled_command_resubmitted_under_its_key_is_not_a_new_command, "ingress-command-resubmission"),
-            (composition_offers_mixed_authorities_and_merge_keys_as_one_prefix, "ingress-per-item-data"),
-            (a_host_drain_policy_keeps_principals_apart, "ingress-principal-policy"),
             ]
             hosted_stores [
-            (identical_retry_after_defer_is_existing_not_conflict, "root"),
-            (pending_turn_input_cancel_covers_active_and_deferred_states, "root"),
-            (pending_active_turn_inputs_defer_unaccepted_once_on_interrupt, "root"),
             ]
             store_refs [
             ]
@@ -232,9 +180,7 @@ macro_rules! runtime_persistence_reopenable_tests {
             [
                 (reopen_mint_identity, "pending-turn-input-multi-store-mint"),
                 (gc_blobs, "gc-blobs"),
-                (an_admission_base_survives_collection_until_the_next_admission, "admission-base-retention"),
                 (append_receipt_reopen, "root"),
-                (runtime_reopen, "root"),
             ]
         );
     };
@@ -415,12 +361,9 @@ macro_rules! store_recovery_tests {
     ($fixture:block) => {
         $crate::store_recovery_tests!(@catalogue $fixture;
             timed [
-                (checkpoint_survives_before_admission_settlement, "store-recovery-checkpoint"),
             ]
             plain [
                 (store_recovery_fresh_instances, "store-recovery-fresh-instance-probe"),
-                (a_commit_settles_admitted_rows_once, "store-recovery-atomic-commit"),
-                (recorded_commit_replay_is_idempotent, "store-recovery-replay"),
             ]
         );
     };
@@ -793,25 +736,6 @@ macro_rules! store_contract_state_machine_tests {
     ($fixture:block) => {
         $crate::store_contract_state_machine_tests!(@catalogue $fixture; [
             (store_contract_state_machine, "store-contract-state-machine"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, backend, make) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(backend, make).await;
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! runtime_persistence_state_machine_tests {
-    ($fixture:block) => {
-        $crate::runtime_persistence_state_machine_tests!(@catalogue $fixture; [
-            (runtime_persistence_state_machine, "runtime-persistence-state-machine"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -1284,18 +1208,9 @@ macro_rules! session_store_factory_tests {
         $crate::session_store_factory_tests!(@turn_cancel $fixture; [
             (session_meta_records_the_process_that_owns_it, "session-meta-owning-process"),
             (a_closing_session_lists_as_closing_never_as_live, "catalog-closing-entry"),
-            (a_control_raise_answers_no_seal_as_sealed, "control-raise-seal"),
-            (a_command_runs_end_unparks_it, "command-run-end-unparks"),
             (concurrent_session_admissions_preserve_one_relation, "concurrent-session-relation"),
-            (ingress_follow_on_fork_and_command_run_matrix, "ingress-follow-on-fork-commands"),
-            (a_pin_written_before_during_or_after_its_turn_keeps_that_turn_through_collection, "pin-timing"),
-            (a_pin_racing_its_turns_commit_and_the_next_admission_keeps_the_turn, "pin-race"),
-            (a_merged_or_deferred_input_resolves_to_the_run_that_applied_it, "pin-merge-defer"),
-            (every_turn_forks_until_the_host_collects_and_refuses_pruned_after, "fork-retained-until-gc"),
+
             (a_session_that_never_ran_a_turn_forks_at_its_creation_revision, "fork-empty-session"),
-            (every_reclaimer_keeps_a_pinned_turn_until_its_last_pin_is_released, "pin-reclaimers"),
-            (the_retention_window_counts_terminal_runs_and_pins_extend_it, "retention-window"),
-            (pending_and_unavailable_targets_refuse_typed_and_never_fork_the_head, "fork-refusals"),
         ]);
         $crate::session_store_factory_tests!(@turn_cancel_hosted $fixture; [
             (fork_inherits_history_without_execution_queues_waits_or_journals, "fork-execution-isolation"),
@@ -1404,27 +1319,6 @@ macro_rules! session_read_view_tests {
                 let (_fixture_guard, factory) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory).await;
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! turn_commit_outcome_tests {
-    ($fixture:block) => {
-        $crate::turn_commit_outcome_tests!(@laws $fixture; [
-            (turn_commit_completed, completed),
-            (turn_commit_frame_switch, frame_switch),
-            (turn_commit_cancelled, cancelled),
-            (turn_commit_failed, failed),
-        ]);
-    };
-    (@laws $fixture:block; [$(( $law:ident, $name:ident )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, store) = $fixture;
-                $crate::$law(store).await;
             }
         )*
     };

@@ -172,7 +172,5 @@ pub fn response_synthesized_from_aborted_stream(
     crate::runtime::response_synthesized_from_aborted_stream(events)
 }
 
-pub use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt;
-
 /// Laws exercised by optional plugins over their own durable codecs.
 pub use lash_core_store::testing::guarded_surfaces;

@@ -28,9 +28,7 @@ use lash_trace::{TraceContext, TraceLevel, TraceSink};
 
 use super::host::RuntimeWork;
 use super::process::ProcessRegistry;
-use super::{
-    NoSessionWork, ProcessWorkWiring, RuntimeHostConfig, SessionWorkEngine, TerminationPolicy,
-};
+use super::{ProcessWorkWiring, RuntimeHostConfig, TerminationPolicy};
 
 /// Shared runtime infrastructure an embedder builds once and reuses
 /// across every `LashRuntime` it constructs.
@@ -66,10 +64,6 @@ impl RuntimeEnvironment {
         self.work
             .process_wiring()
             .map(|wiring| Arc::clone(wiring.port()))
-    }
-
-    pub fn queued_work(&self) -> Arc<dyn SessionWorkEngine> {
-        Arc::clone(self.work.queued_arc())
     }
 
     /// A builder over `core` and its one backend. There is no in-memory
@@ -149,7 +143,7 @@ impl RuntimeEnvironmentBuilder {
         Self {
             env: RuntimeEnvironment {
                 plugin_host: None,
-                work: RuntimeWork::sessions_only(Arc::new(NoSessionWork::new())),
+                work: RuntimeWork::sessions_only(),
                 core,
             },
         }
@@ -163,11 +157,6 @@ impl RuntimeEnvironmentBuilder {
     /// and process-work port, so process starts can work pending work.
     pub fn with_process_work(mut self, wiring: ProcessWorkWiring) -> Self {
         self.env.work = self.env.work.with_process_wiring(wiring);
-        self
-    }
-
-    pub fn with_queued_work(mut self, queued: Arc<dyn SessionWorkEngine>) -> Self {
-        self.env.work = self.env.work.with_queued(queued);
         self
     }
 
@@ -225,12 +214,8 @@ impl RuntimeEnvironmentBuilder {
 }
 
 impl RuntimeEnvironment {
-    pub fn with_work_ports(
-        mut self,
-        process: ProcessWorkWiring,
-        queued: Arc<dyn SessionWorkEngine>,
-    ) -> Self {
-        self.work = RuntimeWork::processes(process, queued);
+    pub fn with_work_ports(mut self, process: ProcessWorkWiring) -> Self {
+        self.work = RuntimeWork::processes(process);
         self
     }
 }

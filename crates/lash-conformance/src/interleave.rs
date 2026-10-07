@@ -8,7 +8,7 @@
 //! each schedule and asserts an invariant after it:
 //!
 //! ```ignore
-//! let mut explorer = Explorer::new("law").holding(&[StoreOp::load_turn_park.into()]);
+//! let mut explorer = Explorer::new("law").holding(&[StoreOp::load_session_head_meta.into()]);
 //! while let Some(mut schedule) = explorer.next_schedule() {
 //!     let world = World::new(schedule.index()).await;
 //!     let a = schedule.actor("a", world.store());
@@ -33,7 +33,7 @@
 //! * a law whose actors never met at a held call, or that names an operation
 //!   no schedule reached, explored nothing and fails.
 //!
-//! A failed schedule is printed as `a:load_turn_park b:load_turn_park …`.
+//! A failed schedule is printed as `a:load_session_head_meta b:load_session_head_meta …`.
 //! Setting [`REPLAY_VAR`] to that string runs that one schedule.
 use std::collections::BTreeSet;
 use std::future::Future;
@@ -501,8 +501,8 @@ mod tests {
 
     type Store = Arc<Scripted<AtomicUsize>>;
 
-    const READ: StoreOp = StoreOp::load_turn_park;
-    const WRITE: StoreOp = StoreOp::record_turn_park;
+    const READ: StoreOp = StoreOp::load_session_head_meta;
+    const WRITE: StoreOp = StoreOp::settle_observer_intents;
 
     /// The store's count, as `op` reads it.
     async fn read(store: &Store, op: StoreOp) -> usize {
@@ -561,26 +561,30 @@ mod tests {
         );
         assert_eq!(
             ended[0].0,
-            "a:load_turn_park a:record_turn_park b:load_turn_park b:record_turn_park"
+            "a:load_session_head_meta a:settle_observer_intents b:load_session_head_meta b:settle_observer_intents"
         );
         for (schedule, count) in &ended {
-            let lost = schedule.starts_with("a:load_turn_park b:load_turn_park")
-                || schedule.starts_with("b:load_turn_park a:load_turn_park");
+            let lost = schedule.starts_with("a:load_session_head_meta b:load_session_head_meta")
+                || schedule.starts_with("b:load_session_head_meta a:load_session_head_meta");
             assert_eq!(*count, if lost { 1 } else { 2 }, "{schedule}");
         }
     }
 
     #[tokio::test]
     async fn a_printed_schedule_replays_that_one_order() {
-        let racing = "b:load_turn_park a:load_turn_park a:record_turn_park b:record_turn_park";
+        let racing = "b:load_session_head_meta a:load_session_head_meta a:settle_observer_intents b:settle_observer_intents";
         let ended = two_increments(Explorer::replaying("increments", racing)).await;
         assert_eq!(ended, [(racing.to_string(), 1)]);
         // A prefix replays too: the steps after it run in the first order.
-        let ended = two_increments(Explorer::replaying("increments", "b:load_turn_park")).await;
+        let ended = two_increments(Explorer::replaying(
+            "increments",
+            "b:load_session_head_meta",
+        ))
+        .await;
         assert_eq!(
             ended,
             [(
-                "b:load_turn_park a:load_turn_park a:record_turn_park b:record_turn_park"
+                "b:load_session_head_meta a:load_session_head_meta a:settle_observer_intents b:settle_observer_intents"
                     .to_string(),
                 1
             )]
@@ -589,13 +593,13 @@ mod tests {
 
     #[tokio::test]
     #[should_panic(
-        expected = "the schedule does not replay: step 2 is `a:record_turn_park`, and the actors \
-                    are held before a:load_turn_park b:record_turn_park"
+        expected = "the schedule does not replay: step 2 is `a:settle_observer_intents`, and the actors \
+                    are held before a:load_session_head_meta b:settle_observer_intents"
     )]
     async fn a_schedule_the_actors_do_not_follow_fails_at_its_first_wrong_step() {
         two_increments(Explorer::replaying(
             "increments",
-            "b:load_turn_park a:record_turn_park",
+            "b:load_session_head_meta a:settle_observer_intents",
         ))
         .await;
     }
@@ -608,15 +612,15 @@ mod tests {
         assert_eq!(
             schedules,
             [
-                "a:record_turn_park b:record_turn_park",
-                "b:record_turn_park a:record_turn_park"
+                "a:settle_observer_intents b:settle_observer_intents",
+                "b:settle_observer_intents a:settle_observer_intents"
             ]
         );
     }
 
     #[tokio::test(start_paused = true)]
     #[should_panic(
-        expected = "actor `b` blocked outside the gates after `b:load_turn_park`: within 10s it \
+        expected = "actor `b` blocked outside the gates after `b:load_session_head_meta`: within 10s it \
                     neither reached a held call nor finished"
     )]
     async fn an_actor_that_waits_outside_the_store_is_refused_by_name() {
@@ -696,10 +700,10 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "no schedule reached `admit_run`")]
+    #[should_panic(expected = "no schedule reached `bind_run_inputs`")]
     async fn a_held_operation_no_actor_calls_fails_the_law() {
         two_increments(
-            Explorer::over("stale", None).holding(&[WRITE.into(), StoreOp::admit_run.into()]),
+            Explorer::over("stale", None).holding(&[WRITE.into(), StoreOp::bind_run_inputs.into()]),
         )
         .await;
     }
@@ -746,10 +750,10 @@ mod tests {
         assert_eq!(
             schedules,
             [
-                "retried:load_turn_park retried:load_turn_park writer:record_turn_park \
-                 retried:load_turn_park",
-                "retried:load_turn_park writer:record_turn_park retried:load_turn_park",
-                "writer:record_turn_park retried:load_turn_park",
+                "retried:load_session_head_meta retried:load_session_head_meta writer:settle_observer_intents \
+                 retried:load_session_head_meta",
+                "retried:load_session_head_meta writer:settle_observer_intents retried:load_session_head_meta",
+                "writer:settle_observer_intents retried:load_session_head_meta",
             ]
         );
     }

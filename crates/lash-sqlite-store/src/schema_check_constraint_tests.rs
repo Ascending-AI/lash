@@ -257,60 +257,6 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
     );
 }
 
-/// The shift-authority columns as `(shift_epoch, shift_admission_id,
-/// shift_run_start, closing_intent)` literals: every combination no raise
-/// writes, and every one a raise does.
-const UNREAL_SHIFT_STATES: &[(&str, &str)] = &[
-    (
-        "an unraised epoch naming an admission",
-        "0, 'a', NULL, NULL",
-    ),
-    (
-        "an unraised epoch naming a start marker",
-        "0, NULL, 'n', NULL",
-    ),
-    ("an unraised epoch naming a seal", "0, 'a', 'n', NULL"),
-    ("a raised epoch naming no admission", "1, NULL, NULL, NULL"),
-    ("a start marker without its admission", "1, NULL, 'n', NULL"),
-    ("a closing session no close raised", "0, NULL, NULL, 1"),
-    ("a closing session an execution sealed", "1, 'a', 'n', 1"),
-];
-const REAL_SHIFT_STATES: &[(&str, &str)] = &[
-    ("unraised", "0, NULL, NULL, NULL"),
-    ("sealed by an execution", "1, 'a', 'n', NULL"),
-    ("raised by a control verb", "1, 'a', NULL, NULL"),
-    ("closing under the raise of its close", "1, 'a', NULL, 1"),
-];
-
-#[test]
-fn sqlite_shift_authority_check_admits_only_real_shift_states() {
-    let core = Connection::open_in_memory().expect("open shift-authority constraint fixture");
-    core.execute_batch(SCHEMA)
-        .expect("create shift-authority constraint fixture");
-    let insert = |case: &str, values: &str| {
-        format!(
-            "INSERT INTO session_meta (session_id, relation_kind, shift_epoch,
-                 shift_admission_id, shift_run_start, closing_intent)
-             VALUES ('{case}', 'root', {values})"
-        )
-    };
-    for (case, values) in UNREAL_SHIFT_STATES {
-        let error = core
-            .execute_batch(&insert(case, values))
-            .expect_err(&format!("{case} must violate the shift-authority CHECK"));
-        assert!(
-            error
-                .to_string()
-                .contains("ck_session_meta_shift_authority"),
-            "{case}: SQLite reported the wrong CHECK: {error}"
-        );
-    }
-    for (case, values) in REAL_SHIFT_STATES {
-        core.execute_batch(&insert(case, values))
-            .unwrap_or_else(|error| panic!("{case} is a real shift state: {error}"));
-    }
-}
-
 #[test]
 fn turn_cancellation_shape_is_guarded() {
     let conn = Connection::open_in_memory().expect("open cancellation fixture");
@@ -471,23 +417,4 @@ fn trigger_delivery_cannot_settle_without_binding() {
          obligation_state, obligation_settled_at_ms)
          VALUES ('occurrence', 'subscription', 'incarnation', 1, '{}', 0, 'obligation', 'delivered', 1)",
         "ck_trigger_deliveries_binding");
-}
-
-#[test]
-fn park_feed_columns_refuse_mixed_variants() {
-    let conn = Connection::open_in_memory().expect("park feed fixture");
-    conn.execute_batch(SCHEMA).expect("schema");
-    assert_check_rejects(
-        &conn,
-        "INSERT INTO turn_park_events
-        (seq, session_id, turn_id, park_id, kind, cause_json, redrive_intent, at_ms)
-        VALUES (1, 'session', 'turn', 1, 'redrive_requested', '7', 7, 0)",
-        "ck_turn_park_events_parked_reason",
-    );
-    conn.execute_batch(
-        "INSERT INTO turn_park_events
-        (seq, session_id, turn_id, park_id, kind, redrive_intent, at_ms)
-        VALUES (1, 'session', 'turn', 1, 'redrive_requested', 7, 0)",
-    )
-    .expect("integer redrive");
 }

@@ -20,6 +20,17 @@ use sqlx::{Connection, PgConnection};
 mod database_url;
 pub use database_url::required_database_url;
 
+/// Arm (`true`) or disarm a cut of every session-mail producer transaction
+/// at the session actor's wake, over `pool`: the producer's transaction
+/// rolls back before it commits.
+///
+/// # Errors
+///
+/// The trigger's DDL failed.
+pub async fn cut_session_wakes(pool: &sqlx::PgPool, armed: bool) -> sqlx::Result<()> {
+    crate::durable::cut_session_wakes(pool, armed).await
+}
+
 /// Returns the production trigger-subscription listing SQL for conformance assertions.
 ///
 /// The filter no longer builds the statement; it selects one (FIG-3385). The

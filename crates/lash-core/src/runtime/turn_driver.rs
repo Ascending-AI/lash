@@ -20,9 +20,7 @@ mod tool_catalog;
 mod tools;
 mod trace;
 
-pub(in crate::runtime) use crate::runtime::turn_loop::{
-    ingress_admitted_trace_payload, send_queued_work_started_event,
-};
+pub(in crate::runtime) use crate::runtime::turn_loop::send_queued_work_started_event;
 pub(super) use events::{emit_semantic_response_parts, send_turn_input_applications};
 use handlers::foreground_exec_graph_key;
 pub(super) use trace::protocol_step_trace_event;
@@ -68,12 +66,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// wakes (FIG-3543).
     pub(super) withheld_terminal_work: super::logical_turn::WithheldTerminalWork,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
-    /// The fence of the shift admission the turn's run executes under: the
-    /// authority its checkpoint admissions present (FIG-3927). `None` for a
-    /// turn that runs under no admitted run, which admits nothing.
-    pub(super) shift_fence: Option<ShiftFence>,
-    /// The logical run the turn's checkpoint admissions bind rows to.
-    pub(super) shift_run: Option<crate::TurnId>,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     /// The host-local stop the turn reads at its boundaries.
     pub(super) turn_control: crate::LocalTurnStop,

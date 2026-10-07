@@ -50,12 +50,6 @@ store_error_samples! {
         session_id: session(),
         run: turn(),
     },
-    RunHeldByAnotherExecutor { .. } => StoreError::RunHeldByAnotherExecutor {
-        session_id: session(),
-        run: turn(),
-        recorded: Box::new(crate::store::RunExecutor::run(&crate::store::AdmissionId::new("fixture#0"))),
-        admitting: Box::new(crate::store::RunExecutor::run(&crate::store::AdmissionId::new("fixture#0"))),
-    },
     FollowOnPending { .. } => StoreError::FollowOnPending {
         session_id: session(),
         follow_on_turn_id: turn(),
@@ -84,7 +78,6 @@ store_error_samples! {
         )),
     },
     PreparedProcessRegistrationStale { .. } => StoreError::PreparedProcessRegistrationStale { process_id: crate::process_id_for_test("prepared-process") },
-    PreparedRunAdmissionStale { .. } => StoreError::PreparedRunAdmissionStale { session_id: session(), run: crate::TurnId::from("stale-run") },
     Contended => StoreError::Contended,
     CommitNodeBudgetExceeded { .. } => StoreError::CommitNodeBudgetExceeded {
         node_count: 2,
@@ -269,9 +262,6 @@ store_error_samples! {
         run: turn(),
         row: Box::new(super::IngressRowId::Input(InputId::from("ti:sampled"))),
     },
-    IngressSettlementUnfenced { .. } => StoreError::IngressSettlementUnfenced {
-        session_id: session(),
-    },
     IngressAndSessionCommandRun { .. } => StoreError::IngressAndSessionCommandRun {
         session_id: session(),
         run: turn(),
@@ -283,11 +273,6 @@ store_error_samples! {
     SessionHeadOwned { .. } => StoreError::SessionHeadOwned {
         session_id: session(),
         owner: super::SessionHeadOwner::Run { run: turn() },
-    },
-    StaleShiftFence { .. } => StoreError::StaleShiftFence {
-        session_id: session(),
-        fence_epoch: 1,
-        current_epoch: 2,
     },
     RunAlreadyTerminal { .. } => StoreError::RunAlreadyTerminal {
         session_id: session(),
@@ -306,11 +291,6 @@ store_error_samples! {
     },
     ControlIntentUnknown { .. } => StoreError::ControlIntentUnknown {
         intent: super::ControlIntentId::from_sequence(1),
-    },
-    ShiftEpochUnavailable { .. } => StoreError::ShiftEpochUnavailable { session_id: session() },
-    ShiftFenceSessionMismatch { .. } => StoreError::ShiftFenceSessionMismatch {
-        session_id: session(),
-        fence_session_id: SessionId::from("sampled-other"),
     },
     IngressTurnAddressUnknown { .. } => StoreError::IngressTurnAddressUnknown {
         session_id: session(),

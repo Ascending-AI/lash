@@ -380,7 +380,7 @@ def _is_pr_host_e2e_path(path: str) -> bool:
     if path.startswith("crates/lash-core/src/runtime/"):
         return any(
             path.startswith(f"crates/lash-core/src/runtime/{part}")
-            for part in ("shift/", "shift.rs", "turn_loop/", "turn_loop.rs")
+            for part in ("turn_loop/", "turn_loop.rs")
         )
     return False
 
@@ -1304,10 +1304,6 @@ SCRIPT_PROOFS = {
     "scripts/ci/pg-service.sh": "scripts/test_pg_service.py",
     "scripts/dev-test.py": "scripts/test_dev_test.py",
     "scripts/ci_plan.py": "scripts/test_ci_plan.py",
-    "scripts/shift-determinism-allowlist.count": "scripts/test_check_substrate_boundary.py",
-    "scripts/shift-determinism-allowlist.txt": "scripts/test_check_substrate_boundary.py",
-    "scripts/shift-store-allowlist.count": "scripts/test_check_substrate_boundary.py",
-    "scripts/shift-store-allowlist.txt": "scripts/test_check_substrate_boundary.py",
     "tools/buck2/junit_xml.py": "scripts/test_test_xml.py",
     "tools/buck2/target-inventory.json": "scripts/test_ci_plan.py",
     "tools/buck2/test_shard.py": "scripts/test_buck2_test_contract.py",

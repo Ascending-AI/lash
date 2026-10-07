@@ -175,7 +175,6 @@ fn write_head(fleet: FleetFormat) -> Vec<u8> {
         schema_version: meta.schema_version,
         session_id: session,
         config: meta.config,
-        published_by_shift: meta.published_by_shift,
     })
     .expect("encode the head")
 }

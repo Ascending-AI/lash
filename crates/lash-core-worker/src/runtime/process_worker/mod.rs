@@ -29,7 +29,6 @@ pub struct DurableProcessWorkerConfig {
     /// worker's process work.
     pub work_cadence: crate::WorkCadencePolicy,
     process_work: crate::ProcessWorkWiring,
-    queued_work: Arc<dyn crate::SessionWorkEngine>,
     pub turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot,
     /// The host owner identity a process runtime runs under.
     pub lease_owner: crate::LeaseOwnerIdentity,
@@ -40,7 +39,6 @@ impl DurableProcessWorkerConfig {
         plugin_host: Arc<PluginHost>,
         runtime_host: RuntimeHostConfig,
         process_work: crate::ProcessWorkWiring,
-        queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         let plugin_host = Arc::new(
@@ -53,7 +51,6 @@ impl DurableProcessWorkerConfig {
             runtime_host,
             work_cadence: crate::WorkCadencePolicy::default(),
             process_work,
-            queued_work,
             turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot::default(),
             lease_owner,
         }
@@ -86,14 +83,12 @@ impl DurableProcessWorkerConfig {
         plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
         runtime_host: RuntimeHostConfig,
         process_work: crate::ProcessWorkWiring,
-        queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::new(
             Arc::new(PluginHost::new(plugin_factories.into_iter().collect())),
             runtime_host,
             process_work,
-            queued_work,
             lease_owner,
         )
     }
@@ -102,14 +97,12 @@ impl DurableProcessWorkerConfig {
         plugin_stack: PluginStack,
         runtime_host: RuntimeHostConfig,
         process_work: crate::ProcessWorkWiring,
-        queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::from_plugin_factories(
             plugin_stack.into_factories(),
             runtime_host,
             process_work,
-            queued_work,
             lease_owner,
         )
     }
@@ -347,7 +340,6 @@ impl DurableProcessWorker {
                 host: self.config.runtime_host.clone(),
                 plugin_host: Arc::clone(&self.config.plugin_host),
                 process_work: self.process_wiring(),
-                queued_work: Arc::clone(&self.config.queued_work),
                 lease_owner: self.config.lease_owner.clone(),
                 turn_phase_probe,
             },

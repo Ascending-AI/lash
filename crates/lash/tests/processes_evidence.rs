@@ -77,7 +77,6 @@ fn processes_area_witnesses() {
         Vec<std::sync::Arc<dyn lash::plugins::PluginFactory>>,
         lash::durability::RuntimeHostConfig,
         lash::process::ProcessWorkWiring,
-        std::sync::Arc<dyn lash::runtime::SessionWorkEngine>,
         lash::persistence::LeaseOwnerIdentity,
     ) -> lash::durability::DurableProcessWorkerConfig =
         lash::durability::DurableProcessWorkerConfig::from_plugin_factories;

@@ -1,6 +1,6 @@
 //! A session's two-phase delete (ADR 0109 §4) compared across the three
-//! backends: the close's acknowledgement arms the `SessionDelete` obligation
-//! on the session's catalog row, and the session-delete ledger counts exactly
+//! backends: a close leaves the `SessionDelete` obligation unarmed until the
+//! session actor acknowledges it, and the session-delete ledger counts exactly
 //! the session's undelivered cleanup — scope closes on its runs and
 //! parent-end plans of the scopes it owns — and nothing another session owes;
 //! and a closed session counts as closing until its physical delete.
@@ -10,7 +10,7 @@
 //! presence and state, never by value.
 
 use lash_core::store::session_delete::SessionCleanup;
-use lash_core::store::{IntentApplication, ObligationKey, ObligationKind, ObligationSettlement};
+use lash_core::store::{ObligationKey, ObligationKind, ObligationSettlement};
 use lash_core::{ScopeId, StoreSet, TurnId};
 
 use super::*;
@@ -68,7 +68,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
     // The Postgres database is shared, so the closing count is read as a
     // difference across this case's own close.
     let closing_before = ledger.count_closing().await.expect("count closing");
-    let intent = factory
+    factory
         .begin_session_close(own, T0)
         .await
         .expect("begin the close")
@@ -84,60 +84,6 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
     out.push(format!(
         "delete after an unacknowledged close -> {:?}",
         pending.map(|o| o.state)
-    ));
-    let application = factory
-        .claim_intent_application(intent.id, T0 + 1)
-        .await
-        .expect("claim the close's application");
-    out.push(format!(
-        "close application applies -> {}",
-        matches!(application, IntentApplication::Apply(_))
-    ));
-    // The acknowledgement is claim-fenced: the relay's claim on the close's
-    // `ControlIntent` obligation.
-    let claim = stores
-        .obligation_ledger(ObligationKind::ControlIntent)
-        .claim(
-            intent
-                .obligation_id()
-                .expect("the close armed its obligation"),
-            &lash_core::store::ClaimToken::mint(),
-            T0 + 1,
-            60_000,
-        )
-        .await
-        .expect("claim the close's obligation")
-        .expect("the close's obligation is due")
-        .token;
-    factory
-        .acknowledge_intent(intent.id, &claim, T0 + 2)
-        .await
-        .expect("acknowledge the close");
-    let armed = ledger
-        .delete_obligation(own)
-        .await
-        .expect("read the delete obligation")
-        .expect("the acknowledgement armed the delete");
-    out.push(format!(
-        "delete after the acknowledgement -> {:?}",
-        armed.state
-    ));
-    factory
-        .acknowledge_intent(intent.id, &claim, T0 + 3)
-        .await
-        .expect("acknowledge again");
-    let kept = ledger
-        .delete_obligation(own)
-        .await
-        .expect("read the delete obligation")
-        .expect("still armed");
-    out.push(format!(
-        "a repeated acknowledgement keeps the obligation -> {}",
-        kept == armed
-    ));
-    out.push(format!(
-        "an acknowledged close keeps its session closing -> {}",
-        ledger.count_closing().await.expect("count closing") - closing_before
     ));
 
     let cleanup = |label: &'static str, cleanup: SessionCleanup| {

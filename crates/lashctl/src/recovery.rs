@@ -1,6 +1,6 @@
 //! Deployment recovery through the same core API embedders use.
 use super::{CliError, Exit, OPERATOR_POOL_MAX, USAGE, stalled_result};
-use lash::{ObligationId, ObligationKind, ParkedWorkRef};
+use lash::{ObligationId, ObligationKind};
 use serde_json::{Value, json};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -12,16 +12,6 @@ pub(super) struct Invocation {
 }
 
 pub(super) enum Command {
-    Parks(lash::ParkedWorkQuery),
-    Events {
-        after: lash::ParkedWorkEventsCursor,
-        limit: NonZeroUsize,
-    },
-    Park {
-        verb: ParkVerb,
-        target: ParkedWorkRef,
-        park_id: lash::persistence::ParkId,
-    },
     Stalled {
         kind: ObligationKind,
         after: Option<ObligationId>,
@@ -36,29 +26,9 @@ pub(super) enum Command {
     },
 }
 
-pub(super) enum ParkVerb {
-    Redrive,
-    Cancel,
-    Fork,
-}
-
 impl Command {
     pub(super) fn name(&self) -> &'static str {
         match self {
-            Self::Parks(_) => "park-list",
-            Self::Events { .. } => "park-events",
-            Self::Park {
-                verb: ParkVerb::Redrive,
-                ..
-            } => "park-redrive",
-            Self::Park {
-                verb: ParkVerb::Cancel,
-                ..
-            } => "park-cancel",
-            Self::Park {
-                verb: ParkVerb::Fork,
-                ..
-            } => "park-fork",
             Self::Stalled { .. } => "stalled-list",
             Self::Rearm { .. } => "stalled-rearm",
             Self::DeploymentStatus { .. } => "deployment-status",
@@ -68,9 +38,6 @@ impl Command {
 
 fn usage() -> CliError {
     CliError::new(Exit::Usage, USAGE)
-}
-fn decode<T: serde::de::DeserializeOwned>(value: &str) -> Result<T, CliError> {
-    serde_json::from_str(value).map_err(|error| CliError::new(Exit::Usage, error.to_string()))
 }
 fn kind(value: &str) -> Result<ObligationKind, CliError> {
     ObligationKind::ALL
@@ -105,42 +72,6 @@ pub(super) fn split_sqlite_path(rest: &[String]) -> Result<(Vec<&str>, Option<Pa
 pub(super) fn parse(verb: &str, rest: &[String]) -> Result<Invocation, CliError> {
     let (words, sqlite_path) = split_sqlite_path(rest)?;
     let command = match (verb, words.as_slice()) {
-        ("park", [action @ ("list" | "events"), options @ ..]) => {
-            let (after, limit) = page(options)?;
-            if *action == "list" {
-                let mut query = lash::ParkedWorkQuery::all(limit);
-                query.after = after.map(decode).transpose()?;
-                Command::Parks(query)
-            } else {
-                Command::Events {
-                    after: after.map(decode).transpose()?.unwrap_or_default(),
-                    limit,
-                }
-            }
-        }
-        ("park", [action @ ("redrive" | "cancel" | "fork"), options @ ..]) => {
-            let mut target = None;
-            let mut park_id = None;
-            for pair in options.chunks(2) {
-                let [flag, value] = pair else {
-                    return Err(usage());
-                };
-                match *flag {
-                    "--target" if target.is_none() => target = Some(decode(value)?),
-                    "--park-id" if park_id.is_none() => park_id = Some(decode(value)?),
-                    _ => return Err(usage()),
-                }
-            }
-            Command::Park {
-                verb: match *action {
-                    "redrive" => ParkVerb::Redrive,
-                    "cancel" => ParkVerb::Cancel,
-                    _ => ParkVerb::Fork,
-                },
-                target: target.ok_or_else(usage)?,
-                park_id: park_id.ok_or_else(usage)?,
-            }
-        }
         ("stalled", ["list", delivery, options @ ..]) => {
             let (after, limit) = page(options)?;
             Command::Stalled {
@@ -249,60 +180,6 @@ impl Invocation {
 
 async fn execute(core: &lash::LashCore, command: &Command) -> Result<Value, CliError> {
     Ok(match command {
-        Command::Parks(query) => {
-            let page = core.parked_work().list(query).await.map_err(core_error)?;
-            json!({"records": page.records.into_iter().map(|park| json!({"target": park.target, "park_id": park.park_id, "reason": park.reason, "since_ms": park.since_ms, "last_refused_ms": park.last_refused_ms, "attempts": park.attempts})).collect::<Vec<_>>(), "next": page.next})
-        }
-        Command::Events { after, limit } => {
-            let page = core
-                .parked_work()
-                .events(after, *limit)
-                .await
-                .map_err(core_error)?;
-            json!({"events": page.events.into_iter().map(|event| json!({"target": event.target, "park_id": event.park_id, "at_ms": event.at_ms, "kind": event.kind})).collect::<Vec<_>>(), "next": page.next})
-        }
-        Command::Park {
-            verb,
-            target,
-            park_id,
-        } => match verb {
-            ParkVerb::Redrive => match core
-                .parked_work()
-                .redrive(target, *park_id)
-                .await
-                .map_err(park_error)?
-            {
-                lash::RedriveAccepted::Run(result) => {
-                    json!({"kind":"turn", "intent":result.intent, "applied":result.applied, "turn_id":result.run})
-                }
-                lash::RedriveAccepted::Process { process, park } => {
-                    json!({"kind":"process", "process_id":process, "park_id":park})
-                }
-            },
-            ParkVerb::Cancel => {
-                let result = core
-                    .parked_work()
-                    .cancel(target, *park_id)
-                    .await
-                    .map_err(park_error)?;
-                json!({"intent":result.intent, "terminal":result.terminal, "applied":result.applied})
-            }
-            ParkVerb::Fork => {
-                let ParkedWorkRef::Turn {
-                    session_id,
-                    turn_id,
-                } = target
-                else {
-                    return Err(park_error(lash::ParkVerbRefused::ForkRequiresTurn));
-                };
-                let result = core
-                    .parked_work()
-                    .fork(session_id, turn_id, *park_id)
-                    .await
-                    .map_err(park_error)?;
-                json!({"intent":result.intent, "cancelled":result.cancelled, "new_turn":result.new_run, "applied":result.applied})
-            }
-        },
         Command::Stalled { kind, after, limit } => {
             let records = core
                 .stalled_obligations(*kind, after.as_ref(), limit.saturating_add(1))
@@ -332,43 +209,12 @@ pub(super) fn core_error(error: lash::EmbedError) -> CliError {
     }
 }
 
-fn park_error(error: lash::ParkVerbRefused) -> CliError {
-    use lash::ParkVerbRefused;
-    let refusal = match &error {
-        ParkVerbRefused::NotParked => json!({"kind":"not_parked"}),
-        ParkVerbRefused::ParkSuperseded { current } => {
-            json!({"kind":"park_superseded", "current":current})
-        }
-        ParkVerbRefused::Redriving { intent } => json!({"kind":"redriving", "intent":intent}),
-        ParkVerbRefused::IntentOpen { intent } => json!({"kind":"intent_open", "intent":intent}),
-        ParkVerbRefused::SessionDeleted => json!({"kind":"session_deleted"}),
-        ParkVerbRefused::SessionClosing => json!({"kind":"session_closing"}),
-        ParkVerbRefused::ForkRequiresTurn => json!({"kind":"fork_requires_turn"}),
-        ParkVerbRefused::SubstrateRefused { code, message } => {
-            json!({"kind":"engine_refused", "code":code, "message":message})
-        }
-        ParkVerbRefused::Store(_) => {
-            return match error {
-                ParkVerbRefused::Store(error) => store_error(error),
-                _ => unreachable!(),
-            };
-        }
-        _ => json!({"kind":"park_refused", "message":error.to_string()}),
-    };
-    CliError::refused(Exit::Refused, error.to_string(), &refusal)
-}
-
 fn store_error(error: lash_core_store::store::StoreError) -> CliError {
     use lash_core_store::store::StoreError;
     match error {
         error @ (StoreError::Incompatible { .. } | StoreError::WriterFenced { .. }) => {
             CliError::store(error)
         }
-        StoreError::ParkFeedCursorCompacted { horizon } => CliError::refused(
-            Exit::Refused,
-            "park event cursor was compacted; relist and restart the feed".into(),
-            &json!({"kind":"cursor_compacted", "horizon":horizon}),
-        ),
         error => {
             let exit = if error.is_transient() {
                 Exit::Unexpected

@@ -78,13 +78,12 @@ repos:
         files: '^(crates/.*\.(rs|sql)|examples/.*\.(rs|sql)|runbooks/.*\.(rs|sql)|scripts/check-durable-sql\.py)$'
         pass_filenames: false
 
-      # Mirrors CI Lint "Check substrate boundary" — includes the
-      # shift-determinism ratchet (FIG-3672), whose allowlist can only shrink.
+      # Mirrors CI Lint "Check substrate boundary".
       - id: substrate-boundary
         name: substrate boundary
         language: system
         entry: bash scripts/check-substrate-boundary.sh
-        files: '^(\.pre-commit-config\.yaml|crates/.*\.rs|scripts/(check-substrate-boundary\.sh|shift-determinism-allowlist\.(count|txt)|test_check_substrate_boundary\.py))$'
+        files: '^(\.pre-commit-config\.yaml|crates/.*\.rs|scripts/(check-substrate-boundary\.sh|test_check_substrate_boundary\.py))$'
         pass_filenames: false
 
       # Mirrors CI Lint "Check substrate port ledger": every test that uses the

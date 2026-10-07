@@ -114,48 +114,34 @@ pub(super) fn corrupt_graph_node_case() -> GeneratedCase {
     }
 }
 
-/// A corrupt pending-turn-input row must refuse both its list paths and the
-/// run admission that binds it, with no residue.
+/// A corrupt pending-turn-input row must refuse both its list paths, with no
+/// residue.
 pub(super) fn corrupt_pending_turn_input_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::CorruptPendingTurnInputRefusals,
         operations: vec![
             seed_graph(),
             StoreOperation::EnqueueNextTurnInput,
-            StoreOperation::AcquireSessionLease {
-                slot: LeaseSlot::First,
-                owner: "corrupt-input-owner",
-            },
             seed(CorruptTarget::PendingTurnInputJson),
             shift(SurfaceMethod::ListPendingTurnInputs),
             shift(SurfaceMethod::ListTurnInputApplications),
-            shift(SurfaceMethod::AdmitRun {
-                lease: LeaseSlot::First,
-            }),
             restore(CorruptTarget::PendingTurnInputJson),
         ],
     }
 }
 
-/// A corrupt queued-work payload must refuse every queued-work list path and
-/// the run admission that binds it, with no residue. The admission's head is
-/// read before the corruption is seeded.
+/// A corrupt queued-work payload must refuse every queued-work list path,
+/// with no residue.
 pub(super) fn corrupt_queued_work_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::CorruptQueuedWorkRefusals,
         operations: vec![
             seed_graph(),
             StoreOperation::EnqueueAdmittableQueuedWork,
-            StoreOperation::AcquireSessionLease {
-                slot: LeaseSlot::First,
-                owner: "corrupt-queued-work-owner",
-            },
-            shift(SurfaceMethod::ListPendingQueuedWork),
             seed(CorruptTarget::QueuedWorkPayloadJson),
             shift(SurfaceMethod::ListQueuedWork),
             shift(SurfaceMethod::ListPendingQueuedWork),
             shift(SurfaceMethod::PendingSessionWorkOrdering),
-            shift(SurfaceMethod::AdmitListedQueuedHead),
             restore(CorruptTarget::QueuedWorkPayloadJson),
         ],
     }

@@ -99,9 +99,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         commit_budget: _, // host operational policy
         session_id,
         expected_head_revision: _, // CAS is excluded from replay identity
-        shift_fence: _,            // transaction predicate, not content
         run_terminal: _,           // a turn run's end; no boundary carries one
-        park_run: _,               // a store instruction, not content
         frame_transition: _,       // a store instruction derived from the graph
         config,
         execution_config, // the run's view: the identity's config when present

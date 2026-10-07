@@ -35,7 +35,6 @@ mod fork_plan;
 mod graph_commit;
 mod head_ownership;
 pub mod history;
-pub mod ingress_obligation;
 mod ingress_terminal;
 pub mod plugin_writers;
 pub use ingress_terminal::{IngressTerminal, IngressTerminalCause};
@@ -59,9 +58,8 @@ pub mod recovery_leader;
 mod retention;
 mod run;
 mod session_head;
-mod shift_admission;
 pub use session_head::{
-    BlobRef, SessionAdmission, SessionHeadMeta, SessionHeadPayload, SessionMeta,
+    BlobRef, SessionAdmission, SessionHeadMeta, SessionHeadPayload, SessionHeadRef, SessionMeta,
     validate_session_id,
 };
 pub mod runtime_commit;
@@ -69,7 +67,6 @@ mod runtime_commit_plan;
 mod semantic_boundary;
 mod session_config_views;
 mod session_view;
-mod shift_fence;
 pub mod tool_material;
 pub use session_config_views::{
     execution_session_config_from_state, persisted_session_config_from_state,
@@ -113,10 +110,7 @@ pub use commit_identity::{
 };
 pub use control_intent::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    ControlIntentStore, IntentApplication, IntentObligation, IntentSettle, RunIntentFacts,
-    RunIntentPlan, RunIntentRefused, RunIntentRequest, RunVerb, decide_intent_acknowledgement,
-    decide_intent_application, decide_intent_refusal, decide_run_intent, forked_run,
-    stored_intent_kind, stored_intent_state,
+    ControlIntentStore, stored_intent_kind, stored_intent_state,
 };
 pub use error::{AnchorUnavailable, StoreError, StoreFault, StoreRefusal, WindowAnchorViolation};
 pub use fencing::{
@@ -151,9 +145,8 @@ pub use maintenance::{
 pub use obligation::*;
 pub use park::{
     EnginePark, ParkCancelCause, ParkEventColumns, ParkEventKind, ParkFeedCursor, ParkFeedEvent,
-    ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport, StoreTransition,
-    StoredParkRedrive, StoredTurnParkHead, TurnPark, TurnParkOrigin, TurnParkQuery, TurnParkTarget,
-    TurnParkWrite, TurnParkWriteDecision, UnparkCause, UnsettledTurnCounts, decide_turn_park_write,
+    ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport, StoreTransition, UnparkCause,
+    UnsettledTurnCounts,
 };
 pub use pending_follow_on::{
     DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnAdmission, FollowOnBlocked, FollowOnRecovery,
@@ -174,13 +167,10 @@ pub use realization::commit_runtime_state_verified;
 pub use recovery_leader::*;
 pub use retention::{RetentionBound, RetentionReport};
 pub use run::{
-    AdmitRunRequest, AdmittedHead, AdmittedHeadVerdict, CheckpointAdmission,
-    CheckpointAdmissionRequest, InMemoryRunLedger, PreparedRunAdmission, RunAdmission,
-    RunAdmissionAnswer, RunAdmissionRefusal, RunCommittedOutcome, RunEndOutcome, RunExecutor,
-    RunStore, RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite,
-    RunTerminalWriteDecision, RunTurns, StoredRunTerminal, TurnCommitId, UnfinishedRun,
-    admit_run_with_trace, decide_run_terminal_write, refused_execution_owns_run,
-    run_binding_conflict,
+    AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest, InMemoryRunLedger, RunAdmission,
+    RunCommittedOutcome, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause, RunTerminalKind,
+    RunTerminalWrite, RunTerminalWriteDecision, RunTurns, StoredRunTerminal, TurnCommitId,
+    UnfinishedRun, decide_run_terminal_write, run_binding_conflict,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
@@ -201,14 +191,7 @@ pub use semantic_boundary::{
     CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION,
     RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION,
 };
-pub use session_fault::{SessionFault, SessionFaultOrigin, SessionFaultRecord};
-pub use shift_admission::*;
-pub use shift_fence::{
-    AdmissionId, HeldRun, InMemoryShiftEpochs, RunHold, RunStartNonce, SessionHeadRef,
-    ShiftEpochSeal, ShiftEpochSealDecision, ShiftEpochStore, ShiftFence, ShiftRaise,
-    StoredShiftEpoch, close_admission, current_shift_fence, decide_run_hold,
-    decide_shift_epoch_seal, require_current_shift_fence,
-};
+pub use session_fault::{SessionFault, SessionFaultOrigin, SessionFaultRecord, SessionFaultStore};
 pub use tool_material::ToolMaterialStore;
 
 pub use session_view::SessionStore;
@@ -351,9 +334,7 @@ impl RuntimeCommit {
             commit_budget: _,
             session_id: _,
             expected_head_revision: _,
-            shift_fence: _,
             run_terminal,
-            park_run,
             frame_transition,
             config: _,
             execution_config: _,
@@ -382,7 +363,6 @@ impl RuntimeCommit {
                 && trace.is_none()
                 && committed_attachment_ids.is_empty()
                 && run_terminal.is_none()
-                && park_run.is_none()
                 && frame_transition.is_none(),
             "append-session-nodes constructor gained unrelated settlement side effects"
         );
@@ -435,18 +415,10 @@ impl RuntimeCommit {
             .unwrap_or_default()
     }
 
-    /// Refuse a commit that settles ingress rows or applies commands
-    /// without presenting a shift fence, or names one row twice, before any
-    /// backend reads a row (FIG-3927).
+    /// Refuse a commit whose command outcomes name batches it does not
+    /// settle, or whose settlement names one row twice, before any backend
+    /// reads a row (FIG-3927).
     pub fn validate_ingress_settlement(&self) -> Result<(), StoreError> {
-        let settles_rows = self
-            .ingress
-            .as_ref()
-            .is_some_and(|ingress| !ingress.is_empty())
-            || self
-                .applied_commands
-                .as_ref()
-                .is_some_and(|commands| !commands.batch_ids.is_empty());
         if self.command_outcomes.keys().any(|batch_id| {
             !self
                 .applied_commands
@@ -456,11 +428,6 @@ impl RuntimeCommit {
             return Err(StoreError::Backend(
                 "command outcomes must name batches settled by the same commit".to_string(),
             ));
-        }
-        if settles_rows && self.shift_fence.is_none() {
-            return Err(StoreError::IngressSettlementUnfenced {
-                session_id: self.session_id.clone(),
-            });
         }
         if let Some(ingress) = self.ingress.as_ref() {
             ingress.validate(&self.session_id)?;
@@ -517,9 +484,7 @@ impl RuntimeCommit {
             commit_budget,
             session_id: state.session_id.clone(),
             expected_head_revision: state.head_revision,
-            shift_fence: None,
             run_terminal: None,
-            park_run: None,
             frame_transition: None,
             config,
             execution_config,
@@ -550,12 +515,6 @@ impl RuntimeCommit {
         let node_id_mapping = self.graph.derive_node_ids(&session_id, &operation)?;
         self.turn_commit = RuntimeTurnCommitStamp::new(operation);
         Ok((self, node_id_mapping))
-    }
-
-    /// Present `fence`: the shift fence the commit's run was sealed under.
-    pub fn fenced_by(mut self, fence: ShiftFence) -> Self {
-        self.shift_fence = Some(Box::new(fence));
-        self
     }
 
     /// Settle `ingress` atomically with the runtime commit.
@@ -700,17 +659,15 @@ pub trait SessionCommitStore: Send + Sync {
     /// absent marker reads as [`OLDEST_SUPPORTED_SESSION_STATE_VERSION`].
     async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError>;
 
-    /// Revalidate `fence`, then classify the independently read session-state
-    /// marker of `fence.session()`.
+    /// Classify the session-state marker of `session_id`.
     async fn admit_session_state(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
     ) -> Result<SessionStateAdmission, StoreError> {
-        let version = self.read_session_state_version(fence.session()).await?;
+        let version = self.read_session_state_version(session_id).await?;
         Ok(SessionStateAdmission {
-            session_id: fence.session().clone(),
+            session_id: session_id.clone(),
             version,
-            shift_epoch: fence.epoch(),
         })
     }
 
@@ -731,7 +688,7 @@ pub trait SessionCommitStore: Send + Sync {
     /// [`load_session_window(Admitted(base))`](SessionHistoryStore::load_session_window)
     /// until the session's next admission replaces it (FIG-3682).
     ///
-    /// Called by a turn's admission under the session's shift fence, once per
+    /// Called by a turn's admission, once per
     /// first execution. While it stands, maintenance that reclaims
     /// unreferenced checkpoints treats `base.checkpoint` as a root, so a
     /// replay of the admitted turn can rebuild its input state even after the
@@ -739,7 +696,7 @@ pub trait SessionCommitStore: Send + Sync {
     /// never reclaims a superseded checkpoint answers `Ok(())` explicitly.
     async fn retain_admission_base(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
         base: &SessionHeadRef,
     ) -> Result<(), StoreError>;
 
@@ -767,12 +724,6 @@ pub trait SessionCommitStore: Send + Sync {
 
     /// Atomically persist one settled runtime commit and its durable receipt
     /// for `commit.session_id`.
-    ///
-    /// A commit carrying [`RuntimeCommit::shift_fence`] is refused
-    /// [`StoreError::StaleShiftFence`] unless the fence is still the session's
-    /// current one. Implementors must validate it inside the write
-    /// transaction and before receipt lookup, so superseded authority vetoes
-    /// even an otherwise replayable operation identity.
     ///
     /// Implementors must look up the `(session_id, operation storage key)`
     /// receipt inside the write transaction before the fresh append ancestor
@@ -825,7 +776,7 @@ pub trait SessionCommitStore: Send + Sync {
     ///
     /// A shift that recovers a pending follow-on calls this before the
     /// follow-on's first effect. Implementations must, in one transaction,
-    /// validate `fence` against the session's current shift fence, refuse with
+    /// refuse with
     /// [`StoreError::FollowOnNotPending`] unless the head's
     /// `pending_follow_on_json` names `follow_on_turn_id`, and write the fact
     /// back with `attempts` raised by one. The head revision does not move:
@@ -833,7 +784,7 @@ pub trait SessionCommitStore: Send + Sync {
     /// Returns the raised fact.
     async fn raise_pending_follow_on_attempts(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
         follow_on_turn_id: &TurnId,
     ) -> Result<PendingFollowOn, StoreError>;
 
@@ -861,60 +812,29 @@ pub trait SessionCommitStore: Send + Sync {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionMeta>, StoreError>;
-
-    /// Record that `park.session_id`'s turn parked (FIG-3586, FIG-3600,
-    /// FIG-3659).
-    ///
-    /// Written on the abort path of a turn whose refusal parks it, before its
-    /// lease is released. A first park allocates the feed sequence the record's
-    /// `park_id` names and appends a `Parked` event; a re-park of the same
-    /// turn keeps `park_id` and `since_ms`, bumps `attempts` and
-    /// `last_refused_ms`, and writes no event; a different turn's park
-    /// supersedes the stored one (`Unparked{Superseded}` then `Parked`).
-    /// Any commit of the session clears the park in the commit's transaction,
-    /// as does a cancel that ends the parked run and the session's
-    /// deletion: a park is live exactly while its turn is.
-    ///
-    /// Returns the record as stored, so the caller can report the allocated
-    /// `park_id` and attempt count.
-    async fn record_turn_park(
-        &self,
-        park: &TurnParkWrite,
-    ) -> Result<StoreTransition<TurnPark>, StoreError>;
-
-    /// The session's parked turn, if its turn is parked.
-    async fn load_turn_park(&self, session_id: &SessionId) -> Result<Option<TurnPark>, StoreError>;
 }
 
 /// What [`TurnInputStore::admit_pending_turn_inputs`] committed (FIG-3975).
 ///
 /// The admission's own commit can answer the follow-ups the caller owes
-/// next — the session state-version check, the claim of each admitted row's
-/// still-due ingress obligation for the producer's immediate ask, and the
-/// committed head the queue event publishes against — so a backend that can
-/// fold them returns [`TurnInputAdmission::Fused`] instead of leaving the
-/// caller three more store round-trips.
+/// next — the session state-version check and the committed head the queue
+/// event publishes against — so a backend that can fold them returns
+/// [`TurnInputAdmission::Fused`] instead of leaving the caller more store
+/// round-trips. Either way the admission woke the session actor in its own
+/// transaction (ADR 0132 §12).
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum TurnInputAdmission {
-    /// The admission transaction did it all: `ingress_claims` holds — in
-    /// request order — the claim of each admitted row's still-due ingress
-    /// obligation, taken under the caller's TTL for the producer's immediate
-    /// ask, and `committed_head` is the session head the same transaction
-    /// read (`None` before the session's first checkpoint).
+    /// The admission transaction did it all: `committed_head` is the
+    /// session head the same transaction read (`None` before the session's
+    /// first checkpoint).
     Fused {
         /// The admitted rows, in request order.
         rows: Vec<crate::PendingTurnInput>,
-        /// The claims the transaction took for the rows whose ingress
-        /// obligation was still due, in row order. A replayed row whose
-        /// obligation is claimed or settled contributes no claim, so
-        /// `ingress_claims` may be shorter than `rows`.
-        ingress_claims: Vec<ClaimedObligation>,
         /// The session head the committed transaction read.
         committed_head: Option<SessionHeadMeta>,
     },
-    /// Only the rows were enqueued: the caller owes each admitted row's
-    /// ingress claim through the relay and the head read itself.
+    /// Only the rows were enqueued: the caller owes the head read itself.
     Enqueued(Vec<crate::PendingTurnInput>),
 }
 
@@ -985,18 +905,13 @@ pub trait TurnInputStore: Send + Sync {
     /// with whatever else the admission's own commit can answer riding the
     /// same write transaction ([`TurnInputAdmission`]).
     ///
-    /// An implementation that folds takes each admitted row's still-due
-    /// ingress-obligation claim inside the transaction — under
-    /// `ingress_claim_ttl_ms`, the relay's claim TTL, so the claim outlives
-    /// the send it precedes — and reads the committed head before it
+    /// An implementation that folds reads the committed head before it
     /// commits. One that does not fold still runs the version check before
-    /// the enqueue and answers
-    /// [`TurnInputAdmission::Enqueued`], leaving the caller to claim through
-    /// the relay and read the head itself.
+    /// the enqueue and answers [`TurnInputAdmission::Enqueued`], leaving the
+    /// caller to read the head itself.
     async fn admit_pending_turn_inputs(
         &self,
         batch: crate::PendingTurnInputBatch,
-        ingress_claim_ttl_ms: u64,
     ) -> Result<TurnInputAdmission, StoreError>;
 
     /// The run spec `session_id` interned under `hash`, if it holds one
@@ -1089,15 +1004,12 @@ pub trait TurnInputStore: Send + Sync {
 
 impl dyn TurnInputStore {
     /// Persist the one draft a child session's turn accepts before its
-    /// acceptor executes it inline (ADR 0069 §6): a batch of one
-    /// [`held_by_acceptor`](crate::PendingTurnInputBatch::held_by_acceptor)
-    /// for `claim_ttl_ms`, the relay's claim TTL.
+    /// acceptor executes it (ADR 0069 §6).
     pub async fn accept_pending_turn_input(
         &self,
         input: crate::PendingTurnInputDraft,
-        claim_ttl_ms: u64,
     ) -> Result<crate::PendingTurnInput, StoreError> {
-        let batch = crate::PendingTurnInputBatch::one(input).held_by_acceptor(claim_ttl_ms);
+        let batch = crate::PendingTurnInputBatch::one(input);
         crate::PendingTurnInputBatch::only(self.enqueue_pending_turn_inputs(batch).await?)
     }
 }
@@ -1144,16 +1056,15 @@ pub trait QueuedWorkStore: Send + Sync {
     /// The run is returned only when the earliest open batch is classified
     /// as [`QueuedWorkClass::SessionCommand`]. Every command is a run of one
     /// ([`SESSION_COMMAND_BATCHES_PER_RUN`](crate::store::queued_work::SESSION_COMMAND_BATCHES_PER_RUN)),
-    /// applied alone in the commit that settles it. In one transaction fenced by
-    /// `fence`, the run's ingress obligations are acknowledged delivered
-    /// (ADR 0109 §3). The applying commit settles the rows
+    /// applied alone in the commit that settles it. The applying commit
+    /// settles the rows
     /// ([`RuntimeCommit::applied_commands`]). The read admits the run: a
     /// host withdrawal no longer reaches a delivered command
     /// ([`Self::cancel_queued_work_batch`]), so plugin code a command runs
     /// only ever runs for a command that will settle.
     async fn open_session_command_run(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
 
     /// Withdraw an open queued-work batch from durable ingress into its
@@ -1163,8 +1074,8 @@ pub trait QueuedWorkStore: Send + Sync {
     /// Returns `None` when the batch is missing, a tombstone, or held by a
     /// run; callers must treat that as "already admitted or completed" and
     /// must not restore any stale local draft state.
-    /// A command whose fenced read delivered its obligation is being applied
-    /// and cannot be withdrawn.
+    /// A command the command lane read is being applied and cannot be
+    /// withdrawn.
     ///
     async fn cancel_queued_work_batch(
         &self,
@@ -1342,8 +1253,8 @@ pub type PluginWriterRangesFuture<'a> = std::pin::Pin<
 /// deletion), [`SessionCommitStore`] (atomic head commits, metadata and
 /// parks), [`SessionHistoryStore`] (frame windows and paged history),
 /// [`TurnInputStore`] (pending turn-input lifecycle), [`QueuedWorkStore`]
-/// (queued-work ingress and claiming), [`ShiftEpochStore`] (the shift epoch a
-/// session shift's seal raises, FIG-3600), [`RunStore`] (logical runs'
+/// (queued-work ingress and claiming), [`SessionFaultStore`] (a session's
+/// standing fault, ADR 0109 §9), [`RunStore`] (logical runs'
 /// terminal evidence and input bindings) and [`StoreMaintenance`]
 /// (vacuum/GC). The segments share one transactional domain: claims granted by
 /// the input and queue segments settle atomically in
@@ -1369,7 +1280,7 @@ pub trait RuntimeStore:
     + SessionHistoryStore
     + TurnInputStore
     + QueuedWorkStore
-    + ShiftEpochStore
+    + SessionFaultStore
     + RunStore
     + StoreMaintenance
 {
@@ -1383,7 +1294,7 @@ impl<T> RuntimeStore for T where
         + SessionHistoryStore
         + TurnInputStore
         + QueuedWorkStore
-        + ShiftEpochStore
+        + SessionFaultStore
         + RunStore
         + StoreMaintenance
         + ?Sized

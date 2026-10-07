@@ -145,8 +145,6 @@ def browser(args):
                 return snapshot if len(pending) == 1 and pending[0]["admitted_run"] else None
             admitted = poll("accepted input durably bound to its Run", admission)
             work = admitted["pending_turn_inputs"][0]
-            before_meta = admitted["session_meta"][0]
-            assert before_meta["shift_epoch"] > 0 and before_meta["shift_admission_id"]
             before_trace = trace(session)
             assert not [r for r in before_trace if r["type"] == "turn_completed"]
             killed = control("kill-host")
@@ -193,9 +191,6 @@ def browser(args):
             late.goto(url, wait_until="domcontentloaded")
             projection.assert_three_layers(late, state(), rows, directory / "s29-late-browser.json", navigation_wait="domcontentloaded")
             after = store(session)
-            meta = after["session_meta"][0]
-            assert meta["shift_epoch"] > before_meta["shift_epoch"] or (
-                meta["shift_epoch"] == before_meta["shift_epoch"] and meta["shift_admission_id"] == before_meta["shift_admission_id"]), "sealed fence regressed"
             assert len([r for r in final["transcript"] if r["kind"] == "user" and not r["suppressed"]]) == 1, "recovery duplicated input"
             terminals = [r for r in trace(session) if r["type"] == "turn_completed"]
             assert len(terminals) == 1 and terminals[0]["outcome"]["status"] == "completed", terminals

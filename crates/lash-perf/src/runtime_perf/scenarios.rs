@@ -32,7 +32,6 @@ impl ScenarioDurability {
 pub(crate) enum ScenarioPhaseContract {
     StableDurableTurn,
     CheckpointCurve,
-    QueuedWorkContention,
     HighTraffic,
     FrameResidencyCurve,
 }
@@ -102,8 +101,6 @@ pub(crate) enum RuntimePerfScenario {
     LiveReplayPressure,
     TraceJsonlStandard,
     TraceJsonlExtended,
-    QueuedWorkAdmissionStress,
-    TurnInputIngressInterrupt,
     DeepTurnComposition,
     TurnStartGate,
     TurnCancelRoundTrip,
@@ -114,7 +111,6 @@ pub(crate) enum RuntimePerfScenario {
     DurableAgentChildTurnSqlite,
     DurableCheckpointCurveSqlite,
     DurableCheckpointCurvePostgres,
-    DurableQueuedWorkContentionSqlite,
     WriterContention2Workers,
     WriterContention8Workers,
     AsyncProcessSettlement2Children,
@@ -139,7 +135,6 @@ pub(crate) struct ScenarioWiring {
     pub(crate) large_tool_catalog_plugin: bool,
     pub(crate) workbench_trigger_plugin: bool,
     pub(crate) measure_commit_bytes: bool,
-    pub(crate) session_store_handle: bool,
 }
 
 impl ScenarioWiring {
@@ -152,7 +147,6 @@ impl ScenarioWiring {
         large_tool_catalog_plugin: false,
         workbench_trigger_plugin: false,
         measure_commit_bytes: true,
-        session_store_handle: false,
     };
 }
 
@@ -336,20 +330,19 @@ macro_rules! runtime_perf_metadata {
 
 impl RuntimePerfScenario {
     #[cfg(test)]
-    pub(crate) const DURABLE_REPRESENTATIVE_TURNS: [Self; 10] = [
+    pub(crate) const DURABLE_REPRESENTATIVE_TURNS: [Self; 9] = [
         Self::DurableStandardToolTurnSqlite,
         Self::DurableRlmCheckpointTurnSqlite,
         Self::DurableAgentChildTurnSqlite,
         Self::DurableCheckpointCurveSqlite,
         Self::DurableCheckpointCurvePostgres,
-        Self::DurableQueuedWorkContentionSqlite,
         Self::HighTrafficLoadSqlite,
         Self::HighTrafficKneeSqlite,
         Self::FrameResidencyCurveSqlite,
         Self::FrameResidencyCurvePostgres,
     ];
 
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 55] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 52] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -605,22 +598,6 @@ impl RuntimePerfScenario {
             "Measures RLM protocol trace JSONL output for protocol-level turns."
         ),
         runtime_perf_metadata!(
-            QueuedWorkAdmissionStress,
-            "queued_work_admission_stress",
-            Standard,
-            RuntimeScenario,
-            "Measures core queued-work admission/renew/complete invariants below protocol and facade ownership.",
-            ["runtime_scenario_queued_work_admission_keeps_pending_next_turn_input"]
-        ),
-        runtime_perf_metadata!(
-            TurnInputIngressInterrupt,
-            "turn_input_ingress_interrupt",
-            Standard,
-            RuntimeScenario,
-            "Measures core turn-input ingress, interrupt, reclaim, and completion below protocol and facade ownership.",
-            ["runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"]
-        ),
-        runtime_perf_metadata!(
             DeepTurnComposition,
             "deep_turn_composition",
             Rlm,
@@ -708,17 +685,6 @@ impl RuntimePerfScenario {
             false
         ),
         runtime_perf_metadata!(
-            DurableQueuedWorkContentionSqlite,
-            "durable_queued_work_contention_sqlite",
-            Standard,
-            RuntimeScenario,
-            "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared SQLite backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
-            Durable,
-            QueuedWorkContention,
-            wiring { session_store_handle = true },
-            false
-        ),
-        runtime_perf_metadata!(
             WriterContention2Workers,
             "writer_contention_2_workers",
             Standard,
@@ -803,7 +769,7 @@ impl RuntimePerfScenario {
             false
         ),
     ];
-    pub(crate) const KNOWN: [Self; 55] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 52] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; RUNTIME_PERF_DEFAULT_COUNT] =
@@ -863,11 +829,6 @@ impl RuntimePerfScenario {
             self,
             Self::HighTrafficLoadSqlite | Self::HighTrafficKneeSqlite
         )
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn is_queued_work_contention(self) -> bool {
-        matches!(self, Self::DurableQueuedWorkContentionSqlite)
     }
 
     pub(crate) fn is_high_traffic_knee(self) -> bool {
@@ -934,7 +895,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 55] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 52] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -988,9 +949,6 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 55] {
         RuntimePerfScenario::METADATA[49].scenario,
         RuntimePerfScenario::METADATA[50].scenario,
         RuntimePerfScenario::METADATA[51].scenario,
-        RuntimePerfScenario::METADATA[52].scenario,
-        RuntimePerfScenario::METADATA[53].scenario,
-        RuntimePerfScenario::METADATA[54].scenario,
     ]
 }
 

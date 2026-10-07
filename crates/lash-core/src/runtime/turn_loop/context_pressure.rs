@@ -110,7 +110,6 @@ pub(super) struct ContextPressureStep<'a, 'run> {
     pub(super) trace_turn_id: &'a TurnId,
     pub(super) previous_prompt_usage: Option<crate::TokenUsage>,
     pub(super) scoped_effect_controller: &'a ActorContext,
-    pub(super) shift_fence: Option<&'a ShiftFence>,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'run ()>,
 }
@@ -126,7 +125,6 @@ impl LashRuntime {
             trace_turn_id,
             previous_prompt_usage,
             scoped_effect_controller,
-            shift_fence,
         } = step;
         let session = self.session.as_ref().ok_or_else(|| {
             RuntimeError::new(
@@ -148,7 +146,7 @@ impl LashRuntime {
             Arc::clone(&self.host.core.clock),
         );
         let manager = self
-            .runtime_session_services_for_turn(shift_fence, &reads)
+            .runtime_session_services_for_turn(&reads)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -252,7 +250,6 @@ impl LashRuntime {
                         task,
                         seed,
                         scoped_effect_controller,
-                        shift_fence,
                     )
                     .await?;
                     return Ok(ContextPressureOutcome {
@@ -282,7 +279,6 @@ impl LashRuntime {
         task: String,
         seed: Vec<crate::SessionAppendNode>,
         committing: &ActorContext,
-        shift_fence: Option<&ShiftFence>,
     ) -> Result<(), RuntimeError> {
         let opened = match self.open_context_pressure_frame(write, records, seed).await {
             Ok(opened) => opened,
@@ -293,12 +289,7 @@ impl LashRuntime {
         };
         let frame_node_id = opened.result.frame_node_id.clone();
         if let Err(error) = self
-            .persist_context_pressure_frame(
-                write,
-                opened,
-                committing.execution_scope(),
-                shift_fence,
-            )
+            .persist_context_pressure_frame(write, opened, committing.execution_scope())
             .await
         {
             // Nothing of the frame is durable: drop it from resident state,
@@ -365,7 +356,6 @@ impl LashRuntime {
         write: &ContextPressureWrite<'_>,
         opened: crate::runtime::frame_open::OpenedFrame,
         committing: &crate::ExecutionScope,
-        shift_fence: Option<&ShiftFence>,
     ) -> Result<(), RuntimeError> {
         // A storeless runtime keeps the frame resident, as it keeps
         // everything else.
@@ -381,7 +371,6 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(super::runtime_error_from_store_commit)?;
-        commit.shift_fence = shift_fence.cloned().map(Box::new);
         commit.frame_transition = super::turn_boundary::committed_frame_transition(
             &self.state,
             opened.ended,

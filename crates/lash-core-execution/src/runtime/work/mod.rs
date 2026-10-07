@@ -1,8 +1,9 @@
-//! The deployment ports an engine serves work through: session shifts
-//! ([`SessionWorkEngine`], [`SessionShifts`]) and durable processes
-//! ([`ProcessWorkSubstrate`], [`ProcessWorkWiring`]), with the engine-neutral
-//! pieces every engine shares: the registry awaiter, the wake-delivery driver
-//! and their pacing.
+//! The deployment port durable processes are served through
+//! ([`ProcessWorkSubstrate`], [`ProcessWorkWiring`]), with the pieces every
+//! deployment shares: the registry awaiter, the wake-delivery driver and
+//! their pacing. Session work has no port: a producer wakes the session
+//! actor in its own transaction ([`crate::Backend::wake_session`] outside
+//! one).
 
 use std::sync::Arc;
 
@@ -12,198 +13,10 @@ mod durable;
 
 pub use awaiter::ProcessRegistryAwaiter;
 pub use cadence::{WorkCadenceError, WorkCadencePolicy};
-pub use durable::{DurableProcessWork, DurableSessionWork};
+pub use durable::DurableProcessWork;
 
 use super::process::{ProcessRegistry, WatchedRegistry};
-use crate::{PluginError, ProcessAwaitOutput, SessionId};
-
-/// Deployment port for **session work** (ADR 0104 O1/O2, FIG-3600): the
-/// engine that runs each session's shift.
-///
-/// Acceptance is the store's: an item is durable before anyone is told about
-/// it, and its admission transaction records the shift it owes as an ingress
-/// obligation (ADR 0109 §3). The producer then asks the engine for that execute
-/// through [`request_shift`](Self::request_shift); the obligation relay
-/// retries an ask that did not reach the engine. The engine serializes
-/// executes per session (one authorized shift at a time) and dedupes a request
-/// id across its runs, so a repeated ask for the same request never executes
-/// twice, and a shift admits whatever is pending, not only the item that
-/// asked.
-///
-/// The engine runs the kernel's shift through the [`SessionShifts`] the core
-/// installs; it never decides what a shift admits.
-#[async_trait::async_trait]
-pub trait SessionWorkEngine: Send + Sync {
-    /// Ask the engine to work `session` for `request`. Returns once the ask
-    /// is handed to the engine, not once the shift ran.
-    fn schedule_shift(&self, session: &SessionId, request: crate::engine::ShiftRequestId);
-
-    /// Ask the engine to work `session` for `request` and answer once the
-    /// engine accepted the ask (ADR 0109): the delivery of an obligation
-    /// whose effect is a shift, never fire-and-forget. Idempotent under a
-    /// repeated `request`: the engine dedupes it as
-    /// [`schedule_shift`](Self::schedule_shift) does. A refusal is the
-    /// obligation's attempt failing; its relay retries it.
-    ///
-    /// The default accepts the ask once it is scheduled.
-    async fn request_shift(
-        &self,
-        session: &SessionId,
-        request: crate::engine::ShiftRequestId,
-    ) -> Result<(), crate::engine::EngineRefusal> {
-        self.schedule_shift(session, request);
-        Ok(())
-    }
-
-    /// Install the core's shift: get-or-init. One engine can back several
-    /// cores, and exactly one `SessionShifts` serves it, so a caller hands in a
-    /// candidate and uses whatever comes back.
-    ///
-    /// The caller keeps what comes back for as long as it serves shifts. It
-    /// may be an installation wrapping the `SessionShifts`
-    /// ([`SessionShifts::runs_on`] tells whose), whose life, not that of a
-    /// shift still running on the `SessionShifts`, decides whether the install holds
-    /// (FIG-4017).
-    fn install_session_shifts(&self, shifts: Arc<dyn SessionShifts>) -> Arc<dyn SessionShifts>;
-
-    /// The engine half of the control verbs over this engine's executions
-    /// (FIG-3600 S7). An engine that holds no execution across calls has
-    /// nothing to release.
-    fn control(&self) -> Arc<dyn crate::engine::SessionControlEngine> {
-        Arc::new(crate::engine::NoEngineControl)
-    }
-
-    /// Wait until a shift of `session` that began after `request` was
-    /// scheduled has stopped, and answer how it stopped.
-    ///
-    /// Idempotent, and it never executes twice for one request id: an ask the
-    /// engine lost is re-issued under the same id. This is a **wake
-    /// barrier**, not the resolution of anything the request followed: a
-    /// shift may stop before an input's run settled (another `SessionShifts` holds
-    /// it, or the run parked), so a caller reads the outcome from the store
-    /// and uses this only to learn that a shift ran, or that the engine
-    /// refused one.
-    ///
-    /// The default is an engine that runs no shifts: it refuses with
-    /// [`SessionWorkUnavailable`](crate::RuntimeErrorCode::SessionWorkUnavailable).
-    async fn await_shift(
-        &self,
-        session: &SessionId,
-        request: &crate::engine::ShiftRequestId,
-    ) -> Result<crate::engine::ShiftOutcome, crate::engine::ShiftAbort> {
-        Err(session_work_unavailable(session, request))
-    }
-}
-
-/// The refusal of an engine that runs no shifts, asked to wait for one.
-fn session_work_unavailable(
-    session: &SessionId,
-    request: &crate::engine::ShiftRequestId,
-) -> crate::engine::ShiftAbort {
-    crate::engine::ShiftAbort::Refused(crate::RuntimeError::new(
-        crate::RuntimeErrorCode::SessionWorkUnavailable,
-        format!(
-            "shift `{}` of session `{session}` cannot be awaited: this deployment runs no session work",
-            request.as_str()
-        ),
-    ))
-}
-
-/// The kernel's shift of one session, as the core installs it on its
-/// [`SessionWorkEngine`].
-///
-/// The engine splits the shift over its own handlers: it calls
-/// [`admit`](Self::admit) from its per-session handler and
-/// [`execute_run`](Self::execute_run) from its per-run handler, each on a
-/// controller over that handler's own journal.
-#[async_trait::async_trait]
-pub trait SessionShifts: Send + Sync {
-    /// Whether this `SessionShifts` owns the deployment recovery pass.
-    fn owns_reconciliation(&self) -> bool {
-        false
-    }
-
-    /// Whether the shifts this `SessionShifts` serves run on `shifts`: it is `shifts`
-    /// itself, or an engine's installation of it
-    /// ([`SessionWorkEngine::install_session_shifts`]).
-    fn runs_on(&self, shifts: &dyn SessionShifts) -> bool {
-        std::ptr::addr_eq(self, shifts)
-    }
-
-    /// One bounded recovery pass, invoked on the engine's own schedule.
-    async fn reconcile(
-        &self,
-        _cursor: &crate::engine::ReconcileCursor,
-        _page: std::num::NonZeroUsize,
-    ) -> Result<crate::engine::ReconcileCursor, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "SessionShifts::reconcile",
-        })
-    }
-
-    /// Hold `session`'s runtime open for one attempt of one shift
-    /// invocation (FIG-3825).
-    ///
-    /// The engine takes the hold before the attempt's first admission and
-    /// drops it when the attempt ends. While it is held, every run the
-    /// attempt calls that runs in this process shares one runtime, opened by
-    /// the first of them. An attempt ends where the engine stops polling
-    /// it, so nothing held crosses into the next attempt: that one opens
-    /// the session afresh, as a redrive in a fresh process does. An
-    /// admission runs on no runtime, so a replayed one never waits for a
-    /// run still running on the held runtime (FIG-4729, FIG-4755). The
-    /// default holds nothing.
-    fn hold_shift(&self, _session: &SessionId) -> crate::engine::ShiftHold {
-        crate::engine::ShiftHold::empty()
-    }
-
-    /// Admission `ordinal` of `request`: one recorded `AdmitShift` step
-    /// through `controller`, which serves
-    /// [`shift_admission_scope`](crate::engine::shift_admission_scope).
-    /// The step reads the session's store and takes no runtime's writer:
-    /// an admission never waits for a run running in this process
-    /// (FIG-4755).
-    async fn admit(
-        &self,
-        controller: crate::ActorContext,
-        request: &crate::engine::ShiftRequest,
-        ordinal: u32,
-    ) -> Result<crate::engine::AdmitVerdict, crate::engine::ShiftAbort>;
-
-    /// Run `admitted`'s run to its terminal through `controller`, which
-    /// serves [`shift_run_scope`](crate::engine::shift_run_scope): the
-    /// recorded `SealShiftAdmission` step, then the run's turns and commits.
-    ///
-    /// The run does not close the run's scope. When it made the run's
-    /// terminal evidence durable, [`RunEnd::owed_close`] names the run
-    /// whose close the engine then runs through
-    /// [`close_run`](Self::close_run) (FIG-4035).
-    ///
-    /// [`RunEnd::owed_close`]: crate::engine::RunEnd::owed_close
-    async fn execute_run(
-        &self,
-        controller: crate::ActorContext,
-        admitted: crate::engine::Admitted,
-    ) -> crate::engine::RunEnd;
-
-    /// Close the lifetime scope of `run` of `session`, whose terminal
-    /// evidence is durable: the run's recorded `CloseRunScope` step
-    /// through `controller`, which serves the
-    /// [`shift_run_scope`](crate::engine::shift_run_scope) of the admitted
-    /// run whose execution owed it (FIG-4035).
-    ///
-    /// It opens no runtime of the session, so it runs beside the session's
-    /// next run: the engine runs it in a journal of its own, never one the
-    /// session's shift awaits. The close is the immediate delivery of the
-    /// `ScopeClose` obligation the terminal commit armed (ADR 0109 §3), so a
-    /// close this never runs is still delivered once, by the relay.
-    async fn close_run(
-        &self,
-        controller: crate::ActorContext,
-        session: &SessionId,
-        run: &crate::TurnId,
-    ) -> Result<(), crate::engine::ShiftAbort>;
-}
+use crate::{PluginError, ProcessAwaitOutput};
 
 /// Deployment port for durable process work.
 #[async_trait::async_trait]
@@ -424,39 +237,5 @@ impl ProcessWorkSubstrate for NoProcessWork {
         _key: &str,
     ) -> Result<(), PluginError> {
         Ok(())
-    }
-}
-
-/// Explicit session-work engine for deployments that run no shifts: an ask
-/// is dropped (the rows stay pending for a host that executes them itself), and
-/// the `SessionShifts` a core installs is kept only so the get-or-init answer holds.
-#[derive(Default)]
-pub struct NoSessionWork {
-    shifts: std::sync::OnceLock<Arc<dyn SessionShifts>>,
-}
-
-impl NoSessionWork {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-impl std::fmt::Debug for NoSessionWork {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("NoSessionWork")
-    }
-}
-
-impl SessionWorkEngine for NoSessionWork {
-    fn schedule_shift(&self, session: &SessionId, request: crate::engine::ShiftRequestId) {
-        tracing::trace!(
-            session_id = session.as_str(),
-            request = request.as_str(),
-            "session shift not scheduled: deployment runs no session work"
-        );
-    }
-
-    fn install_session_shifts(&self, shifts: Arc<dyn SessionShifts>) -> Arc<dyn SessionShifts> {
-        Arc::clone(self.shifts.get_or_init(|| shifts))
     }
 }

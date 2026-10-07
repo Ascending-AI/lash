@@ -11,7 +11,6 @@ use lash_store_sql::turn_ingress::{
     TurnIngressStatements, cancel_requests::CancelRequestStatements,
     pending_inputs::PendingInputStatements, queued_batches::QueuedBatchStatements,
     run_specs::RunSpecStatements, tool_intent_submissions::ToolIntentSubmissionStatements,
-    turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -25,14 +24,11 @@ mod pending_inputs;
 mod queued_work;
 #[path = "turn_ingress/tool_intents.rs"]
 mod tool_intents;
-#[path = "turn_ingress/turn_parks.rs"]
-mod turn_parks;
 
 pub(crate) use family::TurnIngressPostgresStatements;
 pub(crate) use pending_inputs::PendingInputPostgresStatements;
 pub(crate) use queued_work::QueuedBatchPostgresStatements;
 pub(crate) use tool_intents::ToolIntentSubmissionPostgresStatements;
-pub(crate) use turn_parks::{TurnParkClockPostgresStatements, TurnParkPostgresStatements};
 
 /// The `pending_turn_inputs.state` partitions this family's statements name.
 ///
@@ -104,14 +100,7 @@ pub(crate) struct TurnIngressSql {
     pub(crate) queued_batches_postgres: QueuedBatchPostgresStatements,
     /// `turn_cancel_requests`, shared.
     pub(crate) cancel_requests: CancelRequestStatements,
-    /// `turn_parks`, shared.
-    pub(crate) turn_parks: TurnParkStatements,
-    /// `turn_parks`, PostgreSQL only.
-    pub(crate) turn_parks_postgres: TurnParkPostgresStatements,
-    /// `turn_park_clock`, PostgreSQL only.
-    pub(crate) turn_park_clock: TurnParkClockPostgresStatements,
-    /// `turn_park_events`, shared.
-    pub(crate) turn_park_events: TurnParkEventStatements,
+
     /// `tool_intent_submissions`, shared.
     pub(crate) tool_intents: ToolIntentSubmissionStatements,
     /// `tool_intent_submissions`, PostgreSQL only.
@@ -129,10 +118,7 @@ static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
         queued_batches: QueuedBatchStatements::render(dialect),
         queued_batches_postgres: QueuedBatchPostgresStatements::render(dialect),
         cancel_requests: CancelRequestStatements::render(dialect),
-        turn_parks: TurnParkStatements::render(dialect),
-        turn_parks_postgres: TurnParkPostgresStatements::render(dialect),
-        turn_park_clock: TurnParkClockPostgresStatements::render(dialect),
-        turn_park_events: TurnParkEventStatements::render(dialect),
+
         tool_intents: ToolIntentSubmissionStatements::render(dialect),
         tool_intents_postgres: ToolIntentSubmissionPostgresStatements::render(dialect),
     }

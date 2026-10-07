@@ -96,12 +96,6 @@ pub struct SessionHeadPayload {
     #[serde(default = "default_root_session_id")]
     pub session_id: SessionId,
     pub config: crate::PersistedSessionConfig,
-    /// Whether the commit that published this head presented a shift fence:
-    /// a run's own commit or the command lane's, never a lane-less host
-    /// write (FIG-4201). A run resumed on a fresh journal reads it to tell a
-    /// head its own commits moved from one another writer overtook.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub published_by_shift: bool,
 }
 
 /// Fully assembled session-head metadata returned by a store.
@@ -125,9 +119,6 @@ pub struct SessionHeadMeta {
     /// The follow-on the head owes, from the `pending_follow_on_json` column
     /// (ADR 0101 §3). It is not part of [`SessionHeadPayload`].
     pub pending_follow_on: Option<PendingFollowOn>,
-    /// Whether a fenced commit published the head
-    /// ([`SessionHeadPayload::published_by_shift`]).
-    pub published_by_shift: bool,
 }
 
 impl SessionHeadMeta {
@@ -164,7 +155,6 @@ impl SessionHeadMeta {
             checkpoint_ref: None,
             leaf_node_id: None,
             pending_follow_on: None,
-            published_by_shift: false,
         }
     }
 
@@ -216,7 +206,6 @@ impl SessionHeadMeta {
             checkpoint_ref,
             leaf_node_id,
             pending_follow_on: None,
-            published_by_shift: payload.published_by_shift,
         })
     }
 
@@ -226,7 +215,6 @@ impl SessionHeadMeta {
             schema_version: self.schema_version,
             session_id: self.session_id.clone(),
             config: self.config.clone(),
-            published_by_shift: self.published_by_shift,
         }
     }
 }
@@ -241,7 +229,6 @@ impl Default for SessionHeadPayload {
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
             ),
-            published_by_shift: false,
         }
     }
 }
@@ -249,4 +236,32 @@ impl Default for SessionHeadPayload {
 impl crate::store::DurableRecord for SessionHeadPayload {
     const SURFACE: crate::store::SurfaceFormat =
         crate::surface_format!(crate::store::SESSION_HEAD_META_SCHEMA_VERSION);
+}
+
+/// A session head a run names: the state generation, the head revision, the
+/// leaf of its graph and its checkpoint (ADR 0105 §2, §9).
+///
+/// A commit names the head it expects. An admission names the head it was
+/// admitted on, its base: a replay of the admitted turn rebuilds the turn's
+/// input state from this reference, never from the live head, which the turn's
+/// own commit or a lane service may have advanced since (FIG-3682). `leaf` and
+/// `checkpoint` are `None` for a session with no committed graph or checkpoint.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct SessionHeadRef {
+    pub generation: u32,
+    pub revision: u64,
+    pub leaf: Option<crate::NodeId>,
+    pub checkpoint: Option<BlobRef>,
+}
+
+impl SessionHeadRef {
+    /// Whether `head` is this head: the same revision, leaf and checkpoint.
+    /// The generation is the store's, not the head row's, so it is compared
+    /// by the caller that read it.
+    #[must_use]
+    pub fn names_head(&self, head: &SessionHeadMeta) -> bool {
+        self.revision == head.head_revision
+            && self.leaf == head.leaf_node_id
+            && self.checkpoint == head.checkpoint_ref
+    }
 }

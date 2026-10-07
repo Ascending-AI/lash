@@ -5,9 +5,10 @@
 //!
 //! * **ingress** — [`pending_inputs`] holds the turn inputs a caller submitted
 //!   and [`queued_batches`] the work batches enqueued against
-//!   a session. A row a run admitted names it (`admitted_run`), written
-//!   under the session's current shift fence, and only that run's commit or
-//!   terminal write lets go of it again (FIG-3927).
+//!   a session. A row a run admitted names it (`admitted_run` and
+//!   `admitted_by`), written by the session actor's owner commit that
+//!   admitted the run, and only that run's commit or terminal write lets go
+//!   of it again (FIG-3927).
 //! * **cancellation** — [`cancel_requests`] holds the cancel request a turn
 //!   accepted, which its session's owner honours.
 //!
@@ -20,9 +21,6 @@ pub mod pending_inputs;
 pub mod queued_batches;
 pub mod run_specs;
 pub mod tool_intent_submissions;
-pub mod turn_park_clock;
-pub mod turn_park_events;
-pub mod turn_parks;
 
 crate::statements! {
     /// Statements over more than one of the family's tables, which both
@@ -49,69 +47,20 @@ crate::statements! {
                 WHERE session_id = ?1 AND run = ?2 AND terminal_kind IS NOT NULL
              )";
 
-        /// Clear session `?1`'s park once its turn holds no work: no
-        /// unsettled input bound to the parked run, and the parked run
-        /// holds no admission without terminal evidence (only its own
-        /// terminal write ends an admitted run). The returning projection
-        /// names the park the `Cancelled` event logs.
-        delete_released_turn_park_returning = "DELETE FROM turn_parks
-             WHERE session_id = ?1
-               AND NOT EXISTS(
-                  SELECT 1 FROM session_run_inputs binding
-                  JOIN pending_turn_inputs pti
-                    ON pti.session_id = binding.session_id
-                   AND pti.input_id = binding.input_id
-                  WHERE binding.session_id = ?1
-                    AND binding.run = turn_parks.turn_id
-                    AND {{nonterminal_turn_input_state(pti.state)}}
-               )
-               AND NOT EXISTS(
-                  SELECT 1 FROM session_runs sr
-                  WHERE sr.session_id = ?1
-                    AND sr.run = turn_parks.turn_id
-                    AND sr.admission_json IS NOT NULL
-                    AND sr.terminal_kind IS NULL
-               )
-             RETURNING turn_id, park_id";
-
-        /// The deployment's parked turns, the oldest live park's instant,
-        /// its turns in flight — a session with an unfinished run or a
-        /// parked turn — and the unparked ones among them its stalled close
-        /// holds: the session's `close_session` intent stalled its obligation
-        /// (ADR 0109 §4), so no delete retires the run until an operator
-        /// re-arms it.
+        /// The deployment's turns in flight — sessions with an unfinished
+        /// run — and those among them whose close is pending: the session's
+        /// `close_session` intent holds them until its close retires the run.
         count_unsettled_turns = "SELECT
-                (SELECT COUNT(*) FROM turn_parks) AS parked_turns,
-                (SELECT MIN(since_ms) FROM turn_parks) AS oldest_parked_since_ms,
-                (SELECT COUNT(*) FROM (
-                    SELECT session_id FROM turn_parks
-                    UNION
-                    SELECT session_id FROM session_runs
+                (SELECT COUNT(DISTINCT session_id) FROM session_runs
                     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
-                ) AS unsettled) AS in_flight_turns,
-                (SELECT COUNT(*) FROM (
-                    SELECT session_id FROM session_runs
+                ) AS in_flight_turns,
+                (SELECT COUNT(DISTINCT session_id) FROM session_runs
                     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
-                ) AS held
-                WHERE held.session_id NOT IN (SELECT session_id FROM turn_parks)
-                  AND held.session_id IN (
-                      SELECT session_id FROM control_intents
-                      WHERE kind = 'close_session' AND obligation_state = 'stalled'
-                  )) AS held_by_stalled_close";
-
-        /// Live parked turns grouped by their reason's stable code. All four
-        /// `ParkReasonCode` cells stay observable: the reader zero-fills.
-        count_parks_by_reason = "SELECT reason_code, COUNT(*) AS parks
-             FROM turn_parks
-             GROUP BY reason_code";
-
-        /// Live retired-generation parks grouped by the generation their
-        /// admission recorded (FIG-3571): read off the projected, indexed
-        /// `park_executable_generation` column, never the reason payload.
-        count_retired_parks_by_executable_generation = "SELECT park_executable_generation, COUNT(*) AS parks
-             FROM turn_parks
-             WHERE park_executable_generation IS NOT NULL
-             GROUP BY park_executable_generation";
+                      AND session_id IN (
+                          SELECT session_id FROM control_intents
+                          WHERE kind = 'close_session' AND state = 'pending'
+                      )
+                ) AS held_by_stalled_close";
 
         /// Whether session `?1` has work a runner could pick up: an unfinished
         /// run, an open queued batch, or an open input. With no unfinished

@@ -6,10 +6,7 @@ use std::sync::Arc;
 use super::process::{
     ArtifactReferrerPorts, ProcessEngineRegistry, ProcessExecutionEnvStore, ProcessRegistry,
 };
-use super::{
-    DeploymentStore, NoSessionWork, ProcessWorkSubstrate, ProcessWorkWiring, SessionWorkEngine,
-    TerminationPolicy,
-};
+use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring, TerminationPolicy};
 
 /// Required host configuration for all runtimes.
 ///
@@ -243,16 +240,16 @@ pub struct RuntimeControlConfig {
 }
 
 impl RuntimeControlConfig {
-    /// The [`RelayPolicy`](crate::runtime::shift::relay::RelayPolicy) every
+    /// The [`RelayPolicy`](crate::runtime::obligations::relay::RelayPolicy) every
     /// obligation relay of this runtime runs under: the recovery pass's
     /// attempt budget on the kinds' shared retry shape. There is no second
     /// default — a `deliver_now` construction that skips it builds a relay
     /// at the 30 s kind default instead.
     #[must_use]
-    pub fn relay_policy(&self) -> crate::runtime::shift::relay::RelayPolicy {
-        crate::runtime::shift::relay::RelayPolicy {
+    pub fn relay_policy(&self) -> crate::runtime::obligations::relay::RelayPolicy {
+        crate::runtime::obligations::relay::RelayPolicy {
             attempt_budget_ms: self.recovery_pass.attempt_ms(),
-            ..crate::runtime::shift::relay::RelayPolicy::default()
+            ..crate::runtime::obligations::relay::RelayPolicy::default()
         }
     }
 }
@@ -495,7 +492,6 @@ impl EmbeddedRuntimeHost {
 pub struct ProcessRuntimeHost {
     embedded: EmbeddedRuntimeHost,
     wiring: ProcessWorkWiring,
-    queued_work: Arc<dyn SessionWorkEngine>,
 }
 
 impl ProcessRuntimeHost {
@@ -503,27 +499,13 @@ impl ProcessRuntimeHost {
         &self.embedded
     }
 
-    /// Construct a process-capable host from a registry/port wiring and a
-    /// required queued-work port.
-    pub fn with_ports(
-        embedded: EmbeddedRuntimeHost,
-        wiring: ProcessWorkWiring,
-        queued_work: Arc<dyn SessionWorkEngine>,
-    ) -> Self {
-        Self {
-            embedded,
-            wiring,
-            queued_work,
-        }
+    /// Construct a process-capable host from a registry/port wiring.
+    pub fn with_ports(embedded: EmbeddedRuntimeHost, wiring: ProcessWorkWiring) -> Self {
+        Self { embedded, wiring }
     }
 
     pub fn process_registry(&self) -> &Arc<dyn ProcessRegistry> {
         self.wiring.registry()
-    }
-
-    /// Return the required queued-work port installed on this host.
-    pub fn queued_work(&self) -> &Arc<dyn SessionWorkEngine> {
-        &self.queued_work
     }
 
     pub fn process_work(&self) -> &Arc<dyn ProcessWorkSubstrate> {
@@ -532,31 +514,21 @@ impl ProcessRuntimeHost {
 }
 
 /// A runtime's exhaustive work wiring. Process wiring owns both the registry
-/// and the port that executes its work.
+/// and the port that executes its work. Session work needs no port: its
+/// producers wake the session actor in their own transaction (ADR 0132).
 #[derive(Clone)]
 pub enum RuntimeWork {
-    SessionsOnly {
-        queued: Arc<dyn SessionWorkEngine>,
-    },
-    Processes {
-        wiring: ProcessWorkWiring,
-        queued: Arc<dyn SessionWorkEngine>,
-    },
+    SessionsOnly,
+    Processes { wiring: ProcessWorkWiring },
 }
 
 impl RuntimeWork {
-    pub fn sessions_only(queued: Arc<dyn SessionWorkEngine>) -> Self {
-        Self::SessionsOnly { queued }
+    pub fn sessions_only() -> Self {
+        Self::SessionsOnly
     }
 
-    pub fn processes(wiring: ProcessWorkWiring, queued: Arc<dyn SessionWorkEngine>) -> Self {
-        Self::Processes { wiring, queued }
-    }
-
-    pub fn queued_arc(&self) -> &Arc<dyn SessionWorkEngine> {
-        match self {
-            Self::SessionsOnly { queued } | Self::Processes { queued, .. } => queued,
-        }
+    pub fn processes(wiring: ProcessWorkWiring) -> Self {
+        Self::Processes { wiring }
     }
 
     pub fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
@@ -565,22 +537,14 @@ impl RuntimeWork {
 
     pub fn process_wiring(&self) -> Option<&ProcessWorkWiring> {
         match self {
-            Self::SessionsOnly { .. } => None,
-            Self::Processes { wiring, .. } => Some(wiring),
+            Self::SessionsOnly => None,
+            Self::Processes { wiring } => Some(wiring),
         }
     }
 
-    pub fn with_queued(self, queued: Arc<dyn SessionWorkEngine>) -> Self {
-        match self {
-            Self::SessionsOnly { .. } => Self::SessionsOnly { queued },
-            Self::Processes { wiring, .. } => Self::Processes { wiring, queued },
-        }
-    }
-
-    /// Install process wiring while retaining the queued-work port.
+    /// Install process wiring.
     pub fn with_process_wiring(self, wiring: ProcessWorkWiring) -> Self {
-        let queued = Arc::clone(self.queued_arc());
-        Self::Processes { wiring, queued }
+        Self::Processes { wiring }
     }
 }
 
@@ -604,10 +568,6 @@ impl RuntimeHost {
 
     pub fn process_work(&self) -> Option<&Arc<dyn ProcessWorkSubstrate>> {
         self.work.process_wiring().map(ProcessWorkWiring::port)
-    }
-
-    pub fn queued_work(&self) -> &Arc<dyn SessionWorkEngine> {
-        self.work.queued_arc()
     }
 
     /// `policy` with the lazy binding of its recorded model. Nothing is
@@ -657,10 +617,7 @@ impl RuntimeHost {
 
 impl From<EmbeddedRuntimeHost> for RuntimeHost {
     fn from(value: EmbeddedRuntimeHost) -> Self {
-        Self::from_embedded_with_work(
-            value,
-            RuntimeWork::sessions_only(Arc::new(NoSessionWork::new())),
-        )
+        Self::from_embedded_with_work(value, RuntimeWork::sessions_only())
     }
 }
 
@@ -668,7 +625,7 @@ impl From<ProcessRuntimeHost> for RuntimeHost {
     fn from(value: ProcessRuntimeHost) -> Self {
         Self {
             core: value.embedded.core,
-            work: RuntimeWork::processes(value.wiring, value.queued_work),
+            work: RuntimeWork::processes(value.wiring),
         }
     }
 }

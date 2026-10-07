@@ -25,7 +25,7 @@ use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupAuthorities, ArtifactCleanupPorts, ArtifactCleanupRelay, RetainedStart,
     SubscriptionRevisionStanding,
 };
-use lash_core::runtime::shift::relay::{RelayPolicy, relay_due};
+use lash_core::runtime::obligations::relay::{RelayPolicy, relay_due};
 use lash_core::testing::TestClock;
 
 const DEFINITION_ENGINE: &str = "definition-law";

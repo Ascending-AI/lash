@@ -205,7 +205,6 @@ pub async fn attachment_materialization_turn_witnesses(
                                     crate::testing::test_standard_protocol_factories(),
                                 )
                                 .with_store(session_store)
-                                .with_queued_work(Arc::new(NoSessionWork::new()))
                                 .build(),
                         )
                         .await

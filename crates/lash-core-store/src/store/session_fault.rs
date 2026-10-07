@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::StoreError;
 use crate::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionId, TurnId};
 
 /// What met the fault.
@@ -132,6 +133,39 @@ impl SessionFault {
             }),
         }
     }
+}
+
+/// A session's standing fault in its store (ADR 0109 §9): recorded once,
+/// read, listed and cleared by an operator.
+#[async_trait::async_trait]
+pub trait SessionFaultStore: Send + Sync {
+    /// Record `record` as `session_id`'s fault at `at_ms` (ADR 0109 §9) and
+    /// answer the fault that now stands: a session already faulted keeps its
+    /// first. `None` when the session has no `session_meta` row.
+    async fn record_session_fault(
+        &self,
+        session_id: &SessionId,
+        record: &SessionFaultRecord,
+        at_ms: u64,
+    ) -> Result<Option<SessionFault>, StoreError>;
+
+    /// `session_id`'s standing fault, read by itself.
+    async fn session_fault(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionFault>, StoreError>;
+
+    /// The standing session faults after session `after`, in session-id
+    /// order, at most `limit`.
+    async fn list_session_faults(
+        &self,
+        after: Option<&SessionId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<SessionFault>, StoreError>;
+
+    /// Clear `session_id`'s fault, an operator's verb: the session admits
+    /// again. `false` when it had none.
+    async fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError>;
 }
 
 #[cfg(test)]

@@ -50,22 +50,15 @@ fn store_error(err: impl std::fmt::Display) -> crate::RuntimeError {
 #[derive(Clone)]
 pub struct DurableSessionOps {
     session_id: SessionId,
-    ingress: super::shift::IngressRelay,
     live_replay_store: Arc<dyn LiveReplayStore>,
 }
 
 impl DurableSessionOps {
-    /// Bind the session identity, the ingress relay that delivers what an
-    /// acceptance admits (ADR 0109 §3), and the Live Replay publisher queue
-    /// events are published through.
-    pub fn new(
-        session_id: SessionId,
-        ingress: super::shift::IngressRelay,
-        live_replay_store: Arc<dyn LiveReplayStore>,
-    ) -> Self {
+    /// Bind the session identity and the Live Replay publisher queue events
+    /// are published through.
+    pub fn new(session_id: SessionId, live_replay_store: Arc<dyn LiveReplayStore>) -> Self {
         Self {
             session_id,
-            ingress,
             live_replay_store,
         }
     }
@@ -73,32 +66,6 @@ impl DurableSessionOps {
     /// The session these operations are bound to.
     pub fn session_id(&self) -> &SessionId {
         &self.session_id
-    }
-
-    /// The ingress obligation of the accepted input or batch `item_id`, when
-    /// its delivery to the engine stalled (ADR 0109 §3).
-    ///
-    /// # Errors
-    ///
-    /// A store failure.
-    pub async fn stalled_ingress(
-        &self,
-        item_id: &str,
-    ) -> Result<Option<crate::store::StalledObligation>, crate::StoreError> {
-        self.ingress.stalled(&self.session_id, item_id).await
-    }
-
-    /// The shift the relay's current claim of item `item_id` asked for, while
-    /// one is outstanding ([`IngressRelay::current_ask`](crate::runtime::shift::IngressRelay::current_ask)).
-    ///
-    /// # Errors
-    ///
-    /// A store failure.
-    pub async fn current_ingress_ask(
-        &self,
-        item_id: &str,
-    ) -> Result<Option<crate::engine::ShiftRequestId>, crate::StoreError> {
-        self.ingress.current_ask(&self.session_id, item_id).await
     }
 
     /// A failed head read proves no revision. Invalidate replay continuity
@@ -156,11 +123,11 @@ impl DurableSessionOps {
         }
     }
 
-    /// Durably accept host turn input under `run_spec`, then deliver the
-    /// shift its admission owes (ADR 0109 §3).
+    /// Durably accept host turn input under `run_spec`, waking the session
+    /// actor in the same transaction (ADR 0132 §12).
     ///
-    /// Success acknowledges durable acceptance only; a delivery that fails is
-    /// retried by the ingress relay from the row's obligation.
+    /// Success acknowledges durable acceptance only: the session actor runs
+    /// the input.
     pub async fn enqueue_turn_input(
         &self,
         store: &crate::store::SessionStore,
@@ -183,8 +150,8 @@ impl DurableSessionOps {
     }
 
     /// Durably accept `inputs`, each filed under its source key, as one
-    /// request under one shared `ingress` and `run_spec` (FIG-3842), then
-    /// deliver the shift each admission owes (ADR 0109 §3).
+    /// request under one shared `ingress` and `run_spec` (FIG-3842), waking
+    /// the session actor in the same transaction (ADR 0132 §12).
     ///
     /// The rows come back in request order. An input a stored row already
     /// answers returns that row; the others are enqueued in request order as
@@ -212,7 +179,6 @@ impl DurableSessionOps {
         let (enqueued, revision) = enqueue_turn_inputs_to_store(
             self.session_id.clone(),
             store.clone(),
-            &self.ingress,
             inputs,
             ingress,
             run_spec,
@@ -385,7 +351,6 @@ impl DurableSessionOps {
 pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     session_id: SessionId,
     store: crate::store::SessionStore,
-    ingress_relay: &super::shift::IngressRelay,
     input: crate::TurnInput,
     ingress: crate::TurnInputIngress,
     source_key: Option<String>,
@@ -394,7 +359,6 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     enqueue_turn_inputs_to_store(
         session_id,
         store,
-        ingress_relay,
         vec![(input, source_key)],
         ingress,
         run_spec,
@@ -413,24 +377,16 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
 }
 
 /// Durably accept `inputs`, each filed under its source key, as one request
-/// under one shared `ingress` and `run_spec` (FIG-3842), then deliver the
-/// shift each admitted row's ingress obligation owes (ADR 0109 §3). The rows
-/// come back in request order; a refusal accepted nothing.
+/// under one shared `ingress` and `run_spec` (FIG-3842); the same
+/// transaction wakes the session actor (ADR 0132 §12). The rows come back in
+/// request order; a refusal accepted nothing.
 ///
 /// The admission is the store's whole round when the backend folds it
-/// (FIG-3975): it answers [`crate::TurnInputAdmission`] with the claims its commit
-/// already took, so the only post-commit operation is the shift ask itself.
-/// A backend that does not fold answers `Enqueued`; the relay then takes
-/// each row's claim as before. The revision a fused admission read rides
-/// back so the caller's queue event does not read the head again.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one request names its session, store and relay, then what every input of it shares"
-)]
+/// (FIG-3975): the revision a fused admission read rides back so the
+/// caller's queue event does not read the head again.
 pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     session_id: SessionId,
     store: crate::store::SessionStore,
-    ingress_relay: &super::shift::IngressRelay,
     inputs: Vec<(crate::TurnInput, Option<String>)>,
     ingress: crate::TurnInputIngress,
     run_spec: crate::RunSpec,
@@ -457,33 +413,15 @@ pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     let batch = crate::PendingTurnInputBatch::new(session_id, drafts)
         .map_err(super::error::runtime_error_from_turn_input_admission)?;
     let admission = store
-        .admit_pending_turn_inputs(batch, ingress_relay.claim_ttl_ms())
+        .admit_pending_turn_inputs(batch)
         .await
         .map_err(super::error::runtime_error_from_turn_input_admission)?;
-    // Each admission armed its row's ingress obligation; deliver them now
-    // (ADR 0109 §3). An attempt that fails is the relay's to retry: the
-    // inputs are accepted either way. A row a resend answered is delivered
-    // only if its obligation is still due — a fused admission's claim list
-    // holds exactly those rows.
     let (enqueued, revision) = match admission {
         crate::TurnInputAdmission::Fused {
             rows,
-            ingress_claims,
             committed_head,
-        } => {
-            for claimed in ingress_claims {
-                ingress_relay.deliver_claimed(claimed).await;
-            }
-            (rows, Some(revision_of_head(committed_head)))
-        }
-        crate::TurnInputAdmission::Enqueued(rows) => {
-            for row in &rows {
-                ingress_relay
-                    .deliver_admitted(&row.session_id, row.input_id.as_str())
-                    .await;
-            }
-            (rows, None)
-        }
+        } => (rows, Some(revision_of_head(committed_head))),
+        crate::TurnInputAdmission::Enqueued(rows) => (rows, None),
     };
     Ok((enqueued, revision))
 }

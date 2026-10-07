@@ -49,11 +49,6 @@ impl std::fmt::Display for IngressRowId {
 /// §2.4). Keyed by the run: every row write is predicated on
 /// `admitted_run = run`, and a row the run does not hold refuses the whole
 /// commit [`StoreError::IngressRowNotAdmitted`].
-///
-/// A commit carrying a settlement must present its shift fence
-/// ([`RuntimeCommit::shift_fence`](super::RuntimeCommit::shift_fence)); the
-/// store checks it in the commit's own transaction before anything is
-/// written.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IngressSettlement {
     /// The run whose admitted rows this commit settles.

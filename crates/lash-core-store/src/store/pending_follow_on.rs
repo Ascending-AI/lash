@@ -211,22 +211,6 @@ impl PendingFollowOn {
         )
     }
 
-    /// Whether this committed fact hands a root executor's logical Run to
-    /// the named recovery Run of another root invocation. Admission and the
-    /// seal transaction apply this same decision to their recorded facts.
-    #[must_use]
-    pub fn hands_off_root(
-        &self,
-        recorded: &super::RunExecutor,
-        parent: &TurnId,
-        successor: &super::RunHold,
-    ) -> bool {
-        matches!(recorded, super::RunExecutor::Run { .. })
-            && matches!(successor.executor, super::RunExecutor::Run { .. })
-            && *parent == self.run_turn_id()
-            && successor.run == self.recovery_run()
-    }
-
     /// Whether `run` is the admitted run of one of this follow-on's
     /// recoveries ([`Self::recovery_run`] at any recovery count).
     pub fn names_recovery(&self, run: &TurnId) -> bool {
@@ -535,43 +519,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn a_recorded_follow_on_hands_off_only_its_named_root_recovery() {
-        let owed = fact("run:agent-frame:1", "f");
-        let parent = owed.run_turn_id();
-        let recorded = super::super::RunExecutor::run(&crate::store::AdmissionId::new("shift#0"));
-        let mut successor = super::super::RunHold {
-            run: owed.recovery_run(),
-            executor: super::super::RunExecutor::run(&crate::store::AdmissionId::new("shift#1")),
-        };
-        assert!(owed.hands_off_root(&recorded, &parent, &successor));
-        for run in [
-            parent.clone(),
-            TurnId::fixture("unnamed"),
-            TurnId::fixture("follow-on:run:agent-frame:1#1"),
-        ] {
-            successor.run = run;
-            assert!(!owed.hands_off_root(&recorded, &parent, &successor));
-        }
-        successor.run = owed.recovery_run();
-        for executor in [
-            super::super::RunExecutor::Inline {
-                scope: crate::ExecutionScope::turn("session", "inline"),
-            },
-            super::super::RunExecutor::Acceptor {
-                scope: crate::ExecutionScope::turn("session", "acceptor"),
-            },
-        ] {
-            successor.executor = executor.clone();
-            assert!(!owed.hands_off_root(&recorded, &parent, &successor));
-            successor.executor =
-                super::super::RunExecutor::run(&crate::store::AdmissionId::new("shift#1"));
-            assert!(!owed.hands_off_root(&executor, &parent, &successor));
-        }
-    }
-
-    /// A recovery's admitted run names its follow-on and count, and maps
-    /// back to the logical run the follow-on continues.
     #[test]
     fn a_recovery_run_names_its_follow_on_at_any_count() {
         let mut owed = fact("run:agent-frame:1", "f");

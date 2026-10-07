@@ -41,7 +41,7 @@ fn scope_close_obligations(
     now_ms: u64,
     rows: Vec<ScopeCloseObligationRow>,
 ) -> Vec<ScopeCloseObligationObservation> {
-    let policy = lash_core::runtime::shift::relay::RelayPolicy::default();
+    let policy = lash_core::runtime::obligations::relay::RelayPolicy::default();
     rows.into_iter()
         .map(
             |(

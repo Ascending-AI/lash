@@ -1482,7 +1482,6 @@ async fn execute_turn(
                     watched.clone(),
                     Arc::new(crate::NoProcessWork::new(&watched)),
                 ),
-                Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
             ),
         )
@@ -1505,7 +1504,6 @@ async fn execute_turn(
                     .await,
                 world.session_id.clone(),
             ))
-            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await

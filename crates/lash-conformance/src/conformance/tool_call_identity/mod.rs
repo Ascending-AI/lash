@@ -513,7 +513,6 @@ impl World {
                     watched.clone(),
                     Arc::new(crate::NoProcessWork::new(&watched)),
                 ),
-                Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
             ),
         )
@@ -669,8 +668,7 @@ impl World {
                 .with_store(crate::conformance::helpers::session_view(
                     &store,
                     self.session_id.clone(),
-                ))
-                .with_queued_work(Arc::new(crate::NoSessionWork::new()));
+                ));
         if let Some(processes) = &self.processes {
             builder = builder.with_process_work(processes.wiring.clone());
         } else if let Some(registry) = &self.process_registry {

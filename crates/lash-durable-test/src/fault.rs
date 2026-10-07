@@ -427,6 +427,13 @@ impl DurableReads for FaultStore {
         self.read(self.inner.ending_scopes(session)).await
     }
 
+    async fn session_mailbox(
+        &self,
+        session: &lash_sansio::SessionId,
+    ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
+        self.read(self.inner.session_mailbox(session)).await
+    }
+
     async fn park_events(
         &self,
         after: Option<ParkEventSeq>,

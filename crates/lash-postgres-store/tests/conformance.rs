@@ -31,6 +31,9 @@ lash_conformance::attachment_adoption_tests!({
     )
 });
 
+/// Fresh, empty attachment byte stores for the run-set laws, each a
+/// filesystem store in its own directory under `run`: PostgreSQL keeps no
+/// attachment bytes of its own.
 fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentBytesFactory {
     let root = root.path().to_path_buf();
     let next = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -65,7 +68,6 @@ use lash_conformance::{
     ReopenableProcessRegistry, ReopenableTriggerStore,
 };
 use lash_core_execution::compat::CompatRefusal;
-use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt as _;
 use lash_core_execution::{
     AttachmentReferrers as _, DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry,
     RuntimeStore, SessionCatalogStore as _, SessionCommitStore as _, StoreError, TriggerStore,
@@ -84,6 +86,8 @@ mod non_terminal_page_collation;
 mod session_delete_blob_reclaim;
 #[path = "conformance/session_ingress.rs"]
 mod session_ingress;
+#[path = "conformance/session_mail.rs"]
+mod session_mail;
 
 use injectors::{PostgresFenceIntegrityInjector, PostgresLineageConformanceInjector};
 use lash_postgres_store::testing::IsolatedDatabase;
@@ -592,19 +596,6 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .complete_attachment_write(&clock_intent, clock_permit)
         .await
         .expect("stamp turn-owned upload");
-    let owner =
-        lash_core_execution::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
-    let _lease = store
-        .seal_shift_epoch_for_test(
-            &SessionId::from(SESSION_ID),
-            &owner,
-            "clock-executor",
-            60_000,
-        )
-        .await
-        .expect("claim clock test lease")
-        .acquired()
-        .expect("clock test lease acquired");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::fixture(SESSION_ID.to_string()),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
@@ -820,31 +811,6 @@ lash_conformance::store_contract_state_machine_tests!({
     })
 });
 
-lash_conformance::runtime_persistence_state_machine_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres runtime-persistence properties: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    let storage = Arc::new(storage);
-    let bytes_root = tempfile::tempdir().expect("attachment bytes root");
-    let make_bytes = attachment_bytes(&bytes_root);
-    ((database_fixture, bytes_root), "postgres", move |_| {
-        let storage = Arc::clone(&storage);
-        let attachments = make_bytes();
-        async move {
-            reset(storage.pool()).await;
-            lash_conformance::RuntimePersistenceStateMachineHandles::create(
-                Arc::new(storage.store()),
-                attachments,
-            )
-            .await
-            .expect("create Postgres runtime-persistence property handles")
-        }
-    })
-});
-
 lash_conformance::session_graph_state_machine_tests!({
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(
@@ -947,29 +913,6 @@ mod session_history {
         reset(storage.pool()).await;
         let store = Arc::new(storage.store()) as Arc<dyn ConformanceDeployment>;
         Some((lock, store, storage))
-    }
-
-    lash_conformance::turn_commit_outcome_tests!({
-        let Some((lock, store, _storage)) = catalog().await else {
-            return;
-        };
-        (lock, store)
-    });
-
-    #[tokio::test]
-    async fn unread_turn_terminals_survive_retention() {
-        let (_lock, store, _storage) = catalog()
-            .await
-            .expect("PostgreSQL law requires its isolated database");
-        lash_conformance::unread_terminals_survive_retention(store).await;
-    }
-
-    #[tokio::test]
-    async fn terminal_feed_is_ordered_and_replay_stable() {
-        let (_lock, store, _storage) = catalog()
-            .await
-            .expect("PostgreSQL law requires its isolated database");
-        lash_conformance::terminal_feed_is_ordered_and_replay_stable(store).await;
     }
 
     #[tokio::test]

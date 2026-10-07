@@ -52,6 +52,8 @@ mod process_retention;
 mod session_delete_blob_reclaim;
 #[path = "session_ingress.rs"]
 mod session_ingress;
+#[path = "session_mail.rs"]
+mod session_mail;
 #[path = "store_maintenance.rs"]
 mod store_maintenance;
 #[path = "tool_intent_retention.rs"]
@@ -627,23 +629,6 @@ lash_conformance::store_contract_state_machine_tests!({
                 registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
                 runtime: backend.store().await as Arc<dyn RuntimeStore>,
             }
-        }
-    })
-});
-
-lash_conformance::runtime_persistence_state_machine_tests!({
-    let retained: Retained<TestBackend> = Retained::default();
-    ((), "sqlite", move |_| {
-        let retained = retained.clone();
-        async move {
-            let backend = TestBackend::open(SUBSTRATE).await;
-            retained.keep(&backend);
-            lash_conformance::RuntimePersistenceStateMachineHandles::create(
-                backend.store().await,
-                backend.attachment_store(),
-            )
-            .await
-            .expect("create SQLite runtime-persistence property handles")
         }
     })
 });

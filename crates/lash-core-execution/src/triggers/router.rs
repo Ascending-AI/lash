@@ -395,7 +395,7 @@ fn unstarted_delivery(
 struct ProcessStartWiring {
     ledger: Arc<dyn crate::store::ObligationLedger>,
     clock: Arc<dyn crate::Clock>,
-    policy: crate::runtime::shift::relay::RelayPolicy,
+    policy: crate::runtime::obligations::relay::RelayPolicy,
     metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
 }
 
@@ -443,7 +443,7 @@ impl TriggerRouter {
         mut self,
         ledger: Arc<dyn crate::store::ObligationLedger>,
         clock: Arc<dyn crate::Clock>,
-        policy: crate::runtime::shift::relay::RelayPolicy,
+        policy: crate::runtime::obligations::relay::RelayPolicy,
         metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     ) -> Self {
         self.process_starts = Some(ProcessStartWiring {

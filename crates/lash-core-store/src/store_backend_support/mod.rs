@@ -132,21 +132,6 @@ pub fn terminal_turn_input_states_sql() -> String {
 
 pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
 
-/// The fence a backend's [`ShiftEpochStore::seal_shift_epoch`] returns for
-/// the epoch its compare-and-set raised, or the one a retried seal of the
-/// same admission finds. It is the only constructor of a [`ShiftFence`]
-/// outside `lash-core-store`, and only store backends call it.
-///
-/// [`ShiftEpochStore::seal_shift_epoch`]: crate::store::ShiftEpochStore::seal_shift_epoch
-/// [`ShiftFence`]: crate::store::ShiftFence
-#[must_use]
-pub fn sealed_shift_fence(
-    session_id: SessionId,
-    epoch: u64,
-    admission: crate::store::AdmissionId,
-) -> crate::store::ShiftFence {
-    crate::store::ShiftFence::sealed_by_store(session_id, epoch, admission)
-}
 /// The admission verdicts every backend takes alike; see
 /// [`crate::store::admission_plan`].
 pub use crate::store::admission_plan::{

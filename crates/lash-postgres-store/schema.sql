@@ -202,9 +202,6 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     caused_by_node_id TEXT,
     source_session_id TEXT,
     source_node_id TEXT,
-    shift_epoch BIGINT NOT NULL DEFAULT 0,
-    shift_admission_id TEXT,
-    shift_run_start TEXT,
     admission_base_checkpoint_ref TEXT,
     closing_intent BIGINT,
     owning_process_id TEXT,
@@ -222,10 +219,6 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     -- The session's standing fault (ADR 0109 §9) and when it was recorded.
     fault_json TEXT,
     fault_at_ms BIGINT CONSTRAINT ck_session_meta_fault CHECK ((fault_json IS NULL) = (fault_at_ms IS NULL)),
-    -- The shift authority holds exactly the states a raise writes: unraised,
-    -- sealed by an execution (its start marker), or raised by a control verb
-    -- (no marker). A closing session was raised by its close.
-    CONSTRAINT ck_session_meta_shift_authority CHECK ((shift_epoch = 0 AND shift_admission_id IS NULL AND shift_run_start IS NULL AND closing_intent IS NULL) OR (shift_epoch > 0 AND shift_admission_id IS NOT NULL AND (shift_run_start IS NULL OR closing_intent IS NULL))),
     CONSTRAINT ck_session_meta_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_session_meta_retention CHECK ((retention_kind IN ('until_gc', 'head_only') AND retention_last_turns IS NULL) OR (retention_kind = 'last_turns' AND retention_last_turns > 0)),
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
@@ -318,43 +311,6 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancel_requests (
     PRIMARY KEY (session_id, turn_id)
 );
 
-CREATE TABLE IF NOT EXISTS lash_turn_parks (
-    session_id TEXT PRIMARY KEY,
-    turn_id TEXT NOT NULL,
-    park_id BIGINT NOT NULL,
-    reason_code TEXT NOT NULL,
-    reason_json TEXT NOT NULL,
-    since_ms BIGINT NOT NULL,
-    last_refused_ms BIGINT NOT NULL,
-    attempts BIGINT NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1),
-    park_executable_generation TEXT,
-    engine_ref TEXT,
-    resume_intent BIGINT
-);
-CREATE INDEX IF NOT EXISTS idx_lash_turn_parks_since
-    ON lash_turn_parks(since_ms, session_id);
-CREATE INDEX IF NOT EXISTS idx_lash_turn_parks_executable_generation
-    ON lash_turn_parks(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS lash_turn_park_clock (
-    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
-    current_seq BIGINT NOT NULL DEFAULT 0,
-    compaction_horizon BIGINT NOT NULL DEFAULT 0,
-    CONSTRAINT ck_turn_park_clock_singleton CHECK (singleton)
-);
-
-CREATE TABLE IF NOT EXISTS lash_turn_park_events (
-    seq BIGINT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    turn_id TEXT NOT NULL,
-    park_id BIGINT NOT NULL,
-    kind TEXT NOT NULL CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')),
-    cause_json TEXT,
-    reason_json TEXT,
-    at_ms BIGINT NOT NULL,
-    redrive_intent BIGINT,
-    CONSTRAINT ck_turn_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0)) IS TRUE)
-);
 
 CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     enqueue_seq BIGINT NOT NULL,
@@ -486,25 +442,15 @@ CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
 );
 
 -- The logical-run family (FIG-3600 S7). `lash_session_runs` holds one row
--- per (session, run) a shift admitted work under, with the executor the seal
--- of its admission recorded (`executor_json`), the exact result of
--- an input run's claim, committed in the claim's own transaction, and the
+-- per (session, run) admitted work ran under, with the exact result of
+-- the run's admission, committed in the admission's own transaction, and the
 -- run's terminal evidence once it has one: the `terminal_*` columns are set
 -- together, exactly once. `lash_session_run_inputs` binds each accepted input to the
--- run that executes it. `lash_control_intents` records an operator's verb or a
--- session's close; a `close_session` row outlives its session as the
--- deletion tombstone.
-CREATE TABLE IF NOT EXISTS lash_session_shift_admissions (
-    session_id TEXT NOT NULL,
-    admission TEXT NOT NULL,
-    receipt_json TEXT NOT NULL,
-    PRIMARY KEY (session_id, admission)
-);
-
+-- run that executes it. `lash_control_intents` records a session's close; a
+-- `close_session` row outlives its session as the deletion tombstone.
 CREATE TABLE IF NOT EXISTS lash_session_runs (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
-    executor_json TEXT,
     admission_json TEXT,
     terminal_kind TEXT,
     terminal_cause_json TEXT,
@@ -552,13 +498,11 @@ CREATE TABLE IF NOT EXISTS lash_control_intents (
     intent_id BIGSERIAL PRIMARY KEY,
     session_id TEXT NOT NULL,
     format BIGINT NOT NULL,
-    kind TEXT NOT NULL CONSTRAINT ck_control_intents_kind CHECK (kind IN ('redrive', 'cancel', 'fork', 'close_session')),
+    kind TEXT NOT NULL CONSTRAINT ck_control_intents_kind CHECK (kind IN ('close_session')),
     kind_json TEXT NOT NULL,
-    state TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged', 'superseded', 'refused')),
+    state TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged')),
     state_json TEXT NOT NULL,
-    engine_half_owed BOOLEAN NOT NULL GENERATED ALWAYS AS ((state = 'pending' AND obligation_state IN ('due', 'claimed')) IS TRUE) STORED,
     created_at_ms BIGINT NOT NULL,
-    engine_ref TEXT,
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -1079,10 +1023,6 @@ INSERT INTO lash_process_change_clock (
 ) VALUES (TRUE, 0, 0)
 ON CONFLICT (singleton) DO NOTHING;
 
-INSERT INTO lash_turn_park_clock (
-    singleton, current_seq, compaction_horizon
-) VALUES (TRUE, 0, 0)
-ON CONFLICT (singleton) DO NOTHING;
 
 INSERT INTO lash_attachment_sweep_clock (singleton, generation)
 VALUES (TRUE, 0)

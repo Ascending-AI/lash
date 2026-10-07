@@ -437,7 +437,6 @@ impl<'a> RuntimeCommitPlan<'a> {
             checkpoint_ref: Some(checkpoint_ref),
             leaf_node_id: self.committed_leaf_node_id.clone(),
             pending_follow_on: self.commit.pending_follow_on.clone(),
-            published_by_shift: self.commit.shift_fence.is_some(),
         }
     }
 

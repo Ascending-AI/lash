@@ -84,7 +84,7 @@ mod tests {
 
         async fn retain_admission_base(
             &self,
-            _fence: &super::super::ShiftFence,
+            _session_id: &SessionId,
             _base: &super::super::SessionHeadRef,
         ) -> Result<(), StoreError> {
             Ok(())
@@ -146,11 +146,11 @@ mod tests {
 
         async fn raise_pending_follow_on_attempts(
             &self,
-            fence: &super::super::ShiftFence,
+            session_id: &SessionId,
             follow_on_turn_id: &crate::TurnId,
         ) -> Result<super::super::PendingFollowOn, StoreError> {
             Err(StoreError::FollowOnNotPending {
-                session_id: fence.session().clone(),
+                session_id: session_id.clone(),
                 follow_on_turn_id: follow_on_turn_id.clone(),
             })
         }
@@ -183,22 +183,6 @@ mod tests {
             session_id: &SessionId,
         ) -> Result<Option<super::super::SessionMeta>, StoreError> {
             self.load_session_meta(session_id).await
-        }
-
-        async fn record_turn_park(
-            &self,
-            _park: &super::super::TurnParkWrite,
-        ) -> Result<super::super::StoreTransition<super::super::TurnPark>, StoreError> {
-            Err(StoreError::UnsupportedStoreOperation {
-                operation: "record_turn_park",
-            })
-        }
-
-        async fn load_turn_park(
-            &self,
-            _session_id: &SessionId,
-        ) -> Result<Option<super::super::TurnPark>, StoreError> {
-            Ok(None)
         }
     }
 

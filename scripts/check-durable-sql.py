@@ -7,7 +7,7 @@ the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
 neutral statement set and one module per dialect. Since I0 (FIG-5194) each
 of those is a directory: the core in `durable/mod.rs` and one file per
 domain (`turns`, `run_records`, `snapshots`, `waits`, `processes`,
-`session_close`, `park_events`), each owned by its lane. This check fails
+`session_close`, `session_mail`, `park_events`), each owned by its lane. This check fails
 when:
 
 - SQL naming an engine table appears in any tracked Rust or SQL file outside
@@ -39,6 +39,7 @@ DOMAINS = (
     "waits",
     "processes",
     "session_close",
+    "session_mail",
     "park_events",
 )
 NEUTRAL_DIR = "crates/lash-store-sql/src/durable"

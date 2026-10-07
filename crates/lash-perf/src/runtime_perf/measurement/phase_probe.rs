@@ -214,7 +214,6 @@ async fn deep_turn_session(
 pub(crate) async fn run_once(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
-    contention_workers: usize,
     checkpoint_curve: &CheckpointCurveConfig,
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
@@ -222,7 +221,6 @@ pub(crate) async fn run_once(
     let result = Box::pin(run_once_inner(
         scenario,
         chat_turns,
-        contention_workers,
         checkpoint_curve,
         high_traffic,
     ))
@@ -254,10 +252,9 @@ impl PostgresTarget {
 
 /// The "does this scenario have the database it needs" rule, stated once.
 ///
-/// It used to be written out four times -- the checkpoint-curve branch, the
-/// high-traffic branch, the generic dispatch below, and a fourth copy inside
-/// `run_once_durable_queued_work_contention` -- with the same bail message and
-/// the same skip message in each.
+/// It used to be written out several times -- the checkpoint-curve branch,
+/// the high-traffic branch and the generic dispatch below -- with the same
+/// bail message and the same skip message in each.
 fn resolve_postgres_target(scenario: RuntimePerfScenario) -> anyhow::Result<PostgresTarget> {
     if !scenario.uses_postgres() {
         return Ok(PostgresTarget::NotNeeded);
@@ -274,7 +271,6 @@ fn resolve_postgres_target(scenario: RuntimePerfScenario) -> anyhow::Result<Post
 async fn run_once_inner(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
-    contention_workers: usize,
     checkpoint_curve: &CheckpointCurveConfig,
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
@@ -293,14 +289,6 @@ async fn run_once_inner(
                 chat_turns,
                 checkpoint_curve,
                 postgres.url(),
-            ))
-            .await;
-        }
-        RuntimePerfScenario::DurableQueuedWorkContentionSqlite => {
-            return Box::pin(run_once_durable_queued_work_contention(
-                scenario,
-                chat_turns,
-                contention_workers,
             ))
             .await;
         }
@@ -364,12 +352,6 @@ async fn run_once_inner(
                 )
             })?;
             return run_once_store_hardening_hot_paths(chat_turns, &postgres_database_url).await;
-        }
-        RuntimePerfScenario::QueuedWorkAdmissionStress => {
-            return Box::pin(run_once_queued_work_admission_stress(chat_turns)).await;
-        }
-        RuntimePerfScenario::TurnInputIngressInterrupt => {
-            return run_once_turn_input_ingress_interrupt(chat_turns).await;
         }
         RuntimePerfScenario::EmbedStandard | RuntimePerfScenario::EmbedRlm => {
             return run_once_embed(scenario, chat_turns).await;

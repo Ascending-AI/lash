@@ -1,35 +1,22 @@
-use crate::support::{
-    Arc, DeploymentStore, ProcessWorkWiring, RuntimeEnvironment, SessionWorkEngine,
-};
+use crate::support::{Arc, DeploymentStore, ProcessWorkWiring, RuntimeEnvironment};
 use lash_core::ActorContext;
-use lash_sansio::SessionId;
 
 /// Immutable owner-issued capabilities for one successfully opened session.
 ///
 /// Construction stays inside the facade open/materialize paths. The store,
-/// effect host, process/queue ports, backend, and catalog are captured
+/// effect host, process port, backend, and catalog are captured
 /// together from the core's one backend so later per-session operations
 /// cannot independently consult a core override.
 #[derive(Clone)]
 pub(crate) struct BoundSession {
-    session_id: SessionId,
     store: lash_core::store::SessionStore,
     effect_host: ActorContext,
     process: ProcessWorkWiring,
-    work: Arc<crate::core::ResolvedQueuedWork>,
-    /// The owner core's open sessions: the core whose `SessionShifts` serves `work`
-    /// runs a shift on the runtime registered here.
-    residents: Arc<crate::core::residents::ResidentSessions>,
     backend: lash_core::Backend,
     attachment_store: Arc<lash_core::facade_support::RuntimeAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
     catalog: Arc<dyn DeploymentStore>,
-    /// The owner core's relay policy: every immediate delivery this binding
-    /// runs (an ingress ask) honors the host's configured attempt budget
-    /// (FIG-4246).
-    relay_policy: lash_core::shift::relay::RelayPolicy,
-    clock: Arc<dyn lash_core::Clock>,
     models: Arc<dyn lash_core::LlmProfiles>,
     /// The owner core's telemetry adapter: what a send through this
     /// binding captures the caller's trace context from.
@@ -38,28 +25,20 @@ pub(crate) struct BoundSession {
 
 impl BoundSession {
     pub(crate) fn new(
-        session_id: SessionId,
         store: lash_core::store::SessionStore,
         env: &RuntimeEnvironment,
         process: ProcessWorkWiring,
-        work: Arc<crate::core::ResolvedQueuedWork>,
-        residents: Arc<crate::core::residents::ResidentSessions>,
         catalog: Arc<dyn DeploymentStore>,
     ) -> Self {
         Self {
-            session_id,
             store,
             effect_host: env.core.control.effect_host.clone(),
             process,
-            work,
-            residents,
             backend: env.core.backend().clone(),
             attachment_store: Arc::clone(&env.core.durability.attachment_store),
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
             process_engines: env.core.process_engines.clone(),
             catalog,
-            relay_policy: env.core.control.relay_policy(),
-            clock: Arc::clone(&env.core.clock),
             models: Arc::clone(&env.core.providers.models),
             tracing: env.core.tracing.clone(),
         }
@@ -75,47 +54,6 @@ impl BoundSession {
 
     pub(crate) fn process(&self) -> &ProcessWorkWiring {
         &self.process
-    }
-
-    /// The owner-issued queued-work port. The binding-derived Durable Session
-    /// wakes this port, never a core-level override.
-    pub(crate) fn queued(&self) -> Arc<dyn SessionWorkEngine> {
-        Arc::clone(&self.work) as Arc<dyn SessionWorkEngine>
-    }
-
-    /// The ingress relay an acceptance through this binding delivers with
-    /// (ADR 0109 §3): the backend's ingress ledger asking the binding's
-    /// owner-issued queued-work port for shifts.
-    pub(crate) fn ingress_relay(&self) -> lash_core::shift::IngressRelay {
-        lash_core::shift::IngressRelay::over_backend(
-            &self.backend,
-            self.queued(),
-            Arc::clone(&self.clock),
-        )
-        .with_policy(self.relay_policy)
-        .with_metrics(self.tracing.metrics().clone())
-    }
-
-    /// The same port as [`queued`](Self::queued), with how a send waits on
-    /// its shift.
-    pub(crate) fn work(&self) -> Arc<crate::core::ResolvedQueuedWork> {
-        Arc::clone(&self.work)
-    }
-
-    /// Record `handle` as this session's open runtime with the owner core,
-    /// whose `SessionShifts` then runs the session's shifts on it (FIG-3600 S5b). A
-    /// resumed session keeps its owner, so a resume registers here too.
-    pub(crate) fn register_resident(&self, handle: &lash_core::facade_support::RuntimeHandle) {
-        self.residents.register(&self.session_id, handle);
-    }
-
-    /// Withdraw `handle` from the owner core's open sessions and let a shift
-    /// running on it stop: a close or park then owns the runtime alone.
-    pub(crate) async fn release_resident(
-        &self,
-        handle: &lash_core::facade_support::RuntimeHandle,
-    ) -> bool {
-        self.residents.release(&self.session_id, handle).await
     }
 
     pub(crate) fn catalog(&self) -> Arc<dyn DeploymentStore> {
@@ -149,6 +87,6 @@ impl BoundSession {
         env.core.control.effect_host = self.effect_host();
         env.core.durability.attachment_store = Arc::clone(&self.attachment_store);
         env.core.durability.process_env_store = Arc::clone(&self.process_env_store);
-        env.with_work_ports(self.process.clone(), self.queued())
+        env.with_work_ports(self.process.clone())
     }
 }

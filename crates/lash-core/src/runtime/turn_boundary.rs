@@ -1,6 +1,6 @@
 use super::turn_graph_editor::ReadProjectionDiagnostic;
 use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft};
-use crate::TurnId;
+
 use crate::facade_support::AgentFrameReasonFacadeOps as _;
 use crate::facade_support::SessionGraphFacadeOps;
 use crate::runtime::turn_settlement::TurnIngressSettlement;
@@ -110,13 +110,6 @@ pub(super) struct TurnBoundary {
     /// driver when the turn finishes so the final commit recognizes it by
     /// identity.
     protocol_terminal_output: materialize::ProtocolTerminalOutput,
-    /// What the final commit presents when the turn runs under an admitted
-    /// run (FIG-3600 S7): the run's shift fence, and the run's terminal
-    /// evidence when this turn ends it.
-    shift_commit: Option<ShiftCommit>,
-    /// The logical run the turn runs under, whose park the final commit
-    /// clears (FIG-3600 S7, D2 §1.3 P3).
-    park_run: Option<crate::TurnId>,
 }
 
 /// The frame end a final commit makes (ADR 0113 §3.1). A switch the turn
@@ -129,10 +122,6 @@ pub(super) struct FrameSwitchCommit {
     carries: SeedCarries,
     committing: crate::ExecutionScope,
 }
-
-/// A final commit's shift fence and run, and the terminal evidence it
-/// writes.
-pub(super) type ShiftCommit = crate::runtime::shift::ShiftCommit;
 
 /// Explicit two-phase lifecycle for a turn commit.
 /// Drafting accumulates progress; finalization irreversibly assembles and
@@ -237,19 +226,7 @@ impl TurnBoundary {
             trace_metadata: Default::default(),
             graph_appends,
             protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
-            shift_commit: None,
-            park_run: None,
         }
-    }
-
-    /// Present `shift_commit` on the final commit.
-    pub(super) fn set_shift_commit(&mut self, shift_commit: Option<ShiftCommit>) {
-        self.shift_commit = shift_commit;
-    }
-
-    /// Clear `run`'s park with the final commit.
-    pub(super) fn set_park_run(&mut self, run: crate::TurnId) {
-        self.park_run = Some(run);
     }
 
     pub(super) fn record_protocol_terminal_output(
@@ -456,7 +433,6 @@ impl TurnBoundary {
         session: Option<&mut Session>,
         ingress_settlement: TurnIngressSettlement,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
-        cancellation: Option<crate::TurnCancellationEvidence>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     ) -> Result<bool, StoreError> {
         // Record the outcome before capturing execution state: a second author
@@ -470,14 +446,9 @@ impl TurnBoundary {
                 // The final gate may cancel an already accepted suspension.
                 // Terminal cleanup precedes the capture published atomically
                 // with the Run's terminal and the cleared follow-on.
-                let run_terminates = self.shift_commit.as_ref().map_or_else(
-                    || {
-                        matches!(
-                            returned_turn.outcome,
-                            TurnOutcome::Finished(_) | TurnOutcome::Stopped(_)
-                        )
-                    },
-                    |commit| commit.terminal.is_some(),
+                let run_terminates = matches!(
+                    returned_turn.outcome,
+                    TurnOutcome::Finished(_) | TurnOutcome::Stopped(_)
                 );
                 if run_terminates && let Some(executor) = session.plugins().code_executor() {
                     executor
@@ -540,7 +511,6 @@ impl TurnBoundary {
                 outcome: &returned_turn.outcome,
                 ingress_settlement,
                 pending_follow_on,
-                cancellation,
                 recorded_attachment_intent_ids,
             })
             .await;
@@ -668,7 +638,6 @@ impl TurnBoundary {
             outcome,
             ingress_settlement,
             pending_follow_on,
-            cancellation,
             recorded_attachment_intent_ids,
         } = input;
         // Every path into the final commit reconciles the same way. A turn
@@ -735,8 +704,6 @@ impl TurnBoundary {
         let metrics = self.metrics.clone();
         let trace = self.trace.clone();
         let trace_metadata = self.trace_metadata.clone();
-        let shift_commit = self.shift_commit.clone();
-        let park_run = self.park_run.clone();
         // A switch this turn makes ends the frame the turn was admitted on;
         // otherwise the commit ends whatever frame a resident open left
         // behind, if any.
@@ -779,11 +746,8 @@ impl TurnBoundary {
                 crate::store::TurnCommitOutcome::from_terminal(outcome),
                 operation,
                 ingress_settlement,
-                cancellation,
                 committed_attachment_ids,
                 adopted_intent_rows,
-                shift_commit,
-                park_run,
                 frame_switch,
             ))
             .await
@@ -814,11 +778,8 @@ impl TurnBoundary {
         outcome: crate::store::TurnCommitOutcome,
         operation: crate::OperationId,
         ingress_settlement: TurnIngressSettlement,
-        cancellation: Option<crate::TurnCancellationEvidence>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
-        shift_commit: Option<ShiftCommit>,
-        park_run: Option<TurnId>,
         frame_switch: FrameSwitchCommit,
     ) -> FinalCommitResult {
         let session_id = state.session_id.clone();
@@ -869,38 +830,18 @@ impl TurnBoundary {
                 scope,
                 context,
                 outcome,
-                run_scope: shift_commit
-                    .as_ref()
-                    .filter(|commit| commit.terminal.is_some())
-                    .and_then(|commit| commit.trace_scope.clone()),
+                run_scope: None,
             }))
         });
         commit.adopted_intent_rows = adopted_intent_rows;
-        // A cancelled turn's undelivered input follows the cancellation's
-        // disposition; every other handed-back row is deferred.
-        let disposition = cancellation
-            .as_ref()
-            .map_or(crate::TurnCancelUndeliveredInputPolicy::Defer, |evidence| {
-                evidence.undelivered
-            });
-        // The rows a turn settles are its run's, settled under the run's
-        // shift fence (FIG-3927): a turn that runs under no admitted run
-        // admitted nothing and settles nothing.
-        match shift_commit {
-            Some(shift_commit) => {
-                commit.shift_fence = Some(Box::new(shift_commit.fence));
-                commit.run_terminal = shift_commit.terminal.map(Box::new);
-                if !ingress_settlement.is_empty() {
-                    commit.ingress =
-                        Some(ingress_settlement.into_ingress(shift_commit.run, disposition));
-                }
-            }
-            None if !ingress_settlement.is_empty() => {
-                return Err(StoreError::IngressSettlementUnfenced { session_id });
-            }
-            None => {}
+        // The rows a turn settles are its run's (FIG-3927), and a run's turn
+        // commits from the session actor: a turn here runs under no admitted
+        // run, admitted nothing and settles nothing.
+        if !ingress_settlement.is_empty() {
+            return Err(StoreError::Backend(format!(
+                "session {session_id}: a turn under no admitted run has no ingress rows to settle"
+            )));
         }
-        commit.park_run = park_run;
         super::frame_definition_carry::prepare(definition_engines, frame_transition.as_ref())
             .await?;
         commit.frame_transition = frame_transition;

@@ -441,16 +441,6 @@ pub trait DeploymentStore:
         &self,
     ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError>;
 
-    /// List the deployment's parked turns under `query` (FIG-3659), ordered by
-    /// `(since_ms, session_id)` with `query.after` as the keyset. A parked
-    /// turn is unfinished work a host must be able to enumerate across
-    /// sessions; a store with no park ledger returns
-    /// `StoreError::UnsupportedStoreOperation` rather than an empty page.
-    async fn list_turn_parks(
-        &self,
-        query: &crate::store::TurnParkQuery,
-    ) -> Result<Vec<crate::store::TurnPark>, crate::StoreError>;
-
     /// Durable turn and session terminals strictly after `after`, in commit
     /// order. Independent of live replay; pages return the retention horizon.
     /// A cursor behind that horizon refuses as `TurnChangeCursorPruned`.
@@ -460,26 +450,7 @@ pub trait DeploymentStore:
         limit: std::num::NonZeroUsize,
     ) -> Result<crate::store::TurnChangePage, crate::StoreError>;
 
-    /// Read the durable turn park feed strictly after `after` (FIG-3659): one
-    /// event per park transition, in commit order. A position below the
-    /// compaction horizon fails with
-    /// `StoreError::ParkFeedCursorCompacted`.
-    async fn turn_park_feed(
-        &self,
-        after: crate::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<crate::store::ParkFeedPage<crate::store::TurnParkTarget>, crate::StoreError>;
-
-    /// Compact the turn park feed: events at or below `through` are removed
-    /// and the cursor horizon advances to it. Host-gated — the feed's
-    /// retention lever — never automatic (FIG-3659).
-    async fn compact_turn_park_feed(
-        &self,
-        through: crate::store::ParkFeedCursor,
-    ) -> Result<(), crate::StoreError>;
-
-    /// Open logical runs in `(session, run)` order, after `after`, each
-    /// with the executor its recorded admission names (FIG-4403). Recovery
+    /// Open logical runs in `(session, run)` order, after `after`. Recovery
     /// checks the execution that runs each in bounded pages; it never guesses
     /// liveness from a missing terminal row alone.
     async fn non_terminal_runs_page(
@@ -608,68 +579,4 @@ pub async fn admit_session_state_generation(
         Ok(_) | Err(crate::StoreError::SessionDeleted { .. }) => Ok(()),
         Err(error) => Err(error),
     }
-}
-
-/// Records the park of the turn a durable engine redelivered to a build whose
-/// generation gate refused its session (FIG-3735), and returns it. `store` is
-/// the deployment's store, read without admission.
-///
-/// The gate refuses before any effect, so a redrive meets `refusal` before it
-/// issues its first command. A turn the refused session holds in flight for
-/// `scope` — the admitted, unfinished run an engine-executed turn scope names; for
-/// a direct turn scope, the open input row the turn's journaled acceptance
-/// wrote (its id is provisioned from the acceptance address) — was executed by
-/// an earlier execution, whose journal already holds commands the refused
-/// redrive cannot replay. Its handler must not return, or fail terminally,
-/// where that journal holds its next command: the turn parks, typed
-/// ([`ParkReason::SessionStateGenerationRefused`](crate::store::ParkReason::SessionStateGenerationRefused)),
-/// keeps its claims for a build of its own generation, and its handler ends
-/// the attempt as every parked turn does. A scope with nothing in flight
-/// returns `None`: nothing ran before the refusal, and the refusal is the
-/// turn's terminal answer.
-pub async fn park_turn_refused_by_generation(
-    store: &dyn crate::store::RuntimeStore,
-    scope: &crate::ExecutionScope,
-    refusal: crate::SessionStateVersionRefusal,
-    at_ms: u64,
-    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
-) -> Result<Option<crate::store::TurnPark>, crate::StoreError> {
-    let crate::ExecutionScope::Turn {
-        session_id,
-        turn_id,
-    } = scope
-    else {
-        return Ok(None);
-    };
-    let in_flight = if store
-        .unfinished_run(session_id)
-        .await?
-        .is_some_and(|unfinished| unfinished.run == *turn_id)
-    {
-        true
-    } else {
-        let accepted = super::provisioned_turn_input_id(
-            super::causal::turn_acceptance_effect_invocation(scope, session_id, turn_id).address(),
-        );
-        store
-            .list_pending_turn_inputs(session_id)
-            .await?
-            .iter()
-            .any(|read| read.input.input_id.as_str() == accepted)
-    };
-    if !in_flight {
-        return Ok(None);
-    }
-    let park = super::record_run_park(
-        store,
-        &crate::store::TurnParkWrite::refusal(
-            session_id.clone(),
-            TurnId::parse(scope.id())?,
-            crate::store::ParkReason::session_state_generation_refused(refusal),
-            at_ms,
-        ),
-        metrics,
-    )
-    .await?;
-    Ok(Some(park))
 }

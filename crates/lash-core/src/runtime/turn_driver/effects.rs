@@ -204,37 +204,21 @@ impl RuntimeTurnDriver<'_> {
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         checkpoint: CheckpointKind,
-        step: &str,
         event_tx: &TurnObserver,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let result = match self.admit_at_checkpoint(checkpoint, step).await {
-            Ok(admission) => {
-                self.run_checkpoint(
-                    messages,
-                    protocol_iteration,
-                    checkpoint,
-                    step,
-                    admission,
-                    event_tx,
-                )
-                .await
-            }
-            // A store that did not answer the admission is this attempt's
-            // fault, never the checkpoint's outcome (FIG-4651, as FIG-3683
-            // and FIG-3726 rule for the other store-reading steps): the step
-            // stays unrecorded and the engine runs it again. A hook's own
-            // failure, and an answer the store did give, are still recorded:
-            // a superseded shift fence ends the run typed, with no retry.
-            // Use the engine's retry policy here too: a superseded commit
-            // is a live fault whose recorded fence no retry can repair.
-            Err(fault) if crate::runtime::shift::engine_retries(&fault) => {
-                return Err(
-                    RuntimeEffectControllerError::from(fault).retryable_uncommitted_derivation()
-                );
-            }
-            Err(refusal) => Err(refusal),
-        }
-        .map_err(RuntimeEffectControllerError::from);
+        // A turn here runs under no admitted run, so it admits nothing at
+        // its checkpoints: a run's checkpoint admission is the session
+        // actor's (L3).
+        let result = self
+            .run_checkpoint(
+                messages,
+                protocol_iteration,
+                checkpoint,
+                crate::store::CheckpointAdmission::default(),
+                event_tx,
+            )
+            .await
+            .map_err(RuntimeEffectControllerError::from);
         let (result, session_contributions) = match result {
             Ok((delivery, contributions)) => (Ok(delivery), contributions),
             Err(error) => (Err(error), Vec::new()),
@@ -426,47 +410,11 @@ impl RuntimeTurnDriver<'_> {
         .await
     }
 
-    /// The store's admission at a checkpoint. Only a turn that runs under an
-    /// admitted run admits at its checkpoints: the rows bind to that run,
-    /// keyed by this step, under the run's shift fence (FIG-3927).
-    async fn admit_at_checkpoint(
-        &self,
-        checkpoint: CheckpointKind,
-        step: &str,
-    ) -> Result<crate::store::CheckpointAdmission, RuntimeError> {
-        let (Some(store), Some(fence), Some(run)) = (
-            self.session.history_store(),
-            self.shift_fence.as_ref(),
-            self.shift_run.as_ref(),
-        ) else {
-            return Ok(crate::store::CheckpointAdmission::default());
-        };
-        let policy = self
-            .host
-            .core
-            .durability
-            .queued_work_batching
-            .admission_policy(self.policy.llm_profile_config().context_window_tokens());
-        store
-            .admit_at_checkpoint(&crate::store::CheckpointAdmissionRequest {
-                fence: fence.clone(),
-                run: run.clone(),
-                turn_id: self.turn_id.clone(),
-                checkpoint,
-                step: step.to_string(),
-                max_inputs: 64,
-                policy,
-            })
-            .await
-            .map_err(crate::runtime::runtime_error_from_store_commit)
-    }
-
     pub(in crate::runtime) async fn run_checkpoint(
         &mut self,
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         checkpoint: CheckpointKind,
-        step: &str,
         admission: crate::store::CheckpointAdmission,
         event_tx: &TurnObserver,
     ) -> Result<
@@ -480,26 +428,6 @@ impl RuntimeTurnDriver<'_> {
         let mut transient_messages = Vec::new();
         let mut committed_user_messages = Vec::new();
         let mut turn_causes = Vec::new();
-        if let Some(run) = self.shift_run.as_ref()
-            && !admission.is_empty()
-        {
-            let causes = admission
-                .queued
-                .as_ref()
-                .map(|queued| queued.materialize_queued_checkpoint_work().turn_causes)
-                .unwrap_or_default();
-            self.emit_trace(protocol_iteration, || lash_trace::TraceEvent::Custom {
-                name: "ingress.admitted".to_string(),
-                payload: ingress_admitted_trace_payload(
-                    run,
-                    step,
-                    crate::AdmissionBoundary::ActiveTurnCheckpoint,
-                    admission.inputs.as_ref(),
-                    admission.queued.as_ref(),
-                    &causes,
-                ),
-            });
-        }
         let crate::store::CheckpointAdmission {
             inputs: turn_input_admission,
             queued: queued_admission,

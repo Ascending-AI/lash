@@ -27,6 +27,7 @@ pub mod park_events;
 pub mod processes;
 pub mod run_records;
 pub mod session_close;
+pub mod session_mail;
 pub mod snapshots;
 pub mod turns;
 pub mod waits;

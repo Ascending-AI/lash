@@ -1,5 +1,5 @@
 //! Registration macro for the session-ingress store laws: the shared
-//! admission sequence and the shift-epoch seal.
+//! admission sequence and the reserved source keys.
 
 /// Register one independently reported test per session-ingress store law.
 ///
@@ -13,8 +13,6 @@ macro_rules! session_ingress_tests {
         $crate::session_ingress_tests!(@catalogue $fixture; [
             (every_ingress_producer_shares_the_session_sequence, "ingress-shared-sequence"),
             (ingress_reserved_source_keys_are_refused_before_admission, "ingress-reserved-source-keys"),
-            (the_shift_epoch_seal_is_idempotent_per_admission, "ingress-shift-epoch-seal"),
-            (concurrent_seals_serialize, "ingress-concurrent-seals"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

@@ -7,12 +7,11 @@ use super::process_references::{ProcessCountConservation, assert_process_count_c
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
 use crate::{
-    LeaseOwnerIdentity, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessObserverBy, ProcessRecord, ProcessStartOutcome, ProjectionWatermark,
+    ProcessCompletionOutcome, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessObserverBy, ProcessRecord, ProcessStartOutcome, ProjectionWatermark,
     apply_process_event_projection, fold_process_record, process_wake_batch_draft,
 };
 use generated_prefix::generated_prefix;
-use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::{ProcessId, SessionId};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
@@ -103,7 +102,6 @@ pub enum StoreContractOp {
     ConsumeWake {
         selection: u8,
         highest_in_group: bool,
-        stale: bool,
     },
     Prune {
         watermark: bool,
@@ -925,7 +923,6 @@ async fn apply_operation(
         StoreContractOp::ConsumeWake {
             selection,
             highest_in_group,
-            stale,
         } => {
             let Some((key, sequence)) = select_live_wake(model, *selection, *highest_in_group)
             else {
@@ -935,7 +932,7 @@ async fn apply_operation(
                 .live_wakes
                 .get(&key)
                 .is_some_and(|wakes| wakes.keys().any(|candidate| *candidate < sequence));
-            if consume_wake(handles.runtime.as_ref(), &key.1, sequence, *stale).await? {
+            if consume_wake(handles.runtime.as_ref(), &key.1, sequence).await? {
                 let wakes = model
                     .live_wakes
                     .get_mut(&key)
@@ -1425,18 +1422,6 @@ async fn assert_enqueued_wake_high_water_safety(
         "Enqueued-wake source key: live-row absorption changed pending receiver work"
     );
 
-    let owner = LeaseOwnerIdentity::opaque(
-        "law-high-water-earlier-owner",
-        "law-high-water-earlier-incarnation",
-    );
-    let lease = runtime
-        .seal_shift_epoch_for_test(&session, &owner, "wake-high-water-executor-2", 60_000)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .acquired()
-        .ok_or_else(|| {
-            TestCaseError::fail("Enqueued-wake high-water safety: second lease unexpectedly busy")
-        })?;
     let head = runtime
         .list_queued_work(&session)
         .await
@@ -1448,13 +1433,13 @@ async fn assert_enqueued_wake_high_water_safety(
                 "Enqueued-wake high-water safety: lower wake did not remain admissible",
             )
         })?;
-    super::execute_run_to_end(
-        runtime,
-        &lease,
-        "store-contract-high-water",
-        crate::store::AdmittedHead::Batch(head.batch_id),
-    )
-    .await;
+    // The wake leaves through a terminal transition: the host cancel raises
+    // the receiver floor exactly as a settled claim does (FIG-3545).
+    runtime
+        .cancel_queued_work_batch(&session, &head.batch_id)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .ok_or_else(|| TestCaseError::fail("Enqueued-wake high-water safety: head not open"))?;
     prop_assert!(
         runtime
             .list_queued_work(&session)
@@ -1499,17 +1484,7 @@ async fn assert_prune_reregister_wake_names_the_new_run(
         .enqueue_queued_work(process_wake_batch_draft(original))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let owner = LeaseOwnerIdentity::opaque(
-        "law-prune-reregister-wake-owner",
-        "law-prune-reregister-wake-incarnation",
-    );
-    let lease = handles
-        .runtime
-        .seal_shift_epoch_for_test(&session, &owner, "wake-fence-executor", 60_000)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .acquired()
-        .ok_or_else(|| TestCaseError::fail("prune/re-register wake lease unexpectedly busy"))?;
+
     let head = handles
         .runtime
         .list_queued_work(&session)
@@ -1518,13 +1493,12 @@ async fn assert_prune_reregister_wake_names_the_new_run(
         .into_iter()
         .next()
         .ok_or_else(|| TestCaseError::fail("old-incarnation wake was not admissible"))?;
-    super::execute_run_to_end(
-        &handles.runtime,
-        &lease,
-        "store-contract-prune",
-        crate::store::AdmittedHead::Batch(head.batch_id),
-    )
-    .await;
+    handles
+        .runtime
+        .cancel_queued_work_batch(&session, &head.batch_id)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .ok_or_else(|| TestCaseError::fail("old-incarnation wake was not open"))?;
 
     handles
         .registry
@@ -1878,7 +1852,6 @@ async fn consume_wake(
     runtime: &dyn RuntimeStore,
     process_id: &ProcessId,
     sequence: u64,
-    stale: bool,
 ) -> Result<bool, String> {
     let session = SessionId::from("prop-runtime-session");
     let queued = runtime
@@ -1888,148 +1861,12 @@ async fn consume_wake(
     let Some(batch) = queued.iter().find(|batch| matches!(
         &batch.payload, QueuedWorkPayload::ProcessWake { wake } if wake.process_id == process_id && wake.sequence == sequence
     )) else { return Ok(false); };
-    // The turn lane is claimed in enqueue order, so only the head wake is
-    // consumed by a settled claim. A wake behind it leaves through the other
-    // terminal transition, a host cancel; a stale settlement needs a claim, so
-    // it executes the head.
-    let head = queued.iter().min_by_key(|batch| batch.enqueue_seq);
-    if head.is_none_or(|head| head.batch_id != batch.batch_id) {
-        if stale {
-            return Ok(false);
-        }
-        return runtime
-            .cancel_queued_work_batch(&session, &batch.batch_id)
-            .await
-            .map(|cancelled| cancelled.is_some())
-            .map_err(|error| error.to_string());
-    }
-    let owner = LeaseOwnerIdentity::opaque("property-consumer", "property-consumer-incarnation");
-    let Some(lease) = runtime
-        .seal_shift_epoch_for_test(&session, &owner, "consume-wake-executor", 60_000)
-        .await
-        .map_err(|error| error.to_string())?
-        .acquired()
-    else {
-        return Ok(false);
-    };
-    let run = crate::TurnId::fixture(format!(
-        "store-contract-consume:{}",
-        lease.admission().as_str()
-    ));
-    let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
-        &lease,
-        &run,
-        crate::store::AdmittedHead::Batch(batch.batch_id.clone()),
-    );
-    request.policy = crate::testing::queued_work_admission_policy(1);
-    let Some(admission) = runtime
-        .admit_run(&request)
-        .await
-        .map_err(|error| error.to_string())?
-    else {
-        return Ok(false);
-    };
-    let admitted = admission.batch_ids();
-    if admitted != vec![batch.batch_id.clone()] {
-        return Err(format!(
-            "the head admission took {admitted:?}, not the head wake {}",
-            batch.batch_id
-        ));
-    }
-    let state = crate::conformance::helpers::load_window_state(runtime, &session)
-        .await
-        .map_err(|error| error.to_string())?
-        .unwrap_or_else(|| RuntimeSessionState {
-            session_id: session.clone(),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            ))
-        });
-    let settling = |fence: &crate::store::ShiftFence, label: &str| {
-        let operation = crate::OperationId::new(
-            crate::ExecutionScope::runtime_operation(format!(
-                "store-contract-consume:{process_id}:{sequence}:{}:{label}",
-                lease.admission().as_str()
-            )),
-            "commit",
-        );
-        let mut settlement = crate::store::IngressSettlement::new(run.clone());
-        if let Some(queued) = &admission.queued {
-            settlement.completed_batches.push(queued.completion());
-        }
-        RuntimeCommit::persisted_state_for_test(&state)
-            .with_operation(operation)
-            .map(|(mut commit, _)| {
-                commit.shift_fence = Some(Box::new(fence.clone()));
-                commit.ingress = Some(settlement);
-                commit.run_terminal = Some(Box::new(crate::store::RunTerminalWrite {
-                    commit: crate::store::TurnCommitId::new(run.clone(), 0),
-                    turn: run.clone(),
-                    run: run.clone(),
-                    outcome: crate::store::RunCommittedOutcome::Finished(
-                        lash_core::facade_support::TurnFinish::AssistantMessage {
-                            text: String::new(),
-                        },
-                    ),
-                }));
-                commit
-            })
-            .map_err(|error| error.to_string())
-    };
-    if stale {
-        let successor = runtime
-            .seal_shift_epoch_for_test(&session, &owner, "consume-wake-successor", 60_000)
-            .await
-            .map_err(|error| error.to_string())?
-            .acquired()
-            .ok_or_else(|| "the successor shift did not seal".to_string())?;
-        let before = queued_batch_snapshot(runtime, &session, &batch.batch_id).await?;
-        let result = runtime
-            .commit_runtime_state(settling(&lease, "stale")?)
-            .await;
-        if !matches!(result, Err(crate::StoreError::StaleShiftFence { .. })) {
-            return Err(format!(
-                "Stale-authority non-mutation: a superseded fence's settlement was not refused: {result:?}"
-            ));
-        }
-        let after = queued_batch_snapshot(runtime, &session, &batch.batch_id).await?;
-        if before != after {
-            return Err(
-                "Stale-authority non-mutation: a refused settlement changed its batch".to_string(),
-            );
-        }
-        // The live shift ends the run settling nothing: its terminal hands
-        // the wake back open at its own position.
-        let mut release = settling(&successor, "release")?;
-        if let Some(ingress) = release.ingress.as_mut() {
-            ingress.completed_batches.clear();
-        }
-        runtime
-            .commit_runtime_state(release)
-            .await
-            .map_err(|error| error.to_string())?;
-        return Ok(false);
-    }
+    // A wake leaves the lane through a terminal transition. The one a store
+    // law can drive without a session actor is the host cancel, which raises
+    // the same receiver floor a settled claim does (FIG-3545).
     runtime
-        .commit_runtime_state(settling(&lease, "settle")?)
+        .cancel_queued_work_batch(&session, &batch.batch_id)
         .await
-        .map_err(|error| error.to_string())?;
-    Ok(true)
-}
-
-async fn queued_batch_snapshot(
-    runtime: &dyn RuntimeStore,
-    session_id: &SessionId,
-    batch_id: &str,
-) -> Result<Option<serde_json::Value>, String> {
-    runtime
-        .list_queued_work(session_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|batch| batch.batch_id == batch_id)
-        .map(serde_json::to_value)
-        .transpose()
+        .map(|cancelled| cancelled.is_some())
         .map_err(|error| error.to_string())
 }

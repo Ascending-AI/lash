@@ -34,7 +34,7 @@ pub(super) async fn record_native_transition(
     let invocation =
         crate::RuntimeEffectInvocation::new(request.id.0.clone(), attribution, "plugin-transition");
     let answer = controller
-        .shift_effect(
+        .ingress_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::TransitionPlugins {

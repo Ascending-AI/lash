@@ -323,7 +323,6 @@ impl SugarTurn {
                 .with_process_work(crate::testing::process_work_wiring_for_registry(
                     self.stores.process_registry(),
                 ))
-                .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                 .build(),
         )
         .await

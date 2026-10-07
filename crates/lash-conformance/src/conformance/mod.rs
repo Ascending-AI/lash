@@ -41,6 +41,7 @@ pub(crate) use law_backend::{
 };
 mod admission_support;
 mod admitted_head_redrive;
+mod commit_receipts;
 mod declared_start;
 mod definitions;
 mod deployment_view;
@@ -48,8 +49,6 @@ mod direct_turn_acceptance;
 use deployment_view::DeploymentViewExt;
 mod fence_integrity;
 mod fleet_format;
-mod frame_open_redrive;
-mod frame_switch_redrive;
 mod helpers;
 mod hostile_input;
 mod lineage;
@@ -69,50 +68,34 @@ mod process_references;
 mod process_registry;
 mod process_trigger_retention;
 mod queue_observation;
-mod queued_after_commit_redrive;
-mod queued_input_runs;
 pub mod registration_macro_support;
 mod release_stamp;
 mod retention;
-mod run_admission_fixture;
-mod run_answers_its_rows;
-mod run_control;
-mod run_executor;
 mod run_shape;
-mod run_spec_shift;
-mod run_spec_tool_access;
-mod run_start_marker;
-mod run_supersession;
-mod run_terminal;
 mod runtime_persistence;
-mod runtime_persistence_state_machine;
 mod segment_budget;
 mod segment_redrive;
-mod shift_admission;
 mod trace_provenance;
 pub use segment_budget::{
     SegmentBudgetHarness, SegmentBudgetObservation,
     segment_budget_and_continuation_preserve_results_across_waits,
 };
+mod batch_sugar;
+mod revision_pins;
 mod served_process_start;
 mod session_delete_blob_reclaim;
 mod session_graph_append;
 mod session_graph_state_machine;
 mod session_history;
 mod session_ingress;
+mod session_mail;
+pub use session_mail::{
+    WakeCut, a_producer_commits_its_row_and_its_wake_together,
+    a_producer_wakes_no_absent_or_deleted_session, two_claimers_racing_admission_admit_one_run,
+};
 mod session_store_factory;
 mod session_store_factory_enumeration;
 mod session_store_factory_failure_evidence;
-mod turn_commit_outcome;
-pub use turn_commit_outcome::{
-    cancelled as turn_commit_cancelled, completed as turn_commit_completed,
-    failed as turn_commit_failed, frame_switch as turn_commit_frame_switch,
-};
-pub use turn_commit_outcome::{
-    terminal_feed_is_ordered_and_replay_stable, unread_terminals_survive_retention,
-};
-mod batch_sugar;
-mod revision_pins;
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;
@@ -125,10 +108,9 @@ mod tool_intent_retention;
 mod tool_intent_runtime;
 mod trigger_store;
 mod turn_config;
-mod turn_park_feed;
+
 mod turn_runner;
 
-pub use admission_support::prepare_final_commit;
 pub(crate) use admission_support::*;
 pub use admitted_head_redrive::*;
 #[cfg(feature = "lashlang")]
@@ -144,8 +126,6 @@ pub use definitions::*;
 pub use direct_turn_acceptance::*;
 pub use fence_integrity::*;
 pub use fleet_format::{FleetFormatDeployment, fleet_format_conformance};
-pub use frame_open_redrive::*;
-pub use frame_switch_redrive::*;
 pub use helpers::*;
 pub use lineage::*;
 pub use live_replay::*;
@@ -158,14 +138,10 @@ pub use process_prune_reclaim::*;
 pub use process_prune_start_staging::*;
 pub use process_registry::*;
 pub use process_trigger_retention::*;
-pub use queued_after_commit_redrive::*;
-pub use queued_input_runs::*;
 pub use release_stamp::{ReleaseStampDeployment, release_stamp_conformance};
 pub use retention::*;
 pub use revision_pins::*;
-pub use run_start_marker::*;
 pub use runtime_persistence::*;
-pub use runtime_persistence_state_machine::*;
 pub use served_process_start::SubagentFactories;
 pub use session_delete_blob_reclaim::*;
 pub use session_graph_append::*;
@@ -177,7 +153,6 @@ pub use session_ingress::{
 };
 pub use session_store_factory::*;
 pub use session_store_factory_failure_evidence::*;
-pub use shift_admission::*;
 pub use store_contract_state_machine::*;
 pub use store_maintenance_outcome::*;
 pub use store_recovery::*;
@@ -188,5 +163,5 @@ pub use tool_call_identity::ToolCallIdentityTier;
 pub use tool_intent_retention::*;
 pub use tool_intent_runtime::*;
 pub use trigger_store::*;
-pub use turn_park_feed::*;
+
 pub use turn_runner::*;

@@ -84,7 +84,7 @@ pub async fn record_plugin_callbacks(
         step,
     );
     let outcome = controller
-        .shift_effect(
+        .ingress_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::PluginCallbacks { phase },

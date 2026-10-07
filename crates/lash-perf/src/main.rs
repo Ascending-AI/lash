@@ -68,10 +68,6 @@ struct Args {
     #[arg(long, default_value_t = 4)]
     runtime_perf_load_population: usize,
 
-    /// Concurrent workers for durable queued-work contention scenarios
-    #[arg(long, default_value_t = 4)]
-    runtime_perf_contention_workers: usize,
-
     /// Fixed transcript/body byte target at the center of the durable checkpoint curve
     #[arg(long, default_value_t = 8 * 1024)]
     runtime_perf_checkpoint_transcript_bytes: usize,
@@ -292,7 +288,6 @@ fn main() -> anyhow::Result<()> {
         warmups: args.runtime_perf_warmups,
         scenario_filters: args.runtime_perf_scenario,
         chat_turns: args.runtime_perf_turns,
-        contention_workers: args.runtime_perf_contention_workers,
         checkpoint_transcript_bytes: args.runtime_perf_checkpoint_transcript_bytes,
         checkpoint_messages: args.runtime_perf_checkpoint_messages,
         checkpoint_graph_rows: args.runtime_perf_checkpoint_graph_rows,

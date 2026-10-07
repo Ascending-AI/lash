@@ -31,6 +31,7 @@ pub mod park_events;
 pub mod processes;
 pub mod run_records;
 pub mod session_close;
+pub mod session_mail;
 pub mod snapshots;
 pub mod turns;
 pub mod waits;
@@ -43,6 +44,9 @@ pub use processes::{
 };
 pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
 pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
+pub use session_mail::{
+    MailBatch, MailBatchKind, MailInput, SESSION_ACTOR_FORMATS, SessionMailWrite, SessionMailbox,
+};
 pub use snapshots::{SnapshotRev, SnapshotRow, SnapshotWrite};
 pub use turns::{
     ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnPhase, TurnRow,
@@ -84,6 +88,8 @@ pub enum DomainWrite {
     SessionClose(SessionCloseWrite),
     /// L6: one entry of the operator's park feed.
     ParkEvent(ParkEventWrite),
+    /// L3s: the session's admission of its mail.
+    SessionMail(SessionMailWrite),
 }
 
 /// One conditional non-owner write inside a [`MailTx`](crate::MailTx).
@@ -194,6 +200,15 @@ pub enum DomainRefusal {
         /// The revision stored; `None` when the process is gone or terminal.
         found: Option<u64>,
     },
+    /// Session mail an admission named is no longer open and unbound: a
+    /// producer cancelled it, or another admission took it.
+    #[error("session {session} mail {item} is no longer open")]
+    SessionMailMoved {
+        /// The session.
+        session: SessionId,
+        /// The input or batch.
+        item: String,
+    },
     /// The session head moved past the revision the commit expected.
     #[error("session {session} head is at {found:?}, not the expected {expected}")]
     HeadMoved {
@@ -292,6 +307,9 @@ pub trait DurableReads: Send + Sync {
     /// L6b: the session's scopes whose cascade still has children to mark,
     /// in the order they began ending.
     async fn ending_scopes(&self, session: &SessionId) -> Result<Vec<ScopeKey>, DurableError>;
+
+    /// L3s: the session's open mail.
+    async fn session_mailbox(&self, session: &SessionId) -> Result<SessionMailbox, DurableError>;
 
     /// L6: up to `limit` park-feed entries after `after`, oldest first.
     async fn park_events(

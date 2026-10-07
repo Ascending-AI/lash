@@ -812,62 +812,6 @@
           }
         }
       },
-      "queued_work_admission_stress": {
-        "guarded_span": "whole_run",
-        "enforced_allocation": {
-          "alloc_bytes_max": 40675000,
-          "steady_state_turn_alloc_bytes_max": 3007000
-        },
-        "advisory_duration": {
-          "ms_max": 151.366,
-          "phases": {
-            "queued_work.supersede_join_shift": {
-              "budget_ms": 3.041,
-              "required": true
-            },
-            "queued_work.admit_exclusive_turn_work": {
-              "budget_ms": 7.343,
-              "required": true
-            },
-            "queued_work.admit_join_turn_work": {
-              "budget_ms": 17.148,
-              "required": true
-            },
-            "queued_work.open_session_command_run": {
-              "budget_ms": 9.978,
-              "required": true
-            },
-            "queued_work.seal_shift_epoch": {
-              "budget_ms": 2.372,
-              "required": true
-            },
-            "queued_work.complete_exclusive_turn_work": {
-              "budget_ms": 4.009,
-              "required": true
-            },
-            "queued_work.complete_join_turn_work": {
-              "budget_ms": 23.105,
-              "required": true
-            },
-            "queued_work.complete_session_command": {
-              "budget_ms": 4.354,
-              "required": true
-            },
-            "queued_work.enqueue_mixed_batch": {
-              "budget_ms": 74.087,
-              "required": true
-            },
-            "queued_work.list_pending": {
-              "budget_ms": 2.695,
-              "required": true
-            },
-            "queued_work.resume_join_admission": {
-              "budget_ms": 11.768,
-              "required": true
-            }
-          }
-        }
-      },
       "resident_graph_append_curve": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
@@ -2693,14 +2637,6 @@
               "budget_ms": 6.307,
               "required": true
             },
-            "store_hardening.memory.admit_queued_work": {
-              "budget_ms": 8.335,
-              "required": true
-            },
-            "store_hardening.memory.seal_shift_epoch": {
-              "budget_ms": 8.911,
-              "required": true
-            },
             "store_hardening.memory.history_cursor_page": {
               "budget_ms": 36.0,
               "required": true
@@ -2715,10 +2651,6 @@
             },
             "store_hardening.memory.history_head_page": {
               "budget_ms": 30.0,
-              "required": true
-            },
-            "store_hardening.memory.complete_queued_work": {
-              "budget_ms": 26.529,
               "required": true
             },
             "store_hardening.memory.prune_terminal_processes": {
@@ -2741,14 +2673,6 @@
               "budget_ms": 264.525,
               "required": true
             },
-            "store_hardening.postgres.admit_queued_work": {
-              "budget_ms": 320.688,
-              "required": true
-            },
-            "store_hardening.postgres.seal_shift_epoch": {
-              "budget_ms": 309.862,
-              "required": true
-            },
             "store_hardening.postgres.history_cursor_page": {
               "budget_ms": 200.0,
               "required": true
@@ -2763,10 +2687,6 @@
             },
             "store_hardening.postgres.history_head_page": {
               "budget_ms": 200.0,
-              "required": true
-            },
-            "store_hardening.postgres.complete_queued_work": {
-              "budget_ms": 357.053,
               "required": true
             },
             "store_hardening.postgres.open_enforce": {
@@ -2797,14 +2717,6 @@
               "budget_ms": 110.446,
               "required": true
             },
-            "store_hardening.sqlite.admit_queued_work": {
-              "budget_ms": 62.32,
-              "required": true
-            },
-            "store_hardening.sqlite.seal_shift_epoch": {
-              "budget_ms": 44.198,
-              "required": true
-            },
             "store_hardening.sqlite.history_cursor_page": {
               "budget_ms": 40.0,
               "required": true
@@ -2819,10 +2731,6 @@
             },
             "store_hardening.sqlite.history_head_page": {
               "budget_ms": 40.0,
-              "required": true
-            },
-            "store_hardening.sqlite.complete_queued_work": {
-              "budget_ms": 55.687,
               "required": true
             },
             "store_hardening.sqlite.prune_terminal_processes": {
@@ -3167,66 +3075,6 @@
             },
             "standard_parallel_tools_checkpoint": {
               "budget_ms": 54.799,
-              "required": true
-            }
-          }
-        }
-      },
-      "turn_input_ingress_interrupt": {
-        "guarded_span": "whole_run",
-        "enforced_allocation": {
-          "alloc_bytes_max": 17077000,
-          "steady_state_turn_alloc_bytes_max": 1310000
-        },
-        "advisory_duration": {
-          "ms_max": 253.806,
-          "phases": {
-            "turn_input_ingress.supersede_active_shift": {
-              "budget_ms": 3.892,
-              "required": true
-            },
-            "turn_input_ingress.supersede_next_shift": {
-              "budget_ms": 37.725,
-              "required": true
-            },
-            "turn_input_ingress.admit_active_inputs": {
-              "budget_ms": 7.328,
-              "required": true
-            },
-            "turn_input_ingress.admit_next_turn_inputs": {
-              "budget_ms": 31.137,
-              "required": true
-            },
-            "turn_input_ingress.seal_shift_epoch": {
-              "budget_ms": 3.526,
-              "required": true
-            },
-            "turn_input_ingress.complete_active_and_defer": {
-              "budget_ms": 44.616,
-              "required": true
-            },
-            "turn_input_ingress.complete_next_turn_inputs": {
-              "budget_ms": 6.141,
-              "required": true
-            },
-            "turn_input_ingress.enqueue_active": {
-              "budget_ms": 66.538,
-              "required": true
-            },
-            "turn_input_ingress.enqueue_next": {
-              "budget_ms": 17.117,
-              "required": true
-            },
-            "turn_input_ingress.list_pending": {
-              "budget_ms": 3.133,
-              "required": true
-            },
-            "turn_input_ingress.resume_active_admission": {
-              "budget_ms": 26.056,
-              "required": true
-            },
-            "turn_input_ingress.resume_next_admission": {
-              "budget_ms": 32.642,
               "required": true
             }
           }

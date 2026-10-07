@@ -1,69 +1,12 @@
-//! The work ports of the durable backend (ADR 0132 §1): a submission is a
-//! wake of the actor that owns the work, never a send to an engine.
+//! The process work port of the durable backend (ADR 0132 §1): a
+//! submission is a wake of the actor that owns the work, never a send to an
+//! engine.
 //!
-//! A session's shift ask wakes its session actor ([`Backend::wake_session`],
-//! L3s); a process start wakes its process actor ([`Backend::wake_process`],
-//! L6). Waits and cancels become wait rows and mail, filled by their owners.
+//! A process start wakes its process actor ([`Backend::wake_process`], L6).
+//! Waits and cancels become wait rows and mail, filled by their owners.
 
-use std::sync::{Arc, OnceLock};
-
-use super::{ProcessTerminalWait, ProcessWorkSubstrate, SessionShifts, SessionWorkEngine};
-use crate::{Backend, PluginError, SessionId};
-
-/// Session work over the durable backend: every ask wakes the session actor.
-pub struct DurableSessionWork {
-    backend: Backend,
-    shifts: OnceLock<Arc<dyn SessionShifts>>,
-}
-
-impl DurableSessionWork {
-    /// Session work over `backend`.
-    #[must_use]
-    pub fn new(backend: Backend) -> Self {
-        Self {
-            backend,
-            shifts: OnceLock::new(),
-        }
-    }
-}
-
-impl std::fmt::Debug for DurableSessionWork {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("DurableSessionWork")
-    }
-}
-
-#[async_trait::async_trait]
-impl SessionWorkEngine for DurableSessionWork {
-    fn schedule_shift(&self, _session: &SessionId, _request: crate::engine::ShiftRequestId) {
-        todo!("L3s (FIG-5196): wake the session actor; its activation drains the session's mail")
-    }
-
-    async fn request_shift(
-        &self,
-        session: &SessionId,
-        _request: crate::engine::ShiftRequestId,
-    ) -> Result<(), crate::engine::EngineRefusal> {
-        self.backend.wake_session(session).await.map_err(|error| {
-            crate::engine::EngineRefusal::retryable(
-                crate::RuntimeErrorCode::SessionWorkUnavailable,
-                error.to_string(),
-            )
-        })
-    }
-
-    fn install_session_shifts(&self, shifts: Arc<dyn SessionShifts>) -> Arc<dyn SessionShifts> {
-        Arc::clone(self.shifts.get_or_init(|| shifts))
-    }
-
-    async fn await_shift(
-        &self,
-        _session: &SessionId,
-        _request: &crate::engine::ShiftRequestId,
-    ) -> Result<crate::engine::ShiftOutcome, crate::engine::ShiftAbort> {
-        todo!("L3s (FIG-5196): answer once the session actor's activation for the ask released")
-    }
-}
+use super::{ProcessTerminalWait, ProcessWorkSubstrate};
+use crate::{Backend, PluginError};
 
 /// Process work over the durable backend: a start wakes the process actor.
 pub struct DurableProcessWork {

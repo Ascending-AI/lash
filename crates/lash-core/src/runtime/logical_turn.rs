@@ -294,20 +294,12 @@ pub(super) enum LogicalTurnStart {
     /// An input, with the protocol turn options a follow-on turn recorded
     /// beyond its run's view (`None` for a run's own first turn).
     Input(TurnInput),
-    /// A recovered follow-on whose recovery bound is spent (ADR 0101 §3): it
-    /// never runs, and commits as the failed turn carrying
-    /// `FollowOnRecoveryExhausted` with its task as the delivered input.
-    ExhaustedFollowOn(Box<crate::store::PendingFollowOn>),
 }
 
 impl LogicalTurnStart {
     fn continuation_state(&self) -> (crate::TurnContext, Option<TurnId>) {
         match self {
             Self::Input(input) => (input.turn_context.clone(), input.trace_turn_id.clone()),
-            Self::ExhaustedFollowOn(owed) => (
-                crate::TurnContext::default(),
-                Some(owed.follow_on_turn_id.clone()),
-            ),
         }
     }
 }
@@ -370,106 +362,6 @@ impl LashRuntime {
             ));
     }
 
-    /// End the run at the commit of its physical turn `committed_turn`,
-    /// handing back `withheld`: the rows that turn withheld from its
-    /// terminal checkpoint for a follow-on turn this run will not execute
-    /// after all (FIG-3157, FIG-3927).
-    ///
-    /// The commit that withheld them owed their follow-on, so it wrote no
-    /// terminal, and the rows stay bound to the run. Once the follow-on
-    /// fails before its commit, or the commit before it fails its delivery,
-    /// nothing else ends the run or redrives it: its run returns, and no row
-    /// owes a shift. So the run ends here, at the turn whose answer it
-    /// committed, in one commit under the run's shift fence that releases
-    /// the withheld rows open at their own positions, each owing its session a
-    /// shift again, and writes the terminal a redrive of the run reads. A
-    /// run that still owes a frame's follow-on is left to the shift that
-    /// recovers it, and a commit that fails leaves the run as it was, to the
-    /// next shift that resumes it.
-    async fn end_run_without_follow_on(
-        &mut self,
-        committed_turn: &TurnId,
-        outcome: &TurnOutcome,
-        withheld: WithheldTerminalWork,
-    ) {
-        let Some(shift_commit) = self
-            .shift_run
-            .as_ref()
-            .and_then(|run| run.commit_facts(committed_turn, outcome, false))
-        else {
-            return;
-        };
-        let refused = |runtime: &mut Self, error: &dyn std::fmt::Display| {
-            runtime.invalidate_resident_session_state();
-            tracing::warn!(
-                error = %error,
-                run = %shift_commit.run,
-                "failed to end a run whose withheld follow-on work will not run"
-            );
-        };
-        // The failed turn may have dirtied the resident state; the run ends
-        // over the head its last commit wrote.
-        if let Err(error) = self.refresh_resident_head().await {
-            refused(self, &error);
-            return;
-        }
-        if self.state.pending_follow_on.is_some() {
-            return;
-        }
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
-            return;
-        };
-        let operation = crate::OperationId::new(
-            crate::ExecutionScope::turn(self.state.session_id.clone(), committed_turn.clone()),
-            "run-end",
-        );
-        let fleet_format = self.fleet_format();
-        let (mut commit, persisted_node_ids) =
-            match crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
-                &mut self.state,
-                operation,
-                self.host.core.durability.commit_budget,
-                fleet_format,
-            ) {
-                Ok(commit) => commit,
-                Err(error) => {
-                    refused(self, &error);
-                    return;
-                }
-            };
-        let settlement =
-            super::turn_settlement::TurnIngressSettlement::default().with_undelivered(withheld);
-        if !settlement.is_empty() {
-            commit.ingress = Some(settlement.into_ingress(
-                shift_commit.run.clone(),
-                crate::TurnCancelUndeliveredInputPolicy::Defer,
-            ));
-        }
-        commit.shift_fence = Some(Box::new(shift_commit.fence.clone()));
-        commit.run_terminal = shift_commit.terminal.clone().map(Box::new);
-        match store
-            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
-            .await
-        {
-            Ok(receipt) => {
-                if receipt.receipt_replayed {
-                    self.invalidate_resident_session_state();
-                } else {
-                    self.state.apply_persisted_commit_result(receipt);
-                    self.state.mark_node_ids_persisted(persisted_node_ids);
-                }
-                if let Some(run) = self.shift_run.as_mut() {
-                    run.mark_terminal_written();
-                }
-            }
-            Err(error) => refused(self, &error),
-        }
-    }
-
     /// How this runtime's turns frame their stream deltas for the host.
     pub(super) fn delta_framing(&self) -> super::turn_observer::DeltaFraming {
         super::turn_observer::DeltaFraming {
@@ -495,7 +387,6 @@ impl LashRuntime {
         scoped_effect_controller: ActorContext,
         local_stop: LocalTurnStop,
         admissions: LogicalTurnAdmissions,
-        shift_fence: Option<&ShiftFence>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
         let (observer, mut observations) =
@@ -506,7 +397,6 @@ impl LashRuntime {
             scoped_effect_controller,
             local_stop,
             admissions,
-            shift_fence,
             stopwatch,
         ));
         work_with_observations(shift, &mut observations, |observation| {
@@ -523,7 +413,6 @@ impl LashRuntime {
         scoped_effect_controller: ActorContext,
         local_stop: LocalTurnStop,
         mut admissions: LogicalTurnAdmissions,
-        shift_fence: Option<&ShiftFence>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
         let (follow_turn_context, supplied_trace_turn_id) = start.continuation_state();
@@ -566,16 +455,11 @@ impl LashRuntime {
             None => TurnId::parse(scoped_effect_controller.scope_id())?,
         };
         let logical_run = self
-            .shift_run
-            .as_ref()
-            .map(|executed| executed.run().clone())
-            .or_else(|| {
-                self.state
-                    .pending_follow_on
-                    .as_deref()
-                    .filter(|owed| owed.is_turn(&turn_trace_turn_id))
-                    .map(|owed| owed.run_turn_id())
-            })
+            .state
+            .pending_follow_on
+            .as_deref()
+            .filter(|owed| owed.is_turn(&turn_trace_turn_id))
+            .map(|owed| owed.run_turn_id())
             .unwrap_or_else(|| turn_trace_turn_id.clone());
         let mut physical_ordinal = crate::store::PhysicalTurn::physical_ordinal_of(
             &logical_run,
@@ -619,10 +503,6 @@ impl LashRuntime {
         // delivery so the committed finish stayed the turn's answer, waiting
         // for the follow-on turn that executes it.
         let mut carried_withheld: Option<WithheldTerminalWork> = None;
-        // The last committed physical turn, and the withheld rows the
-        // follow-on turn now running executes (FIG-3157).
-        let mut committed_turn: Option<TurnId> = None;
-        let mut follow_on_rows: Option<WithheldTerminalWork> = None;
         let mut announce_queued_work = true;
         let mut follow_on_turns = 0usize;
 
@@ -645,22 +525,10 @@ impl LashRuntime {
                 self.tool_restore_report.take(),
             );
             announce_queued_work = true;
-            // A follow-on that must not run commits its failure as its
-            // terminal record instead, whatever shift reached it (ADR 0101
-            // §3): its recovery bound is spent, or its chain passed
-            // MAX_AGENT_FRAME_SWITCHES switches (the chain bound travels with
-            // the follow-on).
-            let terminal = match &start {
-                LogicalTurnStart::ExhaustedFollowOn(owed) => Some((
-                    crate::TurnFailureCode::FollowOnRecoveryExhausted,
-                    format!(
-                        "follow-on turn `{}` was recovered {} times, past the host's bound; it \
-                         commits failed instead of running",
-                        owed.follow_on_turn_id, owed.attempts
-                    ),
-                    owed.owes.task().map(str::to_owned),
-                )),
-                _ => self
+            // A follow-on whose chain passed MAX_AGENT_FRAME_SWITCHES
+            // switches commits its failure as its terminal record instead of
+            // running (the chain bound travels with the follow-on).
+            let terminal = self
                     .state
                     .pending_follow_on
                     .as_ref()
@@ -676,8 +544,7 @@ impl LashRuntime {
                             ),
                             owed.owes.task().map(str::to_owned),
                         )
-                    }),
-            };
+                    });
             if let Some((code, message, task)) = terminal {
                 // A terminal record starts no follow-on: work an earlier turn
                 // withheld for one is handed back open by its commit.
@@ -690,7 +557,6 @@ impl LashRuntime {
                     sinks: TurnSinks { observer },
                     scoped_effect_controller: turn_effect_controller,
                     admissions: admissions.with_follow_on_allowed(false),
-                    shift_fence,
                 }))
                 .await;
                 let mut terminal = match terminal {
@@ -729,19 +595,10 @@ impl LashRuntime {
                                 LogicalTurnAdmissions::new(Vec::new(), Vec::new()),
                             ),
                             materialize_initial_admissions: true,
-                            shift_fence,
                         },
                     ))
                     .await
                 }
-                // Committed as its terminal above; it never executes.
-                LogicalTurnStart::ExhaustedFollowOn(owed) => Err(RuntimeError::new(
-                    RuntimeErrorCode::FollowOnPending,
-                    format!(
-                        "follow-on turn `{}` commits its exhaustion before any execution",
-                        owed.follow_on_turn_id
-                    ),
-                )),
             };
             let execution = match execution_result {
                 Ok(execution) => execution,
@@ -764,30 +621,16 @@ impl LashRuntime {
                     self.invalidate_resident_session_state();
                     return Err(err);
                 }
-                // A FIG-3157 follow-on that failed ends its run at the turn
-                // that withheld its rows, unless the failure parked the run:
-                // a park holds the run's rows until it is resolved.
+                // A follow-on that failed after an earlier turn committed
+                // reports the failure on the run's turns.
                 Err(err) => {
-                    let parked = err.turn_failure_cause() == crate::TurnFailureCause::Parked;
                     self.record_follow_on_failure(&mut turns, err);
-                    if let (false, Some(withheld), Some(committed), Some(last)) = (
-                        parked,
-                        follow_on_rows.take(),
-                        committed_turn.as_ref(),
-                        turns.last(),
-                    ) {
-                        let outcome = last.outcome.clone();
-                        Box::pin(self.end_run_without_follow_on(committed, &outcome, withheld))
-                            .await;
-                    }
                     return Ok(AgentFrameRun {
                         turns,
                         acceptance: None,
                     });
                 }
             };
-            committed_turn = Some(turn_trace_turn_id.clone());
-            follow_on_rows = None;
             let PhysicalTurnExecution {
                 mut turn,
                 post_commit_delivery_failed,
@@ -801,17 +644,6 @@ impl LashRuntime {
             frame_stopwatch.stamp(&mut turn, self.host.core.clock.as_ref());
             turns.push(turn);
             if post_commit_delivery_failed {
-                // The run stops before the follow-on its withheld rows owe,
-                // so the run ends at this commit instead.
-                if let (Some(withheld), Some(last)) = (carried_withheld.take(), turns.last()) {
-                    let outcome = last.outcome.clone();
-                    Box::pin(self.end_run_without_follow_on(
-                        &turn_trace_turn_id,
-                        &outcome,
-                        withheld,
-                    ))
-                    .await;
-                }
                 return Ok(AgentFrameRun {
                     turns,
                     acceptance: None,
@@ -866,7 +698,6 @@ impl LashRuntime {
                 .await?;
             let mut input = TurnInput::items(Vec::new());
             input.turn_context = follow_turn_context.clone();
-            follow_on_rows = Some(withheld.clone());
             admissions = LogicalTurnAdmissions::new(withheld.queued, withheld.turn_inputs)
                 .with_follow_on_allowed(follow_on_turns < MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS);
             announce_queued_work = false;

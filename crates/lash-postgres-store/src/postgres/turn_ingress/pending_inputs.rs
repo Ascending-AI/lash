@@ -9,16 +9,6 @@
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only PostgreSQL issues.
     pub(crate) struct PendingInputPostgresStatements @ "pending_turn_input" {
-        /// At most `?2` ingress obligations due at `?1`, oldest due first,
-        /// each row locked for the caller's claim and skipped by every
-        /// concurrent claimant: two deployments' relays take disjoint pages
-        /// (ADR 0109 §1.7).
-        obligation_select_due_locking = "SELECT obligation_id FROM pending_turn_inputs
-             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
-             ORDER BY obligation_due_at_ms, obligation_id
-             LIMIT ?2
-             FOR UPDATE SKIP LOCKED";
-
         /// Input `?2` of session `?1`, locked for the caller's transaction.
         select_by_id_for_update = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json

@@ -157,7 +157,6 @@ impl SpawnWorld {
                     watched.clone(),
                     Arc::new(crate::NoProcessWork::new(&watched)),
                 ),
-                Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
             ),
         )
@@ -213,7 +212,6 @@ impl SpawnWorld {
                     session_id.clone(),
                 ))
                 .with_process_work(self.process_work.clone())
-                .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                 .build(),
         )
         .await
@@ -291,7 +289,7 @@ async fn cut_then_redrive(
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     prefix: &str,
     cut: Cut,
-) -> (SessionId, Arc<dyn crate::RuntimeStore>, Answer) {
+) -> (SessionId, Answer) {
     let turn_id = TurnId::fixture(format!("{prefix}-spawn-turn"));
     let session_id = SessionId::fixture(format!("{prefix}-{}-real", cut.label()));
     let store = crate::conformance::law_session_store(world.stores.as_ref(), &session_id).await;
@@ -337,7 +335,7 @@ async fn cut_then_redrive(
         .await;
     runner.run_turn(admitted, redrive).await;
     let turn = answer(&mut answered).await;
-    (session_id, store, turn)
+    (session_id, turn)
 }
 
 fn assert_finished_with_the_child_reply(cut: Cut, turn: Answer) {
@@ -357,10 +355,6 @@ fn assert_finished_with_the_child_reply(cut: Cut, turn: Answer) {
 
 /// One law: cut the first attempt at `cut`, redrive under the drifted
 /// binding, and check the start was served or parked with nothing started.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn served_process_start_law(
     prefix: &str,
     effect_host: ActorContext,
@@ -371,16 +365,8 @@ async fn served_process_start_law(
     cut: Cut,
 ) {
     let world = SpawnWorld::new(effect_host, stores, &runner, rlm, subagents);
-    let (session_id, store, turn) = cut_then_redrive(&world, &runner, prefix, cut).await;
+    let (session_id, turn) = cut_then_redrive(&world, &runner, prefix, cut).await;
     assert_finished_with_the_child_reply(cut, turn);
-    assert!(
-        store
-            .load_turn_park(&session_id)
-            .await
-            .expect("read the park")
-            .is_none(),
-        "{cut:?}: a served start leaves no park"
-    );
     let started = world.started(&session_id).await;
     assert_eq!(
         started.len(),

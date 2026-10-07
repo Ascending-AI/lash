@@ -56,24 +56,6 @@ lash_store_sql::statements! {
         /// concurrent admission cannot move it inside this transaction.
         select_state_version_for_update = "SELECT session_state_version FROM session_meta WHERE session_id = ?1 FOR UPDATE";
 
-        /// The shared `select_shift_epoch`, row-locked for the rest of the
-        /// fenced write's transaction (FIG-4044).
-        ///
-        /// The lock is the fork. SQLite's fenced writes run under the
-        /// database's single-writer lock; here `READ COMMITTED` would let a
-        /// seal raise the epoch between the fence check and the write it
-        /// fences. Locked, the read waits for an in-flight seal and sees the
-        /// epoch it committed, and a later seal waits for the write. The lock
-        /// is exclusive rather than shared because a fenced write may go on
-        /// to lock the row for update itself (`admit_run` reads the state
-        /// version `FOR UPDATE`): two shared holders upgrading would
-        /// deadlock, where exclusive holders simply queue.
-        select_shift_epoch_locked = "SELECT shift_epoch, shift_admission_id, shift_run_start, closing_intent,
-            EXISTS (SELECT 1 FROM control_intents WHERE control_intents.session_id = session_meta.session_id
-                AND kind IN ('cancel', 'fork') AND engine_half_owed),
-            fault_json, fault_at_ms
-            FROM session_meta WHERE session_id = ?1 FOR NO KEY UPDATE";
-
         exists_materialized = "SELECT EXISTS(
                  SELECT 1 FROM session_head WHERE session_id = ?1
                  UNION ALL
@@ -422,41 +404,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `runtime_turn_commits` statements only PostgreSQL issues.
     pub(crate) struct TurnCommitPostgresStatements @ "turn_commit" {
-        /// The receipt session `?1` recorded for operation key `?2`, read in
-        /// the round trip that settles run `?3`'s park (FIG-3586, FIG-3600
-        /// S7) and logs the `Unparked{TurnCommitted}` event (FIG-3659): a
-        /// run's commit clears its park row inside the commit's transaction,
-        /// whichever of its physical turns committed, and another run's
-        /// commit leaves it. A `NULL` `?3`, an operation that is no turn's,
-        /// matches no park — and the `EXISTS` guard on the clock bump means
-        /// no event, no sequence burned.
-        ///
-        /// A data-modifying `WITH` runs whether or not the outer query reads
-        /// it, so the clear and the feed append cost the commit no round trip
-        /// of their own.
-        select_receipt_settling_turn_park = "WITH settled_park AS (
-                 DELETE FROM turn_parks WHERE session_id = ?1 AND turn_id = ?3
-                 RETURNING session_id, turn_id, park_id
-             ), settled_park_clock AS (
-                 UPDATE turn_park_clock SET current_seq = current_seq + 1
-                 WHERE singleton = TRUE
-                   AND EXISTS (SELECT 1 FROM settled_park)
-                 RETURNING current_seq
-             ), settled_park_event AS (
-                 INSERT INTO turn_park_events
-                     (seq, session_id, turn_id, park_id, kind, cause_json, reason_json, at_ms)
-                 SELECT clock.current_seq, park.session_id, park.turn_id, park.park_id,
-                        'unparked', '{\"type\":\"turn_committed\"}', NULL,
-                        floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
-                 FROM settled_park AS park
-                 CROSS JOIN settled_park_clock AS clock
-             )
-             SELECT turn_commit_hash, result_json, outcome_code,
-                        request_identity_hash, identity_encoding_version,
-                        requested_node_count
-                 FROM runtime_turn_commits
-                 WHERE session_id = ?1 AND turn_id = ?2";
-
         /// Drop every receipt of a deleted session older than `?1`.
         delete_retained = "DELETE FROM runtime_turn_commits AS receipt
              WHERE receipt.committed_at_ms < ?1 AND receipt.change_seq <= ?2

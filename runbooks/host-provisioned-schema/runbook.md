@@ -54,7 +54,7 @@ for the landing commit, so alpha.113 predates it). Figments' pinned revision
   write schema, under any configuration.
 - **Seed data ships in the same artifact.** `schema.sql` ends with the required
   seeds: the `lash_schema_versions` component stamp, the `lash_process_change_clock`
-  and `lash_turn_park_clock` singletons, and the `lash_catalog_identity` row. A
+  singleton, and the `lash_catalog_identity` row. A
   schema that skipped them is *provisioned but incomplete*: open refuses naming
   `lash_catalog_identity` and `schema.sql`. Apply the artifact whole.
 - **Ordering: migrate → verify → deploy.** Run the host migration to completion,

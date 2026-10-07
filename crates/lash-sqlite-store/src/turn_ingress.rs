@@ -19,7 +19,6 @@ use lash_store_sql::turn_ingress::{
     TurnIngressStatements, cancel_requests::CancelRequestStatements,
     pending_inputs::PendingInputStatements, queued_batches::QueuedBatchStatements,
     run_specs::RunSpecStatements, tool_intent_submissions::ToolIntentSubmissionStatements,
-    turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -27,16 +26,11 @@ mod family;
 mod pending_inputs;
 mod queued_work;
 mod tool_intents;
-mod turn_parks;
 
 pub(crate) use family::TurnIngressSqliteStatements;
 pub(crate) use pending_inputs::PendingInputSqliteStatements;
 pub(crate) use queued_work::QueuedBatchSqliteStatements;
 pub(crate) use tool_intents::ToolIntentSubmissionSqliteStatements;
-pub(crate) use turn_parks::{
-    TurnParkClockSqliteStatements, TurnParkSqliteStatements,
-    count_retired_parks_by_executable_generation,
-};
 
 /// The `pending_turn_inputs.state` partitions this family's statements name.
 ///
@@ -109,14 +103,6 @@ pub(crate) struct TurnIngressSql {
     pub(crate) queued_batches_sqlite: QueuedBatchSqliteStatements,
     /// `turn_cancel_requests`, shared.
     pub(crate) cancel_requests: CancelRequestStatements,
-    /// `turn_parks`, shared.
-    pub(crate) turn_parks: TurnParkStatements,
-    /// `turn_parks`, SQLite only.
-    pub(crate) turn_parks_sqlite: TurnParkSqliteStatements,
-    /// `turn_park_clock`, SQLite only.
-    pub(crate) turn_park_clock: TurnParkClockSqliteStatements,
-    /// `turn_park_events`, shared.
-    pub(crate) turn_park_events: TurnParkEventStatements,
 }
 
 impl TurnIngressSql {
@@ -131,10 +117,6 @@ impl TurnIngressSql {
             queued_batches: QueuedBatchStatements::render(dialect),
             queued_batches_sqlite: QueuedBatchSqliteStatements::render(dialect),
             cancel_requests: CancelRequestStatements::render(dialect),
-            turn_parks: TurnParkStatements::render(dialect),
-            turn_parks_sqlite: TurnParkSqliteStatements::render(dialect),
-            turn_park_clock: TurnParkClockSqliteStatements::render(dialect),
-            turn_park_events: TurnParkEventStatements::render(dialect),
         }
     }
 }

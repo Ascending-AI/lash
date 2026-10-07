@@ -4,7 +4,6 @@ use crate::facade_support::AgentFrameReasonFacadeOps;
 use crate::runtime::tests::helpers::RecordingStore;
 use crate::session_model::{MessageRole, Part};
 use crate::store::SessionStore;
-use crate::testing::RuntimeStoreTestShiftExt as _;
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, shared_parts,
 };
@@ -15,9 +14,6 @@ fn cancelled_outcome() -> TurnOutcome {
     TurnOutcome::Stopped(crate::TurnStop::Cancelled {
         evidence: crate::TurnCancellationEvidence::internal("turn-boundary-test"),
     })
-}
-fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
-    crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {
@@ -121,10 +117,7 @@ fn outcome_switch(
     }
 }
 
-async fn leased_boundary(
-    store: &SessionStore,
-    state: RuntimeSessionState,
-) -> (TurnBoundary, crate::store::ShiftFence) {
+async fn admitted_boundary(store: &SessionStore, state: RuntimeSessionState) -> TurnBoundary {
     assert_eq!(store.session_id(), &state.session_id);
     store
         .store()
@@ -138,20 +131,7 @@ async fn leased_boundary(
         })
         .await
         .expect("admit turn-boundary test session");
-    let owner = lease_owner("turn-boundary-test");
-    let lease = store
-        .store()
-        .seal_shift_epoch_for_test(
-            &state.session_id,
-            &owner,
-            "leased-boundary-executor",
-            60_000,
-        )
-        .await
-        .expect("claim test session execution lease")
-        .acquired()
-        .expect("test session execution lease");
-    (TurnBoundary::from_state(state), lease)
+    TurnBoundary::from_state(state)
 }
 #[test]
 fn agent_frame_switch_seeds_the_new_frame_without_a_tool_call_event() {
@@ -379,8 +359,7 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
         })
         .collect::<Vec<_>>();
     let (recording, store) = recording_session().await;
-    let (mut pipeline, _lease) =
-        leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
+    let mut pipeline = admitted_boundary(&store, state_with_graph(SessionGraph::default())).await;
     pipeline
         .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
             policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
@@ -408,7 +387,6 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             outcome: &cancelled_outcome(),
             ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
-            cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
         })
         .await
@@ -429,71 +407,6 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             .await
             .expect("load session")
             .is_none_or(|read| read.window.nodes.is_empty())
-    );
-}
-
-/// A settlement names rows its run admitted, and only the run's shift fence
-/// may settle them (FIG-3927): a final commit carrying row completions but no
-/// shift commit is refused before it reaches persistence.
-#[tokio::test]
-async fn final_commit_refuses_a_settlement_without_a_shift_fence() {
-    let graph = SessionGraph::from_active_read_state(&[text_message(
-        "admitted-input",
-        MessageRole::User,
-        "admitted content",
-    )]);
-    let queue_origin = crate::QueuedWorkCompletion {
-        session_id: SessionId::from("session-1"),
-        batch_ids: vec!["queue-batch".into()],
-    };
-    let turn_input_origin = crate::TurnInputCompletion {
-        session_id: SessionId::from("session-1"),
-        data: crate::TurnInputCompletionData {
-            input_ids: vec!["turn-input".into()],
-            applications: Vec::new(),
-        },
-    };
-    let (recording, store) = recording_session().await;
-    for settlement in [
-        TurnIngressSettlement::new(vec![queue_origin], Vec::new()),
-        TurnIngressSettlement::new(Vec::new(), vec![turn_input_origin]),
-    ] {
-        let (mut pipeline, lease) = leased_boundary(&store, state_with_graph(graph.clone())).await;
-        let returned_state = pipeline.export_state_for_assembly();
-        let error = pipeline
-            .final_commit_with_snapshots(FinalCommitInput {
-                returned_state: returned_state.clone(),
-                plugins: None,
-                execution_state_update: ExecutionStateUpdate::Clean,
-                agent_frame_switch_materializes: false,
-                store: Some(&store),
-                failure_evidence: &[],
-                outcome: &cancelled_outcome(),
-                tool_calls: &[],
-                omitted: None,
-                retained_outputs: &[],
-                ingress_settlement: settlement,
-                pending_follow_on: None,
-                cancellation: None,
-                recorded_attachment_intent_ids: Default::default(),
-            })
-            .await
-            .expect_err("an unfenced settlement is refused");
-        assert!(matches!(
-            error,
-            StoreError::IngressSettlementUnfenced { ref session_id }
-                if session_id.as_str() == "session-1"
-        ));
-        store
-            .store()
-            .supersede_shift_epoch_for_test(&lease)
-            .await
-            .expect("release the case's shift epoch");
-    }
-    assert_eq!(
-        *recording.runtime_commit_count.lock_recover(),
-        0,
-        "invalid commits must be rejected before reaching persistence"
     );
 }
 
@@ -522,7 +435,6 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph() {
             retained_outputs: &[],
             ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
-            cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
         })
         .await

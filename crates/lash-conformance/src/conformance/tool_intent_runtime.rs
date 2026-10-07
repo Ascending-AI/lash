@@ -207,7 +207,6 @@ pub async fn public_signal_intent_wakes_parked_process(
                 watched.clone(),
                 Arc::new(crate::NoProcessWork::new(&watched)),
             ),
-            Arc::new(crate::NoSessionWork::new()),
             crate::testing::runtime_lease_owner(),
         ),
     )
@@ -269,7 +268,6 @@ pub async fn public_signal_intent_wakes_parked_process(
                                 session_id.clone(),
                             ))
                             .with_process_work(process_work)
-                            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                             .build(),
                     )
                     .await

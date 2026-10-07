@@ -115,36 +115,8 @@ fn ingress_fixture(commit: &RuntimeCommit) -> IngressSettlement {
 }
 
 #[test]
-fn ingress_settlement_requires_the_shift_fence() {
-    let mut commit = intent_fixture();
-    commit.ingress = Some(ingress_fixture(&commit));
-    let error = commit
-        .validate_ingress_settlement()
-        .expect_err("a settlement without a shift fence must be refused");
-    assert!(matches!(
-        error,
-        StoreError::IngressSettlementUnfenced { ref session_id } if *session_id == commit.session_id
-    ));
-
-    commit.ingress = None;
-    commit.applied_commands = Some(crate::QueuedWorkCompletion {
-        session_id: commit.session_id.clone(),
-        batch_ids: vec!["command".into()],
-    });
-    assert!(matches!(
-        commit.validate_ingress_settlement(),
-        Err(StoreError::IngressSettlementUnfenced { .. })
-    ));
-}
-
-#[test]
 fn ingress_settlement_refuses_a_row_named_twice() {
     let mut commit = intent_fixture();
-    commit.shift_fence = Some(Box::new(crate::store_backend_support::sealed_shift_fence(
-        commit.session_id.clone(),
-        1,
-        AdmissionId::new("admission"),
-    )));
     let mut ingress = ingress_fixture(&commit);
     ingress.released.push(IngressRowId::Batch("batch".into()));
     commit.ingress = Some(ingress);
@@ -161,11 +133,6 @@ fn ingress_settlement_refuses_a_row_named_twice() {
 #[test]
 fn ingress_settlement_refuses_a_completion_minted_for_another_session() {
     let mut commit = intent_fixture();
-    commit.shift_fence = Some(Box::new(crate::store_backend_support::sealed_shift_fence(
-        commit.session_id.clone(),
-        1,
-        AdmissionId::new("admission"),
-    )));
     let mut ingress = ingress_fixture(&commit);
     ingress.completed_inputs[0].session_id = SessionId::from("foreign-session");
     commit.ingress = Some(ingress);
@@ -300,7 +267,6 @@ fn session_head_meta_refuses_a_head_json_naming_another_session() {
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
             ),
-            published_by_shift: false,
         },
         7,
         None,
@@ -669,8 +635,7 @@ fn decorator_surface_covers_every_component_trait_method() {
 
     // Provided methods a backend overrides with stronger semantics, so a
     // decorator forwards them rather than composing them over its own
-    // primitive: fence revalidation inside the backend's read, and a
-    // backend's own single-statement probes.
+    // primitive: a backend's own single-statement probes.
     const FORWARDED_PROVIDED: &[&str] = &["admit_session_state", "enqueue_queued_work"];
     const UNCHANGED_SEGMENT_DEFAULTS: &[&str] = &[];
 
@@ -696,8 +661,8 @@ fn decorator_surface_covers_every_component_trait_method() {
         declared.extend(declared_methods(store_mod, trait_name));
     }
     declared.extend(declared_methods(
-        include_str!("shift_fence.rs"),
-        "ShiftEpochStore",
+        include_str!("session_fault.rs"),
+        "SessionFaultStore",
     ));
     declared.extend(declared_methods(include_str!("run.rs"), "RunStore"));
     assert!(
@@ -764,7 +729,7 @@ fn decorator_surface_covers_every_component_trait_method() {
             .map(|name| (*name).to_string())
             .collect();
     assert!(
-        ledger.contains("open_run_intent"),
+        ledger.contains("load_intent"),
         "the ledger scan must reach the trait's last method: {ledger:?}"
     );
     assert_eq!(
@@ -790,7 +755,7 @@ fn every_interceptable_operation_is_scriptable() {
         .collect();
     let scriptable: Vec<&str> = StoreOp::ALL.iter().map(|op| op.name()).collect();
     assert_eq!(scriptable, interceptable);
-    assert!(scriptable.contains(&"admit_run") && scriptable.contains(&"acknowledge_intent"));
+    assert!(scriptable.contains(&"bind_run_inputs") && scriptable.contains(&"load_intent"));
     let distinct: std::collections::BTreeSet<&str> = scriptable.iter().copied().collect();
     assert_eq!(
         distinct.len(),

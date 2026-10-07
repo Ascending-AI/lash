@@ -82,11 +82,6 @@ mod error;
 pub mod formats;
 mod observation_feed;
 mod parked_work;
-mod parked_work_verbs;
-pub use parked_work_verbs::{
-    ControlIntentPage, ControlIntentQuery, ForkedTurn, ParkCancelled, ParkVerbRefused,
-    RedriveAccepted, RunRedriveAccepted,
-};
 #[cfg(feature = "postgres")]
 mod postgres_live_replay;
 pub mod preflight;
@@ -202,10 +197,7 @@ pub use crate::core::{
 };
 pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};
-pub use crate::parked_work::{
-    ParkedWork, ParkedWorkCursor, ParkedWorkEvent, ParkedWorkEventPage, ParkedWorkEventsCursor,
-    ParkedWorkPage, ParkedWorkQuery, ParkedWorkRecord, ParkedWorkRef, ParkedWorkReport,
-};
+pub use crate::parked_work::{ControlIntentPage, ControlIntentQuery, ParkedWork};
 pub use crate::send::{
     BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RunHandle,
     SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, StalledDelivery, TurnEvents,
@@ -233,11 +225,11 @@ pub use lash_core::facade_support::{
 /// validated at compile time.
 pub use lash_core::hook_key;
 pub use lash_core::runtime::ExternalCompletionError;
+/// The immediate delivery verdict of an obligation relay's attempt.
+pub use lash_core::runtime::obligations::relay::RelayVerdict;
 /// How a turn coalesces its stream deltas into frames for the live feed
 /// (`LashCoreBuilder::delta_coalescing`).
 pub use lash_core::runtime::{DeltaCoalescing, DeltaCoalescingError};
-/// The immediate delivery verdict of an obligation relay's attempt.
-pub use lash_core::shift::relay::RelayVerdict;
 pub use lash_core::store::{
     DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, SessionFault,
     SessionFaultOrigin, SessionFaultRecord, StallReason, StalledObligation, UndecodableObligation,
@@ -308,8 +300,10 @@ pub use tokio_util::sync::CancellationToken;
 pub use lash_core::ConfigTransactionRecord;
 pub use lash_core::SessionPluginInit;
 pub use lash_core::runtime::ConfigTransactionSubmitError;
-pub use lash_core::shift::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
-pub use lash_core::shift::{ObligationRelayUnavailable, RelayNeed};
+pub use lash_core::runtime::obligations::relay::{
+    DeliveryFailure, ObligationDelivery, ObligationRelay,
+};
+pub use lash_core::runtime::obligations::{ObligationRelayUnavailable, RelayNeed};
 pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
@@ -553,8 +547,6 @@ pub mod direct {
 /// Session persistence types and services.
 pub mod persistence {
     // The vocabulary this module's signatures name (the facade-completeness rule).
-
-    pub use lash_core::engine::AdmittedWork;
     pub use lash_core_store::artifact_referrer::{
         ArtifactCarry, ArtifactCleanup, ArtifactReferrerError, ArtifactReferrerKind,
         ArtifactStoreId, AttachmentUploadId, ReferrerGuard, ReferrerStore, SubscriptionRevisionId,
@@ -632,7 +624,7 @@ pub mod persistence {
         SettleOutcome,
         session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
-    pub use lash_core::store::{PreparedRunAdmission, StoreTransition, TurnTraceReceipt};
+    pub use lash_core::store::{StoreTransition, TurnTraceReceipt};
     /// Artifact ownership supplied to protocol engines and effect controllers.
     pub use lash_core::{
         ArtifactName, ArtifactReferrer, FrameEnvironmentId, ReferrerClaim, ResolvedArtifactCleanup,
@@ -658,26 +650,19 @@ pub mod persistence {
     pub use lash_core::runtime::process_wake_batch_draft_with_delivery_policy;
     pub use lash_core::session_graph::WindowAnchor;
     pub use lash_core::store::PluginWriterRangesFuture;
+    /// A session's fault record (ADR 0109 §9): one segment of
+    /// [`RuntimeStore`], implemented by every store a runtime executes.
+    pub use lash_core::store::SessionFaultStore;
     pub use lash_core::store::plugin_writers::{
         AdmittedPlugin, PluginAdmission, PluginPublication, PluginWriterRanges,
         PluginWriterRegistration, PluginWriterStamp,
     };
-    /// The shift epoch a session shift's seal raises (FIG-3600): one segment
-    /// of [`RuntimeStore`], implemented by every store a runtime executes,
-    /// and the fence it yields, the one authority every shift write presents.
+    /// A run's admission, what its checkpoints admit, how a commit settles
+    /// the rows its run holds, and the session's one unfinished run
+    /// (FIG-3927, FIG-4403).
     pub use lash_core::store::{
-        AdmissionId, RunHold, RunStartNonce, ShiftEpochSeal, ShiftEpochStore, ShiftFence,
-        ShiftRaise, StoredShiftEpoch,
-    };
-    /// A run's recorded admission of the turn-lane run it executes and the
-    /// execution that runs it, what its checkpoints admit, how a commit
-    /// settles the rows its run holds, and the session's one unfinished
-    /// run (FIG-3927, FIG-4403).
-    pub use lash_core::store::{
-        AdmitRunRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
-        IngressRowId, IngressSettlement, RUN_ADMISSION_STEP, RunAdmission, RunAdmissionAnswer,
-        RunAdmissionRefusal, RunExecutor, ShiftAdmissionPreparation, ShiftAdmissionReceipt,
-        ShiftAdmissionSelection, ShiftAdmissionWrite, UnfinishedRun,
+        AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest, IngressRowId,
+        IngressSettlement, RUN_ADMISSION_STEP, RunAdmission, UnfinishedRun,
     };
     /// The multi-session store's catalog and bounded history segments, the
     /// one-session view runtime code holds, and the window loaders (ADR 0112).
@@ -697,19 +682,17 @@ pub mod persistence {
         RunOpenerState, RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator,
         RuntimeTurnCommitStamp, SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta,
         SessionHeadPayload, SuspendedCell, TurnChange, TurnChangeCursor, TurnChangeKind,
-        TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkOrigin,
-        TurnParkQuery, TurnParkTarget, TurnParkWrite, TurnProjectionWatermark, UnparkCause,
-        UnsettledTurnCounts, commit_runtime_state_verified, validate_turn_commit_outcome_code,
+        TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome, TurnProjectionWatermark,
+        UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
+        validate_turn_commit_outcome_code,
     };
     /// A logical run's durable terminal evidence and the store segment that
     /// answers and binds runs (FIG-3600 S7, FIG-3607 item 8), and the
-    /// control intents a session's close and a parked run's verbs record.
+    /// control intent a session's close records.
     pub use lash_core::store::{
         CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind,
-        ControlIntentState, ControlIntentStore, EnginePark, IntentApplication, IntentObligation,
-        IntentSettle, RunCommittedOutcome, RunEndOutcome, RunIntentRefused, RunIntentRequest,
-        RunStore, RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite, RunVerb,
-        TurnCommitId,
+        ControlIntentState, ControlIntentStore, EnginePark, RunCommittedOutcome, RunEndOutcome,
+        RunStore, RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite, TurnCommitId,
     };
     /// Test-only store hooks and the conformance-suite handle types that
     /// carry them (`testing` feature only; no production trait requires them).
@@ -1218,20 +1201,11 @@ pub mod runtime {
     pub use lash_core::facade_support::TraceBoundaryReceipt;
     pub use lash_core::runtime::{AttemptStreamRecorder, DeclaredStartPhase, StartCancelDecision};
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::SessionShifts;
-    pub use lash_core::engine::{
-        AdmitRequest, AdmitVerdict, Admitted, EngineAck, EngineCursor, EnginePage,
-        EngineParkRecorded, EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, ParkRef,
-        ParkTarget, ReconcileCursor, RefusalClass, RunEnd, RunOutcome, ScopeCloseSink, SealRefusal,
-        SealVerdict, SessionControlEngine, ShiftAbort, ShiftHold, ShiftOutcome, ShiftRequest,
-        ShiftRequestId, ShiftStop, StalledExecution,
-    };
+    pub use lash_core::engine::{EngineRefusal, ReconcileCursor, RefusalClass, ScopeCloseSink};
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
     pub use lash_core::runtime::SessionTurnAdmission;
-    pub use lash_core::runtime::{
-        AdmittedHeadVerdict, CompactionBase, PresentationBinding, ToolPresentation,
-    };
-    pub use lash_core::shift::relay::RelayPolicy;
+    pub use lash_core::runtime::obligations::relay::RelayPolicy;
+    pub use lash_core::runtime::{CompactionBase, PresentationBinding, ToolPresentation};
     pub use lash_core::tool_dispatch::ToolAttemptLineage;
     /// The cancellation policy pinned in a Run-owned source descriptor.
     pub use lash_core::tool_run::ExternalCancelPolicy;
@@ -1275,15 +1249,15 @@ pub mod runtime {
         AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantResponsePlan,
         AssistantStreamHookState, CheckpointAdmittedSet, CompletionKeyPreparation,
         DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost, EventSink, ExecutionScope,
-        LlmRequestSpec, LlmStreamRecord, NoSessionWork, NoopEventSink, NoopTurnActivitySink,
-        ProcessCommand, ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy,
-        RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        LlmRequestSpec, LlmStreamRecord, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
+        ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution,
+        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
         RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
         RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
         RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
-        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SessionWorkEngine, SleepSpec,
-        TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef,
-        WorkCadenceError, WorkCadencePolicy,
+        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec, TraceEmitter,
+        TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
+        WorkCadencePolicy,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

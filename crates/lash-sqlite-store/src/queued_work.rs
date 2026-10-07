@@ -217,9 +217,8 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         ],
     )
     .map_err(sqlite_error)?;
-    // The admitted batch owes its session a shift (ADR 0109 §3), armed in
-    // the transaction that admits it.
-    crate::ingress_obligation::arm_queued_batch_tx(conn, &batch.session_id, &batch_id, now)?;
+    // The batch and the session's wake commit together (ADR 0132 §12).
+    crate::durable::wake_session_tx(conn, &batch.session_id, false, now)?;
     let inserted = load_queued_batch_by_id_conn(conn, &batch_id)?
         .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
     Ok(QueuedWorkEnqueueOutcome::Inserted(inserted))

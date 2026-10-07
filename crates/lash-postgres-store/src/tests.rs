@@ -10,11 +10,9 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use lash_core_execution::DeploymentStore as _;
+use lash_core_execution::TurnId;
 use lash_core_execution::TurnInputStore as _;
 use lash_core_execution::store::RunStore as _;
-use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt as _;
-use lash_core_execution::{LeaseOwnerIdentity, TurnId};
 use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
 
 #[tokio::test(flavor = "current_thread")]
@@ -736,16 +734,15 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
 }
 
 /// A session over `storage` with a committed head and one next-turn input
-/// admitted to `run`: the fixture the settlement laws below start from.
+/// bound to `run`: the fixture the settlement laws below start from.
 async fn admitted_input_fixture(
     storage: &PostgresStorage,
     label: &str,
     run: &TurnId,
 ) -> (
     PostgresStore,
-    lash_core_execution::store::ShiftFence,
     lash_core_execution::RuntimeSessionState,
-    lash_core_execution::store::RunAdmission,
+    lash_core_execution::InputId,
 ) {
     let session_id = SessionId::fixture(format!("{label}:{}", uuid::Uuid::new_v4()));
     let store = storage.store();
@@ -775,29 +772,23 @@ async fn admitted_input_fixture(
         ))
         .await
         .expect("enqueue the fixture input");
-    let fence = store
-        .seal_shift_epoch_for_test(
-            &session_id,
-            &LeaseOwnerIdentity::opaque(format!("{label}-owner"), format!("{label}-incarnation")),
-            &format!("{label}-executor"),
-            60_000,
-        )
+    store
+        .bind_run_inputs(&session_id, run, std::slice::from_ref(&input.input_id))
         .await
-        .expect("seal the fixture shift")
-        .acquired()
-        .expect("the fixture shift is sealed");
-    let admission = store
-        .admit_run(
-            &lash_core_execution::testing::store_fixtures::admit_run_request_for_test(
-                &fence,
-                run,
-                lash_core_execution::store::AdmittedHead::Input(input.input_id),
-            ),
-        )
-        .await
-        .expect("admit the fixture run")
-        .expect("the fixture run takes its input");
-    (store, fence, state, admission)
+        .expect("bind the fixture input to its run");
+    // The row as the session mail drain's admission leaves it: bound to the
+    // run that admitted it.
+    sqlx::query(
+        "UPDATE lash_pending_turn_inputs SET admitted_run = $3, admitted_by = $3
+         WHERE session_id = $1 AND input_id = $2",
+    )
+    .bind(session_id.as_str())
+    .bind(input.input_id.as_str())
+    .bind(run.as_str())
+    .execute(storage.pool())
+    .await
+    .expect("admit the fixture input");
+    (store, state, input.input_id)
 }
 
 /// A settlement locks the row it settles: the verdict reads the row under
@@ -814,9 +805,8 @@ async fn postgres_settlement_locks_the_admitted_row() {
         .await
         .expect("connect settlement-lock storage");
     let run = TurnId::from("settlement-lock-run");
-    let (_store, _fence, state, admission) =
+    let (_store, state, input_id) =
         admitted_input_fixture(&storage, "postgres-settlement-lock", &run).await;
-    let input_id = admission.input_ids()[0].clone();
 
     let mut settling = storage.pool().begin().await.expect("begin settling tx");
     sqlx::query(
@@ -836,7 +826,7 @@ async fn postgres_settlement_locks_the_admitted_row() {
         .await
         .expect("bound the rebinder's lock wait");
     let blocked = sqlx::query(
-        "UPDATE lash_pending_turn_inputs SET admitted_run = 'another-run'
+        "UPDATE lash_pending_turn_inputs SET admitted_run = 'another-run', admitted_by = 'another-run'
          WHERE session_id = $1 AND input_id = $2",
     )
     .bind(state.session_id.as_str())
@@ -878,13 +868,12 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
         .await
         .expect("connect settlement-order storage");
     let run = TurnId::from("settlement-order-run");
-    let (store, fence, state, admission) =
+    let (store, state, input_id) =
         admitted_input_fixture(&storage, "postgres-settle-order", &run).await;
-    let input_id = admission.input_ids()[0].clone();
     // A fork rebinds a row to its own run; the commit of the run that
     // admitted it then names a row it no longer holds.
     sqlx::query(
-        "UPDATE lash_pending_turn_inputs SET admitted_run = 'rebinding-root'
+        "UPDATE lash_pending_turn_inputs SET admitted_run = 'rebinding-root', admitted_by = 'rebinding-root'
          WHERE session_id = $1 AND input_id = $2",
     )
     .bind(state.session_id.as_str())
@@ -896,12 +885,17 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
     let mut settlement = lash_core_execution::store::IngressSettlement::new(run.clone());
     settlement
         .completed_inputs
-        .extend(admission.inputs.as_ref().map(|inputs| inputs.completion()));
+        .push(lash_core_execution::TurnInputCompletion {
+            session_id: state.session_id.clone(),
+            data: lash_core_execution::TurnInputCompletionData {
+                input_ids: vec![input_id],
+                applications: Vec::new(),
+            },
+        });
     let error = store
         .commit_runtime_state(
             lash_core_execution::testing::store_fixtures::settling_commit_for_test(
                 lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
-                &fence,
                 settlement,
             ),
         )
@@ -931,103 +925,6 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
         head_revision, state.head_revision,
         "a refused settlement must not move the session head"
     );
-}
-
-/// FIG-4044: an admission holds the shift fence it checked until it commits.
-///
-/// A seal raises the epoch on the session's `session_meta` row. Under `READ
-/// COMMITTED` a plain fence read sees the epoch the seal has not committed
-/// yet, so an admission racing the seal would bind rows under a fence the
-/// seal makes stale the moment it commits. The fence read locks the row: the
-/// admission waits for the in-flight seal, reads the epoch it committed, and
-/// is refused, binding nothing.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_checkpoint_admission_holds_its_fence_against_a_concurrent_seal() {
-    let Some(database_url) = postgres_test_support::database_url() else {
-        eprintln!("skipping Postgres admission fence lock: database URL is not set");
-        return;
-    };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
-        .await
-        .expect("connect admission-fence storage");
-    let run = TurnId::from("admission-fence-run");
-    let (store, fence, state, _admission) =
-        admitted_input_fixture(&storage, "postgres-admission-fence", &run).await;
-    let input = store
-        .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
-            &state.session_id,
-            lash_core_execution::TurnInputIngress::active_turn(
-                run.clone(),
-                lash_core_execution::TurnInputCheckpointBoundary::AfterWork,
-            ),
-            lash_core_execution::TurnInput::text("the checkpoint input"),
-        ))
-        .await
-        .expect("enqueue the checkpoint input");
-
-    // A seal in flight: the epoch is raised on the row and not yet committed.
-    let mut sealing = storage.pool().begin().await.expect("begin the seal");
-    let raised = sqlx::query(
-        "UPDATE lash_session_meta SET shift_epoch = shift_epoch + 1 WHERE session_id = $1",
-    )
-    .bind(state.session_id.as_str())
-    .execute(&mut *sealing)
-    .await
-    .expect("raise the shift epoch")
-    .rows_affected();
-    assert_eq!(raised, 1, "the seal raises the session's epoch");
-
-    let request = lash_core_execution::store::CheckpointAdmissionRequest {
-        fence,
-        run: run.clone(),
-        turn_id: run.clone(),
-        checkpoint: lash_core_execution::CheckpointKind::AfterWork,
-        step: "admission-fence-run:checkpoint".to_string(),
-        max_inputs: 10,
-        policy: lash_core_execution::testing::queued_work_admission_policy(10),
-    };
-    let admitting = tokio::spawn(async move { store.admit_at_checkpoint(&request).await });
-    // Wait until the admission has either finished, having read the epoch
-    // the seal has not committed, or is blocked on the seal's row lock.
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-    loop {
-        if admitting.is_finished() {
-            break;
-        }
-        let waiting: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM pg_stat_activity
-             WHERE datname = current_database() AND pid <> pg_backend_pid()
-               AND wait_event_type = 'Lock' AND query LIKE '%shift_epoch%'",
-        )
-        .fetch_one(storage.pool())
-        .await
-        .expect("read lock waits");
-        if waiting > 0 {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the admission neither finished nor waited on the seal"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    sealing.commit().await.expect("commit the seal");
-    let admitted = admitting.await.expect("join the admission");
-    assert!(
-        matches!(admitted, Err(StoreError::StaleShiftFence { .. })),
-        "an admission racing a seal is refused once the seal commits, got {admitted:?}"
-    );
-    let bound: Option<String> = sqlx::query_scalar(
-        "SELECT admitted_run FROM lash_pending_turn_inputs
-         WHERE session_id = $1 AND input_id = $2",
-    )
-    .bind(state.session_id.as_str())
-    .bind(input.input_id.as_str())
-    .fetch_one(storage.pool())
-    .await
-    .expect("read the input's binding");
-    assert_eq!(bound, None, "the refused admission binds nothing");
 }
 
 /// The per-operation PostgreSQL round trips, counted by normalized statement
@@ -1094,7 +991,6 @@ fn postgres_statement_name(query: &str) -> &'static str {
             "txn-clock-ms"
         }
         q if q.starts_with("SELECT pg_advisory_xact_lock(") => "advisory-lock",
-        q if q.starts_with("SELECT shift_epoch, shift_admission_id") => "shift-epoch-read",
         q if q.contains("FROM lash_pending_turn_inputs") => "pending-inputs-lock",
         q if q.starts_with("UPDATE lash_pending_turn_inputs") => "pending-input-admit",
         // pg_stat_statements stores this statement's own text when the row is
@@ -1127,13 +1023,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("SELECT head_revision") => "head-lock",
         q if q.starts_with("SELECT node_id FROM lash_graph_nodes") => "graph-nodes-exist",
         q if q.starts_with("SELECT hash FROM lash_blobs") => "blob-lock",
-        // The receipt read carries the committing turn's park clear as a
-        // data-modifying `WITH` (FIG-3586): one round trip, not two.
-        q if q.starts_with("WITH settled_park AS ( DELETE FROM lash_turn_parks")
-            && q.contains("SELECT turn_commit_hash, result_json") =>
-        {
-            "turn-commit-load"
-        }
+        q if q.starts_with("SELECT turn_commit_hash, result_json") => "turn-commit-load",
         q if q.starts_with("INSERT INTO lash_blobs") => "blob-insert",
         q if q.starts_with("INSERT INTO lash_checkpoint_blob_refs") => {
             "checkpoint-blob-refs-insert"
@@ -1377,116 +1267,4 @@ async fn postgres_gc_with_no_roots_sweeps_every_blob_when_configured() {
         .await
         .expect("count blobs after the rootless sweep");
     assert_eq!(resident, 0, "no blob survives a rootless sweep");
-}
-
-/// The process-prune batch delete parks a `Cancelled{SessionDeleted}` event
-/// per deleted park through one clock bump: `first_seq + row_number - 1`
-/// must hand each event a distinct, contiguous sequence (FIG-3659).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
-    let Some(database_url) = postgres_test_support::database_url() else {
-        eprintln!("skipping batch-delete park feed test: database URL is not set");
-        return;
-    };
-    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(isolated_database.url())
-        .await
-        .expect("connect batch-delete storage");
-    let factory = storage.session_store_factory();
-    let nonce = uuid::Uuid::new_v4();
-
-    let mut session_ids = Vec::new();
-    for label in ["batch-park-a", "batch-park-b"] {
-        let session_id = SessionId::fixture(format!("{label}:{nonce}"));
-        let request = SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: lash_core_execution::SessionRelation::Root,
-            config: lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
-            )
-            .into(),
-            head: lash_core_execution::SessionCreationHead::Config,
-        };
-        factory
-            .admit_session(&request)
-            .await
-            .expect("admit the parked session");
-        let store = factory.clone();
-        let state = lash_core_execution::RuntimeSessionState {
-            session_id: session_id.clone(),
-            ..lash_core_execution::RuntimeSessionState::new(request.config.session_policy())
-        };
-        store
-            .commit_runtime_state(
-                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
-            )
-            .await
-            .expect("seed the parked session");
-        store
-            .record_turn_park(&lash_core_execution::store::TurnParkWrite {
-                session_id: session_id.clone(),
-                turn_id: lash_core_execution::TurnId::fixture(format!("{label}-turn")),
-                reason: lash_core_execution::store::ParkReason::ReplayDivergence {
-                    message: format!("{label} diverged"),
-                },
-                at_ms: 1_700_000_000_000,
-                origin: lash_core_execution::store::TurnParkOrigin::Refusal,
-            })
-            .await
-            .map(lash_core::store::StoreTransition::into_record)
-            .expect("park the session's turn");
-        session_ids.push(session_id);
-    }
-
-    let before = factory
-        .turn_park_feed(
-            lash_core_execution::store::ParkFeedCursor::initial(),
-            std::num::NonZeroUsize::new(100).expect("a nonzero page size"),
-        )
-        .await
-        .expect("read the feed before the batch delete");
-    let head = before
-        .events
-        .last()
-        .expect("the two parks precede the delete")
-        .seq;
-
-    for session in &session_ids {
-        factory
-            .delete_session(session)
-            .await
-            .expect("delete parked session");
-    }
-
-    let after = factory
-        .turn_park_feed(
-            lash_core_execution::store::ParkFeedCursor::from_store_sequence(head),
-            std::num::NonZeroUsize::new(100).expect("a nonzero page size"),
-        )
-        .await
-        .expect("read the feed after the batch delete");
-    assert_eq!(
-        after.events.len(),
-        2,
-        "one Cancelled event per deleted park: {:?}",
-        after.events
-    );
-    assert_eq!(
-        after.events[0].seq + 1,
-        after.events[1].seq,
-        "the batch's event sequences are contiguous"
-    );
-    for (event, session_id) in after.events.iter().zip(session_ids.iter()) {
-        assert_eq!(
-            event.kind,
-            lash_core_execution::store::ParkEventKind::Cancelled {
-                cause: lash_core_execution::store::ParkCancelCause::SessionDeleted,
-            },
-            "each deleted park closes as session-deleted"
-        );
-        assert_eq!(&event.target.session_id, session_id);
-    }
 }

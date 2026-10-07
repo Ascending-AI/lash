@@ -22,7 +22,5 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) ingress_settlement: TurnIngressSettlement,
     /// The follow-on the head owes once this commit publishes (ADR 0101 §3).
     pub(super) pending_follow_on: Option<crate::store::PendingFollowOn>,
-    /// The cancellation the commit settles, when the turn was cancelled.
-    pub(super) cancellation: Option<crate::TurnCancellationEvidence>,
     pub(super) recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
 }

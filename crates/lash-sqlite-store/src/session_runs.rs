@@ -9,18 +9,15 @@
 use std::sync::LazyLock;
 
 use lash_core_execution::store::{
-    CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
-    ControlIntentState, EnginePark, IntentObligation, IntentSettle, ObligationKey, ObligationState,
-    ParkCancelCause, ParkEventKind, RunAdmission, RunEndOutcome, RunExecutor, RunStore,
-    RunTerminal, RunTerminalCause, RunTerminalWriteDecision, RunTurns, UnfinishedRun,
-    close_admission, decide_run_terminal_write, refused_execution_owns_run, run_binding_conflict,
-    stored_intent_kind, stored_intent_state,
+    CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
+    ObligationKey, RunAdmission, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause,
+    RunTerminalWriteDecision, RunTurns, UnfinishedRun, decide_run_terminal_write,
+    run_binding_conflict, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_runs::{
-    control_intents::ControlIntentStatements,
-    run_inputs::SessionRunInputStatements,
-    runs::{RunVerbStatements, SessionRunStatements},
+    control_intents::ControlIntentStatements, run_inputs::SessionRunInputStatements,
+    runs::SessionRunStatements,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -30,20 +27,16 @@ use crate::{StoreError, sqlite_error, stored_data_corrupt};
 /// Every logical-run statement the session catalog issues.
 pub(crate) struct SessionRunsSql {
     pub(crate) runs: SessionRunStatements,
-    pub(crate) verbs: RunVerbStatements,
     pub(crate) inputs: SessionRunInputStatements,
     pub(crate) intents: ControlIntentStatements,
 }
 
 static SESSION_RUNS_SQL: LazyLock<SessionRunsSql> = LazyLock::new(|| {
-    // The run verbs name the turn-input lifecycle.
+    // The run-input reads name the turn-input lifecycle.
     let dialect =
         crate::schema_layout::MAIN.with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE);
     SessionRunsSql {
         runs: SessionRunStatements::render(dialect),
-        verbs: RunVerbStatements::render(
-            dialect.with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE),
-        ),
         inputs: SessionRunInputStatements::render(dialect),
         intents: ControlIntentStatements::render(dialect),
     }
@@ -177,19 +170,12 @@ pub(crate) fn write_run_terminal_conn(
         },
         columns.at_ms,
     )?;
-    crate::persistence::turn_park::end_run_park_conn(
-        tx,
-        &terminal.session_id,
-        &terminal.run,
-        &terminal.cause,
-        terminal.at_ms,
-    )?;
     release_run_rows_conn(tx, &terminal.session_id, &terminal.run, terminal.at_ms)
 }
 
 /// Release every row of either admission table `run` still holds, in the
 /// caller's transaction: accepted input is open again in the state its
-/// submitted delivery names, and each row owes its session a shift again.
+/// submitted delivery names, and the session is woken to admit it again.
 ///
 /// Open input addressed to a turn the run ends ([`RunTurns`]: its own
 /// physical turns and the turns its admission's members were accepted
@@ -211,7 +197,7 @@ fn release_run_rows_conn(
     run: &TurnId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
-    let verbs = &session_runs_sql().verbs;
+    let verbs = &session_runs_sql().inputs;
     let own = {
         let mut stmt = tx
             .prepare_cached(verbs.bound_inputs.sql())
@@ -240,6 +226,8 @@ fn release_run_rows_conn(
         params![session_id.as_str(), run.as_str()],
     )
     .map_err(sqlite_error)?;
+    // What the run let go of is the session's to admit again.
+    crate::durable::wake_session_tx(tx, session_id, false, at_ms)?;
     let ended = RunTurns::new(run, run_admission_conn(tx, session_id, run)?.as_ref());
     let open_rows = {
         let mut stmt = tx
@@ -295,9 +283,8 @@ fn release_run_rows_conn(
 /// scope-close obligation takes over before recovery acknowledges the loss.
 /// A run that already has terminal evidence, or no row, is left as it is.
 /// A run the engine holds no execution of that never recorded its admission
-/// started nothing, and its ingress obligation still owns its input: it is
-/// not ended, and the executor a seal recorded for it is released
-/// (FIG-4814), so the shift that obligation asks for runs it.
+/// started nothing: it is not ended, and its session admits its input
+/// again.
 pub(crate) fn end_lost_run_conn(
     tx: &Connection,
     target: &lash_core_execution::engine::RunRef,
@@ -309,14 +296,6 @@ pub(crate) fn end_lost_run_conn(
             if loss == lash_core_execution::engine::RunLoss::NoRun
                 && run_admission_conn(tx, &target.session, &target.run)?.is_none()
             {
-                // The executor a seal recorded for it is gone with its run,
-                // so the run is free for the shift its ingress asks for.
-                crate::conn::cached_execute(
-                    tx,
-                    session_runs_sql().runs.release_hold.sql(),
-                    params![target.session.as_str(), target.run.as_str()],
-                )
-                .map_err(sqlite_error)?;
                 return Ok(None);
             }
             write_unanswered_run_end_conn(tx, target, at_ms, |cancelled_by| {
@@ -328,28 +307,24 @@ pub(crate) fn end_lost_run_conn(
     }
 }
 
-/// The run's execution under `fence` met a typed refusal no retry can change
+/// The run's execution met a typed refusal no retry can change
 /// (FIG-4018): the same transaction as a lost run's, ending it with the
-/// refusal, once the execution is shown to still own the run (FIG-4200).
+/// refusal.
 pub(crate) fn end_refused_run_conn(
     tx: &Connection,
-    fence: &lash_core_execution::store::ShiftFence,
+    session_id: &SessionId,
     run: &TurnId,
     refusal: &lash_core_execution::RuntimeError,
     at_ms: u64,
 ) -> Result<RunEndOutcome, StoreError> {
     let target = lash_core_execution::engine::RunRef {
-        session: fence.session().clone(),
+        session: session_id.clone(),
         run: run.clone(),
     };
     match unanswered_run_conn(tx, &target)? {
         UnansweredRun::Ended(terminal) => Ok(RunEndOutcome::AlreadyEnded(*terminal)),
         UnansweredRun::Unknown => Ok(RunEndOutcome::Unknown),
         UnansweredRun::Open => {
-            let current = crate::persistence::shift_epoch_conn(tx, &target.session)?;
-            if !refused_execution_owns_run(&target.session, fence, &current)? {
-                return Ok(RunEndOutcome::Superseded);
-            }
             write_unanswered_run_end_conn(tx, &target, at_ms, |_| RunTerminalCause::Refused {
                 code: refusal.code.clone(),
                 message: refusal.message.clone(),
@@ -360,23 +335,17 @@ pub(crate) fn end_refused_run_conn(
     }
 }
 
-/// The command run whose execution under `fence` applied the session's command
-/// lane until it was empty ends (FIG-4202): its row opens and its terminal
-/// is written in one transaction, arming its scope close, once the run is
-/// shown to still own the session's shift epoch.
+/// The command run that applied the session's command lane until it was
+/// empty ends (FIG-4202): its row opens and its terminal is written in one
+/// transaction, arming its scope close.
 pub(crate) fn end_command_run_conn(
     tx: &Connection,
-    fence: &lash_core_execution::store::ShiftFence,
+    session: &SessionId,
     run: &TurnId,
     at_ms: u64,
 ) -> Result<RunEndOutcome, StoreError> {
-    let session = fence.session();
     if let Some(terminal) = run_terminal_conn(tx, session, run)? {
         return Ok(RunEndOutcome::AlreadyEnded(terminal));
-    }
-    let current = crate::persistence::shift_epoch_conn(tx, session)?;
-    if !refused_execution_owns_run(session, fence, &current)? {
-        return Ok(RunEndOutcome::Superseded);
     }
     let terminal = RunTerminal {
         session_id: session.clone(),
@@ -455,10 +424,10 @@ fn write_unanswered_run_end_conn(
 
     // The run's own input is dropped and its batches cancelled first; the
     // terminal write then releases whatever else the run still held.
-    let sql = &session_runs_sql().verbs;
+    let sql = session_runs_sql();
     let mut inputs = {
         let mut stmt = tx
-            .prepare_cached(sql.bound_inputs.sql())
+            .prepare_cached(sql.inputs.bound_inputs.sql())
             .map_err(sqlite_error)?;
         stmt.query_map(params![session.as_str(), run.as_str()], |row| {
             row.get::<_, String>(0)
@@ -473,7 +442,10 @@ fn write_unanswered_run_end_conn(
     for input in inputs {
         crate::conn::cached_execute(
             tx,
-            sql.cancel_input.sql(),
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .cancel_input
+                .sql(),
             params![
                 session.as_str(),
                 input,
@@ -498,58 +470,6 @@ pub(crate) fn decode_run_admission(json: &str) -> Result<RunAdmission, StoreErro
     serde_json::from_str(json).map_err(|error| stored_data_corrupt("RunAdmission", error))
 }
 
-/// What run `run` holds, as a seal reads it in its transaction
-/// (FIG-4814): the executor its admission recorded, else the one a seal
-/// recorded for it. `None` when no executor is recorded for it.
-pub(crate) fn held_run_conn(
-    conn: &Connection,
-    session_id: &SessionId,
-    run: &TurnId,
-) -> Result<Option<lash_core_execution::store::HeldRun>, StoreError> {
-    let row: Option<(Option<String>, Option<String>, bool)> = conn
-        .query_row(
-            session_runs_sql().runs.select_hold.sql(),
-            params![session_id.as_str(), run.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .optional()
-        .map_err(sqlite_error)?;
-    let Some((sealed, admission, ended)) = row else {
-        return Ok(None);
-    };
-    lash_core_execution::store::RunExecutor::from_stored(admission.as_deref(), sealed.as_deref())
-        .map(|executor| {
-            executor.map(|executor| lash_core_execution::store::HeldRun { executor, ended })
-        })
-}
-
-/// Record `hold`'s executor on its run, opening the run's row if it has
-/// none, in the transaction of the seal that raised the epoch for it.
-pub(crate) fn record_run_hold_conn(
-    tx: &Connection,
-    session_id: &SessionId,
-    hold: &lash_core_execution::store::RunHold,
-) -> Result<(), StoreError> {
-    let sql = session_runs_sql();
-    crate::conn::cached_execute(
-        tx,
-        sql.runs.insert_open.sql(),
-        params![session_id.as_str(), hold.run.as_str()],
-    )
-    .map_err(sqlite_error)?;
-    crate::conn::cached_execute(
-        tx,
-        sql.runs.write_hold.sql(),
-        params![
-            session_id.as_str(),
-            hold.run.as_str(),
-            hold.executor.to_stored()?
-        ],
-    )
-    .map_err(sqlite_error)?;
-    Ok(())
-}
-
 /// The session's unfinished run, with the head its admission recorded,
 /// read on `conn`.
 pub(crate) fn unfinished_run_conn(
@@ -569,7 +489,6 @@ pub(crate) fn unfinished_run_conn(
         Ok(UnfinishedRun {
             run: TurnId::parse(run)?,
             head: admission.head,
-            executor: admission.executor,
         })
     })
     .transpose()
@@ -629,8 +548,8 @@ pub(crate) fn run_admission_conn(
 
 /// The queued-work batches `run`'s recorded admission took, read on `conn`:
 /// none for a run with no admission or an input-headed one.
-/// Cancel batch `batch_id` of session `session_id`, held by a run a verb
-/// ends, into its `cancelled` tombstone at `at_ms` (ADR 0101 §8).
+/// Cancel batch `batch_id` of session `session_id`, held by a run that
+/// ends unanswered, into its `cancelled` tombstone at `at_ms` (ADR 0101 §8).
 pub(crate) fn cancel_run_batch_conn(
     tx: &Connection,
     session_id: &SessionId,
@@ -639,7 +558,10 @@ pub(crate) fn cancel_run_batch_conn(
 ) -> Result<(), StoreError> {
     crate::conn::cached_execute(
         tx,
-        session_runs_sql().verbs.cancel_batch.sql(),
+        crate::turn_ingress::turn_ingress_sql()
+            .queued_batches
+            .cancel_batch
+            .sql(),
         params![session_id.as_str(), batch_id, crate::clamp_epoch_ms(at_ms)],
     )
     .map_err(sqlite_error)?;
@@ -773,9 +695,6 @@ pub(crate) fn intent_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredInte
         kind_json: row.get(3)?,
         state_json: row.get(4)?,
         created_at_ms: row.get(5)?,
-        engine_ref: row.get(6)?,
-        obligation_id: row.get(7)?,
-        obligation_state: row.get(8)?,
     })
 }
 
@@ -786,9 +705,6 @@ pub(crate) struct StoredIntentRow {
     kind_json: String,
     state_json: String,
     created_at_ms: i64,
-    engine_ref: Option<String>,
-    obligation_id: Option<String>,
-    obligation_state: Option<String>,
 }
 
 impl StoredIntentRow {
@@ -801,9 +717,6 @@ impl StoredIntentRow {
             &self.kind_json,
             &self.state_json,
             stored_u64("ControlIntent", self.created_at_ms)?,
-            self.engine_ref,
-            self.obligation_id,
-            self.obligation_state,
         )
     }
 }
@@ -841,36 +754,12 @@ pub(crate) fn load_intent_conn(
     .transpose()
 }
 
-/// Session `session_id`'s open verbs (pending, or failed and retryable), in
-/// id order, read on `conn`.
-pub(crate) fn open_verbs_by_session_conn(
-    conn: &Connection,
-    session_id: &SessionId,
-) -> Result<Vec<ControlIntent>, StoreError> {
-    let mut statement = conn
-        .prepare_cached(
-            session_runs_sql()
-                .intents
-                .select_open_verbs_by_session
-                .sql(),
-        )
-        .map_err(sqlite_error)?;
-    let rows = statement
-        .query_map(params![session_id.as_str()], intent_row)
-        .map_err(sqlite_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(sqlite_error)?;
-    rows.into_iter().map(StoredIntentRow::decode).collect()
-}
-
 /// Record a new intent of `session_id` in the caller's transaction: `kind`,
-/// `Pending`, with its `ControlIntent` obligation armed due at `at_ms` on the
-/// same row (ADR 0109). Answers it with its allocated id.
+/// `Pending`. Answers it with its allocated id.
 pub(crate) fn insert_intent_conn(
     tx: &Connection,
     session_id: &SessionId,
     kind: ControlIntentKind,
-    engine: Option<&EnginePark>,
     at_ms: u64,
 ) -> Result<ControlIntent, StoreError> {
     let state = ControlIntentState::Pending;
@@ -886,23 +775,11 @@ pub(crate) fn insert_intent_conn(
                 state_code,
                 state_json,
                 sql_i64("control intent instant", at_ms)?,
-                engine.map(EnginePark::as_str),
             ],
             |row| row.get(0),
         )
         .map_err(sqlite_error)?;
     let id = ControlIntentId::from_sequence(stored_u64("ControlIntent", id)?);
-    let obligation = crate::obligation_ledger::arm_obligation_tx(
-        tx,
-        &ObligationKey::ControlIntent { intent_id: id },
-        at_ms,
-    )?
-    .ok_or_else(|| {
-        stored_data_corrupt(
-            "ControlIntent",
-            "a freshly recorded intent already carries an obligation",
-        )
-    })?;
     Ok(ControlIntent {
         id,
         session_id: session_id.clone(),
@@ -910,98 +787,17 @@ pub(crate) fn insert_intent_conn(
         kind,
         state,
         created_at_ms: at_ms,
-        engine: engine.cloned(),
-        obligation: Some(IntentObligation {
-            id: obligation,
-            state: ObligationState::Due,
-        }),
     })
 }
 
-/// Move intent `prior` to `next`'s state in the caller's transaction, if it
-/// is still as `prior` read it. `false` when another writer moved it first.
-pub(crate) fn write_intent_state_conn(
-    tx: &Connection,
-    prior: &ControlIntent,
-    next: &ControlIntent,
-) -> Result<bool, StoreError> {
-    let (state_code, state_json) = stored_intent_state(&next.state)?;
-    let (_, prior_json) = stored_intent_state(&prior.state)?;
-    let changed = crate::conn::cached_execute(
-        tx,
-        session_runs_sql().intents.update_state.sql(),
-        params![
-            sql_i64("control intent id", next.id.sequence())?,
-            state_code,
-            state_json,
-            prior_json,
-        ],
-    )
-    .map_err(sqlite_error)?;
-    Ok(changed == 1)
-}
-
-/// Settle intent `prior`'s engine half to `next`'s state in the caller's
-/// transaction under obligation claim `claim` (ADR 0109 claim fencing):
-/// [`IntentSettle::ClaimLost`] and nothing written when the obligation is no
-/// longer claimed under `claim`; otherwise `decide` answers the state to
-/// write over the stored one, or `None` to leave it.
-pub(crate) fn settle_intent_claimed_conn(
-    tx: &Connection,
-    id: ControlIntentId,
-    claim: &ClaimToken,
-    decide: impl FnOnce(&ControlIntentState) -> Option<ControlIntentState>,
-) -> Result<IntentSettle, StoreError> {
-    let sql = session_runs_sql();
-    let intent_id = sql_i64("control intent id", id.sequence())?;
-    let held: i64 = tx
-        .query_row(
-            sql.intents.select_claim_held.sql(),
-            params![intent_id, claim.as_str()],
-            |row| row.get(0),
-        )
-        .map_err(sqlite_error)?;
-    let stored =
-        load_intent_conn(tx, id)?.ok_or(StoreError::ControlIntentUnknown { intent: id })?;
-    if held == 0 {
-        return Ok(IntentSettle::ClaimLost);
-    }
-    let Some(state) = decide(&stored.state) else {
-        return Ok(IntentSettle::Held(Box::new(stored)));
-    };
-    let (state_code, state_json) = stored_intent_state(&state)?;
-    let (_, prior_json) = stored_intent_state(&stored.state)?;
-    let changed = crate::conn::cached_execute(
-        tx,
-        sql.intents.update_state_claimed.sql(),
-        params![
-            intent_id,
-            state_code,
-            state_json,
-            prior_json,
-            claim.as_str()
-        ],
-    )
-    .map_err(sqlite_error)?;
-    if changed != 1 {
-        // The write transaction is exclusive: nothing else can move the row
-        // between the read and the write.
-        return Err(StoreError::Contended);
-    }
-    let mut settled = stored.clone();
-    settled.state = state;
-    Ok(IntentSettle::Held(Box::new(settled)))
-}
-
 /// The store half of session `session_id`'s close, in the caller's
-/// transaction ([`ControlIntentSqliteStore::begin_session_close`]).
+/// transaction ([`ControlIntentStore::begin_session_close`]).
 ///
 /// The close names the runs it releases: every run without terminal
-/// evidence (its logical-run rows, its parked run, its pending queued
-/// run), each ended `Cancelled` by `SessionDeleted`, plus the runs of the
-/// open verbs it supersedes, whose engine half then never runs.
+/// evidence, each ended `Cancelled` by `SessionDeleted`. It wakes the
+/// session actor, whose close steps act on the intent.
 ///
-/// [`ControlIntentSqliteStore::begin_session_close`]: lash_core_execution::store::ControlIntentSqliteStore::begin_session_close
+/// [`ControlIntentStore::begin_session_close`]: lash_core_execution::store::ControlIntentStore::begin_session_close
 pub(crate) fn begin_session_close_conn(
     tx: &Connection,
     session_id: &SessionId,
@@ -1040,49 +836,11 @@ pub(crate) fn begin_session_close_conn(
             .map_err(sqlite_error)?;
         runs.extend(open);
     }
-    // The parked run is released with the park, whose feed event outlives
-    // the session (FIG-3659).
-    let released: Option<(String, i64)> = tx
-        .query_row(
-            crate::turn_ingress::turn_ingress_sql()
-                .turn_parks
-                .delete_by_session_returning
-                .sql(),
-            params![session_id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(sqlite_error)?;
-    if let Some((parked_run, park_id)) = released {
-        crate::persistence::turn_park_feed::log_turn_park_closed_conn(
-            tx,
-            session_id,
-            &parked_run,
-            park_id,
-            &ParkEventKind::Cancelled {
-                cause: ParkCancelCause::SessionDeleted,
-            },
-            crate::clamp_epoch_ms(at_ms),
-        )?;
-        runs.insert(TurnId::parse(parked_run)?);
-    }
-    let verbs = open_verbs_by_session_conn(tx, session_id)?;
-    for verb in &verbs {
-        match &verb.kind {
-            ControlIntentKind::Redrive { run, .. }
-            | ControlIntentKind::Cancel { run, .. }
-            | ControlIntentKind::Fork { run, .. } => {
-                runs.insert(run.clone());
-            }
-            ControlIntentKind::CloseSession { .. } => {}
-        }
-    }
     let runs: Vec<TurnId> = runs.into_iter().collect();
     let intent = insert_intent_conn(
         tx,
         session_id,
         ControlIntentKind::CloseSession { runs: runs.clone() },
-        None,
         at_ms,
     )?;
     for run in &runs {
@@ -1099,31 +857,24 @@ pub(crate) fn begin_session_close_conn(
             )?;
         }
     }
-    for verb in verbs {
-        let mut superseded = verb.clone();
-        superseded.state = ControlIntentState::Superseded { by: intent.id };
-        if !write_intent_state_conn(tx, &verb, &superseded)? {
-            return Err(StoreError::Contended);
-        }
-    }
     let closed = crate::conn::cached_execute(
         tx,
         crate::session_sql::session_sql().meta.begin_close.sql(),
         params![
             session_id.as_str(),
             sql_i64("control intent id", intent.id.sequence())?,
-            close_admission(intent.id).as_str(),
         ],
     )
     .map_err(sqlite_error)?;
     if closed != 1 {
         return Err(StoreError::Contended);
     }
+    crate::durable::wake_session_tx(tx, session_id, false, at_ms)?;
     Ok(Some(intent))
 }
 
 /// Forget what session `session_id`'s runs hold, in its deletion's
-/// transaction: its runs, its bindings and its verbs. A `close_session`
+/// transaction: its runs and its bindings. A `close_session`
 /// intent stays: it is the tombstone the factory answers the deleted
 /// session's runs from.
 pub(crate) fn delete_session_runs_conn(
@@ -1133,9 +884,7 @@ pub(crate) fn delete_session_runs_conn(
     let sql = session_runs_sql();
     for statement in [
         sql.runs.delete_by_session.sql(),
-        sql.runs.delete_shift_admissions.sql(),
         sql.inputs.delete_by_session.sql(),
-        sql.intents.delete_verbs_by_session.sql(),
     ] {
         crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
             .map_err(sqlite_error)?;
@@ -1152,61 +901,6 @@ fn commit<T>(outcome: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Resul
 
 #[async_trait::async_trait]
 impl RunStore for crate::SqliteStore {
-    async fn prepare_shift_admission(
-        &self,
-        session_id: &SessionId,
-        admission: &lash_core_execution::store::AdmissionId,
-        executor: &RunExecutor,
-    ) -> Result<lash_core_execution::store::ShiftAdmissionPreparation, StoreError> {
-        crate::persistence::shift_admission::prepare(self, session_id, admission, executor).await
-    }
-    async fn read_shift_admission(
-        &self,
-        session_id: &SessionId,
-        admission: &lash_core_execution::store::AdmissionId,
-    ) -> Result<Option<lash_core_execution::store::ShiftAdmissionReceipt>, StoreError> {
-        crate::persistence::shift_admission::read(self, session_id, admission).await
-    }
-    async fn commit_shift_admission(
-        &self,
-        request: &lash_core_execution::store::ShiftAdmissionWrite,
-        anchor: &lash_core_execution::TraceAnchor,
-    ) -> Result<lash_core_execution::store::ShiftAdmissionReceipt, StoreError> {
-        crate::persistence::shift_admission::commit(self, request, anchor).await
-    }
-
-    async fn run_executor(
-        &self,
-        session_id: &SessionId,
-        run: &TurnId,
-    ) -> Result<Option<RunExecutor>, StoreError> {
-        let session_id = session_id.to_string();
-        let run = run.to_string();
-        let stored = self
-            .conn
-            .call(move |conn| {
-                conn.query_row(
-                    session_runs_sql().runs.select_hold.sql(),
-                    params![session_id, run],
-                    |row| {
-                        Ok((
-                            row.get::<_, Option<String>>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                        ))
-                    },
-                )
-                .optional()
-            })
-            .await
-            .map_err(sqlite_error)?;
-        stored
-            .map(|(sealed, admission)| {
-                RunExecutor::from_stored(admission.as_deref(), sealed.as_deref())
-            })
-            .transpose()
-            .map(Option::flatten)
-    }
-
     async fn unfinished_run(
         &self,
         session_id: &SessionId,
@@ -1216,40 +910,6 @@ impl RunStore for crate::SqliteStore {
             .call(move |conn| Ok(unfinished_run_conn(conn, &session_id)))
             .await
             .map_err(sqlite_error)?
-    }
-
-    async fn admit_run(
-        &self,
-        request: &lash_core_execution::store::AdmitRunRequest,
-    ) -> Result<Option<RunAdmission>, StoreError> {
-        lash_core_execution::store::admit_run_with_trace(self, request).await
-    }
-
-    async fn prepare_run_admission(
-        &self,
-        request: &lash_core_execution::store::AdmitRunRequest,
-    ) -> Result<Option<lash_core_execution::store::PreparedRunAdmission>, StoreError> {
-        Ok(crate::persistence::admit_run_sqlite(
-            self,
-            request,
-            None,
-            &lash_core_execution::TraceAnchor::Untraced,
-        )
-        .await?
-        .map(
-            |admission| lash_core_execution::store::PreparedRunAdmission {
-                request: request.clone(),
-                admission,
-            },
-        ))
-    }
-
-    async fn commit_run_admission(
-        &self,
-        prepared: &lash_core_execution::store::PreparedRunAdmission,
-        anchor: &lash_core_execution::TraceAnchor,
-    ) -> Result<Option<RunAdmission>, StoreError> {
-        crate::persistence::admit_run_sqlite(self, &prepared.request, Some(prepared), anchor).await
     }
 
     async fn admit_at_checkpoint(
@@ -1274,32 +934,34 @@ impl RunStore for crate::SqliteStore {
 
     async fn end_refused_run(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
         run: &TurnId,
         refusal: &lash_core_execution::RuntimeError,
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
-        lash_core_execution::store::validate_session_id(fence.session())?;
-        let fence = fence.clone();
+        lash_core_execution::store::validate_session_id(session_id)?;
+        let session_id = session_id.clone();
         let run = run.clone();
         let refusal = refusal.clone();
         self.conn
-            .write_flow(move |tx| commit(end_refused_run_conn(tx, &fence, &run, &refusal, at_ms)))
+            .write_flow(move |tx| {
+                commit(end_refused_run_conn(tx, &session_id, &run, &refusal, at_ms))
+            })
             .await
             .map_err(sqlite_error)?
     }
 
     async fn end_command_run(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
         run: &TurnId,
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
-        lash_core_execution::store::validate_session_id(fence.session())?;
-        let fence = fence.clone();
+        lash_core_execution::store::validate_session_id(session_id)?;
+        let session_id = session_id.clone();
         let run = run.clone();
         self.conn
-            .write_flow(move |tx| commit(end_command_run_conn(tx, &fence, &run, at_ms)))
+            .write_flow(move |tx| commit(end_command_run_conn(tx, &session_id, &run, at_ms)))
             .await
             .map_err(sqlite_error)?
     }

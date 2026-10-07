@@ -15,7 +15,6 @@ use lash_core::ActorContext;
 mod batch;
 mod cancel;
 mod follow;
-mod mailbox;
 mod resolve;
 
 use std::pin::Pin;
@@ -30,7 +29,6 @@ use lash_core::{InputId, LiveReplayStore, SessionId, TurnId};
 use lash_sansio::sync::MutexExt;
 use tokio::sync::mpsc;
 
-use crate::core::ResolvedQueuedWork;
 use crate::durable_session::DurableSession;
 use crate::error::{EmbedError, Result, SendError};
 use crate::support::{
@@ -47,7 +45,6 @@ use lash_core::store::{ParkId, ParkReason, StallReason};
 
 pub use batch::{BatchInput, SendBatchBuilder};
 use follow::{Subject, Tap};
-pub(crate) use mailbox::{RunningHere, running};
 
 /// The session a send, a handle or a cancel is bound to.
 #[derive(Clone)]
@@ -60,14 +57,13 @@ pub(crate) enum SendTarget {
 }
 
 /// What a send reads and writes through: the session's store, its queue
-/// operations, the engine a handle waits on, the effect host terminal reads
+/// operations, the effect host terminal reads
 /// and cancels go through, and the live replay events come from.
 #[derive(Clone)]
 pub(crate) struct SendParts {
     pub(crate) session_id: SessionId,
     pub(crate) store: lash_core::store::SessionStore,
     pub(crate) ops: DurableSessionOps,
-    pub(crate) work: Arc<ResolvedQueuedWork>,
     pub(crate) effect_host: ActorContext,
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     /// The models a spec's model key is judged against before the input is
@@ -95,49 +91,6 @@ impl SendContext {
         // the head. Restore its services before publishing the host's reads.
         resident.reload_invalidated_resident_session_state().await?;
         runtime.adopt_observation_from(&resident);
-        Ok(())
-    }
-
-    /// [`refresh`](Self::refresh), unless the shift that deposited
-    /// `settled` ran on the open session's own runtime: that runtime holds
-    /// the run's commit and published it with the deposit, and its shift
-    /// may still hold it while the run's scope closes (FIG-3979).
-    async fn refresh_unless_ran_on(&self, settled: Option<&mailbox::SettledRun>) -> Result<()> {
-        if let (Some(runtime), Some(settled)) = (&self.live, settled)
-            && settled.ran_on(runtime)
-        {
-            return Ok(());
-        }
-        self.refresh().await
-    }
-
-    /// [`refresh`](Self::refresh) for an answer read while `run`'s run may
-    /// still be under way in this process: a run parked for a stopped child
-    /// it waits on is answered while its run holds the open session's
-    /// runtime (FIG-4618). That run keeps the runtime at the head it commits
-    /// and publishes it when it returns, so the answer never waits for it.
-    /// Any other holder of the runtime is brief, and is waited for.
-    async fn refresh_unless_held_by_run_of(&self, run: &TurnId) -> Result<()> {
-        let Some(runtime) = &self.live else {
-            return Ok(());
-        };
-        let writer = runtime.writer();
-        let mut resident = match writer.try_lock() {
-            Ok(resident) => resident,
-            Err(_)
-                if mailbox::under_way_here(
-                    self.parts.work.store_binding(),
-                    &self.parts.session_id,
-                    run,
-                ) =>
-            {
-                return Ok(());
-            }
-            Err(_) => writer.lock().await,
-        };
-        if resident.adopt_committed_head().await? {
-            runtime.adopt_observation_from(&resident);
-        }
         Ok(())
     }
 

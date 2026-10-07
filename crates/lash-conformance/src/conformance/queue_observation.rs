@@ -60,15 +60,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
         else {
             panic!("healthy cursor subscribes");
         };
-        let ops = crate::facade_support::DurableSessionOps::new(
-            session_id.clone(),
-            lash_core::shift::IngressRelay::over_backend(
-                &backend,
-                Arc::new(crate::NoSessionWork::new()),
-                backend.clock(),
-            ),
-            replay.clone(),
-        );
+        let ops = crate::facade_support::DurableSessionOps::new(session_id.clone(), replay.clone());
         let first = store
             .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
                 session_id.clone(),
@@ -239,15 +231,7 @@ pub async fn queue_publication_failure_preserves_committed_mutation(backend: cra
             inner: Default::default(),
             attempts: Default::default(),
         });
-        let ops = crate::facade_support::DurableSessionOps::new(
-            id.clone(),
-            lash_core::shift::IngressRelay::over_backend(
-                &backend,
-                Arc::new(crate::NoSessionWork::new()),
-                backend.clock(),
-            ),
-            replay.clone(),
-        );
+        let ops = crate::facade_support::DurableSessionOps::new(id.clone(), replay.clone());
         assert!(
             ops.cancel_pending_turn_input(&store, input.input_id.as_str())
                 .await

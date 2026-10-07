@@ -14,7 +14,8 @@
 const SESSION_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/mod.rs");
 const SESSION_CATALOG_SOURCE: &str = include_str!("../../../lash-core-store/src/store/catalog.rs");
 const SESSION_HISTORY_SOURCE: &str = include_str!("../../../lash-core-store/src/store/history.rs");
-const SHIFT_EPOCH_SOURCE: &str = include_str!("../../../lash-core-store/src/store/shift_fence.rs");
+const SESSION_FAULT_SOURCE: &str =
+    include_str!("../../../lash-core-store/src/store/session_fault.rs");
 const RUN_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/run.rs");
 const ATTACHMENT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/attachments.rs");
 const ATTACHMENT_REFERRERS_SOURCE: &str =
@@ -73,7 +74,7 @@ const GATED_SESSION_TRAITS: &[(&str, &str)] = &[
     (SESSION_HISTORY_SOURCE, "SessionHistoryStore"),
     (SESSION_STORE_SOURCE, "TurnInputStore"),
     (SESSION_STORE_SOURCE, "QueuedWorkStore"),
-    (SHIFT_EPOCH_SOURCE, "ShiftEpochStore"),
+    (SESSION_FAULT_SOURCE, "SessionFaultStore"),
     (RUN_STORE_SOURCE, "RunStore"),
     (SESSION_STORE_SOURCE, "StoreMaintenance"),
 ];

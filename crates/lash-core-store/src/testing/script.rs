@@ -14,7 +14,7 @@
 //! A rule that never fired fails the law when its script drops, so a law
 //! cannot pass without exercising what it armed.
 use super::gate::{GATE_DEADLINE, Gate};
-use crate::store::{MaintenanceFailure, RunIntentRefused, StoreError};
+use crate::store::{MaintenanceFailure, StoreError};
 use lash_sansio::sync::MutexExt as _;
 use std::future::Future;
 use std::sync::{Arc, Mutex, Weak};
@@ -154,12 +154,6 @@ impl ScriptedError for StoreError {
 impl<R: Default> ScriptedError for MaintenanceFailure<R> {
     fn from_store_fault(error: StoreError) -> Self {
         Self::failed_before_any_work(error)
-    }
-}
-
-impl ScriptedError for RunIntentRefused {
-    fn from_store_fault(error: StoreError) -> Self {
-        Self::Store(error)
     }
 }
 
@@ -681,11 +675,11 @@ mod tests {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
         script
-            .on(StoreOp::admit_run)
+            .on(StoreOp::admit_at_checkpoint)
             .nth(2)
             .before()
             .fail(permanent);
-        let call = || store.call(StoreOp::admit_run, store.inner().work());
+        let call = || store.call(StoreOp::admit_at_checkpoint, store.inner().work());
         assert_eq!(call().await.expect("the first call passes"), 1);
         assert!(matches!(
             call().await,
@@ -695,23 +689,23 @@ mod tests {
         assert_eq!(
             rendered(&script),
             [
-                "a:admit_run#1 before entered",
-                "a:admit_run#1 after returned",
-                "a:admit_run#2 before fail(permanent)",
-                "a:admit_run#3 before entered",
-                "a:admit_run#3 after returned",
+                "a:admit_at_checkpoint#1 before entered",
+                "a:admit_at_checkpoint#1 after returned",
+                "a:admit_at_checkpoint#2 before fail(permanent)",
+                "a:admit_at_checkpoint#3 before entered",
+                "a:admit_at_checkpoint#3 after returned",
             ]
         );
-        assert_eq!(script.calls(StoreOp::admit_run), 3);
+        assert_eq!(script.calls(StoreOp::admit_at_checkpoint), 3);
     }
 
     #[tokio::test]
     async fn a_lost_reply_keeps_the_stores_work_and_answers_a_transient_fault() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
-        script.on(StoreOp::admit_run).after().lose_reply();
+        script.on(StoreOp::admit_at_checkpoint).after().lose_reply();
         let lost = store
-            .call(StoreOp::admit_run, store.inner().work())
+            .call(StoreOp::admit_at_checkpoint, store.inner().work())
             .await
             .expect_err("the reply is lost");
         assert!(matches!(lost, StoreError::StorageFailure { .. }));
@@ -724,8 +718,8 @@ mod tests {
         assert_eq!(
             rendered(&script),
             [
-                "a:admit_run#1 before entered",
-                "a:admit_run#1 after fail(transient)",
+                "a:admit_at_checkpoint#1 before entered",
+                "a:admit_at_checkpoint#1 after fail(transient)",
             ]
         );
     }
@@ -776,25 +770,25 @@ mod tests {
         let a = script.wrap("a", Arc::clone(&inner));
         let b = script.wrap("b", inner);
         script
-            .on(StoreOp::load_turn_park)
+            .on(StoreOp::unfinished_run)
             .by("b")
             .nth(1)
             .before()
             .fail(transient);
         for _ in 0..2 {
             assert!(
-                a.call(StoreOp::load_turn_park, a.inner().work())
+                a.call(StoreOp::unfinished_run, a.inner().work())
                     .await
                     .is_ok()
             );
         }
         assert!(matches!(
-            b.call(StoreOp::load_turn_park, b.inner().work()).await,
+            b.call(StoreOp::unfinished_run, b.inner().work()).await,
             Err(StoreError::Contended)
         ));
         assert_eq!(
             rendered(&script).last().map(String::as_str),
-            Some("b:load_turn_park#3 before fail(transient)")
+            Some("b:unfinished_run#3 before fail(transient)")
         );
     }
 
@@ -803,7 +797,10 @@ mod tests {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
         let held = script
-            .on_each(&[StoreOp::load_turn_park.into(), StoreOp::admit_run.into()])
+            .on_each(&[
+                StoreOp::unfinished_run.into(),
+                StoreOp::admit_at_checkpoint.into(),
+            ])
             .by("a")
             .before()
             .pause();
@@ -813,7 +810,10 @@ mod tests {
             .call(StoreOp::lookup_session, store.inner().work())
             .await
             .expect("an operation the rule does not name passes");
-        for (op, arrivals) in [(StoreOp::load_turn_park, 1), (StoreOp::admit_run, 2)] {
+        for (op, arrivals) in [
+            (StoreOp::unfinished_run, 1),
+            (StoreOp::admit_at_checkpoint, 2),
+        ] {
             let mut call = std::pin::pin!(store.call(op, store.inner().work()));
             held.reached_by(&mut call, arrivals).await;
             held.open_one();
@@ -827,8 +827,8 @@ mod tests {
         assert_eq!(
             rendered(&script)[2..4],
             [
-                "a:load_turn_park#1 before pause",
-                "a:load_turn_park#1 after pause"
+                "a:unfinished_run#1 before pause",
+                "a:unfinished_run#1 after pause"
             ]
         );
     }
@@ -837,8 +837,8 @@ mod tests {
     async fn a_pause_holds_the_call_before_the_store_until_the_law_opens_its_gate() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
-        let held = script.on(StoreOp::record_turn_park).before().pause();
-        let mut call = std::pin::pin!(store.call(StoreOp::record_turn_park, store.inner().work()));
+        let held = script.on(StoreOp::run_terminal).before().pause();
+        let mut call = std::pin::pin!(store.call(StoreOp::run_terminal, store.inner().work()));
         held.reached_by(&mut call, 1).await;
         assert_eq!(
             store.inner().0.load(Ordering::SeqCst),
@@ -853,8 +853,8 @@ mod tests {
     async fn a_pause_after_the_store_holds_its_answer() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
-        let held = script.on(StoreOp::record_turn_park).after().pause();
-        let mut call = std::pin::pin!(store.call(StoreOp::record_turn_park, store.inner().work()));
+        let held = script.on(StoreOp::run_terminal).after().pause();
+        let mut call = std::pin::pin!(store.call(StoreOp::run_terminal, store.inner().work()));
         held.reached_by(&mut call, 1).await;
         assert_eq!(store.inner().0.load(Ordering::SeqCst), 1);
         held.open_all();
@@ -883,8 +883,9 @@ mod tests {
     async fn dropping_the_script_lets_every_held_call_through() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
-        let held = script.on(StoreOp::admit_run).before().pause();
-        let mut call = std::pin::pin!(store.call(StoreOp::admit_run, store.inner().work()));
+        let held = script.on(StoreOp::admit_at_checkpoint).before().pause();
+        let mut call =
+            std::pin::pin!(store.call(StoreOp::admit_at_checkpoint, store.inner().work()));
         held.reached_by(&mut call, 1).await;
         drop(script);
         assert_eq!(call.await.expect("the call passes"), 1);
@@ -892,51 +893,51 @@ mod tests {
 
     #[tokio::test]
     #[should_panic(
-        expected = "rule `admit_run#2 before fail(transient)`, `b:load_turn_park#1.. after pause` \
-                    never fired; trace: a:admit_run#1 before entered, a:admit_run#1 after returned"
+        expected = "rule `admit_at_checkpoint#2 before fail(transient)`, `b:unfinished_run#1.. after pause` \
+                    never fired; trace: a:admit_at_checkpoint#1 before entered, a:admit_at_checkpoint#1 after returned"
     )]
     async fn a_rule_that_never_fired_fails_the_law_with_the_trace() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
         script
-            .on(StoreOp::admit_run)
+            .on(StoreOp::admit_at_checkpoint)
             .nth(2)
             .before()
             .fail(transient);
         let _held = script
-            .on(StoreOp::load_turn_park)
+            .on(StoreOp::unfinished_run)
             .by("b")
             .from_nth(1)
             .after()
             .pause();
         store
-            .call(StoreOp::admit_run, store.inner().work())
+            .call(StoreOp::admit_at_checkpoint, store.inner().work())
             .await
             .expect("the first call passes");
     }
 
     #[tokio::test(start_paused = true)]
     #[should_panic(
-        expected = "`admit_run` was called 1 of 2 times within 10s; trace: a:admit_run#1 before entered"
+        expected = "`admit_at_checkpoint` was called 1 of 2 times within 10s; trace: a:admit_at_checkpoint#1 before entered"
     )]
     async fn waiting_for_a_call_that_never_comes_fails_at_the_deadline_with_the_trace() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
         store
-            .call(StoreOp::admit_run, store.inner().work())
+            .call(StoreOp::admit_at_checkpoint, store.inner().work())
             .await
             .expect("the call passes");
-        script.called(StoreOp::admit_run, 1).await;
-        script.called(StoreOp::admit_run, 2).await;
+        script.called(StoreOp::admit_at_checkpoint, 1).await;
+        script.called(StoreOp::admit_at_checkpoint, 2).await;
     }
 
     #[tokio::test(start_paused = true)]
     #[should_panic(
-        expected = "gate `admit_run#1 before pause`: 0 of 1 arrivals within 10s; trace: (no calls)"
+        expected = "gate `admit_at_checkpoint#1 before pause`: 0 of 1 arrivals within 10s; trace: (no calls)"
     )]
     async fn a_script_gate_nothing_reaches_fails_with_its_rule_and_the_trace() {
         let script = Script::new();
-        let held = script.on(StoreOp::admit_run).before().pause();
+        let held = script.on(StoreOp::admit_at_checkpoint).before().pause();
         held.reached(1).await;
     }
 
@@ -946,10 +947,6 @@ mod tests {
         let store = script.wrap("a", Arc::new(()));
         script
             .on(StoreOp::vacuum)
-            .before()
-            .fail(|| StoreError::Contended);
-        script
-            .on(StoreOp::open_run_intent)
             .before()
             .fail(|| StoreError::Contended);
         let vacuum = store
@@ -963,15 +960,5 @@ mod tests {
             MaintenanceStop::Failed(StoreError::Contended)
         ));
         assert_eq!(vacuum.partial, VacuumReport::default());
-        let verb = store
-            .call(StoreOp::open_run_intent, async {
-                Ok::<(), RunIntentRefused>(())
-            })
-            .await
-            .expect_err("the verb fails");
-        assert!(matches!(
-            verb,
-            RunIntentRefused::Store(StoreError::Contended)
-        ));
     }
 }

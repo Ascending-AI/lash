@@ -165,188 +165,12 @@ pub async fn commit_runtime_state_for_test(
     store.commit_runtime_state(commit).await
 }
 
-pub async fn seal_shift_fence_for_test(
-    store: &Arc<dyn RuntimeStore>,
-    session_id: &SessionId,
-    owner_id: &str,
-) -> crate::store::ShiftFence {
-    let _ = owner_id;
-    let stored = match store.shift_epoch(session_id).await {
-        Ok(stored) => stored,
-        Err(crate::StoreError::ShiftEpochUnavailable { .. }) => {
-            store
-                .admit_session(&root_session_request(session_id))
-                .await
-                .expect("admit shift-fence test session");
-            store
-                .shift_epoch(session_id)
-                .await
-                .expect("read admitted shift epoch")
-        }
-        Err(error) => panic!("read shift-fence test shift epoch: {error}"),
-    };
-    let admission = crate::store::AdmissionId::new(uuid::Uuid::new_v4().to_string());
-    match store
-        .seal_shift_epoch(
-            session_id,
-            &admission,
-            stored.epoch,
-            &crate::store::RunStartNonce::new(admission.as_str()),
-            None,
-        )
-        .await
-        .expect("seal shift-fence test shift")
-    {
-        crate::store::ShiftEpochSeal::Sealed(fence) => fence,
-        other => panic!("shift-fence test shift did not seal: {other:?}"),
-    }
-}
-
-/// Result of sealing a test shift admission for an admission law.
-#[derive(Debug)]
-pub enum ShiftSealTestOutcome {
-    Sealed(crate::store::ShiftFence),
-    Superseded { current_epoch: u64 },
-    ExecutionLost,
-}
-
-impl ShiftSealTestOutcome {
-    pub fn acquired(self) -> Option<crate::store::ShiftFence> {
-        match self {
-            Self::Sealed(fence) => Some(fence),
-            Self::Superseded { .. } => None,
-            Self::ExecutionLost => None,
-        }
-    }
-}
-
-/// Test support for admission laws that need an independent sealed shift epoch.
-#[async_trait::async_trait]
-pub trait RuntimeStoreTestShiftExt: crate::RuntimeStore {
-    async fn seal_shift_epoch_for_test(
-        &self,
-        session_id: &SessionId,
-        _owner: &crate::store::LeaseOwnerIdentity,
-        _executor_id: &str,
-        _old_lease_ttl_ms: u64,
-    ) -> Result<ShiftSealTestOutcome, StoreError> {
-        let stored = match self.shift_epoch(session_id).await {
-            Ok(stored) => stored,
-            Err(crate::StoreError::ShiftEpochUnavailable { .. }) => {
-                self.admit_session(&root_session_request(session_id))
-                    .await?;
-                self.shift_epoch(session_id).await?
-            }
-            Err(error) => return Err(error),
-        };
-        let admission = crate::store::AdmissionId::new(uuid::Uuid::new_v4().to_string());
-        let seal = self
-            .seal_shift_epoch(
-                session_id,
-                &admission,
-                stored.epoch,
-                &crate::store::RunStartNonce::new(admission.as_str()),
-                None,
-            )
-            .await?;
-        Ok(match seal {
-            crate::store::ShiftEpochSeal::Sealed(fence) => ShiftSealTestOutcome::Sealed(fence),
-            crate::store::ShiftEpochSeal::Superseded { epoch } => {
-                ShiftSealTestOutcome::Superseded {
-                    current_epoch: epoch,
-                }
-            }
-            crate::store::ShiftEpochSeal::ExecutionLost => ShiftSealTestOutcome::ExecutionLost,
-            held @ crate::store::ShiftEpochSeal::HeldByAnotherExecutor { .. } => {
-                return Err(StoreError::Backend(format!(
-                    "a test seal that names no run was refused {held:?}"
-                )));
-            }
-        })
-    }
-
-    async fn supersede_shift_epoch_for_test(
-        &self,
-        fence: &crate::store::ShiftFence,
-    ) -> Result<(), StoreError> {
-        let admission = crate::store::AdmissionId::new(uuid::Uuid::new_v4().to_string());
-        let result = self
-            .seal_shift_epoch(
-                fence.session(),
-                &admission,
-                fence.epoch(),
-                &crate::store::RunStartNonce::new(admission.as_str()),
-                None,
-            )
-            .await?;
-        match result {
-            crate::store::ShiftEpochSeal::Sealed(_) => Ok(()),
-            crate::store::ShiftEpochSeal::Superseded { epoch } => {
-                Err(StoreError::StaleShiftFence {
-                    session_id: fence.session().clone(),
-                    fence_epoch: fence.epoch(),
-                    current_epoch: epoch,
-                })
-            }
-            crate::store::ShiftEpochSeal::ExecutionLost => Err(StoreError::Backend(
-                "test shift successor lost execution".to_string(),
-            )),
-            held @ crate::store::ShiftEpochSeal::HeldByAnotherExecutor { .. } => Err(
-                StoreError::Backend(format!("test shift successor was refused {held:?}")),
-            ),
-        }
-    }
-}
-
-impl<T: crate::RuntimeStore + ?Sized> RuntimeStoreTestShiftExt for T {}
-
-/// The admission request conformance laws present for `run` headed by
-/// `head` under `fence`: generous bounds, an empty base, a test build
-/// generation, and the run run as its own engine execution.
-pub fn admit_run_request_for_test(
-    fence: &crate::store::ShiftFence,
-    run: &crate::TurnId,
-    head: crate::store::AdmittedHead,
-) -> crate::store::AdmitRunRequest {
-    crate::store::AdmitRunRequest {
-        unsealed_epoch: None,
-        fence: fence.clone(),
-        run: run.clone(),
-        head,
-        max_inputs: 64,
-        policy: super::queued_work_admission_policy(64),
-        base: crate::store::SessionHeadRef {
-            generation: 0,
-            revision: 0,
-            leaf: None,
-            checkpoint: None,
-        },
-        turn_index: 1,
-        executor: crate::store::RunExecutor::run(&crate::store::AdmissionId::new("fixture#0")),
-        plugins: Default::default(),
-        trace_scopes: std::sync::Arc::new(lash_trace::UntracedScopes),
-    }
-}
-
-/// Admit `run`'s turn-lane run headed by `head` under `fence`
-/// ([`RunStore::admit_run`](crate::store::RunStore::admit_run)).
-pub async fn admit_run_for_test(
-    store: &Arc<dyn RuntimeStore>,
-    fence: &crate::store::ShiftFence,
-    run: &crate::TurnId,
-    head: crate::store::AdmittedHead,
-) -> Result<Option<crate::store::RunAdmission>, StoreError> {
-    store
-        .admit_run(&admit_run_request_for_test(fence, run, head))
-        .await
-}
-
 /// Admit what `run`'s physical turn `turn_id` takes at `checkpoint`, keyed
 /// by `step` ([`RunStore::admit_at_checkpoint`](crate::store::RunStore::admit_at_checkpoint)).
 #[allow(clippy::too_many_arguments)]
 pub async fn admit_at_checkpoint_for_test(
     store: &Arc<dyn RuntimeStore>,
-    fence: &crate::store::ShiftFence,
+    session_id: &SessionId,
     run: &crate::TurnId,
     turn_id: &crate::TurnId,
     checkpoint: crate::CheckpointKind,
@@ -356,7 +180,7 @@ pub async fn admit_at_checkpoint_for_test(
 ) -> Result<crate::store::CheckpointAdmission, StoreError> {
     store
         .admit_at_checkpoint(&crate::store::CheckpointAdmissionRequest {
-            fence: fence.clone(),
+            session_id: session_id.clone(),
             run: run.clone(),
             turn_id: turn_id.clone(),
             checkpoint,
@@ -367,14 +191,12 @@ pub async fn admit_at_checkpoint_for_test(
         .await
 }
 
-/// Present `fence` on `commit` and have it settle `settlement`: the shape of
-/// every commit that settles rows a run admitted (FIG-3927).
+/// Have `commit` settle `settlement`: the shape of every commit that settles
+/// rows a run admitted (FIG-3927).
 pub fn settling_commit_for_test(
     mut commit: RuntimeCommit,
-    fence: &crate::store::ShiftFence,
     settlement: crate::store::IngressSettlement,
 ) -> RuntimeCommit {
-    commit.shift_fence = Some(Box::new(fence.clone()));
     commit.ingress = Some(settlement);
     commit
 }

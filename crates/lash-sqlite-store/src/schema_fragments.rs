@@ -16,27 +16,17 @@ CREATE TABLE IF NOT EXISTS session_ingress_sequence (
 
 /// The logical-run family (FIG-3600 S7), carried by the durable core alone.
 ///
-/// `session_runs` holds one row per `(session, run)` a shift admitted work
-/// under, with the executor the seal of its admission recorded
-/// (`executor_json`, written in the seal's transaction, FIG-4814), the exact
-/// result of the run's admission (`admission_json`),
+/// `session_runs` holds one row per `(session, run)` admitted work ran
+/// under, with the exact result of the run's admission (`admission_json`),
 /// committed in the admission's own transaction (FIG-3840, FIG-3927), and the run's terminal evidence once
 /// it has one: all four `terminal_*` columns are set together, exactly once. `session_run_inputs`
 /// binds each accepted input to the run that executes it. `control_intents`
-/// records an operator's verb or a session's close; a `close_session` row
-/// outlives its session as the deletion tombstone.
+/// records a session's close; a `close_session` row outlives its session as
+/// the deletion tombstone.
 pub(crate) const SESSION_RUNS_TABLES: &str = "
-CREATE TABLE IF NOT EXISTS session_shift_admissions (
-    session_id TEXT NOT NULL,
-    admission TEXT NOT NULL,
-    receipt_json TEXT NOT NULL,
-    PRIMARY KEY (session_id, admission)
-);
-
 CREATE TABLE IF NOT EXISTS session_runs (
     session_id              TEXT NOT NULL,
     run                    TEXT NOT NULL,
-    executor_json           TEXT,
     admission_json          TEXT,
     terminal_kind           TEXT,
     terminal_cause_json     TEXT,
@@ -84,13 +74,11 @@ CREATE TABLE IF NOT EXISTS control_intents (
     intent_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id     TEXT NOT NULL,
     format         INTEGER NOT NULL,
-    kind           TEXT NOT NULL CONSTRAINT ck_control_intents_kind CHECK (kind IN ('redrive', 'cancel', 'fork', 'close_session')),
+    kind           TEXT NOT NULL CONSTRAINT ck_control_intents_kind CHECK (kind IN ('close_session')),
     kind_json      TEXT NOT NULL,
-    state          TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged', 'superseded', 'refused')),
+    state          TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged')),
     state_json     TEXT NOT NULL,
-    engine_half_owed INTEGER NOT NULL GENERATED ALWAYS AS ((state = 'pending' AND obligation_state IN ('due', 'claimed')) IS TRUE) VIRTUAL,
     created_at_ms  INTEGER NOT NULL,
-    engine_ref     TEXT,
     obligation_id  TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,

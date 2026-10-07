@@ -22,7 +22,6 @@ impl LashRuntime {
         &mut self,
         change: ToolStateChange,
         completion: crate::QueuedWorkCompletion,
-        shift_fence: &crate::store::ShiftFence,
     ) -> Result<bool, RuntimeError> {
         let outcome = self.change_tool_state(change).await.map_err(|error| {
             RuntimeError::new(
@@ -30,13 +29,10 @@ impl LashRuntime {
                 error.to_string(),
             )
         })?;
-        let committed =
-            Box::pin(
-                self.commit_host_command(&completion, shift_fence, None, None, |_, _| {
-                    crate::runtime::SessionCommandOutcome::ToolState { outcome }
-                }),
-            )
-            .await?;
+        let committed = Box::pin(self.commit_host_command(&completion, None, None, |_, _| {
+            crate::runtime::SessionCommandOutcome::ToolState { outcome }
+        }))
+        .await?;
         Ok(!matches!(committed, CommandCommit::Withdrawn))
     }
 

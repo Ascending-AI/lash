@@ -24,17 +24,11 @@ pub(super) struct TriggerRows {
 pub(super) struct SurfaceState {
     pub(super) processes: ProcessRows,
     pub(super) triggers: TriggerRows,
-    /// `turn_parks`, normalized: the session's parked-turn record (FIG-3586).
-    pub(super) turn_parks: Vec<serde_json::Value>,
-    /// The `load_turn_park` answers the record ops produced, in operation
-    /// order. Recorded by the runner, not read off the tables.
-    pub(super) turn_park_loads: Vec<serde_json::Value>,
     pub(super) trigger_feed_reads: Vec<serde_json::Value>,
 }
 
 pub(super) enum SurfaceReader {
     Sqlite {
-        runtime_path: PathBuf,
         process_path: PathBuf,
         trigger_path: PathBuf,
     },
@@ -47,10 +41,9 @@ impl SurfaceReader {
     pub(super) async fn observe(&self) -> SurfaceState {
         match self {
             Self::Sqlite {
-                runtime_path,
                 process_path,
                 trigger_path,
-            } => read_sqlite_surface(runtime_path, process_path, trigger_path),
+            } => read_sqlite_surface(process_path, trigger_path),
             Self::Postgres { pool } => read_postgres_surface(pool).await,
         }
     }
@@ -162,12 +155,7 @@ pub(super) fn normalize_json_fields(
     clippy::unwrap_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-pub(super) fn read_sqlite_surface(
-    runtime_path: &Path,
-    process_path: &Path,
-    trigger_path: &Path,
-) -> SurfaceState {
-    let runtime = rusqlite::Connection::open(runtime_path).expect("open SQLite runtime reader");
+pub(super) fn read_sqlite_surface(process_path: &Path, trigger_path: &Path) -> SurfaceState {
     let process = rusqlite::Connection::open(process_path).expect("open SQLite process reader");
     let trigger = rusqlite::Connection::open(trigger_path).expect("open SQLite trigger reader");
     let records = sqlite_simple_json_rows(
@@ -227,26 +215,6 @@ pub(super) fn read_sqlite_surface(
             tombstones,
         },
         triggers: read_sqlite_triggers(&trigger),
-        turn_parks: sqlite_simple_json_rows(
-            &runtime,
-            "SELECT session_id, turn_id, park_id, reason_code, reason_json,
-                    since_ms, last_refused_ms, attempts FROM turn_parks
-             ORDER BY session_id",
-            |row| {
-                let reason: String = row.get(4)?;
-                Ok(normalized_json(serde_json::json!({
-                    "session_id": row.get::<_, String>(0)?,
-                    "turn_id": row.get::<_, String>(1)?,
-                    "park_id": row.get::<_, i64>(2)?,
-                    "reason_code": row.get::<_, String>(3)?,
-                    "reason": serde_json::from_str::<serde_json::Value>(&reason).unwrap(),
-                    "since_ms": row.get::<_, i64>(5)?,
-                    "last_refused_ms": row.get::<_, i64>(6)?,
-                    "attempts": row.get::<_, i64>(7)?,
-                })))
-            },
-        ),
-        turn_park_loads: Vec::new(),
         trigger_feed_reads: Vec::new(),
     }
 }
@@ -349,51 +317,8 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
             tombstones,
         },
         triggers: read_postgres_triggers(pool).await,
-        turn_parks: read_postgres_turn_parks(pool).await,
-        turn_park_loads: Vec::new(),
         trigger_feed_reads: Vec::new(),
     }
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) async fn read_postgres_turn_parks(pool: &PgPool) -> Vec<serde_json::Value> {
-    type Row = (String, String, i64, String, String, i64, i64, i64);
-    sqlx::query_as::<_, Row>(
-        "SELECT session_id, turn_id, park_id, reason_code, reason_json,
-                since_ms, last_refused_ms, attempts
-         FROM lash_turn_parks ORDER BY session_id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap()
-    .into_iter()
-    .map(
-        |(
-            session_id,
-            turn_id,
-            park_id,
-            reason_code,
-            reason,
-            since_ms,
-            last_refused_ms,
-            attempts,
-        )| {
-            normalized_json(serde_json::json!({
-                "session_id": session_id,
-                "turn_id": turn_id,
-                "park_id": park_id,
-                "reason_code": reason_code,
-                "reason": serde_json::from_str::<serde_json::Value>(&reason).unwrap(),
-                "since_ms": since_ms,
-                "last_refused_ms": last_refused_ms,
-                "attempts": attempts,
-            }))
-        },
-    )
-    .collect()
 }
 
 #[expect(
@@ -435,8 +360,6 @@ pub(super) fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
     observations.windows(2).all(|pair| {
         pair[0].1.processes == pair[1].1.processes
             && pair[0].1.triggers == pair[1].1.triggers
-            && pair[0].1.turn_parks == pair[1].1.turn_parks
-            && pair[0].1.turn_park_loads == pair[1].1.turn_park_loads
             && pair[0].1.trigger_feed_reads == pair[1].1.trigger_feed_reads
     })
 }

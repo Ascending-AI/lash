@@ -2,33 +2,26 @@
 //!
 //! The state struct, its checkpoint components and the durable-head adoption
 //! rules live in `lash-core-store`; this module re-exports them at their
-//! original path and keeps the one commit helper that needs the runtime's
-//! shift fence.
+//! original path and keeps the one commit helper a host service commits
+//! through.
 
 pub use lash_core_store::session_state::*;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Commit `commit` from a service that runs either inside a running turn's
-/// shift (`shift_fence`) or as a lane-less host service (`None`). The
-/// explicit context selects the authority, never scheduling or elapsed time.
+/// Commit `commit` from a service outside the owning runtime's turn. The
+/// service committed from a snapshot the resident runtime does not hold, so
+/// a success forces a deliberate head reload before the runtime's next
+/// physical turn; planner CAS is not the graph-freshness discovery
+/// mechanism.
 pub(crate) async fn commit_in_lane_context(
-    shift_fence: Option<&crate::store::ShiftFence>,
     store: crate::store::SessionStore,
-    mut commit: crate::RuntimeCommit,
+    commit: crate::RuntimeCommit,
     resident_graph_head_stale: &AtomicBool,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<crate::store::RuntimeCommitReceipt, crate::StoreError> {
-    let Some(fence) = shift_fence else {
-        return store.commit_runtime_state_verified(commit, metrics).await;
-    };
-    commit.shift_fence = Some(Box::new(fence.clone()));
     let result = store.commit_runtime_state_verified(commit, metrics).await;
     if result.is_ok() {
-        // The shift remains current, but this service committed from a
-        // snapshot outside the owning runtime. Force a deliberate head
-        // reload before its next physical turn; planner CAS is not the
-        // graph-freshness discovery mechanism.
         resident_graph_head_stale.store(true, Ordering::Release);
     }
     result

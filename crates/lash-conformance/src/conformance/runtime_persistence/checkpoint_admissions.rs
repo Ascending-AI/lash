@@ -1,8 +1,6 @@
 use super::*;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION;
-use lash_core::store::IngressSettlement;
-use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use pretty_assertions::assert_eq;
 
 /// A backend must mint refs for checkpoint bodies and resolve those refs after
@@ -229,12 +227,6 @@ where
             },
         },
     );
-    let _rejection_lease = seal_shift_fence_for_test(
-        &cold_reopen,
-        &SessionId::from("checkpoint-component-refs"),
-        "checkpoint-component-rejections",
-    )
-    .await;
     let unknown_error = cold_reopen
         .commit_runtime_state(unknown)
         .await
@@ -363,121 +355,6 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
     ));
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
-    store: Arc<dyn RuntimeStore>,
-) {
-    let session_id = "turn-input-application";
-    let fence = seal_shift_fence_for_test(
-        &store,
-        &SessionId::from(session_id),
-        "turn-input-application-owner",
-    )
-    .await;
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::fixture(session_id.to_string()),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-    };
-    let mut expected = Vec::new();
-    let mut replay = None;
-
-    for (turn_index, turn_id) in ["z-first-application-turn", "a-second-application-turn"]
-        .into_iter()
-        .enumerate()
-    {
-        let enqueued = futures_util::future::try_join_all((0..2).map(|input_index| {
-            store.enqueue_pending_turn_input(
-                pending_next_turn_input_draft(
-                    &SessionId::from(session_id),
-                    &format!("canonical application {turn_index}:{input_index}"),
-                )
-                .with_source_key(format!(
-                    "host:application-source-{turn_index}-{input_index}"
-                )),
-            )
-        }))
-        .await
-        .expect("enqueue application inputs");
-        let head = enqueued
-            .iter()
-            .min_by_key(|input| input.enqueue_seq)
-            .expect("two inputs were enqueued");
-        let admission = admitted_run(
-            &store,
-            &fence,
-            turn_id,
-            lash_core::store::AdmittedHead::Input(head.input_id.clone()),
-        )
-        .await;
-        let mut admitted = *admission.inputs.clone().expect("the run admits its inputs");
-        let committed_message_id = format!("application-message-{turn_index}");
-        admitted
-            .record_initial_turn_application(&crate::TurnId::from(turn_id), &committed_message_id);
-        let turn_expected = admitted.applications.clone();
-        assert_eq!(enqueued.len(), turn_expected.len());
-
-        let mut settlement = IngressSettlement::new(TurnId::from(turn_id));
-        settlement.completed_inputs.push(admitted.completion());
-        let mut commit = final_commit(
-            RuntimeCommit::persisted_state_for_test(&state),
-            &fence,
-            settlement,
-        );
-        commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
-            session_id, turn_id, "final",
-        ));
-        let commit = prepare_final_commit(&store, commit).await;
-        if turn_index == 1 {
-            replay = Some(commit.clone());
-        }
-        let result = store
-            .commit_runtime_state(commit)
-            .await
-            .expect("commit application identity");
-        state.head_revision = result.head_revision;
-
-        assert_eq!(result.turn_input_applications, turn_expected);
-        expected.extend(turn_expected);
-    }
-
-    let replayed = store
-        .commit_runtime_state(replay.expect("second turn commit replay"))
-        .await
-        .expect("replay application turn commit");
-    assert_eq!(
-        replayed.turn_input_applications,
-        expected[2..],
-        "an exact turn-commit replay must retain its applications"
-    );
-    assert_eq!(
-        store
-            .list_turn_input_applications(&SessionId::from(session_id))
-            .await
-            .expect("read durable application identity"),
-        expected,
-        "applications must follow monotonic turn-commit order and must not double-count a replay"
-    );
-
-    store
-        .vacuum(&SessionId::from(session_id))
-        .await
-        .expect("vacuum application tombstone");
-    assert_eq!(
-        store
-            .list_turn_input_applications(&SessionId::from(session_id))
-            .await
-            .expect("read application identity after tombstone vacuum"),
-        expected,
-        "application reconciliation must come from the committed turn, not a pending snapshot"
-    );
-}
-
 fn admitted_input_ids(admission: &lash_core::store::CheckpointAdmission) -> Vec<String> {
     admission
         .inputs
@@ -500,14 +377,17 @@ fn admitted_batch_ids(admission: &lash_core::store::CheckpointAdmission) -> Vec<
 /// own run.
 async fn at_checkpoint(
     store: &Arc<dyn RuntimeStore>,
-    fence: &lash_core::store::ShiftFence,
+    session_id: &SessionId,
     turn: &TurnId,
     kind: crate::CheckpointKind,
     step: &str,
     max_inputs: usize,
     policy: crate::TurnLaneAdmissionPolicy,
 ) -> Result<lash_core::store::CheckpointAdmission, StoreError> {
-    admit_at_checkpoint_for_test(store, fence, turn, turn, kind, step, max_inputs, policy).await
+    admit_at_checkpoint_for_test(
+        store, session_id, turn, turn, kind, step, max_inputs, policy,
+    )
+    .await
 }
 
 /// A checkpoint's admission takes both families in one transaction, binds
@@ -519,8 +399,7 @@ async fn at_checkpoint(
 pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("checkpoint-work");
     let turn_id = crate::TurnId::from("checkpoint-turn");
-    let fence = seal_shift_fence_for_test(&store, &session_id, "checkpoint-owner").await;
-    active_run(&store, &fence, &turn_id).await;
+    active_run(&store, &session_id, &turn_id).await;
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -541,7 +420,7 @@ pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn Runtim
 
     let admitted = at_checkpoint(
         &store,
-        &fence,
+        &session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         "checkpoint-turn:step:1",
@@ -561,7 +440,7 @@ pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn Runtim
 
     let later_step = at_checkpoint(
         &store,
-        &fence,
+        &session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         "checkpoint-turn:step:2",
@@ -576,138 +455,9 @@ pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn Runtim
     );
 }
 
-/// FIG-3976: a checkpoint-admitted input has no run binding while its
-/// delivery is in flight; the commit that completes it binds it to the run
-/// that applied it, so `run_of_input` resolves it by one point read. The
-/// row's own point read, `pending_turn_input`, answers what the pending list
-/// answers for it at each stage: open once enqueued, admitted to its run
-/// from the checkpoint until the run's commit completes it (FIG-4044), and
-/// absent from then on.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_checkpoint_applied_input_resolves_to_its_run_by_point_read(
-    store: Arc<dyn RuntimeStore>,
-) {
-    let session_id = SessionId::from("checkpoint-applied-binding");
-    let turn = crate::TurnId::from("checkpoint-applied-binding:turn");
-    let fence = seal_shift_fence_for_test(&store, &session_id, "checkpoint-applied-owner").await;
-    let run = active_run(&store, &fence, &turn).await;
-    let input = store
-        .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &session_id,
-            &turn,
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "checkpoint applied input",
-        ))
-        .await
-        .expect("enqueue active input");
-    assert_eq!(
-        pending_status(&store, &session_id, &input.input_id).await,
-        (
-            Some(crate::PendingTurnInputReadStatus::Open),
-            Some(crate::PendingTurnInputReadStatus::Open)
-        ),
-        "an enqueued input reads open by id and in the list"
-    );
-    let admission = admit_at_checkpoint_for_test(
-        &store,
-        &fence,
-        &turn,
-        &turn,
-        crate::CheckpointKind::AfterWork,
-        "checkpoint-applied-binding:step",
-        10,
-        crate::testing::queued_work_admission_policy(10),
-    )
-    .await
-    .expect("admit at the checkpoint");
-    assert!(
-        admission
-            .inputs
-            .as_ref()
-            .is_some_and(|inputs| inputs.input_ids() == vec![input.input_id.clone()]),
-        "the checkpoint admits the input"
-    );
-    assert_eq!(
-        store
-            .run_of_input(&session_id, &input.input_id)
-            .await
-            .expect("read the in-flight binding"),
-        None,
-        "a checkpoint delivery in flight binds no run yet"
-    );
-    assert_eq!(
-        pending_status(&store, &session_id, &input.input_id).await,
-        (
-            Some(crate::PendingTurnInputReadStatus::Admitted { run: turn.clone() }),
-            Some(crate::PendingTurnInputReadStatus::Admitted { run: turn.clone() })
-        ),
-        "an accepted checkpoint delivery reads admitted to its run, by id and in the list, \
-         until the run settles it"
-    );
-
-    end_run(
-        &store,
-        &fence,
-        completing_checkpoint(completing_admission(turn.as_str(), &run), &admission),
-    )
-    .await;
-    assert_eq!(
-        store
-            .run_of_input(&session_id, &input.input_id)
-            .await
-            .expect("read the applied binding"),
-        Some(turn.clone()),
-        "the completing commit binds the input to the run that applied it"
-    );
-    assert_eq!(
-        pending_status(&store, &session_id, &input.input_id).await,
-        (None, None),
-        "the completing commit takes the input out of the pending read, by id and in the list"
-    );
-    assert_eq!(
-        store
-            .run_binding(&session_id, &input.input_id)
-            .await
-            .expect("read the applied binding"),
-        Some(turn),
-    );
-}
-
-/// `input`'s pending-read status by its point read and by the session's list.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: the reads are established by the caller's setup"
-)]
-async fn pending_status(
-    store: &Arc<dyn RuntimeStore>,
-    session_id: &SessionId,
-    input: &crate::InputId,
-) -> (
-    Option<crate::PendingTurnInputReadStatus>,
-    Option<crate::PendingTurnInputReadStatus>,
-) {
-    let by_id = store
-        .pending_turn_input(session_id, input)
-        .await
-        .expect("read the row by id")
-        .map(|read| read.status);
-    let listed = store
-        .list_pending_turn_inputs(session_id)
-        .await
-        .expect("list the pending rows")
-        .into_iter()
-        .find(|read| read.input.input_id == *input)
-        .map(|read| read.status);
-    (by_id, listed)
-}
-
 /// FIG-3927 N3, checkpoint half: `admit_at_checkpoint` is idempotent by
-/// `(run, step)`. Run again under the same fence, under a later fence, or
-/// with rows enqueued in between, the step reads back exactly the rows it
-/// bound, byte for byte, and takes nothing more.
+/// `(run, step)`. Run again, or with rows enqueued in between, the step reads
+/// back exactly the rows it bound, byte for byte, and takes nothing more.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -716,8 +466,7 @@ pub async fn checkpoint_admission_is_idempotent_by_run_and_step(store: Arc<dyn R
     let session_id = SessionId::from("checkpoint-step-idempotence");
     let turn_id = crate::TurnId::from("checkpoint-step-idempotence:turn");
     let step = "checkpoint-step-idempotence:step";
-    let first = seal_shift_fence_for_test(&store, &session_id, "checkpoint-step-a").await;
-    active_run(&store, &first, &turn_id).await;
+    active_run(&store, &session_id, &turn_id).await;
     store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -737,7 +486,7 @@ pub async fn checkpoint_admission_is_idempotent_by_run_and_step(store: Arc<dyn R
         .expect("enqueue checkpoint queued work");
     let admitted = at_checkpoint(
         &store,
-        &first,
+        &session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         step,
@@ -749,9 +498,9 @@ pub async fn checkpoint_admission_is_idempotent_by_run_and_step(store: Arc<dyn R
     assert!(!admitted.is_empty());
     let recorded = serde_json::to_value(&admitted).expect("encode the admission");
 
-    let same_fence = at_checkpoint(
+    let rerun = at_checkpoint(
         &store,
-        &first,
+        &session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         step,
@@ -759,11 +508,11 @@ pub async fn checkpoint_admission_is_idempotent_by_run_and_step(store: Arc<dyn R
         crate::testing::queued_work_admission_policy(10),
     )
     .await
-    .expect("a rerun under the same fence");
+    .expect("a rerun of the step");
     assert_eq!(
-        serde_json::to_value(&same_fence).expect("encode the rerun"),
+        serde_json::to_value(&rerun).expect("encode the rerun"),
         recorded,
-        "a rerun under the same fence reads its own rows back"
+        "a rerun of the step reads its own rows back"
     );
 
     store
@@ -783,14 +532,9 @@ pub async fn checkpoint_admission_is_idempotent_by_run_and_step(store: Arc<dyn R
         ))
         .await
         .expect("enqueue later queued work");
-    store
-        .supersede_shift_epoch_for_test(&first)
-        .await
-        .expect("the first shift is superseded");
-    let successor = seal_shift_fence_for_test(&store, &session_id, "checkpoint-step-b").await;
     let resumed = at_checkpoint(
         &store,
-        &successor,
+        &session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         step,
@@ -798,108 +542,11 @@ pub async fn checkpoint_admission_is_idempotent_by_run_and_step(store: Arc<dyn R
         crate::testing::queued_work_admission_policy(10),
     )
     .await
-    .expect("a rerun under a later fence");
+    .expect("a rerun after later rows arrived");
     assert_eq!(
         serde_json::to_value(&resumed).expect("encode the resumed rerun"),
         recorded,
-        "a rerun under a later fence reads back exactly the recorded rows, not the later ones"
-    );
-    assert!(
-        at_checkpoint(
-            &store,
-            &first,
-            &turn_id,
-            crate::CheckpointKind::AfterWork,
-            step,
-            10,
-            crate::testing::queued_work_admission_policy(10),
-        )
-        .await
-        .is_err_and(|error| matches!(error, StoreError::StaleShiftFence { .. })),
-        "the superseded fence reads nothing back"
-    );
-}
-
-/// FIG-3927 N4 at a checkpoint (FIG-4044): a stale fence is refused
-/// `StaleShiftFence` whatever the request's caps and whatever the checkpoint
-/// has pending, and the step's read-back does not depend on the caps either.
-/// A checkpoint whose caps are zero is still a checkpoint of a run that may
-/// have been superseded, and a re-execution of its step still reads back the
-/// rows the step bound.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_checkpoint_refuses_a_stale_fence_whatever_its_caps(store: Arc<dyn RuntimeStore>) {
-    let session_id = SessionId::from("checkpoint-stale-fence-caps");
-    let turn_id = crate::TurnId::from("checkpoint-stale-fence-caps:turn");
-    let idle_turn = crate::TurnId::from("checkpoint-stale-fence-caps:idle-turn");
-    let step = "checkpoint-stale-fence-caps:step";
-    let stale = seal_shift_fence_for_test(&store, &session_id, "checkpoint-stale-caps-a").await;
-    active_run(&store, &stale, &turn_id).await;
-    let input = store
-        .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &session_id,
-            &turn_id,
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "input a stale checkpoint must not take",
-        ))
-        .await
-        .expect("enqueue checkpoint input");
-    let live = seal_shift_fence_for_test(&store, &session_id, "checkpoint-stale-caps-b").await;
-    assert!(live.epoch() > stale.epoch(), "the later seal supersedes");
-
-    for turn in [&turn_id, &idle_turn] {
-        for (max_inputs, max_rows) in [(10, 10), (0, 0), (0, 10), (10, 0)] {
-            let refused = at_checkpoint(
-                &store,
-                &stale,
-                turn,
-                crate::CheckpointKind::AfterWork,
-                step,
-                max_inputs,
-                crate::testing::queued_work_admission_policy(max_rows),
-            )
-            .await;
-            assert!(
-                matches!(refused, Err(StoreError::StaleShiftFence { .. })),
-                "turn `{turn}`, caps ({max_inputs}, {max_rows}): a stale fence is refused, got \
-                 {refused:?}"
-            );
-        }
-    }
-
-    let admitted = at_checkpoint(
-        &store,
-        &live,
-        &turn_id,
-        crate::CheckpointKind::AfterWork,
-        step,
-        10,
-        crate::testing::queued_work_admission_policy(10),
-    )
-    .await
-    .expect("the live fence admits");
-    assert_eq!(
-        admitted_input_ids(&admitted),
-        vec![input.input_id.to_string()],
-        "no stale attempt took the input"
-    );
-    let reread = at_checkpoint(
-        &store,
-        &live,
-        &turn_id,
-        crate::CheckpointKind::AfterWork,
-        step,
-        0,
-        crate::testing::queued_work_admission_policy(0),
-    )
-    .await
-    .expect("a re-execution with zero caps");
-    assert_eq!(
-        serde_json::to_value(&reread).expect("encode the re-execution"),
-        serde_json::to_value(&admitted).expect("encode the admission"),
-        "a re-execution reads back the step's rows whatever its caps"
+        "a rerun reads back exactly the recorded rows, not the later ones"
     );
 }
 
@@ -916,8 +563,7 @@ pub async fn a_checkpoint_admitted_input_is_listed_admitted_to_its_run(
 ) {
     let session_id = SessionId::from("checkpoint-admitted-listing");
     let turn_id = crate::TurnId::from("checkpoint-admitted-listing:turn");
-    let fence = seal_shift_fence_for_test(&store, &session_id, "checkpoint-admitted-listing").await;
-    let run = active_run(&store, &fence, &turn_id).await;
+    active_run(&store, &session_id, &turn_id).await;
     let before = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
             &session_id,
@@ -943,7 +589,7 @@ pub async fn a_checkpoint_admitted_input_is_listed_admitted_to_its_run(
         .expect("enqueue the later next-turn input");
     let admitted = at_checkpoint(
         &store,
-        &fence,
+        &session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         "checkpoint-admitted-listing:step",
@@ -967,13 +613,6 @@ pub async fn a_checkpoint_admitted_input_is_listed_admitted_to_its_run(
     assert_eq!(
         listed,
         vec![
-            (
-                run.input_ids()[0].clone(),
-                crate::TurnInputStateKind::DeferredNextTurn,
-                crate::PendingTurnInputReadStatus::Admitted {
-                    run: turn_id.clone()
-                },
-            ),
             (
                 before.input_id,
                 crate::TurnInputStateKind::DeferredNextTurn,
@@ -1007,9 +646,7 @@ pub async fn checkpoint_admissions_honor_min_boundary_at_every_checkpoint(
 ) {
     let session_id = SessionId::from("checkpoint-min-boundary");
     let turn_id = crate::TurnId::from("checkpoint-min-boundary:turn");
-    let fence =
-        seal_shift_fence_for_test(&store, &session_id, "checkpoint-min-boundary-owner").await;
-    active_run(&store, &fence, &turn_id).await;
+    active_run(&store, &session_id, &turn_id).await;
     let before_completion = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -1022,7 +659,7 @@ pub async fn checkpoint_admissions_honor_min_boundary_at_every_checkpoint(
 
     let probed = at_checkpoint(
         &store,
-        &fence,
+        &session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         "min-boundary:step:1",
@@ -1061,7 +698,7 @@ pub async fn checkpoint_admissions_honor_min_boundary_at_every_checkpoint(
     ] {
         let admitted = at_checkpoint(
             &store,
-            &fence,
+            &session_id,
             &turn_id,
             crate::CheckpointKind::AfterWork,
             step,
@@ -1081,7 +718,7 @@ pub async fn checkpoint_admissions_honor_min_boundary_at_every_checkpoint(
 
     let admitted = at_checkpoint(
         &store,
-        &fence,
+        &session_id,
         &turn_id,
         crate::CheckpointKind::BeforeCompletion,
         "min-boundary:step:4",
@@ -1111,9 +748,7 @@ pub async fn checkpoint_admissions_honor_min_boundary_at_every_checkpoint(
 pub async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("checkpoint-budget-atomicity");
     let turn_id = crate::TurnId::from("checkpoint-budget-atomicity:turn");
-    let fence =
-        seal_shift_fence_for_test(&store, &session_id, "checkpoint-budget-atomicity-owner").await;
-    let run = active_run(&store, &fence, &turn_id).await;
+    active_run(&store, &session_id, &turn_id).await;
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -1134,7 +769,7 @@ pub async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dy
         .expect("enqueue oversized checkpoint queued work");
     let error = at_checkpoint(
         &store,
-        &fence,
+        &session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         "checkpoint-budget:step",
@@ -1163,11 +798,11 @@ pub async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dy
             .iter()
             .map(|read| read.input.input_id.to_string())
             .collect::<Vec<_>>(),
-        vec![run.input_ids()[0].to_string(), input.input_id.to_string()],
+        vec![input.input_id.to_string()],
         "the input binding must roll back with the refused queued-work admission"
     );
     assert_eq!(
-        pending[1].input.state.kind(),
+        pending[0].input.state.kind(),
         crate::TurnInputStateKind::PendingActive
     );
     assert_eq!(pending[1].status, crate::PendingTurnInputReadStatus::Open);
@@ -1186,16 +821,10 @@ pub async fn checkpoint_admission_probe_transaction_counts(
     counts: impl Fn() -> (usize, usize),
 ) {
     let turn_id = crate::TurnId::fixture(format!("{session_id}:counter-turn"));
-    let fence = seal_shift_fence_for_test(
-        &store,
-        session_id,
-        &format!("{session_id}:checkpoint-counter-owner"),
-    )
-    .await;
 
     let empty = at_checkpoint(
         &store,
-        &fence,
+        session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         "counter:step:1",
@@ -1217,7 +846,7 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         .expect("enqueue deferred checkpoint head");
     let deferred_checkpoint = at_checkpoint(
         &store,
-        &fence,
+        session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         "counter:step:2",
@@ -1236,27 +865,15 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         "a deferred queue head must not open a checkpoint write transaction"
     );
 
-    // The idle boundary starts the run whose checkpoint the rest probes.
-    let idle = admitted_run(
-        &store,
-        &fence,
-        turn_id.as_str(),
-        lash_core::store::AdmittedHead::Batch(deferred.batch_id.clone()),
-    )
-    .await;
-    assert_eq!(idle.batch_ids(), vec![deferred.batch_id.clone()]);
-
+    // The run whose checkpoint the rest probes starts; the deferred head
+    // leaves the lane.
+    active_run(&store, session_id, &turn_id).await;
     store
-        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
-            session_id,
-            crate::TurnInputIngress::active_turn(
-                TurnId::fixture(turn_id.to_string()),
-                crate::TurnInputCheckpointBoundary::AfterWork,
-            ),
-            crate::TurnInput::text("pending checkpoint input"),
-        ))
+        .cancel_queued_work_batch(session_id, &deferred.batch_id)
         .await
-        .expect("enqueue counter input");
+        .expect("withdraw the deferred head")
+        .expect("the deferred head is open");
+
     store
         .enqueue_queued_work(queued_process_wake_draft(
             session_id,
@@ -1267,7 +884,7 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         .expect("enqueue counter work");
     let pending = at_checkpoint(
         &store,
-        &fence,
+        session_id,
         &turn_id,
         crate::CheckpointKind::AfterWork,
         "counter:step:3",
@@ -1276,7 +893,7 @@ pub async fn checkpoint_admission_probe_transaction_counts(
     )
     .await
     .expect("admit pending checkpoint work");
-    assert!(pending.inputs.is_some() && pending.queued.is_some());
+    assert!(pending.queued.is_some());
     assert_eq!(counts(), (3, 1));
 }
 
@@ -1368,14 +985,6 @@ pub(super) fn pending_next_turn_input_draft(
         crate::TurnInputIngress::NextTurn,
         crate::TurnInput::text(text),
     )
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "conformance-law fixture: the unwrap mirrors the setup above"
-)]
-pub(super) fn inline_png(bytes: Vec<u8>) -> crate::AttachmentSource {
-    crate::AttachmentSource::inline(crate::MediaType::parse("image/png").unwrap(), bytes)
 }
 
 pub(super) fn pending_active_turn_input_draft(

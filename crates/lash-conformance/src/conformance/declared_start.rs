@@ -863,7 +863,6 @@ impl World {
                     watched.clone(),
                     Arc::new(crate::NoProcessWork::new(&watched)),
                 ),
-                Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
             ),
         )
@@ -930,7 +929,6 @@ impl World {
                     self.session_id.clone(),
                 ))
                 .with_process_work(self.process_work.clone())
-                .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                 .build(),
         )
         .await

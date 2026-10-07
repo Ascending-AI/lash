@@ -12,10 +12,10 @@ use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
 use lash_core_execution::store::{
-    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, ControlIntentState,
-    DeliveryError, KeyColumn, KeyColumnType, ObligationId, ObligationKey, ObligationKind,
-    ObligationLedger, ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome,
-    StallReason, StalledObligation,
+    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, DeliveryError, KeyColumn,
+    KeyColumnType, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
+    ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome, StallReason,
+    StalledObligation,
 };
 use lash_core_execution::{ArtifactCleanup, ArtifactReferrer};
 use lash_store_sql::artifact::cleanup_obligations::{
@@ -27,7 +27,6 @@ use lash_store_sql::process::processes::{
     ProcessObligationStatements, ProcessStartObligationStatements,
 };
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
-use lash_store_sql::session_runs::control_intents::ControlIntentObligationStatements;
 use lash_store_sql::session_runs::runs::SessionRunObligationStatements;
 use lash_store_sql::trigger::deliveries::DeliveryObligationStatements;
 use rusqlite::types::Value;
@@ -36,8 +35,6 @@ use rusqlite::{Row, params_from_iter};
 use crate::conn::SqliteConnection;
 use crate::{StoreError, sqlite_conversion_error, sqlite_error, stored_data_corrupt};
 
-static INTENTS: LazyLock<ControlIntentObligationStatements> =
-    LazyLock::new(|| ControlIntentObligationStatements::render(crate::schema_layout::MAIN));
 static RUNS: LazyLock<SessionRunObligationStatements> =
     LazyLock::new(|| SessionRunObligationStatements::render(crate::schema_layout::MAIN));
 static META: LazyLock<SessionMetaObligationStatements> =
@@ -55,13 +52,9 @@ static CLEANUPS: LazyLock<CleanupObligationStatements> =
 static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
     LazyLock::new(|| CleanupObligationLedgerStatements::render(crate::schema_layout::MAIN));
 
-/// `kind`'s statements, rendered for the connection's own database. Ingress
-/// names its turn-input table here; its ledger composes that table with the
-/// queued-batch table (`crate::ingress_obligation`).
+/// `kind`'s statements, rendered for the connection's own database.
 pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
     match kind {
-        ObligationKind::Ingress => crate::ingress_obligation::turn_input_sql(),
-        ObligationKind::ControlIntent => INTENTS.obligation_sql(),
         ObligationKind::ScopeClose => RUNS.obligation_sql(),
         ObligationKind::SessionDelete => META.obligation_sql(),
         ObligationKind::ParentEnd => PLANS.obligation_sql(),
@@ -192,38 +185,7 @@ pub(crate) fn arm_obligation_tx(
     key: &ObligationKey,
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {
-    if key.kind() == ObligationKind::Ingress {
-        return crate::ingress_obligation::arm_ingress_tx(conn, key, now_ms);
-    }
     arm_table_tx(conn, obligation_sql(key.kind()), key, now_ms)
-}
-
-/// [`SqliteObligationLedger::claim`] inside a transaction the caller already
-/// holds (FIG-3975): the admission that arms the row claims its obligation
-/// in the same commit, so the producer's immediate ask owes no second store
-/// round-trip. `token` is the claimant's token and `until_ms` its expiry.
-/// `None` when `id` is neither due nor claimed under `token` — as `claim`
-/// answers.
-pub(crate) fn claim_obligation_tx(
-    conn: &rusqlite::Connection,
-    sql: ObligationSql<'static>,
-    kind: ObligationKind,
-    id: &ObligationId,
-    token: &ClaimToken,
-    until_ms: u64,
-) -> Result<Option<ClaimedObligation>, StoreError> {
-    let until = sql_i64("obligation claim expiry", until_ms)?;
-    let mut claim = conn.prepare_cached(sql.claim.sql()).map_err(sqlite_error)?;
-    let mut rows = claim
-        .query(rusqlite::params![id.as_str(), token.as_str(), until])
-        .map_err(sqlite_error)?;
-    let row = rows
-        .next()
-        .map_err(sqlite_error)?
-        .map(|row| read_claim(kind, row))
-        .transpose()
-        .map_err(sqlite_error)?;
-    row.map(|row| claimed(row, token)).transpose()
 }
 
 /// Arm `key`'s row in the table `sql` addresses as obligation `id`, due at
@@ -423,22 +385,10 @@ impl ObligationLedger for SqliteObligationLedger {
         let sql = self.sql();
         let now = sql_i64("obligation due instant", now_ms)?;
         let id = id.as_str().to_owned();
-        // A control intent the engine refused returns to pending with its
-        // obligation: the statement takes that state's stored columns.
-        let reopened = (self.kind == ObligationKind::ControlIntent)
-            .then(|| lash_core_execution::store::stored_intent_state(&ControlIntentState::Pending))
-            .transpose()?;
         let changed = self
             .conn
-            .write(move |tx| match reopened {
-                Some((code, json)) => crate::conn::cached_execute(
-                    tx,
-                    sql.rearm.sql(),
-                    rusqlite::params![id, now, code, json],
-                ),
-                None => {
-                    crate::conn::cached_execute(tx, sql.rearm.sql(), rusqlite::params![id, now])
-                }
+            .write(move |tx| {
+                crate::conn::cached_execute(tx, sql.rearm.sql(), rusqlite::params![id, now])
             })
             .await
             .map_err(sqlite_error)?;

@@ -5,13 +5,11 @@ mod cache_regression;
 mod canonical_scripts;
 pub mod content_oracle;
 #[cfg(test)]
-mod ingress_bound;
-#[cfg(test)]
-mod obligation_bounds;
-#[cfg(test)]
 mod oracle_coverage_tests;
 #[cfg(test)]
 mod recorded_reality;
+#[cfg(test)]
+mod session_mail_matrix;
 #[cfg(test)]
 mod tool_call_replay;
 

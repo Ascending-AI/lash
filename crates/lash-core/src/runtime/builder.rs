@@ -45,9 +45,7 @@ impl EmbeddedRuntimeBuilder {
             core,
             store: None,
             attachment_referrers_store: None,
-            work: Box::new(RuntimeWork::sessions_only(Arc::new(
-                crate::NoSessionWork::new(),
-            ))),
+            work: Box::new(RuntimeWork::sessions_only()),
         }
     }
 
@@ -127,11 +125,6 @@ impl EmbeddedRuntimeBuilder {
 
     pub fn with_process_work(mut self, wiring: crate::ProcessWorkWiring) -> Self {
         self.work = Box::new((*self.work).with_process_wiring(wiring));
-        self
-    }
-
-    pub fn with_queued_work(mut self, queued: Arc<dyn crate::SessionWorkEngine>) -> Self {
-        self.work = Box::new((*self.work).with_queued(queued));
         self
     }
 

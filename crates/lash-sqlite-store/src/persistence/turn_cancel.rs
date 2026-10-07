@@ -86,16 +86,14 @@ pub(super) fn pending_follow_on_conn(
     )
 }
 
-/// Raise the owed follow-on's recovery count under the shift `fence` (ADR
-/// 0101 §3), inside the caller's write transaction. The head revision does
-/// not move.
+/// Raise session `session_id`'s owed follow-on's recovery count (ADR 0101
+/// §3), inside the caller's write transaction. The head revision does not
+/// move.
 pub(super) fn raise_pending_follow_on_conn(
     conn: &Connection,
-    fence: &lash_core_execution::store::ShiftFence,
+    session_id: &SessionId,
     follow_on_turn_id: &lash_core_execution::TurnId,
 ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
-    require_shift_fence_conn(conn, fence)?;
-    let session_id = fence.session();
     let not_pending = || StoreError::FollowOnNotPending {
         session_id: session_id.clone(),
         follow_on_turn_id: follow_on_turn_id.clone(),
@@ -124,15 +122,6 @@ pub(super) fn raise_pending_follow_on_conn(
         return Err(not_pending());
     }
     Ok(raised)
-}
-
-/// Refuse `fence` unless it is the session's current shift fence, read in the
-/// caller's transaction.
-pub(super) fn require_shift_fence_conn(
-    conn: &Connection,
-    fence: &lash_core_execution::store::ShiftFence,
-) -> Result<(), StoreError> {
-    super::shift_epoch::require_fence_conn(conn, fence.session(), fence)
 }
 
 pub(crate) fn decode_stored_json<T: serde::de::DeserializeOwned>(

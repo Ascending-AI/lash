@@ -9,7 +9,6 @@ use super::session_store_factory_vacuum::{
 };
 use super::*;
 use crate::ActorContext;
-use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -18,10 +17,7 @@ mod admission;
 mod identity_claims;
 pub use identity_claims::*;
 mod lifecycle_states;
-pub use super::turn_park_feed::a_command_runs_end_unparks_it;
-pub use lifecycle_states::{
-    a_closing_session_lists_as_closing_never_as_live, a_control_raise_answers_no_seal_as_sealed,
-};
+pub use lifecycle_states::a_closing_session_lists_as_closing_never_as_live;
 mod owning_process;
 pub use owning_process::session_meta_records_the_process_that_owns_it;
 mod process_successor;
@@ -33,7 +29,7 @@ mod config_commands;
 #[path = "session_store_factory_creation_budget.rs"]
 mod creation_budget;
 pub use config_commands::{
-    cancelled_session_config_settlement_is_typed, ingress_follow_on_fork_and_command_run_matrix,
+    cancelled_session_config_settlement_is_typed,
     session_config_settlement_pending_returns_without_wait,
     superseded_config_settlement_adopts_the_newer_head,
 };
@@ -83,19 +79,12 @@ where
     session_store_factory_vacuum_agrees_on_unpin_before_delete(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
-    turn_park_feed::parked_turns_list_by_since_with_filters_and_keyset_pages(make()).await;
-    turn_park_feed::re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes(make())
-        .await;
-    turn_park_feed::every_park_transition_writes_exactly_one_feed_event(make()).await;
-    turn_park_feed::a_rolled_back_commit_leaves_park_and_feed_unchanged(make()).await;
-    turn_park_feed::a_compacted_feed_cursor_is_refused_typed(make()).await;
-    turn_park_feed::summary_agrees_with_list(make()).await;
 }
 
 /// Hold a backend to the read-only session-view contract.
 ///
 /// The factory must expose committed history, failure evidence and usage while another
-/// handle owns the live execution lease. Reading must leave that writer's
+/// handle writes the session. Reading must leave that writer's
 /// authority intact, and deleting the session must produce the same absent
 /// read disposition as the ordinary live-open surface.
 #[expect(
@@ -174,18 +163,6 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
         .await
         .expect("commit readable session state");
 
-    let owner = crate::LeaseOwnerIdentity::opaque(
-        "read-only-session-writer",
-        "read-only-session-writer:incarnation",
-    );
-    let held = writer
-        .store()
-        .seal_shift_epoch_for_test(&SessionId::from(SESSION_ID), &owner, "live-writer", 60_000)
-        .await
-        .expect("claim live writer lease")
-        .acquired()
-        .expect("live writer owns the session");
-
     let view = factory
         .read_view(&SessionId::from(SESSION_ID))
         .await
@@ -227,17 +204,6 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
         },
         "usage is projected"
     );
-
-    let current = writer
-        .shift_epoch()
-        .await
-        .expect("reader leaves shift epoch available");
-    assert_eq!(current.epoch, held.epoch());
-    writer
-        .store()
-        .supersede_shift_epoch_for_test(&held)
-        .await
-        .expect("release live writer after inspection");
 
     factory
         .delete_session(&SessionId::from(SESSION_ID))
@@ -370,95 +336,6 @@ async fn session_store_factory_admissible_queued_work_peek(
             .await
             .expect("peek an admissible next-turn input"),
         "deferred next-turn input must be visible through the factory peek"
-    );
-
-    let fenced_request = session_store_request(
-        &SessionId::from("admissible-queued-work-fences"),
-        "admissible-queued-work-model",
-        crate::SessionRelation::Root,
-    );
-    let fenced_store = factory
-        .admit_view(&fenced_request)
-        .await
-        .expect("create admission-fence conformance store");
-    fenced_store
-        .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
-            &fenced_request.session_id,
-            "admission-fence",
-            1,
-            "admission fence",
-            crate::DeliveryPolicy::EarliestSafeBoundary,
-        ))
-        .await
-        .expect("enqueue admission-fenced queued work");
-    fenced_store
-        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
-            &fenced_request.session_id,
-            crate::TurnInputIngress::NextTurn,
-            crate::TurnInput::text("admission-fenced next-turn input"),
-        ))
-        .await
-        .expect("enqueue admission-fenced next-turn input");
-    let first_lease = crate::testing::store_fixtures::seal_shift_fence_for_test(
-        fenced_store.store(),
-        &fenced_request.session_id,
-        "peek-fence-first",
-    )
-    .await;
-    let wake = fenced_store
-        .list_open_queued_work()
-        .await
-        .expect("list the open wake")
-        .remove(0);
-    let admission = crate::conformance::admitted_run(
-        fenced_store.store(),
-        &first_lease,
-        "admissible-peek-root",
-        crate::store::AdmittedHead::Batch(wake.batch_id.clone()),
-    )
-    .await;
-    assert_eq!(admission.batch_ids(), vec![wake.batch_id.clone()]);
-    assert!(
-        factory
-            .has_admissible_queued_work(&fenced_request.session_id)
-            .await
-            .expect("conservatively peek admitted rows"),
-        "an unfinished root's rows must keep bounded recovery armed rather than create a false negative"
-    );
-
-    fenced_store
-        .store()
-        .supersede_shift_epoch_for_test(&first_lease)
-        .await
-        .expect("supersede the first shift deterministically");
-    assert!(
-        factory
-            .has_admissible_queued_work(&fenced_request.session_id)
-            .await
-            .expect("peek after the shift is superseded"),
-        "an unfinished root's rows stay visible to the conservative recovery peek"
-    );
-    let successor_lease = crate::testing::store_fixtures::seal_shift_fence_for_test(
-        fenced_store.store(),
-        &fenced_request.session_id,
-        "peek-fence-successor",
-    )
-    .await;
-    assert!(
-        successor_lease.epoch() > first_lease.epoch(),
-        "the successor's seal must advance the shift epoch"
-    );
-    let resumed = crate::conformance::admitted_run(
-        fenced_store.store(),
-        &successor_lease,
-        "admissible-peek-root",
-        crate::store::AdmittedHead::Batch(wake.batch_id.clone()),
-    )
-    .await;
-    assert_eq!(
-        serde_json::to_value(&resumed).expect("encode the resumed admission"),
-        serde_json::to_value(&admission).expect("encode the recorded admission"),
-        "the successor resumes the unfinished root's recorded admission"
     );
 }
 
@@ -840,20 +717,6 @@ async fn session_store_factory_rejects_writes_after_delete(
         &request.session_id,
         "queued work",
     );
-    assert_deleted_write(
-        stale
-            .store()
-            .seal_shift_epoch_for_test(
-                &request.session_id,
-                &crate::LeaseOwnerIdentity::opaque("deleted-owner", "deleted-incarnation"),
-                "session-store-factory-rejects-writes-after-delete-executor",
-                60_000,
-            )
-            .await,
-        &request.session_id,
-        "session execution lease",
-    );
-
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(request.config.session_policy())
@@ -1677,23 +1540,6 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
             .expect("list pending input before delete")
             .len(),
         1
-    );
-    let initial_lease = created
-        .store()
-        .seal_shift_epoch_for_test(
-            &request.session_id,
-            &crate::LeaseOwnerIdentity::opaque("delete-session-owner", "before-delete"),
-            "session-store-factory-delete-removes-store-and-is-idempotent-executor",
-            60_000,
-        )
-        .await
-        .expect("claim session execution lease before delete")
-        .acquired()
-        .expect("session execution lease before delete must be acquired");
-    assert_eq!(
-        initial_lease.epoch(),
-        1,
-        "newly created session should start with the first execution lease fence"
     );
     assert!(
         factory

@@ -239,168 +239,23 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             return Ok(lash_core_execution::store::UnsettledTurnCounts::default());
         }
         let conn = self.read_connection();
-        conn.read(|conn| {
-            let (parked, oldest_since_ms, in_flight, held_by_stalled_close): (
-                i64,
-                Option<i64>,
-                i64,
-                i64,
-            ) = conn
-                .query_row(
+        let (in_flight, held_by_stalled_close): (i64, i64) = conn
+            .read(|conn| {
+                conn.query_row(
                     crate::turn_ingress::turn_ingress_sql()
                         .family
                         .count_unsettled_turns
                         .sql(),
                     [],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
-                .map_err(|err| {
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(sqlite_error(err)))
-                })?;
-            let mut statement = conn
-                .prepare(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .family
-                        .count_parks_by_reason
-                        .sql(),
-                )
-                .map_err(|err| {
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(sqlite_error(err)))
-                })?;
-            let rows = statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                })
-                .map_err(|err| {
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(sqlite_error(err)))
-                })?;
-            let mut parked_by_reason = std::collections::BTreeMap::new();
-            for row in rows {
-                let (code, count) = row.map_err(|err| {
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(sqlite_error(err)))
-                })?;
-                let Some(code) = lash_core_execution::store::ParkReasonCode::from_code(&code)
-                else {
-                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                        StoreError::StoredDataCorrupt {
-                            record_kind: "TurnPark",
-                            message: format!("stored park reason code `{code}` is unknown"),
-                        },
-                    )));
-                };
-                parked_by_reason.insert(code, usize::try_from(count).unwrap_or_default());
-            }
-            let retired_by_executable_generation =
-                crate::turn_ingress::count_retired_parks_by_executable_generation(conn)?;
-            Ok(lash_core_execution::store::UnsettledTurnCounts {
-                parked_turns: usize::try_from(parked).unwrap_or_default(),
-                in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
-                held_by_stalled_close: usize::try_from(held_by_stalled_close).unwrap_or_default(),
-                oldest_parked_since_ms: oldest_since_ms
-                    .map(|ms| u64::try_from(ms).unwrap_or_default()),
-                parked_by_reason,
-                retired_by_executable_generation,
-            })
-        })
-        .await
-        .map_err(sqlite_error)
-    }
-    async fn list_turn_parks(
-        &self,
-        query: &lash_core_execution::store::TurnParkQuery,
-    ) -> Result<Vec<lash_core_execution::store::TurnPark>, StoreError> {
-        if !self.location.target().exists() {
-            return Ok(Vec::new());
-        }
-        let conn = self.read_connection();
-        let limit = i64::try_from(query.limit.get()).unwrap_or(i64::MAX);
-        let session = query.session.as_ref().map(|id| id.as_str().to_string());
-        let at_or_before = query
-            .parked_at_or_before_ms
-            .map(|ms| i64::try_from(ms).unwrap_or(i64::MAX));
-        let (after_since, after_session) = match query.after.as_ref() {
-            Some((since_ms, session_id)) => (
-                Some(i64::try_from(*since_ms).unwrap_or(i64::MAX)),
-                Some(session_id.as_str().to_string()),
-            ),
-            None => (None, None),
-        };
-        let reasons = query
-            .reasons
-            .as_ref()
-            .filter(|reasons| !reasons.is_empty())
-            .map(|reasons| {
-                serde_json::to_string(&reasons.iter().map(|code| code.as_str()).collect::<Vec<_>>())
-                    .map_err(|error| StoreError::Backend(error.to_string()))
-            })
-            .transpose()?;
-        let rows = conn
-            .call(move |conn| {
-                let mut statement = conn.prepare_cached(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .turn_parks_sqlite
-                        .list
-                        .sql(),
-                )?;
-                let rows = statement.query_map(
-                    params![
-                        limit,
-                        session,
-                        at_or_before,
-                        after_since,
-                        after_session,
-                        reasons
-                    ],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, i64>(2)?,
-                            row.get::<_, String>(3)?,
-                            row.get::<_, String>(4)?,
-                            row.get::<_, i64>(5)?,
-                            row.get::<_, i64>(6)?,
-                            row.get::<_, i64>(7)?,
-                            row.get::<_, Option<String>>(8)?,
-                            row.get::<_, Option<i64>>(9)?,
-                        ))
-                    },
-                )?;
-                rows.collect::<Result<Vec<_>, _>>()
             })
             .await
             .map_err(sqlite_error)?;
-        rows.into_iter()
-            .map(
-                |(
-                    session_id,
-                    turn_id,
-                    park_id,
-                    reason_code,
-                    reason_json,
-                    since_ms,
-                    last_refused_ms,
-                    attempts,
-                    engine_ref,
-                    resume_intent,
-                )| {
-                    lash_core_execution::store::TurnPark::decode(
-                        SessionId::parse(session_id)?,
-                        lash_sansio::TurnId::parse(turn_id)?,
-                        lash_core_execution::store::ParkId::from_feed_sequence(
-                            u64::try_from(park_id).unwrap_or_default(),
-                        ),
-                        &reason_code,
-                        &reason_json,
-                        u64::try_from(since_ms).unwrap_or_default(),
-                        u64::try_from(last_refused_ms).unwrap_or_default(),
-                        u32::try_from(attempts).unwrap_or(u32::MAX),
-                        engine_ref,
-                        resume_intent.and_then(|intent| u64::try_from(intent).ok()),
-                    )
-                },
-            )
-            .collect()
+        Ok(lash_core_execution::store::UnsettledTurnCounts {
+            in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
+            held_by_stalled_close: usize::try_from(held_by_stalled_close).unwrap_or_default(),
+        })
     }
     async fn turns_changed_since(
         &self,
@@ -410,16 +265,6 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         self.read_turn_changes(after, limit).await
     }
 
-    async fn turn_park_feed(
-        &self,
-        after: lash_core_execution::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<
-        lash_core_execution::store::ParkFeedPage<lash_core_execution::store::TurnParkTarget>,
-        StoreError,
-    > {
-        self.read_turn_park_feed(after, limit).await
-    }
     async fn non_terminal_runs_page(
         &self,
         after: Option<&lash_core_execution::engine::RunRef>,
@@ -439,30 +284,19 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                         .sql(),
                 )?;
                 let rows = stmt.query_map(params![session, run, limit.get() as i64], |row| {
-                    Ok((
-                        lash_core_execution::engine::RunRef {
-                            session: crate::codec::sql_identity(row.get::<_, String>(0)?)?,
-                            run: crate::codec::sql_identity(row.get::<_, String>(1)?)?,
-                        },
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                    ))
+                    Ok(lash_core_execution::engine::RunRef {
+                        session: crate::codec::sql_identity(row.get::<_, String>(0)?)?,
+                        run: crate::codec::sql_identity(row.get::<_, String>(1)?)?,
+                    })
                 })?;
                 rows.collect::<Result<Vec<_>, _>>()
             })
             .await
             .map_err(sqlite_error)?;
-        rows.into_iter()
-            .map(|(target, admission, sealed)| {
-                Ok(lash_core_execution::engine::OpenRun {
-                    target,
-                    executor: lash_core_execution::store::RunExecutor::from_stored(
-                        admission.as_deref(),
-                        sealed.as_deref(),
-                    )?,
-                })
-            })
-            .collect()
+        Ok(rows
+            .into_iter()
+            .map(|target| lash_core_execution::engine::OpenRun { target })
+            .collect())
     }
     async fn end_lost_run(
         &self,
@@ -494,8 +328,8 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             return Ok(Vec::new());
         };
         conn.call(move |conn| {
-            let sql = &crate::session_runs::session_runs_sql().verbs;
-            let mut stmt = conn.prepare_cached(sql.intents.sql())?;
+            let sql = &crate::session_runs::session_runs_sql().intents;
+            let mut stmt = conn.prepare_cached(sql.list_after.sql())?;
             let rows = stmt
                 .query_map(
                     params![
@@ -509,41 +343,6 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                 .into_iter()
                 .map(crate::session_runs::StoredIntentRow::decode)
                 .collect())
-        })
-        .await
-        .map_err(sqlite_error)?
-    }
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash_core_execution::store::ParkFeedCursor,
-    ) -> Result<(), StoreError> {
-        if !self.location.target().exists() {
-            return Ok(());
-        }
-        let conn = self.conn.clone();
-        let through_seq = i64::try_from(through.store_sequence()).unwrap_or(i64::MAX);
-        conn.write_flow(move |tx| {
-            let sql = crate::turn_ingress::turn_ingress_sql();
-            // The write lock is held, so this read is the clock's committed
-            // sequence. `through` is clamped to it: raising the horizon past
-            // `current_seq` would strand events the feed has not yet
-            // appended.
-            let through_seq = tx
-                .query_row(sql.turn_park_clock.select_current.sql(), [], |row| {
-                    row.get::<_, i64>(0)
-                })?
-                .min(through_seq);
-            crate::conn::cached_execute(
-                tx,
-                sql.turn_park_events.delete_events_through.sql(),
-                params![through_seq],
-            )?;
-            crate::conn::cached_execute(
-                tx,
-                sql.turn_park_clock.raise_compaction_horizon.sql(),
-                params![through_seq],
-            )?;
-            Ok(TxOutcome::Commit(Ok(())))
         })
         .await
         .map_err(sqlite_error)?

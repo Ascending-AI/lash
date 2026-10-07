@@ -154,7 +154,6 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
             RuntimePerfScenario::DurableAgentChildTurnSqlite,
             RuntimePerfScenario::DurableCheckpointCurveSqlite,
             RuntimePerfScenario::DurableCheckpointCurvePostgres,
-            RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
             RuntimePerfScenario::HighTrafficLoadSqlite,
             RuntimePerfScenario::HighTrafficKneeSqlite,
             RuntimePerfScenario::FrameResidencyCurveSqlite,
@@ -190,30 +189,6 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
     }
 }
 
-#[test]
-fn durable_queued_work_contention_inventory_is_backend_complete_and_opt_in() {
-    let scenarios = [RuntimePerfScenario::DurableQueuedWorkContentionSqlite];
-    assert!(!scenarios[0].uses_postgres());
-    for scenario in scenarios {
-        assert!(scenario.is_durable());
-        assert!(scenario.is_queued_work_contention());
-        assert_eq!(
-            scenario.phase_contract(),
-            ScenarioPhaseContract::QueuedWorkContention
-        );
-        assert!(!RuntimePerfScenario::DEFAULTS.contains(&scenario));
-        let metadata = RuntimePerfScenario::METADATA
-            .iter()
-            .find(|metadata| metadata.scenario == scenario)
-            .unwrap_or_else(|| panic!("{} is missing metadata", scenario.name()));
-        assert_eq!(
-            metadata.scenario_harness,
-            ScenarioHarnessKind::RuntimeScenario
-        );
-        assert!(metadata.harness_rationale.contains("quiet box"));
-    }
-}
-
 /// The harness partition and the phase contracts state the same thing.
 ///
 /// `run_once_inner` used to select three scenario groups with predicate
@@ -237,12 +212,6 @@ fn harness_predicates_and_phase_contracts_describe_one_partition() {
         assert_eq!(
             scenario.is_high_traffic(),
             contract == ScenarioPhaseContract::HighTraffic,
-            "{}",
-            scenario.name()
-        );
-        assert_eq!(
-            scenario.is_queued_work_contention(),
-            contract == ScenarioPhaseContract::QueuedWorkContention,
             "{}",
             scenario.name()
         );
@@ -441,8 +410,6 @@ fn runtime_perf_direct_counterparts_link_to_correctness_coverage() {
         RuntimePerfScenario::RlmProcessAsyncToolCompletion,
         RuntimePerfScenario::RlmSubagentSpawn,
         RuntimePerfScenario::TurnCheckpoint,
-        RuntimePerfScenario::QueuedWorkAdmissionStress,
-        RuntimePerfScenario::TurnInputIngressInterrupt,
     ] {
         assert!(
             !scenario.correctness_coverage_ids().is_empty(),
@@ -463,10 +430,7 @@ fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
         RuntimePerfScenario::SqliteStoreReopen,
         RuntimePerfScenario::TurnCheckpoint,
         RuntimePerfScenario::LiveReplayPressure,
-        RuntimePerfScenario::QueuedWorkAdmissionStress,
-        RuntimePerfScenario::TurnInputIngressInterrupt,
         RuntimePerfScenario::StoreHardeningHotPaths,
-        RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
     ] {
         let metadata = RuntimePerfScenario::METADATA
             .iter()

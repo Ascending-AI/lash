@@ -158,12 +158,12 @@ impl ProcessLocalExecution {
                 // claimed or delivered it.
                 if let Some(starts) = &process_starts {
                     match starts.deliver_start(&record.id).await {
-                        Ok(crate::runtime::shift::relay::RelayVerdict::NotDue) => {}
+                        Ok(crate::runtime::obligations::relay::RelayVerdict::NotDue) => {}
                         Ok(
-                            verdict @ (crate::runtime::shift::relay::RelayVerdict::Retried {
+                            verdict @ (crate::runtime::obligations::relay::RelayVerdict::Retried {
                                 ..
                             }
-                            | crate::runtime::shift::relay::RelayVerdict::Stalled(_)),
+                            | crate::runtime::obligations::relay::RelayVerdict::Stalled(_)),
                         ) => {
                             // The first attempt failed: the settlement wrote
                             // `last_error` on the row, which the reconcile

@@ -26,7 +26,7 @@
 //! refused run leaves no durable write, restores no protocol session and
 //! emits no `SessionRestored`.
 
-use crate::{SessionId, ToolRestoreReport, ToolSourcePolicy, ToolState};
+use crate::{SessionId, ToolRestoreReport, ToolState};
 
 /// Which construction installed the snapshot. It names the site on the trace
 /// evidence, so a host reading its traces can tell a run's construction from
@@ -93,33 +93,6 @@ pub(crate) fn install_persisted_tool_state(
         .map_err(|error| crate::SessionError::Protocol(format!("tool restore failed: {error}")))?;
     deliver(&report, &context);
     Ok(report)
-}
-
-/// The run-time [`ToolSourcePolicy`]: under `Require`, refuse when restoring
-/// `snapshot` over `registry`'s sources would lose a member. The registry is
-/// read, never changed. Parked opt-outs and superseded identities never
-/// refuse, because neither describes a capability the session lost.
-pub(crate) fn require_tool_sources(
-    policy: ToolSourcePolicy,
-    registry: &crate::ToolRegistry,
-    snapshot: Option<&ToolState>,
-    session_id: &SessionId,
-) -> Result<(), crate::RuntimeEffectControllerError> {
-    let (ToolSourcePolicy::Require, Some(snapshot)) = (policy, snapshot) else {
-        return Ok(());
-    };
-    let report = registry.preview_restore(snapshot).map_err(|error| {
-        crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::Plugin,
-            format!("tool restore preview failed: {error}"),
-        )
-    })?;
-    if report.has_lost_members() {
-        return Err(
-            crate::RuntimeEffectControllerError::tool_sources_unavailable(session_id, report),
-        );
-    }
-    Ok(())
 }
 
 /// Deliver the report to the host: warn only for capability loss, and emit the

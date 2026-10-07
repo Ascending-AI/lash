@@ -174,7 +174,7 @@ impl SessionCommitStore for Integrator {
     }
     async fn admit_session_state(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
     ) -> Result<SessionStateAdmission, StoreError> {
         unreachable!("external signature witness")
     }
@@ -186,7 +186,7 @@ impl SessionCommitStore for Integrator {
     }
     async fn retain_admission_base(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
         base: &SessionHeadRef,
     ) -> Result<(), StoreError> {
         unreachable!("external signature witness")
@@ -212,7 +212,7 @@ impl SessionCommitStore for Integrator {
     }
     async fn raise_pending_follow_on_attempts(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
         follow_on_turn_id: &TurnId,
     ) -> Result<PendingFollowOn, StoreError> {
         unreachable!("external signature witness")
@@ -234,15 +234,6 @@ impl SessionCommitStore for Integrator {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionMeta>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn record_turn_park(
-        &self,
-        park: &TurnParkWrite,
-    ) -> Result<StoreTransition<TurnPark>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn load_turn_park(&self, session_id: &SessionId) -> Result<Option<TurnPark>, StoreError> {
         unreachable!("external signature witness")
     }
 }
@@ -298,7 +289,6 @@ impl TurnInputStore for Integrator {
     async fn admit_pending_turn_inputs(
         &self,
         batch: PendingTurnInputBatch,
-        ingress_claim_ttl_ms: u64,
     ) -> Result<TurnInputAdmission, StoreError> {
         unreachable!("external signature witness")
     }
@@ -367,7 +357,7 @@ impl QueuedWorkStore for Integrator {
     }
     async fn open_session_command_run(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         unreachable!("external signature witness")
     }
@@ -409,20 +399,7 @@ impl QueuedWorkStore for Integrator {
 }
 
 #[lash::async_trait]
-impl ShiftEpochStore for Integrator {
-    async fn seal_shift_epoch(
-        &self,
-        session_id: &SessionId,
-        admission: &AdmissionId,
-        observed_epoch: u64,
-        run_start: &RunStartNonce,
-        hold: Option<&RunHold>,
-    ) -> Result<ShiftEpochSeal, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn shift_epoch(&self, session_id: &SessionId) -> Result<StoredShiftEpoch, StoreError> {
-        unreachable!("external signature witness")
-    }
+impl SessionFaultStore for Integrator {
     async fn record_session_fault(
         &self,
         session_id: &SessionId,
@@ -451,60 +428,10 @@ impl ShiftEpochStore for Integrator {
 
 #[lash::async_trait]
 impl RunStore for Integrator {
-    async fn run_executor(
-        &self,
-        session_id: &SessionId,
-        run: &TurnId,
-    ) -> Result<Option<RunExecutor>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn prepare_shift_admission(
-        &self,
-        session_id: &SessionId,
-        admission: &lash::persistence::AdmissionId,
-        executor: &lash::persistence::RunExecutor,
-    ) -> Result<lash::persistence::ShiftAdmissionPreparation, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn read_shift_admission(
-        &self,
-        session_id: &SessionId,
-        admission: &lash::persistence::AdmissionId,
-    ) -> Result<Option<lash::persistence::ShiftAdmissionReceipt>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn commit_shift_admission(
-        &self,
-        request: &lash::persistence::ShiftAdmissionWrite,
-        anchor: &lash::tracing::TraceAnchor,
-    ) -> Result<lash::persistence::ShiftAdmissionReceipt, StoreError> {
-        unreachable!("external signature witness")
-    }
-
-    async fn prepare_run_admission(
-        &self,
-        request: &AdmitRunRequest,
-    ) -> Result<Option<PreparedRunAdmission>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn commit_run_admission(
-        &self,
-        prepared: &PreparedRunAdmission,
-        anchor: &lash::tracing::TraceAnchor,
-    ) -> Result<Option<RunAdmission>, StoreError> {
-        unreachable!("external signature witness")
-    }
-
     async fn unfinished_run(
         &self,
         session_id: &SessionId,
     ) -> Result<Option<UnfinishedRun>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn admit_run(
-        &self,
-        request: &AdmitRunRequest,
-    ) -> Result<Option<RunAdmission>, StoreError> {
         unreachable!("external signature witness")
     }
     async fn admit_at_checkpoint(
@@ -522,7 +449,7 @@ impl RunStore for Integrator {
     }
     async fn end_refused_run(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
         run: &TurnId,
         refusal: &RuntimeError,
         at_ms: u64,
@@ -531,7 +458,7 @@ impl RunStore for Integrator {
     }
     async fn end_command_run(
         &self,
-        fence: &ShiftFence,
+        session_id: &SessionId,
         run: &TurnId,
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
@@ -587,38 +514,13 @@ impl ControlIntentStore for Integrator {
     ) -> Result<Option<ControlIntent>, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn claim_intent_application(
+    async fn session_close_intent(
         &self,
-        id: ControlIntentId,
-        at_ms: u64,
-    ) -> Result<IntentApplication, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn acknowledge_intent(
-        &self,
-        id: ControlIntentId,
-        claim: &ClaimToken,
-        at_ms: u64,
-    ) -> Result<IntentSettle, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn refuse_intent(
-        &self,
-        id: ControlIntentId,
-        claim: &ClaimToken,
-        cause: &DeliveryError,
-        at_ms: u64,
-    ) -> Result<IntentSettle, StoreError> {
+        session_id: &SessionId,
+    ) -> Result<Option<ControlIntent>, StoreError> {
         unreachable!("external signature witness")
     }
     async fn load_intent(&self, id: ControlIntentId) -> Result<Option<ControlIntent>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn open_run_intent(
-        &self,
-        _request: &RunIntentRequest,
-        _at_ms: u64,
-    ) -> Result<ControlIntent, RunIntentRefused> {
         unreachable!("external signature witness")
     }
 }
@@ -640,19 +542,6 @@ impl DeploymentStore for Integrator {
         after: lash::persistence::TurnChangeCursor,
         limit: std::num::NonZeroUsize,
     ) -> Result<lash::persistence::TurnChangePage, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn list_turn_parks(&self, query: &TurnParkQuery) -> Result<Vec<TurnPark>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn turn_park_feed(
-        &self,
-        after: ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<ParkFeedPage<TurnParkTarget>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn compact_turn_park_feed(&self, through: ParkFeedCursor) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
     async fn non_terminal_runs_page(

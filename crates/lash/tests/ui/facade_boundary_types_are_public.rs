@@ -11,11 +11,11 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    AdmissionId, AdmitRunRequest, CheckpointAdmission, CheckpointAdmissionRequest, GraphAppend,
-    IngressSettlement, OperationId, PersistedSessionConfig, RealizedNodeTimestamp, RuntimeCommit,
-    RuntimeCommitReceipt, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
-    SessionCommitStore, SessionHeadMeta, SessionHeadPayload, ShiftEpochSeal, StoreError,
-    TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState, commit_runtime_state_verified,
+    CheckpointAdmission, CheckpointAdmissionRequest, GraphAppend, IngressSettlement, OperationId,
+    PersistedSessionConfig, RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitReceipt,
+    RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp, SessionCommitStore, SessionHeadMeta,
+    SessionHeadPayload, StoreError, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
+    commit_runtime_state_verified,
 };
 use lash::plugins::{
     AfterToolContributions, AfterToolDecision, BeforeToolDecision, CompactionContext,
@@ -39,9 +39,7 @@ fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
     RuntimeCommit {
         session_id: SessionId::from("facade"),
         expected_head_revision: 0,
-        shift_fence: None,
         run_terminal: None,
-        park_run: None,
         trace: None,
         config: PersistedSessionConfig::new(
             lash::TurnBudget::Unbounded,
@@ -407,7 +405,6 @@ fn main() {
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
             ),
-            published_by_shift: false,
         },
         0,
         None,

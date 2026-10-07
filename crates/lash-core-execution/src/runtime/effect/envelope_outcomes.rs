@@ -218,9 +218,8 @@ impl RuntimeEffectOutcome {
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
-            Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
+
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
-            Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::RenderCompactionPrompt { .. } => RuntimeEffectKind::RenderCompactionPrompt,

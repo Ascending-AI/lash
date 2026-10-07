@@ -11,22 +11,23 @@
 //! or emitted under an anchor that lost.
 //!
 //! The law walks every owning row through the stores under test: a turn
-//! input, the run that admits it, a queued process wake, a process start, a
+//! input, a queued process wake, a process start, a
 //! signal, a trigger occurrence and a host-submitted tool intent.
 
 use crate::ActorContext;
 use std::sync::Arc;
 
-use lash_core::store::AdmittedHead;
-use lash_core::testing::store_fixtures::{admit_run_request_for_test, seal_shift_fence_for_test};
 use lash_core::{
     DurableTraceScope, TraceAnchor, TraceCarrier, TraceCause, TraceScopeAdmission, TraceScopeId,
     TraceScopeOffer, TraceScopeOwner,
 };
-use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
-use super::shift_admission::ShiftParts;
+/// The law's session and its store.
+struct TraceParts {
+    session_id: crate::SessionId,
+    store: Arc<dyn crate::RuntimeStore>,
+}
 
 /// The context of producer `producer`: a sampled span of its own trace.
 #[expect(
@@ -57,18 +58,21 @@ const FIRST_ANCHOR: u8 = 0xa1;
 const SECOND_ANCHOR: u8 = 0xa2;
 
 /// Law P2: the first admission's cause and anchor are retained across
-/// retried inputs, runs, queued wakes, process starts, signals, trigger
+/// retried inputs, queued wakes, process starts, signals, trigger
 /// occurrences and host tool intents, without changing a business hash, key
 /// or typed conflict, and a retained read yields no emission permit.
 pub async fn first_admission_wins_without_changing_business_identity(
     prefix: &str,
-    host: ActorContext,
+    _host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let parts = ShiftParts::new(prefix, "trace-first-writer", &host, &stores, 4).await;
+    let session_id = crate::SessionId::fixture(format!("{prefix}-trace-first-writer"));
+    let parts = TraceParts {
+        store: crate::conformance::law_session_store(stores.as_ref(), &session_id).await,
+        session_id,
+    };
     a_retried_input_keeps_its_first_cause(&parts).await;
-    a_run_keeps_the_anchor_its_first_admission_offered(&parts).await;
     a_redelivered_wake_keeps_its_first_cause(&parts).await;
     a_retried_start_keeps_its_first_scope(prefix, &stores).await;
     a_redelivered_signal_keeps_its_first_cause(prefix, &stores).await;
@@ -77,7 +81,7 @@ pub async fn first_admission_wins_without_changing_business_identity(
 }
 
 fn input_draft(
-    parts: &ShiftParts,
+    parts: &TraceParts,
     key: &str,
     text: &str,
     cause: TraceCause,
@@ -96,7 +100,7 @@ fn input_draft(
     clippy::panic,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn a_retried_input_keeps_its_first_cause(parts: &ShiftParts) {
+async fn a_retried_input_keeps_its_first_cause(parts: &TraceParts) {
     let draft = |cause| input_draft(parts, "traced-run", "the accepted words", cause);
     let digest = |draft: crate::PendingTurnInputDraft| {
         draft
@@ -180,155 +184,10 @@ async fn a_retried_input_keeps_its_first_cause(parts: &ShiftParts) {
 
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn a_run_keeps_the_anchor_its_first_admission_offered(parts: &ShiftParts) {
-    let run = TurnId::from("traced-run");
-    let head = parts
-        .store
-        .list_pending_turn_inputs(&parts.session_id)
-        .await
-        .expect("list the pending inputs")
-        .into_iter()
-        .find(|read| read.input.source_key.as_deref() == Some("traced-run"))
-        .expect("the traced input is pending")
-        .input
-        .input_id;
-    let request = |fence: &crate::store::ShiftFence, candidate: u8| {
-        let mut request =
-            admit_run_request_for_test(fence, &run, AdmittedHead::Input(head.clone()));
-        // One input per run, so the run's cause is its head's.
-        request.max_inputs = 1;
-        request.trace_scopes = Arc::new(FixedScopes(TraceAnchor::Context(context(candidate))));
-        request
-    };
-    let first = seal_shift_fence_for_test(&parts.store, &parts.session_id, "first").await;
-    let first_request = request(&first, FIRST_ANCHOR);
-    let second_request = request(&first, SECOND_ANCHOR);
-    let first_plan = parts
-        .store
-        .prepare_run_admission(&first_request)
-        .await
-        .expect("prepare first candidate")
-        .expect("head exists");
-    let second_plan = parts
-        .store
-        .prepare_run_admission(&second_request)
-        .await
-        .expect("prepare second candidate")
-        .expect("head exists");
-    assert!(
-        parts
-            .store
-            .unfinished_run(&parts.session_id)
-            .await
-            .expect("read admission")
-            .is_none(),
-        "preparation creates no admission"
-    );
-    assert!(
-        parts
-            .store
-            .run_binding(&parts.session_id, &head)
-            .await
-            .expect("read binding")
-            .is_none(),
-        "preparation creates no binding"
-    );
-    let first_anchor = TraceAnchor::Context(context(FIRST_ANCHOR));
-    let second_anchor = TraceAnchor::Context(context(SECOND_ANCHOR));
-    let (one, two) = tokio::join!(
-        parts.store.commit_run_admission(&first_plan, &first_anchor),
-        parts
-            .store
-            .commit_run_admission(&second_plan, &second_anchor),
-    );
-    let one = one
-        .expect("first race participant")
-        .expect("first reaches head");
-    let two = two
-        .expect("second race participant")
-        .expect("second reaches head");
-    assert_ne!(
-        one.recorded_by_this_call, two.recorded_by_this_call,
-        "exactly one committed writer owns the transition"
-    );
-    let winning_anchor = if one.recorded_by_this_call {
-        FIRST_ANCHOR
-    } else {
-        SECOND_ANCHOR
-    };
-    let (won, lost) = if one.recorded_by_this_call {
-        (one, two)
-    } else {
-        (two, one)
-    };
-    assert_eq!(
-        won.trace, lost.trace,
-        "loser dispatches under winner's retained scope"
-    );
-    assert!(
-        lost.trace_admission()
-            .expect("retained scope")
-            .permit()
-            .is_none()
-    );
-    let scope = won.trace.clone().expect("the admission retains a scope");
-    assert_eq!(
-        scope.scope,
-        TraceScopeId::admission(TraceScopeOwner::Run {
-            session_id: parts.session_id.clone(),
-            run: run.clone(),
-        })
-    );
-    assert_eq!(
-        scope.cause,
-        linked(FIRST),
-        "the run's cause is what caused the input it admitted"
-    );
-    assert_eq!(scope.anchor, TraceAnchor::Context(context(winning_anchor)));
-    let admission = won.trace_admission().expect("the admission's receipt");
-    assert_eq!(admission, TraceScopeAdmission::Inserted(scope.clone()));
-    assert!(
-        admission.permit().is_some(),
-        "the admission that recorded the run may emit it"
-    );
-
-    // A competing admission, under a later fence and another candidate, is
-    // answered the winner: it dispatches under no anchor of its own.
-    let later = seal_shift_fence_for_test(&parts.store, &parts.session_id, "later").await;
-    for fence in [&first, &later] {
-        let Ok(lost) = parts.store.admit_run(&request(fence, SECOND_ANCHOR)).await else {
-            // A superseded fence is refused before anything is read.
-            continue;
-        };
-        let lost = lost.expect("the recorded admission is read back");
-        let admission = lost.trace_admission().expect("the retained scope");
-        assert_eq!(admission, TraceScopeAdmission::Existing(scope.clone()));
-        assert!(
-            admission.permit().is_none(),
-            "a retained read holds no emission permit"
-        );
-    }
-
-    // A worker that died after the commit and before its journal took the
-    // outcome leaves a successor the recorded admission: read back from a
-    // journal or from the row, it is retained, never fresh.
-    let journaled: crate::store::RunAdmission =
-        serde_json::from_value(serde_json::to_value(&won).expect("journal the admission"))
-            .expect("replay the journaled admission");
-    assert_eq!(
-        journaled.trace_admission(),
-        Some(TraceScopeAdmission::Existing(scope))
-    );
-}
-
-#[expect(
-    clippy::expect_used,
     clippy::panic,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn a_redelivered_wake_keeps_its_first_cause(parts: &ShiftParts) {
+async fn a_redelivered_wake_keeps_its_first_cause(parts: &TraceParts) {
     let wake = |cause| {
         super::process_wake_work(
             &parts.session_id,
@@ -596,7 +455,7 @@ async fn a_redelivered_occurrence_keeps_its_first_scope(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn a_resubmitted_intent_keeps_its_first_scope(
-    parts: &ShiftParts,
+    parts: &TraceParts,
     stores: &Arc<dyn crate::StoreSet>,
 ) {
     let registry = stores.process_registry();
@@ -670,25 +529,4 @@ async fn a_resubmitted_intent_keeps_its_first_scope(
         }
         answer => panic!("a resubmission is answered the first writer: {answer:?}"),
     }
-}
-
-struct FixedScopes(TraceAnchor);
-impl lash_core::TraceScopeFactory for FixedScopes {
-    fn capture_current(&self) -> Option<TraceCarrier> {
-        None
-    }
-    fn propose(
-        &self,
-        _scope: &TraceScopeId,
-        _cause: &TraceCause,
-    ) -> Box<dyn lash_core::TraceAdmissionCandidate> {
-        Box::new(FixedCandidate(self.0.clone()))
-    }
-}
-struct FixedCandidate(TraceAnchor);
-impl lash_core::TraceAdmissionCandidate for FixedCandidate {
-    fn anchor(&self) -> TraceAnchor {
-        self.0.clone()
-    }
-    fn settle(self: Box<Self>, _outcome: lash_core::TraceCandidateOutcome) {}
 }

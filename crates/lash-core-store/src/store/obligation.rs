@@ -13,7 +13,6 @@ use crate::artifact_referrer::ArtifactReferrer;
 use crate::{ProcessId, SessionId, TurnId};
 
 use super::StoreError;
-use super::control_intent::ControlIntentId;
 
 /// The obligation state, kind, key, and stall labels written at the 1.0 cut.
 ///
@@ -49,10 +48,6 @@ pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 2;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ObligationKind {
-    /// An admitted ingress item owes its session a shift.
-    Ingress,
-    /// A control intent owes its engine half and its follow-on shift.
-    ControlIntent,
     /// A terminal run owes its scope close.
     ScopeClose,
     /// A closed scope's plan owes each child its cancel.
@@ -71,9 +66,7 @@ pub enum ObligationKind {
 
 impl ObligationKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 9] = [
-        Self::Ingress,
-        Self::ControlIntent,
+    pub const ALL: [Self; 7] = [
         Self::ScopeClose,
         Self::ParentEnd,
         Self::SessionDelete,
@@ -95,8 +88,6 @@ impl ObligationKind {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Ingress => "ingress",
-            Self::ControlIntent => "control_intent",
             Self::ScopeClose => "scope_close",
             Self::ParentEnd => "parent_end",
             Self::SessionDelete => "session_delete",
@@ -112,12 +103,9 @@ impl ObligationKind {
     #[must_use]
     pub const fn key_column_types(self) -> &'static [KeyColumnType] {
         match self {
-            Self::Ingress
-            | Self::ScopeClose
-            | Self::ParentEnd
-            | Self::TriggerDelivery
-            | Self::ArtifactCleanup => &[KeyColumnType::Text, KeyColumnType::Text],
-            Self::ControlIntent => &[KeyColumnType::Integer],
+            Self::ScopeClose | Self::ParentEnd | Self::TriggerDelivery | Self::ArtifactCleanup => {
+                &[KeyColumnType::Text, KeyColumnType::Text]
+            }
             Self::SessionDelete | Self::ProcessStart | Self::ProcessTerminal => {
                 &[KeyColumnType::Text]
             }
@@ -149,14 +137,6 @@ impl std::fmt::Display for ObligationKind {
 /// carrying that ledger's primary key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ObligationKey {
-    /// An admission row: a `pending_turn_inputs` input (`ti:` id) or a
-    /// `queued_work_batches` batch (`qwb:` id).
-    Ingress {
-        session_id: SessionId,
-        item_id: String,
-    },
-    /// A `control_intents` row.
-    ControlIntent { intent_id: ControlIntentId },
     /// A `session_runs` row.
     ScopeClose { session_id: SessionId, run: TurnId },
     /// A `parent_end_plans` row: the scope's stored kind label and id.
@@ -185,24 +165,10 @@ impl ObligationKey {
     /// so delimiters and Unicode cannot make distinct keys collide.
     #[must_use]
     pub fn id(&self) -> ObligationId {
-        let parts = match self {
-            Self::ControlIntent { intent_id } => vec![intent_id.sequence().to_string()],
-            Self::Ingress { .. }
-            | Self::ScopeClose { .. }
-            | Self::ParentEnd { .. }
-            | Self::SessionDelete { .. }
-            | Self::TriggerDelivery { .. }
-            | Self::ProcessStart { .. }
-            | Self::ProcessTerminal { .. }
-            | Self::ArtifactCleanup { .. } => self
-                .columns()
-                .into_iter()
-                .map(|column| match column {
-                    KeyColumn::Text(text) => text,
-                    KeyColumn::Integer(integer) => integer.to_string(),
-                })
-                .collect(),
-        };
+        let parts = self.columns().into_iter().map(|column| match column {
+            KeyColumn::Text(text) => text,
+            KeyColumn::Integer(integer) => integer.to_string(),
+        });
         let mut id = self.kind().label().to_owned();
         for part in parts {
             id.push(':');
@@ -228,8 +194,6 @@ impl ObligationKey {
     #[must_use]
     pub const fn kind(&self) -> ObligationKind {
         match self {
-            Self::Ingress { .. } => ObligationKind::Ingress,
-            Self::ControlIntent { .. } => ObligationKind::ControlIntent,
             Self::ScopeClose { .. } => ObligationKind::ScopeClose,
             Self::ParentEnd { .. } => ObligationKind::ParentEnd,
             Self::SessionDelete { .. } => ObligationKind::SessionDelete,
@@ -246,16 +210,6 @@ impl ObligationKey {
     #[must_use]
     pub fn columns(&self) -> Vec<KeyColumn> {
         match self {
-            Self::Ingress {
-                session_id,
-                item_id,
-            } => vec![
-                KeyColumn::Text(session_id.as_str().to_owned()),
-                KeyColumn::Text(item_id.clone()),
-            ],
-            Self::ControlIntent { intent_id } => vec![KeyColumn::Integer(
-                i64::try_from(intent_id.sequence()).unwrap_or(i64::MAX),
-            )],
             Self::ScopeClose { session_id, run } => vec![
                 KeyColumn::Text(session_id.as_str().to_owned()),
                 KeyColumn::Text(run.as_str().to_owned()),
@@ -300,10 +254,6 @@ impl ObligationKey {
     ) -> Result<Self, UndecodableObligation> {
         let mut columns = columns.into_iter();
         Ok(match kind {
-            ObligationKind::Ingress => Self::Ingress {
-                session_id: next_identity(&mut columns, kind, "session_id")?,
-                item_id: next_text(&mut columns, kind, "item_id")?,
-            },
             ObligationKind::ScopeClose => Self::ScopeClose {
                 session_id: next_identity(&mut columns, kind, "session_id")?,
                 run: next_identity(&mut columns, kind, "run")?,
@@ -341,18 +291,6 @@ impl ObligationKey {
                     _ => unreachable!("the matched kinds are ProcessStart and ProcessTerminal"),
                 }
             }
-            ObligationKind::ControlIntent => {
-                let sequence = next_integer(&mut columns, kind, "intent_id")?;
-                Self::ControlIntent {
-                    intent_id: ControlIntentId::from_sequence(u64::try_from(sequence).map_err(
-                        |_| {
-                            UndecodableObligation::malformed(format!(
-                                "control intent id {sequence} is negative"
-                            ))
-                        },
-                    )?),
-                }
-            }
         })
     }
 }
@@ -385,20 +323,6 @@ where
             "{kind} obligation key column `{name}` is no identity: {error}"
         ))
     })
-}
-
-/// The next key column as an integer, or why it is not.
-fn next_integer(
-    columns: &mut impl Iterator<Item = KeyColumn>,
-    kind: ObligationKind,
-    name: &str,
-) -> Result<i64, UndecodableObligation> {
-    match columns.next() {
-        Some(KeyColumn::Integer(value)) => Ok(value),
-        other => Err(UndecodableObligation::malformed(format!(
-            "{kind} obligation key column `{name}` is {other:?}, not an integer"
-        ))),
-    }
 }
 
 /// The stable id of one obligation, derived from its owning typed key.
@@ -824,13 +748,8 @@ mod tests {
         for (kind, columns) in [
             (ObligationKind::SessionDelete, vec![KeyColumn::Integer(7)]),
             (
-                ObligationKind::Ingress,
+                ObligationKind::ScopeClose,
                 vec![KeyColumn::Text("s".to_owned())],
-            ),
-            (ObligationKind::ControlIntent, vec![KeyColumn::Integer(-1)]),
-            (
-                ObligationKind::ControlIntent,
-                vec![KeyColumn::Text("7".to_owned())],
             ),
             (
                 ObligationKind::ProcessTerminal,

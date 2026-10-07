@@ -44,7 +44,7 @@ L13 = FIG-5193.
 - **S4:** `ExecutionDraft.limit` is L3a's (FIG-5171) `lash_sansio::ExecutionLimit`; I0 defines no copy.
 - **S9, facade:** `DurableBackendBuilder::new` keeps the `Arc<dyn StoreSet>` that L10a's skeleton landed with, because every host already hands it one. `config` takes `DurableSettings` (the unvalidated parameters) rather than a `DurableConfig`, so `build` is where they are validated and `InvalidConfig` is reachable. `projection_provider` exists with the `rlm` feature, which brings `lashlang`; `build` registers the providers into a `lashlang::ProjectionCatalog` (whose `register` is L7p's) and maps a refused registration, or a host provider of the lash-provided `history` type, to `DuplicateProvider`. The facade re-exports the build vocabulary from `lash::durable` (`CompletionKeySecrets`, `DurableBuildError`, `DurableConfig`, `DurableSettings`, `DurableStore`, `KeyVersion`, `SecretBytes`, `SecretsRefusal`) and the engine state machine from `lash::plugins` (`EngineAction`, `EngineEvent`, `EngineState`, `EngineStateFormat`, `HostWaitKind`, `KeyName`, `StepName`, `StepRequest`), so an external engine and store set can be written against the facade alone.
 - **S9, signals (L8, FIG-5178):** `StoreSet` gained `durable_signals() -> Option<Arc<dyn lash_durable::Signals>>`, agreed with the orchestrator. PostgreSQL answers `PostgresSignals` (after-commit `pg_notify` wake hints, a listener per node that holds the boot's session advisory lock, liveness probes and the reap of a boot whose lock is released); SQLite and the test store sets answer `None`, because one node per database keeps its wakes in process. `serve` passes it to `Runner::with_signals` when `DurableConfig`'s notifier is `AfterCommit`, and every mailbox commit through `Backend::commit_mail` hands what it woke to the shared `Hints`, which hint in process or publish.
-- **S1, work ports:** `EffectEngine::{session_work, process_work}` became `DurableSessionWork` and `DurableProcessWork` (`runtime/work/durable.rs`), the facade core's session-work engine and process port over the backend. A shift ask is `Backend::wake_session` (L3s) and a process start needs no delivery: registration creates its actor ready, so the durable `deliver_process_start` is a no-op (L6); `schedule_shift` and `await_shift` are L3s stubs, the terminal wait and its publication are L5's, and cancel delivery is L6's mail. `install_session_shifts` is real (get-or-init).
+- **S1, work ports:** `EffectEngine::{session_work, process_work}` became `DurableSessionWork` and `DurableProcessWork` (`runtime/work/durable.rs`), the facade core's session-work engine and process port over the backend. Session work is a producer's row and `Backend::wake_session` in one transaction (L3s), and a process start needs no delivery: registration creates its actor ready, so the durable `deliver_process_start` is a no-op (L6); the shift ask, `schedule_shift` and `await_shift` are deleted, the terminal wait and its publication are L5's, and cancel delivery is L6's mail.
 - **S0, L6b:** the session-close domain also records a session's turn scopes whose cascade is still marking (`SessionCloseWrite::ScopeEnding` and `ScopeEnded`), and `DurableReads` gained `session_close` and `ending_scopes`. A deletion is session mail (`session.close`, under `mail.session`); the close runs as the session actor's closing state in `lash-core/src/runtime/durable/session_close.rs`, and a turn's scope end, its cascade cursor work and the bounded wait for its children (G1b) are in `durable/turn_scope.rs`.
 - **S1, perf:** the runtime-perf scenario `ScopedEffectController` is `ScopedEffects`; its report name `scoped_effect_controller` and its budget are unchanged.
 
@@ -64,7 +64,8 @@ L13 = FIG-5193.
 | `session_effect` (L3) | `ResolveConfigTransaction`, `ReadSessionCommandRun` | phase-transaction write under the session epoch |
 | | `CloseRunScope` | phase-transaction write (`turn.commit` ends the run's scope through `process::end_scope`) |
 | | `BeginSessionClose` | deleted (L6b): a deletion is session mail, and the close is the session actor's closing state (`runtime/durable/session_close.rs`), one labelled transaction per step |
-| `shift_effect` (L3s) | `AdmitShift`, `DrawRunStart`, `AcceptTurnInput`, `TransitionPlugins`, `PluginCallbacks` | phase-transaction write in the session mail drain (`turn.accept`, `turn.admit`) |
+| `ingress_effect` (L3s) | `AcceptTurnInput`, `TransitionPlugins`, `PluginCallbacks` | run once by the producer or plugin host; the producer's row and the session's wake commit together, and `drain_session_mail` admits under the epoch |
+| | `AdmitShift`, `DrawRunStart` | deleted with the shift (L3s) |
 | | `ObserveDrainMark` | deleted: drain is a release at a committed phase (L11) |
 | `tool_effect` (L4) | `ToolAttempt`, `PresentToolResult` | run in place, recorded nowhere: inside the admitted execution that runs the call (a round member between its `x_start` and `x_outcome`, or a code cell up to its next snapshot); a round's presentation record commits in `round.present+model.start` |
 | | `RestoreRunMaterial` | deleted: the fold reads committed records (S4) |
@@ -92,7 +93,7 @@ Each constant default was deleted and its call sites folded to the constant:
 | `turn_attach` | `None` | `TurnControlAttachment::Attached` and `run_scoped`; only the resolver path remains |
 | `bind_process_registry` | no-op | `ProcessRegistryBinding`, `ProcessRegistrationProbe` and both stores' registration probes; `bind_effect_host` on the registry and deployment store; `ProcessScopeFenceHosts` |
 
-Also deleted with the traits: the remote-effect runner and its forwarding, `serve_effect_controller_task_request`, `UnavailableEffectController` (replaced by `ActorContext::unavailable()`), the turn-cancel closure owner in both stores, `retire_effect_journal` and `SessionDeleteFailure::Journal`, `LayeredEngine` and the layered effect host (the store decorator `LayeredBackend` stays), the attempt sentinel, and the build-generation binding in the shift (`admitting_generation` refuses `GenerationUnbound` until L3s replaces it).
+Also deleted with the traits: the remote-effect runner and its forwarding, `serve_effect_controller_task_request`, `UnavailableEffectController` (replaced by `ActorContext::unavailable()`), the turn-cancel closure owner in both stores, `retire_effect_journal` and `SessionDeleteFailure::Journal`, `LayeredEngine` and the layered effect host (the store decorator `LayeredBackend` stays), the attempt sentinel, and the build-generation binding in the shift (deleted with the shift by L3s).
 
 Behaviours the deleted `execute_effect` wrapper added around every effect, which each group's owner re-establishes in its method: scope validation, the command journal guard, plugin publication, and wait receipts (deleted by L5 with `lash_wait_receipts`: a wait is its own row).
 
@@ -127,7 +128,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 
 Generated from the tree with `scripts/check-substrate-todos.py`'s scanner; each lane removes its rows as it fills them.
 
-Counts: L3 1, L3s 5, L4 1, L6 1 (8 in all).
+Counts: L3 1, L4 1, L6 1 (3 in all).
 
 ### V0 (FIG-5170)
 
@@ -138,16 +139,6 @@ None: V0 filled its stubs. It re-tagged the journal-era ones its path never reac
 | Where | Function | Stub |
 |---|---|---|
 | `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the plugin task cancel signal's port to session mail |
-
-### L3s (FIG-5196)
-
-| Where | Function | Stub |
-|---|---|---|
-| `crates/lash-core-execution/src/backend.rs` | `wake_session` | wake a session actor in a mailbox transaction |
-| `crates/lash-core-execution/src/runtime/actor/shift.rs` | `shift_effect` | apply a shift effect under the session's epoch, or delete it with the shift fence |
-| `crates/lash-core-execution/src/runtime/work/durable.rs` | `await_shift` | answer once the session actor's activation for the ask released |
-| `crates/lash-core-execution/src/runtime/work/durable.rs` | `schedule_shift` | wake the session actor; its activation drains the session's mail |
-| `crates/lash-core/src/runtime/durable/session_mail.rs` | `drain_session_mail` | drain pending inputs, queued work, control intents and plugin transitions under the epoch |
 
 ### L4 (FIG-5174)
 

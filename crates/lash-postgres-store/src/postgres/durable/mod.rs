@@ -44,6 +44,7 @@ use lash_durable::{
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::park_events::ParkEventStatements;
 use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
+use lash_store_sql::durable::session_mail::SessionMailStatements;
 use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
 use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgConnection, PgPool, Row};
@@ -56,6 +57,9 @@ mod park_events;
 pub(crate) mod processes;
 mod run_records;
 mod session_close;
+mod session_mail;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use session_mail::cut_session_wakes;
 mod snapshots;
 mod turns;
 mod waits;
@@ -190,6 +194,7 @@ struct Sql {
     park: ActorParkStatements,
     process: ProcessActorStatements,
     park_events: ParkEventStatements,
+    session_mail: SessionMailStatements,
     postgres: PostgresDurableStatements,
 }
 
@@ -202,6 +207,7 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
         park: ActorParkStatements::render(dialect),
         process: ProcessActorStatements::render(dialect),
         park_events: ParkEventStatements::render(dialect),
+        session_mail: SessionMailStatements::render(dialect),
         postgres: PostgresDurableStatements::render(dialect),
     }
 });
@@ -630,6 +636,52 @@ pub(crate) async fn wake_within(
     ))
 }
 
+/// Wake session `session`'s actor inside a producer's transaction (ADR
+/// 0132 §12), creating it ready first when the session has none yet.
+pub(crate) async fn wake_session_within(
+    tx: &mut PgConnection,
+    session: &lash_sansio::SessionId,
+    control: bool,
+    now: DurableInstant,
+) -> Result<Woken, DurableError> {
+    let actor = ActorKey::session(session.as_str())
+        .map_err(|error| corrupt("session actor key", &error.to_string()))?;
+    sqlx::query(SQL.actor.create.sql())
+        .bind(actor.as_str())
+        .bind(actor.kind().as_str())
+        .bind(lash_durable::domain::SESSION_ACTOR_FORMATS)
+        .bind(now.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(sqlx_failure)?;
+    Ok(wake_within(tx, &actor, control, now).await?.0)
+}
+
+/// [`wake_session_within`] for a session store transaction at `at_ms`. An
+/// absent or deleted session, and one whose actor already ended (its close
+/// finished), wakes nobody and creates nothing; that is no refusal of the
+/// producer's write, which refuses such a session itself.
+pub(crate) async fn wake_session_tx(
+    tx: &mut PgConnection,
+    session: &lash_sansio::SessionId,
+    control: bool,
+    at_ms: u64,
+) -> Result<(), StoreError> {
+    let wake = async {
+        if !session_mail::standing(tx, session).await?.0 {
+            return Ok(());
+        }
+        let now = DurableInstant(i64::try_from(at_ms).unwrap_or(i64::MAX));
+        match wake_session_within(tx, session, control, now).await {
+            Ok(_) | Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => Ok(()),
+            Err(error) => Err(error),
+        }
+    };
+    wake.await.map_err(|error: DurableError| {
+        StoreError::Backend(format!("session {session} was not woken: {error}"))
+    })
+}
+
 /// Apply one owner-commit domain write by its domain's module.
 async fn apply_domain(
     tx: &mut Tx,
@@ -647,6 +699,7 @@ async fn apply_domain(
         DomainWrite::Process(write) => processes::apply(tx, committing, write).await,
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write).await,
         DomainWrite::ParkEvent(write) => park_events::apply(tx, committing, write).await,
+        DomainWrite::SessionMail(write) => session_mail::apply(tx, committing, write).await,
     }
 }
 
@@ -1125,6 +1178,13 @@ impl DurableReads for PostgresDurableStore {
         session: &lash_sansio::SessionId,
     ) -> Result<Vec<ScopeKey>, DurableError> {
         session_close::ending_scopes(&mut *self.reader().await?, session).await
+    }
+
+    async fn session_mailbox(
+        &self,
+        session: &lash_sansio::SessionId,
+    ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
+        session_mail::read(&mut *self.reader().await?, session).await
     }
 
     async fn park_events(

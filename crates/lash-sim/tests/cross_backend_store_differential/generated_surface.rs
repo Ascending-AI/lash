@@ -34,8 +34,7 @@ const DEFAULT_SEED: u64 = 852;
 const OPS_PER_CASE: usize = 55;
 const SURFACE_SESSION: &str = "surface-session";
 /// The session the scenario's runtime store is bound to: the runtime ops the
-/// generated contract history executes all commit against it, so a turn park
-/// lands in a session the history already has.
+/// generated contract history executes all commit against it.
 const SURFACE_RUNTIME_SESSION: &str = "prop-runtime-session";
 
 const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
@@ -66,9 +65,6 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "trigger_occurrence",
     "trigger_occurrence_null_source",
     "process_signal_zero",
-    "turn_park_record",
-    "turn_park_load",
-    "turn_park_settle",
 ];
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -78,37 +74,11 @@ enum SurfaceOperation {
     TriggerChanges,
     TriggerSnapshot,
     TriggerCompact,
-    TriggerRegister {
-        key: u8,
-    },
-    TriggerDisable {
-        key: u8,
-    },
-    TriggerOccurrence {
-        key: u8,
-    },
-    TriggerOccurrenceNullSource {
-        key: u8,
-    },
-    ProcessSignalZero {
-        negative: bool,
-    },
-    /// Park turn `key` of the runtime session with generated but valid
-    /// fields (FIG-3586). One record per session: a second record replaces
-    /// the first.
-    TurnParkRecord {
-        key: u8,
-    },
-    /// Read the runtime session's park back through `load_turn_park` and
-    /// record the answer for the cross-backend comparison.
-    TurnParkLoad,
-    /// Commit turn `key` on the runtime session. A turn's commit settles its
-    /// own park inside the commit's transaction and leaves another turn's
-    /// (FIG-3586), so which park a settle clears is decided by the turn it
-    /// names.
-    TurnParkSettle {
-        key: u8,
-    },
+    TriggerRegister { key: u8 },
+    TriggerDisable { key: u8 },
+    TriggerOccurrence { key: u8 },
+    TriggerOccurrenceNullSource { key: u8 },
+    ProcessSignalZero { negative: bool },
 }
 
 impl SurfaceOperation {
@@ -139,9 +109,6 @@ impl SurfaceOperation {
             Self::TriggerOccurrence { .. } => "trigger_occurrence",
             Self::TriggerOccurrenceNullSource { .. } => "trigger_occurrence_null_source",
             Self::ProcessSignalZero { .. } => "process_signal_zero",
-            Self::TurnParkRecord { .. } => "turn_park_record",
-            Self::TurnParkLoad => "turn_park_load",
-            Self::TurnParkSettle { .. } => "turn_park_settle",
         }
     }
 }
@@ -155,46 +122,8 @@ struct SurfaceRunner {
     scenario: StoreContractScenario,
     process_registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
-    /// The session-bound runtime store the scenario executes; the turn-park
-    /// ops apply to it directly.
-    runtime: Arc<dyn RuntimeStore>,
-    /// The `load_turn_park` answers this runner observed, in operation
-    /// order. Compared across every backend: each lane's runtime store is a
-    /// real durable one.
-    turn_park_loads: Vec<serde_json::Value>,
     trigger_feed_reads: Vec<serde_json::Value>,
     reader: SurfaceReader,
-}
-
-fn surface_parked_turn_id(key: u8) -> lash_core::TurnId {
-    lash_core::TurnId::fixture(format!("surface-parked-turn-{key}"))
-}
-
-/// One deterministic park record per key, cycling every reason shape the
-/// persisted `reason_json` carries so each variant round-trips.
-fn surface_turn_park(key: u8) -> lash_core::store::TurnParkWrite {
-    let message = format!("surface park {key}: the journal refused replay");
-    let reason = match key % 4 {
-        0 => lash_core::store::ParkReason::ReplayDivergence { message },
-        1 => lash_core::store::ParkReason::RetiredGeneration {
-            generation: Some(lash_core::ExecutableGeneration::new(format!(
-                "blake3:surface-{key}"
-            ))),
-            message,
-        },
-        2 => lash_core::store::ParkReason::BindingDrift { message },
-        _ => lash_core::store::ParkReason::EffectReplayDivergence {
-            effect_kind: "llm_call".to_string(),
-            message,
-        },
-    };
-    lash_core::store::TurnParkWrite {
-        session_id: SessionId::fixture(SURFACE_RUNTIME_SESSION.to_string()),
-        turn_id: surface_parked_turn_id(key),
-        reason,
-        at_ms: 1_000 + u64::from(key),
-        origin: lash_core::store::TurnParkOrigin::Refusal,
-    }
 }
 
 fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
@@ -212,23 +141,6 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
             operations.push(SurfaceOperation::TriggerDisable { key: 0 });
             operations.push(SurfaceOperation::TriggerChanges);
             operations.push(SurfaceOperation::TriggerSnapshot);
-        }
-        // Park turn 0, read it back, then replace it with turn 1's park —
-        // one record per session. Turn 0's settle leaves turn 1's park (a
-        // commit clears only the park naming its own turn), and turn 1's
-        // settle clears it.
-        if index == 6 {
-            operations.extend([
-                SurfaceOperation::TurnParkLoad,
-                SurfaceOperation::TurnParkRecord { key: 0 },
-                SurfaceOperation::TurnParkLoad,
-                SurfaceOperation::TurnParkRecord { key: 1 },
-                SurfaceOperation::TurnParkLoad,
-                SurfaceOperation::TurnParkSettle { key: 0 },
-                SurfaceOperation::TurnParkLoad,
-                SurfaceOperation::TurnParkSettle { key: 1 },
-                SurfaceOperation::TurnParkLoad,
-            ]);
         }
     }
     operations
@@ -396,64 +308,11 @@ impl SurfaceRunner {
                     .map_err(|error| error.to_string())?;
                 Ok(())
             }
-            SurfaceOperation::TurnParkRecord { key } => self
-                .runtime
-                .record_turn_park(&surface_turn_park(*key))
-                .await
-                .map(lash_core::store::StoreTransition::into_record)
-                .map(|_park| ())
-                .map_err(|error| error.to_string()),
-            SurfaceOperation::TurnParkLoad => {
-                let loaded = self
-                    .runtime
-                    .load_turn_park(&SessionId::fixture(SURFACE_RUNTIME_SESSION.to_string()))
-                    .await
-                    .map_err(|error| error.to_string())?;
-                self.turn_park_loads
-                    .push(serde_json::to_value(&loaded).map_err(|error| error.to_string())?);
-                Ok(())
-            }
-            SurfaceOperation::TurnParkSettle { key } => {
-                let session = SessionId::fixture(SURFACE_RUNTIME_SESSION.to_string());
-                let view = lash_core::SessionStore::new(Arc::clone(&self.runtime), session.clone())
-                    .map_err(|error| error.to_string())?;
-                let state = lash_core::store::load_session_window_state(
-                    &view,
-                    lash_core::store::WindowSelector::Current,
-                )
-                .await
-                .map_err(|error| error.to_string())?
-                .map(|loaded| loaded.state)
-                .unwrap_or_else(|| RuntimeSessionState {
-                    session_id: session.clone(),
-                    ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                        lash_core::TurnBudget::Unbounded,
-                        lash_core::MaxToolCalls::new(1024),
-                    ))
-                });
-                let commit = RuntimeCommit::persisted_state_with_operation_for_testing(
-                    &state,
-                    lash_core::store::OperationId::turn(
-                        session,
-                        surface_parked_turn_id(*key),
-                        format!("surface-park-settle-{key}"),
-                    ),
-                );
-                lash_core::testing::store_fixtures::commit_runtime_state_for_test(
-                    &self.runtime,
-                    commit,
-                    "surface-park-settler",
-                )
-                .await
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-            }
         }
     }
 
     async fn observe(&self) -> SurfaceState {
         let mut state = self.reader.observe().await;
-        state.turn_park_loads = self.turn_park_loads.clone();
         state.trigger_feed_reads = self.trigger_feed_reads.clone();
         state
     }
@@ -474,7 +333,6 @@ async fn reset_postgres_surface(storage: &PostgresStorage) {
     .unwrap();
     sqlx::query("INSERT INTO lash_trigger_subscription_change_clock (singleton, current_seq, pruned_through) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, pruned_through = 0").execute(storage.pool()).await.unwrap();
     sqlx::query("INSERT INTO lash_process_change_clock (singleton, current_seq, tombstone_compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, tombstone_compaction_horizon = 0").execute(storage.pool()).await.unwrap();
-    sqlx::query("INSERT INTO lash_turn_park_clock (singleton, current_seq, compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, compaction_horizon = 0").execute(storage.pool()).await.unwrap();
 }
 
 #[expect(
@@ -491,7 +349,6 @@ async fn surface_runners(
     // session-bound runtime store. The SQL effect engines are not storage
     // (ADR 0104); FIG-3667 and FIG-3668 delete them.
     let sqlite_runtime_root = root.join("runtime");
-    let sqlite_runtime_path = sqlite_runtime_root.join("lash.db");
     let sqlite_process_path = root.join("process.db");
     let sqlite_trigger_path = root.join("trigger.db");
     let session_request = SessionStoreCreateRequest {
@@ -547,7 +404,7 @@ async fn surface_runners(
             .with_clock(Arc::clone(&clock))
             .with_process_id_mint_for_testing(postgres_mint),
     );
-    let postgres_triggers = Arc::new(storage.trigger_store());
+    let postgres_triggers = Arc::new(storage.trigger_store().with_clock(Arc::clone(&clock)));
 
     vec![
         SurfaceRunner {
@@ -558,11 +415,8 @@ async fn surface_runners(
             }),
             process_registry: sqlite_registry,
             trigger_store: sqlite_triggers,
-            runtime: sqlite_runtime,
-            turn_park_loads: Vec::new(),
             trigger_feed_reads: Vec::new(),
             reader: SurfaceReader::Sqlite {
-                runtime_path: sqlite_runtime_path,
                 process_path: sqlite_process_path,
                 trigger_path: sqlite_trigger_path,
             },
@@ -575,8 +429,6 @@ async fn surface_runners(
             }),
             process_registry: postgres_registry,
             trigger_store: postgres_triggers,
-            runtime: postgres_runtime,
-            turn_park_loads: Vec::new(),
             trigger_feed_reads: Vec::new(),
             reader: SurfaceReader::Postgres {
                 pool: storage.pool().clone(),

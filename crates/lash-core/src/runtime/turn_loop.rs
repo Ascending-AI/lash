@@ -15,13 +15,11 @@ mod accept;
 mod commit;
 mod context_pressure;
 mod execute;
-mod follow_on_recovery;
 mod post_commit;
 #[cfg(feature = "testing")]
 pub mod prepare;
 #[cfg(not(feature = "testing"))]
 mod prepare;
-mod queued_work;
 mod resident_session;
 
 pub(in crate::runtime) use commit::LogicalTurnErrorContext;
@@ -30,7 +28,6 @@ pub(in crate::runtime) use execute::PreparedTurnExecuteContext;
 use execute::TurnDriverRemainder;
 use post_commit::PostCommitDelivery;
 pub(in crate::runtime) use prepare::TurnPrepareContext;
-pub use queued_work::{EmptyQueuedDrainReason, QueuedTurnDrain};
 pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
 pub use resident_session::ResidentSessionState;
 
@@ -141,13 +138,6 @@ fn session_head_refresh_error(err: SessionError) -> RuntimeError {
     }
 }
 
-fn queued_work_payload_type(payload: &crate::QueuedWorkPayload) -> &'static str {
-    match payload {
-        crate::QueuedWorkPayload::ProcessWake { .. } => "process_wake",
-        crate::QueuedWorkPayload::SessionCommand { command } => command.kind(),
-    }
-}
-
 fn queued_work_batch_ids(queued: &crate::AdmittedQueuedWork) -> Vec<crate::BatchId> {
     queued
         .batches
@@ -189,63 +179,6 @@ impl TurnStopwatch {
 
 fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
     parent_turn_id.with_suffix(format_args!(":{phase}"))
-}
-
-/// The `ingress.admitted` trace of one admission (FIG-3927): the rows
-/// `run` bound under `admitted_by` (its run admission step, or a
-/// checkpoint's replay key), at `boundary`, with the causes its queued work
-/// materialized.
-pub(in crate::runtime) fn ingress_admitted_trace_payload(
-    run: &TurnId,
-    admitted_by: &str,
-    boundary: crate::AdmissionBoundary,
-    inputs: Option<&crate::AdmittedTurnInputs>,
-    queued: Option<&crate::AdmittedQueuedWork>,
-    causes: &[crate::TurnCause],
-) -> serde_json::Value {
-    serde_json::json!({
-        "run": run,
-        "admitted_by": admitted_by,
-        "boundary": boundary,
-        "input_ids": inputs.map(crate::AdmittedTurnInputs::input_ids).unwrap_or_default(),
-        "batch_ids": queued.map(queued_work_batch_ids).unwrap_or_default(),
-        "payload_types": queued
-            .into_iter()
-            .flat_map(|queued| queued.batches.iter())
-            .map(|batch| queued_work_payload_type(&batch.payload))
-            .collect::<Vec<_>>(),
-        "causes": causes,
-    })
-}
-
-/// The `ingress.settled` trace of one commit: the rows `run` settled as
-/// delivered, and the rows it handed back open or dropped.
-pub(in crate::runtime) fn ingress_settled_trace_payload(
-    settlement: &crate::store::IngressSettlement,
-) -> serde_json::Value {
-    let rows = |rows: &[crate::store::IngressRowId]| {
-        rows.iter()
-            .map(|row| match row {
-                crate::store::IngressRowId::Input(input) => input.to_string(),
-                crate::store::IngressRowId::Batch(batch) => batch.to_string(),
-            })
-            .collect::<Vec<_>>()
-    };
-    serde_json::json!({
-        "run": settlement.run,
-        "input_ids": settlement
-            .completed_inputs
-            .iter()
-            .flat_map(|completion| completion.input_ids.iter())
-            .collect::<Vec<_>>(),
-        "batch_ids": settlement
-            .completed_batches
-            .iter()
-            .flat_map(|completion| completion.batch_ids.iter())
-            .collect::<Vec<_>>(),
-        "released": rows(&settlement.released),
-        "dropped": rows(&settlement.dropped),
-    })
 }
 
 /// A fresh observation cursor for one turn-level emission lane of the
@@ -348,7 +281,7 @@ pub(super) fn max_context_tokens_of(
         .effective_policy()
         .context_window_tokens()
         .ok_or_else(|| {
-            crate::runtime::shift::llm_profile_unconfigured(
+            crate::runtime::turn_config::llm_profile_unconfigured(
                 crate::SessionError::LlmProfileUnconfigured {
                     session_id: state.session_id.clone(),
                 },

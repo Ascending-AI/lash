@@ -138,14 +138,6 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             "Turn {} in extended JSONL trace benchmark mode. Run the Lashlang block and finish exactly: runtime perf benchmark ok",
             turn_index + 1
         ),
-        RuntimePerfScenario::QueuedWorkAdmissionStress => format!(
-            "Turn {} in queued-work admission stress benchmark mode. Admit, renew, complete, and verify queued work.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::TurnInputIngressInterrupt => format!(
-            "Turn {} in turn-input ingress interrupt benchmark mode. Claim, defer, reclaim, complete, and verify pending turn input.",
-            turn_index + 1
-        ),
         RuntimePerfScenario::DeepTurnComposition => format!(
             "Turn {} in the deep-composition stack benchmark. Run the parent process/tool loop and child session, then incorporate the injected active-turn input.",
             turn_index + 1
@@ -174,7 +166,6 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
         ),
         RuntimePerfScenario::HighTrafficLoadSqlite
         | RuntimePerfScenario::HighTrafficKneeSqlite
-        | RuntimePerfScenario::DurableQueuedWorkContentionSqlite
         | RuntimePerfScenario::DurableCheckpointCurveSqlite
         | RuntimePerfScenario::DurableCheckpointCurvePostgres
         | RuntimePerfScenario::ResidentGraphAppendCurve

@@ -57,9 +57,6 @@ pub struct RuntimeObservation {
     /// durable waits through without the runtime's writer, such as an
     /// admitted plugin task's cancel signal (FIG-4391).
     pub effect_host: ActorContext,
-    /// The ingress relay an acceptance through this observation delivers
-    /// with (ADR 0109 §3).
-    pub ingress: super::shift::IngressRelay,
     /// Fingerprint of the resident authority at publication time, compared
     /// across publishes to detect revision-stable resident changes without
     /// retaining the resident state itself.
@@ -139,7 +136,6 @@ impl RuntimeObservation {
             process_registry: runtime.host.process_registry().cloned(),
             queue_store: runtime.services.store.clone(),
             effect_host: runtime.effect_host(),
-            ingress: runtime.ingress_relay(),
             authority_fingerprint,
         }
     }
@@ -600,7 +596,6 @@ impl RuntimeHandle {
             .ok_or_else(super::session_api::queued_turn_input_store_required)?;
         let ops = super::DurableSessionOps::new(
             observation.session_id().clone(),
-            observation.ingress.clone(),
             Arc::clone(&self.live_replay_store),
         );
         Ok((ops, store))

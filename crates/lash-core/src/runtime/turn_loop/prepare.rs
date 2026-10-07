@@ -17,7 +17,6 @@ pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
     pub(in crate::runtime) local_stop: LocalTurnStop,
     pub(in crate::runtime) admissions: LogicalTurnAdmissions,
     pub(in crate::runtime) materialize_initial_admissions: bool,
-    pub(in crate::runtime) shift_fence: Option<&'sinks ShiftFence>,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'run ()>,
 }
@@ -70,7 +69,6 @@ impl LashRuntime {
             local_stop,
             mut admissions,
             materialize_initial_admissions,
-            shift_fence,
         } = context;
         // A direct turn's admission already adopted the head it was admitted
         // on and recorded its index (FIG-3682): re-reading the live head here
@@ -186,7 +184,7 @@ impl LashRuntime {
                     admissions: &admissions,
                     scoped_effect_controller: &scoped_effect_controller,
                     honoured_cancel: None,
-                    shift_fence,
+
                     observer,
                 }))
                 .await;
@@ -298,7 +296,6 @@ impl LashRuntime {
                 trace_turn_id: &trace_turn_id,
                 previous_prompt_usage: previous_prompt_usage.clone(),
                 scoped_effect_controller: &scoped_effect_controller,
-                shift_fence,
             })
             .await?;
         // After a frame opens, the old frame's usage is not the new frame's:
@@ -324,7 +321,7 @@ impl LashRuntime {
                 })?;
         }
         let manager = self
-            .runtime_session_services_for_turn(shift_fence, &turn_graph_appends)
+            .runtime_session_services_for_turn(&turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -381,12 +378,7 @@ impl LashRuntime {
         let prelude = Box::new(crate::runtime::effect::TurnPrelude {
             configuration: crate::EffectAddress::new(
                 scoped_effect_controller.execution_scope().clone(),
-                format!(
-                    "turn-config:{}",
-                    self.shift_run
-                        .as_ref()
-                        .map_or(&trace_turn_id, |run| run.run())
-                ),
+                format!("turn-config:{}", trace_turn_id),
             )
             .map_err(RuntimeEffectControllerError::from)
             .map_err(RuntimeEffectControllerError::into_runtime_error)?,
@@ -427,7 +419,6 @@ impl LashRuntime {
                 scoped_effect_controller,
                 local_stop,
                 initial_admissions: admissions,
-                shift_fence,
             },
             turn_graph_appends,
         ))

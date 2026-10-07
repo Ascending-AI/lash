@@ -34,7 +34,7 @@ use serde_json::{Value, json};
 /// format_outside_manifest = "operator CLI wire: gates a --json consumer, not state lash reopens"
 const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
 const OPERATOR_POOL_MAX: u32 = 2;
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery commands accept --sqlite-path <database-file>) | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery commands accept --sqlite-path <database-file>) | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -156,7 +156,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
     };
     let rest = &words[1..];
     let command = match verb {
-        "park" | "stalled" | "deployment-status" => Command::Recovery(recovery::parse(verb, rest)?),
+        "stalled" | "deployment-status" => Command::Recovery(recovery::parse(verb, rest)?),
         "migrate" => {
             let mut phase = MigrationPhase::Expand;
             let mut dry_run = false;
@@ -304,11 +304,6 @@ fn migration_result(report: &MigrationReport, dry_run: bool) -> Value {
 /// `None` when this build cannot name it.
 fn stalled_row(key: &ObligationKey) -> Value {
     match key {
-        ObligationKey::Ingress {
-            session_id,
-            item_id,
-        } => json!({"session_id":session_id.as_str(),"item_id":item_id}),
-        ObligationKey::ControlIntent { intent_id } => json!({"intent_id":intent_id.sequence()}),
         ObligationKey::ScopeClose { session_id, run } => {
             json!({"session_id":session_id.as_str(),"root":run.as_str()})
         }
@@ -494,43 +489,21 @@ mod tests {
     use super::*;
     use lash_core_store::compat::CompatRefusal;
 
-    /// FIG-5037: recovery commands require an exact park token; paging cursors
-    /// and delivery kinds are validated before opening any operator backend.
+    /// FIG-5037: recovery commands validate paging cursors and delivery kinds
+    /// before opening any operator backend.
     #[test]
     fn recovery_verbs_validate_tokens_cursors_and_delivery_kinds() {
-        let process = json!({"kind":"process", "process_id":lash::ProcessId::fixture("recovery")})
-            .to_string();
         let valid = [
-            vec!["park", "list", "--limit", "1"],
-            vec!["park", "events", "--after", r#"{"turn":0,"process":0}"#],
             vec![
-                "park",
-                "redrive",
-                "--target",
-                process.as_str(),
-                "--park-id",
+                "stalled",
+                "list",
+                "scope_close",
+                "--after",
+                "delivery",
+                "--limit",
                 "1",
             ],
-            vec![
-                "park",
-                "cancel",
-                "--target",
-                r#"{"kind":"turn","session_id":"s","turn_id":"t"}"#,
-                "--park-id",
-                "1",
-            ],
-            vec![
-                "park",
-                "fork",
-                "--target",
-                r#"{"kind":"turn","session_id":"s","turn_id":"t"}"#,
-                "--park-id",
-                "1",
-            ],
-            vec![
-                "stalled", "list", "ingress", "--after", "delivery", "--limit", "1",
-            ],
-            vec!["stalled", "rearm", "ingress", "delivery"],
+            vec!["stalled", "rearm", "scope_close", "delivery"],
             vec!["deployment-status", "--accepting-new-work", "false"],
         ];
         for words in valid {
@@ -540,11 +513,8 @@ mod tests {
             );
         }
         for words in [
-            vec!["park", "redrive", "--target", process.as_str()],
-            vec!["park", "list", "--limit", "0"],
-            vec!["park", "list", "--after", "broken"],
             vec!["stalled", "list", "unknown"],
-            vec!["stalled", "rearm", "ingress"],
+            vec!["stalled", "rearm", "scope_close"],
             vec!["deployment-status"],
         ] {
             let error = parse(words.iter().map(|word| (*word).to_owned()))
@@ -663,9 +633,12 @@ mod tests {
         };
 
         let decoded = StalledObligation {
-            kind: ObligationKind::ControlIntent,
+            kind: ObligationKind::ScopeClose,
             id: ObligationId::new("obligation-decoded"),
-            key: ObligationKey::decode(ObligationKind::ControlIntent, vec![KeyColumn::Integer(7)]),
+            key: ObligationKey::decode(
+                ObligationKind::ScopeClose,
+                vec![KeyColumn::Text("s".into()), KeyColumn::Text("r".into())],
+            ),
             reason: StallReason::AttemptsExhausted,
             attempts: 3,
             last_error: Some(lash_core_store::store::DeliveryError::new(
@@ -677,10 +650,10 @@ mod tests {
         assert_eq!(
             stalled_result(&decoded),
             json!({
-                "kind": "control_intent",
+                "kind": "scope_close",
                 "obligation_id": "obligation-decoded",
                 "reason": "attempts_exhausted",
-                "row": {"intent_id": 7},
+                "row": {"session_id": "s", "root": "r"},
                 "undecodable": null,
                 "attempts": 3,
                 "last_error": {

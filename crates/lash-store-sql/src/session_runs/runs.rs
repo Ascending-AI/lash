@@ -1,6 +1,6 @@
-//! `session_runs`: one row per `(session, run)` a shift sealed an
-//! admission for or admitted work under, holding the run's terminal evidence
-//! once it has one. The row lives until its session is deleted.
+//! `session_runs`: one row per `(session, run)` admitted work ran under,
+//! holding the run's terminal evidence once it has one. The row lives until
+//! its session is deleted.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_runs";
@@ -8,10 +8,6 @@ pub const TABLE: &str = "session_runs";
 crate::statements! {
     /// `session_runs` statements both backends issue verbatim.
     pub struct SessionRunStatements @ "session_run" {
-        read_shift_admission = "SELECT receipt_json FROM session_shift_admissions WHERE session_id = ?1 AND admission = ?2";
-        write_shift_admission = "INSERT INTO session_shift_admissions (session_id, admission, receipt_json) VALUES (?1, ?2, ?3)";
-        delete_shift_admissions = "DELETE FROM session_shift_admissions WHERE session_id = ?1";
-
         /// Open run `?2` of session `?1` if it has no row yet.
         insert_open = "INSERT INTO session_runs (session_id, run) VALUES (?1, ?2)
              ON CONFLICT (session_id, run) DO NOTHING";
@@ -26,28 +22,6 @@ crate::statements! {
              SET admission_json = ?3
              WHERE session_id = ?1 AND run = ?2 AND admission_json IS NULL";
 
-        /// What run `?2` of session `?1` holds, as a seal reads it: the
-        /// executor a seal recorded for it, its admission, and whether it
-        /// has terminal evidence.
-        select_hold = "SELECT executor_json, admission_json, terminal_kind IS NOT NULL
-             FROM session_runs
-             WHERE session_id = ?1 AND run = ?2";
-
-        /// Record `?3` as the executor of run `?2`, in the transaction of
-        /// the seal that raises the shift epoch for it. A run's admission
-        /// records its executor from then on, so an admitted or ended run
-        /// keeps what it has.
-        write_hold = "UPDATE session_runs
-             SET executor_json = ?3
-             WHERE session_id = ?1 AND run = ?2
-               AND admission_json IS NULL AND terminal_kind IS NULL";
-
-        /// Release the executor a seal recorded for run `?2`, which never
-        /// recorded its admission: the engine holds no run of it.
-        release_hold = "UPDATE session_runs
-             SET executor_json = NULL
-             WHERE session_id = ?1 AND run = ?2
-               AND admission_json IS NULL AND terminal_kind IS NULL";
 
         /// The one admitted run of session `?1` without terminal evidence,
         /// with its recorded admission.
@@ -76,10 +50,8 @@ crate::statements! {
              WHERE session_id = ?1 AND terminal_kind IS NULL
              ORDER BY run";
 
-        /// Bounded recovery page after the `(session_id, run)` cursor, with
-        /// each run's recorded admission and the executor its seal
-        /// recorded: recovery reads its executor.
-        select_open_page = "SELECT session_id, run, admission_json, executor_json
+        /// Bounded recovery page after the `(session_id, run)` cursor.
+        select_open_page = "SELECT session_id, run
              FROM session_runs
              WHERE terminal_kind IS NULL
                AND (session_id > ?1 OR (session_id = ?1 AND run > ?2))
@@ -87,42 +59,6 @@ crate::statements! {
 
         /// Every run of session `?1`: its deletion.
         delete_by_session = "DELETE FROM session_runs WHERE session_id = ?1";
-    }
-}
-
-/// Rendered statements used by a parked-run control transaction.
-pub struct RunVerbStatements {
-    pub bound_inputs: crate::Rendered,
-    pub rebind: crate::Rendered,
-    pub unbind: crate::Rendered,
-    pub set_kind: crate::Rendered,
-    pub raise_epoch: crate::Rendered,
-    pub cancel_input: crate::Rendered,
-    pub reopen_input: crate::Rendered,
-    pub cancel_batch: crate::Rendered,
-    pub intents: crate::Rendered,
-}
-
-impl RunVerbStatements {
-    /// Render each statement through its table owner.
-    #[must_use]
-    pub fn render(dialect: crate::Dialect) -> Self {
-        let group0 = crate::session_runs::run_inputs::RunInputVerbStatements::render(dialect);
-        let group1 = crate::session_runs::control_intents::ControlVerbStatements::render(dialect);
-        let group2 = crate::session::meta::MetaRunVerbStatements::render(dialect);
-        let group3 = crate::turn_ingress::pending_inputs::PendingRunVerbStatements::render(dialect);
-        let group4 = crate::turn_ingress::queued_batches::BatchRunVerbStatements::render(dialect);
-        Self {
-            bound_inputs: group0.bound_inputs,
-            rebind: group0.rebind,
-            unbind: group0.unbind,
-            set_kind: group1.set_kind,
-            intents: group1.intents,
-            raise_epoch: group2.raise_epoch,
-            cancel_input: group3.cancel_input,
-            reopen_input: group3.reopen_input,
-            cancel_batch: group4.cancel_batch,
-        }
     }
 }
 

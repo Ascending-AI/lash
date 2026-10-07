@@ -71,17 +71,15 @@ macro_rules! runtime_store_operations {
             }
             SessionCommitStore {
                 [session] fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError>;
-                [carried fence] fn admit_session_state(&self, fence: &ShiftFence) -> Result<SessionStateAdmission, StoreError>;
+                [session] fn admit_session_state(&self, session_id: &SessionId) -> Result<SessionStateAdmission, StoreError>;
                 [session] fn load_session_head_meta(&self, session_id: &SessionId) -> Result<Option<SessionHeadMeta>, StoreError>;
-                [carried fence] fn retain_admission_base(&self, fence: &ShiftFence, base: &SessionHeadRef) -> Result<(), StoreError>;
+                [session] fn retain_admission_base(&self, session_id: &SessionId, base: &SessionHeadRef) -> Result<(), StoreError>;
                 [session] fn committed_turn_exists(&self, session_id: &SessionId, turn_id: &crate::TurnId) -> Result<bool, StoreError>;
                 [carried commit] fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError>;
-                [carried fence] fn raise_pending_follow_on_attempts(&self, fence: &ShiftFence, follow_on_turn_id: &crate::TurnId) -> Result<PendingFollowOn, StoreError>;
+                [session] fn raise_pending_follow_on_attempts(&self, session_id: &SessionId, follow_on_turn_id: &crate::TurnId) -> Result<PendingFollowOn, StoreError>;
                 [session] fn settle_observer_intents(&self, session_id: &SessionId, remaining: Vec<crate::SessionObserverIntent>) -> Result<(), StoreError>;
                 [session] fn load_session_meta(&self, session_id: &SessionId) -> Result<Option<SessionMeta>, StoreError>;
                 [session] fn load_session_meta_for_commit(&self, session_id: &SessionId) -> Result<Option<SessionMeta>, StoreError>;
-                [carried park] fn record_turn_park(&self, park: &TurnParkWrite) -> Result<StoreTransition<TurnPark>, StoreError>;
-                [session] fn load_turn_park(&self, session_id: &SessionId) -> Result<Option<TurnPark>, StoreError>;
                 provided:
                 [session] fn load_pending_follow_on(&self, session_id: &SessionId) -> Result<Option<PendingFollowOn>, StoreError>;
             }
@@ -93,7 +91,7 @@ macro_rules! runtime_store_operations {
             }
             TurnInputStore {
                 [carried batch] fn enqueue_pending_turn_inputs(&self, batch: crate::PendingTurnInputBatch) -> Result<Vec<crate::PendingTurnInput>, StoreError>;
-                [carried batch] fn admit_pending_turn_inputs(&self, batch: crate::PendingTurnInputBatch, ingress_claim_ttl_ms: u64) -> Result<TurnInputAdmission, StoreError>;
+                [carried batch] fn admit_pending_turn_inputs(&self, batch: crate::PendingTurnInputBatch) -> Result<TurnInputAdmission, StoreError>;
                 [session] fn load_run_spec(&self, session_id: &SessionId, hash: &crate::run_spec::RunSpecHash) -> Result<Option<crate::run_spec::RunSpec>, StoreError>;
                 [session] fn list_pending_turn_inputs(&self, session_id: &SessionId) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
                 [session] fn pending_turn_input(&self, session_id: &SessionId, input_id: &crate::InputId) -> Result<Option<crate::PendingTurnInputRead>, StoreError>;
@@ -107,7 +105,7 @@ macro_rules! runtime_store_operations {
             QueuedWorkStore {
                 [carried batch] fn enqueue_queued_work(&self, batch: crate::QueuedWorkBatchDraft) -> Result<crate::QueuedWorkBatch, StoreError>;
                 [carried batch] fn enqueue_queued_work_with_outcome(&self, batch: crate::QueuedWorkBatchDraft) -> Result<crate::QueuedWorkEnqueueOutcome, StoreError>;
-                [carried fence] fn open_session_command_run(&self, fence: &ShiftFence) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
+                [session] fn open_session_command_run(&self, session_id: &SessionId) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
                 [session] fn cancel_queued_work_batch(&self, session_id: &SessionId, batch_id: &str) -> Result<Option<crate::QueuedWorkBatch>, StoreError>;
                 [session] fn queued_work_batch_completion(&self, session_id: &SessionId, batch_id: &str) -> Result<Option<RuntimeCommitReceipt>, StoreError>;
                 [session] fn pending_session_work_ordering(&self, session_id: &SessionId) -> Result<PendingSessionWorkOrdering, StoreError>;
@@ -115,27 +113,18 @@ macro_rules! runtime_store_operations {
                 [session] fn list_open_queued_work(&self, session_id: &SessionId) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
                 [session] fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError>;
             }
-            ShiftEpochStore {
-                [session] fn seal_shift_epoch(&self, session_id: &SessionId, admission: &AdmissionId, observed_epoch: u64, run_start: &RunStartNonce, hold: Option<&RunHold>) -> Result<ShiftEpochSeal, StoreError>;
-                [session] fn shift_epoch(&self, session_id: &SessionId) -> Result<StoredShiftEpoch, StoreError>;
+            SessionFaultStore {
                 [session] fn record_session_fault(&self, session_id: &SessionId, record: &SessionFaultRecord, at_ms: u64) -> Result<Option<SessionFault>, StoreError>;
                 [session] fn session_fault(&self, session_id: &SessionId) -> Result<Option<SessionFault>, StoreError>;
                 [catalog] fn list_session_faults(&self, after: Option<&SessionId>, limit: std::num::NonZeroUsize) -> Result<Vec<SessionFault>, StoreError>;
                 [session] fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError>;
             }
             RunStore {
-                [session] fn prepare_shift_admission(&self, session_id: &SessionId, admission: &AdmissionId, executor: &RunExecutor) -> Result<ShiftAdmissionPreparation, StoreError>;
-                [session] fn read_shift_admission(&self, session_id: &SessionId, admission: &AdmissionId) -> Result<Option<ShiftAdmissionReceipt>, StoreError>;
-                [carried request] fn commit_shift_admission(&self, request: &ShiftAdmissionWrite, anchor: &lash_trace::TraceAnchor) -> Result<ShiftAdmissionReceipt, StoreError>;
-                [session] fn run_executor(&self, session_id: &SessionId, run: &crate::TurnId) -> Result<Option<RunExecutor>, StoreError>;
                 [session] fn unfinished_run(&self, session_id: &SessionId) -> Result<Option<UnfinishedRun>, StoreError>;
-                [carried request] fn prepare_run_admission(&self, request: &AdmitRunRequest) -> Result<Option<PreparedRunAdmission>, StoreError>;
-                [carried prepared] fn commit_run_admission(&self, prepared: &PreparedRunAdmission, anchor: &lash_trace::TraceAnchor) -> Result<Option<RunAdmission>, StoreError>;
-                [carried request] fn admit_run(&self, request: &AdmitRunRequest) -> Result<Option<RunAdmission>, StoreError>;
                 [carried request] fn admit_at_checkpoint(&self, request: &CheckpointAdmissionRequest) -> Result<CheckpointAdmission, StoreError>;
                 [session] fn run_terminal(&self, session_id: &SessionId, run: &crate::TurnId) -> Result<Option<RunTerminal>, StoreError>;
-                [carried fence] fn end_refused_run(&self, fence: &ShiftFence, run: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
-                [carried fence] fn end_command_run(&self, fence: &ShiftFence, run: &crate::TurnId, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
+                [session] fn end_refused_run(&self, session_id: &SessionId, run: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
+                [session] fn end_command_run(&self, session_id: &SessionId, run: &crate::TurnId, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
                 [session] fn run_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 [session] fn run_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 [session] fn bound_turn_scopes(&self, session_id: &SessionId, run: &crate::TurnId) -> Result<Vec<crate::TurnId>, StoreError>;
@@ -147,11 +136,8 @@ macro_rules! runtime_store_operations {
             }
             @inner ControlIntentStore {
                 fn begin_session_close(&self, session_id: &SessionId, at_ms: u64) -> Result<Option<ControlIntent>, StoreError>;
-                fn claim_intent_application(&self, id: ControlIntentId, at_ms: u64) -> Result<IntentApplication, StoreError>;
-                fn acknowledge_intent(&self, id: ControlIntentId, claim: &ClaimToken, at_ms: u64) -> Result<IntentSettle, StoreError>;
-                fn refuse_intent(&self, id: ControlIntentId, claim: &ClaimToken, cause: &DeliveryError, at_ms: u64) -> Result<IntentSettle, StoreError>;
+                fn session_close_intent(&self, session_id: &SessionId) -> Result<Option<ControlIntent>, StoreError>;
                 fn load_intent(&self, id: ControlIntentId) -> Result<Option<ControlIntent>, StoreError>;
-                fn open_run_intent(&self, request: &RunIntentRequest, at_ms: u64) -> Result<ControlIntent, RunIntentRefused>;
             }
         }
     };

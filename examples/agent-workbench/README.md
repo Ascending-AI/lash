@@ -688,12 +688,6 @@ Use `lashctl` for deployment operations. Set `LASH_SQLITE_PATH` to the
 workbench's database file `<data-dir>/lash-sessions.db`, or `LASH_POSTGRES_DATABASE_URL` for a
 PostgreSQL store.
 
-- `lashctl --json park list [--after '<cursor JSON>'] [--limit 50]` lists parks.
-- `lashctl --json park events [--after '<cursor JSON>']` reads transitions.
-- `lashctl --json park redrive|cancel|fork --target '<target JSON>' --park-id <id>`
-  submits the exact `target` and `park_id` returned by the list. Process parks
-  support redrive; cancel and fork apply to turn parks. After a compacted event
-  cursor refusal, relist and restart the event feed.
 - `lashctl --json stalled list <kind> [--after <id>] [--limit 50]` pages stalled
   deliveries, including their last typed error. `stalled rearm <kind> <id>`
   resets that delivery in its owning ledger.

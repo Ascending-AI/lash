@@ -196,9 +196,15 @@ pub struct SessionAdmin {
     pub(crate) target: crate::send::SendTarget,
     pub(crate) runtime: RuntimeHandle,
     pub(crate) process_work: Arc<dyn lash_core::ProcessWorkSubstrate>,
-    pub(crate) work: Arc<dyn lash_core::SessionWorkEngine>,
-    pub(crate) ingress: lash_core::shift::IngressRelay,
 }
+
+/// The longest a session command's caller waits for the session actor to
+/// settle it before answering `Pending`.
+const COMMAND_SETTLEMENT_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+/// The first and the longest pause between a pending command's settlement
+/// reads.
+const COMMAND_SETTLEMENT_POLL_FLOOR: std::time::Duration = std::time::Duration::from_millis(25);
+const COMMAND_SETTLEMENT_POLL_CEILING: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl SessionAdmin {
     pub fn config(&self) -> SessionConfigAdmin {
@@ -263,52 +269,44 @@ impl SessionAdmin {
         value
     }
 
-    /// Wait, with the writer released, for the engine shift that applies the
-    /// command `receipt` names, then read how it settled. A command the
-    /// shift has not settled by the deadline answers `Pending` with its
-    /// receipt; the command stays durable and settles later.
+    /// Wait for the session actor to apply the command `receipt` names, then
+    /// read how it settled. The settlement is read from the store, with the
+    /// writer released between reads; a command not settled by the deadline
+    /// answers `Pending` with its receipt, and stays durable and settles
+    /// later.
     async fn await_command_settlement(
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,
         previous_policy: Option<lash_core::SessionPolicy>,
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
-        let request = self
-            .ingress
-            .current_ask(&receipt.session_id, receipt.batch_id.as_str())
-            .await
-            .map_err(|source| {
-                EmbedError::Session(SessionError::Store {
-                    context: "failed to read session command shift".into(),
-                    source,
-                })
-            })?;
-        if let Some(request) = request {
-            let wait = tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                self.work.await_shift(&receipt.session_id, &request),
-            )
-            .await;
-            match wait {
-                Ok(Ok(_)) | Err(_) => {}
-                Ok(Err(abort)) => return Err(EmbedError::Runtime(abort.into_error())),
+        let deadline = tokio::time::Instant::now() + COMMAND_SETTLEMENT_WAIT;
+        let mut pause = COMMAND_SETTLEMENT_POLL_FLOOR;
+        loop {
+            let settlement = {
+                let writer = self.runtime.writer();
+                let mut runtime = writer.lock().await;
+                let settlement = match previous_policy.clone() {
+                    Some(previous_policy) => {
+                        runtime
+                            .settle_session_command_from_policy(receipt.clone(), previous_policy)
+                            .await
+                    }
+                    None => runtime.settle_session_command(receipt.clone()).await,
+                }
+                .map_err(EmbedError::from)?;
+                self.runtime.publish_from(&runtime).await;
+                settlement
+            };
+            let pending = matches!(
+                settlement,
+                lash_core::runtime::SessionCommandSettlement::Pending(_)
+            );
+            if !pending || tokio::time::Instant::now() >= deadline {
+                return Ok(settlement);
             }
+            tokio::time::sleep(pause.min(deadline - tokio::time::Instant::now())).await;
+            pause = (pause * 2).min(COMMAND_SETTLEMENT_POLL_CEILING);
         }
-        // Cancellation removes the ask and the queued batch together. Read
-        // the batch's recorded state after the ask read or shift wait; only a
-        // still-open batch may be reported as pending.
-        let writer = self.runtime.writer();
-        let mut runtime = writer.lock().await;
-        let settlement = match previous_policy {
-            Some(previous_policy) => {
-                runtime
-                    .settle_session_command_from_policy(receipt.clone(), previous_policy)
-                    .await
-            }
-            None => runtime.settle_session_command(receipt.clone()).await,
-        }
-        .map_err(EmbedError::from)?;
-        self.runtime.publish_from(&runtime).await;
-        Ok(settlement)
     }
 
     async fn export_state(&self) -> lash_core::SessionSnapshot {

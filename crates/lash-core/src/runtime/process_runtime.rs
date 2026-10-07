@@ -17,7 +17,6 @@ pub struct ProcessRuntimePorts {
     pub host: crate::RuntimeHostConfig,
     pub plugin_host: Arc<crate::PluginHost>,
     pub process_work: crate::ProcessWorkWiring,
-    pub queued_work: Arc<dyn crate::SessionWorkEngine>,
     /// The host owner identity the process's session work runs under.
     pub lease_owner: crate::LeaseOwnerIdentity,
     pub turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
@@ -55,7 +54,7 @@ impl ProcessRuntimeContext {
             process_id,
             environment,
             host: ports.host,
-            work: super::host::RuntimeWork::processes(ports.process_work, ports.queued_work),
+            work: super::host::RuntimeWork::processes(ports.process_work),
             plugin_host: ports.plugin_host,
             lease_owner: ports.lease_owner,
             turn_phase_probe: ports.turn_phase_probe,

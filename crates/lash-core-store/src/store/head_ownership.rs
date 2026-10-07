@@ -1,14 +1,14 @@
-//! Who owns a session's head when a head write arrives from outside a shift
+//! Who owns a session's head when a head write arrives from outside a run
 //! (FIG-4202, ADR 0105).
 //!
-//! The bound turn owns the session head. A head commit that presents a
-//! shift fence is the owner's own: the store checks the fence is current and
-//! nothing more. A commit that presents none is a writer outside every shift
-//! (a dirty park's flush, a host-scoped service's write): the store refuses
-//! it, in the commit's own transaction, while a shift owns the head or is
-//! owed it, so no such write moves a head a bound run, an owed follow-on or
-//! an admitted command run was planned against. A host that must move the
-//! head submits its write as a session command, which the shift applies at a
+//! The bound turn owns the session head. A head commit that names the run
+//! it commits under ([`RuntimeCommit::committing_run`]) is a run's own: the
+//! session actor's epoch fences it. A commit that names none is a writer
+//! outside every run (a host-scoped service's write): the store refuses it,
+//! in the commit's own transaction, while a run owns the head or is owed
+//! it, so no such write moves a head a bound run, an owed follow-on or an
+//! open command run was planned against. A host that must move the head
+//! submits its write as a session command, which the session applies at a
 //! turn boundary.
 //!
 //! The owners, as the transaction reads them:
@@ -16,17 +16,18 @@
 //! - an unfinished run: admitted, with its rows bound and no terminal;
 //! - an owed follow-on on the head (ADR 0101 §3);
 //! - an open session command: a command run applies it at the next
-//!   boundary, and a command run that sealed and read it holds no binding a
-//!   narrower check would see.
+//!   boundary.
 //!
 //! A session's first commit publishes over the created head, which is no
 //! head to own (FIG-4099), so creation is never refused.
+//!
+//! [`RuntimeCommit::committing_run`]: super::RuntimeCommit::committing_run
 
 use crate::{SessionId, TurnId};
 
 use super::StoreError;
 
-/// What owns a session's head, refusing a head write outside the shift.
+/// What owns a session's head, refusing a head write outside every run.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -64,15 +65,15 @@ pub struct HeadOwnershipFacts {
     pub open_command: Option<u64>,
 }
 
-/// Whether a commit that presents `shift_fence` onto a head that exists
-/// (`head_exists`) must be checked against the head's owners: exactly a
-/// write outside every shift onto an existing head.
+/// Whether a commit onto a head that exists (`head_exists`) must be checked
+/// against the head's owners: exactly a write that names no run it commits
+/// under (`names_its_run`) onto an existing head.
 #[must_use]
-pub fn head_write_needs_ownership(shift_fence_presented: bool, head_exists: bool) -> bool {
-    !shift_fence_presented && head_exists
+pub fn head_write_needs_ownership(names_its_run: bool, head_exists: bool) -> bool {
+    !names_its_run && head_exists
 }
 
-/// The follow-on that owns the head against a write outside every shift:
+/// The follow-on that owns the head against a write outside every run:
 /// the one the head owes (`owed`) while the commit keeps owing it
 /// (`carried`). A commit that settles the follow-on is the follow-on's own,
 /// and the commit plan already refused every other commit that would drop
@@ -88,7 +89,7 @@ pub fn follow_on_owning_the_head(
         .then(|| owed.follow_on_turn_id.clone())
 }
 
-/// Refuse a head write outside every shift while `facts` name an owner of
+/// Refuse a head write outside every run while `facts` name an owner of
 /// the head (FIG-4202). A run outranks a follow-on, which outranks the
 /// command lane, so the refusal names the owner a host waits on first.
 pub fn require_unowned_head(

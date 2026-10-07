@@ -24,7 +24,6 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn admit_pending_turn_inputs(
         &self,
         batch: lash_core_execution::PendingTurnInputBatch,
-        ingress_claim_ttl_ms: u64,
     ) -> Result<lash_core_execution::TurnInputAdmission, StoreError> {
         let drafts = batch.drafts().len() as u64;
         let first_nonce = self.commit_count.fetch_add(drafts, AtomicOrdering::Relaxed);
@@ -32,14 +31,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         self.conn
             .write_flow(move |tx| {
                 let fleet = tx.fleet();
-                let outcome = admit_pending_turn_inputs_conn(
-                    tx,
-                    &batch,
-                    now,
-                    first_nonce,
-                    fleet,
-                    ingress_claim_ttl_ms,
-                );
+                let outcome = admit_pending_turn_inputs_conn(tx, &batch, now, first_nonce, fleet);
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
@@ -259,29 +251,6 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                             outcome,
                         });
                     }
-                    let released: Option<(String, i64)> = tx
-                        .query_row(
-                            crate::turn_ingress::turn_ingress_sql()
-                                .family
-                                .delete_released_turn_park_returning
-                                .sql(),
-                            params![session_id.as_str()],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?;
-                    if let Some((released_turn_id, released_park_id)) = released {
-                        crate::persistence::turn_park_feed::log_turn_park_closed_conn(
-                            tx,
-                            &session_id,
-                            &released_turn_id,
-                            released_park_id,
-                            &lash_core_execution::store::ParkEventKind::Cancelled {
-                                cause: lash_core_execution::store::ParkCancelCause::InputWithdrawn,
-                            },
-                            crate::clamp_epoch_ms(now),
-                        )?;
-                    }
                     Ok(results)
                 })();
                 match outcome {
@@ -335,30 +304,6 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                         for row in rows {
                             outcomes.push(cancel_pending_turn_input_row_conn(tx, row, now)?);
                         }
-                        let released: Option<(String, i64)> = tx
-                            .query_row(
-                                crate::turn_ingress::turn_ingress_sql()
-                                    .family
-                                    .delete_released_turn_park_returning
-                                    .sql(),
-                                params![session_id.as_str()],
-                                |row| Ok((row.get(0)?, row.get(1)?)),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?;
-                        if let Some((released_turn_id, released_park_id)) = released {
-                            crate::persistence::turn_park_feed::log_turn_park_closed_conn(
-                                tx,
-                                &session_id,
-                                &released_turn_id,
-                                released_park_id,
-                                &lash_core_execution::store::ParkEventKind::Cancelled {
-                                    cause:
-                                        lash_core_execution::store::ParkCancelCause::InputWithdrawn,
-                                },
-                                crate::clamp_epoch_ms(now),
-                            )?;
-                        }
                         Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes {
                             anchor,
                             outcomes,
@@ -392,9 +337,9 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
 
     async fn open_session_command_run(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        super::open_session_command_run_sqlite(self, fence).await
+        super::open_session_command_run_sqlite(self, session_id).await
     }
 
     async fn cancel_queued_work_batch(
@@ -559,10 +504,6 @@ fn enqueue_pending_turn_inputs_conn(
                 .map_err(|err| {
                     crate::sqlite_pending_turn_input_insert_error(err, session_id, &input_id)
                 })?;
-                // The admitted input owes its session a shift (ADR 0109 §3):
-                // the row is armed in the transaction that admits it, so no
-                // crash between the commit and the shift ask loses the ask.
-                crate::ingress_obligation::arm_turn_input_tx(tx, session_id, &input_id, now)?;
                 input_id
             }
         };
@@ -581,45 +522,10 @@ fn enqueue_pending_turn_inputs_conn(
             })?,
         );
     }
-    // An acceptor that executes its rows itself holds their ingress claims
-    // from this commit (FIG-4728): its inline shift is the ask, so no relay
-    // pass finds the rows due before the acceptor's own admission.
-    if let Some(claim_ttl_ms) = batch.acceptor_claim_ttl_ms() {
-        claim_due_ingress_conn(tx, &admitted, now.saturating_add(claim_ttl_ms))?;
-    }
+    // The rows and the session's wake commit together (ADR 0132 §12): no
+    // crash between them can leave input that nothing will admit.
+    crate::durable::wake_session_tx(tx, session_id, false, now)?;
     Ok(admitted)
-}
-
-/// Claim the still-due ingress obligation of each of `rows` under one minted
-/// token, held until `until_ms`, inside the transaction that admitted them.
-/// A row whose obligation is claimed, delivered or stalled is left as it
-/// stands, as the relay's own claim would answer `NotDue`.
-fn claim_due_ingress_conn(
-    tx: &Connection,
-    rows: &[lash_core_execution::PendingTurnInput],
-    until_ms: u64,
-) -> Result<Vec<lash_core_execution::store::ClaimedObligation>, StoreError> {
-    let token = lash_core_execution::store::ClaimToken::mint();
-    let sql = crate::ingress_obligation::turn_input_sql();
-    let mut claims = Vec::with_capacity(rows.len());
-    for row in rows {
-        let id = lash_core_execution::store::ObligationKey::Ingress {
-            session_id: row.session_id.clone(),
-            item_id: row.input_id.as_str().to_string(),
-        }
-        .id();
-        if let Some(claimed) = crate::obligation_ledger::claim_obligation_tx(
-            tx,
-            sql,
-            lash_core_execution::store::ObligationKind::Ingress,
-            &id,
-            &token,
-            until_ms,
-        )? {
-            claims.push(claimed);
-        }
-    }
-    Ok(claims)
 }
 
 /// What session `session_id` records about turn `turn_id`, read under the
@@ -653,31 +559,22 @@ fn turn_address_evidence_conn(
 }
 
 /// The fused admission (FIG-3975): inside the one enqueue transaction, answer
-/// the caller's session state-version probe, claim each admitted row's
-/// still-due ingress obligation under one minted token for the producer's
-/// immediate ask, and read the head the queue event publishes against. A
-/// failure anywhere rolls the whole admission back, as the separate calls
-/// would have.
+/// the caller's session state-version probe and read the head the queue
+/// event publishes against. A failure anywhere rolls the whole admission
+/// back, as the separate calls would have.
 fn admit_pending_turn_inputs_conn(
     tx: &Connection,
     batch: &lash_core_execution::PendingTurnInputBatch,
     now: u64,
     first_nonce: u64,
     fleet: lash_core_execution::FleetFormat,
-    ingress_claim_ttl_ms: u64,
 ) -> Result<lash_core_execution::TurnInputAdmission, StoreError> {
     let session_id = batch.session_id();
     read_session_state_version_conn(tx, session_id, fleet)?;
     let rows = enqueue_pending_turn_inputs_conn(tx, batch, now, first_nonce)?;
-    // Claim only the obligations still `due`: a row a resend answered whose
-    // obligation is claimed, delivered or stalled is not the producer's ask
-    // to make — the relay's own claim would have answered `NotDue` the same.
-    let ingress_claims =
-        claim_due_ingress_conn(tx, &rows, now.saturating_add(ingress_claim_ttl_ms))?;
     let committed_head = try_load_session_head_meta_from_conn(tx, session_id, fleet)?;
     Ok(lash_core_execution::TurnInputAdmission::Fused {
         rows,
-        ingress_claims,
         committed_head,
     })
 }

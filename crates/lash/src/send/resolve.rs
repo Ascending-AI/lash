@@ -1,18 +1,17 @@
 //! Outcome derivation (FIG-3600 S5b, D1 §1.5): an input's run, then that
-//! run's terminal or its park, read from the store alone.
+//! run's terminal, read from the store alone.
 //!
-//! Resolution makes no engine call. It is engine-neutral, so the interim SQL
-//! engine and Restate share it, and it answers the same after a restart. A
+//! Resolution makes no engine call, so it answers the same after a restart. A
 //! committed run answers from its terminal evidence, which the head commit
 //! of its final physical turn writes with the outcome it committed: one
 //! read, however deep the engine's queues are (FIG-4345).
 
 use lash_core::facade_support::TurnOutcome;
 use lash_core::runtime::TurnInputAcceptanceReceipt;
-use lash_core::store::{PhysicalTurn, RunTerminalCause};
+use lash_core::store::RunTerminalCause;
 use lash_core::{InputId, TurnId};
 
-use super::{ParkedTurn, SendParts, StalledDelivery};
+use super::SendParts;
 use crate::error::Result;
 
 /// What the store says about an input or a run, right now.
@@ -32,19 +31,14 @@ pub(super) enum Resolution {
         run: TurnId,
         outcome: Box<lash_core::runtime::PluginOperationCommandOutcome>,
     },
-    /// The run is parked (ADR 0104 O3): durable, and not terminal.
-    Parked(ParkedTurn),
     /// The run's execution ended with `refusal`, a typed refusal no retry could
     /// change, and no turn of it committed (FIG-4018).
     Refused {
         run: TurnId,
         refusal: lash_core::RuntimeError,
     },
-    /// The input is open and its delivery to the engine stalled (ADR 0109
-    /// §3): no shift will take it until its obligation is re-armed.
-    Stalled(StalledDelivery),
     /// The input is open and its session carries a fault (ADR 0109 §9): no
-    /// shift admits it until an operator clears the fault, whose typed
+    /// run admits it until an operator clears the fault, whose typed
     /// error is the answer.
     Faulted(lash_core::RuntimeError),
 }
@@ -90,10 +84,7 @@ pub(super) async fn resolve_input(
         Ok(None) | Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => {}
         Err(error) => return Err(store_error(error)),
     }
-    Ok(match stalled_delivery(parts, &receipt.input_id).await? {
-        Some(stalled) => Resolution::Stalled(stalled),
-        None => Resolution::Undecided { run: None },
-    })
+    Ok(Resolution::Undecided { run: None })
 }
 
 /// An input with no run binding and no open row: a withdrawal on record, or
@@ -128,29 +119,10 @@ async fn unbound_input(parts: &SendParts, input: &InputId) -> Result<Resolution>
     Ok(resolution)
 }
 
-/// The open input's delivery, when its ingress obligation stalled. A store
-/// that keeps no obligations has none stalled.
-async fn stalled_delivery(parts: &SendParts, input: &InputId) -> Result<Option<StalledDelivery>> {
-    let stalled = match parts.ops.stalled_ingress(input.as_str()).await {
-        Ok(stalled) => stalled,
-        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => None,
-        Err(error) => return Err(store_error(error)),
-    };
-    Ok(stalled.map(|stalled| StalledDelivery {
-        session_id: parts.session_id.clone(),
-        input_id: input.clone(),
-        reason: stalled.reason,
-        attempts: stalled.attempts,
-        last_error: stalled.last_error,
-        stalled_at_ms: stalled.stalled_at_ms,
-    }))
-}
-
-/// Resolve a logical run from its durable record: its terminal evidence,
-/// then its park.
+/// Resolve a logical run from its durable record: its terminal evidence.
 ///
 /// A run the head commit of its final physical turn ended is settled with
-/// the outcome that commit wrote. A parked run is parked. A run whose execution
+/// the outcome that commit wrote. A run whose execution
 /// ended with a typed refusal is refused. Any other run is undecided.
 pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resolution> {
     let cause = parts
@@ -276,9 +248,6 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
         )
         | None => None,
     };
-    if let Some(parked) = park_of(parts, run).await? {
-        return Ok(Resolution::Parked(parked));
-    }
     if let Some(refusal) = refusal {
         return Ok(Resolution::Refused {
             run: run.clone(),
@@ -288,23 +257,4 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
     Ok(Resolution::Undecided {
         run: Some(run.clone()),
     })
-}
-
-/// The session's park, when it holds `run`.
-async fn park_of(parts: &SendParts, run: &TurnId) -> Result<Option<ParkedTurn>> {
-    let park = match parts.store.load_turn_park().await {
-        Ok(park) => park,
-        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => None,
-        Err(error) => return Err(store_error(error)),
-    };
-    Ok(park
-        .filter(|park| PhysicalTurn::physical_ordinal_of(run, &park.turn_id).is_some())
-        .map(|park| ParkedTurn {
-            session_id: park.session_id,
-            run: run.clone(),
-            park_id: park.park_id,
-            reason: park.reason,
-            since_ms: park.since_ms,
-            attempts: park.attempts,
-        }))
 }

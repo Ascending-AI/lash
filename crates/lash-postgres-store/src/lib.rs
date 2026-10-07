@@ -757,14 +757,6 @@ impl PostgresStorage {
         &self,
         kind: lash_core_execution::store::ObligationKind,
     ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
-        // Ingress spans two tables (ADR 0109 §3).
-        if kind == lash_core_execution::store::ObligationKind::Ingress {
-            return crate::ingress_obligation::ingress_ledger(
-                &self.pool,
-                &self.fence,
-                &self.observer,
-            );
-        }
         Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
             kind,
             self.pool.clone(),
@@ -847,8 +839,6 @@ mod evidence_retention;
 mod fleet_format;
 #[path = "postgres/guarded_tx.rs"]
 mod guarded_tx;
-#[path = "postgres/ingress_obligation.rs"]
-mod ingress_obligation;
 #[path = "postgres/migrate.rs"]
 mod migrate;
 #[path = "postgres/obligation_ledger.rs"]
@@ -873,8 +863,6 @@ mod release_stamp;
 mod rendered_statement_sets_tests;
 #[path = "postgres/revisions.rs"]
 mod revisions;
-#[path = "postgres/run_verbs.rs"]
-mod run_verbs;
 #[path = "postgres/runtime_persistence/mod.rs"]
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]

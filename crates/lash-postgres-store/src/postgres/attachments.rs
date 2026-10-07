@@ -70,7 +70,7 @@ pub(crate) async fn lock_attachment_referrer_tx(
         .map_err(store_sqlx_error)
 }
 async fn check_fence_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     referrer: &ArtifactReferrer,
 ) -> Result<(), StoreError> {
     let fenced: bool = sqlx::query_scalar(
@@ -81,7 +81,7 @@ async fn check_fence_tx(
     )
     .bind(referrer.kind().as_str())
     .bind(referrer.canonical_id())
-    .fetch_one(&mut **tx)
+    .fetch_one(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
     if fenced {
@@ -92,7 +92,7 @@ async fn check_fence_tx(
     Ok(())
 }
 pub(crate) async fn acquire_attachment_refs_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     claim: &ReferrerClaim,
     ids: &[AttachmentId],
     now: u64,
@@ -107,12 +107,12 @@ pub(crate) async fn acquire_attachment_refs_tx(
     for id in &ids {
         let deleting: bool = sqlx::query_scalar(attachment_sql().postgres.select_deleting.sql())
             .bind(id.as_str())
-            .fetch_one(&mut **tx)
+            .fetch_one(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
         let evidenced = sqlx::query(attachment_sql().uploads.select_evidence.sql())
             .bind(id.as_str())
-            .fetch_optional(&mut **tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?
             .is_some();
@@ -130,7 +130,7 @@ pub(crate) async fn acquire_attachment_refs_tx(
                 .sql(),
         )
         .bind(id.as_str())
-        .execute(&mut **tx)
+        .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
         insert_edge_tx(tx, &claim.referrer(), id).await?;
@@ -141,7 +141,7 @@ pub(crate) async fn acquire_attachment_refs_tx(
     Ok(())
 }
 async fn insert_edge_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     referrer: &ArtifactReferrer,
     id: &AttachmentId,
 ) -> Result<(), StoreError> {
@@ -149,7 +149,7 @@ async fn insert_edge_tx(
         .bind(id.as_str())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .execute(&mut **tx)
+        .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
     Ok(())
@@ -223,7 +223,7 @@ pub(crate) static FENCE_WRITER_WINDOW_DELAY_MS: std::sync::atomic::AtomicU64 =
 
 /// Take the per-digest fence lock for the rest of `tx`.
 pub(crate) async fn lock_attachment_fence_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     attachment_id: &str,
 ) -> Result<(), StoreError> {
     sqlx::query(
@@ -233,7 +233,7 @@ pub(crate) async fn lock_attachment_fence_tx(
     )
     .bind(ATTACHMENT_FENCE_LOCK_NAMESPACE)
     .bind(attachment_id)
-    .execute(&mut **tx)
+    .execute(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
     Ok(())

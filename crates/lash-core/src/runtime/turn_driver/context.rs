@@ -82,12 +82,10 @@ impl<'run> RuntimeTurnDriver<'run> {
                 context
                     .with_logical_run(crate::TurnAddress::new(
                         self.session_id.clone(),
-                        self.shift_run.clone().unwrap_or_else(|| {
-                            self.scoped_effect_controller
-                                .execution_scope()
-                                .logical_run()
-                                .unwrap_or_else(|| self.turn_id.clone())
-                        }),
+                        self.scoped_effect_controller
+                            .execution_scope()
+                            .logical_run()
+                            .unwrap_or_else(|| self.turn_id.clone()),
                     ))
                     .with_run_capabilities(run_capabilities)
                     .with_recorded_turn_cancel(

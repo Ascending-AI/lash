@@ -38,123 +38,21 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
     async fn count_unsettled_turns(
         &self,
     ) -> Result<lash_core_execution::store::UnsettledTurnCounts, StoreError> {
-        // The headline counts and the per-reason split must come from one
-        // snapshot — a park landing between two pool reads would appear in
-        // the total but not in the split. `REPEATABLE READ` pins both
-        // statements to the transaction's first-snapshot.
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query(
-            crate::connection_sql::connection_sql()
-                .begin_repeatable_read_read_only
-                .sql(),
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
         let row = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .count_unsettled_turns
                 .sql(),
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&self.pool)
         .await
         .map_err(store_sqlx_error)?;
-        let parked: i64 = row.get(0);
-        let oldest_since_ms: Option<i64> = row.get(1);
-        let in_flight: i64 = row.get(2);
-        let held_by_stalled_close: i64 = row.get(3);
-        let reason_rows = sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .family
-                .count_parks_by_reason
-                .sql(),
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let generation_rows = sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .family
-                .count_retired_parks_by_executable_generation
-                .sql(),
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        let retired_by_executable_generation = generation_rows
-            .into_iter()
-            .map(|row| {
-                let generation: String = row.get(0);
-                let count: i64 = row.get(1);
-                (
-                    lash_core_execution::ExecutableGeneration::new(generation),
-                    usize::try_from(count).unwrap_or_default(),
-                )
-            })
-            .collect();
-        let mut parked_by_reason = std::collections::BTreeMap::new();
-        for row in reason_rows {
-            let code: String = row.get(0);
-            let count: i64 = row.get(1);
-            let Some(code) = lash_core_execution::store::ParkReasonCode::from_code(&code) else {
-                return Err(StoreError::StoredDataCorrupt {
-                    record_kind: "TurnPark",
-                    message: format!("stored park reason code `{code}` is unknown"),
-                });
-            };
-            parked_by_reason.insert(code, usize::try_from(count).unwrap_or_default());
-        }
+        let in_flight: i64 = row.get(0);
+        let held_by_stalled_close: i64 = row.get(1);
         Ok(lash_core_execution::store::UnsettledTurnCounts {
-            parked_turns: usize::try_from(parked).unwrap_or_default(),
             in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
             held_by_stalled_close: usize::try_from(held_by_stalled_close).unwrap_or_default(),
-            oldest_parked_since_ms: oldest_since_ms.map(|ms| u64::try_from(ms).unwrap_or_default()),
-            parked_by_reason,
-            retired_by_executable_generation,
         })
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &lash_core_execution::store::TurnParkQuery,
-    ) -> Result<Vec<lash_core_execution::store::TurnPark>, StoreError> {
-        let limit = i64::try_from(query.limit.get()).unwrap_or(i64::MAX);
-        let session = query.session.as_ref().map(|id| id.as_str().to_string());
-        let at_or_before = query
-            .parked_at_or_before_ms
-            .map(|ms| i64::try_from(ms).unwrap_or(i64::MAX));
-        let (after_since, after_session) = match query.after.as_ref() {
-            Some((since_ms, session_id)) => (
-                Some(i64::try_from(*since_ms).unwrap_or(i64::MAX)),
-                Some(session_id.as_str().to_string()),
-            ),
-            None => (None, None),
-        };
-        let reasons: Option<Vec<&str>> = query
-            .reasons
-            .as_ref()
-            .filter(|reasons| !reasons.is_empty())
-            .map(|reasons| reasons.iter().map(|code| code.as_str()).collect());
-        let rows = sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .turn_parks_postgres
-                .list
-                .sql(),
-        )
-        .bind(limit)
-        .bind(session)
-        .bind(at_or_before)
-        .bind(after_since)
-        .bind(after_session)
-        .bind(reasons)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(store_sqlx_error)?;
-        rows.iter()
-            .map(crate::runtime_persistence::turn_park::decode_turn_park_row)
-            .collect()
     }
 
     async fn turns_changed_since(
@@ -204,87 +102,6 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         })
     }
 
-    async fn turn_park_feed(
-        &self,
-        after: lash_core_execution::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<
-        lash_core_execution::store::ParkFeedPage<lash_core_execution::store::TurnParkTarget>,
-        StoreError,
-    > {
-        let mut page = lash_core_execution::store::ParkFeedPage {
-            events: Vec::new(),
-            next: after,
-        };
-        let after_seq = i64::try_from(after.store_sequence()).unwrap_or(i64::MAX);
-        let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        // The horizon is read under `FOR SHARE`: a compaction still
-        // committing must not let a stale-cursor read pass unrefused while
-        // its events are already gone.
-        let horizon: i64 = sqlx::query_scalar(
-            crate::turn_ingress::turn_ingress_sql()
-                .turn_park_clock
-                .select_compaction_horizon_for_share
-                .sql(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if after_seq < horizon {
-            return Err(StoreError::ParkFeedCursorCompacted {
-                horizon: lash_core_execution::store::ParkFeedCursor::from_store_sequence(
-                    u64::try_from(horizon).unwrap_or_default(),
-                ),
-            });
-        }
-        let rows = sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .turn_park_events
-                .select_events_after
-                .sql(),
-        )
-        .bind(after_seq)
-        .bind(limit)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        for row in rows {
-            let seq: i64 = row.get(0);
-            let session_id: String = row.get(1);
-            let turn_id: String = row.get(2);
-            let park_id: i64 = row.get(3);
-            let kind: String = row.get(4);
-            let cause: Option<String> = row.get(5);
-            let reason_json: Option<String> = row.get(6);
-            let at_ms: i64 = row.get(7);
-            let redrive_intent: Option<i64> = row.get(8);
-            let kind = lash_core_execution::store::ParkEventKind::decode_columns(
-                &kind,
-                cause.as_deref(),
-                reason_json.as_deref(),
-                redrive_intent,
-            )?;
-            page.events.push(lash_core_execution::store::ParkFeedEvent {
-                seq: u64::try_from(seq).unwrap_or_default(),
-                at_ms: u64::try_from(at_ms).unwrap_or_default(),
-                target: lash_core_execution::store::TurnParkTarget {
-                    session_id: SessionId::parse(session_id)?,
-                    turn_id: lash_sansio::TurnId::parse(turn_id)?,
-                },
-                park_id: lash_core_execution::store::ParkId::from_feed_sequence(
-                    u64::try_from(park_id).unwrap_or_default(),
-                ),
-                kind,
-            });
-            page.next = lash_core_execution::store::ParkFeedCursor::from_store_sequence(
-                u64::try_from(seq).unwrap_or_default(),
-            );
-        }
-        Ok(page)
-    }
-
     async fn non_terminal_runs_page(
         &self,
         after: Option<&lash_core_execution::engine::RunRef>,
@@ -307,9 +124,6 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         .map_err(crate::store_sqlx_error)?;
         rows.into_iter()
             .map(|row| {
-                let admission = row
-                    .try_get::<Option<String>, _>(2)
-                    .map_err(crate::store_sqlx_error)?;
                 Ok(lash_core_execution::engine::OpenRun {
                     target: lash_core_execution::engine::RunRef {
                         session: SessionId::parse(
@@ -321,12 +135,6 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
                                 .map_err(crate::store_sqlx_error)?,
                         )?,
                     },
-                    executor: lash_core_execution::store::RunExecutor::from_stored(
-                        admission.as_deref(),
-                        row.try_get::<Option<String>, _>(3)
-                            .map_err(crate::store_sqlx_error)?
-                            .as_deref(),
-                    )?,
                 })
             })
             .collect()
@@ -350,8 +158,8 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         after: Option<lash_core_execution::store::ControlIntentId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
-        let sql = &crate::session_runs::session_runs_sql().verbs;
-        let rows = sqlx::query(sql.intents.sql())
+        let sql = &crate::session_runs::session_runs_sql().intents;
+        let rows = sqlx::query(sql.list_after.sql())
             .bind(after.map_or(0, |id| id.sequence()) as i64)
             .bind(limit.get() as i64)
             .fetch_all(&self.pool)
@@ -360,37 +168,6 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         rows.iter()
             .map(crate::session_runs::decode_intent)
             .collect()
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash_core_execution::store::ParkFeedCursor,
-    ) -> Result<(), StoreError> {
-        let through_seq = i64::try_from(through.store_sequence()).unwrap_or(i64::MAX);
-        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        let sql = crate::turn_ingress::turn_ingress_sql();
-        // Lock the clock row before the delete: a concurrent bump either
-        // commits ahead of the lock — its events are then visible to the
-        // delete and to the clamp — or waits until this horizon update is
-        // durable. `through` is clamped to the allocated sequence so the
-        // horizon never rises past events the feed has not yet committed.
-        let current_seq: i64 =
-            sqlx::query_scalar(sql.turn_park_clock.select_current_for_update.sql())
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        let through_seq = through_seq.min(current_seq);
-        sqlx::query(sql.turn_park_events.delete_events_through.sql())
-            .bind(through_seq)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        sqlx::query(sql.turn_park_clock.raise_compaction_horizon.sql())
-            .bind(through_seq)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)
     }
 }
 
@@ -784,7 +561,6 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 ),
                 session_id: request.session_id.clone(),
                 config,
-                published_by_shift: false,
             },
             0,
             checkpoint_ref.clone().map(Into::into),
@@ -1258,30 +1034,6 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
-    // A deleted session's parked turn is cancelled, and its feed event
-    // outlives the session row: the ledger is the only place the park
-    // transition stays durable (FIG-3659).
-    let released = sqlx::query(turn_ingress.turn_parks.delete_by_session_returning.sql())
-        .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    if let Some(released) = released {
-        let released_turn_id: String = released.get(0);
-        let released_park_id: i64 = released.get(1);
-        let at_ms = postgres_transaction_epoch_ms(tx).await?;
-        crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
-            tx,
-            session_id,
-            &released_turn_id,
-            released_park_id,
-            &lash_core_execution::store::ParkEventKind::Cancelled {
-                cause: lash_core_execution::store::ParkCancelCause::SessionDeleted,
-            },
-            at_ms,
-        )
-        .await?;
-    }
     // The session's logical runs and their input bindings go with it; a
     // `close_session` intent stays as its deletion tombstone.
     crate::session_runs::delete_session_runs_conn(tx, session_id).await?;

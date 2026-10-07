@@ -114,7 +114,7 @@ impl LashRuntime {
     }
 
     /// Apply the administrative compaction the command run `completion`
-    /// names, under the command run's `shift_fence` (FIG-4201). `false`
+    /// names (FIG-4201). `false`
     /// when the command was withdrawn since the lane was read: nothing was
     /// applied.
     ///
@@ -129,7 +129,6 @@ impl LashRuntime {
         &mut self,
         instructions: Option<String>,
         completion: crate::QueuedWorkCompletion,
-        shift_fence: &crate::store::ShiftFence,
         run_controller: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let [batch_id] = completion.batch_ids.as_slice() else {
@@ -141,7 +140,7 @@ impl LashRuntime {
                 ),
             ));
         };
-        let controller = super::shift::step_controller(
+        let controller = super::step_controller(
             run_controller,
             crate::AdmittedScope::session_operation(
                 self.state.session_id.clone(),
@@ -149,7 +148,7 @@ impl LashRuntime {
             ),
         )?;
         let run = Box::pin(self.run_compaction(instructions, &controller)).await?;
-        Box::pin(self.commit_compact_context_command(run, completion, shift_fence)).await
+        Box::pin(self.commit_compact_context_command(run, completion)).await
     }
 
     /// Summarize the frame current at the compaction's recorded base and
@@ -275,7 +274,6 @@ impl LashRuntime {
         &mut self,
         run: CompactionRun,
         completion: crate::QueuedWorkCompletion,
-        shift_fence: &crate::store::ShiftFence,
     ) -> Result<bool, RuntimeError> {
         let store = self
             .session
@@ -350,7 +348,6 @@ impl LashRuntime {
                     message: error.message.clone(),
                 },
             };
-            commit.shift_fence = Some(Box::new(shift_fence.clone()));
             commit.applied_commands = Some(completion.clone());
             for batch_id in &completion.batch_ids {
                 commit.command_outcomes.insert(

@@ -180,7 +180,7 @@ pub struct RuntimeExecutionProcessEventContext {
     pub process_work: crate::ProcessWorkWiring,
     pub store: Option<Arc<dyn crate::RuntimeStore>>,
     pub session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-    pub queued_work: Arc<dyn crate::SessionWorkEngine>,
+
     pub clock: Arc<dyn crate::Clock>,
 }
 

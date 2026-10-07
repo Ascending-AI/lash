@@ -112,17 +112,6 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                         .map_err(|err| {
                             pending_turn_input_insert_error(err, session_id, &input_id)
                         })?;
-                    // The admitted input owes its session a shift (ADR 0109
-                    // §3): the row is armed in the transaction that admits
-                    // it. A row an earlier submission admitted already
-                    // carries its obligation and is left as it stands.
-                    crate::ingress_obligation::arm_turn_input_tx(
-                        &mut tx,
-                        session_id,
-                        input_id.as_str(),
-                        now,
-                    )
-                    .await?;
                     input_id
                 }
             };
@@ -144,31 +133,18 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                     })?,
             );
         }
-        // An acceptor that executes its rows itself holds their ingress claims
-        // from this commit (FIG-4728): its inline shift is the ask, so no
-        // relay pass finds the rows due before the acceptor's own admission.
-        if let Some(claim_ttl_ms) = batch.acceptor_claim_ttl_ms() {
-            let until_ms = now.saturating_add(claim_ttl_ms);
-            for row in &admitted {
-                crate::ingress_obligation::claim_turn_input_tx(
-                    &mut tx,
-                    &row.session_id,
-                    row.input_id.as_str(),
-                    until_ms,
-                )
-                .await?;
-            }
-        }
+        // The rows and the session's wake commit together (ADR 0132 §12): no
+        // crash between them can leave input that nothing will admit.
+        crate::durable::wake_session_tx(&mut tx, session_id, false, now).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(admitted)
     }
 
     /// This backend does not fold the follow-ups (FIG-3975): the probe, the
-    /// enqueue, the relay's claim and the head read stay separate round-trips.
+    /// enqueue and the head read stay separate round-trips.
     async fn admit_pending_turn_inputs(
         &self,
         batch: lash_core_execution::PendingTurnInputBatch,
-        _ingress_claim_ttl_ms: u64,
     ) -> Result<lash_core_execution::TurnInputAdmission, StoreError> {
         self.read_session_state_version(batch.session_id()).await?;
         self.enqueue_pending_turn_inputs(batch)
@@ -339,31 +315,6 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 };
             results.push(lash_core_execution::PendingTurnInputCancelReceipt { target, outcome });
         }
-        let released = sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .family
-                .delete_released_turn_park_returning
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if let Some(released) = released {
-            let released_turn_id: String = released.get(0);
-            let released_park_id: i64 = released.get(1);
-            crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
-                &mut tx,
-                session_id,
-                &released_turn_id,
-                released_park_id,
-                &lash_core_execution::store::ParkEventKind::Cancelled {
-                    cause: lash_core_execution::store::ParkCancelCause::InputWithdrawn,
-                },
-                now,
-            )
-            .await?;
-        }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(results)
     }
@@ -412,31 +363,6 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         for row in rows {
             outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row, now).await?);
         }
-        let released = sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .family
-                .delete_released_turn_park_returning
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if let Some(released) = released {
-            let released_turn_id: String = released.get(0);
-            let released_park_id: i64 = released.get(1);
-            crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
-                &mut tx,
-                session_id,
-                &released_turn_id,
-                released_park_id,
-                &lash_core_execution::store::ParkEventKind::Cancelled {
-                    cause: lash_core_execution::store::ParkCancelCause::InputWithdrawn,
-                },
-                now,
-            )
-            .await?;
-        }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })
     }
@@ -460,9 +386,9 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
 
     async fn open_session_command_run(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        super::open_session_command_run_postgres(self, fence).await
+        super::open_session_command_run_postgres(self, session_id).await
     }
 
     async fn cancel_queued_work_batch(

@@ -150,25 +150,20 @@ impl SessionCommitStore for SqliteStore {
 
     async fn admit_session_state(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
-        let fence = fence.clone();
-        self.conn
-            .write_flow(move |tx| {
-                let fleet = tx.fleet();
-                let outcome = (|| {
-                    require_shift_fence_conn(tx, &fence)?;
-                    let version = read_session_state_version_conn(tx, fence.session(), fleet)?;
-                    Ok(lash_core_execution::store::SessionStateAdmission {
-                        session_id: fence.session().clone(),
-                        version,
-                        shift_epoch: fence.epoch(),
-                    })
-                })();
-                Ok(match outcome {
-                    Ok(admission) => TxOutcome::Commit(Ok(admission)),
-                    Err(error) => TxOutcome::Rollback(Err(error)),
-                })
+        let session_id = session_id.clone();
+        let fleet = self.fleet_format();
+        self.read_connection()
+            .call(move |conn| {
+                Ok(
+                    read_session_state_version_conn(conn, &session_id, fleet).map(|version| {
+                        lash_core_execution::store::SessionStateAdmission {
+                            session_id: session_id.clone(),
+                            version,
+                        }
+                    }),
+                )
             })
             .await
             .map_err(sqlite_error)?
@@ -176,21 +171,18 @@ impl SessionCommitStore for SqliteStore {
 
     async fn retain_admission_base(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
         base: &lash_core_execution::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
-        let fence = fence.clone();
+        let session_id = session_id.clone();
         let checkpoint_ref = base.checkpoint.clone();
         self.conn
             .write_flow(move |tx| {
-                let outcome = (|| {
-                    require_shift_fence_conn(tx, &fence)?;
-                    crate::session_meta::retain_admission_base_conn(
-                        tx,
-                        fence.session(),
-                        checkpoint_ref.as_ref(),
-                    )
-                })();
+                let outcome = crate::session_meta::retain_admission_base_conn(
+                    tx,
+                    &session_id,
+                    checkpoint_ref.as_ref(),
+                );
                 Ok(match outcome {
                     Ok(()) => TxOutcome::Commit(Ok(())),
                     Err(error) => TxOutcome::Rollback(Err(error)),
@@ -202,14 +194,14 @@ impl SessionCommitStore for SqliteStore {
 
     async fn raise_pending_follow_on_attempts(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
         follow_on_turn_id: &lash_core_execution::TurnId,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
-        let fence = fence.clone();
+        let session_id = session_id.clone();
         let follow_on_turn_id = follow_on_turn_id.clone();
         self.conn
             .write_flow(move |tx| {
-                let outcome = raise_pending_follow_on_conn(tx, &fence, &follow_on_turn_id);
+                let outcome = raise_pending_follow_on_conn(tx, &session_id, &follow_on_turn_id);
                 Ok(match outcome {
                     Ok(raised) => TxOutcome::Commit(Ok(raised)),
                     Err(error) => TxOutcome::Rollback(Err(error)),
@@ -225,38 +217,6 @@ impl SessionCommitStore for SqliteStore {
     ) -> Result<Option<SessionHeadMeta>, StoreError> {
         self.read_session_state_version(session_id).await?;
         SqliteStore::load_session_head_meta(self, session_id).await
-    }
-
-    async fn record_turn_park(
-        &self,
-        park: &lash_core_execution::store::TurnParkWrite,
-    ) -> Result<
-        lash_core_execution::store::StoreTransition<lash_core_execution::store::TurnPark>,
-        StoreError,
-    > {
-        let write = park.clone();
-        self.conn
-            .write_flow(move |tx| {
-                let outcome = ensure_session_not_deleted_conn(tx, &write.session_id)
-                    .and_then(|()| super::turn_park::record_turn_park_conn(tx, &write));
-                Ok(match outcome {
-                    Ok(park) => TxOutcome::Commit(Ok(park)),
-                    Err(err) => TxOutcome::Rollback(Err(err)),
-                })
-            })
-            .await
-            .map_err(sqlite_error)?
-    }
-
-    async fn load_turn_park(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<lash_core_execution::store::TurnPark>, StoreError> {
-        let session_id = session_id.clone();
-        self.conn
-            .call(move |conn| Ok(super::turn_park::turn_park_conn(conn, &session_id)))
-            .await
-            .map_err(sqlite_error)?
     }
 
     async fn commit_runtime_state(
@@ -414,45 +374,8 @@ pub(crate) fn apply_runtime_commit_conn(
             session_id: commit.session_id.clone(),
         });
     }
-    // A successor's seal refuses the commit before anything
-    // is written (ADR 0105 §2). A commit already stored still
-    // answers from its receipt below, since a shift that runs
-    // several runs in one journal replays an earlier run's
-    // commit after a later run's seal (FIG-4498).
-    let superseded = super::shift_epoch::commit_fence_superseded_conn(tx, commit)?;
     let existing = try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
     planner.validate_node_derivation()?;
-    // A run's commit settles its park (FIG-3586, FIG-3600
-    // S7), in the commit's transaction, whichever of its
-    // physical turns committed; another run's commit
-    // leaves it.
-    if let Some(turn_id) = commit.settled_park_run()
-        && superseded.is_none()
-    {
-        let released: Option<(String, i64)> = tx
-            .query_row(
-                crate::turn_ingress::turn_ingress_sql()
-                    .turn_parks
-                    .delete_for_turn_returning
-                    .sql(),
-                params![commit.session_id.as_str(), turn_id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        if let Some((released_turn_id, released_park_id)) = released {
-            crate::persistence::turn_park_feed::log_turn_park_closed_conn(
-                tx,
-                &commit.session_id,
-                &released_turn_id,
-                released_park_id,
-                &lash_core_execution::store::ParkEventKind::Unparked {
-                    cause: lash_core_execution::store::UnparkCause::TurnCommitted,
-                },
-                crate::clamp_epoch_ms(now),
-            )?;
-        }
-    }
     {
         let prior: Option<PriorReceiptRow> = tx
             .query_row(
@@ -504,19 +427,11 @@ pub(crate) fn apply_runtime_commit_conn(
                 result,
                 append_request_identity,
             };
-            let replay = match planner.decide_receipt(Some(prior)) {
-                Ok(replay) => replay,
-                // Only the stored commit's exact replay answers under a
-                // superseded fence.
-                Err(conflict) => return Err(superseded.unwrap_or(conflict)),
-            };
+            let replay = planner.decide_receipt(Some(prior))?;
             if let Some(replay) = replay {
                 return Ok(replay.into_result());
             }
         }
-    }
-    if let Some(superseded) = superseded {
-        return Err(superseded);
     }
     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
     let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
@@ -624,13 +539,13 @@ pub(crate) fn apply_runtime_commit_conn(
             .and_then(|meta| meta.pending_follow_on.clone()),
     })?;
     // The bound turn owns the head (FIG-4202): a write
-    // outside every shift is refused while a run, an owed
+    // outside every run is refused while a run, an owed
     // follow-on or an open command owns it. A replayed
     // receipt above answered its first outcome already, and
     // the plan's own refusals (a follow-on the commit would
     // drop, a moved head) answer first.
     if lash_core_execution::store::head_write_needs_ownership(
-        commit.shift_fence.is_some(),
+        commit.committing_run().is_some(),
         existing.as_ref().is_some_and(|head| !head.is_created()),
     ) {
         let facts = crate::session_runs::head_ownership_facts_conn(

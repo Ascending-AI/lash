@@ -36,21 +36,3 @@ fn deleted_commit_is_typed_terminal_and_retains_the_session_id() {
     assert!(!deleted.is_retryable());
     assert!(deleted.is_terminal());
 }
-
-#[test]
-fn a_superseded_shift_fence_is_a_superseded_commit_on_every_commit_path() {
-    let stale = || StoreError::StaleShiftFence {
-        session_id: crate::SessionId::from("fenced"),
-        fence_epoch: 1,
-        current_epoch: 2,
-    };
-    for mapped in [
-        runtime_error_from_store_commit(stale()),
-        super::runtime_error_from_turn_input_admission(stale()),
-    ] {
-        assert_eq!(mapped.code, RuntimeErrorCode::StoreCommitSuperseded);
-        assert!(!mapped.is_retryable());
-        assert!(!crate::runtime::shift::engine_retries(&mapped));
-        assert!(mapped.message.contains("fenced"), "{mapped:?}");
-    }
-}

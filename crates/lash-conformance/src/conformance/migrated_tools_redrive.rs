@@ -149,7 +149,6 @@ async fn build_migrated_runtime(parts: MigratedRuntimeParts) -> crate::LashRunti
                 parts.session_id.clone(),
             ))
             .with_process_work(parts.process_work)
-            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await
@@ -244,7 +243,6 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
                 watched.clone(),
                 Arc::new(crate::NoProcessWork::new(&watched)),
             ),
-            Arc::new(crate::NoSessionWork::new()),
             crate::testing::runtime_lease_owner(),
         ),
     )

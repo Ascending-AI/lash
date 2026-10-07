@@ -106,7 +106,6 @@ impl LashRuntime {
         &mut self,
         request: crate::AppendSessionNodesRequest,
         completion: crate::QueuedWorkCompletion,
-        shift_fence: &crate::store::ShiftFence,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
@@ -145,24 +144,20 @@ impl LashRuntime {
                 // over the durable head, with nothing appended.
                 self.invalidate_resident_session_state();
                 self.reload_invalidated_resident_session_state().await?;
-                let committed = Box::pin(self.commit_host_command(
-                    &completion,
-                    shift_fence,
-                    None,
-                    None,
-                    |_, _| crate::runtime::SessionCommandOutcome::Failed {
-                        code: RuntimeErrorCode::SessionCommandRun,
-                        message: format!("the protocol refused the appended nodes: {error}"),
-                    },
-                ))
-                .await?;
+                let committed =
+                    Box::pin(self.commit_host_command(&completion, None, None, |_, _| {
+                        crate::runtime::SessionCommandOutcome::Failed {
+                            code: RuntimeErrorCode::SessionCommandRun,
+                            message: format!("the protocol refused the appended nodes: {error}"),
+                        }
+                    }))
+                    .await?;
                 return Ok(!matches!(committed, CommandCommit::Withdrawn));
             }
         }
         self.stamp_live_plugin_state()?;
         let committed = Box::pin(self.commit_host_command(
             &completion,
-            shift_fence,
             Some(append_stamp),
             None,
             |state, persisted| crate::runtime::SessionCommandOutcome::AppendSessionNodes {
@@ -180,18 +175,15 @@ impl LashRuntime {
             // refused, over the durable head, with nothing appended.
             CommandCommit::AncestorNotActive { required_node_id } => {
                 self.reload_invalidated_resident_session_state().await?;
-                let settled = Box::pin(self.commit_host_command(
-                    &completion,
-                    shift_fence,
-                    None,
-                    None,
-                    |_, _| crate::runtime::SessionCommandOutcome::AppendSessionNodes {
-                        outcome: crate::AppendSessionNodesOutcome::StaleBranch {
-                            required_node_id: required_node_id.clone(),
-                        },
-                    },
-                ))
-                .await?;
+                let settled =
+                    Box::pin(self.commit_host_command(&completion, None, None, |_, _| {
+                        crate::runtime::SessionCommandOutcome::AppendSessionNodes {
+                            outcome: crate::AppendSessionNodesOutcome::StaleBranch {
+                                required_node_id: required_node_id.clone(),
+                            },
+                        }
+                    }))
+                    .await?;
                 Ok(!matches!(settled, CommandCommit::Withdrawn))
             }
         }
@@ -217,7 +209,6 @@ impl LashRuntime {
         name: String,
         args: serde_json::Value,
         completion: crate::QueuedWorkCompletion,
-        shift_fence: &crate::store::ShiftFence,
         run_controller: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
@@ -229,10 +220,8 @@ impl LashRuntime {
                     session_id: self.state.session_id.clone(),
                     operation_id: batch_id.to_string(),
                 };
-                let controller = super::shift::step_controller(
-                    run_controller,
-                    operation.opener().admitted_scope(),
-                )?;
+                let controller =
+                    super::step_controller(run_controller, operation.opener().admitted_scope())?;
                 let signal = PluginTaskCancelSignal::open(
                     self.effect_host(),
                     &self.state.session_id,
@@ -256,7 +245,6 @@ impl LashRuntime {
                     &name,
                     args,
                     &batch_id,
-                    shift_fence,
                     task.as_ref()
                         .map(|(controller, signal)| (controller, signal.as_ref())),
                 ),
@@ -313,13 +301,10 @@ impl LashRuntime {
                 }
             }
         };
-        let committed =
-            Box::pin(
-                self.commit_host_command(&completion, shift_fence, None, None, |_, _| {
-                    crate::runtime::SessionCommandOutcome::PluginOperation { outcome }
-                }),
-            )
-            .await?;
+        let committed = Box::pin(self.commit_host_command(&completion, None, None, |_, _| {
+            crate::runtime::SessionCommandOutcome::PluginOperation { outcome }
+        }))
+        .await?;
         Ok(!matches!(committed, CommandCommit::Withdrawn))
     }
 
@@ -339,7 +324,6 @@ impl LashRuntime {
         name: &str,
         args: serde_json::Value,
         batch_id: &crate::BatchId,
-        shift_fence: &crate::store::ShiftFence,
         task: Option<(&crate::ActorContext, Option<&PluginTaskCancelSignal>)>,
     ) -> Result<
         Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError>,
@@ -351,7 +335,7 @@ impl LashRuntime {
         );
         // The operation's services join the command as in-turn services join
         // a turn: its appends ride the command's commit.
-        let services = match self.runtime_session_services_for_turn(Some(shift_fence), &draft) {
+        let services = match self.runtime_session_services_for_turn(&draft) {
             Ok(services) => services,
             Err(error) => return Ok(Err(error)),
         };
@@ -505,7 +489,6 @@ impl LashRuntime {
             super::durable_queue::enqueue_turn_inputs_to_store(
                 self.state.session_id.clone(),
                 store,
-                &self.ingress_relay(),
                 inputs,
                 crate::TurnInputIngress::NextTurn,
                 crate::RunSpec::default(),
@@ -532,7 +515,6 @@ impl LashRuntime {
         &mut self,
         request: crate::OpenAgentFrameRequest,
         completion: crate::QueuedWorkCompletion,
-        shift_fence: &crate::store::ShiftFence,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
@@ -566,32 +548,29 @@ impl LashRuntime {
             }
         };
         let opens = switch.is_some();
-        let committed = Box::pin(self.commit_host_command(
-            &completion,
-            shift_fence,
-            None,
-            switch,
-            |state, persisted| {
-                // The frame's committed node id replaces the draft id the
-                // resident open answered with.
-                let outcome = match outcome {
-                    crate::runtime::OpenAgentFrameCommandOutcome::Opened { mut outcome }
-                        if opens =>
-                    {
-                        if let Some(current) = state.current_frame_node_id.as_ref() {
-                            outcome.frame_node_id = current.to_string();
+        let committed =
+            Box::pin(
+                self.commit_host_command(&completion, None, switch, |state, persisted| {
+                    // The frame's committed node id replaces the draft id the
+                    // resident open answered with.
+                    let outcome = match outcome {
+                        crate::runtime::OpenAgentFrameCommandOutcome::Opened { mut outcome }
+                            if opens =>
+                        {
+                            if let Some(current) = state.current_frame_node_id.as_ref() {
+                                outcome.frame_node_id = current.to_string();
+                            }
+                            let seeds = outcome.initial_node_ids.len();
+                            outcome.initial_node_ids =
+                                persisted[persisted.len().saturating_sub(seeds)..].to_vec();
+                            crate::runtime::OpenAgentFrameCommandOutcome::Opened { outcome }
                         }
-                        let seeds = outcome.initial_node_ids.len();
-                        outcome.initial_node_ids =
-                            persisted[persisted.len().saturating_sub(seeds)..].to_vec();
-                        crate::runtime::OpenAgentFrameCommandOutcome::Opened { outcome }
-                    }
-                    outcome => outcome,
-                };
-                crate::runtime::SessionCommandOutcome::OpenAgentFrame { outcome }
-            },
-        ))
-        .await?;
+                        outcome => outcome,
+                    };
+                    crate::runtime::SessionCommandOutcome::OpenAgentFrame { outcome }
+                }),
+            )
+            .await?;
         if matches!(committed, CommandCommit::Landed) && opens {
             // Every accepted open restarts the live interpreter from the new
             // frame's seed, on the shift's own resident runtime (F5).
@@ -630,7 +609,6 @@ impl LashRuntime {
     pub(super) async fn commit_host_command(
         &mut self,
         completion: &crate::QueuedWorkCompletion,
-        shift_fence: &crate::store::ShiftFence,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
         switch: Option<CommandFrameSwitch>,
         outcome: impl FnOnce(
@@ -640,7 +618,6 @@ impl LashRuntime {
     ) -> Result<CommandCommit, RuntimeError> {
         let over_budget = match Box::pin(self.commit_host_command_once(
             completion,
-            shift_fence,
             append_stamp,
             switch,
             outcome,
@@ -651,16 +628,15 @@ impl LashRuntime {
             Err(over_budget) => over_budget,
         };
         self.reload_invalidated_resident_session_state().await?;
-        let settled =
-            Box::pin(
-                self.commit_host_command_once(completion, shift_fence, None, None, |_, _| {
-                    crate::runtime::SessionCommandOutcome::Failed {
-                        code: over_budget.code.clone(),
-                        message: over_budget.message.clone(),
-                    }
-                }),
-            )
-            .await?;
+        let settled = Box::pin(
+            self.commit_host_command_once(completion, None, None, |_, _| {
+                crate::runtime::SessionCommandOutcome::Failed {
+                    code: over_budget.code.clone(),
+                    message: over_budget.message.clone(),
+                }
+            }),
+        )
+        .await?;
         match settled {
             Ok(CommandCommit::Landed) => Ok(CommandCommit::OverBudget),
             Ok(committed) => Ok(committed),
@@ -676,7 +652,6 @@ impl LashRuntime {
     async fn commit_host_command_once(
         &mut self,
         completion: &crate::QueuedWorkCompletion,
-        shift_fence: &crate::store::ShiftFence,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
         switch: Option<CommandFrameSwitch>,
         outcome: impl FnOnce(
@@ -727,7 +702,6 @@ impl LashRuntime {
             )
             .map_err(super::runtime_error_from_store_commit)?;
         }
-        commit.shift_fence = Some(Box::new(shift_fence.clone()));
         commit.applied_commands = Some(completion.clone());
         let outcome = outcome(&self.state, &persisted_node_ids);
         for batch_id in &completion.batch_ids {

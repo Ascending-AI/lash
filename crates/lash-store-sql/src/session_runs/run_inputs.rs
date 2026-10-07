@@ -28,15 +28,14 @@ crate::statements! {
              ORDER BY 1";
 
         /// Every binding of session `?1`: its deletion.
-        delete_by_session = "DELETE FROM session_run_inputs WHERE session_id = ?1";
-    }
-}
+        /// The unsettled inputs run `?2` of session `?1` took as its own.
+        bound_inputs = "SELECT b.input_id FROM session_run_inputs b
+             JOIN pending_turn_inputs i ON i.session_id = b.session_id AND i.input_id = b.input_id
+             WHERE b.session_id = ?1 AND b.run = ?2 AND {{nonterminal_turn_input_state(i.state)}}";
 
-crate::statements! {
-    /// Statements for parked-run control and recovery.
-    pub struct RunInputVerbStatements @ "session_run_input" {
-        bound_inputs = "SELECT b.input_id FROM session_run_inputs b JOIN pending_turn_inputs i ON i.session_id = b.session_id AND i.input_id = b.input_id WHERE b.session_id = ?1 AND b.run = ?2 AND {{nonterminal_turn_input_state(i.state)}}";
-        rebind = "UPDATE session_run_inputs SET run = ?3 WHERE session_id = ?1 AND input_id = ?2";
+        /// Forget which run took input `?2` of session `?1`.
         unbind = "DELETE FROM session_run_inputs WHERE session_id = ?1 AND input_id = ?2";
+
+        delete_by_session = "DELETE FROM session_run_inputs WHERE session_id = ?1";
     }
 }

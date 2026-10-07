@@ -247,8 +247,19 @@ impl Backend {
     /// # Errors
     ///
     /// The store's refusal.
-    pub async fn wake_session(&self, _session: &crate::SessionId) -> Result<(), DurableError> {
-        todo!("L3s (FIG-5196): wake a session actor in a mailbox transaction")
+    pub async fn wake_session(&self, session: &crate::SessionId) -> Result<(), DurableError> {
+        let actor = lash_durable::ActorKey::session(session.as_str()).map_err(|error| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Corrupt,
+                message: format!("session {session} names no actor: {error}"),
+            })
+        })?;
+        let mut tx = lash_durable::MailTx::new();
+        tx.wake(actor);
+        self.durable()
+            .commit_mail(tx, lash_durable::CommitLabel::MAIL_SESSION)
+            .await
+            .map(|_| ())
     }
 
     /// Wake `process`'s actor from outside a store transaction: a mailbox

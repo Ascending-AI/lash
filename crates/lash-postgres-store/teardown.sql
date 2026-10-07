@@ -50,11 +50,6 @@ DROP TABLE IF EXISTS lash_session_terminal_changes CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_cancel_requests CASCADE;
 
-DROP TABLE IF EXISTS lash_turn_parks CASCADE;
-
-DROP TABLE IF EXISTS lash_turn_park_clock CASCADE;
-
-DROP TABLE IF EXISTS lash_turn_park_events CASCADE;
 
 DROP TABLE IF EXISTS lash_queued_work_batches CASCADE;
 
@@ -63,8 +58,6 @@ DROP TABLE IF EXISTS lash_pending_turn_inputs CASCADE;
 DROP TABLE IF EXISTS lash_session_run_specs CASCADE;
 
 DROP TABLE IF EXISTS lash_session_ingress_sequence CASCADE;
-
-DROP TABLE IF EXISTS lash_session_shift_admissions CASCADE;
 
 DROP TABLE IF EXISTS lash_session_runs CASCADE;
 

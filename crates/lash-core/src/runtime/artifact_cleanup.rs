@@ -14,7 +14,7 @@
 use crate::JournalReplay;
 use std::sync::Arc;
 
-use super::shift::relay::{
+use super::obligations::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, plugin_delivery_error,
 };
 use crate::store::{

@@ -150,9 +150,6 @@ CREATE TABLE IF NOT EXISTS session_meta (
     caused_by_node_id                 TEXT,
     source_session_id                 TEXT,
     source_node_id                    TEXT,
-    shift_epoch                       INTEGER NOT NULL DEFAULT 0,
-    shift_admission_id                TEXT,
-    shift_run_start                  TEXT,
     admission_base_checkpoint_ref     TEXT,
     closing_intent                    INTEGER,
     owning_process_id                 TEXT,
@@ -173,7 +170,6 @@ CREATE TABLE IF NOT EXISTS session_meta (
     -- The shift authority holds exactly the states a raise writes: unraised,
     -- sealed by an execution (its start marker), or raised by a control verb
     -- (no marker). A closing session was raised by its close.
-    CONSTRAINT ck_session_meta_shift_authority CHECK ((shift_epoch = 0 AND shift_admission_id IS NULL AND shift_run_start IS NULL AND closing_intent IS NULL) OR (shift_epoch > 0 AND shift_admission_id IS NOT NULL AND (shift_run_start IS NULL OR closing_intent IS NULL))),
     CONSTRAINT ck_session_meta_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_session_meta_retention CHECK ((retention_kind IN ('until_gc', 'head_only') AND retention_last_turns IS NULL) OR (retention_kind = 'last_turns' AND retention_last_turns > 0)),
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
@@ -262,46 +258,6 @@ CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     PRIMARY KEY (session_id, turn_id)
 );
 
-CREATE TABLE IF NOT EXISTS turn_parks (
-    session_id TEXT PRIMARY KEY,
-    turn_id TEXT NOT NULL,
-    park_id INTEGER NOT NULL,
-    reason_code TEXT NOT NULL,
-    reason_json TEXT NOT NULL,
-    since_ms INTEGER NOT NULL,
-    last_refused_ms INTEGER NOT NULL,
-    attempts INTEGER NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1),
-    park_executable_generation TEXT,
-    engine_ref TEXT,
-    resume_intent INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_turn_parks_since
-    ON turn_parks(since_ms, session_id);
-CREATE INDEX IF NOT EXISTS idx_turn_parks_executable_generation
-    ON turn_parks(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS turn_park_clock (
-    singleton           INTEGER PRIMARY KEY CONSTRAINT ck_turn_park_clock_singleton CHECK (singleton = 1),
-    current_seq         INTEGER NOT NULL DEFAULT 0,
-    compaction_horizon  INTEGER NOT NULL DEFAULT 0
-);
-
-INSERT OR IGNORE INTO turn_park_clock (
-    singleton, current_seq, compaction_horizon
-) VALUES (1, 0, 0);
-
-CREATE TABLE IF NOT EXISTS turn_park_events (
-    seq         INTEGER PRIMARY KEY,
-    session_id  TEXT NOT NULL,
-    turn_id     TEXT NOT NULL,
-    park_id     INTEGER NOT NULL,
-    kind        TEXT NOT NULL CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')),
-    cause_json       TEXT,
-    reason_json TEXT,
-    at_ms       INTEGER NOT NULL,
-    redrive_intent INTEGER,
-    CONSTRAINT ck_turn_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0)) IS TRUE)
-);
 
 CREATE TABLE IF NOT EXISTS queued_work_batches (
     enqueue_seq       INTEGER NOT NULL,

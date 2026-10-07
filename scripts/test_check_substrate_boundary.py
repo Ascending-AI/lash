@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
-import os
 import shutil
 import subprocess
 import tempfile
@@ -10,23 +9,6 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/check-substrate-boundary.sh"
-ALLOWLIST = ROOT / "scripts/shift-determinism-allowlist.txt"
-COUNT = ROOT / "scripts/shift-determinism-allowlist.count"
-STORE_ALLOWLIST = ROOT / "scripts/shift-store-allowlist.txt"
-STORE_COUNT = ROOT / "scripts/shift-store-allowlist.count"
-
-ENTRY_SEPARATOR = "  |  "
-
-
-def parse_allowlist(text: str) -> list[tuple[str, str, int]]:
-    entries = []
-    for line in text.splitlines():
-        if not line.strip() or line.startswith("#"):
-            continue
-        body = line.split("  # ", 1)[0]
-        path, text, count = body.split(ENTRY_SEPARATOR)
-        entries.append((path, text, int(count)))
-    return entries
 
 
 # Every path the script hands to rg must exist in a fixture tree, or the
@@ -52,17 +34,12 @@ FIXTURE_FILES = [
     "crates/lash-core-execution/src/session.rs",
     "crates/lash-core-execution/src/tool_dispatch.rs",
 ]
-FIXTURE_SHIFT_FILE = "crates/lash-core/src/runtime/logical_turn.rs"
-FIXTURE_HIT_LINE = "    tokio::spawn(worker());"
 FIXTURE_ENGINE_ID_FILE = "crates/lash-core/src/runtime/turn_loop/engine_ids.rs"
 FIXTURE_ENGINE_ID_LINE = "    let _ = context.restate_invocation_id();"
 FIXTURE_ENGINE_ERROR_FILE = "crates/lash-core-store/src/runtime_error.rs"
 FIXTURE_ENGINE_ERROR_LINE = "    RestateProcessAwait,"
 FIXTURE_ENGINE_FORMAT_FILE = "crates/lash/src/formats.rs"
 FIXTURE_ENGINE_FORMAT_LINE = "    RestateDurableWaitRequest,"
-FIXTURE_STORE_FILE = "crates/lash-core/src/runtime/shift.rs"
-FIXTURE_STORE_LINE = "    let open = store.list_pending_turn_inputs(session).await?;"
-FIXTURE_STORE_TEXT = "let open = store.list_pending_turn_inputs(session).await?;"
 COLLAPSED_NAMES = (
     "EffectEngine", "EffectHost", "RuntimeEffectController", "ScopedEffectController",
     "EffectTaskController", "LayeredEngine", "EffectLayer", "LayeredEffectHost",
@@ -74,10 +51,16 @@ GENERATION_NAMES = (
     "fleet_finalize", "DeploymentRegistry", "draining_generations", "generation_fence",
 )
 FIXTURE_GENERATION_FILE = "crates/lash-core-store/src/store/park.rs"
+SHIFT_NAMES = (
+    "ShiftFence", "seal_shift_epoch", "RunStartNonce", "RunHold", "ShiftHold", "ShiftLoop",
+    "ShiftRequest", "shift_epoch", "lash_session_shift_admissions",
+    "ck_session_meta_shift_authority", "lash_turn_parks", "lash_turn_park_clock",
+    "lash_turn_park_events", "TurnParkWrite",
+)
 FIXTURE_DEFAULTS_FILE = "crates/lash-core-execution/src/runtime/effect/engine.rs"
 
 
-class ShiftDeterminismRatchetTests(unittest.TestCase):
+class SubstrateBoundaryTests(unittest.TestCase):
     def run_check(self, cwd: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["bash", str(cwd / "scripts" / SCRIPT.name)],
@@ -87,27 +70,18 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
             check=False,
         )
 
-    def build_fixture(
-        self,
-        root: Path,
-        shift_lines: list[str],
-        allowlist_entries: list[str],
-        store_entries: list[str] | None = None,
-    ) -> None:
+    def build_fixture(self, root: Path) -> None:
         scripts = root / "scripts"
         scripts.mkdir(parents=True)
         shutil.copy2(SCRIPT, scripts / SCRIPT.name)
-        (scripts / ALLOWLIST.name).write_text("\n".join(allowlist_entries) + "\n")
-        (scripts / STORE_ALLOWLIST.name).write_text("\n".join(store_entries or []) + "\n")
         for directory in FIXTURE_DIRS:
             (root / directory).mkdir(parents=True)
         for file in FIXTURE_FILES:
             path = root / file
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
-        (root / FIXTURE_SHIFT_FILE).write_text("\n".join(shift_lines) + "\n")
 
-    def test_shift_determinism_rule_passes_on_the_tree(self) -> None:
+    def test_the_boundary_passes_on_the_tree(self) -> None:
         result = subprocess.run(
             ["bash", str(SCRIPT)],
             cwd=ROOT,
@@ -117,169 +91,10 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_allowlist_only_shrinks(self) -> None:
-        # Every entry pins a forbidden-construct site as
-        # `path  |  <normalized line text>  |  <occurrence count>  # tag`.
-        # A fix deletes or decrements entries; nothing may grow them, so the
-        # pinned occurrence count is capped by the committed count file. Pins
-        # whose tag's first word is RECORDED (a journaled step records the
-        # result) or BENIGN (the site provably cannot affect replay) carry a
-        # one-line reason and raise no cap, the way rule 6 treats RECORDED.
-        uncapped = {"RECORDED", "BENIGN"}
-        capped = 0
-        entries = parse_allowlist(ALLOWLIST.read_text())
-        for path, text, count in entries:
-            with self.subTest(path=path, text=text):
-                self.assertTrue(path.startswith("crates/"), path)
-                self.assertTrue(text, path)
-                self.assertGreaterEqual(count, 1, path)
-        for line in ALLOWLIST.read_text().splitlines():
-            if not line.strip() or line.startswith("#"):
-                continue
-            body, _, tag = line.partition("  # ")
-            if tag.strip().split(" ", 1)[0] not in uncapped:
-                capped += int(body.split(ENTRY_SEPARATOR)[2])
-        cap = int(COUNT.read_text().strip())
-        self.assertLessEqual(capped, cap)
-
-    def test_store_allowlist_only_shrinks(self) -> None:
-        # The store-call rule pins every direct persistence call in the
-        # session shift the same way. Its count file caps the calls made
-        # outside any recorded step (every tag but RECORDED): those may only
-        # shrink, while a call inside a recorded step's body is pinned
-        # RECORDED and raises no cap.
-        text = STORE_ALLOWLIST.read_text()
-        entries = parse_allowlist(text)
-        for path, entry, count in entries:
-            with self.subTest(path=path, text=entry):
-                self.assertTrue(path.startswith("crates/"), path)
-                self.assertTrue(entry, path)
-                self.assertGreaterEqual(count, 1, path)
-        unrecorded = 0
-        for line in text.splitlines():
-            if not line.strip() or line.startswith("#"):
-                continue
-            body, _, tag = line.partition("  # ")
-            if tag.strip().split(" ", 1)[0] != "RECORDED":
-                unrecorded += int(body.split(ENTRY_SEPARATOR)[2])
-        cap = int(STORE_COUNT.read_text().strip())
-        self.assertLessEqual(unrecorded, cap)
-
-    def test_unpinned_store_call_in_the_shift_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
-            hit = root / FIXTURE_STORE_FILE
-            hit.parent.mkdir(parents=True, exist_ok=True)
-            hit.write_text("async fn shift() {\n" + FIXTURE_STORE_LINE + "\n}\n")
-            result = self.run_check(root)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("rule 6 failed", result.stderr)
-
-    def test_unjournaled_before_llm_call_await_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(
-                root,
-                ["async fn shift() {", "self.before_llm_call(machine, request).await;", "}"],
-                [],
-            )
-            result = self.run_check(root)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("rule 5 failed", result.stderr)
-
-    def test_unpinned_checkpoint_admission_in_the_shift_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {}"], [])
-            hit = root / FIXTURE_STORE_FILE
-            hit.write_text(
-                "async fn shift() {\n"
-                "store.admit_at_checkpoint(&request);\n"
-                "}\n"
-            )
-            result = self.run_check(root)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("rule 6 failed", result.stderr)
-
-    def test_pinned_store_call_in_the_shift_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(
-                root,
-                ["fn shift() {", "}"],
-                [],
-                [f"{FIXTURE_STORE_FILE}{ENTRY_SEPARATOR}{FIXTURE_STORE_TEXT}{ENTRY_SEPARATOR}1  # FIG-3824"],
-            )
-            hit = root / FIXTURE_STORE_FILE
-            hit.parent.mkdir(parents=True, exist_ok=True)
-            hit.write_text("async fn shift() {\n" + FIXTURE_STORE_LINE + "\n}\n")
-            result = self.run_check(root)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_stale_store_entry_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(
-                root,
-                ["fn shift() {", "}"],
-                [],
-                [f"{FIXTURE_STORE_FILE}{ENTRY_SEPARATOR}{FIXTURE_STORE_TEXT}{ENTRY_SEPARATOR}1  # FIG-3824"],
-            )
-            result = self.run_check(root)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("rule 6 failed: stale allowlist entry", result.stderr)
-
-    def test_blank_lines_above_a_hit_still_pass(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(
-                root,
-                ["fn shift() {", FIXTURE_HIT_LINE, "}"],
-                [
-                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
-                    f"tokio::spawn(worker());{ENTRY_SEPARATOR}1  # UNMAPPED"
-                ],
-            )
-            shift_file = root / FIXTURE_SHIFT_FILE
-            shift_file.write_text("\n\n\n" + shift_file.read_text())
-            result = self.run_check(root)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_new_hit_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(
-                root,
-                ["fn shift() {", FIXTURE_HIT_LINE, "    let _id = Uuid::new_v4();", "}"],
-                [
-                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
-                    f"tokio::spawn(worker());{ENTRY_SEPARATOR}1  # UNMAPPED"
-                ],
-            )
-            result = self.run_check(root)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("rule 5 failed", result.stderr)
-
-    def test_extra_occurrence_of_a_pinned_hit_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(
-                root,
-                ["fn shift() {", FIXTURE_HIT_LINE, FIXTURE_HIT_LINE, "}"],
-                [
-                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
-                    f"tokio::spawn(worker());{ENTRY_SEPARATOR}1  # UNMAPPED"
-                ],
-            )
-            result = self.run_check(root)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("rule 5 failed", result.stderr)
-
     def test_engine_named_identifier_in_a_kernel_crate_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             (root / FIXTURE_ENGINE_ID_FILE).write_text(FIXTURE_ENGINE_ID_LINE + "\n")
             result = self.run_check(root)
         self.assertNotEqual(result.returncode, 0)
@@ -288,7 +103,7 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_error_variant_in_runtime_error_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             hit = root / FIXTURE_ENGINE_ERROR_FILE
             hit.parent.mkdir(parents=True, exist_ok=True)
             hit.write_text("pub enum RuntimeErrorCode {\n" + FIXTURE_ENGINE_ERROR_LINE + "\n}\n")
@@ -299,7 +114,7 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_type_outside_runtime_error_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             hit = root / "crates/lash-core-store/src/other.rs"
             hit.parent.mkdir(parents=True, exist_ok=True)
             hit.write_text("pub struct RestateBackend;\n")
@@ -309,7 +124,7 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_format_in_the_format_table_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             (root / FIXTURE_ENGINE_FORMAT_FILE).write_text(
                 "pub enum DurableFormat {\n" + FIXTURE_ENGINE_FORMAT_LINE + "\n}\n"
             )
@@ -320,7 +135,7 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_format_in_preflight_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             hit = root / "crates/lash/src/preflight/report.rs"
             hit.parent.mkdir(parents=True, exist_ok=True)
             hit.write_text("    format: DurableFormat::RestateProcessJournal,\n")
@@ -331,172 +146,11 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_format_in_the_engine_module_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             hit = root / "crates/lash/src/restate.rs"
             hit.write_text("pub enum EngineFormats {\n" + FIXTURE_ENGINE_FORMAT_LINE + "\n}\n")
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_new_rule5_patterns_each_flag_a_synthetic_offender(self) -> None:
-        # Every seam name added to the shift_forbidden scan (FIG-3902) must
-        # flag a line that reaches a forbidden facility through it.
-        offenders = [
-            "        let out = lash_sansio::future::shift_sync(work());",
-            "            futures_util::select_biased! {",
-            "            futures::select! {",
-            "        let now = crate::system_clock().timestamp_ms();",
-            "        let nonce = crate::journaled_nonce();",
-            "        let epoch_ms = super::restate_now_ms();",
-            "type Fut<'a> = lash_sansio::future::SendBoxFuture<'a, ()>;",
-            "        future: crate::JournaledStepFuture<'run, T>,",
-            "        let mark = ProfileMark::now();",
-            "        let (tx, rx) = crate::session_model::llm_stream_channel();",
-            "        rx: &mut crate::session_model::LlmStreamEventRx,",
-            "        let task = crate::task::spawn(async move {});",
-            "        task: &mut crate::task::JoinHandle<T>,",
-            "        handle: crate::task::AbortHandle,",
-            "        err: crate::task::JoinError,",
-            "        let watched = lash_core::retry_cancel_watch(\"a cancel\", || watch());",
-            "        crate::runtime::run_step_body_until_cancelled(stop, watch, body, on_cancel)",
-        ]
-        for line in offenders:
-            with self.subTest(line=line):
-                with tempfile.TemporaryDirectory() as tmp:
-                    root = Path(tmp)
-                    self.build_fixture(root, ["fn shift() {", line, "}"], [])
-                    result = self.run_check(root)
-                self.assertNotEqual(result.returncode, 0, line)
-                self.assertIn("rule 5 failed", result.stderr)
-
-    def test_multiline_dyn_future_send_is_caught(self) -> None:
-        # A `dyn Future` whose `+ Send` bound spills onto following lines must
-        # flag just like the single-line spelling.
-        lines = [
-            "fn shift<'a>() -> std::pin::Pin<",
-            "    std::boxed::Box<",
-            "        dyn Future<Output = Result<(), Error>>",
-            "            + Send",
-            "            + 'a,",
-            "    >,",
-            "> {",
-            "    unreachable!()",
-            "}",
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(root, lines, [])
-            result = self.run_check(root)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("rule 5 failed", result.stderr)
-
-    def test_path_qualified_dyn_future_is_caught(self) -> None:
-        # A path-qualified `dyn std::future::Future` names the same trait as
-        # the bare spelling, on one line or with its `+ Send` spilled over.
-        shapes = [
-            [
-                "type Body<'a> =",
-                "    std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;",
-            ],
-            [
-                "type Key<'a> = std::pin::Pin<",
-                "    Box<",
-                "        dyn core::future::Future<Output = Result<u32, Error>>",
-                "            + Send",
-                "            + 'a,",
-                "    >,",
-                ">;",
-            ],
-        ]
-        for lines in shapes:
-            with self.subTest(line=lines[1]):
-                with tempfile.TemporaryDirectory() as tmp:
-                    root = Path(tmp)
-                    self.build_fixture(root, lines, [])
-                    result = self.run_check(root)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("rule 5 failed", result.stderr)
-
-    def test_recorded_pin_with_a_reason_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            hit = "        let now = crate::system_clock().timestamp_ms();"
-            self.build_fixture(
-                root,
-                ["fn shift() {", hit, "}"],
-                [
-                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
-                    f"let now = crate::system_clock().timestamp_ms();{ENTRY_SEPARATOR}"
-                    "1  # RECORDED inside a journaled step"
-                ],
-            )
-            result = self.run_check(root)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_benign_pin_with_a_reason_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            hit = "        let mark = ProfileMark::now();"
-            self.build_fixture(
-                root,
-                ["fn shift() {", hit, "}"],
-                [
-                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
-                    f"let mark = ProfileMark::now();{ENTRY_SEPARATOR}"
-                    "1  # BENIGN observational only"
-                ],
-            )
-            result = self.run_check(root)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_regenerate_counts_only_capped_pins(self) -> None:
-        # Regeneration keeps each pin's tag and writes the count file from the
-        # capped pins alone: a RECORDED or BENIGN pin raises no cap.
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(
-                root,
-                [
-                    "fn shift() {",
-                    FIXTURE_HIT_LINE,
-                    "        let now = crate::system_clock().timestamp_ms();",
-                    "        let mark = ProfileMark::now();",
-                    "}",
-                ],
-                [
-                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
-                    f"let now = crate::system_clock().timestamp_ms();{ENTRY_SEPARATOR}"
-                    "1  # RECORDED inside a journaled step",
-                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
-                    f"let mark = ProfileMark::now();{ENTRY_SEPARATOR}"
-                    "1  # BENIGN observational only",
-                ],
-            )
-            result = subprocess.run(
-                ["bash", str(root / "scripts" / SCRIPT.name)],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
-                env={**os.environ, "SHIFT_DETERMINISM_REGENERATE": "1"},
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            count = (root / "scripts" / COUNT.name).read_text().strip()
-        self.assertEqual(count, "1")
-
-    def test_removed_hit_with_stale_entry_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(
-                root,
-                ["fn shift() {", "}"],
-                [
-                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
-                    f"tokio::spawn(worker());{ENTRY_SEPARATOR}1  # UNMAPPED"
-                ],
-            )
-            result = self.run_check(root)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("stale allowlist entry", result.stderr)
 
     def write_rust(self, root: Path, relative: str, lines: list[str]) -> None:
         path = root / relative
@@ -507,16 +161,37 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
         for name in COLLAPSED_NAMES:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                self.build_fixture(root, ["fn shift() {", "}"], [])
+                self.build_fixture(root)
                 self.write_rust(root, FIXTURE_COLLAPSE_FILE, [f"fn drive(host: &dyn {name}) {{}}"])
                 result = self.run_check(root)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("rule 7 failed: a deleted effect-seam name", result.stderr)
 
+    def test_a_deleted_shift_fence_name_fails(self) -> None:
+        for name in SHIFT_NAMES:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.build_fixture(root)
+                self.write_rust(root, FIXTURE_COLLAPSE_FILE, [f"fn admit(fence: &{name}) {{}}"])
+                result = self.run_check(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("rule 7d failed: a deleted shift-fence or turn-park name", result.stderr)
+
+    def test_a_shift_fence_name_in_a_comment_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root)
+            self.write_rust(root, FIXTURE_COLLAPSE_FILE, [
+                "// Version 128 reshaped `lash_turn_parks`; the shift_fence is gone.",
+                "fn admit() {}",
+            ])
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_the_effect_controller_error_variants_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             self.write_rust(root, FIXTURE_COLLAPSE_FILE, [
                 "fn widen(error: RuntimeEffectControllerError) -> PluginError {",
                 "    crate::PluginError::RuntimeEffectController(error)",
@@ -537,7 +212,7 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
         for name in GENERATION_NAMES:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                self.build_fixture(root, ["fn shift() {", "}"], [])
+                self.build_fixture(root)
                 self.write_rust(root, FIXTURE_GENERATION_FILE, [f"fn stamp(_: &{name}) {{}}"])
                 result = self.run_check(root)
                 self.assertNotEqual(result.returncode, 0)
@@ -546,7 +221,7 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
     def test_a_table_name_embedding_a_deleted_generation_name_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             self.write_rust(root, FIXTURE_GENERATION_FILE, [
                 'const TABLE: &str = "lash_draining_generations";',
             ])
@@ -557,7 +232,7 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
     def test_surviving_generation_vocabulary_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             self.write_rust(root, FIXTURE_GENERATION_FILE, [
                 "fn park(_: ExecutableGeneration, _: SessionStateGeneration) {}",
                 "fn reason(_: ParkReason) -> bool { matches!(_, ParkReason::RetiredGeneration { .. }) }",
@@ -569,7 +244,7 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
         for trait in ("ProcessEngine", "ProjectionProvider", "DurableStore"):
             with self.subTest(trait=trait), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                self.build_fixture(root, ["fn shift() {", "}"], [])
+                self.build_fixture(root)
                 self.write_rust(root, FIXTURE_DEFAULTS_FILE, [
                     "#[async_trait::async_trait]",
                     f"pub trait {trait}: Send + Sync {{",
@@ -590,7 +265,7 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
     def test_required_methods_and_other_traits_defaults_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.build_fixture(root)
             self.write_rust(root, FIXTURE_DEFAULTS_FILE, [
                 "pub trait ProcessEngine: Send + Sync {",
                 "    fn kind(&self) -> &'static str;",

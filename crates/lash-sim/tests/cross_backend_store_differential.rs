@@ -21,29 +21,23 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::QueuedWorkBatchDraft;
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
-use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_core::{
     AttachmentId, BlobRef, Clock, DeliveryPolicy, DeploymentStore, EffectAddress, ExecutionScope,
-    ForkSessionRequest, HydratedSessionCheckpoint, LeaseOwnerIdentity, PendingTurnInputDraft,
-    PluginNamespaceState, PluginState, ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent,
-    QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeStore,
-    RuntimeTurnCommitStamp, SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord,
-    SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    StoreError, TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress,
-    TurnInputStateKind,
+    ForkSessionRequest, HydratedSessionCheckpoint, PendingTurnInputDraft, PluginNamespaceState,
+    PluginState, ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority,
+    QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
+    SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord, SessionMeta,
+    SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, StoreError,
+    TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress, TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
 use sqlx::{Connection, PgConnection, PgPool};
 
-#[path = "cross_backend_store_differential/admission_cases.rs"]
-mod admission_cases;
 #[path = "cross_backend_store_differential/attachment_seeding.rs"]
 mod attachment_seeding;
 #[path = "cross_backend_store_differential/checkpoint_cases.rs"]
 mod checkpoint_cases;
-#[path = "cross_backend_store_differential/coalesced_batch_oracles.rs"]
-mod coalesced_batch_oracles;
 #[path = "cross_backend_store_differential/corrupt_input_cases.rs"]
 mod corrupt_input_cases;
 #[path = "cross_backend_store_differential/fixture_catalog.rs"]
@@ -52,8 +46,7 @@ mod fixture_catalog;
 mod fork_cases;
 #[path = "cross_backend_store_differential/generated_surface.rs"]
 mod generated_surface;
-#[path = "cross_backend_store_differential/ingress_cases.rs"]
-mod ingress_cases;
+
 #[path = "cross_backend_store_differential/obligation_cases.rs"]
 mod obligation_cases;
 #[path = "cross_backend_store_differential/observations.rs"]
@@ -83,8 +76,6 @@ use residue::*;
 use session_meta_layout::verify_independent_session_meta_layout;
 use surface_sweep::{SurfaceMethod, SurfaceScratch};
 
-const SESSION_LEASE_TTL_MS: u64 = 60_000;
-
 // "LASH_PGT" encoded as a positive i64. This must match the shared-database
 // advisory lock used by lash-postgres-store's integration-test harness.
 const SHARED_DATABASE_LOCK_KEY: i64 = 0x4c41_5348_5f50_4754;
@@ -98,9 +89,6 @@ enum CaseName {
     NodelessLeafMove,
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
-    TurnInputAdmissionAfterHandoff,
-    QueuedWorkAdmissionAfterHandoff,
-    UnfinishedRunRefusesRival,
     CheckpointBodiesThenRefOnly,
     CheckpointBodiesThenCleared,
     MissingCheckpointComponentRef,
@@ -109,18 +97,13 @@ enum CaseName {
     ForeignLineageFork,
     Rewind,
     AttachmentAdoption,
-    QueuedWorkAdmissionReleased,
     DeleteThenAttemptAdmission,
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
-    LostRunRecovery,
     RunEndOutcome,
     PendingFollowOnRaise,
-    RunAdmissionReplay,
     RefusedSurfaceOnDeletedSession,
     SessionCloseLedger,
-    RunCancelLedger,
-    RunForkLedger,
     CorruptGraphNodeRefusals,
     CorruptPendingTurnInputRefusals,
     CorruptQueuedWorkRefusals,
@@ -148,13 +131,6 @@ impl CaseName {
             Self::NodelessLeafMove => "nodeless_commit_cannot_move_leaf",
             Self::StaleExpectedHeadRevision => "stale_expected_head_revision",
             Self::IdenticalAndMutatedTurnCommitReplay => "identical_and_mutated_turn_commit_replay",
-            Self::TurnInputAdmissionAfterHandoff => {
-                "turn_input_admission_settles_only_under_the_live_fence"
-            }
-            Self::QueuedWorkAdmissionAfterHandoff => {
-                "queued_work_admission_settles_only_under_the_live_fence"
-            }
-            Self::UnfinishedRunRefusesRival => "unfinished_run_refuses_a_rival_admission",
             Self::CheckpointBodiesThenRefOnly => "checkpoint_bodies_then_ref_only",
             Self::CheckpointBodiesThenCleared => "checkpoint_bodies_then_cleared",
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
@@ -163,25 +139,18 @@ impl CaseName {
             Self::ForeignLineageFork => "fork_accepts_foreign_lineage",
             Self::Rewind => "rewind_fork_delete_source_refork",
             Self::AttachmentAdoption => "attachment_intent_adopted_by_commit",
-            Self::QueuedWorkAdmissionReleased => "queued_work_admission_released_by_run_terminal",
             Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
-            Self::LostRunRecovery => "lost_run_recovery",
             Self::RunEndOutcome => "refused_run_end",
             Self::PendingFollowOnRaise => "pending_follow_on_raise_and_clear",
-            Self::RunAdmissionReplay => "run_admission_replays_exact_result_after_shift_handoff",
             Self::RefusedSurfaceOnDeletedSession => {
                 "refused_surface_on_deleted_session_leaves_no_residue"
             }
-            Self::RunCancelLedger => "run_cancel_ledger",
-            Self::RunForkLedger => "run_fork_ledger",
             Self::SessionCloseLedger => "session_close_ledger_closes_runs_and_tracks_its_intent",
             Self::CorruptGraphNodeRefusals => "corrupt_graph_node_refuses_every_reader",
-            Self::CorruptPendingTurnInputRefusals => {
-                "corrupt_pending_turn_input_refuses_list_and_admission"
-            }
-            Self::CorruptQueuedWorkRefusals => "corrupt_queued_work_refuses_list_and_admission",
+            Self::CorruptPendingTurnInputRefusals => "corrupt_pending_turn_input_refuses_its_lists",
+            Self::CorruptQueuedWorkRefusals => "corrupt_queued_work_refuses_its_lists",
             Self::CorruptPriorCheckpointRefusals => {
                 "corrupt_prior_checkpoint_refuses_read_modify_write"
             }
@@ -237,37 +206,6 @@ enum StoreOperation {
     EnqueueNextTurnInput,
     EnqueueQueuedWork,
     EnqueueAdmittableQueuedWork,
-    AcquireSessionLease {
-        slot: LeaseSlot,
-        owner: &'static str,
-    },
-    /// Admit the differential run headed by the case's open `head` under
-    /// `lease`. A later admission of the same run, under any fence, must
-    /// return the recorded admission unchanged.
-    AdmitRun {
-        lease: LeaseSlot,
-        head: HeadKind,
-    },
-    /// Admit a second run, headed by the case's next-turn input, while the
-    /// differential run is unfinished: every backend must refuse it
-    /// `UnfinishedRunConflict` and write nothing.
-    AdmitRivalRun {
-        lease: LeaseSlot,
-    },
-    /// End the differential run handing every row it admitted back open.
-    EndRunReleasing {
-        lease: LeaseSlot,
-    },
-    /// End the differential run completing every row it admitted, under
-    /// `lease`. Under a superseded fence every backend must refuse it
-    /// `StaleShiftFence` and write nothing.
-    EndRunCompleting {
-        lease: LeaseSlot,
-        expected_head_revision: u64,
-    },
-    ReleaseSessionLease {
-        lease: LeaseSlot,
-    },
     /// SQLite and PostgreSQL discard the live store/factory and reopen through
     /// an independent connection. In-memory has no independent durable
     /// instance, so its leg can only reopen the same object through the
@@ -323,33 +261,6 @@ impl StoreOperation {
             Self::EnqueueNextTurnInput => "enqueue_next_turn_input",
             Self::EnqueueQueuedWork => "enqueue_queued_work",
             Self::EnqueueAdmittableQueuedWork => "enqueue_admittable_queued_work",
-            Self::AcquireSessionLease {
-                slot: LeaseSlot::First,
-                ..
-            } => "acquire_first_session_lease_generation",
-            Self::AcquireSessionLease {
-                slot: LeaseSlot::Successor,
-                ..
-            } => "acquire_successor_session_lease_generation",
-            Self::AdmitRun {
-                lease: LeaseSlot::First,
-                ..
-            } => "admit_run_under_first_fence",
-            Self::AdmitRun {
-                lease: LeaseSlot::Successor,
-                ..
-            } => "admit_run_under_successor_fence",
-            Self::AdmitRivalRun { .. } => "admit_rival_run_while_unfinished",
-            Self::EndRunReleasing { .. } => "end_run_releasing_its_rows",
-            Self::EndRunCompleting {
-                lease: LeaseSlot::First,
-                ..
-            } => "end_run_completing_under_first_fence",
-            Self::EndRunCompleting {
-                lease: LeaseSlot::Successor,
-                ..
-            } => "end_run_completing_under_successor_fence",
-            Self::ReleaseSessionLease { .. } => "release_first_session_lease_generation",
             Self::ColdReopenSession => "cold_reopen_session",
             Self::DeleteSession => "delete_session",
             Self::AttemptAdmission => "attempt_admission",
@@ -473,25 +384,6 @@ enum CheckpointSpec {
     ClearedComponents,
     MissingExecutionStateRef,
 }
-
-#[derive(Clone, Copy, Debug)]
-enum LeaseSlot {
-    First,
-    Successor,
-}
-
-/// Which open row heads the differential run's admission.
-#[derive(Clone, Copy, Debug)]
-enum HeadKind {
-    /// The case's next-turn input.
-    Input,
-    /// The case's first open turn-work batch.
-    Batch,
-}
-
-/// The run the admission cases admit, and the rival they refuse.
-const DIFFERENTIAL_RUN_ID: &str = "differential-run";
-const RIVAL_RUN_ID: &str = "differential-rival-run";
 
 fn append(nodes: Vec<NodeSpec>, leaf_node_id: Option<&'static str>) -> GraphSpec {
     GraphSpec {
@@ -642,7 +534,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
             ],
         },
-        admission_cases::turn_input_admission_after_handoff(),
         checkpoint_cases::bodies_then_ref_only(),
         checkpoint_cases::bodies_then_cleared(),
         checkpoint_cases::missing_component_ref(),
@@ -651,19 +542,12 @@ fn generated_cases() -> Vec<GeneratedCase> {
         fork_cases::foreign_lineage_case(),
         fork_cases::rewind_case(),
         session_lifecycle_cases::attachment_adoption_case(),
-        admission_cases::queued_work_admission_released(),
-        admission_cases::unfinished_run_refuses_rival(),
-        admission_cases::queued_work_admission_after_handoff(),
         session_lifecycle_cases::delete_then_attempt_admission_case(),
         surface_sweep::surface_sweep_case(),
-        surface_sweep::lost_run_recovery_case(),
         surface_sweep::refused_run_end_case(),
         surface_sweep::pending_follow_on_raise_case(),
-        surface_sweep::run_admission_replay_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
         surface_sweep::session_close_ledger_case(),
-        surface_sweep::run_control_case(false),
-        surface_sweep::run_control_case(true),
         session_lifecycle_cases::stale_handle_after_delete_case(),
     ]
     .into_iter()
@@ -989,13 +873,6 @@ struct BackendRunner {
     lifecycle_backend: lash::Backend,
     lifecycle_core: Option<lash::LashCore>,
     reopened_postgres_pool: Option<PgPool>,
-    first_lease: Option<lash_core::store::ShiftFence>,
-    successor_lease: Option<lash_core::store::ShiftFence>,
-    /// The differential run's recorded admission.
-    admission: Option<lash_core::store::RunAdmission>,
-    /// Stored `turn_commit_hash` -> backend-neutral hash, for the settling
-    /// commits whose identity names backend-minted batch ids.
-    neutral_commit_hashes: BTreeMap<String, String>,
     current_frame_node_id: Option<lash_core::FrameNodeId>,
     current_leaf_node_id: Option<String>,
     checkpoint_component_refs: Option<CheckpointComponentRefs>,
@@ -1082,142 +959,6 @@ impl BackendRunner {
     async fn close_reopened_postgres_pool(&mut self) {
         if let Some(pool) = self.reopened_postgres_pool.take() {
             pool.close().await;
-        }
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-    )]
-    fn lease(&self, slot: LeaseSlot) -> &lash_core::store::ShiftFence {
-        match slot {
-            LeaseSlot::First => self.first_lease.as_ref(),
-            LeaseSlot::Successor => self.successor_lease.as_ref(),
-        }
-        .expect("generated sequence acquired lease before use")
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "test support: the generated sequence admits the run before it ends it"
-    )]
-    fn recorded_admission(&self) -> lash_core::store::RunAdmission {
-        self.admission
-            .clone()
-            .expect("generated sequence admitted the differential run before ending it")
-    }
-
-    /// The case's open row of `kind`, read rather than assumed: backends mint
-    /// their own batch ids.
-    async fn open_head(
-        &self,
-        kind: HeadKind,
-    ) -> Result<lash_core::store::AdmittedHead, StoreError> {
-        match kind {
-            HeadKind::Input => Ok(lash_core::store::AdmittedHead::Input(
-                lash_core::InputId::fixture(format!("{}:input", self.session_id)),
-            )),
-            HeadKind::Batch => self
-                .store()
-                .list_open_queued_work(&self.session_id)
-                .await?
-                .into_iter()
-                .filter(|batch| batch.work_class() == lash_core::store::QueuedWorkClass::TurnWork)
-                .min_by_key(|batch| batch.enqueue_seq)
-                .map(|batch| lash_core::store::AdmittedHead::Batch(batch.batch_id))
-                .ok_or_else(|| {
-                    StoreError::Backend(format!("{} has no open turn-work head", self.name))
-                }),
-        }
-    }
-
-    /// Admit the differential run under `fence`. The first admission is
-    /// recorded; every later one, under any fence, must return it unchanged.
-    async fn admit_differential_run(
-        &mut self,
-        fence: &lash_core::store::ShiftFence,
-        kind: HeadKind,
-    ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
-        let head = match &self.admission {
-            Some(recorded) => recorded.head.clone(),
-            None => self.open_head(kind).await?,
-        };
-        let admission = self
-            .store()
-            .admit_run(
-                &lash_core::testing::store_fixtures::admit_run_request_for_test(
-                    fence,
-                    &lash_core::TurnId::from(DIFFERENTIAL_RUN_ID),
-                    head,
-                ),
-            )
-            .await?
-            .ok_or_else(|| {
-                StoreError::Backend(format!(
-                    "{} did not admit the generated run at its head",
-                    self.name
-                ))
-            })?;
-        match &self.admission {
-            Some(recorded) => assert_eq!(
-                serde_json::to_value(recorded).ok(),
-                serde_json::to_value(&admission).ok(),
-                "{}: a re-admission must return the recorded admission",
-                self.name
-            ),
-            None => self.admission = Some(admission),
-        }
-        Ok(None)
-    }
-
-    /// Land the differential run's final commit settling `settlement` under
-    /// `fence`, with the run's terminal in the same commit.
-    async fn end_differential_run(
-        &mut self,
-        fence: &lash_core::store::ShiftFence,
-        expected_head_revision: u64,
-        settlement: lash_core::store::IngressSettlement,
-    ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
-        let run = lash_core::TurnId::from(DIFFERENTIAL_RUN_ID);
-        let graph = GraphSpec {
-            nodes: vec![NodeSpec::new("run-end-node", None, "run-end")],
-            leaf_node_id: Some("run-end-node"),
-        };
-        let mut commit = lash_core::testing::store_fixtures::settling_commit_for_test(
-            runtime_commit(
-                &self.session_id,
-                expected_head_revision,
-                &graph,
-                None,
-                HydratedSessionCheckpoint::default(),
-                Vec::new(),
-            ),
-            fence,
-            settlement,
-        );
-        commit.run_terminal = Some(Box::new(lash_core::store::RunTerminalWrite {
-            commit: lash_core::store::TurnCommitId::new(run.clone(), 0),
-            turn: lash_core::store::PhysicalTurn::derive_turn_id(&run, 0),
-            run,
-            outcome: lash_core::store::RunCommittedOutcome::Finished(
-                lash_core::facade_support::TurnFinish::AssistantMessage {
-                    text: String::new(),
-                },
-            ),
-        }));
-        if let Some((stored, neutral)) = admission_cases::backend_neutral_commit_hash(&commit) {
-            self.neutral_commit_hashes.insert(stored, neutral);
-        }
-        self.store()
-            .commit_runtime_state(commit)
-            .await
-            .map(|result| Some(result.into()))
-    }
-
-    fn put_lease(&mut self, slot: LeaseSlot, lease: lash_core::store::ShiftFence) {
-        match slot {
-            LeaseSlot::First => self.first_lease = Some(lease),
-            LeaseSlot::Successor => self.successor_lease = Some(lease),
         }
     }
 
@@ -1443,117 +1184,6 @@ impl BackendRunner {
                 )
                 .await
                 .map(|_| None),
-            StoreOperation::AcquireSessionLease { slot, owner } => {
-                use lash_core::store::{AdmissionId, RunStartNonce, ShiftEpochSeal};
-                let stored = self.store().shift_epoch(&self.session_id).await?;
-                let admission = AdmissionId::new(format!("{owner}:{slot:?}-admission"));
-                let seal = self
-                    .store()
-                    .seal_shift_epoch(
-                        &self.session_id,
-                        &admission,
-                        stored.epoch,
-                        &RunStartNonce::new(admission.as_str()),
-                        None,
-                    )
-                    .await?;
-                let fence = match seal {
-                    ShiftEpochSeal::Sealed(fence) => fence,
-                    other => {
-                        return Err(StoreError::Backend(format!(
-                            "{} failed to seal generated shift: {other:?}",
-                            self.name
-                        )));
-                    }
-                };
-                if matches!(slot, LeaseSlot::Successor) {
-                    let first = self.lease(LeaseSlot::First);
-                    assert!(
-                        fence.epoch() > first.epoch(),
-                        "{} reused shift epoch",
-                        self.name
-                    );
-                }
-                self.put_lease(*slot, fence);
-                Ok(None)
-            }
-            StoreOperation::AdmitRun { lease, head } => {
-                let fence = self.lease(*lease).clone();
-                self.admit_differential_run(&fence, *head).await
-            }
-            StoreOperation::AdmitRivalRun { lease } => {
-                let fence = self.lease(*lease).clone();
-                let head = self.open_head(HeadKind::Input).await?;
-                self.store()
-                    .admit_run(
-                        &lash_core::testing::store_fixtures::admit_run_request_for_test(
-                            &fence,
-                            &lash_core::TurnId::from(RIVAL_RUN_ID),
-                            head,
-                        ),
-                    )
-                    .await
-                    .map(|admission| {
-                        panic!(
-                            "{}: a rival run must be refused while the differential run is \
-                             unfinished, got {admission:?}",
-                            self.name
-                        )
-                    })
-            }
-            StoreOperation::ReleaseSessionLease { lease } => self
-                .store()
-                .supersede_shift_epoch_for_test(self.lease(*lease))
-                .await
-                .map(|_| None),
-            StoreOperation::EndRunReleasing { lease } => {
-                let fence = self.lease(*lease).clone();
-                let admission = self.recorded_admission();
-                let mut settlement = lash_core::store::IngressSettlement::new(
-                    lash_core::TurnId::from(DIFFERENTIAL_RUN_ID),
-                );
-                settlement.released.extend(
-                    admission
-                        .input_ids()
-                        .into_iter()
-                        .map(lash_core::store::IngressRowId::Input),
-                );
-                settlement.released.extend(
-                    admission
-                        .queued
-                        .iter()
-                        .flat_map(|queued| queued.batch_ids())
-                        .map(lash_core::store::IngressRowId::Batch),
-                );
-                let head = self
-                    .store()
-                    .load_session_head_meta(&self.session_id)
-                    .await?;
-                self.end_differential_run(
-                    &fence,
-                    head.map_or(0, |head| head.head_revision),
-                    settlement,
-                )
-                .await
-            }
-            StoreOperation::EndRunCompleting {
-                lease,
-                expected_head_revision,
-            } => {
-                let fence = self.lease(*lease).clone();
-                let admission = self.recorded_admission();
-                let mut settlement = lash_core::store::IngressSettlement::new(
-                    lash_core::TurnId::from(DIFFERENTIAL_RUN_ID),
-                );
-                if let Some(inputs) = &admission.inputs {
-                    settlement.completed_inputs.push(inputs.completion());
-                }
-                if let Some(queued) = &admission.queued {
-                    settlement.completed_batches.push(queued.completion());
-                }
-                self.end_differential_run(&fence, *expected_head_revision, settlement)
-                    .await
-            }
             StoreOperation::ColdReopenSession => {
                 let request = self.create_request();
                 let reopened = match self.reopen.clone() {
@@ -1858,14 +1488,7 @@ impl BackendRunner {
         // digest; the raw changed-table set is the comparison instead.
         let durable_state = match comparison {
             ComparisonMode::Decoded => {
-                let mut state = self.raw_reader.observe(self.clock.timestamp_ms()).await;
-                for receipt in &mut state.runtime_turn_commits {
-                    if let Some(neutral) = self.neutral_commit_hashes.get(&receipt.turn_commit_hash)
-                    {
-                        receipt.turn_commit_hash.clone_from(neutral);
-                    }
-                }
-                Some(state)
+                Some(self.raw_reader.observe(self.clock.timestamp_ms()).await)
             }
             ComparisonMode::RawOnly => None,
         };
@@ -2170,10 +1793,6 @@ async fn runners_for_case_with_clock(
             lifecycle_backend: memory_lifecycle,
             lifecycle_core: None,
             reopened_postgres_pool: None,
-            first_lease: None,
-            successor_lease: None,
-            admission: None,
-            neutral_commit_hashes: BTreeMap::new(),
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2198,10 +1817,6 @@ async fn runners_for_case_with_clock(
             lifecycle_backend: sqlite_lifecycle,
             lifecycle_core: None,
             reopened_postgres_pool: None,
-            first_lease: None,
-            successor_lease: None,
-            admission: None,
-            neutral_commit_hashes: BTreeMap::new(),
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2226,10 +1841,6 @@ async fn runners_for_case_with_clock(
             lifecycle_backend: postgres_lifecycle,
             lifecycle_core: None,
             reopened_postgres_pool: None,
-            first_lease: None,
-            successor_lease: None,
-            admission: None,
-            neutral_commit_hashes: BTreeMap::new(),
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2284,7 +1895,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 33);
+    assert_eq!(cases.len(), 25);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2298,7 +1909,6 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "nodeless_commit_cannot_move_leaf",
             "stale_expected_head_revision",
             "identical_and_mutated_turn_commit_replay",
-            "turn_input_admission_settles_only_under_the_live_fence",
             "checkpoint_bodies_then_ref_only",
             "checkpoint_bodies_then_cleared",
             "missing_checkpoint_component_ref",
@@ -2307,23 +1917,16 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "fork_accepts_foreign_lineage",
             "rewind_fork_delete_source_refork",
             "attachment_intent_adopted_by_commit",
-            "queued_work_admission_released_by_run_terminal",
-            "unfinished_run_refuses_a_rival_admission",
-            "queued_work_admission_settles_only_under_the_live_fence",
             "delete_then_attempt_admission",
             "store_surface_sweep",
-            "lost_run_recovery",
             "refused_run_end",
             "pending_follow_on_raise_and_clear",
-            "run_admission_replays_exact_result_after_shift_handoff",
             "refused_surface_on_deleted_session_leaves_no_residue",
             "session_close_ledger_closes_runs_and_tracks_its_intent",
-            "run_cancel_ledger",
-            "run_fork_ledger",
             "stale_handle_after_delete",
             "corrupt_graph_node_refuses_every_reader",
-            "corrupt_pending_turn_input_refuses_list_and_admission",
-            "corrupt_queued_work_refuses_list_and_admission",
+            "corrupt_pending_turn_input_refuses_its_lists",
+            "corrupt_queued_work_refuses_its_lists",
             "corrupt_prior_checkpoint_refuses_read_modify_write",
         ]
     );
@@ -2361,7 +1964,7 @@ async fn cross_backend_store_differential_agrees() {
     let run_nonce = run_nonce();
     obligation_cases::compare_obligation_ledgers(sqlite_root.path(), &postgres, &run_nonce).await;
     session_delete_cases::compare_session_deletes(sqlite_root.path(), &postgres, &run_nonce).await;
-    ingress_cases::compare_ingress_ledgers(sqlite_root.path(), &postgres, &run_nonce).await;
+
     process_event_pages::compare_bounded_process_event_pages(
         sqlite_root.path(),
         &postgres,

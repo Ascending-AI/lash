@@ -376,10 +376,6 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
     ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
         let conn = self.inner.process_env_store.conn.clone();
         match kind {
-            // Ingress spans two tables.
-            lash_core_execution::store::ObligationKind::Ingress => {
-                crate::ingress_obligation::ingress_ledger(&conn)
-            }
             lash_core_execution::store::ObligationKind::ArtifactCleanup => Arc::new(
                 crate::obligation_ledger::SqliteArtifactCleanupLedger::new(conn),
             ),

@@ -71,7 +71,7 @@ class ClassifyTests(unittest.TestCase):
             ("crates/lash-sqlite-store/migrations/0001_init/up.sql", "true", "false"),
             ("crates/lash-store-sql/src/lib.rs", "true", "false"),
             ("crates/lash-sim/src/lib.rs", "true", "false"),
-            ("crates/lash-core/src/runtime/shift/admission.rs", "false", "true"),
+            ("crates/lash-core/src/runtime/turn_loop/accept.rs", "false", "true"),
             ("crates/lash-core/src/runtime/turn_loop.rs", "false", "true"),
             ("crates/lash-core/src/session/mod.rs", "false", "false"),
         )

@@ -70,12 +70,7 @@ pub enum RuntimeEffectKind {
     /// (FIG-4361): run the owed follow-on under its raised recovery count,
     /// commit it exhausted, or cede a follow-on the head owes no longer.
     RecoverFollowOn,
-    /// A session shift's recorded admission (ADR 0105 §2, FIG-3600): the run
-    /// it admitted, with its base and turn index, or why it admitted none.
-    AdmitShift,
-    /// The OS-random nonce recorded before a root's atomic admission
-    /// (ADR 0105 L-S8).
-    DrawRunStart,
+
     /// The session config a logical turn runs under, recorded once per run
     /// after the boundary's command drain (FIG-3600 S6, D3 §2): every replay
     /// of the run executes under the recorded config, never the live head's.
@@ -132,9 +127,8 @@ impl RuntimeEffectKind {
             Self::AcceptTurnInput => "accept_turn_input",
             Self::PluginCallbacks => "plugin_callbacks",
             Self::RecoverFollowOn => "recover_follow_on",
-            Self::AdmitShift => "admit_shift",
+
             Self::TraceBoundary => "trace_boundary",
-            Self::DrawRunStart => "draw_run_start",
             Self::ResolveTurnConfig => "resolve_turn_config",
             Self::RecordCompactionBase => "record_compaction_base",
             Self::RenderCompactionPrompt => "render_compaction_prompt",

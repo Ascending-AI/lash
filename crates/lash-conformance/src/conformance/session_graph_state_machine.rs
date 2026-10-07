@@ -7,7 +7,6 @@
 
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -1591,26 +1590,8 @@ async fn commit_runtime_state_for_property(
     commit: crate::RuntimeCommit,
     owner_suffix: &str,
 ) -> Result<crate::RuntimeCommitReceipt, crate::StoreError> {
-    let session_id = commit.session_id.clone();
-    let owner = crate::LeaseOwnerIdentity::opaque(
-        format!("session-graph-property-{owner_suffix}"),
-        format!("session-graph-property-{owner_suffix}-incarnation"),
-    );
-    let lease = store
-        .seal_shift_epoch_for_test(
-            &session_id,
-            &owner,
-            "commit-runtime-state-for-property-executor",
-            60_000,
-        )
-        .await?
-        .acquired()
-        .ok_or(crate::StoreError::Contended)?;
-    let result = store.commit_runtime_state(commit).await;
-    if result.is_err() {
-        store.supersede_shift_epoch_for_test(&lease).await?;
-    }
-    result
+    let _ = owner_suffix;
+    store.commit_runtime_state(commit).await
 }
 
 #[expect(

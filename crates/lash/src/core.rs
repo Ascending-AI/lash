@@ -2,8 +2,7 @@ use crate::support::{
     Arc, DeploymentStore, EmbedError, InMemoryLiveReplayStore, LashRuntime, LashSession,
     LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginSpec, PluginStack,
     ProcessRegistry, Result, RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig, SessionBuilder,
-    SessionListFilter, SessionView, SessionWorkEngine, StaticPluginFactory, TerminationPolicy,
-    ToolProvider,
+    SessionListFilter, SessionView, StaticPluginFactory, TerminationPolicy, ToolProvider,
 };
 use lash_core::ActorContext;
 use lash_core::Backend;
@@ -12,23 +11,23 @@ use lash_core_worker::DurableProcessWorkerConfig;
 use lash_sansio::SessionId;
 
 mod drain;
-pub(crate) mod held_shifts;
+#[expect(
+    dead_code,
+    reason = "no reconcile tick runs the election since the shift is deleted (L3s, FIG-5196); L10b decides what drives the relays it keeps"
+)]
 mod recovery;
-pub(crate) mod residents;
 mod runtime_host_config;
 mod session_deletion;
-pub(crate) mod session_shifts;
 pub use session_deletion::SessionDeleteCompletion;
 mod work_drivers;
 
 pub use drain::DeploymentDrainStatus;
-use session_shifts::{CoreSessionShifts, CoreSessionShiftsConfig};
 use work_drivers::CoreWorkSetup;
-pub(crate) use work_drivers::{CoreWorkSlot, ResolvedQueuedWork};
+pub(crate) use work_drivers::CoreWorkSlot;
 #[derive(Clone)]
 /// Owns the configured runtime services used to create and resume Lash sessions.
 pub struct LashCore {
-    pub(crate) shift_owner: lash_core::LeaseOwnerIdentity,
+    pub(crate) runtime_owner: lash_core::LeaseOwnerIdentity,
     pub(crate) env: RuntimeEnvironment,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     /// The one substrate every port and the effect host come from.
@@ -52,58 +51,12 @@ pub struct LashCore {
     pub(crate) host_process_engines: lash_core::ProcessEngineRegistry,
     /// Shared across core clones so the work ports are resolved at most once.
     pub(crate) substrate_slot: Arc<CoreWorkSlot>,
-    /// The `SessionShifts` this core installed on its backend's session-work
-    /// engine (FIG-3600), as the engine returned it. The engine may hold it
-    /// weakly, so the core keeps it for its whole life, and no longer: a shift
-    /// still running on this core's `SessionShifts` after the core is dropped does not
-    /// keep the install live (FIG-4017).
-    pub(crate) _session_shifts: Arc<dyn lash_core::SessionShifts>,
-    /// The sessions this core has open in this process: the `SessionShifts` runs a
-    /// shift on the open session's runtime (FIG-3600 S5b).
-    pub(crate) residents: Arc<residents::ResidentSessions>,
-    /// This core's seat in the recovery leader election (ADR 0109 §1.6),
-    /// shared with its `SessionShifts`.
+    /// This core's seat in the recovery leader election (ADR 0109 §1.6);
+    /// the core resigns it at shutdown.
     pub(crate) recovery: Arc<recovery::RecoverySlot>,
 }
 
 pub use lash_core::session_delete::SessionDeletion;
-
-/// What a core builds its [`SessionAdministration`](lash_core::SessionAdministration)
-/// from. Its `SessionShifts` holds one, weakly bound to the core's substrate,
-/// so the reconcile tick can deliver session deletes (ADR 0109 §4).
-#[derive(Clone)]
-pub(crate) struct AdministrationSource {
-    slot: std::sync::Weak<CoreWorkSlot>,
-    env: RuntimeEnvironment,
-    store_factory: Arc<dyn DeploymentStore>,
-    host_process_engines: lash_core::ProcessEngineRegistry,
-}
-
-impl AdministrationSource {
-    /// The administration over the core's resolved ports; `None` once the
-    /// core is gone.
-    pub(crate) async fn administration(&self) -> Option<lash_core::SessionAdministration> {
-        let slot = self.slot.upgrade()?;
-        Some(self.administration_over(&slot).await)
-    }
-
-    async fn administration_over(&self, slot: &CoreWorkSlot) -> lash_core::SessionAdministration {
-        let ports = slot.ports().await;
-        let queued = ports.queued_port();
-        let resolved_env = self
-            .env
-            .clone()
-            .with_work_ports(ports.process.clone(), Arc::clone(&queued));
-        lash_core::SessionAdministration::new(
-            Arc::clone(&self.store_factory),
-            resolved_env.core.control.effect_host.clone(),
-            Some(ports.process),
-            Some(resolved_env.core.trigger_store()),
-            Arc::clone(&resolved_env.core.durability.process_env_store),
-            self.host_process_engines.clone(),
-        )
-    }
-}
 
 impl LashCore {
     pub(crate) fn transcript_options(&self) -> crate::transcript::TranscriptProjectionOptions {
@@ -114,26 +67,6 @@ impl LashCore {
             .fold(Default::default(), |options, projector| {
                 options.with_projector(projector)
             })
-    }
-
-    /// The core's session work as a host-held handle carries it.
-    pub(crate) async fn held_work(&self) -> Arc<ResolvedQueuedWork> {
-        Arc::clone(&self.substrate_slot.ports().await.queued)
-    }
-
-    /// The ingress relay an acceptance through this core delivers with
-    /// (ADR 0109 §3): the backend's ingress ledger asking `work` for shifts.
-    pub(crate) fn ingress_relay(
-        &self,
-        work: &Arc<ResolvedQueuedWork>,
-    ) -> lash_core::shift::IngressRelay {
-        lash_core::shift::IngressRelay::over_backend(
-            &self.backend,
-            Arc::clone(work) as Arc<dyn SessionWorkEngine>,
-            Arc::clone(&self.env.core.clock),
-        )
-        .with_policy(self.env.core.control.relay_policy())
-        .with_metrics(self.env.core.tracing.metrics().clone())
     }
 
     /// A [`LashCoreBuilder`] over `backend`, the one substrate every
@@ -171,26 +104,14 @@ impl LashCore {
     /// not maintain a counter or orchestrate routing, deadlines, worker
     /// shutdown, or retirement.
     ///
-    /// Turns are counted as well as processes (FIG-3586): a parked turn, or a
-    /// turn whose admission a crashed `SessionShifts` still holds, is unfinished work, so
-    /// the deployment is not drained until none remains. A store that cannot
-    /// count its turns refuses rather than report zero.
+    /// Turns are counted as well as processes (FIG-3586): an unfinished
+    /// turn is unfinished work, so the deployment is not drained until none
+    /// remains. A store that cannot count its turns refuses rather than
+    /// report zero.
     pub async fn drain_status(&self, accepting_new_work: bool) -> Result<DeploymentDrainStatus> {
         let remaining_invocations = self.process_registry.count_non_terminal_processes().await?;
         let turns = self.store_factory.count_unsettled_turns().await?;
         let checked_at = self.env.core.clock.timestamp_ms();
-        let parked = crate::parked_work::ParkedWorkReport {
-            turns: lash_core::store::ParkReport {
-                by_reason: turns.parked_by_reason.clone(),
-                oldest_since_ms: turns.oldest_parked_since_ms,
-                retired_by_executable_generation: turns.retired_by_executable_generation.clone(),
-            },
-        };
-        crate::parked_work::record_park_gauges(
-            self.env.core.tracing.metrics(),
-            &parked,
-            checked_at,
-        );
         let mut stalled_obligations = std::collections::BTreeMap::new();
         for kind in lash_core::store::ObligationKind::ALL {
             let count = self.backend.obligation_ledger(kind).count_stalled().await?;
@@ -205,9 +126,6 @@ impl LashCore {
             accepting_new_work,
             remaining_invocations,
             in_flight_turns: turns.in_flight_turns,
-            parked_turns: turns.parked_turns,
-            oldest_parked_since_ms: parked.oldest_since_ms(),
-            retired_by_executable_generation: parked.retired_by_executable_generation(),
             stalled_obligations,
             checked_at,
         })
@@ -295,29 +213,10 @@ impl LashCore {
         Ok(self.store_factory.clear_session_fault(session_id).await?)
     }
 
-    /// The deployment's parked work — turns and processes whose redrive
-    /// refuses to replay their journals — to list, summarize and follow
-    /// (FIG-3659).
+    /// The deployment's control intents, to list.
     pub fn parked_work(&self) -> crate::parked_work::ParkedWork {
         crate::parked_work::ParkedWork {
-            work: Arc::clone(&self.substrate_slot),
-            scopes: Arc::clone(&self.env.core.control.scope_close),
-            scope_close_obligations: Arc::new(
-                lash_core::runtime::shift::ScopeCloseRelay::over_backend(
-                    &self.backend,
-                    Arc::clone(&self.store_factory),
-                    Arc::clone(&self.env.core.control.scope_close),
-                )
-                .with_policy(self.env.core.control.relay_policy())
-                .with_metrics(self.env.core.tracing.metrics().clone()),
-            ),
-            intents: self
-                .backend
-                .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
             store_factory: Arc::clone(&self.store_factory),
-            clock: Arc::clone(&self.env.core.clock),
-            metrics: self.env.core.tracing.metrics().clone(),
-            relay_policy: self.env.core.control.relay_policy(),
         }
     }
 
@@ -410,19 +309,16 @@ impl LashCore {
     /// and trigger store chosen by this core together. Provider, plugin,
     /// tracing, and other live turn wiring are deliberately excluded.
     pub async fn session_administration(&self) -> lash_core::SessionAdministration {
-        self.administration_source()
-            .administration_over(&self.substrate_slot)
-            .await
-    }
-
-    /// What this core builds its session administration from.
-    fn administration_source(&self) -> AdministrationSource {
-        AdministrationSource {
-            slot: Arc::downgrade(&self.substrate_slot),
-            env: self.env.clone(),
-            store_factory: Arc::clone(&self.store_factory),
-            host_process_engines: self.host_process_engines.clone(),
-        }
+        let ports = self.substrate_slot.ports().await;
+        let env = self.env.clone().with_work_ports(ports.process.clone());
+        lash_core::SessionAdministration::new(
+            Arc::clone(&self.store_factory),
+            env.core.control.effect_host.clone(),
+            Some(ports.process),
+            Some(env.core.trigger_store()),
+            Arc::clone(&env.core.durability.process_env_store),
+            self.host_process_engines.clone(),
+        )
     }
 
     /// Rebuild a live session from a [`ParkedSession`](crate::ParkedSession)
@@ -454,11 +350,10 @@ impl LashCore {
             self.process_lifecycle_available,
         )?;
         env.plugin_host = Some(Arc::new(plugin_host));
-        let runtime = LashRuntime::resume(inner, &env, self.shift_owner.clone()).await?;
+        let runtime = LashRuntime::resume(inner, &env, self.runtime_owner.clone()).await?;
         let handle =
             RuntimeHandle::with_live_replay_store(runtime, Arc::clone(&self.live_replay_store));
         let process_lifecycle_route = self.process_lifecycle_feed.register(&handle);
-        binding.register_resident(&handle);
         let parent_session_id =
             crate::session::recorded_parent_session_id(&binding.store()).await?;
         Ok(LashSession {
@@ -678,8 +573,7 @@ impl LashCore {
             Arc::new(plugin_host),
             runtime_host,
             self.substrate_slot.setup.process.clone(),
-            Arc::clone(&self.substrate_slot.setup.session_work),
-            self.shift_owner.clone(),
+            self.runtime_owner.clone(),
         ))
     }
 }
@@ -1015,7 +909,7 @@ impl LashCoreBuilder {
     ///
     /// The owner id is stable for the worker or process and never scoped to a
     /// turn. The incarnation id changes once per process boot.
-    pub fn build(mut self, shift_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
+    pub fn build(mut self, runtime_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
         let protocol_factory = self
             .protocol_factory
             .clone()
@@ -1101,51 +995,18 @@ impl LashCoreBuilder {
             .with_plugin_host(Arc::clone(&default_plugin_host))
             .with_process_work(process_work.clone())
             .build();
-        let residents = Arc::new(residents::ResidentSessions::default());
-        let session_work: Arc<dyn SessionWorkEngine> =
-            Arc::new(lash_core::DurableSessionWork::new(backend.clone()));
-        let (session_shifts, installed_shifts) = Self::build_session_shifts(
-            &session_work,
-            Arc::clone(&residents),
-            shift_owner.clone(),
-            env.clone(),
-            protocol_factory.clone(),
-            Arc::new(plugin_factories.clone()),
-            &store_factory,
-            Arc::clone(&live_replay_store),
-            process_lifecycle_available,
+        let recovery = Arc::new(recovery::RecoverySlot::new(
+            &env,
             self.recovery_lease.unwrap_or_default(),
-        );
-        // The `SessionShifts`'s reconcile tick runs every obligation kind's relay
-        // (ADR 0109 §1.4): the backend's process wiring always supplies a
-        // process port, and the `SessionShifts` administers through the slot bound
-        // below.
-        lash_core::shift::RelaySupply {
-            process_work: true,
-            session_administration: true,
-        }
-        .check()?;
+        ));
         let substrate = CoreWorkSetup {
             process: process_work,
-            session_work,
-            store_binding: backend.binding_identity(),
         };
 
         let substrate_slot = Arc::new(CoreWorkSlot::new(substrate));
-        // The `SessionShifts` is built before the slot it reconciles through, so the
-        // binding lands here: its recovery pass asks the resolved work port.
-        session_shifts.bind_substrate_slot(Arc::downgrade(&substrate_slot));
-        // The reconcile tick's session-delete relay administers through the
-        // same source the core does (ADR 0109 §4).
-        session_shifts.bind_administration(AdministrationSource {
-            slot: Arc::downgrade(&substrate_slot),
-            env: env.clone(),
-            store_factory: Arc::clone(&store_factory),
-            host_process_engines: host_process_engines.clone(),
-        });
         let plugin_factories = Arc::new(plugin_factories);
         Ok(LashCore {
-            shift_owner,
+            runtime_owner,
             env,
             backend,
             store_factory,
@@ -1159,42 +1020,8 @@ impl LashCoreBuilder {
             process_lifecycle_available,
             host_process_engines,
             substrate_slot,
-            _session_shifts: installed_shifts,
-            recovery: session_shifts.recovery(),
-            residents,
-        })
-    }
-
-    /// The core's `SessionShifts` (FIG-3600), installed on the backend's
-    /// session-work engine. Returns the `SessionShifts` and the one the engine kept.
-    #[allow(clippy::too_many_arguments)]
-    fn build_session_shifts(
-        session_work: &Arc<dyn SessionWorkEngine>,
-        residents: Arc<residents::ResidentSessions>,
-        shift_owner: lash_core::LeaseOwnerIdentity,
-        env: RuntimeEnvironment,
-        protocol_factory: Option<Arc<dyn PluginFactory>>,
-        plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-        store_factory: &Arc<dyn DeploymentStore>,
-        live_replay_store: Arc<dyn LiveReplayStore>,
-        process_lifecycle_available: bool,
-        recovery_lease: lash_core::engine::RecoveryLeaseConfig,
-    ) -> (Arc<CoreSessionShifts>, Arc<dyn lash_core::SessionShifts>) {
-        let owner = shift_owner.clone();
-        let recovery = Arc::new(recovery::RecoverySlot::new(&env, recovery_lease));
-        let shifts = Arc::new(CoreSessionShifts::new(Arc::new(CoreSessionShiftsConfig {
             recovery,
-            residents,
-            shift_owner,
-            env,
-            protocol_factory,
-            plugin_factories,
-            store_factory: Arc::clone(store_factory),
-            live_replay_store,
-            process_lifecycle_available,
-        })));
-        let installed = install_session_shifts(session_work, shifts.clone(), &owner);
-        (shifts, installed)
+        })
     }
 
     /// Bounds of the process observation hub: its per-process ring capacity
@@ -1302,29 +1129,4 @@ pub struct ForkRequest {
     pub session_id: SessionId,
     pub relation: lash_core::SessionRelation,
     pub observed_processes: Vec<lash_core::ProcessId>,
-}
-
-/// Install `shifts` on `port` for the core that `owner` names, and return the
-/// `SessionShifts` the engine serves.
-///
-/// One engine serves one `SessionShifts` (get-or-init), so a second core over the same
-/// backend does not work its own sessions: its plugins, protocol and policy
-/// are not the ones that run them. That is reported, naming the core whose
-/// `SessionShifts` is ignored (#2290 review, LOW-14).
-fn install_session_shifts(
-    port: &Arc<dyn lash_core::SessionWorkEngine>,
-    shifts: Arc<dyn lash_core::SessionShifts>,
-    owner: &lash_core::LeaseOwnerIdentity,
-) -> Arc<dyn lash_core::SessionShifts> {
-    let installed = port.install_session_shifts(Arc::clone(&shifts));
-    if !installed.runs_on(shifts.as_ref()) {
-        tracing::warn!(
-            event = "session_shifts.install_ignored",
-            owner_id = %owner.owner_id,
-            incarnation_id = %owner.incarnation_id,
-            "the backend's session-work engine already serves another core's SessionShifts; \
-             this core's sessions are executed by that core's plugins, protocol and policy"
-        );
-    }
-    installed
 }

@@ -56,11 +56,12 @@ pub mod artifact_cleanup;
 pub mod durable;
 mod durable_queue;
 mod lifecycle;
+pub mod obligations;
 pub mod process_start;
 pub mod process_terminal;
 pub mod recovery_lease;
-pub mod shift;
 pub mod trigger_delivery;
+mod turn_config;
 use turn_settlement::TurnIngressSettlement;
 #[cfg(feature = "testing")]
 pub mod logical_turn;
@@ -73,7 +74,7 @@ mod plugin_namespace_tests;
 use lash_core_store::queued_drain_policy;
 mod plugin_transition;
 mod process_runtime;
-mod run_start;
+
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
@@ -160,7 +161,6 @@ use crate::{
 };
 use crate::{Effect, TurnMachine};
 
-use crate::store::ShiftFence;
 use host::*;
 use session_manager::*;
 use turn_boundary::*;
@@ -172,6 +172,18 @@ use assembly::{
     LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
     LlmStreamState, ReasoningPublicationState, fold_llm_stream_event,
 };
+
+/// The context for one step of a command run under `admitted`: the run's
+/// own when it already serves that scope, else a rescope of it.
+pub(crate) fn step_controller(
+    controller: &ActorContext,
+    admitted: crate::AdmittedScope,
+) -> Result<ActorContext, RuntimeError> {
+    if controller.execution_scope() == admitted.scope() {
+        return Ok(controller.clone());
+    }
+    controller.rescope(admitted)
+}
 
 #[cfg(any(test, feature = "testing"))]
 pub(crate) fn response_synthesized_from_aborted_stream(
@@ -202,10 +214,10 @@ pub use effect::TurnCancelWait;
 /// Presentation and attempt-stream vocabulary the effect
 /// contracts below name.
 pub use effect::{
-    ATTEMPT_STREAM_BYTE_BUDGET, AdmittedHeadVerdict, AttemptStream, AttemptStreamBuilder,
-    AttemptStreamChannel, AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation,
-    CompactionBase, DecodedStreamEvent, PresentationBinding, ProcessDefinitionLocalExecution,
-    ToolAttemptCapture, ToolPresentation,
+    ATTEMPT_STREAM_BYTE_BUDGET, AttemptStream, AttemptStreamBuilder, AttemptStreamChannel,
+    AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation, CompactionBase,
+    DecodedStreamEvent, PresentationBinding, ProcessDefinitionLocalExecution, ToolAttemptCapture,
+    ToolPresentation,
 };
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
@@ -243,9 +255,8 @@ use io::normalize_input_items;
 pub use lash_core_execution::runtime::DirectCompletionClient;
 pub use lash_core_execution::runtime::EffectOpenerError;
 pub use lash_core_execution::runtime::work::{
-    DurableProcessWork, DurableSessionWork, NoProcessWork, NoSessionWork, ProcessRegistryAwaiter,
-    ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring, SessionShifts, SessionWorkEngine,
-    WorkCadenceError, WorkCadencePolicy,
+    DurableProcessWork, NoProcessWork, ProcessRegistryAwaiter, ProcessTerminalWait,
+    ProcessWorkSubstrate, ProcessWorkWiring, WorkCadenceError, WorkCadencePolicy,
 };
 /// The trace handle a host config carries.
 pub use lash_core_execution::runtime::{TraceEmitter, TraceRuntime};
@@ -389,8 +400,7 @@ pub use lash_core_execution::runtime::{
     AgentFrameRun, AssembledTurn, CodeOutputRecord, DeploymentStore, DeploymentStoreDecorator,
     EventSink, NOOP_EVENT_SINK, NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink,
     ProtocolSessionExtension, TerminationPolicy, TurnActivity, TurnActivitySink, TurnEvent,
-    admit_session_state_generation, admit_session_view, live_session_view,
-    park_turn_refused_by_generation, session_is_live,
+    admit_session_state_generation, admit_session_view, live_session_view, session_is_live,
 };
 
 mod normalized_item {
@@ -411,9 +421,6 @@ pub(crate) use normalized_item::NormalizedItem;
 /// Event sinks default to no-op sinks.
 /// Execution scope is explicit and required at every runtime boundary that can execute
 /// nondeterministic work.
-mod queued_options;
-pub use queued_options::{QueuedEffectSource, QueuedTurnOptions};
-
 pub struct TurnOptions<'a> {
     events: Option<&'a dyn EventSink>,
     turn_events: Option<&'a dyn TurnActivitySink>,
@@ -510,26 +517,12 @@ pub struct LashRuntime {
     /// resident re-sync. The next turn takes it and reports it as
     /// `TurnEvent::ToolRestoreReported` (FIG-3367, FIG-5134).
     pub tool_restore_report: Option<crate::ToolRestoreReport>,
-    /// Whether the running direct turn replays the journaled initial shift
-    /// set (ADR 0069 §6). A superseded one cedes the turn at commit under
-    /// any generation: if its rows were reclaimed while the turn was down,
-    /// another shift answered them, so committing would answer them twice.
-    /// Set while an engine executions one admitted run as an attempt of its own
-    /// ([`execute_admitted_run`](crate::shift::execute_admitted_run)): the engine retries
-    /// that attempt on a live fault, under the same run (FIG-3897). The
-    /// attempt's guard lowers it when the attempt returns or the engine
-    /// drops it, discarding a dropped attempt's residue (FIG-3984).
-    pub(crate) engine_retries_run: bool,
     /// The turn index the running direct turn's admission recorded
     /// (FIG-3682). The accept phase sets it after it adopted the head the
     /// turn was admitted on; the prepare phase takes it, so the admitted
     /// physical turn is addressed under the recorded index and never re-reads
     /// the head a replay's live store may have moved past.
     pub(crate) admitted_turn_index: Option<usize>,
-    /// The admitted run this runtime is running, with the fence its seal
-    /// raised (FIG-3600 S7): its commits present the fence, and the commit of
-    /// its final physical turn writes its terminal evidence.
-    pub(crate) shift_run: Option<Box<crate::runtime::shift::RunExecution>>,
 }
 
 #[doc(hidden)]

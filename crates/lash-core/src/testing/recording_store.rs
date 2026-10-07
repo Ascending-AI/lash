@@ -204,14 +204,6 @@ impl RecordingStore {
 #[async_trait::async_trait]
 impl RuntimeStoreDecorator for RecordingStore {
     type Inner = dyn RuntimeStore;
-    async fn admit_run(
-        &self,
-        request: &crate::store::AdmitRunRequest,
-    ) -> Result<Option<crate::store::RunAdmission>, StoreError> {
-        self.run_admission_hook();
-        self.inner.admit_run(request).await
-    }
-
     async fn admit_at_checkpoint(
         &self,
         request: &crate::store::CheckpointAdmissionRequest,
@@ -312,7 +304,7 @@ impl RuntimeStoreDecorator for RecordingStore {
 
     async fn end_refused_run(
         &self,
-        fence: &crate::store::ShiftFence,
+        session_id: &SessionId,
         run: &crate::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
@@ -325,7 +317,9 @@ impl RuntimeStoreDecorator for RecordingStore {
         if let Some(error) = injected_failure {
             return Err(error);
         }
-        self.inner.end_refused_run(fence, run, refusal, at_ms).await
+        self.inner
+            .end_refused_run(session_id, run, refusal, at_ms)
+            .await
     }
 
     async fn begin_attachment_write(
@@ -422,18 +416,11 @@ impl RuntimeStoreDecorator for RecordingDeploymentStore {
         self.inner.as_ref()
     }
 
-    async fn admit_run(
-        &self,
-        request: &crate::store::AdmitRunRequest,
-    ) -> Result<Option<crate::store::RunAdmission>, StoreError> {
-        self.record(request.session_id()).admit_run(request).await
-    }
-
     async fn admit_at_checkpoint(
         &self,
         request: &crate::store::CheckpointAdmissionRequest,
     ) -> Result<crate::store::CheckpointAdmission, StoreError> {
-        self.record(request.session_id())
+        self.record(&request.session_id)
             .admit_at_checkpoint(request)
             .await
     }
@@ -501,13 +488,13 @@ impl RuntimeStoreDecorator for RecordingDeploymentStore {
 
     async fn end_refused_run(
         &self,
-        fence: &crate::store::ShiftFence,
+        session_id: &SessionId,
         run: &crate::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
     ) -> Result<crate::store::RunEndOutcome, StoreError> {
-        self.record(fence.session())
-            .end_refused_run(fence, run, refusal, at_ms)
+        self.record(session_id)
+            .end_refused_run(session_id, run, refusal, at_ms)
             .await
     }
 

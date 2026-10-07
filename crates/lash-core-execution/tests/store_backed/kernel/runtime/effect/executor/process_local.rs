@@ -346,7 +346,7 @@ mod tests {
         .with_process_starts(
             backend.obligation_ledger(crate::store::ObligationKind::ProcessStart),
             backend.clock(),
-            crate::runtime::shift::relay::RelayPolicy::default(),
+            crate::runtime::obligations::relay::RelayPolicy::default(),
             Default::default(),
         )
         .with_process_env_store(backend.process_env_store());

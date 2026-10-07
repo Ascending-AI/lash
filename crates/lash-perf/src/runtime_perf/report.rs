@@ -81,7 +81,6 @@ pub struct RuntimePerfRun {
     pub warmups: usize,
     pub scenario_filters: Vec<String>,
     pub chat_turns: usize,
-    pub contention_workers: usize,
     pub checkpoint_transcript_bytes: usize,
     pub checkpoint_messages: usize,
     pub checkpoint_graph_rows: usize,
@@ -109,7 +108,6 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
         warmups,
         scenario_filters,
         chat_turns,
-        contention_workers,
         checkpoint_transcript_bytes,
         checkpoint_messages,
         checkpoint_graph_rows,
@@ -133,7 +131,6 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
     let chat_turns = chat_turns.max(1);
     let duration_geometry =
         duration_trend::DurationTrendGeometry::current(runs, warmups, chat_turns);
-    let contention_workers = contention_workers.max(1);
     let checkpoint_curve = CheckpointCurveConfig::new(
         checkpoint_transcript_bytes,
         checkpoint_messages,
@@ -158,7 +155,6 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
                 Box::pin(run_once(
                     *scenario,
                     chat_turns,
-                    contention_workers,
                     &checkpoint_curve,
                     &high_traffic,
                 )),
@@ -201,7 +197,6 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
                 Box::pin(run_once(
                     *scenario,
                     chat_turns,
-                    contention_workers,
                     &checkpoint_curve,
                     &high_traffic,
                 )),

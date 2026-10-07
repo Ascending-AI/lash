@@ -21,12 +21,10 @@
 //! `park_id`.
 
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{RuntimeError, RuntimeErrorCode, SessionId, TurnId};
+use crate::{RuntimeError, RuntimeErrorCode, TurnId};
 
 /// The durable identity of one park: the feed sequence of the `Parked` event
 /// that opened it. A same-turn re-park keeps it; a superseding park mints a
@@ -68,185 +66,6 @@ impl std::fmt::Display for ParkId {
     }
 }
 
-/// What a caller asks the store to record: a park is written by the aborting
-/// turn's own path, which knows the session, the turn, the refusal and the
-/// wall clock. The store allocates `park_id`, `since_ms`, `last_refused_ms`
-/// and `attempts`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TurnParkWrite {
-    /// The session whose turn parked.
-    pub session_id: SessionId,
-    /// The turn that parked.
-    pub turn_id: TurnId,
-    /// Why it parked.
-    pub reason: ParkReason,
-    /// Host-clock epoch milliseconds at which the refusal was recorded.
-    pub at_ms: u64,
-    /// Who writes the park, which decides what it does to a park the run
-    /// already holds.
-    pub origin: TurnParkOrigin,
-}
-
-/// Who writes a park (FIG-4626). The store decides a write by its origin in
-/// the write's own transaction: only the execution's own refusal re-parks a
-/// run unconditionally, and a reconcile write is fenced by the redrive the
-/// stored park names, whether or not it carries a handle.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TurnParkOrigin {
-    /// The aborting execution itself refused: it ran, so it ran past any
-    /// redrive the park names. Keeps any engine handle already stored.
-    Refusal,
-    /// The engine's park reconcile found stopped work and reports it: an
-    /// observation of the engine's state, never a new refusal of the run.
-    Reconcile {
-        /// The engine's handle on the stopped execution, when it is the
-        /// run's own: the handle a redrive resumes and a cancel releases.
-        /// `None` when the stopped work is its session's shift.
-        engine: Option<EnginePark>,
-        /// The settled redrive the stored park named when the writer read
-        /// it, after which the writer confirmed with the engine that the
-        /// work is still stopped. The work then stopped again after that
-        /// redrive resumed it, and the write re-parks the run; a write
-        /// naming no such redrive is from a listing that may predate the
-        /// resume, and leaves a redriven park as it is.
-        after_redrive: Option<super::ControlIntentId>,
-    },
-}
-
-impl TurnParkWrite {
-    /// The park the aborting execution itself writes for `run`: no engine
-    /// handle.
-    #[must_use]
-    pub fn refusal(session_id: SessionId, run: TurnId, reason: ParkReason, at_ms: u64) -> Self {
-        Self {
-            session_id,
-            turn_id: run,
-            reason,
-            at_ms,
-            origin: TurnParkOrigin::Refusal,
-        }
-    }
-
-    /// The park the engine's reconcile writes for `run` (see
-    /// [`TurnParkOrigin::Reconcile`]).
-    #[must_use]
-    pub fn reconcile(
-        session_id: SessionId,
-        run: TurnId,
-        reason: ParkReason,
-        at_ms: u64,
-        engine: Option<EnginePark>,
-        after_redrive: Option<super::ControlIntentId>,
-    ) -> Self {
-        Self {
-            origin: TurnParkOrigin::Reconcile {
-                engine,
-                after_redrive,
-            },
-            ..Self::refusal(session_id, run, reason, at_ms)
-        }
-    }
-
-    /// The engine handle the write carries, if any.
-    #[must_use]
-    pub fn engine(&self) -> Option<&EnginePark> {
-        match &self.origin {
-            TurnParkOrigin::Refusal => None,
-            TurnParkOrigin::Reconcile { engine, .. } => engine.as_ref(),
-        }
-    }
-}
-
-/// The stored park a [`TurnParkWrite`] is decided against: the session's
-/// current park, as its transaction read it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StoredTurnParkHead {
-    /// The run the stored park names.
-    pub run: TurnId,
-    /// The engine handle the stored park carries.
-    pub engine: Option<EnginePark>,
-    /// The redrive the stored park's `resume_intent` names, if any.
-    pub redrive: Option<StoredParkRedrive>,
-}
-
-/// The redrive a stored park names, as the park write's transaction read it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StoredParkRedrive {
-    /// The redrive intent.
-    pub intent: super::ControlIntentId,
-    /// Whether it is still open (pending, or failed and retryable): its
-    /// engine half has not resumed the execution yet, as far as the store
-    /// knows.
-    pub open: bool,
-}
-
-/// What a [`TurnParkWrite`] does to the session's park (D2 §1.3), decided in
-/// the write's own transaction after the run's terminal evidence was found
-/// absent (P2 refuses before this).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TurnParkWriteDecision {
-    /// No park: open one.
-    Open,
-    /// Another run's park: close it `Superseded`, then open this run's.
-    Supersede,
-    /// The same run refused again, or its engine found its work stopped
-    /// again after a redrive resumed it: keep `park_id` and `since_ms`,
-    /// refresh the reason, count the attempt, clear `resume_intent` (P3), and
-    /// store the write's engine handle if it carries one. A redrive the park
-    /// named that is still open is settled with it: the run ran past it,
-    /// which only the run's own refusal can show.
-    Repark,
-    /// The engine stopped the run's execution and the run already holds
-    /// a park without a handle: keep its reason and attempts, store the
-    /// handle (P4, `AttachedToExisting`).
-    AttachEngine,
-    /// Nothing to write: the park already carries this handle, its shift
-    /// stopped behind it, or a redrive owns the stopped execution.
-    Unchanged,
-}
-
-/// Decide `write` against the session's stored park `stored`.
-#[must_use]
-pub fn decide_turn_park_write(
-    stored: Option<&StoredTurnParkHead>,
-    write: &TurnParkWrite,
-) -> TurnParkWriteDecision {
-    let Some(stored) = stored else {
-        return TurnParkWriteDecision::Open;
-    };
-    if stored.run != write.turn_id {
-        return TurnParkWriteDecision::Supersede;
-    }
-    let (engine, after_redrive) = match &write.origin {
-        // The execution itself refused again.
-        TurnParkOrigin::Refusal => return TurnParkWriteDecision::Repark,
-        TurnParkOrigin::Reconcile {
-            engine,
-            after_redrive,
-        } => (engine, after_redrive),
-    };
-    if let Some(redrive) = stored.redrive {
-        // A redrive owns the stopped work until it resumes it; once it did,
-        // only a writer that saw it settled and then found the work stopped
-        // again re-parks: an engine listing read before the resume is stale
-        // and must not re-park the running run. A writer that read the park
-        // before this redrive was requested names no redrive, or another.
-        return if !redrive.open && *after_redrive == Some(redrive.intent) {
-            TurnParkWriteDecision::Repark
-        } else {
-            TurnParkWriteDecision::Unchanged
-        };
-    }
-    match (stored.engine.as_ref(), engine) {
-        // The run is parked and no redrive ran since: a shift that stopped
-        // behind the park adds nothing to it.
-        (_, None) => TurnParkWriteDecision::Unchanged,
-        (None, Some(_)) => TurnParkWriteDecision::AttachEngine,
-        (Some(stored), Some(engine)) if stored == engine => TurnParkWriteDecision::Unchanged,
-        (Some(_), Some(_)) => TurnParkWriteDecision::Repark,
-    }
-}
-
 /// The result of an owning store write. The disposition is ephemeral and
 /// cannot be serialized into a journal as a freshness claim.
 #[derive(Debug)]
@@ -275,34 +94,6 @@ impl<T> StoreTransition<T> {
         self.changed
             .then(lash_trace::EmissionPermit::new_transition)
     }
-}
-
-/// The stored parked state of one session's turn.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TurnPark {
-    /// The session whose turn parked.
-    pub session_id: SessionId,
-    /// The turn that parked: a redrive of this turn is what resumes it.
-    pub turn_id: TurnId,
-    /// Why it parked.
-    pub reason: ParkReason,
-    /// The feed sequence of the `Parked` event that opened this park.
-    pub park_id: ParkId,
-    /// Host-clock epoch milliseconds of the first park of this turn; kept
-    /// across same-turn re-parks and reset only when a different turn parks.
-    pub since_ms: u64,
-    /// Host-clock epoch milliseconds of the most recent refusal.
-    pub last_refused_ms: u64,
-    /// Refusals of this turn since it parked (1 on the first park).
-    pub attempts: u32,
-    /// The engine's handle on the stopped execution, once reconcile recorded
-    /// one: what a redrive resumes and a cancel or fork releases.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub engine: Option<EnginePark>,
-    /// The redrive requested since this park last refused, if any. A re-park
-    /// of the same run clears it (P3), so an operator can redrive again.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resume_intent: Option<super::ControlIntentId>,
 }
 
 /// Why a turn parked. Each arm carries the refusal's operator-facing message:
@@ -892,15 +683,6 @@ impl ParkEventKind {
     }
 }
 
-/// The work a turn park feed event names: the parked turn of one session.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TurnParkTarget {
-    /// The session the transitioned park belonged to.
-    pub session_id: SessionId,
-    /// The turn the transitioned park belonged to.
-    pub turn_id: TurnId,
-}
-
 /// One park feed row, shared by the turn and the process feeds. `seq` is the
 /// feed's own clock sequence; `park_id` is the park the transition applies to
 /// (for `Unparked`/`Cancelled` it names the park that closed, which is
@@ -1018,100 +800,14 @@ impl ParkReport {
     }
 }
 
-/// The filter a `list_turn_parks` read applies.
-#[derive(Clone, Debug)]
-pub struct TurnParkQuery {
-    /// Restrict to these reason codes; `None` (or an empty set) means all.
-    pub reasons: Option<BTreeSet<ParkReasonCode>>,
-    /// Restrict to one session.
-    pub session: Option<SessionId>,
-    /// Age filter: only parks whose `since_ms` is at or before this instant.
-    pub parked_at_or_before_ms: Option<u64>,
-    /// Keyset: rows strictly after `(since_ms, session_id)` in the
-    /// `(since_ms, session_id)` ordering.
-    pub after: Option<(u64, SessionId)>,
-    /// Page size.
-    pub limit: NonZeroUsize,
-}
-
-impl TurnPark {
-    /// Decode a stored park row, checking that the stored `reason_code`
-    /// agrees with the decoded reason's [`ParkReason::code`].
-    ///
-    /// # Errors
-    /// When the stored reason is not a reason this build reads, or the stored
-    /// code disagrees with it.
-    #[allow(clippy::too_many_arguments)]
-    pub fn decode(
-        session_id: SessionId,
-        turn_id: TurnId,
-        park_id: ParkId,
-        reason_code: &str,
-        reason_json: &str,
-        since_ms: u64,
-        last_refused_ms: u64,
-        attempts: u32,
-        engine_ref: Option<String>,
-        resume_intent: Option<u64>,
-    ) -> Result<Self, crate::StoreError> {
-        let reason: ParkReason = serde_json::from_str(reason_json).map_err(|error| {
-            crate::StoreError::StoredDataCorrupt {
-                record_kind: "TurnPark",
-                message: format!(
-                    "stored turn park reason for session `{session_id}` is unreadable: {error}"
-                ),
-            }
-        })?;
-        if reason.code().as_str() != reason_code {
-            return Err(crate::StoreError::StoredDataCorrupt {
-                record_kind: "TurnPark",
-                message: format!(
-                    "stored turn park for session `{session_id}` names reason code \
-                     `{reason_code}` but its reason decodes as `{}`",
-                    reason.code().as_str()
-                ),
-            });
-        }
-        Ok(Self {
-            session_id,
-            turn_id,
-            reason,
-            park_id,
-            since_ms,
-            last_refused_ms,
-            attempts,
-            engine: engine_ref.map(EnginePark::new),
-            resume_intent: resume_intent.map(super::ControlIntentId::from_sequence),
-        })
-    }
-}
-
 /// The turns of a deployment that are not settled yet, for drain.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnsettledTurnCounts {
-    /// Sessions whose turn is parked ([`TurnPark`]).
-    pub parked_turns: usize,
-    /// Sessions with a turn in flight: a pending queued run, an admitted turn
-    /// input that is not settled, or a parked turn. Parked turns are
-    /// in-flight turns too — they hold their admissions — so this is never less
-    /// than [`parked_turns`](Self::parked_turns).
+    /// Sessions with a turn in flight: a pending queued run or an admitted
+    /// turn input that is not settled.
     pub in_flight_turns: usize,
-    /// Sessions whose unparked turn in flight their stalled close holds: the
-    /// session's `CloseSession` intent stalled its obligation (ADR 0109 §4),
-    /// so the claim stays until an operator re-arms the close, whose delete
-    /// then retires it. A typed stall, like a park: never more than
-    /// `in_flight_turns - parked_turns`.
+    /// Sessions whose turn in flight their stalled close holds: the
+    /// session's `CloseSession` intent is still pending, so the claim stays
+    /// until the close retires it. Never more than `in_flight_turns`.
     pub held_by_stalled_close: usize,
-    /// The oldest live park's `since_ms`: the first park of the oldest
-    /// still-parked turn, `None` when nothing is parked.
-    pub oldest_parked_since_ms: Option<u64>,
-    /// Live parks per reason code; codes with no park are absent.
-    pub parked_by_reason: BTreeMap<ParkReasonCode, usize>,
-    /// Live [`RetiredGeneration`](ParkReason::RetiredGeneration) parks per
-    /// the generation their admission recorded (FIG-3571): what an old-build
-    /// drain of each retired generation still has to redrive. A park whose
-    /// admission recorded no generation is counted under
-    /// [`parked_by_reason`](Self::parked_by_reason) only.
-    pub retired_by_executable_generation:
-        BTreeMap<crate::executable_generation::ExecutableGeneration, usize>,
 }

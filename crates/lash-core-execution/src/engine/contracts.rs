@@ -5,11 +5,6 @@
 //! interior mutability in an implementor is a contract violation. A shift
 //! replays them over recorded inputs and must reach the same decisions.
 
-use serde::{Deserialize, Serialize};
-
-use super::admission::ShiftRequestId;
-use crate::SessionId;
-
 /// How a durable format's stored bytes move to a newer build (ADR 0106 §2).
 ///
 /// The type lives in the kernel rather than the facade's format table so an
@@ -27,11 +22,4 @@ pub enum UpgradePolicy {
     /// Both versions live during the roll window: content addresses,
     /// idempotency keys, namespaced object state and negotiated wire versions.
     Coexist,
-}
-
-/// One logical shift request.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ShiftRequest {
-    pub session: SessionId,
-    pub request: ShiftRequestId,
 }

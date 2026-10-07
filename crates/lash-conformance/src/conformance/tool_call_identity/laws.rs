@@ -10,22 +10,6 @@ use super::{
     assert_finished, calls, outputs, text,
 };
 
-/// Panics when the effect loop ends: every tool call settled and the turn
-/// has not committed.
-pub(super) struct PanicBeforeTurnCommit;
-
-impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
-    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
-
-    fn end(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
-        if phase == lash_core::runtime::RuntimeTurnPhase::EffectLoop {
-            panic!("injected crash after the tool calls settled and before the turn commit");
-        }
-    }
-
-    fn begin_named(&self, _phase: &str) {}
-}
-
 /// The one execution of `label`'s body.
 pub(super) fn only(world: &World, label: &str) -> Execution {
     let executions = world.witness.of(label);
@@ -309,9 +293,9 @@ pub async fn one_turn_commits_history_once_and_never_replaces_existing_nodes(
     tier: ToolCallIdentityTier,
 ) {
     let mut world = World::new(&tier, "single-history-commit");
-    let receipts = Arc::new(
-        super::super::frame_open_redrive::receipts::CommitReceipts::new(world.store().await),
-    );
+    let receipts = Arc::new(super::super::commit_receipts::CommitReceipts::new(
+        world.store().await,
+    ));
     world.observed_store = Some(receipts.clone());
     let seed = world.turn("seed", vec![text("immutable prefix")]);
     assert_finished("seed", &world.run(&seed).await);
@@ -363,9 +347,9 @@ pub async fn suspended_tool_keeps_turn_and_history_head_until_resolution(
     tier: ToolCallIdentityTier,
 ) {
     let mut world = World::new(&tier, "suspended-history");
-    let receipts = Arc::new(
-        super::super::frame_open_redrive::receipts::CommitReceipts::new(world.store().await),
-    );
+    let receipts = Arc::new(super::super::commit_receipts::CommitReceipts::new(
+        world.store().await,
+    ));
     world.observed_store = Some(receipts.clone());
     assert_finished(
         "seed",
@@ -412,7 +396,6 @@ pub async fn suspended_tool_keeps_turn_and_history_head_until_resolution(
         assert_eq!(waiting.current_frame_node_id, before.current_frame_node_id);
         assert_eq!(waiting.config, before.config);
         assert_eq!(waiting.pending_follow_on, before.pending_follow_on);
-        assert_eq!(waiting.published_by_shift, before.published_by_shift);
         world.witness.gate.open();
     });
     assert_finished("resolved suspended turn", &assembled);
@@ -434,14 +417,8 @@ pub async fn live_and_durable_queue_paths_share_results_and_capability_refusals(
     let runtime = crate::RuntimeHandle::new(world.runtime(None).await);
     let store = crate::store::SessionStore::new(world.store().await, world.session_id.clone())
         .expect("binding view");
-    let backend = crate::conformance::LawBackend::over_stores(tier.stores.clone()).into_backend();
     let ops = crate::facade_support::DurableSessionOps::new(
         world.session_id.clone(),
-        lash_core::shift::IngressRelay::over_backend(
-            &backend,
-            Arc::new(crate::NoSessionWork::new()),
-            backend.clock(),
-        ),
         Arc::new(crate::facade_support::InMemoryLiveReplayStore::default()),
     );
     let input = crate::TurnInput::text("same request on both rails");
@@ -714,7 +691,6 @@ impl crate::store::RuntimeStoreDecorator for QueueCapabilityRefusal {
     async fn admit_pending_turn_inputs(
         &self,
         _batch: crate::PendingTurnInputBatch,
-        _ttl: u64,
     ) -> Result<crate::TurnInputAdmission, crate::StoreError> {
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "admit_pending_turn_inputs",

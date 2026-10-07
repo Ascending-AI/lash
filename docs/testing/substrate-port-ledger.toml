@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1235 rows over 739 files, 3426 laws.
-# By class: mechanical 143, semantic 99, delete 678, replace 315.
-# By lane: L1b 11, L3 16, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 66, L9c 241, L9d 70, L9e 90, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 472, ported 43, deleted 720.
+# 1377 rows over 808 files, 3686 laws.
+# By class: mechanical 143, semantic 99, delete 735, replace 400.
+# By lane: L1b 11, L3 16, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 325, L9d 70, L9e 90, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 472, ported 43, deleted 862.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -672,7 +672,16 @@ law = "a direct turn's acceptance commits once: a redrive after the acceptance c
 
 [planned."WAKE1"]
 owner = "L3s"
+path = "crates/lash-conformance/src/conformance/session_mail.rs::a_producer_wakes_no_absent_or_deleted_session"
 law = "a send or cancel against an absent or deleted session wakes no session actor and creates nothing; one send to a live session wakes it once"
+
+[planned."L3S-TURN"]
+owner = "L9c"
+law = "the turn and ingress laws L3s deleted with the store run admission, its final commit and the shift fence hold on the session actor's turn commit; each row's owed law names one"
+
+[planned."L3S-CLOSE"]
+owner = "L9c"
+law = "a session close and its two-phase delete hold on the session actor: the close is idempotent, ends every run Cancelled(SessionDeleted) once, its acknowledgement arms the delete, and the delete waits for the session cleanup"
 
 [planned."PARK-FAULT"]
 owner = "L6"
@@ -20041,3 +20050,2194 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the parked-segment surface is gone"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "*"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_committed_run_redriven_after_a_profile_change_answers_from_its_receipt",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a committed run redriven after a later profile change answers from its commit receipt under the config it recorded, with no new model call"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "an_input_sent_after_a_config_command_runs_on_the_new_profile"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "an_input_sent_after_a_config_command_runs_on_the_new_profile",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "an input sent after a config command runs on the new profile"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "a_config_transaction_waits_while_a_run_owns_the_head"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_config_transaction_waits_while_a_run_owns_the_head",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a config transaction waits while a run owns the head and applies at the next boundary"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "an_unknown_profile_key_is_refused_typed_and_publishes_nothing"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "an_unknown_profile_key_is_refused_typed_and_publishes_nothing",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a config command naming an unknown profile key is refused typed and publishes nothing"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_refusal"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_refusal",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a corrupt recorded config namespace is corruption, never a recorded refusal"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "a_profile_change_records_the_binding_minted_where_it_resolves"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_profile_change_records_the_binding_minted_where_it_resolves",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a profile change records the binding minted where it resolves"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "a_reasoning_change_is_judged_against_the_final_recorded_llm_profile"
+area = "turn-config"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_reasoning_change_is_judged_against_the_final_recorded_llm_profile",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a reasoning change is judged against the final recorded LLM profile"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "an_older_admission_redriven_after_a_profile_change_is_fenced_out"
+area = "turn-config"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "an_older_admission_redriven_after_a_profile_change_is_fenced_out",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the stale shift fence an older admission presented"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/revision_pins.rs"
+test = "*"
+area = "revision-pins"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_pin_written_before_during_or_after_its_turn_keeps_that_turn_through_collection",
+  "a_pin_racing_its_turns_commit_and_the_next_admission_keeps_the_turn",
+  "a_merged_or_deferred_input_resolves_to_the_run_that_applied_it",
+  "every_turn_forks_until_the_host_collects_and_refuses_pruned_after",
+  "every_reclaimer_keeps_a_pinned_turn_until_its_last_pin_is_released",
+  "the_retention_window_counts_terminal_runs_and_pins_extend_it",
+  "pending_and_unavailable_targets_refuse_typed_and_never_fork_the_head",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "revision pins, forks of turn targets and the retention window hold over turns the session actor admits and commits (the revision-pin laws)"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/frame_open_redrive.rs"
+test = "*"
+area = "frame-open-redrive"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_pressure_frame_opens_once_whatever_its_crash",
+  "a_pressure_frame_then_continue_as_commits_both_frames_once",
+  "a_pressure_frame_restarts_the_live_execution_state",
+  "a_compaction_frame_opens_once_whatever_its_crash",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a frame open (pressure, compaction, host frame command) redriven at every crash point commits its frame once and restarts the live execution state, on the durable harness"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/frame_open_redrive/adversarial.rs"
+test = "*"
+area = "adversarial"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_standard_compaction_frame_opens_once_whatever_its_crash",
+  "an_overflow_recovery_frame_opens_once_whatever_its_crash",
+  "an_overflow_recovery_summarizer_fault_aborts_without_a_record",
+  "a_compaction_queued_before_an_input_applies_before_it",
+  "a_session_deleted_during_an_open_keeps_nothing_of_it",
+  "a_fork_made_during_an_open_never_sees_its_seed",
+  "an_empty_pressure_seed_opens_one_frame",
+  "a_refused_frame_commit_leaves_nothing_visible",
+  "pressure_hooks_sharing_an_id_keep_their_records_apart",
+  "every_open_restarts_the_live_execution_state",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a fork, a delete or a refused commit racing a frame open sees none of it; every open restarts the live execution state"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/frame_open_redrive/command_budget.rs"
+test = "*"
+area = "command-budget"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_lowered_budget_refuses_a_stranded_command_once_per_shift",
+  "raising_the_budget_settles_a_stranded_command",
+  "an_over_budget_command_settles_failed_at_its_bare_commits_size",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a session command over its commit budget settles failed at its bare commit size, once, and settles after the budget is raised"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/frame_open_redrive/followup.rs"
+test = "*"
+area = "followup"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "compact_with_production_compactor_crash_matrix",
+  "an_administrative_compaction_waits_for_the_bound_turn",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a frame open followed by a follow-on commits both once across a crash"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/frame_open_redrive/host_commands.rs"
+test = "*"
+area = "host-commands"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "plugin_queued_turns_preserve_reserved_source_key_refusals",
+  "a_lane_less_append_names_the_bound_head_owner",
+  "host_append_waits_for_the_bound_turn",
+  "host_plugin_command_applies_at_the_boundary",
+  "host_frame_open_applies_at_the_boundary",
+  "dirty_park_while_busy_is_recoverable_and_loses_nothing",
+  "plugin_state_dirty_park_reparks_from_the_recorded_head",
+  "command_cancellation_before_admission_withdraws_it",
+  "host_cancel_settles_an_admitted_plugin_task_cancelled",
+  "host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_settlement",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "host commands (append, frame open, plugin command, plugin task cancel) apply at the session boundary once across a crash"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/frame_open_redrive/recorded_prompt.rs"
+test = "*"
+area = "recorded-prompt"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_commanded_compaction_redriven_on_another_worker_replays_its_recorded_prompt",
+  "a_pressure_compaction_redriven_on_another_worker_replays_its_recorded_prompt",
+  "an_overflow_recovery_redriven_on_another_worker_replays_its_recorded_prompt",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a redriven frame open uses the prompt it recorded"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/frame_open_redrive/uncommitted_head.rs"
+test = "*"
+area = "uncommitted-head"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "an_over_budget_append_on_an_uncommitted_head_leaves_nothing_of_it",
+  "a_protocol_refused_append_on_an_uncommitted_head_leaves_nothing_of_it",
+  "an_ancestor_refused_append_on_an_uncommitted_head_leaves_nothing_of_it",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a refused host append over an uncommitted head leaves nothing of it"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/frame_open_redrive/receipts.rs"
+test = "*"
+area = "receipts"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "*",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "frame open receipts replay"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/queued_input_runs.rs"
+test = "*"
+area = "queued-input-runs"
+needs = ["turn"]
+class = "replace"
+lane = "L9b"
+laws = [
+  "two_queued_inputs_sent_across_a_restart_get_their_own_runs_and_a_cancel_of_one_leaves_the_other",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "two queued inputs sent across a restart get their own runs, and a cancel of one leaves the other"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/queued_after_commit_redrive.rs"
+test = "*"
+area = "queued-after-commit-redrive"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_queued_shift_redriven_after_its_first_commit_runs_the_next_input_once",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a session redriven after its first commit runs the next input once"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/frame_switch_redrive.rs"
+test = "*"
+area = "frame-switch-redrive"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_its_admitted_head",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a frame-switched driver turn redriven after its commit replays at its admitted head"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/tool_call_identity/replay.rs"
+test = "*"
+area = "replay"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "frames_keep_identity_and_distinguish_fresh_calls",
+  "compaction_keeps_identity_and_distinguishes_fresh_calls",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a tool call replayed across a frame switch or a compaction keeps its identity and a fresh call on the other side is a different call, on the durable harness"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_spec_tool_access.rs"
+test = "*"
+area = "run-spec-tool-access"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "runs_stating_different_tool_grants_each_run_under_their_own",
+  "a_runs_tool_grants_survive_its_crash_and_a_cold_reopen",
+  "a_tool_access_command_still_shapes_later_runs_that_state_no_grants",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a run's stated tool grants are its tool authority alone, survive its crash and a cold reopen, and never become the sticky session access"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory/turn_cancel.rs"
+test = "turn_cancel_repair_orders_intent_and_ordinary_redefer"
+area = "turn-cancel"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "turn_cancel_repair_orders_intent_and_ordinary_redefer",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "cancel repair orders the cancellation intent and the ordinary redefer of undelivered input atomically"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory/turn_cancel.rs"
+test = "turn_cancel_repair_preserves_base_across_escalation_and_reopen"
+area = "turn-cancel"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "turn_cancel_repair_preserves_base_across_escalation_and_reopen",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "cancel repair keeps the first accepted base cancellation across escalation, owner loss and reopen"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory/turn_cancel.rs"
+test = "turn_cancel_undelivered_crash_matrix"
+area = "turn-cancel"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "turn_cancel_undelivered_crash_matrix",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "undelivered input addressed to a cancelled turn takes its disposition once at every crash point"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory/turn_cancel/closure_receipts.rs"
+test = "turn_cancel_exact_replay_preserves_different_pending_authorization"
+area = "closure-receipts"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "turn_cancel_exact_replay_preserves_different_pending_authorization",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "an exact commit replay never consumes a different pending cancellation-closure authorization on the same turn"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/generation_drain.rs"
+test = "a_recovered_follow_on_moves_its_run_to_the_recovering_generation"
+area = "generation-drain"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_recovered_follow_on_moves_its_run_to_the_recovering_generation",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift's admitted_generation stamp and its fenced follow-on raise"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_commit_outcome.rs"
+test = "*"
+area = "turn-commit-outcome"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "completed",
+  "frame_switch",
+  "cancelled",
+  "failed",
+  "unread_terminals_survive_retention",
+  "terminal_feed_is_ordered_and_replay_stable",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "each turn outcome (completed, frame switch, cancelled, failed) is recorded with its commit; unread terminals survive retention; the terminal feed is ordered and replay-stable"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/store_recovery.rs"
+test = "*"
+area = "store-recovery"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "checkpoint_survives_before_admission_settlement",
+  "a_commit_settles_admitted_rows_once",
+  "recorded_commit_replay_is_idempotent",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a successor resumes an admitted run from its checkpoint, its commit settles the admitted rows once, and a recorded commit replays idempotently"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/run_terminals.rs"
+test = "*"
+area = "run-terminals"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "run_terminal_evidence_commits_in_the_head_transaction",
+  "a_queued_headed_run_writes_its_terminal_like_any_run",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a run's terminal evidence commits in its head transaction, for input- and queued-headed runs alike"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/run_terminals.rs"
+test = "a_commit_sealed_under_a_superseded_admission_is_refused"
+area = "run-terminals"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_commit_sealed_under_a_superseded_admission_is_refused",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift fence: a commit sealed under a superseded admission"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/reopen_and_commit.rs"
+test = "*"
+area = "reopen-and-commit"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "runtime_reopen",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn's committed state reads back whole after reopen"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/reopen_and_commit.rs"
+test = "queued_wake_delivery_is_source_key_idempotent_and_admitted_once"
+area = "reopen-and-commit"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "queued_wake_delivery_is_source_key_idempotent_and_admitted_once",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a queued wake is idempotent by source key and admitted once"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/reopen_and_commit.rs"
+test = "final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash"
+area = "reopen-and-commit"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn's final commit stamp is idempotent and a changed hash conflicts"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/reopen_and_commit.rs"
+test = "store_computed_hash_rejects_mutated_commit"
+area = "reopen-and-commit"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "store_computed_hash_rejects_mutated_commit",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "the store-computed commit hash refuses a mutated commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/suite_and_receipts.rs"
+test = "*"
+area = "suite-and-receipts"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "commit_with_every_payload_family_inside_budget_succeeds",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn commit carrying every payload family inside its budget lands"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/append_receipts.rs"
+test = "*"
+area = "append-receipts"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "committed_turn_receipt_answers_the_parent_end_recovery_read",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a committed turn's receipt answers the parent-end recovery read"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory_config_commands.rs"
+test = "*"
+area = "session-store-factory-config-commands"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "ingress_follow_on_fork_and_command_run_matrix",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a pending follow-on blocks idle input and unrelated commits, its terminal clears it, forks owe nothing, and config commands then apply one per commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory/lifecycle_states.rs"
+test = "*"
+area = "lifecycle-states"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_control_raise_answers_no_seal_as_sealed",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift epoch's control raise and seal; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/admission_laws.rs"
+test = "no_row_stays_bound_after_a_runs_terminal_commit"
+area = "admission-laws"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "no_row_stays_bound_after_a_runs_terminal_commit",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "no ingress row stays bound to a run after its terminal commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/admission_laws.rs"
+test = "open_input_addressed_to_an_ended_run_is_next_turn_input"
+area = "admission-laws"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "open_input_addressed_to_an_ended_run_is_next_turn_input",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "an open input addressed to an ended run becomes next-turn input"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/admission_laws.rs"
+test = "the_command_lane_is_bindless"
+area = "admission-laws"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "the_command_lane_is_bindless",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "session commands are applied by their commit and never bound to a run"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/admission_laws.rs"
+test = "a_command_enqueued_behind_a_runs_head_never_starves_it"
+area = "admission-laws"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_command_enqueued_behind_a_runs_head_never_starves_it",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a session command enqueued behind a run's head never starves it"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/admission_laws.rs"
+test = "settlement_is_predicated_on_the_run"
+area = "admission-laws"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "settlement_is_predicated_on_the_run",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a settlement applies only to rows bound to its own run"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/admission_laws.rs"
+test = "a_stale_fence_writes_nothing"
+area = "admission-laws"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_stale_fence_writes_nothing",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift fence: a stale fence's admission and commit write nothing"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/admission_base_retention.rs"
+test = "*"
+area = "admission-base-retention"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "an_admission_base_survives_collection_until_the_next_admission",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the store run admission's retained base under the shift fence"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/pending_follow_on.rs"
+test = "*"
+area = "pending-follow-on"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "pending_follow_on_is_written_by_its_switch_and_cleared_by_its_terminal",
+  "pending_follow_on_blocks_every_admission_but_its_own",
+  "pending_follow_on_refuses_every_other_commit_that_would_drop_it",
+  "pending_follow_on_frame_is_current_on_every_head_write",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a pending follow-on is written by its switch commit, cleared by its terminal, blocks every other admission and every commit that would drop it, and keeps its frame current on every head write"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/pending_follow_on.rs"
+test = "pending_follow_on_recovery_raise_is_fenced_and_never_resets"
+area = "pending-follow-on"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "pending_follow_on_recovery_raise_is_fenced_and_never_resets",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift fence on a follow-on's recovery raise"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/queue_redrive.rs"
+test = "*"
+area = "queue-redrive"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "queued_work_respects_membership_limits_and_sessions",
+  "queued_work_join_groups_by_delivery_policy",
+  "process_wakes_batch_by_default",
+  "queue_completion_and_turn_commit_stamp_are_atomic",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "queued work joins a run within its membership limit and session, groups by delivery policy, process wakes batch by default, and a run's queue completion and its commit stamp are atomic"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/queue_redrive.rs"
+test = "a_resumed_run_executes_exactly_its_recorded_admission"
+area = "queue-redrive"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_resumed_run_executes_exactly_its_recorded_admission",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the store run admission replayed under a successor shift fence"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/queue_redrive.rs"
+test = "queued_work_completion_is_fenced_and_run_keyed"
+area = "queue-redrive"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "queued_work_completion_is_fenced_and_run_keyed",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the store run admission replayed under a successor shift fence"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/run_admissions.rs"
+test = "*"
+area = "run-admissions"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "an_unfinished_runs_input_survives_host_cancellation_after_lane_rotation",
+  "an_unfinished_runs_batch_survives_host_cancellation_after_lane_rotation",
+  "an_admitted_row_is_not_withdrawable_until_its_run_releases_it",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a row bound to an unfinished run is not withdrawable by host cancellation, across owner rotation, until its run releases it"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/run_specs.rs"
+test = "*"
+area = "run-specs"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_next_turn_admission_never_mixes_run_specs",
+  "a_steering_spec_that_differs_from_its_running_turn_is_refused",
+  "a_steering_spec_must_match_a_pending_follow_ons_shape",
+  "a_steering_spec_must_match_a_queued_headed_runs_default_shape",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a run never mixes run specs, and a steering spec must match its running turn's, its pending follow-on's or its queued head's shape"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs"
+test = "*"
+area = "ingress-integrity"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_deferred_input_keeps_its_submitted_delivery",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a deferred input keeps the delivery it was submitted with"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs"
+test = "an_unknown_turn_address_is_refused_without_a_row_or_sequence"
+area = "ingress-integrity"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "an_unknown_turn_address_is_refused_without_a_row_or_sequence",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "input addressed to an unknown turn is refused without a row or sequence number"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs"
+test = "every_terminal_ingress_item_leaves_a_tombstone"
+area = "ingress-integrity"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "every_terminal_ingress_item_leaves_a_tombstone",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "every terminal ingress item leaves a tombstone a resubmission reads"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs"
+test = "composition_offers_mixed_authorities_and_merge_keys_as_one_prefix"
+area = "ingress-integrity"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "composition_offers_mixed_authorities_and_merge_keys_as_one_prefix",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "run composition offers mixed authorities and merge keys as one prefix"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs"
+test = "a_host_drain_policy_keeps_principals_apart"
+area = "ingress-integrity"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_host_drain_policy_keeps_principals_apart",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a host drain policy keeps principals apart"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/attachments_and_queue.rs"
+test = "*"
+area = "attachments-and-queue"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "concurrent_admissions_bind_every_row_to_at_most_one_run",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "concurrent admissions bind every row to at most one run (the one-unfinished-run law covers the session actor's drain)"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/attachments_and_queue.rs"
+test = "queued_work_cancel_removes_only_open_batches"
+area = "attachments-and-queue"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "queued_work_cancel_removes_only_open_batches",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "cancelling queued work removes only open batches"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/attachments_and_queue.rs"
+test = "queued_work_classes_gate_command_and_turn_admissions"
+area = "attachments-and-queue"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "queued_work_classes_gate_command_and_turn_admissions",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "queued work classes gate command and turn admissions"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/attachments_and_queue.rs"
+test = "queued_work_admission_respects_boundaries_and_stale_completion"
+area = "attachments-and-queue"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "queued_work_admission_respects_boundaries_and_stale_completion",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "queued work admission respects delivery boundaries and refuses a stale completion"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs"
+test = "*"
+area = "turn-inputs-and-reopen"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "pending_turn_inputs_admit_settle_and_fence",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "pending turn inputs are admitted to one run and settled by its commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs"
+test = "a_checkpoint_admission_rerun_returns_its_own_rows"
+area = "turn-inputs-and-reopen"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_checkpoint_admission_rerun_returns_its_own_rows",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a checkpoint admission rerun returns its own rows after the run ends"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs"
+test = "accepted_turn_input_released_by_its_run_terminal_is_cancelled_and_vacuumed"
+area = "turn-inputs-and-reopen"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "accepted_turn_input_released_by_its_run_terminal_is_cancelled_and_vacuumed",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "an accepted input released by its run's terminal is cancelled and vacuumed"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs"
+test = "pending_turn_input_cancel_covers_active_and_deferred_states"
+area = "turn-inputs-and-reopen"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "pending_turn_input_cancel_covers_active_and_deferred_states",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "cancelling a pending input covers active and deferred states"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs"
+test = "pending_active_turn_inputs_defer_unaccepted_once_on_interrupt"
+area = "turn-inputs-and-reopen"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "pending_active_turn_inputs_defer_unaccepted_once_on_interrupt",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "pending active-turn inputs defer once on interrupt"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs"
+test = "a_turn_that_cannot_commit_leaves_no_input_pinned_to_it"
+area = "turn-inputs-and-reopen"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_turn_that_cannot_commit_leaves_no_input_pinned_to_it",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn that cannot commit leaves no input pinned to it"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs"
+test = "identical_retry_after_defer_is_existing_not_conflict"
+area = "turn-inputs-and-reopen"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "identical_retry_after_defer_is_existing_not_conflict",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "an identical retry after defer is existing, not a conflict"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs"
+test = "changed_retry_is_typed_conflict"
+area = "turn-inputs-and-reopen"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "changed_retry_is_typed_conflict",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a changed retry is a typed conflict"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/obligation_relay.rs"
+test = "*"
+area = "obligation-relay"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "withdrawing_an_open_input_delivers_its_ingress_obligation",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the ingress obligation, which producers no longer arm: an input wakes the session actor in its own transaction; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_answers_its_rows.rs"
+test = "*"
+area = "run-answers-its-rows"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_checkpoint_input_is_answered_only_by_the_run_that_admitted_it",
+  "a_checkpoint_wake_is_answered_only_by_the_run_that_admitted_it",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a row a checkpoint admitted to one run is answered only by that run, across a worker death at its settling commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence_state_machine.rs"
+test = "*"
+area = "runtime-persistence-state-machine"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "runtime_persistence_state_machine",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "model-based store law: every row is open or bound to one run, at most one run is unfinished, only that run's commit settles its rows, its terminal hands the rest back open, commit CAS serializes, checkpoint components and attachments are conserved (over the session actor's drain and turn commit)"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence_state_machine/dedicated_laws.rs"
+test = "*"
+area = "dedicated-laws"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "*",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "the state machine's dedicated laws: admitted work settles exactly once, turn inputs apply once in order, head CAS serializes competing commits (the stale-fence laws' subject is deleted)"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/checkpoint_admissions.rs"
+test = "*"
+area = "checkpoint-admissions"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_checkpoint_applied_input_resolves_to_its_run_by_point_read",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a checkpoint-applied input resolves to the run that applied it by point read once that run's commit settles it"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/checkpoint_admissions.rs"
+test = "turn_input_application_identity_survives_pending_tombstone_vacuum"
+area = "checkpoint-admissions"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "turn_input_application_identity_survives_pending_tombstone_vacuum",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "an input's application identity survives the vacuum of its pending tombstone"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/checkpoint_admissions.rs"
+test = "a_checkpoint_refuses_a_stale_fence_whatever_its_caps"
+area = "checkpoint-admissions"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_checkpoint_refuses_a_stale_fence_whatever_its_caps",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift fence at a checkpoint admission"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config/command_settlement.rs"
+test = "*"
+area = "command-settlement"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "session_command_resubmission_after_advance_returns_first_receipt",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a session command resubmitted after the head advanced returns its first receipt"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config/command_settlement.rs"
+test = "settled_config_transaction_applies_once_after_advance"
+area = "command-settlement"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "settled_config_transaction_applies_once_after_advance",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a settled config transaction applies once after the head advances"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config/command_settlement.rs"
+test = "stale_config_transaction_replay_returns_its_recorded_revision"
+area = "command-settlement"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "stale_config_transaction_replay_returns_its_recorded_revision",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a stale config transaction replay returns its recorded revision"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config/command_settlement.rs"
+test = "settled_command_changed_content_is_a_typed_conflict"
+area = "command-settlement"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "settled_command_changed_content_is_a_typed_conflict",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a settled command resubmitted with changed content is a typed conflict"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "unread_turn_terminals_survive_retention"
+area = "conformance"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "unread_turn_terminals_survive_retention",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "unread turn terminals survive retention"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "terminal_feed_is_ordered_and_replay_stable"
+area = "conformance"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "terminal_feed_is_ordered_and_replay_stable",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "the turn terminal feed is ordered and replay-stable"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "runtime_persistence_state_machine"
+area = "conformance"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "runtime_persistence_state_machine",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "the runtime-persistence state machine over PostgreSQL (runtime_persistence_state_machine_tests!)"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/session_history.rs"
+test = "*"
+area = "session-history"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "unread_turn_terminals_survive_retention",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "unread turn terminals survive retention"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/session_history.rs"
+test = "terminal_feed_is_ordered_and_replay_stable"
+area = "session-history"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "terminal_feed_is_ordered_and_replay_stable",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "the turn terminal feed is ordered and replay-stable"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "runtime_persistence_state_machine"
+area = "suite"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "runtime_persistence_state_machine",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "the runtime-persistence state machine over SQLite (runtime_persistence_state_machine_tests!)"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/generation_drain.rs"
+test = "*"
+area = "generation-drain"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "*",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift's admitted_generation stamp (generation_drain_tests!)"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance/generation_drain.rs"
+test = "*"
+area = "generation-drain"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "*",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift's admitted_generation stamp (generation_drain_tests!)"
+
+[[row]]
+path = "crates/lash-sim/src/ingress_bound.rs"
+test = "*"
+area = "ingress-bound"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "an_accepted_input_is_attempted_before_its_producer_returns",
+  "a_lost_immediate_attempt_is_claimed_within_one_tick",
+  "an_ask_nothing_admitted_is_asked_again_under_its_next_attempt",
+  "a_retryable_refusal_backs_off_and_stalls_at_the_ceiling",
+  "a_refused_ingress_stalls_in_the_pass_that_claims_it",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the ingress obligation and its relay, which no producer arms: an input wakes the session actor in its own transaction"
+
+[[row]]
+path = "crates/lash-sim/src/obligation_bounds.rs"
+test = "*"
+area = "obligation-bounds"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_control_intents_obligation_is_attempted_before_its_verb_returns",
+  "a_lost_immediate_attempt_is_claimed_within_one_tick",
+  "a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick",
+  "a_failing_intent_retries_on_its_backoff_and_stalls_at_its_ceiling_never_later",
+  "a_refused_intent_stalls_in_the_pass_that_claims_it",
+  "slow_delivery_does_not_starve_later_kinds_or_parks",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the control-intent obligation, its relay and the turn parks: a close request is session mail the session actor drains"
+
+[[row]]
+path = "crates/lash-sim/src/backend_contention.rs"
+test = "*"
+area = "backend-contention"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "competing_shift_seals",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift epoch seal (an operation of the backend contention report, not a test fn); only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
+test = "durable_queued_work_contention_inventory_is_backend_complete_and_opt_in"
+area = "report-phase-tests"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "durable_queued_work_contention_inventory_is_backend_complete_and_opt_in",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the durable_queued_work_contention_sqlite perf scenario over the store run admission"
+
+[[row]]
+path = "crates/lash-sim/tests/cross_backend_store_differential/coalesced_batch_oracles.rs"
+test = "*"
+area = "coalesced-batch-oracles"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "coalesced_batches_match_literal_oracles_on_every_backend",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "coalesced queued-work batches match the literal drain-policy oracles on every backend"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-sim/tests/cross_backend_store_differential/coalesced_batch_oracles.rs"
+test = "interrupted_admission_identity_stands_over_a_later_row"
+area = "coalesced-batch-oracles"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "interrupted_admission_identity_stands_over_a_later_row",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "an interrupted admission's identity stands over a row enqueued after it"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/admission_atomicity.rs"
+test = "sqlite_a_partial_admission_rolls_back_through_both_entry_points"
+area = "admission-atomicity"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "sqlite_a_partial_admission_rolls_back_through_both_entry_points",
+]
+disposition = "covered-by:crates/lash-sqlite-store/tests/conformance/admission_atomicity.rs::sqlite_a_partial_checkpoint_admission_rolls_back"
+status = "deleted"
+note = "the checkpoint entry lives on renamed; the run entry (store admit_run) is deleted and its atomicity is the session mail drain's (MAIL-ATOMIC); only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/admission_atomicity.rs"
+test = "sqlite_an_admission_holds_its_rows_across_a_displaced_fence"
+area = "admission-atomicity"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "sqlite_an_admission_holds_its_rows_across_a_displaced_fence",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/session_mail.rs::two_claimers_racing_admission_admit_one_run"
+status = "deleted"
+note = "subject was the store run admission under a displaced shift fence; one unfinished run per session is the mail drain's law"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/admission_atomicity.rs"
+test = "a_final_commit_cannot_ignore_the_admitted_cancel_intent"
+area = "admission-atomicity"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_final_commit_cannot_ignore_the_admitted_cancel_intent",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a turn's final commit refuses to drop a cancel intent accepted before its admission"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance/admission_atomicity.rs"
+test = "*"
+area = "admission-atomicity"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "postgres_a_partial_admission_rolls_back_through_both_entry_points",
+]
+disposition = "covered-by:crates/lash-postgres-store/tests/conformance/admission_atomicity.rs::postgres_a_partial_checkpoint_admission_rolls_back"
+status = "deleted"
+note = "the checkpoint entry lives on renamed; the run entry is the mail drain's (MAIL-ATOMIC); only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance/admission_atomicity.rs"
+test = "postgres_an_admission_holds_its_rows_across_a_displaced_fence"
+area = "admission-atomicity"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "postgres_an_admission_holds_its_rows_across_a_displaced_fence",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/session_mail.rs::two_claimers_racing_admission_admit_one_run"
+status = "deleted"
+note = "subject was the store run admission under a displaced shift fence"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/storage_fixes.rs"
+test = "*"
+area = "storage-fixes"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "concurrent_admissions_never_double_own_a_batch",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/session_mail.rs::a_producer_commits_its_row_and_its_wake_together"
+status = "deleted"
+note = "subject was two store run admissions racing under one shift fence; the mail drain binds rows under the session actor's epoch; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/storage_fixes.rs"
+test = "run_handover_commits_material_ownership_with_the_head"
+area = "storage-fixes"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "run_handover_commits_material_ownership_with_the_head",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a run's handover commits material ownership in the same write as its head, on the session actor's turn commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/fencing_backstop.rs"
+test = "*"
+area = "fencing-backstop"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "an_admission_the_unfinished_run_refuses_never_reaches_the_write",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/session_mail.rs::two_claimers_racing_admission_admit_one_run"
+status = "deleted"
+note = "subject was the store run admission's unfinished-run refusal; the mail drain's one-unfinished-run law owns it; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance/artifact_retention.rs"
+test = "*"
+area = "artifact-retention"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "run_handover_commits_material_ownership_with_the_head",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a run's handover commits material ownership in the same write as its head, on the session actor's turn commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-postgres-store/src/tests.rs"
+test = "*"
+area = "src"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "postgres_checkpoint_admission_holds_its_fence_against_a_concurrent_seal",
+  "postgres_batch_session_delete_writes_one_cancel_event_per_park",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift fence: a checkpoint admission racing a shift-epoch seal; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_boundary/tests.rs"
+test = "*"
+area = "turn-boundary"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "final_commit_refuses_a_settlement_without_a_shift_fence",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the shift fence: a settlement without a shift commit is refused; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash/src/tests/deployment_and_testing_facade.rs"
+test = "deployment_drain_status_counts_parked_and_in_flight_turns"
+area = "deployment-and-testing-facade"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "deployment_drain_status_counts_parked_and_in_flight_turns",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was the turn park: a parked turn holds the deployment drain"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/schema_constraints.rs"
+test = "*"
+area = "schema-constraints"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "postgres_shift_authority_check_admits_only_real_shift_states_when_configured",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was subject was ck_session_meta_shift_authority, deleted with the shift columns; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core-store/src/store/pending_follow_on.rs"
+test = "*"
+area = "pending-follow-on"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_recorded_follow_on_hands_off_only_its_named_root_recovery",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was root executor hand-off, deleted with RunExecutor/RunHold; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core-store/src/store/tests.rs"
+test = "ingress_settlement_requires_the_shift_fence"
+area = "store"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "ingress_settlement_requires_the_shift_fence",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift fence on settling commits, deleted; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core-store/src/store/control_intent.rs"
+test = "*"
+area = "control-intent"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "the_engine_half_is_owed_only_while_pending_and_its_obligation_is_live",
+  "a_stalled_redrive_does_not_hold_its_run",
+  "a_late_acknowledgement_or_refusal_never_reopens_a_decided_intent",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the ControlIntent engine half, its obligation and the park-based run verbs, deleted; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/schema_check_constraint_tests.rs"
+test = "sqlite_shift_authority_check_admits_only_real_shift_states"
+area = "schema-check-constraint-tests"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "sqlite_shift_authority_check_admits_only_real_shift_states",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was ck_session_meta_shift_authority, deleted"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/schema_check_constraint_tests.rs"
+test = "park_feed_columns_refuse_mixed_variants_and_closing_generations"
+area = "schema-check-constraint-tests"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "park_feed_columns_refuse_mixed_variants_and_closing_generations",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was turn_park_events table, deleted"
+
+[[row]]
+path = "crates/lash-core/src/runtime/error/host_commit_outcome_tests.rs"
+test = "a_superseded_shift_fence_is_a_superseded_commit_on_every_commit_path"
+area = "host-commit-outcome-tests"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_superseded_shift_fence_is_a_superseded_commit_on_every_commit_path",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was StaleShiftFence, deleted; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_loop/queued_work.rs"
+test = "*"
+area = "queued-work"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_lost_execution_is_never_answered_as_a_busy_lane",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift drain and its seal refusals, deleted"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_control.rs"
+test = "*"
+area = "run-control"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_terminal_run_never_reparks",
+  "no_row_stays_bound_after_a_runs_verb_close_or_lost_end",
+  "a_refused_run_ends_once_and_its_next_input_admits_a_new_run",
+  "cancel_of_a_parked_run_writes_cancelled_settles_its_input_and_drains_the_next",
+  "fork_releases_the_old_owner_before_the_new_run_executes_in_original_order_on_a_fresh_journal",
+  "verbs_are_park_id_cas",
+  "redrive_under_the_same_build_reparks_the_same_park_with_attempts_plus_one",
+  "cancel_or_fork_of_a_redriving_run_is_refused",
+  "an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it",
+  "engine_refusals_are_retained_and_listed",
+  "sends_behind_a_parked_run_commit_but_are_not_admitted",
+  "redrive_under_a_restored_build_completes_once_and_clears_the_park",
+  "a_stale_redrive_is_fenced_by_a_later_cancel",
+  "cancel_fork_and_close_raise_the_shift_epoch_and_redrive_does_not",
+  "an_exhausted_run_parks_engine_retry_exhausted_via_reconcile_idempotently_with_no_evidence",
+  "a_parked_runs_fence_stays_current_until_a_verb",
+  "a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore",
+  "a_redrive_the_run_ran_past_is_never_applied_again",
+  "a_stale_paused_listing_never_reparks_a_resumed_run",
+  "a_parked_session_is_asked_to_work_only_through_its_ingress_obligation",
+  "a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles",
+  "a_failing_child_cancel_never_wedges_its_runs_cancel_or_fork",
+  "a_delivery_whose_claim_was_retaken_never_settles_its_intent",
+  "an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session",
+  "a_refused_follow_on_shift_keeps_the_intents_obligation_due",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the park-based run verbs (redrive, cancel, fork) and their control intents"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_control/intent_ledger_fault.rs"
+test = "*"
+area = "intent-ledger-fault"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_store_fault_in_an_intents_delivery_stalls_its_obligation_and_never_wedges_its_session",
+  "re_arming_a_refused_intent_makes_it_owed_again_and_its_delivery_completes_it",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the ControlIntent obligation"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_control/interleavings.rs"
+test = "*"
+area = "interleavings"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of_the_redrive",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was a parked run redrive"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_control/lost_run.rs"
+test = "*"
+area = "lost-run"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_run_with_no_engine_execution_ends_only_once_it_started",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the engine execution of a store-admitted run"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_control/ownership.rs"
+test = "*"
+area = "ownership"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "every_driver_turn_is_owned_by_its_run",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "every driver turn is owned by its run, on the session actor"
+note = "deleted by L3s (FIG-5196) with the session shift that ran it; the domain law is re-proved on the session actor"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_control/physical_turn.rs"
+test = "*"
+area = "physical-turn"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was turn parks"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_control/root_admission.rs"
+test = "*"
+area = "root-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift resume acknowledgement"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "admission_delivers_every_row_it_binds"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "admission_delivers_every_row_it_binds",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "one_unfinished_run_per_session"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "one_unfinished_run_per_session",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "a_run_admission_is_idempotent_across_new_rows_and_fences"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_run_admission_is_idempotent_across_new_rows_and_fences",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "one_shift_admits_many_items"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "one_shift_admits_many_items",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "replay_cannot_mint_ownership"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "replay_cannot_mint_ownership",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "admission_precedes_first_effect"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "admission_precedes_first_effect",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "parked_run_blocks_admission"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "parked_run_blocks_admission",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "a_command_enqueued_after_an_input_runs_admission_waits_for_the_next_boundary"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_command_enqueued_after_an_input_runs_admission_waits_for_the_next_boundary",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "a_host_task_is_admitted_as_its_own_operation_run"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_host_task_is_admitted_as_its_own_operation_run",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind"
+area = "shift-admission"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift admission and its epoch seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_executor.rs"
+test = "*"
+area = "run-executor"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_run_recorded_under_one_executor_is_never_admitted_by_another",
+  "a_lost_acceptors_run_is_executed_once_by_the_sessions_shift",
+  "admit_run_refuses_another_engine_held_executor",
+  "a_refused_acceptor_adopts_the_outcome_its_runs_executor_recorded",
+  "a_parent_turn_acceptors_run_is_closed_to_a_later_drive",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the run executor and RunHold"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_terminal.rs"
+test = "*"
+area = "run-terminal"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_committed_run_answers_its_terminal_by_run",
+  "a_host_id_naming_a_terminal_run_is_answered_not_rerun",
+  "run_scope_close_runs_after_terminal_evidence_at_least_once_never_for_parked",
+  "a_run_crashed_at_its_report_handover_still_closes_its_scope",
+  "a_command_runs_redrive_replays_its_recorded_outcome",
+  "a_run_end_closes_its_turn_scope_in_the_process_registry",
+  "a_joined_inputs_turn_scope_closes_with_its_admitting_run",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a committed run answers its terminal, and its end closes its turn scope once, on the session actor turn commit"
+note = "deleted by L3s (FIG-5196) with the session shift that ran it; the domain law is re-proved on the session actor"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_terminal.rs"
+test = "a_run_whose_admission_a_successor_sealed_commits_nothing"
+area = "run-terminal"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_run_whose_admission_a_successor_sealed_commits_nothing",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was a successor shift seal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_park_feed.rs"
+test = "*"
+area = "turn-park-feed"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "parked_turns_list_by_since_with_filters_and_keyset_pages",
+  "re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes",
+  "every_park_transition_writes_exactly_one_feed_event",
+  "a_command_runs_end_unparks_it",
+  "a_rolled_back_commit_leaves_park_and_feed_unchanged",
+  "a_compacted_feed_cursor_is_refused_typed",
+  "summary_agrees_with_list",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the turn park feed"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_start_marker.rs"
+test = "*"
+area = "run-start-marker"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "a_fresh_root_journal_refuses_the_retained_admission_nonce",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the shift run-start nonce"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_spec_shift.rs"
+test = "*"
+area = "run-spec-shift"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "run_specs_split_runs_in_admission_order",
+  "the_default_spec_is_the_snapshot_after_the_command_drain",
+  "a_config_command_after_a_pinned_run_resolves_over_the_sticky_config",
+  "a_run_resolves_its_spec_once_across_a_crash",
+  "a_missing_definition_retries_unrecorded_until_it_is_deployed",
+  "a_batch_shares_one_spec_that_each_run_resolves_once",
+  "a_batch_keeps_its_turn_lane_place_behind_the_command_lane",
+  "a_recovered_follow_on_inherits_its_runs_recorded_execution",
+  "a_redriven_switch_owes_its_follow_on_under_the_bound_its_run_resolved",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a run resolves its run spec once, in admission order, across a crash, on the session actor"
+note = "deleted by L3s (FIG-5196) with the session shift that ran it; the domain law is re-proved on the session actor"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/run_supersession.rs"
+test = "*"
+area = "run-supersession"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "an_obsolete_executor_never_ends_its_successors_run",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was the run executor supersession"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/turn_parks.rs"
+test = "*"
+area = "turn-parks"
+needs = ["turn"]
+class = "delete"
+lane = "L3s"
+laws = [
+  "turn_park_lives_while_its_turn_holds_work",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "subject was turn parks"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_settlement.rs"
+test = "*"
+area = "turn-settlement"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = [
+  "a_row_two_admitted_sets_name_settles_once",
+]
+disposition = "replaced-by:planned:L3S-TURN"
+status = "deleted"
+owed = "a run's turn commit settles each admitted row once: a row two admitted sets name settles once, and a completed row is never also handed back"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"

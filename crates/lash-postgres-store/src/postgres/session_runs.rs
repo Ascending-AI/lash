@@ -2,26 +2,23 @@
 //!
 //! `lash-store-sql`'s `session_runs` module owns every statement: the family
 //! forks nothing. This module renders them once and holds the in-transaction
-//! reads and writes the commit path, the queued-run settlement, the
-//! admission step, session deletion and the factory's catalog reads share, plus
+//! reads and writes the commit path, the run admission, session deletion
+//! and the factory's catalog reads share, plus
 //! [`RunStore`] for the session store.
 
 use std::sync::LazyLock;
 
 use lash_core_execution::store::{
-    CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
-    ControlIntentState, EnginePark, IntentObligation, IntentSettle, ObligationKey, ObligationState,
-    ParkCancelCause, ParkEventKind, RunAdmission, RunEndOutcome, RunExecutor, RunStore,
-    RunTerminal, RunTerminalCause, RunTerminalWriteDecision, RunTurns, UnfinishedRun,
-    close_admission, decide_run_terminal_write, refused_execution_owns_run, run_binding_conflict,
-    stored_intent_kind, stored_intent_state,
+    CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
+    RunAdmission, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause, RunTerminalWriteDecision,
+    RunTurns, UnfinishedRun, decide_run_terminal_write, run_binding_conflict, stored_intent_kind,
+    stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
 use lash_store_sql::session_runs::{
-    control_intents::ControlIntentStatements,
-    run_inputs::SessionRunInputStatements,
-    runs::{RunVerbStatements, SessionRunStatements},
+    control_intents::ControlIntentStatements, run_inputs::SessionRunInputStatements,
+    runs::SessionRunStatements,
 };
 use sqlx::{PgConnection, Row};
 
@@ -31,7 +28,6 @@ use crate::{PostgresStore, StoreError, acquire_runtime_connection};
 /// Every logical-run statement this store issues.
 pub(crate) struct SessionRunsSql {
     pub(crate) runs: SessionRunStatements,
-    pub(crate) verbs: RunVerbStatements,
     pub(crate) inputs: SessionRunInputStatements,
     pub(crate) intents: ControlIntentStatements,
 }
@@ -41,9 +37,6 @@ static SESSION_RUNS_SQL: LazyLock<SessionRunsSql> = LazyLock::new(|| {
     let dialect = Dialect::postgres().with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE);
     SessionRunsSql {
         runs: SessionRunStatements::render(dialect),
-        verbs: RunVerbStatements::render(
-            dialect.with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE),
-        ),
         inputs: SessionRunInputStatements::render(dialect),
         intents: ControlIntentStatements::render(dialect),
     }
@@ -171,20 +164,12 @@ pub(crate) async fn write_run_terminal_conn(
         columns.at_ms,
     )
     .await?;
-    crate::runtime_persistence::turn_park::end_run_park_conn(
-        conn,
-        &terminal.session_id,
-        &terminal.run,
-        &terminal.cause,
-        terminal.at_ms,
-    )
-    .await?;
     release_run_rows_conn(conn, &terminal.session_id, &terminal.run, terminal.at_ms).await
 }
 
 /// Release every row of either admission table `run` still holds, in the
 /// caller's transaction: accepted input is open again in the state its
-/// submitted delivery names, and each row owes its session a shift again.
+/// submitted delivery names, and the session is woken to admit it again.
 ///
 /// Open input addressed to a turn the run ends ([`RunTurns`]: its own
 /// physical turns and the turns its admission's members were accepted
@@ -206,7 +191,7 @@ async fn release_run_rows_conn(
     run: &TurnId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
-    let verbs = &session_runs_sql().verbs;
+    let verbs = &session_runs_sql().inputs;
     let own: Vec<String> = sqlx::query_scalar(verbs.bound_inputs.sql())
         .bind(session_id.as_str())
         .bind(run.as_str())
@@ -234,6 +219,8 @@ async fn release_run_rows_conn(
         .execute(&mut *conn)
         .await
         .map_err(store_sqlx_error)?;
+    // What the run let go of is the session's to admit again.
+    crate::durable::wake_session_tx(conn, session_id, false, at_ms).await?;
     let ended = RunTurns::new(
         run,
         run_admission_conn(conn, session_id, run).await?.as_ref(),
@@ -292,10 +279,8 @@ async fn release_run_rows_conn(
 /// (`loss`). The terminal, ingress settlement and scope-close arm commit
 /// together under the session history lock. A run that already has
 /// terminal evidence, or no row, is left as it is. A run the engine holds
-/// no run of that never recorded its admission started nothing, and its
-/// ingress obligation still owns its input: it is not ended, and the
-/// executor a seal recorded for it is released (FIG-4814), so the shift that
-/// obligation asks for runs it.
+/// no execution of that never recorded its admission started nothing: it
+/// is not ended, and its session admits its input again.
 pub(crate) async fn end_lost_run_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target: &lash_core_execution::engine::RunRef,
@@ -309,14 +294,6 @@ pub(crate) async fn end_lost_run_tx(
                     .await?
                     .is_none()
             {
-                // The executor a seal recorded for it is gone with its run,
-                // so the run is free for the shift its ingress asks for.
-                sqlx::query(session_runs_sql().runs.release_hold.sql())
-                    .bind(target.session.as_str())
-                    .bind(target.run.as_str())
-                    .execute(&mut **tx)
-                    .await
-                    .map_err(store_sqlx_error)?;
                 return Ok(None);
             }
             write_unanswered_run_end_tx(tx, target, at_ms, |cancelled_by| {
@@ -329,41 +306,24 @@ pub(crate) async fn end_lost_run_tx(
     }
 }
 
-/// The run's execution under `fence` met a typed refusal no retry can change
+/// The run's execution met a typed refusal no retry can change
 /// (FIG-4018): the same transaction as a lost run's, ending it with the
-/// refusal, once the execution is shown to still own the run (FIG-4200).
+/// refusal.
 pub(crate) async fn end_refused_run_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    fence: &lash_core_execution::store::ShiftFence,
+    session_id: &SessionId,
     run: &TurnId,
     refusal: &lash_core_execution::RuntimeError,
     at_ms: u64,
 ) -> Result<RunEndOutcome, StoreError> {
     let target = lash_core_execution::engine::RunRef {
-        session: fence.session().clone(),
+        session: session_id.clone(),
         run: run.clone(),
     };
-    // The shift epoch's row lock is taken before the session history lock,
-    // in the order a fenced commit takes them, so the two never deadlock. A
-    // session whose row is gone holds no open run.
-    let current =
-        match crate::runtime_persistence::shift_epoch::shift_epoch_locked_tx(tx, &target.session)
-            .await
-        {
-            Ok(current) => Some(current),
-            Err(StoreError::ShiftEpochUnavailable { .. }) => None,
-            Err(error) => return Err(error),
-        };
     match unanswered_run_tx(tx, &target).await? {
         UnansweredRun::Ended(terminal) => Ok(RunEndOutcome::AlreadyEnded(*terminal)),
         UnansweredRun::Unknown => Ok(RunEndOutcome::Unknown),
         UnansweredRun::Open => {
-            let current = current.ok_or_else(|| StoreError::ShiftEpochUnavailable {
-                session_id: target.session.clone(),
-            })?;
-            if !refused_execution_owns_run(&target.session, fence, &current)? {
-                return Ok(RunEndOutcome::Superseded);
-            }
             write_unanswered_run_end_tx(tx, &target, at_ms, |_| RunTerminalCause::Refused {
                 code: refusal.code.clone(),
                 message: refusal.message.clone(),
@@ -375,26 +335,18 @@ pub(crate) async fn end_refused_run_tx(
     }
 }
 
-/// The command run whose execution under `fence` applied the session's command
-/// lane until it was empty ends (FIG-4202): its row opens and its terminal
-/// is written in one transaction, arming its scope close, once the run is
-/// shown to still own the session's shift epoch.
+/// The command run that applied the session's command lane until it was
+/// empty ends (FIG-4202): its row opens and its terminal is written in one
+/// transaction, arming its scope close.
 pub(crate) async fn end_command_run_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    fence: &lash_core_execution::store::ShiftFence,
+    session: &SessionId,
     run: &TurnId,
     at_ms: u64,
 ) -> Result<RunEndOutcome, StoreError> {
-    let session = fence.session();
-    // The shift epoch's row lock first, in the order a fenced commit takes
-    // it (see `end_refused_run_tx`).
-    let current =
-        crate::runtime_persistence::shift_epoch::shift_epoch_locked_tx(tx, session).await?;
+    crate::runtime_persistence::lock_session_history_mutation_tx(tx, session).await?;
     if let Some(terminal) = run_terminal_conn(&mut *tx, session, run).await? {
         return Ok(RunEndOutcome::AlreadyEnded(terminal));
-    }
-    if !refused_execution_owns_run(session, fence, &current)? {
-        return Ok(RunEndOutcome::Superseded);
     }
     let terminal = RunTerminal {
         session_id: session.clone(),
@@ -489,8 +441,7 @@ async fn write_unanswered_run_end_tx(
 
     // The run's own input is dropped and its batches cancelled first; the
     // terminal write then releases whatever else the run still held.
-    let sql = &session_runs_sql().verbs;
-    let mut inputs: Vec<String> = sqlx::query_scalar(sql.bound_inputs.sql())
+    let mut inputs: Vec<String> = sqlx::query_scalar(session_runs_sql().inputs.bound_inputs.sql())
         .bind(session.as_str())
         .bind(run.as_str())
         .fetch_all(&mut **tx)
@@ -500,14 +451,19 @@ async fn write_unanswered_run_end_tx(
     inputs.sort();
     inputs.dedup();
     for input in inputs {
-        sqlx::query(sql.cancel_input.sql())
-            .bind(session.as_str())
-            .bind(input)
-            .bind(crate::support::clamp_epoch_ms(at_ms))
-            .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .cancel_input
+                .sql(),
+        )
+        .bind(session.as_str())
+        .bind(input)
+        .bind(crate::support::clamp_epoch_ms(at_ms))
+        .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     }
     for batch in batches {
         cancel_run_batch_tx(tx, session, &batch, at_ms).await?;
@@ -527,13 +483,18 @@ pub(crate) async fn cancel_run_batch_tx(
     batch_id: &str,
     at_ms: u64,
 ) -> Result<(), StoreError> {
-    sqlx::query(session_runs_sql().verbs.cancel_batch.sql())
-        .bind(session_id.as_str())
-        .bind(batch_id)
-        .bind(crate::support::clamp_epoch_ms(at_ms))
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    sqlx::query(
+        crate::turn_ingress::turn_ingress_sql()
+            .queued_batches
+            .cancel_batch
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(batch_id)
+    .bind(crate::support::clamp_epoch_ms(at_ms))
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     Ok(())
 }
 
@@ -543,54 +504,6 @@ pub(crate) fn decode_run_admission(json: &str) -> Result<RunAdmission, StoreErro
         record_kind: "RunAdmission",
         message: error.to_string(),
     })
-}
-
-/// What run `run` holds, as a seal reads it in its transaction
-/// (FIG-4814): the executor its admission recorded, else the one a seal
-/// recorded for it. `None` when no executor is recorded for it.
-pub(crate) async fn held_run_conn(
-    conn: &mut PgConnection,
-    session_id: &SessionId,
-    run: &TurnId,
-) -> Result<Option<lash_core_execution::store::HeldRun>, StoreError> {
-    let row: Option<(Option<String>, Option<String>, bool)> =
-        sqlx::query_as(session_runs_sql().runs.select_hold.sql())
-            .bind(session_id.as_str())
-            .bind(run.as_str())
-            .fetch_optional(&mut *conn)
-            .await
-            .map_err(store_sqlx_error)?;
-    let Some((sealed, admission, ended)) = row else {
-        return Ok(None);
-    };
-    lash_core_execution::store::RunExecutor::from_stored(admission.as_deref(), sealed.as_deref())
-        .map(|executor| {
-            executor.map(|executor| lash_core_execution::store::HeldRun { executor, ended })
-        })
-}
-
-/// Record `hold`'s executor on its run, opening the run's row if it has
-/// none, in the transaction of the seal that raised the epoch for it.
-pub(crate) async fn record_run_hold_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
-    hold: &lash_core_execution::store::RunHold,
-) -> Result<(), StoreError> {
-    let sql = session_runs_sql();
-    sqlx::query(sql.runs.insert_open.sql())
-        .bind(session_id.as_str())
-        .bind(hold.run.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    sqlx::query(sql.runs.write_hold.sql())
-        .bind(session_id.as_str())
-        .bind(hold.run.as_str())
-        .bind(hold.executor.to_stored()?)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    Ok(())
 }
 
 /// The session's unfinished run, with the head its admission recorded,
@@ -610,7 +523,6 @@ pub(crate) async fn unfinished_run_conn(
         Ok(UnfinishedRun {
             run: TurnId::parse(run)?,
             head: admission.head,
-            executor: admission.executor,
         })
     })
     .transpose()
@@ -782,9 +694,6 @@ pub(crate) fn decode_intent(row: &sqlx::postgres::PgRow) -> Result<ControlIntent
     let kind_json: String = row.try_get(3).map_err(store_sqlx_error)?;
     let state_json: String = row.try_get(4).map_err(store_sqlx_error)?;
     let created_at_ms: i64 = row.try_get(5).map_err(store_sqlx_error)?;
-    let engine_ref: Option<String> = row.try_get(6).map_err(store_sqlx_error)?;
-    let obligation_id: Option<String> = row.try_get(7).map_err(store_sqlx_error)?;
-    let obligation_state: Option<String> = row.try_get(8).map_err(store_sqlx_error)?;
     let corrupt = |field: &str| StoreError::StoredDataCorrupt {
         record_kind: "ControlIntent",
         message: format!("{field} out of range"),
@@ -796,9 +705,6 @@ pub(crate) fn decode_intent(row: &sqlx::postgres::PgRow) -> Result<ControlIntent
         &kind_json,
         &state_json,
         u64_from_sql("ControlIntent", "created_at_ms", created_at_ms)?,
-        engine_ref,
-        obligation_id,
-        obligation_state,
     )
 }
 
@@ -833,33 +739,12 @@ pub(crate) async fn load_intent_conn(
         .transpose()
 }
 
-/// Session `session_id`'s open verbs (pending, or failed and retryable), in
-/// id order, read on `conn`.
-pub(crate) async fn open_verbs_by_session_conn(
-    conn: &mut PgConnection,
-    session_id: &SessionId,
-) -> Result<Vec<ControlIntent>, StoreError> {
-    let rows = sqlx::query(
-        session_runs_sql()
-            .intents
-            .select_open_verbs_by_session
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(store_sqlx_error)?;
-    rows.iter().map(decode_intent).collect()
-}
-
 /// Record a new intent of `session_id` in the caller's transaction: `kind`,
-/// `Pending`, with its `ControlIntent` obligation armed due at `at_ms` on the
-/// same row (ADR 0109). Answers it with its allocated id.
+/// `Pending`. Answers it with its allocated id.
 pub(crate) async fn insert_intent_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
     kind: ControlIntentKind,
-    engine: Option<&EnginePark>,
     at_ms: u64,
 ) -> Result<ControlIntent, StoreError> {
     let state = ControlIntentState::Pending;
@@ -872,21 +757,10 @@ pub(crate) async fn insert_intent_conn(
         .bind(state_code)
         .bind(state_json)
         .bind(sql_i64("control intent instant", at_ms)?)
-        .bind(engine.map(EnginePark::as_str))
         .fetch_one(&mut *conn)
         .await
         .map_err(store_sqlx_error)?;
     let id = ControlIntentId::from_sequence(u64_from_sql("ControlIntent", "intent_id", id)?);
-    let obligation = crate::obligation_ledger::arm_obligation_tx(
-        conn,
-        &ObligationKey::ControlIntent { intent_id: id },
-        at_ms,
-    )
-    .await?
-    .ok_or_else(|| StoreError::StoredDataCorrupt {
-        record_kind: "ControlIntent",
-        message: "a freshly recorded intent already carries an obligation".into(),
-    })?;
     Ok(ControlIntent {
         id,
         session_id: session_id.clone(),
@@ -894,83 +768,7 @@ pub(crate) async fn insert_intent_conn(
         kind,
         state,
         created_at_ms: at_ms,
-        engine: engine.cloned(),
-        obligation: Some(IntentObligation {
-            id: obligation,
-            state: ObligationState::Due,
-        }),
     })
-}
-
-/// Move intent `prior` to `next`'s state in the caller's transaction, if it
-/// is still as `prior` read it. `false` when another writer moved it first.
-pub(crate) async fn write_intent_state_conn(
-    conn: &mut PgConnection,
-    prior: &ControlIntent,
-    next: &ControlIntent,
-) -> Result<bool, StoreError> {
-    let (state_code, state_json) = stored_intent_state(&next.state)?;
-    let (_, prior_json) = stored_intent_state(&prior.state)?;
-    let changed = sqlx::query(session_runs_sql().intents.update_state.sql())
-        .bind(sql_i64("control intent id", next.id.sequence())?)
-        .bind(state_code)
-        .bind(state_json)
-        .bind(prior_json)
-        .execute(&mut *conn)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
-    Ok(changed == 1)
-}
-
-/// One attempt to settle intent `id`'s engine half under obligation claim
-/// `claim` in the caller's transaction (ADR 0109 claim fencing):
-/// [`IntentSettle::ClaimLost`] and nothing written when the obligation is no
-/// longer claimed under `claim`; otherwise `decide` answers the state to
-/// write over the stored one, or `None` to leave it. `None` when another
-/// writer moved the row between the read and the compare-and-set: the
-/// caller retries on a fresh transaction.
-pub(crate) async fn settle_intent_claimed_conn(
-    conn: &mut PgConnection,
-    id: ControlIntentId,
-    claim: &ClaimToken,
-    decide: impl FnOnce(&ControlIntentState) -> Option<ControlIntentState>,
-) -> Result<Option<IntentSettle>, StoreError> {
-    let sql = session_runs_sql();
-    let intent_id = sql_i64("control intent id", id.sequence())?;
-    let held: i64 = sqlx::query_scalar(sql.intents.select_claim_held.sql())
-        .bind(intent_id)
-        .bind(claim.as_str())
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(store_sqlx_error)?;
-    let stored = load_intent_conn(conn, id)
-        .await?
-        .ok_or(StoreError::ControlIntentUnknown { intent: id })?;
-    if held == 0 {
-        return Ok(Some(IntentSettle::ClaimLost));
-    }
-    let Some(state) = decide(&stored.state) else {
-        return Ok(Some(IntentSettle::Held(Box::new(stored))));
-    };
-    let (state_code, state_json) = stored_intent_state(&state)?;
-    let (_, prior_json) = stored_intent_state(&stored.state)?;
-    let changed = sqlx::query(sql.intents.update_state_claimed.sql())
-        .bind(intent_id)
-        .bind(state_code)
-        .bind(state_json)
-        .bind(prior_json)
-        .bind(claim.as_str())
-        .execute(&mut *conn)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
-    if changed != 1 {
-        return Ok(None);
-    }
-    let mut settled = stored.clone();
-    settled.state = state;
-    Ok(Some(IntentSettle::Held(Box::new(settled))))
 }
 
 /// The store half of session `session_id`'s close, in the caller's
@@ -979,9 +777,8 @@ pub(crate) async fn settle_intent_claimed_conn(
 /// It takes the session's history-mutation lock first, the lock acceptance
 /// takes, so no input is accepted into a session once its close committed.
 /// The close names the runs it releases: every run without terminal
-/// evidence (its logical-run rows, its parked run, its pending queued
-/// run), each ended `Cancelled` by `SessionDeleted`, plus the runs of the
-/// open verbs it supersedes, whose engine half then never runs.
+/// evidence, each ended `Cancelled` by `SessionDeleted`. It wakes the
+/// session actor, whose close steps act on the intent.
 ///
 /// [`ControlIntentStore::begin_session_close`]: lash_core_execution::store::ControlIntentStore::begin_session_close
 pub(crate) async fn begin_session_close_tx(
@@ -1016,51 +813,11 @@ pub(crate) async fn begin_session_close_tx(
     for run in open {
         runs.insert(TurnId::parse(run)?);
     }
-    // The parked run is released with the park, whose feed event outlives
-    // the session (FIG-3659).
-    let released = sqlx::query(
-        crate::turn_ingress::turn_ingress_sql()
-            .turn_parks
-            .delete_by_session_returning
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    if let Some(released) = released {
-        let parked_run: String = released.try_get(0).map_err(store_sqlx_error)?;
-        let park_id: i64 = released.try_get(1).map_err(store_sqlx_error)?;
-        crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
-            tx,
-            session_id,
-            &parked_run,
-            park_id,
-            &ParkEventKind::Cancelled {
-                cause: ParkCancelCause::SessionDeleted,
-            },
-            at_ms,
-        )
-        .await?;
-        runs.insert(TurnId::parse(parked_run)?);
-    }
-    let verbs = open_verbs_by_session_conn(tx, session_id).await?;
-    for verb in &verbs {
-        match &verb.kind {
-            ControlIntentKind::Redrive { run, .. }
-            | ControlIntentKind::Cancel { run, .. }
-            | ControlIntentKind::Fork { run, .. } => {
-                runs.insert(run.clone());
-            }
-            ControlIntentKind::CloseSession { .. } => {}
-        }
-    }
     let runs: Vec<TurnId> = runs.into_iter().collect();
     let intent = insert_intent_conn(
         tx,
         session_id,
         ControlIntentKind::CloseSession { runs: runs.clone() },
-        None,
         at_ms,
     )
     .await?;
@@ -1079,17 +836,9 @@ pub(crate) async fn begin_session_close_tx(
             .await?;
         }
     }
-    for verb in verbs {
-        let mut superseded = verb.clone();
-        superseded.state = ControlIntentState::Superseded { by: intent.id };
-        if !write_intent_state_conn(tx, &verb, &superseded).await? {
-            return Err(StoreError::Contended);
-        }
-    }
     let closed = sqlx::query(crate::session_sql::session_sql().meta.begin_close.sql())
         .bind(session_id.as_str())
         .bind(sql_i64("control intent id", intent.id.sequence())?)
-        .bind(close_admission(intent.id).as_str())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -1097,11 +846,12 @@ pub(crate) async fn begin_session_close_tx(
     if closed != 1 {
         return Err(StoreError::Contended);
     }
+    crate::durable::wake_session_tx(tx, session_id, false, at_ms).await?;
     Ok(Some(intent))
 }
 
 /// Forget what session `session_id`'s runs hold, in its deletion's
-/// transaction: its runs, its bindings and its verbs. A `close_session`
+/// transaction: its runs and its bindings. A `close_session`
 /// intent stays: it is the tombstone the factory answers the deleted
 /// session's runs from.
 pub(crate) async fn delete_session_runs_conn(
@@ -1111,9 +861,7 @@ pub(crate) async fn delete_session_runs_conn(
     let sql = session_runs_sql();
     for statement in [
         sql.runs.delete_by_session.sql(),
-        sql.runs.delete_shift_admissions.sql(),
         sql.inputs.delete_by_session.sql(),
-        sql.intents.delete_verbs_by_session.sql(),
     ] {
         sqlx::query(statement)
             .bind(session_id.as_str())
@@ -1126,98 +874,12 @@ pub(crate) async fn delete_session_runs_conn(
 
 #[async_trait::async_trait]
 impl RunStore for PostgresStore {
-    async fn prepare_shift_admission(
-        &self,
-        session_id: &SessionId,
-        admission: &lash_core_execution::store::AdmissionId,
-        executor: &RunExecutor,
-    ) -> Result<lash_core_execution::store::ShiftAdmissionPreparation, StoreError> {
-        crate::runtime_persistence::shift_admission::prepare(self, session_id, admission, executor)
-            .await
-    }
-    async fn read_shift_admission(
-        &self,
-        session_id: &SessionId,
-        admission: &lash_core_execution::store::AdmissionId,
-    ) -> Result<Option<lash_core_execution::store::ShiftAdmissionReceipt>, StoreError> {
-        crate::runtime_persistence::shift_admission::read(self, session_id, admission).await
-    }
-    async fn commit_shift_admission(
-        &self,
-        request: &lash_core_execution::store::ShiftAdmissionWrite,
-        anchor: &lash_core_execution::TraceAnchor,
-    ) -> Result<lash_core_execution::store::ShiftAdmissionReceipt, StoreError> {
-        crate::runtime_persistence::shift_admission::commit(self, request, anchor).await
-    }
-
-    async fn run_executor(
-        &self,
-        session_id: &SessionId,
-        run: &TurnId,
-    ) -> Result<Option<RunExecutor>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let stored = sqlx::query_as::<_, (Option<String>, Option<String>, bool)>(
-            session_runs_sql().runs.select_hold.sql(),
-        )
-        .bind(session_id.as_str())
-        .bind(run.as_str())
-        .fetch_optional(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
-        stored
-            .map(|(sealed, admission, _)| {
-                RunExecutor::from_stored(admission.as_deref(), sealed.as_deref())
-            })
-            .transpose()
-            .map(Option::flatten)
-    }
-
     async fn unfinished_run(
         &self,
         session_id: &SessionId,
     ) -> Result<Option<UnfinishedRun>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         unfinished_run_conn(&mut connection, session_id).await
-    }
-
-    async fn admit_run(
-        &self,
-        request: &lash_core_execution::store::AdmitRunRequest,
-    ) -> Result<Option<RunAdmission>, StoreError> {
-        lash_core_execution::store::admit_run_with_trace(self, request).await
-    }
-
-    async fn prepare_run_admission(
-        &self,
-        request: &lash_core_execution::store::AdmitRunRequest,
-    ) -> Result<Option<lash_core_execution::store::PreparedRunAdmission>, StoreError> {
-        Ok(crate::runtime_persistence::admit_run_postgres(
-            self,
-            request,
-            None,
-            &lash_core_execution::TraceAnchor::Untraced,
-        )
-        .await?
-        .map(
-            |admission| lash_core_execution::store::PreparedRunAdmission {
-                request: request.clone(),
-                admission,
-            },
-        ))
-    }
-
-    async fn commit_run_admission(
-        &self,
-        prepared: &lash_core_execution::store::PreparedRunAdmission,
-        anchor: &lash_core_execution::TraceAnchor,
-    ) -> Result<Option<RunAdmission>, StoreError> {
-        crate::runtime_persistence::admit_run_postgres(
-            self,
-            &prepared.request,
-            Some(prepared),
-            anchor,
-        )
-        .await
     }
 
     async fn admit_at_checkpoint(
@@ -1238,29 +900,29 @@ impl RunStore for PostgresStore {
 
     async fn end_refused_run(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
         run: &TurnId,
         refusal: &lash_core_execution::RuntimeError,
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
-        lash_core_execution::store::validate_session_id(fence.session())?;
+        lash_core_execution::store::validate_session_id(session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
-        let end = end_refused_run_tx(&mut tx, fence, run, refusal, at_ms).await?;
+        let end = end_refused_run_tx(&mut tx, session_id, run, refusal, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(end)
     }
 
     async fn end_command_run(
         &self,
-        fence: &lash_core_execution::store::ShiftFence,
+        session_id: &SessionId,
         run: &TurnId,
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
-        lash_core_execution::store::validate_session_id(fence.session())?;
+        lash_core_execution::store::validate_session_id(session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
-        let end = end_command_run_tx(&mut tx, fence, run, at_ms).await?;
+        let end = end_command_run_tx(&mut tx, session_id, run, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(end)
     }
@@ -1314,20 +976,6 @@ impl RunStore for PostgresStore {
         crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         bind_run_inputs_conn(&mut tx, session_id, run, inputs).await?;
         tx.commit().await.map_err(store_sqlx_error)
-    }
-}
-
-lash_store_sql::statements! {
-    /// `control_intents` obligation statements only PostgreSQL issues (ADR 0109 §1.1).
-    pub(crate) struct ControlIntentObligationPostgresStatements @ "control_intent" {
-        /// At most `?2` obligations due at `?1`, oldest due first, each row
-        /// locked for the caller's claim and skipped by every concurrent
-        /// claimant: two deployments' relays take disjoint pages.
-        obligation_select_due_locking = "SELECT obligation_id FROM control_intents
-             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
-             ORDER BY obligation_due_at_ms, obligation_id
-             LIMIT ?2
-             FOR UPDATE SKIP LOCKED";
     }
 }
 

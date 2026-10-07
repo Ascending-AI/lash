@@ -138,16 +138,15 @@ pub fn append_message(state: &mut impl ReadModelStateMut, message: Message) {
     state.append_message(message);
 }
 
-/// Apply a host head write as a session's shift does (FIG-4202), for a test
-/// that runs no engine: enqueue `command` on the session's command lane in
-/// `store` under `idempotency_key`, seal a fresh admission on `store` as a
-/// command run's seal does, drain the command lane under that fence on
-/// `runtime`, and answer the typed outcome the command settled with.
+/// Apply a host head write as a session's command run does (FIG-4202), for a
+/// test that runs no engine: enqueue `command` on the session's command lane
+/// in `store` under `idempotency_key`, drain the command lane on `runtime`,
+/// and answer the typed outcome the command settled with.
 ///
 /// # Errors
 ///
-/// The submission, the seal, the drain or the settlement read failed, or the
-/// command did not settle applied.
+/// The submission, the drain or the settlement read failed, or the command
+/// did not settle applied.
 pub async fn apply_host_command(
     runtime: &mut LashRuntime,
     store: &dyn crate::RuntimeStore,
@@ -155,9 +154,8 @@ pub async fn apply_host_command(
     idempotency_key: &str,
 ) -> Result<SessionCommandOutcome, RuntimeError> {
     let session_id = SessionId::fixture(runtime.session_id());
-    let (receipt, fence) =
-        submit_host_command(store, &session_id, command, idempotency_key).await?;
-    let applied_here = drain_host_commands(runtime, &fence, None)
+    let receipt = submit_host_command(store, &session_id, command, idempotency_key).await?;
+    let applied_here = drain_host_commands(runtime, None)
         .await?
         .contains(&receipt.batch_id);
     settle_host_command(runtime, receipt, applied_here).await
@@ -165,21 +163,18 @@ pub async fn apply_host_command(
 
 /// Submit a host's session command as its submission records it (FIG-4202),
 /// for a test that runs no engine: enqueue `command` on session
-/// `session_id`'s command lane in `store` under `idempotency_key`, and seal
-/// a fresh admission as a command run's seal does. Answers the command's
-/// receipt and the sealed fence its drain presents.
+/// `session_id`'s command lane in `store` under `idempotency_key`. Answers
+/// the command's receipt.
 ///
 /// # Errors
 ///
-/// The submission or the seal failed.
+/// The submission failed.
 pub async fn submit_host_command(
     store: &dyn crate::RuntimeStore,
     session_id: &SessionId,
     command: SessionCommand,
     idempotency_key: &str,
-) -> Result<(crate::SessionCommandReceipt, crate::store::ShiftFence), RuntimeError> {
-    // Enqueued through the store: a test that runs no engine has no ingress
-    // relay to deliver it.
+) -> Result<crate::SessionCommandReceipt, RuntimeError> {
     let source_key = command.source_key(idempotency_key);
     let batch = store
         .enqueue_queued_work(
@@ -199,34 +194,10 @@ pub async fn submit_host_command(
         batch_id: batch.batch_id,
         source_key,
     };
-    let observed = store.shift_epoch(session_id).await.map_err(|error| {
-        RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, error.to_string())
-    })?;
-    let admission = crate::store::AdmissionId::new(format!(
-        "host-command:{idempotency_key}:{}",
-        uuid::Uuid::new_v4()
-    ));
-    match store
-        .seal_shift_epoch(
-            session_id,
-            &admission,
-            observed.epoch,
-            &crate::store::RunStartNonce::new(uuid::Uuid::new_v4().to_string()),
-            None,
-        )
-        .await
-        .map_err(|error| {
-            RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, error.to_string())
-        })? {
-        crate::store::ShiftEpochSeal::Sealed(fence) => Ok((receipt, fence)),
-        other => Err(RuntimeError::new(
-            RuntimeErrorCode::StoreCommitSuperseded,
-            format!("the host command's seal did not land: {other:?}"),
-        )),
-    }
+    Ok(receipt)
 }
 
-/// Drain the session's command lane on `runtime` under `fence` until it is
+/// Drain the session's command lane on `runtime` until it is
 /// empty, as a command run does, on `controller` when one is given: the
 /// controller a tier's handler lends, for an effect host that runs effects
 /// only in a handler. A replay of that handler reads back the runs its
@@ -237,7 +208,6 @@ pub async fn submit_host_command(
 /// A drain failed.
 pub async fn drain_host_commands(
     runtime: &mut LashRuntime,
-    fence: &crate::store::ShiftFence,
     controller: Option<&crate::ActorContext>,
 ) -> Result<Vec<crate::BatchId>, RuntimeError> {
     let mut drained = Vec::new();
@@ -246,13 +216,12 @@ pub async fn drain_host_commands(
             Some(controller) => {
                 runtime
                     .drain_next_session_command_with_cancellation(
-                        fence,
                         tokio_util::sync::CancellationToken::new(),
                         controller,
                     )
                     .await?
             }
-            None => runtime.drain_next_session_command(fence).await?,
+            None => runtime.drain_next_session_command().await?,
         };
         let Some(next) = next else {
             return Ok(drained);
@@ -612,27 +581,6 @@ pub async fn advance_session_head(
     store: &RecordingStore,
     change: impl FnOnce(&mut RuntimeSessionState),
 ) -> crate::SessionHeadMeta {
-    advance_session_head_fenced(store, change, true).await
-}
-
-/// [`advance_session_head`], except the commit presents no shift fence: the
-/// way a writer outside every shift moves the head. The head-ownership check
-/// admits a lane-less write only onto a head no commit has published over yet
-/// (FIG-4202), so this is a first commit racing a bound run; the published
-/// head is not `published_by_shift`, and a resumed run's head inspection
-/// meets it as another writer's, `Overtaken` (FIG-4200).
-pub async fn advance_session_head_unfenced(
-    store: &RecordingStore,
-    change: impl FnOnce(&mut RuntimeSessionState),
-) -> crate::SessionHeadMeta {
-    advance_session_head_fenced(store, change, false).await
-}
-
-async fn advance_session_head_fenced(
-    store: &RecordingStore,
-    change: impl FnOnce(&mut RuntimeSessionState),
-    fenced: bool,
-) -> crate::SessionHeadMeta {
     let session_id = store
         .session_id()
         .expect("recording store has a session id");
@@ -665,20 +613,7 @@ async fn advance_session_head_fenced(
         }
     };
     change(&mut state);
-    // The bound turn owns the head (FIG-4202): a writer that moves it once
-    // a commit has published over the created head must present the run's
-    // own shift fence, as a second execution of that run would. Over the
-    // created head a lane-less write is still admitted, which is what an
-    // unfenced advance exercises. Before the first seal nothing owns it.
-    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
-    commit.shift_fence = if fenced {
-        crate::store::current_shift_fence(store, &session_id)
-            .await
-            .expect("read the session's shift fence")
-            .map(Box::new)
-    } else {
-        None
-    };
+    let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     crate::SessionCommitStore::commit_runtime_state(store, commit)
         .await
         .expect("commit the advanced head");
@@ -994,7 +929,6 @@ impl TestRuntime {
                 let host = crate::ProcessRuntimeHost::with_ports(
                     self.host,
                     crate::testing::process_work_wiring_for_registry(registry),
-                    Arc::new(crate::NoSessionWork::new()),
                 );
                 LashRuntime::from_persistent_background_state(
                     policy,
@@ -1015,7 +949,6 @@ impl TestRuntime {
                 let host = crate::ProcessRuntimeHost::with_ports(
                     self.host,
                     crate::testing::process_work_wiring_for_registry(registry),
-                    Arc::new(crate::NoSessionWork::new()),
                 );
                 LashRuntime::from_background_state(
                     policy,

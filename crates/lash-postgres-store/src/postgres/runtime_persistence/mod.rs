@@ -4,7 +4,7 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 pub(crate) async fn allocate_ingress_sequence_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
 ) -> Result<i64, StoreError> {
     lock_session_history_mutation_tx(tx, session_id).await?;
@@ -14,13 +14,13 @@ pub(crate) async fn allocate_ingress_sequence_tx(
             .sql(),
     )
     .bind(session_id.as_str())
-    .fetch_one(&mut **tx)
+    .fetch_one(&mut *tx)
     .await
     .map_err(store_sqlx_error)
 }
 
 pub(crate) async fn lock_session_history_mutation_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
     sqlx::query(
@@ -29,7 +29,7 @@ pub(crate) async fn lock_session_history_mutation_tx(
             .sql(),
     )
     .bind(session_id.as_str())
-    .execute(&mut **tx)
+    .execute(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
     Ok(())
@@ -182,7 +182,7 @@ pub(crate) async fn nearest_frame_node_id_tx(
 }
 
 async fn enqueue_queued_work_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     batch: &QueuedWorkBatchDraft,
     now: u64,
 ) -> Result<QueuedWorkBatch, StoreError> {
@@ -192,7 +192,7 @@ async fn enqueue_queued_work_tx(
 }
 
 pub(crate) async fn enqueue_queued_work_with_outcome_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     batch: &QueuedWorkBatchDraft,
     now: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
@@ -217,7 +217,7 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
             sqlx::query_as(sql.queued_batches.select_id_by_source_key.sql())
                 .bind(batch.session_id.as_str())
                 .bind(source_key)
-                .fetch_optional(&mut **tx)
+                .fetch_optional(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
         let admission =
@@ -252,12 +252,11 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
         .bind(submission_digest.as_str())
         .bind(encode_json(&batch.payload)?)
         .bind(lash_core_execution::store_backend_support::encode_trace_cause(&batch.trace_cause)?)
-        .execute(&mut **tx)
+        .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-    // The admitted batch owes its session a shift (ADR 0109 §3), armed in
-    // the transaction that admits it.
-    crate::ingress_obligation::arm_queued_batch_tx(tx, &batch.session_id, &batch_id, now).await?;
+    // The batch and the session's wake commit together (ADR 0132 §12).
+    crate::durable::wake_session_tx(tx, &batch.session_id, false, now).await?;
     let queued = load_queued_batch(tx, &batch_id)
         .await?
         .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
@@ -301,12 +300,9 @@ async fn read_session_state_version_tx(
 }
 
 mod admission;
-pub(crate) mod shift_admission;
-pub(crate) use admission::{
-    admit_at_checkpoint_postgres, admit_run_postgres, open_session_command_run_postgres,
-};
+pub(crate) use admission::{admit_at_checkpoint_postgres, open_session_command_run_postgres};
 mod history;
-pub(crate) mod shift_epoch;
+mod session_fault;
 pub(crate) use history::read_tx;
 mod ingress_settlement;
 mod maintenance;
@@ -315,7 +311,5 @@ mod session_commit;
 pub(crate) use session_commit::apply_runtime_commit_tx;
 pub(crate) mod turn_cancel;
 mod turn_input;
-pub(crate) mod turn_park;
-pub(crate) mod turn_park_feed;
 
 use turn_cancel::*;

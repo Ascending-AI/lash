@@ -32,17 +32,13 @@
 //! `integration_boundary` lint forbids naming in this crate's `Cargo.toml`, `src/`,
 //! and `tests/`.
 //!
-//! The intentionally expired session lease is a raw durable generation fact.
-//! Reading it proves decoding and identity continuity; it does not grant live
-//! execution authority.
-//!
 //! ## Generators
 //!
 //! The release fixtures are captured at the cut by
 //! `python3 scripts/capture_release_fixtures.py --regenerate`, which runs the two
 //! ignored generators below and freezes their output under `fixtures/release/`.
 //! Generation is deterministic: the generators fix the clock, signing secret,
-//! lease nonces, trigger incarnation, operation ids, and other identity inputs,
+//! trigger incarnation, operation ids, and other identity inputs,
 //! and normalize the few values a store mints itself, so two runs produce
 //! byte-identical artifacts.
 //!
@@ -573,24 +569,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .enqueue_queued_work(process_wake_batch_draft(wake_delivery.clone()))
         .await
         .expect("enqueue fixture process wake at receiver");
-    let queue_admission = lash_core::store::AdmissionId::new("durable-read-queue-admission");
-    let queue_epoch = session
-        .shift_epoch()
-        .await
-        .expect("read fixture shift epoch");
-    match session
-        .seal_shift_epoch(
-            &queue_admission,
-            queue_epoch.epoch,
-            &lash_core::store::RunStartNonce::new(queue_admission.as_str()),
-            None,
-        )
-        .await
-        .expect("seal fixture queue shift")
-    {
-        lash_core::store::ShiftEpochSeal::Sealed(_) => {}
-        other => panic!("fixture queue shift did not seal: {other:?}"),
-    }
     // The receiver wake sits behind the fixture's queued work, which stays
     // pending, so the turn lane never reaches it: its host cancel is its
     // terminal transition.
@@ -610,23 +588,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .commit_runtime_state(wake_commit)
         .await
         .expect("commit the fixture head after the receiver wake's cancel");
-    let retained_admission = lash_core::store::AdmissionId::new("durable-read-retained-admission");
-    let retained_epoch = session
-        .shift_epoch()
-        .await
-        .expect("read fixture shift epoch");
-    assert!(matches!(
-        session
-            .seal_shift_epoch(
-                &retained_admission,
-                retained_epoch.epoch,
-                &lash_core::store::RunStartNonce::new(retained_admission.as_str()),
-                None,
-            )
-            .await
-            .expect("seal retained fixture shift"),
-        lash_core::store::ShiftEpochSeal::Sealed(_)
-    ));
 
     let read = load_fixture_window(&session).await;
     let seeded_occurrences = handles
@@ -811,16 +772,6 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             "durable fixture drift: retired session open returned wrong typed error: {error}"
         ),
     }
-
-    let stored_epoch = session
-        .shift_epoch()
-        .await
-        .expect("durable fixture shift epoch read");
-    assert_eq!(stored_epoch.epoch, 2);
-    assert_eq!(
-        stored_epoch.admission().map(|id| id.as_str()),
-        Some("durable-read-retained-admission")
-    );
 
     let current_replay = session
         .commit_runtime_state(expected.current_append_retry.clone())

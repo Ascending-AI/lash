@@ -84,8 +84,6 @@ struct TurnCommitRequest<'commit, 'run> {
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-    /// The cancellation the commit settles, when the turn was cancelled.
-    cancellation: Option<crate::TurnCancellationEvidence>,
     run: std::marker::PhantomData<&'run ()>,
 }
 
@@ -149,15 +147,13 @@ impl PreparedTurn {
             commit_effects,
             trace_turn_id: _,
             recorded_attachment_intent_ids,
-            cancellation,
             run: std::marker::PhantomData,
         } = request;
-        let work_remaining = Box::pin(self.turn_pipeline.final_commit(
+        Box::pin(self.turn_pipeline.final_commit(
             &mut self.turn,
             session,
             commit_effects.ingress_settlement,
             commit_effects.pending_follow_on,
-            cancellation,
             recorded_attachment_intent_ids,
         ))
         .await?;
@@ -165,7 +161,6 @@ impl PreparedTurn {
             turn: self.turn,
             events: self.events,
             resident_state: self.turn_pipeline.into_final_state(),
-            work_remaining,
         })
     }
 }
@@ -178,7 +173,6 @@ struct CommittedTurn {
     turn: AssembledTurn,
     events: Vec<SessionStreamEvent>,
     resident_state: RuntimeSessionState,
-    work_remaining: bool,
 }
 
 impl TypedTurnPhase for CommittedTurn {
@@ -194,9 +188,6 @@ impl CommittedTurn {
         runtime: &mut LashRuntime,
         trace_turn_id: &TurnId,
     ) -> Result<PostCommitDelivery, RuntimeError> {
-        if let Some(run) = runtime.shift_run.as_mut() {
-            run.work_remaining = self.work_remaining;
-        }
         runtime.install_resident_state(self.resident_state)?;
         let observation_revision =
             crate::runtime::observation::observation_revision(&runtime.state);
@@ -222,7 +213,7 @@ pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
     /// The cancellation the turn recorded honouring, if any: a journaled
     /// peek's answer, never a live token (FIG-3672 P9).
     pub(in crate::runtime) honoured_cancel: Option<crate::TurnCancellationEvidence>,
-    pub(in crate::runtime) shift_fence: Option<&'commit ShiftFence>,
+
     /// What the turn publishes through. The terminal publication waits
     /// until the host has received every event the turn queued (see
     /// `turn_observer`'s host contract).
@@ -236,7 +227,7 @@ pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
     pub(super) opener: crate::runtime::turn_driver::OpenerForCommit<'run>,
     pub(super) cancellation_messages: crate::MessageSequence,
     pub(super) finish_scoped_effect_controller: &'cancel ActorContext,
-    pub(super) shift_fence: Option<&'cancel ShiftFence>,
+
     pub(super) turn_index: usize,
     pub(super) trace_turn_id: TurnId,
     pub(super) observer: &'cancel TurnObserver,
@@ -255,7 +246,6 @@ pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
     pub(in crate::runtime) sinks: TurnSinks<'error>,
     pub(in crate::runtime) scoped_effect_controller: ActorContext,
     pub(in crate::runtime) admissions: LogicalTurnAdmissions,
-    pub(in crate::runtime) shift_fence: Option<&'error ShiftFence>,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'run ()>,
 }
@@ -304,7 +294,7 @@ impl LashRuntime {
             admissions: &admissions,
             scoped_effect_controller: &controller,
             honoured_cancel: None,
-            shift_fence: None,
+
             observer: &observer,
         })
         .await
@@ -316,7 +306,6 @@ impl LashRuntime {
         pipeline: &TurnBoundary,
         turn: &TurnId,
         controller: &ActorContext,
-        fence: Option<&ShiftFence>,
     ) -> Result<Option<crate::runtime::turn_driver::OpenerForCommit<'run>>, RuntimeError> {
         let Some(continuation) = pipeline
             .state()
@@ -339,7 +328,7 @@ impl LashRuntime {
             return Ok(None);
         }
         let services = self
-            .runtime_session_services_for_turn(fence, pipeline.graph_appends())
+            .runtime_session_services_for_turn(pipeline.graph_appends())
             .map_err(|error| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, error.to_string())
             })?;
@@ -441,7 +430,7 @@ impl LashRuntime {
             admissions,
             scoped_effect_controller,
             honoured_cancel,
-            shift_fence,
+
             observer,
         } = context;
         let TurnFinishInput {
@@ -474,7 +463,6 @@ impl LashRuntime {
                     &turn_pipeline,
                     &trace_turn_id,
                     scoped_effect_controller,
-                    shift_fence,
                 )?,
             };
             if let Some(opener) = opener {
@@ -538,9 +526,7 @@ impl LashRuntime {
                 &self.state,
                 &assembled.outcome,
                 &trace_turn_id,
-                self.shift_run
-                    .as_ref()
-                    .map_or(&trace_turn_id, |ran_execution| ran_execution.run()),
+                &trace_turn_id,
                 assembled.state.current_frame_node_id.as_ref(),
                 segment_boundary.as_deref(),
             )?;
@@ -561,9 +547,7 @@ impl LashRuntime {
         };
 
         let plugins = Arc::clone(session.plugins());
-        let manager = match self
-            .runtime_session_services_for_turn(shift_fence, turn_pipeline.graph_appends())
-        {
+        let manager = match self.runtime_session_services_for_turn(turn_pipeline.graph_appends()) {
             Ok(manager) => manager,
             Err(err) => {
                 return Err(RuntimeError::new(
@@ -651,9 +635,7 @@ impl LashRuntime {
             &self.state,
             prepared.outcome(),
             &trace_turn_id,
-            self.shift_run
-                .as_ref()
-                .map_or(&trace_turn_id, |ran_execution| ran_execution.run()),
+            &trace_turn_id,
             prepared.turn.state.current_frame_node_id.as_ref(),
             segment_boundary.as_deref(),
         ) {
@@ -664,38 +646,6 @@ impl LashRuntime {
             }
         };
         let commit_effects = admissions.commit_effects(prepared.outcome(), pending_follow_on);
-        let settlement_trace = self.shift_run.as_ref().map(|run| {
-            commit_effects.ingress_settlement.clone().into_ingress(
-                run.run().clone(),
-                cancellation
-                    .as_ref()
-                    .map_or(crate::TurnCancelUndeliveredInputPolicy::Defer, |evidence| {
-                        evidence.undelivered
-                    }),
-            )
-        });
-        // Under an admitted run, the commit presents the run's shift fence
-        // and, when this turn ends the run, writes its terminal evidence
-        // (FIG-3600 S7).
-        let shift_commit = self.shift_run.as_ref().and_then(|run| {
-            let owes_follow_on = commit_effects.pending_follow_on.is_some()
-                || admissions.carries_follow_on_work(matches!(
-                    prepared.outcome(),
-                    TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-                ));
-            run.commit_facts(&trace_turn_id, prepared.outcome(), owes_follow_on)
-        });
-        let writes_run_terminal = shift_commit
-            .as_ref()
-            .is_some_and(|commit| commit.terminal.is_some());
-        let mut prepared = prepared;
-        prepared.turn_pipeline.set_shift_commit(shift_commit);
-        // The commit clears the park of the run the turn runs under, the
-        // same run an abort of the turn parks (D2 §1.3 P3).
-        prepared.turn_pipeline.set_park_run(self.park_run(
-            scoped_effect_controller.execution_scope().logical_run(),
-            &trace_turn_id,
-        ));
         let committed = match Box::pin(
             prepared.commit(
                 TurnCommitRequest {
@@ -712,7 +662,6 @@ impl LashRuntime {
                                 .execution_scope()
                                 .journal_identity()?,
                         ),
-                    cancellation: cancellation.clone(),
                     run: std::marker::PhantomData,
                 },
                 TurnCommitAdmission {
@@ -722,18 +671,7 @@ impl LashRuntime {
         )
         .await
         {
-            Ok(committed) => {
-                if (writes_run_terminal
-                    || matches!(
-                        committed.turn.outcome,
-                        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-                    ))
-                    && let Some(run) = self.shift_run.as_mut()
-                {
-                    run.mark_terminal_written();
-                }
-                committed
-            }
+            Ok(committed) => committed,
             Err(err) => {
                 // A store fault is this attempt's own evidence, whatever the
                 // attempt replayed before it met the fault.
@@ -781,24 +719,7 @@ impl LashRuntime {
             ));
             delivery.post_commit_delivery_failed = true;
         }
-        if let Some(settlement) = settlement_trace.filter(|settlement| !settlement.is_empty()) {
-            turn_trace.observe(|| {
-                (
-                    lash_trace::TraceContext::default()
-                        .for_session(delivery.turn.state.session_id.clone())
-                        .for_turn_index(delivery.turn.state.turn_index)
-                        .for_turn(trace_turn_id.clone()),
-                    lash_trace::TraceEvent::Custom {
-                        name: "ingress.settled".to_string(),
-                        payload: ingress_settled_trace_payload(&settlement),
-                    },
-                )
-            });
-        }
-        match self
-            .emit_turn_persisted_event(&delivery.turn, shift_fence)
-            .await
-        {
+        match self.emit_turn_persisted_event(&delivery.turn).await {
             Ok(Some(error)) => {
                 let mut issue = crate::plugin::plugin_lifecycle_hook_issue(error);
                 issue.retryable = Some(false);
@@ -833,7 +754,7 @@ impl LashRuntime {
             opener,
             cancellation_messages,
             finish_scoped_effect_controller,
-            shift_fence,
+
             turn_index,
             trace_turn_id,
             observer,
@@ -885,7 +806,7 @@ impl LashRuntime {
             admissions: &admissions,
             scoped_effect_controller: finish_scoped_effect_controller,
             honoured_cancel: Some(evidence),
-            shift_fence,
+
             observer,
         }))
         .await
@@ -904,7 +825,6 @@ impl LashRuntime {
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             admissions,
-            shift_fence,
         } = context;
         // A recovered follow-on's terminal commits at the index its run's
         // decision recorded, on the head it adopted (FIG-4380).
@@ -977,7 +897,7 @@ impl LashRuntime {
             admissions: &admissions,
             scoped_effect_controller: &scoped_effect_controller,
             honoured_cancel: None,
-            shift_fence,
+
             observer,
         }))
         .await

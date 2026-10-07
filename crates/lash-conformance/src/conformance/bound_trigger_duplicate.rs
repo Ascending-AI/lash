@@ -140,7 +140,6 @@ impl LawRig {
                     watched.clone(),
                     Arc::new(crate::NoProcessWork::new(&watched)),
                 ),
-                Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
             ),
         )
@@ -179,7 +178,7 @@ impl LawRig {
             self.stores
                 .obligation_ledger(crate::store::ObligationKind::ProcessStart),
             self.stores.clock(),
-            crate::shift::relay::RelayPolicy::default(),
+            lash_core::runtime::obligations::relay::RelayPolicy::default(),
             Default::default(),
         )
     }

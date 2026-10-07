@@ -8,16 +8,6 @@
 lash_store_sql::statements! {
     /// `queued_work_batches` statements only PostgreSQL issues.
     pub(crate) struct QueuedBatchPostgresStatements @ "queued_work_batch" {
-        /// At most `?2` ingress obligations due at `?1`, oldest due first,
-        /// each row locked for the caller's obligation claim and skipped by
-        /// every concurrent claimant: two deployments' relays take disjoint pages
-        /// (ADR 0109 §1.7).
-        obligation_select_due_locking = "SELECT obligation_id FROM queued_work_batches
-             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
-             ORDER BY obligation_due_at_ms, obligation_id
-             LIMIT ?2
-             FOR UPDATE SKIP LOCKED";
-
         /// `?10` is the submission digest. The source key was read under the
         /// session's write authority in the same transaction, so its unique
         /// constraint is only the backstop.

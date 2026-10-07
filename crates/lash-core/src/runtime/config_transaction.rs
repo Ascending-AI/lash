@@ -205,7 +205,7 @@ impl LashRuntime {
     }
 
     /// Apply the config transaction the command run `completion` names,
-    /// under the command run's `shift_fence` (FIG-4379). `false` when the
+    /// (FIG-4379). `false` when the
     /// command was withdrawn since the lane was read: nothing was applied.
     ///
     /// The resolution is one recorded step on the command's own scope, the
@@ -217,7 +217,6 @@ impl LashRuntime {
         &mut self,
         transaction: crate::ConfigTransactionRecord,
         completion: crate::QueuedWorkCompletion,
-        shift_fence: &crate::store::ShiftFence,
         run_controller: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let [batch_id] = completion.batch_ids.as_slice() else {
@@ -252,7 +251,7 @@ impl LashRuntime {
         // transaction resolves over the sticky config under it and
         // publishes onto it, never the run's overrides.
         self.uninstall_run_view()?;
-        let controller = super::shift::step_controller(
+        let controller = super::step_controller(
             run_controller,
             crate::AdmittedScope::session_operation(
                 self.state.session_id.clone(),
@@ -277,13 +276,10 @@ impl LashRuntime {
         if applied {
             self.publish_resident_authority()?;
         }
-        let committed =
-            Box::pin(
-                self.commit_host_command(&completion, shift_fence, None, None, |_, _| {
-                    crate::runtime::SessionCommandOutcome::ConfigTransaction { outcome }
-                }),
-            )
-            .await?;
+        let committed = Box::pin(self.commit_host_command(&completion, None, None, |_, _| {
+            crate::runtime::SessionCommandOutcome::ConfigTransaction { outcome }
+        }))
+        .await?;
         if applied && matches!(committed, super::host_commands::CommandCommit::Landed) {
             self.notify_session_config_changed(previous).await;
         }

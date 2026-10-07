@@ -31,10 +31,8 @@ pub(crate) async fn issue_effect(
         | RuntimeEffectCommand::ReadSessionCommandRun { .. }
         | RuntimeEffectCommand::CloseRunScope { .. } => cx.session_effect(envelope, local).await,
         RuntimeEffectCommand::TransitionPlugins { .. }
-        | RuntimeEffectCommand::AdmitShift { .. }
-        | RuntimeEffectCommand::DrawRunStart { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
-        | RuntimeEffectCommand::PluginCallbacks { .. } => cx.shift_effect(envelope, local).await,
+        | RuntimeEffectCommand::PluginCallbacks { .. } => cx.ingress_effect(envelope, local).await,
         RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::PresentToolResult { .. }
         | RuntimeEffectCommand::Trigger { .. }

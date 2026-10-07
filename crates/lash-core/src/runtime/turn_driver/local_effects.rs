@@ -142,7 +142,6 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         runner.messages.clone(),
                         runner.protocol_iteration,
                         checkpoint,
-                        envelope.invocation.effect_replay_key(),
                         &runner.event_tx,
                     )
                     .await
@@ -261,8 +260,6 @@ pub(super) fn turn_effect_executor(
         // back on the journalled admitted set, not on the driver copy.
         withheld_terminal_work: Default::default(),
         checkpoint_messages: driver.checkpoint_messages.clone(),
-        shift_fence: driver.shift_fence.clone(),
-        shift_run: driver.shift_run.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
         turn_control: driver.turn_control.clone(),
         protocol_reply: Default::default(),

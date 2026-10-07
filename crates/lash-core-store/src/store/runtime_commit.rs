@@ -60,15 +60,6 @@ pub struct RuntimeCommit {
     pub commit_budget: super::CommitBudget,
     pub session_id: SessionId,
     pub expected_head_revision: u64,
-    /// The shift fence of the admission this commit's run was sealed under
-    /// (ADR 0105 §2, FIG-3600 S7). A transaction predicate, never commit
-    /// content: the backend refuses the commit
-    /// [`StoreError::StaleShiftFence`](super::StoreError::StaleShiftFence)
-    /// unless it is still the session's current shift fence, checked in the
-    /// commit's own transaction before anything is written. `None` for a
-    /// commit no shift sealed (a runtime operation, a process-scoped turn).
-    #[serde(skip)]
-    pub shift_fence: Option<Box<super::ShiftFence>>,
     /// The logical run's terminal evidence, present exactly on the commit of
     /// the run's final physical turn (FIG-3600 S7): written in this commit's
     /// transaction, refused [`StoreError::RunAlreadyTerminal`](super::StoreError::RunAlreadyTerminal)
@@ -77,15 +68,6 @@ pub struct RuntimeCommit {
     /// fences, it is excluded from the commit's serialized form.
     #[serde(skip)]
     pub run_terminal: Option<Box<super::RunTerminalWrite>>,
-    /// The logical run this commit's physical turn runs under, whose park
-    /// the commit clears in its own transaction (FIG-3600 S7, D2 §1.3 P3): a
-    /// run is parked by its logical run, so any commit of any of its
-    /// physical turns — a frame switch's follow-on, an S4 follow-on, the
-    /// final turn — settles the park. `None` for a commit that runs under no
-    /// run; see [`RuntimeCommit::settled_park_run`]. Like the fences, a
-    /// store instruction excluded from the commit's serialized form.
-    #[serde(skip)]
-    pub park_run: Option<crate::TurnId>,
     /// The frame this commit ends and the frame it opens (ADR 0113 §3.1):
     /// present exactly on a commit that switches frames. The backend applies
     /// it in the commit's own transaction with the head CAS: it checks every
@@ -127,7 +109,7 @@ pub struct RuntimeCommit {
     pub turn_commit: RuntimeTurnCommitStamp,
     /// What this commit does with the rows its run admitted (FIG-3927):
     /// completions, releases and drops, each predicated on the row still
-    /// being bound to the run. Requires [`Self::shift_fence`].
+    /// being bound to the run.
     ///
     /// A cancelled turn hands the work it withheld from its terminal
     /// checkpoint to its cancellation here (FIG-3531, FIG-3543): withheld
@@ -140,7 +122,6 @@ pub struct RuntimeCommit {
     /// command lane takes no admission: each row must still exist and be
     /// open, or the whole commit is refused
     /// [`StoreError::SessionCommandWithdrawn`](super::StoreError::SessionCommandWithdrawn).
-    /// Requires [`Self::shift_fence`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_commands: Option<crate::QueuedWorkCompletion>,
     /// Each command's outcome, keyed by its batch, recorded atomically with
@@ -719,14 +700,13 @@ impl RuntimeTurnCommitStamp {
 }
 
 impl RuntimeCommit {
-    /// The run whose park this commit clears: [`Self::park_run`], else the
-    /// run whose end it records, else the physical turn it commits (a turn
-    /// that runs under no run parks under its own id).
+    /// The run this commit commits under: the run whose end it records,
+    /// else the physical turn it commits.
     #[must_use]
-    pub fn settled_park_run(&self) -> Option<&crate::TurnId> {
-        self.park_run
-            .as_ref()
-            .or_else(|| self.run_terminal.as_deref().map(|terminal| &terminal.run))
+    pub fn committing_run(&self) -> Option<&crate::TurnId> {
+        self.run_terminal
+            .as_deref()
+            .map(|terminal| &terminal.run)
             .or_else(|| self.turn_commit.operation.turn_id())
     }
 
@@ -995,13 +975,11 @@ struct SessionCommitEnvelope {
 /// # Errors
 ///
 /// [`StoreError::Backend`] when the commit carries a store instruction the
-/// durable path has no carrier for (a shift fence, a run terminal, a park, a
-/// frame transition), or does not encode.
+/// durable path has no carrier for (a run terminal or a frame transition),
+/// or does not encode.
 pub fn encode_session_commit(commit: &RuntimeCommit) -> Result<String, StoreError> {
     let unsupported = [
-        ("shift fence", commit.shift_fence.is_some()),
         ("run terminal", commit.run_terminal.is_some()),
-        ("turn park", commit.park_run.is_some()),
         ("frame transition", commit.frame_transition.is_some()),
     ];
     if let Some((what, _)) = unsupported.iter().find(|(_, carried)| *carried) {

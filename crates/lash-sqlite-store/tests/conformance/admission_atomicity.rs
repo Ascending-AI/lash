@@ -7,52 +7,7 @@ use crate::backend_fixture::TestBackend;
 mod law;
 
 #[tokio::test]
-async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
-    for entry in law::ENTRIES {
-        let backend = TestBackend::open(SUBSTRATE).await;
-        let store = backend.store().await;
-        store
-            .admit_session(&lash_core_execution::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: "root".into(),
-                relation: lash_core_execution::SessionRelation::Root,
-                config: lash_core_execution::SessionPolicy::new(
-                    lash_core_execution::TurnBudget::Unbounded,
-                    lash_core_execution::MaxToolCalls::new(1024),
-                )
-                .into(),
-                head: lash_core_execution::SessionCreationHead::Config,
-            })
-            .await
-            .unwrap();
-        let case = law::prepare(store as Arc<dyn RuntimeStore>, entry).await;
-        let conn = backend.raw();
-        let second = case.ids[1].replace('\'', "''");
-        conn.execute_batch(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_run ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
-        assert!(
-            case.admit().await.is_err(),
-            "{entry:?}: a partial admission is refused"
-        );
-        let bound: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM queued_work_batches WHERE admitted_run IS NOT NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(bound, 0, "{entry:?}: the first row's bind must roll back");
-        conn.execute_batch("DROP TRIGGER lose_second_bind").unwrap();
-        assert_eq!(
-            case.admit().await.unwrap().len(),
-            2,
-            "{entry:?}: both rows remain admissible"
-        );
-    }
-}
-
-#[tokio::test]
-async fn sqlite_an_admission_holds_its_rows_across_a_displaced_fence() {
+async fn sqlite_a_partial_checkpoint_admission_rolls_back() {
     let backend = TestBackend::open(SUBSTRATE).await;
     let store = backend.store().await;
     store
@@ -70,9 +25,26 @@ async fn sqlite_an_admission_holds_its_rows_across_a_displaced_fence() {
         })
         .await
         .unwrap();
-    law::an_admission_holds_its_rows_across_a_displaced_fence(
-        store as Arc<dyn RuntimeStore>,
-        "sqlite",
-    )
-    .await;
+    let case = law::prepare(store as Arc<dyn RuntimeStore>).await;
+    let conn = backend.raw();
+    let second = case.ids[1].replace('\'', "''");
+    conn.execute_batch(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_run ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
+    assert!(
+        case.admit().await.is_err(),
+        "a partial admission is refused"
+    );
+    let bound: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM queued_work_batches WHERE admitted_run IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(bound, 0, "the first row's bind must roll back");
+    conn.execute_batch("DROP TRIGGER lose_second_bind").unwrap();
+    assert_eq!(
+        case.admit().await.unwrap().len(),
+        2,
+        "both rows remain admissible"
+    );
 }

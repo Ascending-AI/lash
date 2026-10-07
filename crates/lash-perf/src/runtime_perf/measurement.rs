@@ -6,20 +6,18 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::llm::types::{LlmResponse, LlmUsage};
-use lash_core::runtime::{
-    DeliveryPolicy, QueuedWorkBatchDraft, RuntimeTurnPhase, RuntimeTurnPhaseProbe, SessionCommand,
-};
+use lash_core::runtime::{RuntimeTurnPhase, RuntimeTurnPhaseProbe};
 use lash_core::sansio::{
     ChatContextProjector, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
 };
-use lash_core::store::{AdmittedHead, GraphAppend, RunStore as _};
+use lash_core::store::GraphAppend;
 use lash_core::{
     AttachmentWrite, DriverAction, DriverContextView, Effect, ExecResponse, LiveReplayOutcome,
     LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole, Part, ProtocolTurnOptions,
-    QueuedWorkStore, RuntimeCommit, RuntimeSessionState, SessionCatalogStore, SessionCommitStore,
+    RuntimeCommit, RuntimeSessionState, SessionCatalogStore, SessionCommitStore,
     SessionHistoryStore, SessionObservationEventPayload, SessionRevision, TokenUsage,
-    ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, TurnInput, TurnInputStore,
-    TurnMachine, TurnMachineConfig, facade_support::ModelToolReturn, facade_support::Response,
+    ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, TurnInput, TurnMachine,
+    TurnMachineConfig, facade_support::ModelToolReturn, facade_support::Response,
     facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_sansio::sync::MutexExt;
@@ -43,8 +41,9 @@ use super::harness::{
 };
 use super::prompt::benchmark_prompt;
 use super::scenarios::RuntimePerfScenario;
-use super::store::{RuntimePerfStore, RuntimePerfStoreTiming};
+use super::store::RuntimePerfStoreTiming;
 
+#[cfg(test)]
 async fn load_runtime_perf_session_state(
     store: &Arc<dyn lash_core::RuntimeStore>,
     session_id: &lash_sansio::SessionId,
@@ -56,28 +55,6 @@ async fn load_runtime_perf_session_state(
     )
     .await?
     .map(|loaded| loaded.state))
-}
-
-async fn seal_perf_shift(
-    store: &(impl lash_core::RuntimeStore + ?Sized),
-    session_id: &lash_sansio::SessionId,
-) -> anyhow::Result<lash_core::store::ShiftFence> {
-    use lash_core::store::{AdmissionId, RunStartNonce, ShiftEpochSeal};
-    let stored = store.shift_epoch(session_id).await?;
-    let admission = AdmissionId::new(uuid::Uuid::new_v4().to_string());
-    let seal = store
-        .seal_shift_epoch(
-            session_id,
-            &admission,
-            stored.epoch,
-            &RunStartNonce::new(admission.as_str()),
-            None,
-        )
-        .await?;
-    let ShiftEpochSeal::Sealed(fence) = seal else {
-        anyhow::bail!("benchmark shift seal was superseded: {seal:?}");
-    };
-    Ok(fence)
 }
 
 mod types;
@@ -94,8 +71,6 @@ mod provider_scenarios;
 use provider_scenarios::*;
 mod process_stress;
 use process_stress::*;
-mod queued_work;
-use queued_work::*;
 mod checkpoint;
 pub(crate) use checkpoint::*;
 mod checkpoint_curve;

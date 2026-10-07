@@ -5,7 +5,7 @@
 /// counts every retained non-terminal process row, including waiting or
 /// suspended work and retrying work whose persisted status remains `running`,
 /// the parked processes among them, and the session store's turns in flight
-/// and parked turns (FIG-3586, FIG-3659). This
+/// (FIG-3586, FIG-3659). This
 /// read does not stop routing, impose a deadline, or retire anything.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub struct DeploymentDrainStatus {
@@ -13,24 +13,9 @@ pub struct DeploymentDrainStatus {
     pub accepting_new_work: bool,
     /// Number of retained process rows that are not terminal yet.
     pub remaining_invocations: usize,
-    /// Sessions with a turn in flight: a pending queued run, a claimed turn
-    /// input that is not settled, or a parked turn. Parked turns are included.
+    /// Sessions with a turn in flight: an unfinished run, or a turn input
+    /// bound to a run that is not settled.
     pub in_flight_turns: usize,
-    /// Sessions whose turn is parked: aborted on a replay refusal, holding
-    /// its claims until a redrive under the build that wrote its journal, a
-    /// cancel, or a fork resolves it.
-    pub parked_turns: usize,
-    /// Host-clock epoch milliseconds of the oldest live park's first refusal:
-    /// the minimum `since_ms` over parked turns. `None` when nothing is
-    /// parked. A parked process is non-terminal, so it counts in
-    /// [`remaining_invocations`](Self::remaining_invocations).
-    pub oldest_parked_since_ms: Option<u64>,
-    /// Parked turns admitted under an
-    /// executable generation this build retired, per that generation
-    /// (FIG-3571): what an old-build drain of each generation still has to
-    /// redrive.
-    pub retired_by_executable_generation:
-        std::collections::BTreeMap<lash_core::ExecutableGeneration, usize>,
     /// Stalled store→engine delivery obligations per kind (ADR 0109 §1.5):
     /// work the relay stopped retrying — refused, undecodable, or at its
     /// attempt ceiling — until an operator re-arms it through
@@ -48,7 +33,6 @@ impl DeploymentDrainStatus {
         !self.accepting_new_work
             && self.remaining_invocations == 0
             && self.in_flight_turns == 0
-            && self.parked_turns == 0
             && self.stalled_obligations.values().all(|count| *count == 0)
     }
 }
@@ -62,10 +46,6 @@ impl serde::Serialize for DeploymentDrainStatus {
             accepting_new_work: bool,
             remaining_invocations: usize,
             in_flight_turns: usize,
-            parked_turns: usize,
-            oldest_parked_since_ms: Option<u64>,
-            retired_by_executable_generation:
-                &'a std::collections::BTreeMap<lash_core::ExecutableGeneration, usize>,
             stalled_obligations:
                 &'a std::collections::BTreeMap<lash_core::store::ObligationKind, u64>,
             checked_at: u64,
@@ -75,9 +55,6 @@ impl serde::Serialize for DeploymentDrainStatus {
             accepting_new_work: self.accepting_new_work,
             remaining_invocations: self.remaining_invocations,
             in_flight_turns: self.in_flight_turns,
-            parked_turns: self.parked_turns,
-            oldest_parked_since_ms: self.oldest_parked_since_ms,
-            retired_by_executable_generation: &self.retired_by_executable_generation,
             stalled_obligations: &self.stalled_obligations,
             checked_at: self.checked_at,
             drained: self.drained(),
@@ -88,8 +65,6 @@ impl serde::Serialize for DeploymentDrainStatus {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use lash_core::store::ObligationKind;
 
     use super::DeploymentDrainStatus;
@@ -104,14 +79,11 @@ mod tests {
             accepting_new_work: false,
             remaining_invocations: 0,
             in_flight_turns: 0,
-            parked_turns: 0,
-            oldest_parked_since_ms: None,
-            retired_by_executable_generation: BTreeMap::new(),
             stalled_obligations: ObligationKind::ALL.iter().map(|kind| (*kind, 0)).collect(),
             checked_at: 1,
         };
         assert!(idle.drained());
-        let live: [(&str, DeploymentDrainStatus); 4] = [
+        let live: [(&str, DeploymentDrainStatus); 3] = [
             (
                 "admission open",
                 DeploymentDrainStatus {
@@ -130,13 +102,6 @@ mod tests {
                 "a turn in flight",
                 DeploymentDrainStatus {
                     in_flight_turns: 1,
-                    ..idle.clone()
-                },
-            ),
-            (
-                "a parked turn",
-                DeploymentDrainStatus {
-                    parked_turns: 1,
                     ..idle.clone()
                 },
             ),

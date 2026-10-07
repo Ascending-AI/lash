@@ -203,7 +203,6 @@ pub(crate) struct BenchmarkRuntime {
     core: BenchmarkCore,
     session: Option<lash::LashSession>,
     store: Option<Arc<RuntimePerfStore>>,
-    persistence: Option<Arc<dyn lash::persistence::RuntimeStore>>,
     store_metrics: Arc<RuntimePerfStoreMetrics>,
     provider_control: Option<Arc<BenchmarkProviderControl>>,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
@@ -232,18 +231,6 @@ impl BenchmarkRuntime {
 
     pub(crate) fn store_metrics(&self) -> Arc<RuntimePerfStoreMetrics> {
         Arc::clone(&self.store_metrics)
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "the persistence handle is installed by set_up before measurement begins; the accessor is the panicking half of the Option field"
-    )]
-    pub(crate) fn persistence(&self) -> Arc<dyn lash::persistence::RuntimeStore> {
-        Arc::clone(
-            self.persistence
-                .as_ref()
-                .expect("runtime perf persistence handle"),
-        )
     }
 
     pub(crate) fn core(&self) -> LashCore {
@@ -1001,7 +988,6 @@ pub(crate) async fn build_runtime(
         core,
         session: Some(session),
         store: Some(store),
-        persistence: None,
         provider_control,
         settlement_control,
         tool_catalog_observer,
@@ -1190,19 +1176,6 @@ pub(crate) async fn build_runtime_with_sqlite_store(
             lash::SessionCreation::root(core.session_spec()),
         )
         .await?;
-    let persistence = if wiring.session_store_handle {
-        match store_factory.lookup_session(&session_id).await? {
-            lash_core::SessionLookup::Live(_) => {
-                let store: Arc<dyn lash::persistence::RuntimeStore> = store_factory.clone();
-                Some(store)
-            }
-            lash_core::SessionLookup::Absent | lash_core::SessionLookup::Deleted => {
-                anyhow::bail!("runtime perf SQLite session store was not created")
-            }
-        }
-    } else {
-        None
-    };
     Ok(BenchmarkRuntime {
         store_metrics,
         turn_entry: TurnEntry::Durable,
@@ -1210,7 +1183,6 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         core,
         session: Some(session),
         store: None,
-        persistence,
         provider_control: None,
         settlement_control: None,
         tool_catalog_observer: None,

@@ -22,12 +22,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use lash_core_execution::store::{AdmittedHead, RunAdmission, RunStore as _, ShiftFence};
+use lash_core_execution::store::{CheckpointAdmission, RunStore as _};
 use lash_core_execution::store_backend_support::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
 };
-use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt;
-use lash_core_execution::{LeaseOwnerIdentity, QueuedWorkStore, StoreError, TurnId};
+use lash_core_execution::{QueuedWorkStore, StoreError, TurnId};
 use lash_sansio::SessionId;
 use lash_sqlite_store::SqliteStore;
 use tracing_subscriber::layer::{Context, SubscriberExt};
@@ -193,39 +192,23 @@ async fn enqueue_one(store: &SqliteStore, session_id: &SessionId) -> lash_core_e
         .batch_id
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test fixture wiring: a failed shift epoch setup must fail the test"
-)]
-async fn sealed_shift_fence(
-    store: &SqliteStore,
-    session_id: &SessionId,
-    owner: &LeaseOwnerIdentity,
-    executor_id: &str,
-) -> ShiftFence {
-    store
-        .seal_shift_epoch_for_test(session_id, owner, executor_id, 0)
-        .await
-        .expect("seal shift epoch")
-        .acquired()
-        .expect("shift epoch sealed")
-}
-
-/// Admit `run` headed by the batch `head` under `fence`.
+/// Admit the running run `run`'s rows at its after-work checkpoint.
 async fn admit(
     store: &SqliteStore,
-    fence: &ShiftFence,
+    session_id: &SessionId,
     run: &str,
-    head: &lash_core_execution::BatchId,
-) -> Result<Option<RunAdmission>, StoreError> {
+) -> Result<CheckpointAdmission, StoreError> {
+    let run = TurnId::fixture(run);
     store
-        .admit_run(
-            &lash_core_execution::testing::store_fixtures::admit_run_request_for_test(
-                fence,
-                &TurnId::fixture(run),
-                AdmittedHead::Batch(head.clone()),
-            ),
-        )
+        .admit_at_checkpoint(&lash_core_execution::store::CheckpointAdmissionRequest {
+            session_id: session_id.clone(),
+            run: run.clone(),
+            turn_id: run,
+            checkpoint: lash_core_execution::CheckpointKind::AfterWork,
+            step: "backstop-checkpoint".to_string(),
+            max_inputs: 0,
+            policy: lash_core_execution::testing::queued_work_admission_policy(10),
+        })
         .await
 }
 
@@ -242,12 +225,10 @@ async fn a_lost_admission_bind_fails_closed_and_records_the_disagreement() {
         .await
         .expect("open admission backstop store");
     let session_id = SessionId::from("admission-backstop-lost-write");
-    let owner = LeaseOwnerIdentity::opaque("queued-owner", "queued-incarnation");
     let batch_id = enqueue_one(&store, &session_id).await;
-    let fence = sealed_shift_fence(&store, &session_id, &owner, "queued-executor").await;
 
     suppress_queued_work_bind(&path, batch_id.as_str());
-    let outcome = admit(&store, &fence, "backstop-run", &batch_id).await;
+    let outcome = admit(&store, &session_id, "backstop-run").await;
     restore_queued_work_bind(&path);
 
     // Obligation one: the admission fails closed.
@@ -273,45 +254,10 @@ async fn a_lost_admission_bind_fails_closed_and_records_the_disagreement() {
     assert_eq!(event.field("outcome"), "fenced_write_lost");
 
     // Failing closed means nothing was published: the row is still admissible.
-    let admitted = admit(&store, &fence, "backstop-run", &batch_id)
+    let admitted = admit(&store, &session_id, "backstop-run")
         .await
         .expect("the retried admission succeeds")
+        .queued
         .expect("the rolled-back row is still admissible");
     assert_eq!(admitted.batch_ids(), vec![batch_id]);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_admission_the_unfinished_run_refuses_never_reaches_the_write() {
-    // The companion law: while one run is unfinished the session admits no
-    // other (FIG-3927), and refusing that is not a disagreement. The refusal
-    // comes before any bind, so an empty capture is the evidence that no
-    // conditional write was attempted at all.
-    let capture = capture();
-    let dir = tempfile::tempdir().expect("admission refusal tempdir");
-    let path = dir.path().join("admission-refused-first.db");
-    let store = SqliteStore::open_file_for_testing(&path)
-        .await
-        .expect("open admission refusal store");
-    let session_id = SessionId::from("admission-backstop-refused-first");
-    let owner = LeaseOwnerIdentity::opaque("queued-verdict-owner", "queued-verdict-incarnation");
-    let batch_id = enqueue_one(&store, &session_id).await;
-    let fence = sealed_shift_fence(&store, &session_id, &owner, "queued-verdict-executor").await;
-
-    assert!(
-        admit(&store, &fence, "first-run", &batch_id)
-            .await
-            .expect("the first admission succeeds")
-            .is_some(),
-        "the first run takes the row",
-    );
-    let second = admit(&store, &fence, "second-run", &batch_id).await;
-
-    assert!(
-        matches!(second, Err(StoreError::UnfinishedRunConflict { .. })),
-        "a second run must not take a row the first holds, got {second:?}"
-    );
-    assert!(
-        capture.disagreements_for(batch_id.as_str()).is_empty(),
-        "a refused admission must never reach the write, so nothing disagrees",
-    );
 }

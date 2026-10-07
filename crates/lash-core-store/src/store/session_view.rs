@@ -125,17 +125,12 @@ macro_rules! carries_session_field {
 
 carries_session_field! {
     RuntimeCommit => |request| &request.session_id;
-    ShiftFence => |request| request.session();
-    ShiftAdmissionWrite => |request| &request.session_id;
-    AdmitRunRequest => |request| request.fence.session();
-    PreparedRunAdmission => |request| request.session_id();
-    CheckpointAdmissionRequest => |request| request.fence.session();
+    CheckpointAdmissionRequest => |request| &request.session_id;
     crate::TurnAddress => |request| &request.session_id;
     crate::TurnCancelRequest => |request| &request.address.session_id;
     crate::PendingTurnInputBatch => |request| request.session_id();
     crate::PendingTurnInputDraft => |request| &request.session_id;
     crate::QueuedWorkBatchDraft => |request| &request.session_id;
-    TurnParkWrite => |request| &request.session_id;
     SessionMeta => |request| &request.session_id;
 }
 

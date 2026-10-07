@@ -810,9 +810,9 @@ fn recorded_session_error(error: crate::SessionError) -> crate::PluginError {
         crate::SessionError::Store { context, source } => {
             crate::PluginError::of_store_error(context, source)
         }
-        error @ crate::SessionError::LlmProfileUnconfigured { .. } => {
-            crate::PluginError::Runtime(crate::runtime::shift::llm_profile_unconfigured(error))
-        }
+        error @ crate::SessionError::LlmProfileUnconfigured { .. } => crate::PluginError::Runtime(
+            crate::runtime::turn_config::llm_profile_unconfigured(error),
+        ),
         error => crate::PluginError::Session(error.to_string()),
     }
 }

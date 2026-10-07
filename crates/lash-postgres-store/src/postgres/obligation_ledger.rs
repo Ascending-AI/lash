@@ -10,10 +10,10 @@ use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
 use lash_core_execution::store::{
-    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, ControlIntentState,
-    DeliveryError, KeyColumn, KeyColumnType, ObligationId, ObligationKey, ObligationKind,
-    ObligationLedger, ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome,
-    StallReason, StalledObligation, UndecodableObligation,
+    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, DeliveryError, KeyColumn,
+    KeyColumnType, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
+    ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome, StallReason,
+    StalledObligation, UndecodableObligation,
 };
 use lash_core_execution::{ArtifactCleanup, ArtifactReferrer};
 use lash_store_sql::Dialect;
@@ -26,7 +26,6 @@ use lash_store_sql::process::processes::{
     ProcessObligationStatements, ProcessStartObligationStatements,
 };
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
-use lash_store_sql::session_runs::control_intents::ControlIntentObligationStatements;
 use lash_store_sql::session_runs::runs::SessionRunObligationStatements;
 use lash_store_sql::trigger::deliveries::DeliveryObligationStatements;
 use sqlx::postgres::PgRow;
@@ -38,9 +37,7 @@ use crate::process_sql::{
     ParentEndPlanObligationPostgresStatements, ProcessObligationPostgresStatements,
     ProcessStartObligationPostgresStatements,
 };
-use crate::session_runs::{
-    ControlIntentObligationPostgresStatements, SessionRunObligationPostgresStatements,
-};
+use crate::session_runs::SessionRunObligationPostgresStatements;
 use crate::session_sql::SessionMetaObligationPostgresStatements;
 use crate::support::store_sqlx_error;
 
@@ -50,12 +47,6 @@ struct LedgerSql<S, P> {
     locking: P,
 }
 
-static INTENTS: LazyLock<
-    LedgerSql<ControlIntentObligationStatements, ControlIntentObligationPostgresStatements>,
-> = LazyLock::new(|| LedgerSql {
-    shared: ControlIntentObligationStatements::render(Dialect::postgres()),
-    locking: ControlIntentObligationPostgresStatements::render(Dialect::postgres()),
-});
 static RUNS: LazyLock<
     LedgerSql<SessionRunObligationStatements, SessionRunObligationPostgresStatements>,
 > = LazyLock::new(|| LedgerSql {
@@ -94,16 +85,9 @@ static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
     LazyLock::new(|| CleanupObligationLedgerStatements::render(Dialect::postgres()));
 const CLEANUP_DUE_LOCKING: &str = "SELECT obligation_id FROM lash_artifact_cleanup_obligations WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= $1 ORDER BY obligation_due_at_ms, obligation_id LIMIT $2 FOR UPDATE SKIP LOCKED";
 
-/// `kind`'s shared statements and its locking due read. Ingress names its
-/// turn-input table here; its ledger composes that table with the
-/// queued-batch table (`crate::ingress_obligation`).
+/// `kind`'s shared statements and its locking due read.
 fn obligation_sql(kind: ObligationKind) -> (ObligationSql<'static>, &'static str) {
     match kind {
-        ObligationKind::Ingress => crate::ingress_obligation::turn_input_sql(),
-        ObligationKind::ControlIntent => (
-            INTENTS.shared.obligation_sql(),
-            INTENTS.locking.obligation_select_due_locking.sql(),
-        ),
         ObligationKind::ScopeClose => (
             RUNS.shared.obligation_sql(),
             RUNS.locking.obligation_select_due_locking.sql(),
@@ -292,7 +276,7 @@ fn key_query<'q>(
 /// relays claim on their host clock, so an arm stamped by a database clock
 /// ahead of a relay would defer the row's first attempt until that relay's
 /// clock caught up; a row due at once is taken by the first pass of any
-/// relay, the way the ingress ledger re-opens an abandoned claim.
+/// relay.
 pub(crate) const DUE_AT_ONCE_MS: u64 = 0;
 
 /// Arm `key`'s row as a fresh obligation due at `now_ms` inside a producer's
@@ -304,9 +288,6 @@ pub(crate) async fn arm_obligation_tx(
     key: &ObligationKey,
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {
-    if key.kind() == ObligationKind::Ingress {
-        return crate::ingress_obligation::arm_ingress_tx(conn, key, now_ms).await;
-    }
     arm_table_tx(conn, obligation_sql(key.kind()).0, key, now_ms).await
 }
 
@@ -516,15 +497,9 @@ impl ObligationLedger for PostgresObligationLedger {
         let sql = self.sql;
         let due_at = sql_i64("obligation due instant", now_ms)?;
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
-        let mut query = sqlx::query(sql.rearm.sql()).bind(id.as_str()).bind(due_at);
-        // A control intent the engine refused returns to pending with its
-        // obligation: the statement takes that state's stored columns.
-        if self.kind == ObligationKind::ControlIntent {
-            let (code, json) =
-                lash_core_execution::store::stored_intent_state(&ControlIntentState::Pending)?;
-            query = query.bind(code).bind(json);
-        }
-        let changed = query
+        let changed = sqlx::query(sql.rearm.sql())
+            .bind(id.as_str())
+            .bind(due_at)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
