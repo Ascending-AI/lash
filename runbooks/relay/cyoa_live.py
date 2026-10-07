@@ -5,7 +5,7 @@ import pathlib
 import sys
 
 from extract_live import extract
-from live_common import POLICIES, Workbench, environment, launcher, usage
+from live_common import POLICIES, Workbench, environment, launcher, collect_usage
 
 KINDS = ("recall", "order", "state", "negative")
 WARNING = "At the end I will quiz you on details of your journey: names, codes, coins and the order of places."
@@ -88,7 +88,7 @@ def run(args):
             while record["choice"] is None and len(turns) <= 5:
                 turns.append(wb.turn(f"Round {number} is not finished. Choose one option."))
                 record = wb.call("/api/story")["rounds"][-1]
-            metering = usage(extract(trace, args.out / f"round-{number}", [t["turn_id"] for t in turns]))
+            metering = collect_usage(trace, args.out / f"round-{number}", [t["turn_id"] for t in turns], env, extract)
             rounds.append({"round": number, "record": record, "turns": turns,
                            "continuation_turns": len(turns) - 1, **metering})
             spent += metering["cost"]
@@ -104,7 +104,7 @@ def run(args):
             quiz = {"seed": args.seed, "questions": args.questions, "types": args.types}
             questions = wb.call("/api/story/questions", quiz)
             answered = wb.turn(final_prompt(questions))
-            final = {**answered, **usage(extract(trace, args.out / "final", [answered["turn_id"]]))}
+            final = {**answered, **collect_usage(trace, args.out / "final", [answered["turn_id"]], env, extract)}
             final["score"] = wb.call("/api/story/score", {**quiz, "answer": answered["reply"] or ""})
         log = wb.call("/api/story")
     finally:
@@ -115,6 +115,8 @@ def run(args):
     totals = {key: sum(row[key] for row in usages)
               for key in ("requests", "steps", "input_uncached", "cache_read", "cache_write", "output", "cost")}
     totals["cost"] = round(totals["cost"], 6)
+    totals["billing_generations"] = [g for row in usages for g in row.get("billing_generations", [])]
+    totals["unreported_generations"] = [g for row in usages for g in row.get("unreported_generations", [])]
     turns = [turn for row in rounds for turn in row["turns"]] + ([final] if final else [])
     totals["failed_turns"] = [turn for turn in turns if turn["failed"]]
     totals["continuation_turns"] = sum(row["continuation_turns"] for row in rounds)

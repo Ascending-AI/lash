@@ -19,9 +19,10 @@ def breakpoints(messages):
             for b, block in enumerate(message.get("blocks", [])) if block.get("cache_breakpoint")]
 
 
-def extract(trace, out, turns=()):
+def extract(trace, out, turns=(), billing=None):
     """Write the per-step files and usage.md under `out`; return the usage rows, in trace order."""
     trace, out, turns = pathlib.Path(trace), pathlib.Path(out), list(turns)
+    billing = billing or {}
     out.mkdir(parents=True, exist_ok=True)
     md = []
     rows = {}
@@ -50,6 +51,7 @@ def extract(trace, out, turns=()):
             message = "".join(texts(msgs[-1])) if msgs else ""
             n = re.match(r'<step n="(\d+)">', message)
             rows[call] = {
+                "call_id": call,
                 "step": step,
                 "turn": (ctx.get("turn_id") or "")[-8:],
                 "iteration": ctx.get("protocol_iteration"),
@@ -105,6 +107,19 @@ def extract(trace, out, turns=()):
                     md.append("\n### execute_code program\n```typescript\n" + program + "\n```")
             else:
                 md.append("\n### Answer\n```\n" + (prose or json.dumps(body)[:2000]) + "\n```")
+        elif t == "llm_call_failed" and call in rows:
+            body = strip(e)
+            (out / f"step{rows[call]['step']}-response.json").write_text(json.dumps(body, indent=1))
+            rows[call].update(reply="failed", input=None, cache_read=None, cache_write=None, output=None)
+            receipt = billing.get(call)
+            if receipt and "total_cost" in receipt:
+                cached = receipt.get("native_tokens_cached") or 0
+                rows[call].update(
+                    input=receipt["native_tokens_prompt"] - cached,
+                    cache_read=cached, cache_write=0, output=receipt["native_tokens_completion"],
+                    cost=receipt["total_cost"], billing_generation=receipt["id"],
+                )
+            md.append("\n### Failed model call\n```json\n" + json.dumps(body, indent=1) + "\n```")
         elif t == "tool_call_completed":
             body = strip(e)
             md.append("\n### Tool call\n```json\n" + json.dumps(body)[:1500] + "\n```")
@@ -118,6 +133,12 @@ def extract(trace, out, turns=()):
             **{"input": "-", "cache_read": "-", "cache_write": "-", "output": "-", "ms": "-", "reply": "?", **r, "cost": "-" if r.get("cost") is None else f"{r['cost']:.5f}"}))
     total = sum(rows[call].get("cost") or 0 for call in order)
     table.append(f"\nProvider-reported cost: ${total:.5f}")
+    for call in order:
+        row = rows[call]
+        if row.get("billing_generation"):
+            table.append(f"\nFailed request {row['step']}: tokens and cost reconciled from OpenRouter generation receipt `{row['billing_generation']}` (billing.json).")
+        elif row.get("reply") == "failed":
+            table.append(f"\nFailed request {row['step']}: usage is unreported; omitted amounts are unknown, not zero.")
     (out / "usage.md").write_text("\n".join(table) + "\n")
     return [{**rows[call], "upstreams": sorted(rows[call].get("upstreams", ()))} for call in order]
 

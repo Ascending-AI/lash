@@ -26,7 +26,7 @@ import argparse, json, pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from extract_live import extract  # noqa: E402
 
-from live_common import POLICIES, Workbench, environment as base_environment, launcher, usage
+from live_common import POLICIES, Workbench, environment as base_environment, launcher, collect_usage
 
 
 def settings():
@@ -96,7 +96,7 @@ def main():
                 turns.append(wb.turn(f"Game {game} is not finished. Continue playing it to the end."))
                 record = wb.call("/api/ttt")["games"][game - 1]
             played = turns[-1]
-            turn_usage = usage(extract(trace, args.out / f"game-{game}", [turn["turn_id"] for turn in turns]))
+            turn_usage = collect_usage(trace, args.out / f"game-{game}", [turn["turn_id"] for turn in turns], env, extract)
             games.append({"game": game, "opponent": record["opponent"], "result": record["result"],
                           "moves": len(record["moves"]), "misplays": record["misplays"],
                           "illegal_moves": record["illegal_moves"], "picture": record["picture"],
@@ -113,7 +113,7 @@ def main():
                 break
         if stopped is None:
             answered = wb.turn(final_prompt(args))
-            final = {**answered, **usage(extract(trace, args.out / "final", [answered["turn_id"]]))}
+            final = {**answered, **collect_usage(trace, args.out / "final", [answered["turn_id"]], env, extract)}
             final["score"] = wb.call("/api/ttt/score", {"answer": answered["reply"] or "", "ask": args.ask})
         log = wb.call("/api/ttt")
     finally:
@@ -123,6 +123,8 @@ def main():
     totals = {key: sum(turn[key] for turn in turns)
               for key in ("requests", "steps", "input_uncached", "cache_read", "cache_write", "output")}
     totals["cost"] = round(sum(turn["cost"] for turn in turns), 6)
+    totals["billing_generations"] = [g for row in turns for g in row.get("billing_generations", [])]
+    totals["unreported_generations"] = [g for row in turns for g in row.get("unreported_generations", [])]
     all_turns = [turn for game in games for turn in game["turns"]] + ([final] if final else [])
     totals["failed_turns"] = [turn["turn_id"] for turn in all_turns if turn["failed"]]
     totals["continuation_turns"] = sum(game["continuation_turns"] for game in games)

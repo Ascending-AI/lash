@@ -16,7 +16,7 @@ use lash::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex},
 };
 
@@ -282,12 +282,17 @@ fn questions(
     if request.questions == 0 || request.types.is_empty() {
         return Err("questions and type mix must be nonempty".into());
     }
+    let mut seen = BTreeSet::new();
+    let visits: Vec<usize> = log
+        .iter()
+        .enumerate()
+        .filter(|(_, round)| seen.insert(&round.node.facts.place))
+        .map(|(index, _)| index)
+        .collect();
     let mut pairs = Vec::new();
-    for a in 0..log.len() {
-        for b in a + 1..log.len() {
-            if log[a].node.facts.place != log[b].node.facts.place {
-                pairs.push((a, b));
-            }
+    for (index, &a) in visits.iter().enumerate() {
+        for &b in &visits[index + 1..] {
+            pairs.push((a, b));
         }
     }
     let orders = (0..request.questions)
@@ -720,6 +725,41 @@ mod tests {
                 }
                 Kind::Negative => {}
             }
+        }
+        // Place tokens may repeat on a long path: order means first visit.
+        let repeated = StoryWorld::new(config());
+        for i in 0..500 {
+            repeated.start().expect("start");
+            repeated
+                .choose(&format!("repeat-{i}"), &json!({"option":"A"}))
+                .expect("choose");
+        }
+        let repeated_log = repeated.log();
+        let mut first_visits = BTreeMap::new();
+        for r in &repeated_log {
+            first_visits
+                .entry(r.node.facts.place.as_str())
+                .or_insert(r.round);
+        }
+        assert!(
+            first_visits.len() < repeated_log.len(),
+            "seeded repeated place fixture"
+        );
+        for q in repeated
+            .questions(&QuizRequest {
+                seed: 1,
+                questions: 200,
+                types: vec![Kind::Order],
+            })
+            .expect("order quiz")
+        {
+            let first = first_visits
+                .iter()
+                .filter(|(place, _)| q.prompt.contains(**place))
+                .min_by_key(|(_, round)| **round)
+                .expect("a visited place");
+            assert_eq!(q.expected, json!(first.0));
+            assert_eq!(q.fact_round, *first.1);
         }
         let too_many = QuizRequest {
             seed: 1,

@@ -347,7 +347,8 @@ the last two take `{seed, questions, types}` (score also takes `answer`).
 
 - Each completed round's logged node supplies its names, item and code; `coins`
   is the total after its choice. Order answers are the full name of the first
-  visited place in a sampled pair of distinct places.
+  visited place in a sampled pair of distinct places. Repeated names use their
+  first visit; they do not add new order pairs.
 - Negative answers are exactly `YES` or `NO`. A `NO` place is generated from an
   unchosen sibling and excluded if its name occurs anywhere in the path log.
 - Lookback is R minus the fact round: round R is 0 rounds before the end,
@@ -368,3 +369,9 @@ The six named laws are in `story::tests` in
 `//examples/agent-workbench:agent-workbench__unit_test`: same seeded tree,
 invalid choice leaves state unchanged, log matches moves, reproducible quiz
 with permitted sources, normalization/malformed answers, and lookback.
+
+Failed model requests remain in the usage tables. When their trace lacks usage,
+the shared live driver reconciles the failed generation through OpenRouter's
+read-only generation receipt API and saves `billing.json`. Missing receipts are
+listed as `unreported_generations`; their amounts remain unknown. Successful
+requests use their original trace usage. This applies to both live drivers.

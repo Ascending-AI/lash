@@ -1,5 +1,5 @@
 """Shared live-workbench transport, launch settings and usage accounting."""
-import json, os, pathlib, subprocess, time, urllib.error, urllib.request
+import json, os, pathlib, subprocess, time, urllib.error, urllib.request, urllib.parse
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 POLICIES = {
@@ -84,3 +84,56 @@ def usage(rows):
         "cost": round(total("cost"), 6),
         "upstreams": sorted({u for row in rows for u in row.get("upstreams", [])}),
     }
+
+
+def collect_usage(trace, out, turns, env, extractor):
+    """Reconcile billed failed calls whose trace has no terminal usage receipt."""
+    rows = extractor(trace, out, turns)
+    if not rows:
+        return usage(rows)
+    receipts = {}
+    missing = []
+    failures = []
+    for line in pathlib.Path(trace).open():
+        event = json.loads(line)
+        if event.get("type") == "llm_call_failed" and event.get("context", {}).get("turn_id") in turns:
+            failures.append(event)
+    for event in failures:
+        call = event["context"]["llm_call_id"]
+        ids = [a.get("detail", {}).get("execution_evidence", {}).get("provider_response_id")
+               for a in event.get("attempts", [])]
+        # A terminal failed call is reconciled only when its one attempt has
+        # an identifiable OpenRouter receipt. Multi-attempt billing stays explicit.
+        if len(ids) != 1 or not isinstance(ids[0], str) or not ids[0].startswith("gen-"):
+            missing.append({"call_id": call, "reason": "no single OpenRouter generation receipt"})
+            continue
+        generation = ids[0]
+        key = env.get("OPENROUTER_API_KEY")
+        if not key:
+            missing.append({"call_id": call, "generation": generation, "reason": "no OpenRouter key"})
+            continue
+        request = urllib.request.Request(
+            "https://openrouter.ai/api/v1/generation?id=" + urllib.parse.quote(generation),
+            headers={"Authorization": "Bearer " + key},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                data = json.load(response)["data"]
+            receipt = {k: data.get(k) for k in ("id", "model", "provider_name", "total_cost",
+                "native_tokens_prompt", "native_tokens_completion", "native_tokens_cached", "cancelled")}
+            if receipt["id"] != generation:
+                raise ValueError("generation receipt identity differs from the failed call")
+            if not all(isinstance(receipt[k], (int, float)) for k in
+                       ("total_cost", "native_tokens_prompt", "native_tokens_completion")):
+                raise ValueError("generation receipt lacks numeric usage")
+            receipts[call] = receipt
+        except (urllib.error.URLError, ValueError, KeyError) as error:
+            missing.append({"call_id": call, "generation": generation, "reason": str(error)})
+    if failures:
+        pathlib.Path(out, "billing.json").write_text(json.dumps({"receipts": receipts, "missing": missing}, indent=2))
+    if receipts:
+        rows = extractor(trace, out, turns, billing=receipts)
+    result = usage(rows)
+    result["billing_generations"] = [r["id"] for r in receipts.values()]
+    result["unreported_generations"] = missing
+    return result
