@@ -832,12 +832,6 @@ impl DialectSession {
         self.state.patch_globals(patch, protected_names).await
     }
 
-    /// Whether a cell a segment boundary stopped inside waits to be resumed:
-    /// its state is the cell's, not a step boundary's.
-    pub(crate) fn has_suspended_cell(&self) -> bool {
-        self.state.suspended_cell().is_some()
-    }
-
     /// The variables the session holds, by name and a value-free summary
     /// (kind and size), for a relay harness message (FIG-4441).
     pub(crate) fn relay_left_variables(&self, exclude: &BTreeSet<String>) -> Vec<(String, String)> {

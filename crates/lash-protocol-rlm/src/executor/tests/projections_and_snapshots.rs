@@ -1156,6 +1156,7 @@ pub(super) fn a_projected_scalar_read_reaches_a_tool_as_its_plain_value() {
                     vocabulary: crate::dialect::Dialect::prompt_vocabulary(
                         &crate::dialect::TypescriptDialect,
                     ),
+                    relay: None,
                 }),
                 catalog,
                 invocation,

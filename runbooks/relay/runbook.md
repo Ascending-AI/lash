@@ -48,7 +48,7 @@ Any mismatch is a **finding and FAIL**.
 In a Kiln fork, with `env.sh` sourced and an OpenRouter key exported:
 
 ```sh
-export RESTATE_AUTHORITY_ID=<ticket> AGENT_WORKBENCH_RLM_POLICY=relay
+export AGENT_WORKBENCH_RLM_POLICY=relay
 export AGENT_WORKBENCH_DATA_DIR=$PWD/.kiln/<ticket>/wb-data
 export AGENT_WORKBENCH_RUN_DIR=$PWD/.kiln/<ticket>/wb-run
 scripts/agent-workbench-dev.sh up --port <port>

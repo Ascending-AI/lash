@@ -7,8 +7,8 @@
 //! harness message, so a redriven step gets the same answer as the first time.
 
 use super::*;
-
-const SEED: u64 = 0x4441_0001;
+use crate::TurnInput;
+use tokio::sync::oneshot;
 
 /// A script answer starting with this is sent as bare prose, not as a cell.
 const PROSE_REPLY: &str = "prose:";
@@ -139,9 +139,15 @@ fn requests(served: &Served) -> Vec<RelayRequest> {
     served.lock_recover().iter().map(RelayRequest::of).collect()
 }
 
-fn transcript_texts(session: &crate::LashSession) -> Vec<String> {
+/// The committed transcript, read from the store's head: the session's
+/// turns run on its node's session actor, not in this handle.
+async fn transcript_texts(session: &crate::LashSession) -> Vec<String> {
     session
-        .read_view()
+        .observe()
+        .snapshot()
+        .await
+        .expect("the session's committed head")
+        .read_view
         .messages()
         .iter()
         .map(crate::message_text)
@@ -154,17 +160,16 @@ struct BumpTools {
 }
 
 fn bump_definition() -> lash_core::ToolDefinition {
-    test_tool_definition_with_tool_binding(
-        lash_core::ToolDefinition::raw(
-            "tool:bump",
-            "bump",
-            "Bump the counter.",
-            serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
-            serde_json::json!({"type":"object"}),
-        )
-        .expect("valid declared tool schemas"),
+    use lash_core::ToolDefinitionBindingExt as _;
+    lash_core::ToolDefinition::raw(
+        "tool:bump",
         "bump",
+        "Bump the counter.",
+        serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+        serde_json::json!({"type":"object"}),
     )
+    .expect("valid declared tool schemas")
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "bump"))
 }
 
 #[async_trait]
@@ -183,8 +188,30 @@ impl ToolProvider for BumpTools {
     }
 }
 
+/// No tools: a relay step's only calls are its control calls.
+struct NoTools;
+
+#[async_trait]
+impl ToolProvider for NoTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        None
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::err_fmt("a relay law declares no tools").into()
+    }
+}
+
 fn no_tools() -> Arc<dyn ToolProvider> {
-    Arc::new(AppTools)
+    Arc::new(NoTools)
+}
+
+fn typescript_block(source: &str) -> String {
+    format!("<typescript>\n{}\n</typescript>", source.trim())
 }
 
 fn script(program: impl Fn(&RelayRequest) -> String + Send + Sync + 'static) -> Script {
@@ -198,7 +225,7 @@ fn script(program: impl Fn(&RelayRequest) -> String + Send + Sync + 'static) -> 
 async fn a_committed_next_sets_the_next_steps_context_and_globals() -> Result<()> {
     let served = Served::default();
     let (_core, session) = relay_session(
-        double_backend().await,
+        sqlite_memory_store_backend().await,
         "relay-commit",
         &served,
         script(|request| match request.step {
@@ -235,7 +262,7 @@ await control.next({ context: [...context, "answered"], final: true });"#
         "a dropped variable is named with its kind and size, never its value: {}",
         requests[1].harness
     );
-    let transcript = transcript_texts(&session);
+    let transcript = transcript_texts(&session).await;
     assert_eq!(transcript, ["add one to n", "n+1 = 42; context 2"]);
     Ok(())
 }
@@ -246,7 +273,7 @@ await control.next({ context: [...context, "answered"], final: true });"#
 async fn a_step_that_throws_commits_nothing_and_leaves_no_state() -> Result<()> {
     let served = Served::default();
     let (_core, session) = relay_session(
-        double_backend().await,
+        sqlite_memory_store_backend().await,
         "relay-throw",
         &served,
         script(|request| match request.step {
@@ -279,6 +306,7 @@ await control.next({ context, final: true });"#
     assert!(requests[2].harness.contains("boom"));
     assert!(
         !transcript_texts(&session)
+            .await
             .iter()
             .any(|text| text == "must not be delivered")
     );
@@ -291,7 +319,7 @@ await control.next({ context, final: true });"#
 async fn a_step_that_never_calls_next_commits_nothing() -> Result<()> {
     let served = Served::default();
     let (_core, session) = relay_session(
-        double_backend().await,
+        sqlite_memory_store_backend().await,
         "relay-no-next",
         &served,
         script(|request| match request.step {
@@ -318,7 +346,12 @@ await control.next({ context, final: true });"#
         "{}",
         requests[2].harness
     );
-    assert!(!transcript_texts(&session).iter().any(|text| text == "lost"));
+    assert!(
+        !transcript_texts(&session)
+            .await
+            .iter()
+            .any(|text| text == "lost")
+    );
     Ok(())
 }
 
@@ -328,7 +361,7 @@ await control.next({ context, final: true });"#
 async fn an_over_budget_next_is_refused() -> Result<()> {
     let served = Served::default();
     let (_core, session) = relay_session(
-        double_backend().await,
+        sqlite_memory_store_backend().await,
         "relay-budget",
         &served,
         script(|request| match request.step {
@@ -364,7 +397,7 @@ async fn a_failed_attempts_effect_receipts_reach_the_next_harness_once() -> Resu
     let served = Served::default();
     let calls = Arc::new(AtomicUsize::new(0));
     let (_core, session) = relay_session(
-        double_backend().await,
+        sqlite_memory_store_backend().await,
         "relay-receipts",
         &served,
         script(|request| match request.step {
@@ -409,7 +442,7 @@ await control.next({ context: ["bumped"], final: true });"#
 async fn final_ends_the_turn_and_needs_output() -> Result<()> {
     let served = Served::default();
     let (_core, session) = relay_session(
-        double_backend().await,
+        sqlite_memory_store_backend().await,
         "relay-final",
         &served,
         script(|request| match request.step {
@@ -497,7 +530,7 @@ await control.next({ context: [...context, "primary done"], final: true });"#
         })
         .build()
         .into_handle();
-    let backend = double_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let factory = relay_factory(&backend, None);
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
@@ -519,21 +552,19 @@ await control.next({ context: [...context, "primary done"], final: true });"#
         .await
         .expect("the first step's model call starts")
         .expect("start signal");
-    session
+    let steer = session
         .send(TurnInput::text("steer"))
         .id(crate::TurnId::parse("relay-steer").expect("nonblank host identity"))
         .ingress(lash_core::TurnInputIngress::active_turn(
             active_turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
         ))
-        .accepted()
         .await?;
     release_tx.send(()).expect("release the first step");
-    let primary = tokio::time::timeout(std::time::Duration::from_secs(30), turn)
-        .await
-        .expect("the primary run settles")
-        .expect("turn task")?;
+    let primary = within("the primary turn", turn).await.expect("turn task")?;
     assert_eq!(primary.status(), crate::TurnStatus::Answered);
+    let steered = within("the follow-on turn", steer.output()).await?;
+    assert_eq!(steered.assistant_message(), Some("steer seen"));
 
     let requests = requests(&served);
     assert_eq!(
@@ -553,7 +584,7 @@ await control.next({ context: [...context, "primary done"], final: true });"#
     );
     assert!(requests[2].harness.contains("steer"));
     assert_eq!(requests[2].context, ["primary step 1", "primary done"]);
-    let transcript = transcript_texts(&session);
+    let transcript = transcript_texts(&session).await;
     assert_eq!(
         transcript,
         ["primary", "primary done", "steer", "steer seen"],
@@ -590,7 +621,7 @@ async fn cancellation_reaches_a_relay_turn_mid_turn() -> Result<()> {
         })
         .build()
         .into_handle();
-    let backend = double_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let factory = relay_factory(&backend, None);
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
@@ -624,80 +655,130 @@ async fn cancellation_reaches_a_relay_turn_mid_turn() -> Result<()> {
     Ok(())
 }
 
-/// A redrive replays a relay turn from its journal: the step the run died
-/// under is asked again with the same context and harness, and the vars its
-/// cell reads are the committed ones.
+/// Bounded so a law that regresses fails rather than hangs.
+async fn within<T>(what: &str, future: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(std::time::Duration::from_secs(60), future)
+        .await
+        .unwrap_or_else(|_| panic!("{what} did not finish"))
+}
+
+/// A relay turn moved to another node by a drain resumes from its committed
+/// rows: the step the next build asks reads the context and the vars of the
+/// last committed `next`, and a step asked again sees the same context and
+/// harness.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_redrive_reproduces_the_committed_context_and_vars() -> Result<()> {
-    let double = restate_double(SEED).await;
+async fn a_turn_resumed_on_another_node_reads_the_committed_context_and_vars() -> Result<()> {
+    let stores = sqlite_memory_store_set().await;
     let served = Served::default();
-    let crashed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let provider_served = Arc::clone(&served);
-    let provider_double = double.clone();
-    let provider_crashed = Arc::clone(&crashed);
-    let provider = crate::testing::TestProvider::builder()
-        .kind("relay-law")
-        .complete(move |request| {
-            let served = Arc::clone(&provider_served);
-            let relay = RelayRequest::of(&request);
-            if relay.step == 2 && !provider_crashed.swap(true, Ordering::SeqCst) {
-                // The run dies before this call's result is journaled, so
-                // its redrive replays step 1 and asks step 2 again.
-                provider_double.crash_run_execution(
-                    lash_restate_test::CrashPoint::BeforeRunResult { name: None },
-                );
-            }
-            let program = match relay.step {
-                1 => {
-                    r#"const secret = 7;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let held_once = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let provider = || {
+        let served = Arc::clone(&served);
+        let entered = Arc::clone(&entered);
+        let gate = Arc::clone(&gate);
+        let held_once = Arc::clone(&held_once);
+        crate::testing::TestProvider::builder()
+            .kind("relay-law")
+            .complete(move |request| {
+                let served = Arc::clone(&served);
+                let entered = Arc::clone(&entered);
+                let gate = Arc::clone(&gate);
+                let step = RelayRequest::of(&request).step;
+                let program = match step {
+                    1 => {
+                        r#"const secret = 7;
 await control.next({ context: ["the secret is kept in vars"], vars: { secret, label: "s" } });"#
-                }
-                _ => {
-                    r#"await control.send_user_output({ text: `${label}=${secret}` });
+                    }
+                    _ => {
+                        r#"await control.send_user_output({ text: `${label}=${secret}` });
 await control.next({ context: [...context, "reported"], final: true });"#
+                    }
+                };
+                let hold = step == 1 && !held_once.swap(true, Ordering::SeqCst);
+                async move {
+                    served.lock_recover().push(request);
+                    if hold {
+                        // The old build is asked to drain while step 1's
+                        // first model call is in flight.
+                        entered.notify_one();
+                        gate.notified().await;
+                    }
+                    Ok(text_response(&typescript_block(program)))
                 }
-            };
-            async move {
-                served.lock_recover().push(request);
-                Ok(text_response(&typescript_block(program)))
-            }
-        })
-        .build()
-        .into_handle();
-    let backend = double.lash_backend();
-    let factory = relay_factory(&backend, None);
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
-        .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(no_tools())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session(crate::SessionId::parse("relay-redrive").expect("nonblank host identity"))
+            })
+            .build()
+            .into_handle()
+    };
+    let build = |owner: &str| -> Result<LashCore> {
+        let backend = lash_conformance::backend_over(Arc::clone(&stores) as _);
+        let factory = relay_factory(&backend, None);
+        explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
+            .serve_test_llm_profile(provider(), mock_llm_profile_spec())
+            .tools(no_tools())
+            .build(lash_core::LeaseOwnerIdentity::opaque(owner, "boot-1"))
+    };
+
+    let old = build("relay-old-build")?;
+    let session_id = crate::SessionId::parse("relay-moved").expect("nonblank host identity");
+    let session = old
+        .session(session_id.clone())
         .created()
         .await
         .open()
         .await?;
+    let held = tokio::spawn(session.send(TurnInput::text("report the secret")).output());
+    within("step 1's model call", entered.notified()).await;
+    let drain = old.drain();
+    tokio::pin!(drain);
+    let first = std::future::poll_fn(|cx| {
+        std::task::Poll::Ready(std::future::Future::poll(drain.as_mut(), cx))
+    })
+    .await;
+    assert!(
+        first.is_pending(),
+        "the old build drains only once its turn reaches a committed phase"
+    );
+    gate.notify_one();
+    let report = within("the drain", drain).await.expect("the node drained");
+    assert_eq!(report.sessions, vec![session_id]);
+    assert!(
+        requests(&served).iter().all(|request| request.step == 1),
+        "the old build stopped before step 2"
+    );
 
-    let output = session
-        .send(TurnInput::text("report the secret"))
-        .output()
-        .await?;
-
+    let new = build("relay-new-build")?;
+    let output = within("the resumed turn", held)
+        .await
+        .expect("the handle task")?;
     assert_eq!(output.assistant_message(), Some("s=7"));
-    assert!(crashed.load(Ordering::SeqCst), "the run died under step 2");
     let served = served.lock_recover().clone();
-    let step_two = served
+    let steps = served.iter().map(RelayRequest::of).collect::<Vec<_>>();
+    assert_eq!(
+        steps.iter().filter(|request| request.step == 2).count(),
+        1,
+        "step 2 is asked once, on the next build: {:?}",
+        steps.iter().map(|request| request.step).collect::<Vec<_>>()
+    );
+    // The next build may ask the step the old one drained under again; a
+    // step asked twice sees the same context and harness.
+    let step_one = served
         .iter()
-        .filter(|request| RelayRequest::of(request).step == 2)
+        .filter(|request| RelayRequest::of(request).step == 1)
         .collect::<Vec<_>>();
-    assert_eq!(step_two.len(), 2, "the redrive asked step 2 again");
-    assert_eq!(
-        step_two[0].messages, step_two[1].messages,
-        "the redriven step sees the same context and harness"
+    assert!(
+        step_one
+            .windows(2)
+            .all(|pair| pair[0].messages == pair[1].messages),
+        "a step asked again sees the same context and harness"
     );
-    assert_eq!(
-        RelayRequest::of(step_two[1]).context,
-        ["the secret is kept in vars"]
-    );
+    let step_two = steps
+        .iter()
+        .find(|request| request.step == 2)
+        .expect("step 2 was asked");
+    assert_eq!(step_two.context, ["the secret is kept in vars"]);
+    new.shutdown().await?;
+    old.shutdown().await?;
     Ok(())
 }
 
@@ -708,7 +789,7 @@ async fn system_prompt_and_tools_are_byte_identical_across_steps_and_turns() -> 
     let served = Served::default();
     let calls = Arc::new(AtomicUsize::new(0));
     let (_core, session) = relay_session(
-        double_backend().await,
+        sqlite_memory_store_backend().await,
         "relay-stable-prefix",
         &served,
         script(|request| match request.step {
@@ -762,7 +843,7 @@ await control.next({ context, final: true });"#
 async fn a_prose_reply_comes_back_as_the_cell_that_sends_it() -> Result<()> {
     let served = Served::default();
     let (_core, session) = relay_session(
-        double_backend().await,
+        sqlite_memory_store_backend().await,
         "relay-prose-reply",
         &served,
         script(|request| {

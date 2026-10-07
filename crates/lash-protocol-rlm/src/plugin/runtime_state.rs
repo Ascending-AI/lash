@@ -208,7 +208,10 @@ impl RlmRuntimeState {
         // the cell to finish instead of being told the state is busy, and a
         // cell cancelled mid-flight leaves the state where it was.
         let mut guard = self.execution.lock().await;
-        if self.relay && !guard.has_suspended_cell() {
+        // A cell resumed from its snapshot runs on from the VM its snapshot
+        // holds, so the rebuild, a pure function of the committed view, only
+        // shapes a fresh cell.
+        if self.relay {
             self.rebuild_relay_step(&mut guard, &ctx).await?;
         }
         guard

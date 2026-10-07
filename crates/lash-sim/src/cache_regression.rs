@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use lash::rlm::RlmSendBuilderExt;
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRequest, LlmRole};
 use lash_core::provider::{CacheControlDialect, CacheRetention};
 use lash_llm_transport::cache_regression::{
     SerializedPromptRequest, assert_prefix_stability, strip_cache_directives,
 };
+use lash_sansio::sync::MutexExt;
 use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
