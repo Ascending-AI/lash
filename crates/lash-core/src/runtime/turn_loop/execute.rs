@@ -42,17 +42,17 @@ pub(in crate::runtime) struct PreparedTurnExecuteContext<'sinks, 'run> {
 
 /// The preamble step of the execute phase: the plugin prepare-turn hooks and
 /// the context transform that produce the message sequence the driver runs.
-struct TurnPreambleContext<'preamble, 'run> {
-    plugins: &'preamble Arc<crate::PluginSession>,
-    scoped_effect_controller: &'preamble ActorContext,
-    manager: &'preamble Arc<RuntimeSessionServices>,
-    messages: crate::MessageSequence,
-    turn_policy: &'preamble crate::SessionPolicy,
-    effective_protocol_turn_options: &'preamble crate::ProtocolTurnOptions,
-    turn_context: &'preamble crate::TurnContext,
-    turn_scope_id: &'preamble str,
+pub(super) struct TurnPreambleContext<'preamble, 'run> {
+    pub(super) plugins: &'preamble Arc<crate::PluginSession>,
+    pub(super) scoped_effect_controller: &'preamble ActorContext,
+    pub(super) manager: &'preamble Arc<RuntimeSessionServices>,
+    pub(super) messages: crate::MessageSequence,
+    pub(super) turn_policy: &'preamble crate::SessionPolicy,
+    pub(super) effective_protocol_turn_options: &'preamble crate::ProtocolTurnOptions,
+    pub(super) turn_context: &'preamble crate::TurnContext,
+    pub(super) turn_scope_id: &'preamble str,
     /// The lifetime this value is bound to; the context it carries is `'static`.
-    run: std::marker::PhantomData<&'run ()>,
+    pub(super) run: std::marker::PhantomData<&'run ()>,
 }
 
 /// The effect loop's own inputs: the driver, the observer it publishes
@@ -169,7 +169,7 @@ impl LashRuntime {
     /// Run the turn's before-turn callbacks as one recorded step: their
     /// decisions and the resolutions of their state commands are served from
     /// the journal on replay, and no callback runs again (K10).
-    async fn prepare_turn_preamble(
+    pub(super) async fn prepare_turn_preamble(
         &mut self,
         context: TurnPreambleContext<'_, '_>,
     ) -> Result<crate::plugin::TurnPreparation, RuntimeError> {

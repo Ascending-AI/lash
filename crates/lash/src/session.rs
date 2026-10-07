@@ -423,11 +423,42 @@ impl SessionBuilder {
         Ok(ResolvedSessionStore { store, catalog })
     }
 
+    /// The runtime of this existing session at its committed head, the one
+    /// the session actor runs its turns in (ADR 0132 §4).
+    pub(crate) async fn open_runtime(self) -> Result<LashRuntime> {
+        let resolved = self.existing_store().await?;
+        self.reconcile_process_observer_intents(Some(&resolved.store))
+            .await?;
+        let state = self.recorded_state(&resolved.store).await?;
+        let (runtime, _binding) = Box::pin(self.resolved_runtime(state, resolved)).await?;
+        Ok(runtime)
+    }
+
     async fn open_resolved(
         self,
         state: RuntimeSessionState,
         resolved: ResolvedSessionStore,
     ) -> Result<LashSession> {
+        let live_replay_store = Arc::clone(&self.core.live_replay_store);
+        let process_lifecycle_feed = Arc::clone(&self.core.process_lifecycle_feed);
+        let (runtime, binding) = Box::pin(self.resolved_runtime(state, resolved)).await?;
+        let recorded_parent_session_id =
+            crate::session::recorded_parent_session_id(&binding.store()).await?;
+        let handle = RuntimeHandle::with_live_replay_store(runtime, live_replay_store);
+        let process_lifecycle_route = process_lifecycle_feed.register(&handle);
+        Ok(LashSession {
+            runtime: handle,
+            _process_lifecycle_route: process_lifecycle_route,
+            binding,
+            parent_session_id: recorded_parent_session_id,
+        })
+    }
+
+    async fn resolved_runtime(
+        self,
+        state: RuntimeSessionState,
+        resolved: ResolvedSessionStore,
+    ) -> Result<(LashRuntime, Arc<BoundSession>)> {
         let policy = state.effective_policy().clone();
         let mut env = self.core.env.clone();
         if let Some(policy) = self.tool_source_policy {
@@ -456,8 +487,6 @@ impl SessionBuilder {
             resolved.catalog,
         ));
         env = binding.apply_owner(env);
-        let recorded_parent_session_id =
-            crate::session::recorded_parent_session_id(&binding.store()).await?;
         // Plugin configuration is creation config (FIG-4112, FIG-4379): the
         // session runs what it recorded, delivered unchanged; an open states
         // none.
@@ -469,17 +498,7 @@ impl SessionBuilder {
             self.core.runtime_owner.clone(),
         )
         .await?;
-        let handle = RuntimeHandle::with_live_replay_store(
-            runtime,
-            Arc::clone(&self.core.live_replay_store),
-        );
-        let process_lifecycle_route = self.core.process_lifecycle_feed.register(&handle);
-        Ok(LashSession {
-            runtime: handle,
-            _process_lifecycle_route: process_lifecycle_route,
-            binding,
-            parent_session_id: recorded_parent_session_id,
-        })
+        Ok((runtime, binding))
     }
 }
 

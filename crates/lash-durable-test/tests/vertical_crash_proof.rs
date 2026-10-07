@@ -1,30 +1,39 @@
-//! V0 (FIG-5170): the vertical crash proof, ADR 0132 §15's first kill
-//! criterion.
+//! The vertical crash proof, ADR 0132 §15's first kill criterion (V0,
+//! FIG-5170), on the production turn driver (L3, FIG-5172).
 //!
-//! One session holds one admitted input. Its turn runs on the production
-//! session activation over the production durable store, on simulated nodes
-//! A and B: a scripted model answers first with a TypeScript code cell that
-//! calls the host operation `ext.write(x)`, declared `Once`, and then with a
-//! final answer that uses the cell's result. The body of `ext.write` writes
-//! to an [`ExternalWorld`] that survives every node, as the outside world
-//! would.
+//! A lash core's session holds one sent input. Its turn runs on the
+//! production session activation with the core's own turn services: the
+//! session's runtime, its protocol, the scripted model the core serves and
+//! a host tool `ext_write`, declared `Once`, whose body writes to an
+//! [`ExternalWorld`] that survives every node, as the outside world would.
+//! The nodes are simulated (A and B) over the production durable store.
+//! Two protocols run the turn:
 //!
-//! The matrix cuts the uncut run at every labelled write, under fail-before,
-//! ack-hidden, zombie, abort and commit-then-abort, recovers on the other
-//! node, and checks the laws:
+//! - **Code:** the RLM protocol. The model answers with a TypeScript cell
+//!   that calls `tools.ext_write({ x: 7 })` and prints the answer; the cell
+//!   runs through the RLM worker path on the durable snapshot store, and
+//!   once its printout is in the transcript the model answers in prose.
+//! - **Tools:** the standard protocol. The model calls `ext_write`
+//!   natively, the turn's tool round runs it, and once its result is in the
+//!   transcript the model answers in prose.
+//!
+//! The matrix cuts the uncut run at every labelled write, under
+//! fail-before, ack-hidden, zombie, abort and commit-then-abort, recovers on
+//! the other node, and checks the laws:
 //!
 //! - P1: every call reached the outside world at most once, and every
 //!   admitted body was entered at most once;
 //! - P2 (K1, abort at `round.outcome`): the operation's outcome is
-//!   `Interrupted`, the cell received it, and the turn committed;
+//!   `Interrupted`, and the model was told so;
 //! - P3 (K2, commit-then-abort at `round.outcome`): the saved `Completed`
-//!   value reached the cell, the body ran once;
-//! - P4: no hidden replay: the cell's program is entered fresh only before its
-//!   first snapshot commits, at most one checkpoint restore, no outcome lookup
-//!   for re-running code and no committed ordinal emitted again;
+//!   value reached the model, the body ran once;
+//! - P4: no hidden replay: a cell's program is entered fresh only before its
+//!   first snapshot commits, a claim restores the turn at most once, no
+//!   outcome is looked up for re-running code and no committed ordinal is
+//!   emitted again;
 //! - P5: a zombie's writes after its reap are refused;
-//! - P6: every admitted operation is named by the snapshot that issued it;
-//! - P7: the session head advanced exactly once.
+//! - P7: the session head advanced exactly once, and no row stays bound to
+//!   the ended run.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -38,58 +47,41 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core::facade_support::{EffectId, Response};
-use lash_core::runtime::durable::head::SessionHead;
-use lash_core::runtime::durable::session::{
-    AdmittedInputs, CodeCell, SessionActivation, TurnCommit, TurnDone, TurnDrive, TurnError,
-    TurnRow, TurnServices, admit_mail,
-};
-use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
-use lash_core::{
-    DriverAction, DriverContextView, Effect, ExecResponse, Message, MessageRole, Part,
-    ProtocolTurnOptions, TurnMachine, TurnMachineConfig, facade_support::TurnFinish,
-    facade_support::TurnOutcome, facade_support::shared_parts,
-};
-use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
-use lash_core_execution::runtime::actor::round::{
-    self, AdmittedExecution, BodyOutput, CompletedCall, ExecutionDraft, MemberBody, MemberPin,
-    PolicyView, Recovery, RoundTools,
-};
+use lash::rlm::Dialect as _;
+use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::ToolDefinitionBindingExt as _;
+use lash_core::facade_support::ProviderHandle;
+use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
+use lash_core::runtime::durable::session::SessionActivation;
+use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
 use lash_core_execution::{
-    ActorContext, Backend, BackendParts, CompletionKeySecrets, DurableSettings,
-    NoProjectionProviders, StoreSet,
+    Backend, BackendParts, CompletionKeySecrets, DurableSettings, NoProjectionProviders, StoreSet,
 };
-use lash_core_store::effect_opener::EffectOpener;
-use lash_core_store::tool_run::{
-    AttemptOutcome, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
-};
-use lash_durable::domain::{ExecKey, RunRecordKind};
 use lash_durable::runner::Activation;
 use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DomainWrite, DurableError, DurableStore, LeaseConfig, MailTx,
+    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig,
 };
 use lash_durable_test::{
     Cut, Fault, Life, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored,
     Tripwire, Verdict, WriteKind,
 };
-use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, ToolCallId, ToolId, TurnId};
-use lash_vm_broker::cell::{Cell, CellEnd, CellOperations, ResolvedOperation, run_cell};
-use lash_vm_broker::{Checkpoint, CodeCallIdentities};
-use lashlang::{ExecutionHostError, ResourceOperation, Value};
+use lash_sansio::{SessionId, TurnId};
 
 use dialect::Dialect;
 
 const SESSION: &str = "v0-session";
 const RUN: &str = "v0-turn";
 const TOOL: &str = "ext_write";
+const MODEL: &str = "v0-model";
 
-/// The cell the model writes: one `Once` host operation, then a result
-/// that carries what the operation answered.
-const CELL: &str = "const written = await ext.write({ x: 7 });\nfinish({ written });";
-const CELL_PREFIX: &str = "CELL:";
-const RESULT_PREFIX: &str = "cell result: ";
+/// The cell the model writes: one `Once` host operation, then a printout of
+/// what it answered.
+const CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nprint(written);\n</typescript>";
+/// What marks the operation's answer in the transcript.
+const WROTE: &str = "wrote";
+/// What the final answer starts with.
+const FINAL: &str = "final answer from ";
 
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
@@ -103,7 +95,16 @@ fn actor() -> ActorKey {
     ActorKey::session(SESSION).unwrap()
 }
 
-/// The outside world: what `ext.write` wrote, per call. It survives every
+/// Which protocol runs the turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Protocol {
+    /// The RLM protocol: the operation runs inside a code cell.
+    Code,
+    /// The standard protocol: the operation runs in a tool round.
+    Tools,
+}
+
+/// The outside world: what `ext_write` wrote, per call. It survives every
 /// node, so a write a crash cannot undo is visible to the laws.
 #[derive(Debug, Default)]
 struct ExternalWorld {
@@ -124,469 +125,167 @@ impl ExternalWorld {
     }
 }
 
-/// A material reference to an operation's payload: journal-local, named by a
-/// digest of its bytes.
-fn material(role: MaterialRole, payload: &str) -> MaterialRef {
-    use std::hash::{Hash as _, Hasher as _};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    payload.hash(&mut hasher);
-    MaterialRef {
-        owner: MaterialOwner::Run {
-            opener: EffectOpener::turn(session(), run()),
-        },
-        role,
-        location: MaterialLocation::JournalLocal,
-        digest: MaterialDigest::parse(&format!("{:064x}", hasher.finish())).unwrap(),
-    }
-}
-
-/// `ext.write`: a `Once` host operation whose body writes to the outside
-/// world and answers what it wrote.
+/// `ext_write`'s body: it writes to the outside world and answers what it
+/// wrote.
 struct ExtWrite {
     world: Arc<ExternalWorld>,
 }
 
-impl CellOperations for ExtWrite {
-    fn resolve(
-        &self,
-        call: ToolCallId,
-        operation: &ResourceOperation,
-    ) -> Result<ResolvedOperation, ExecutionHostError> {
-        if operation.operation != "write" {
-            return Err(ExecutionHostError::new("only ext.write is declared"));
-        }
-        let args = serde_json::to_value(&operation.args)
-            .map_err(|error| ExecutionHostError::new(error.to_string()))?;
-        let request = args.to_string();
-        let draft = ExecutionDraft::new(
-            call.clone(),
-            ToolId::new(TOOL),
-            material(MaterialRole::PreparedRequest, &request),
-            ExecutionPolicy::Once,
-            ExecutionLimit {
-                expires_at: u64::MAX,
-                max_slice: Duration::from_secs(60),
-            },
-            None,
-        );
-        let world = Arc::clone(&self.world);
-        Ok(ResolvedOperation {
-            draft,
-            body: Box::new(move |_cancel| {
-                Box::pin(async move {
-                    world.write(&call, args.clone());
-                    let output = serde_json::json!({ "ok": true, "wrote": args }).to_string();
-                    BodyOutput {
-                        outcome: AttemptOutcome::Completed(material(
-                            MaterialRole::AttemptOutput,
-                            &output,
-                        )),
-                        material: Some(output),
+#[async_trait::async_trait]
+impl StaticToolExecute for ExtWrite {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.world.write(call.context.call_id(), call.args.clone());
+        ToolOutcome::ok(serde_json::json!({ "ok": true, WROTE: call.args })).into()
+    }
+}
+
+fn ext_write(world: Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
+    let definition = lash_core::ToolDefinition::raw(
+        TOOL,
+        TOOL,
+        "Writes x to the outside world, once.",
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "x": { "type": "number" } },
+            "required": ["x"]
+        }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("ext_write's schemas")
+    .with_execution_policy(ExecutionPolicy::Once)
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
+    Arc::new(StaticToolProvider::new(
+        vec![definition],
+        ExtWrite { world },
+    ))
+}
+
+/// What the model saw on each call, across every node.
+#[derive(Debug, Default)]
+struct Seen {
+    /// Each request, rendered.
+    requests: Vec<String>,
+}
+
+/// The scripted model: before the transcript holds the operation's answer
+/// it calls the operation (a cell, or a native call); after, it answers in
+/// prose that quotes the answer.
+fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
+    lash_core::testing::TestProvider::builder()
+        .kind("v0-scripted")
+        .requires_streaming(true)
+        .complete(move |request: LlmRequest| {
+            let seen = Arc::clone(&seen);
+            async move {
+                let rendered = serde_json::to_string(&request.messages).expect("a request encodes");
+                seen.lock_recover().requests.push(rendered.clone());
+                // The model's own call is in the transcript once the
+                // operation answered it, however it ended.
+                let answered = request
+                    .messages
+                    .iter()
+                    .any(|message| message.role == lash_core::llm::types::LlmRole::Assistant);
+                let response = match (answered, protocol) {
+                    (true, _) => {
+                        let told = if rendered.contains(WROTE) {
+                            "the write completed"
+                        } else {
+                            "the write did not complete"
+                        };
+                        text(&request, &format!("{FINAL}{told}"))
                     }
-                })
-            }),
+                    (false, Protocol::Code) => text(&request, CELL),
+                    (false, Protocol::Tools) => LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "v0-call".to_owned(),
+                            tool_name: TOOL.to_owned(),
+                            input_json: r#"{"x":7}"#.to_owned(),
+                            replay: None,
+                        }],
+                        ..LlmResponse::default()
+                    },
+                };
+                Ok(response)
+            }
         })
-    }
-
-    fn value(
-        &self,
-        outcome: &AttemptOutcome,
-        material: Option<&str>,
-    ) -> Result<Value, ExecutionHostError> {
-        match (outcome, material) {
-            (AttemptOutcome::Completed(_), Some(payload)) => serde_json::from_str(payload)
-                .map(lashlang::from_json)
-                .map_err(|error| ExecutionHostError::new(error.to_string())),
-            (AttemptOutcome::Interrupted, _) => {
-                Err(ExecutionHostError::new("ext.write was interrupted"))
-            }
-            (outcome, _) => Err(ExecutionHostError::new(format!(
-                "ext.write ended {outcome:?}"
-            ))),
-        }
-    }
-
-    fn policies(&self) -> PolicyView {
-        PolicyView::new([(ToolId::new(TOOL), ExecutionPolicy::Once)])
-    }
+        .build()
+        .into_handle()
 }
 
-/// The scripted protocol: a response that starts with [`CELL_PREFIX`] runs
-/// as a TypeScript cell, any other ends the turn with it; a cell's result
-/// enters the transcript and the next iteration calls the model again.
-#[derive(Debug)]
-struct ScriptedProtocol;
-
-fn response_text(response: &LlmResponse) -> String {
-    response
-        .parts
-        .iter()
-        .filter_map(|part| match part {
-            LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect()
-}
-
-impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
-    fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        match ctx.project_llm_request(false) {
-            Ok(request) => vec![DriverAction::Start(PendingWork::Llm {
-                request,
-                driver_state: None,
-            })],
-            Err(error) => lash_sansio::sansio::stored_history_refusal_actions(error),
-        }
-    }
-
-    fn handle_llm_success(
-        &self,
-        _ctx: DriverContextView<'_>,
-        _request: Arc<LlmRequest>,
-        _driver_state: Option<lash_core::ProtocolDriverState>,
-        llm_response: LlmResponse,
-        _calls: &lash_sansio::ResponseToolCalls,
-        _text_streamed: bool,
-    ) -> Vec<DriverAction> {
-        let text = response_text(&llm_response);
-        match text.strip_prefix(CELL_PREFIX) {
-            Some(code) => vec![DriverAction::Start(PendingWork::Exec {
-                language: "typescript".to_owned(),
-                code: code.to_owned(),
-                driver_state: lash_core::ProtocolDriverState::new("v0", serde_json::json!({})),
-            })],
-            None => vec![DriverAction::Finish(TurnOutcome::Finished(
-                TurnFinish::AssistantMessage { text },
-            ))],
-        }
-    }
-
-    fn handle_tool_results(
-        &self,
-        _ctx: DriverContextView<'_>,
-        _completed: Vec<lash_core::sansio::CompletedToolCall>,
-    ) -> Vec<DriverAction> {
-        Vec::new()
-    }
-
-    fn handle_exec_result(
-        &self,
-        ctx: DriverContextView<'_>,
-        _driver_state: lash_core::ProtocolDriverState,
-        result: Result<ExecResponse, lash_core::ExecCodeFailure>,
-    ) -> Vec<DriverAction> {
-        let text = match result {
-            Ok(response) => response
-                .observations
-                .iter()
-                .map(|observation| observation.text.clone())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            Err(failure) => format!("{RESULT_PREFIX}failed {failure:?}"),
-        };
-        let id = format!("v0-result-{}", ctx.protocol_iteration());
-        let message = Message {
-            id: id.clone(),
-            role: MessageRole::User,
-            parts: shared_parts(vec![Part::text(format!("{id}.p0"), text, None)]),
-            origin: None,
-            reply_marker: None,
-        };
-        vec![
-            DriverAction::AppendEvents(vec![lash_core::SessionHistoryRecord::Conversation(
-                lash_core::session_model::ConversationRecord::from_message(message),
-            )]),
-            DriverAction::AdvanceProtocolIteration,
-            DriverAction::Start(PendingWork::Checkpoint {
-                checkpoint: lash_core::CheckpointKind::AfterWork,
-                on_empty: lash_core::sansio::CheckpointResumeAction::PrepareIteration,
-            }),
-        ]
-    }
-}
-
-/// The deployment's turn services in the scenario: the scripted protocol
-/// and model, and cells compiled from TypeScript and run from their
-/// snapshots.
-#[derive(Clone)]
-struct V0Services {
-    world: Arc<ExternalWorld>,
-    driver: Arc<ScriptedProtocol>,
-    cells: Arc<Mutex<Vec<ExecKey>>>,
-}
-
-/// One turn's drive: its machine, answered by the scenario's services.
-struct V0Drive {
-    services: V0Services,
-    run: TurnId,
-    machine: TurnMachine,
-}
-
-fn host_environment() -> lashlang::LashlangHostEnvironment {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
-    catalog
-        .add_module_operation_contract(
-            ["ext"],
-            "Ext",
-            "write",
-            "tool:ext/write",
-            &lashlang::OperationContract::new(
-                serde_json::json!({
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": { "x": { "type": "number" } },
-                    "required": ["x"]
-                }),
-                serde_json::json!({}),
-            ),
-        )
-        .expect("ext.write's contract");
-    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
-}
-
-fn compile(code: &str) -> Result<Arc<lashlang::CompiledProgram>, String> {
-    let linked = lash_typescript::link(code, &host_environment()).map_err(|d| d.to_string())?;
-    lashlang::compile(&linked.artifact, lashlang::Entry::Main, None)
-        .map(Arc::new)
-        .map_err(|error| error.to_string())
-}
-
-fn machine_config(
-    session: &SessionId,
-    run: &TurnId,
-    driver: &Arc<ScriptedProtocol>,
-) -> TurnMachineConfig {
-    TurnMachineConfig {
-        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
-        protocol_driver: Arc::clone(driver) as _,
-        projector: Arc::new(ChatContextProjector),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("v0-model"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
-                    "scripted".to_string(),
-                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                )
-                .with_capability(lash_core::LlmProfileCapability::default())
-                .with_extra_body(Default::default())
-                .with_request_defaults(Default::default()),
-            ),
-        )
-        .with_reasoning(Default::default()),
-        turn_budget: lash_core::TurnBudget::bounded(8),
-        no_progress_budget: Default::default(),
-        attachment_acceptance: Default::default(),
-        generation: lash_core::GenerationOptions::default(),
-        autonomous: false,
-        session_id: session.clone(),
-        agent_frame_id: "v0-frame".to_string(),
-        turn_id: run.clone(),
-        emit_llm_trace: false,
-        writer_formats: lash_core::build_newest_writer_formats(),
-        termination: ProtocolTurnOptions::default(),
-    }
-}
-
-#[async_trait::async_trait]
-impl TurnServices for V0Services {
-    fn execution_budgets(&self, _session: &SessionId) -> lash_core::ExecutionBudgets {
-        lash_core::ExecutionBudgets::default()
-    }
-
-    async fn machine_config(
-        &self,
-        _cx: &ActorContext,
-        row: &TurnRow,
-    ) -> Result<TurnMachineConfig, TurnError> {
-        Ok(machine_config(&row.session, &row.run, &self.driver))
-    }
-
-    async fn start(
-        &self,
-        _cx: &ActorContext,
-        row: &TurnRow,
-        head: &SessionHead,
-    ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        // The turn starts from the session head's window, with the messages
-        // it was admitted with.
-        let window = head.window()?;
-        let admitted: Vec<Message> = serde_json::from_str(&row.admission_json)
-            .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let messages = window.then(admitted);
-        let machine = TurnMachine::in_window(
-            machine_config(&row.session, &row.run, &self.driver),
-            window,
-            messages,
-            Vec::new(),
-            0,
-            Vec::new(),
-        );
-        Ok(self.drive(row, machine))
-    }
-
-    async fn resume(
-        &self,
-        _cx: &ActorContext,
-        row: &TurnRow,
-        machine: TurnMachine,
-    ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        Ok(self.drive(row, machine))
-    }
-}
-
-impl V0Services {
-    fn drive(&self, row: &TurnRow, machine: TurnMachine) -> Box<dyn TurnDrive> {
-        Box::new(V0Drive {
-            services: self.clone(),
-            run: row.run.clone(),
-            machine,
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl TurnDrive for V0Drive {
-    fn machine(&mut self) -> &mut TurnMachine {
-        &mut self.machine
-    }
-
-    fn tools(&mut self) -> Arc<dyn RoundTools> {
-        Arc::new(NoTools)
-    }
-
-    async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
-        match effect {
-            Effect::SyncExecutionEnvironment { id } => {
-                self.machine
-                    .handle_response(Response::ExecutionEnvironmentSynced {
-                        id,
-                        result: Ok(ExecutionEnvironmentSync {
-                            system_prompt: Arc::from("v0"),
-                            tool_specs: Arc::new(Vec::new()),
-                            projector_turn_inputs: Default::default(),
-                        }),
-                    });
-            }
-            Effect::Checkpoint { id, .. } => {
-                self.machine.handle_response(Response::Checkpoint {
-                    id,
-                    delivery: Default::default(),
-                });
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    /// The scripted model: before the transcript holds a cell result it
-    /// answers with the cell; after, with a final answer that quotes it.
-    async fn model_call(
-        &mut self,
-        _cx: &ActorContext,
-        id: EffectId,
-        request: Arc<LlmRequest>,
-        _attempt: u32,
-        _limit: ExecutionLimit,
-    ) -> Result<(), TurnError> {
-        let rendered = serde_json::to_string(&*request).expect("a request encodes");
-        let text = match rendered.find(RESULT_PREFIX) {
-            None => format!("{CELL_PREFIX}{CELL}"),
-            Some(at) => {
-                let quoted: String = rendered[at..].chars().take(160).collect();
-                format!("final answer from {quoted}")
-            }
-        };
-        self.machine.handle_response(Response::LlmComplete {
-            id,
-            result: Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text,
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            }),
-            text_streamed: false,
+/// A text answer, streamed as one delta.
+fn text(request: &LlmRequest, text: &str) -> LlmResponse {
+    if let Some(stream) = request.stream_events.as_ref() {
+        stream.send(LlmStreamEvent::Delta {
+            block: StreamBlockIdentity::new("text:0", 0),
+            text: text.to_owned(),
         });
-        Ok(())
     }
-
-    async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
-        Ok(())
-    }
-
-    async fn exec_cell(
-        &mut self,
-        cx: &ActorContext,
-        id: EffectId,
-        exec: ExecKey,
-        cell: CodeCell,
-        with: Vec<DomainWrite>,
-    ) -> Result<(), TurnError> {
-        {
-            let mut cells = self.services.cells.lock_recover();
-            if !cells.contains(&exec) {
-                cells.push(exec.clone());
-            }
-        }
-        let program = compile(&cell.code).map_err(TurnError::Exec)?;
-        let operations = ExtWrite {
-            world: Arc::clone(&self.services.world),
-        };
-        let identities =
-            CodeCallIdentities::cell(EffectOpener::turn(session(), run()), exec.stored());
-        let end = run_cell(
-            cx,
-            Cell {
-                exec,
-                program,
-                identities,
-                operations: &operations,
-            },
-            with,
-        )
-        .await
-        .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let (text, value) = match end {
-            CellEnd::Finished(value) => (format!("{RESULT_PREFIX}{value}"), value),
-            CellEnd::Failed(error) => (
-                format!("{RESULT_PREFIX}failed {error}"),
-                serde_json::Value::String(error),
-            ),
-        };
-        self.machine.handle_response(Response::ExecResult {
-            id,
-            result: Ok(ExecResponse {
-                observations: vec![lash_core::Observation {
-                    text,
-                    value,
-                    projection: Default::default(),
-                }],
-                output_archive: None,
-                calls: Vec::new(),
-                printed_images: Vec::new(),
-                error: None,
-                degraded_bindings: Vec::new(),
-                terminal_finish: None,
-                terminal_finish_retained: None,
-                suspended: false,
-            }),
-        });
-        Ok(())
-    }
-
-    async fn finish(
-        &mut self,
-        _cx: &ActorContext,
-        done: TurnDone,
-        head: &SessionHead,
-    ) -> Result<TurnCommit, TurnError> {
-        head.commit(&self.run, done, commit_budget())
+    LlmResponse {
+        parts: vec![LlmOutputPart::Text {
+            text: text.to_owned(),
+            response_meta: None,
+        }],
+        ..LlmResponse::default()
     }
 }
 
-fn commit_budget() -> lash_core::facade_support::CommitBudget {
-    lash_core::facade_support::CommitBudget::bounded(1024 * 1024, 512)
+fn metadata() -> lash_core::LlmProfileMetadata {
+    lash_core::LlmProfileMetadata::builder(MODEL)
+        .context_window_tokens(200_000)
+        .build()
+        .expect("the model's metadata")
+}
+
+/// The dialect's worker service with its run deadlines off the clock: a
+/// cell's guest is bounded by its instruction and memory budgets.
+fn untimed_workers() -> lash::rlm::WorkerService {
+    const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+    let mut config = lash::rlm::TypescriptDialect
+        .worker_service()
+        .config()
+        .clone();
+    config.deadlines.compute = OFF_THE_CLOCK;
+    config.deadlines.serialization = OFF_THE_CLOCK;
+    config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
+    lash::rlm::WorkerService::new(config)
+}
+
+/// One deployment's core over `backend`: it serves no node of its own, the
+/// scenario's simulated nodes run its sessions' turns.
+fn core(
+    protocol: Protocol,
+    backend: &Backend,
+    world: &Arc<ExternalWorld>,
+    seen: &Arc<Mutex<Seen>>,
+) -> lash::LashCore {
+    let builder = match protocol {
+        Protocol::Code => lash::LashCore::rlm_builder(
+            backend.clone(),
+            lash::rlm::RlmProtocolPluginFactory::new(
+                lash::rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash::rlm::RlmChannel::Cell)
+                    .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                    .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                    .build(),
+                Arc::new(lash::rlm::TypescriptDialect),
+                backend,
+            )
+            .with_worker_service(untimed_workers()),
+        ),
+        Protocol::Tools => lash::LashCore::standard_builder(backend.clone()),
+    };
+    builder
+        .serve_sessions(false)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_llm_profile(model(protocol, Arc::clone(seen)), metadata())
+        .tools(ext_write(Arc::clone(world)))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "v0-deployment",
+            "v0-boot",
+        ))
+        .expect("the core builds")
 }
 
 /// The runtime core's backend over `stores`, its actors in the shipped
@@ -603,8 +302,10 @@ fn shipped_backend(stores: Arc<dyn StoreSet>) -> Backend {
     .expect("the V0 backend assembles")
 }
 
-/// The V0 scenario on one dialect, fresh for every matrix cell.
+/// The scenario on one protocol and one dialect, fresh for every matrix
+/// cell.
 struct V0 {
+    protocol: Protocol,
     dialect: Dialect,
     postgres_url: Option<String>,
     /// A committed store image the scenario opens instead of a fresh
@@ -614,23 +315,26 @@ struct V0 {
     /// database.
     record_at: Option<std::path::PathBuf>,
     world: Arc<ExternalWorld>,
+    seen: Arc<Mutex<Seen>>,
     tripwire: Arc<Tripwire>,
-    cells: Arc<Mutex<Vec<ExecKey>>>,
     backend: Mutex<Option<Backend>>,
+    core: Mutex<Option<lash::LashCore>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
 impl V0 {
-    fn new(dialect: Dialect, postgres_url: Option<String>) -> Self {
+    fn new(protocol: Protocol, dialect: Dialect, postgres_url: Option<String>) -> Self {
         Self {
+            protocol,
             dialect,
             postgres_url,
             image: None,
             record_at: None,
             world: Arc::default(),
+            seen: Arc::default(),
             tripwire: Arc::default(),
-            cells: Arc::default(),
             backend: Mutex::default(),
+            core: Mutex::default(),
             keep: Mutex::default(),
         }
     }
@@ -642,13 +346,14 @@ impl V0 {
             .expect("the database is built first")
     }
 
-    /// The one cell the turn ran: every node names it by the same effect id,
-    /// recomputed from the committed checkpoint.
-    fn exec(&self) -> Result<ExecKey, String> {
-        match self.cells.lock_recover().as_slice() {
-            [exec] => Ok(exec.clone()),
-            cells => Err(format!("the turn ran {} cells: {cells:?}", cells.len())),
-        }
+    /// The deployment's core, built on first use over the scenario's
+    /// backend.
+    fn core(&self) -> lash::LashCore {
+        let backend = self.backend();
+        self.core
+            .lock_recover()
+            .get_or_insert_with(|| core(self.protocol, &backend, &self.world, &self.seen))
+            .clone()
     }
 }
 
@@ -693,24 +398,15 @@ impl Scenario for V0 {
     }
 
     fn activation(&self) -> Arc<dyn Activation> {
-        let backend = self
-            .backend
-            .lock_recover()
-            .clone()
-            .expect("the database is built first");
         Arc::new(SessionActivation::new(
-            backend,
-            Arc::new(V0Services {
-                world: Arc::clone(&self.world),
-                driver: Arc::new(ScriptedProtocol),
-                cells: Arc::clone(&self.cells),
-            }),
+            self.backend(),
+            lash::testing::session_turn_services(&self.core()),
             Arc::clone(&self.tripwire) as _,
         ))
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
-        self.seed(nodes).await?;
+        self.send().await?;
         // A starts and claims first, B once A is settled: on a database that
         // runs the two claims concurrently, either could win a race, and
         // the matrix cuts the uncut run's writes by node.
@@ -737,43 +433,27 @@ impl Scenario for V0 {
 }
 
 impl V0 {
-    /// Admit the session at its creation head and seed its turn's admission
-    /// mail, uncut: the producer is outside the deployment under test.
-    async fn seed(&self, nodes: &SimNodes) -> Result<(), String> {
-        // The session exists in the catalog at its creation head before
-        // its turn is admitted.
-        let backend = self.backend();
-        let catalog: Arc<dyn lash_core_store::store::RuntimeStore> =
-            backend.session_store_factory();
-        lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session())
-            .await;
-        let messages = vec![Message {
-            id: "v0-input".to_owned(),
-            role: MessageRole::User,
-            parts: shared_parts(vec![Part::text(
-                "v0-input.p0".to_owned(),
-                "write x, then tell me what was written".to_owned(),
-                None,
-            )]),
-            origin: None,
-            reply_marker: None,
-        }];
-        let inputs = AdmittedInputs {
-            run: run(),
-            inputs: Vec::new(),
-            admission_json: serde_json::to_string(&messages).map_err(|e| e.to_string())?,
-        };
-        let mut seed = MailTx::new();
-        seed.create_actor(actor(), backend.formats().session().clone())
-            .append(actor(), admit_mail(), inputs.mail_body());
-        // The producer is outside the deployment under test: its mail is
-        // seeded straight into the database, uncut.
-        nodes
-            .database()
-            .commit_mail(seed, CommitLabel::MAIL_SESSION)
+    /// Create the session and send it the turn's input through the core,
+    /// uncut: the host is outside the deployment under test.
+    async fn send(&self) -> Result<(), String> {
+        let core = self.core();
+        let session = core
+            .session(session())
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(64),
+            )))
             .await
-            .map_err(|error| error.to_string())?;
-        Ok(())
+            .map_err(|error| format!("create the session: {error}"))?;
+        session
+            .send(lash::TurnInput::text(
+                "write x, then tell me what was written",
+            ))
+            .id(run())
+            .await
+            .map(drop)
+            .map_err(|error| format!("send the turn's input: {error}"))
     }
 
     /// The scenario's laws after a run, cut at `cut`.
@@ -782,10 +462,7 @@ impl V0 {
         let database = nodes.database();
         let trace = nodes.script().trace();
         let counts = self.tripwire.counts();
-        let exec = match self.exec() {
-            Ok(exec) => exec,
-            Err(error) => return vec![error],
-        };
+        let seen = std::mem::take(&mut self.seen.lock_recover().requests);
 
         // P1: the outside world saw each call at most once, and no admitted
         // body was entered twice.
@@ -804,88 +481,35 @@ impl V0 {
             }
         }
 
-        // The turn committed: no unfinished turn is left.
+        // The turn ended, and nothing stays bound to it.
         match database.turn(&session()).await {
             Ok(None) => {}
-            other => violations.push(format!("the turn did not commit: {other:?}")),
+            other => violations.push(format!("the turn did not end: {other:?}")),
+        }
+        match database.session_mailbox(&session()).await {
+            Ok(mailbox) if mailbox.bound_run.is_none() => {}
+            other => violations.push(format!("the ended run still holds its rows: {other:?}")),
         }
 
-        // The cell's operation and what the cell received.
-        let rows = database
-            .run_records(&exec.owner())
-            .await
-            .unwrap_or_default();
-        let fold = round::fold(
-            &rows,
-            &PolicyView::new([(ToolId::new(TOOL), ExecutionPolicy::Once)]),
-        );
-        let outcomes: Vec<Recovery> = match &fold {
-            Ok(fold) => fold
-                .recoveries()
-                .iter()
-                .map(|(_, recovery)| recovery.clone())
-                .collect(),
-            Err(refusal) => {
-                violations.push(format!("the cell's records do not fold: {refusal}"));
-                Vec::new()
-            }
-        };
-        let stored = cell_end(database, &exec).await;
-        let end = match stored
-            .as_ref()
-            .and_then(|checkpoint| checkpoint.end.as_ref())
-        {
-            Some(recorded) => match CellEnd::of(recorded) {
-                Ok(CellEnd::Finished(value)) => value.to_string(),
-                Ok(CellEnd::Failed(error)) => error,
-                Err(error) => {
-                    violations.push(format!("the cell's stored end does not decode: {error}"));
-                    String::new()
-                }
-            },
-            None => {
-                let other = &stored;
-                violations.push(format!("the cell has no stored end: {other:?}"));
-                String::new()
-            }
-        };
-        match outcomes.as_slice() {
-            [Recovery::Settled(AttemptOutcome::Completed(_))] => {
-                if !end.contains("\"ok\":true") {
-                    violations.push(format!(
-                        "P3: the cell did not receive the completed value: {end}"
-                    ));
-                }
-                if writes.len() != 1 {
-                    violations.push(format!(
-                        "P3: a completed write reached the world {} times",
-                        writes.len()
-                    ));
-                }
-            }
-            [Recovery::Settled(AttemptOutcome::Interrupted)] => {
-                if !end.contains("interrupted") {
-                    violations.push(format!("P2: the cell did not receive Interrupted: {end}"));
-                }
-            }
-            other => violations.push(format!("the operation did not settle once: {other:?}")),
+        // What the model was told: the last call saw the operation's
+        // answer, completed or not, and the model called it exactly once.
+        let calls = seen
+            .iter()
+            .filter(|request| !request.contains("\"Assistant\""))
+            .count();
+        let told = seen.last().cloned().unwrap_or_default();
+        let completed = told.contains(WROTE);
+        if seen.is_empty() || calls == seen.len() {
+            let ended = database.turn_end(&session(), &run()).await;
+            violations.push(format!(
+                "the model never saw the operation end: {seen:?}; the turn ended {ended:?}"
+            ));
         }
-
-        // P6: every admitted run is named by the snapshot that issued it.
-        if let (Some(snapshot), Ok(_)) = (&stored, &fold) {
-            for row in rows.iter().filter(|row| row.kind == RunRecordKind::Admit) {
-                let named = snapshot
-                    .ledger
-                    .operations
-                    .keys()
-                    .any(|operation| operation.run == row.run.0);
-                if !named {
-                    violations.push(format!(
-                        "P6: admitted run {:?} has no snapshot naming it",
-                        row.run
-                    ));
-                }
-            }
+        if completed && writes.values().map(Vec::len).sum::<usize>() != 1 {
+            violations.push(format!(
+                "P3: a completed write reached the world {} times",
+                writes.len()
+            ));
         }
 
         // P7: the head advanced exactly once.
@@ -897,18 +521,36 @@ impl V0 {
             violations.push(format!("P7: the turn committed {commits} times"));
         }
 
-        // P4: no hidden replay.
+        // P4: no hidden replay. A cell's program is entered fresh only by an
+        // owner that found no snapshot: once more for each first snapshot
+        // that did not commit, and once more when the owner running it was
+        // lost before any snapshot committed.
         let unsnapshotted = trace
             .iter()
             .filter(|write| {
                 write.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT && !write.committed()
             })
             .count();
-        let programs = counts.vm_programs.get(&exec).copied().unwrap_or(0);
-        if programs > 1 + unsnapshotted {
+        let first_snapshot = trace.iter().position(|write| {
+            write.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT && write.committed()
+        });
+        let lost_before_snapshot = cut
+            .filter(|cut| cut.fault.kills() || cut.fault == Fault::Zombie)
+            .and_then(|cut| {
+                trace
+                    .iter()
+                    .position(|write| write.node == cut.node && write.point == cut.point)
+            })
+            .is_some_and(|at| first_snapshot.is_none_or(|first| at < first));
+        let programs: usize = counts.vm_programs.values().sum();
+        if programs > 1 + unsnapshotted + usize::from(lost_before_snapshot) {
             violations.push(format!(
-                "P4: the cell's program was entered fresh {programs} times with {unsnapshotted} uncommitted snapshots"
+                "P4: the cell's program was entered fresh {programs} times with {unsnapshotted} uncommitted snapshots: {:?}",
+                counts.vm_programs
             ));
+        }
+        if self.protocol == Protocol::Code && programs == 0 {
+            violations.push("the turn's cell never ran".to_owned());
         }
         if counts.outcome_lookups.values().sum::<usize>() != 0 {
             violations.push("P4: an outcome was looked up for re-running code".to_owned());
@@ -921,60 +563,59 @@ impl V0 {
             .get(&(session(), run()))
             .copied()
             .unwrap_or(0);
-        if restores > 1 {
-            violations.push(format!("P4: the turn was restored {restores} times"));
+        // A turn is restored only by an owner taking it over, or by a pass
+        // that failed before it committed (a lost acknowledgement, a crashed
+        // VM worker) and reloads the rows: at most once per owner. The
+        // session is the scenario's one actor, so every claim that took it
+        // is an owner.
+        let owners = trace
+            .iter()
+            .filter(|write| {
+                write.point.label == CommitLabel::CLAIM
+                    && matches!(write.stored, Stored::Committed { effective: true })
+            })
+            .count();
+        if restores > owners.max(1) {
+            violations.push(format!(
+                "P4: the turn was restored {restores} times by {owners} owners"
+            ));
         }
 
         if let Some(cut) = cut {
-            violations.extend(kill_laws(cut, &outcomes, programs, restores, &writes));
+            violations.extend(kill_laws(cut, completed, &writes));
             violations.extend(zombie_laws(cut, &trace));
         }
         violations
     }
 }
 
-/// The cell's last snapshot.
-async fn cell_end(database: &Arc<dyn DurableStore>, exec: &ExecKey) -> Option<Checkpoint> {
-    let row = database.snapshot(exec).await.ok()??;
-    serde_json::from_str(&row.snapshot_ref).ok()
-}
-
 /// K1 and K2: a node killed at `round.outcome` after the body ran.
 fn kill_laws(
     cut: &Cut,
-    outcomes: &[Recovery],
-    programs: usize,
-    restores: usize,
+    completed: bool,
     writes: &BTreeMap<ToolCallId, Vec<serde_json::Value>>,
 ) -> Vec<String> {
     let mut violations = Vec::new();
     if cut.point.label != CommitLabel::ROUND_OUTCOME || !cut.fault.kills() {
         return violations;
     }
-    let name = match cut.fault {
-        Fault::Abort => "K1",
-        _ => "K2",
-    };
-    let expected = match cut.fault {
-        Fault::Abort => matches!(outcomes, [Recovery::Settled(AttemptOutcome::Interrupted)]),
-        _ => matches!(outcomes, [Recovery::Settled(AttemptOutcome::Completed(_))]),
+    let (name, expected) = match cut.fault {
+        Fault::Abort => ("K1", !completed),
+        _ => ("K2", completed),
     };
     if !expected {
-        violations.push(format!("{name}: the operation settled as {outcomes:?}"));
+        violations.push(format!(
+            "{name}: the model was told the operation {}",
+            if completed {
+                "completed"
+            } else {
+                "was interrupted"
+            }
+        ));
     }
     if writes.values().map(Vec::len).sum::<usize>() != 1 {
         violations.push(format!(
             "{name}: the body did not run exactly once: {writes:?}"
-        ));
-    }
-    if programs != 1 {
-        violations.push(format!(
-            "{name}: the cell's program was entered fresh {programs} times"
-        ));
-    }
-    if restores != 1 {
-        violations.push(format!(
-            "{name}: the turn was restored {restores} times, not once"
         ));
     }
     violations
@@ -996,8 +637,12 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
         .iter()
         .filter(|write| write.node == cut.node && write.kind == WriteKind::Actor)
     {
+        // Refused, or never entered: a zombie whose renewals stop stops
+        // itself and drops the write it held.
         match &write.stored {
-            Stored::Refused(DurableError::OwnershipLost(_)) => {}
+            Stored::Refused(DurableError::OwnershipLost(_))
+            | Stored::Pending
+            | Stored::NotEntered => {}
             other => violations.push(format!("P5: zombie write {write} was {other:?}")),
         }
     }
@@ -1018,39 +663,30 @@ fn matrix() -> Matrix {
         .horizon(Duration::from_secs(600))
 }
 
-async fn prove(dialect: Dialect, postgres_url: Option<String>) {
+async fn prove(protocol: Protocol, dialect: Dialect, postgres_url: Option<String>) {
     let report = matrix()
-        .run(|| V0::new(dialect, postgres_url.clone()))
+        .run(|| V0::new(protocol, dialect, postgres_url.clone()))
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
-    let k1 = report.cells.iter().any(|cell| {
-        cell.point.label == CommitLabel::ROUND_OUTCOME
-            && cell.fault == Fault::Abort
-            && cell.verdict == Verdict::Held
-    });
-    let k2 = report.cells.iter().any(|cell| {
-        cell.point.label == CommitLabel::ROUND_OUTCOME
-            && cell.fault == Fault::CommitThenAbort
-            && cell.verdict == Verdict::Held
-    });
     eprintln!(
-        "V0 {dialect:?}: {} cells over {} labels ({}) x {} faults",
+        "V0 {protocol:?} {dialect:?}: {} cells over {} labels ({}) x {} faults",
         report.cells.len(),
         labels.len(),
         labels.join(", "),
         5
     );
     report.assert_held();
-    assert!(k1, "K1 (abort at round.outcome) was not cut");
-    assert!(k2, "K2 (commit-then-abort at round.outcome) was not cut");
-    for label in [
-        CommitLabel::TURN_ADMIT,
-        CommitLabel::MODEL_START,
-        CommitLabel::CELL_SNAPSHOT_ADMIT,
-        CommitLabel::ROUND_OUTCOME,
-        CommitLabel::CELL_SNAPSHOT,
-        CommitLabel::TURN_COMMIT,
-    ] {
+    for fault in [Fault::Abort, Fault::CommitThenAbort] {
+        assert!(
+            report.cells.iter().any(|cell| {
+                cell.point.label == CommitLabel::ROUND_OUTCOME
+                    && cell.fault == fault
+                    && cell.verdict == Verdict::Held
+            }),
+            "{fault:?} at round.outcome was not cut"
+        );
+    }
+    for label in uncut_labels(protocol) {
         assert!(
             report.labels().contains(&label),
             "the matrix never cut {label}"
@@ -1058,13 +694,36 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
     }
 }
 
-/// The scenario runs to its commit uncut, through every commit label, on one
-/// owner with one body entry and one fresh program entry.
-#[tokio::test]
-async fn the_uncut_turn_commits_through_every_label() {
+/// The owner commits of the uncut turn, in order.
+fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
+    match protocol {
+        Protocol::Code => vec![
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::CELL_SNAPSHOT,
+            CommitLabel::MODEL_START,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::SESSION_RELEASE,
+        ],
+        Protocol::Tools => vec![
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::SESSION_RELEASE,
+        ],
+    }
+}
+
+async fn uncut(protocol: Protocol) {
     let report = Matrix::new()
         .faults(&[])
-        .run(|| V0::new(Dialect::SqliteMemory, None))
+        .run(|| V0::new(protocol, Dialect::SqliteMemory, None))
         .await;
     let labels: Vec<CommitLabel> = report
         .baseline
@@ -1072,52 +731,78 @@ async fn the_uncut_turn_commits_through_every_label() {
         .filter(|write| write.kind == WriteKind::Actor && write.committed())
         .map(|write| write.point.label)
         .collect();
-    assert_eq!(
-        labels,
-        vec![
-            CommitLabel::TURN_ADMIT,
-            CommitLabel::MODEL_START,
-            CommitLabel::CELL_SNAPSHOT_ADMIT,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::CELL_SNAPSHOT,
-            CommitLabel::MODEL_START,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::SESSION_RELEASE,
-        ]
-    );
+    assert_eq!(labels, uncut_labels(protocol));
 }
 
-/// V0 on SQLite in memory: every cell of the matrix holds P1 to P7.
+/// A code turn runs to its commit uncut, through every commit label, on
+/// one owner with one body entry and one fresh program entry.
 #[tokio::test]
-async fn a_once_operation_killed_after_its_work_resumes_without_replay_on_sqlite_memory() {
-    prove(Dialect::SqliteMemory, None).await;
+async fn the_uncut_code_turn_commits_through_every_label() {
+    uncut(Protocol::Code).await;
 }
 
-/// V0 on a SQLite file: every cell of the matrix holds P1 to P7.
+/// A tool turn runs to its commit uncut, through every commit label.
 #[tokio::test]
-async fn a_once_operation_killed_after_its_work_resumes_without_replay_on_sqlite_file() {
-    prove(Dialect::SqliteFile, None).await;
+async fn the_uncut_tool_turn_commits_through_every_label() {
+    uncut(Protocol::Tools).await;
 }
 
-/// V0 on PostgreSQL: every cell of the matrix holds P1 to P7.
+/// The code turn on SQLite in memory: every cell of the matrix holds P1 to
+/// P7.
 #[tokio::test]
-async fn a_once_operation_killed_after_its_work_resumes_without_replay_on_postgres() {
+async fn a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay_on_sqlite_memory()
+{
+    prove(Protocol::Code, Dialect::SqliteMemory, None).await;
+}
+
+/// The code turn on a SQLite file.
+#[tokio::test]
+async fn a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay_on_sqlite_file() {
+    prove(Protocol::Code, Dialect::SqliteFile, None).await;
+}
+
+/// The code turn on PostgreSQL.
+#[tokio::test]
+async fn a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay_on_postgres() {
     let Some(url) = dialect::postgres_url() else {
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    prove(Dialect::Postgres, Some(url)).await;
+    prove(Protocol::Code, Dialect::Postgres, Some(url)).await;
+}
+
+/// The tool turn on SQLite in memory: every cell of the matrix holds P1 to
+/// P7.
+#[tokio::test]
+async fn a_once_tool_call_killed_after_its_work_resumes_without_replay_on_sqlite_memory() {
+    prove(Protocol::Tools, Dialect::SqliteMemory, None).await;
+}
+
+/// The tool turn on a SQLite file.
+#[tokio::test]
+async fn a_once_tool_call_killed_after_its_work_resumes_without_replay_on_sqlite_file() {
+    prove(Protocol::Tools, Dialect::SqliteFile, None).await;
+}
+
+/// The tool turn on PostgreSQL.
+#[tokio::test]
+async fn a_once_tool_call_killed_after_its_work_resumes_without_replay_on_postgres() {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    prove(Protocol::Tools, Dialect::Postgres, Some(url)).await;
 }
 
 /// Cold resume: the whole deployment dies right after the cell's end
-/// commits, and a fresh deployment over the same database, with services
-/// and an activation that hold nothing of the first one, takes the turn
-/// over. A restore loads state and re-runs no code: the turn is restored
-/// once, the cell's end is read from its snapshot without entering its
-/// program or its operation again, and the only writes left are the second
-/// model call's `model.start`, `turn.commit` and the release.
+/// commits, and a fresh deployment over the same database, with a core and
+/// an activation that hold nothing of the first one, takes the turn over. A
+/// restore loads state and re-runs no code: the turn is restored once, the
+/// cell's end is read from its snapshot without entering its program or
+/// its operation again, and the only writes left are the second model
+/// call's `model.start`, `turn.commit` and the release.
 async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
-    let first = V0::new(dialect, postgres_url.clone());
+    let first = V0::new(Protocol::Code, dialect, postgres_url.clone());
     let clock = SimClock::new();
     let database = first.database(Arc::clone(&clock)).await;
     let script = Script::new();
@@ -1129,7 +814,7 @@ async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
         first.config(),
         first.activation(),
     );
-    first.seed(&before).await.expect("the turn is seeded");
+    first.send().await.expect("the turn is sent");
     before.start("a");
     before.quiesce().await;
     while before.script().cuts().is_empty() {
@@ -1147,17 +832,19 @@ async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
         "the turn finished before the deployment died"
     );
 
-    // A new process: the same database and the same outside world, nothing
-    // else of the first deployment.
+    // A new process: the same database and the same outside world and
+    // model, nothing else of the first deployment.
     let cold = V0 {
+        protocol: Protocol::Code,
         dialect,
         postgres_url,
         image: None,
         record_at: None,
         world: Arc::clone(&first.world),
+        seen: Arc::clone(&first.seen),
         tripwire: Arc::clone(&first.tripwire),
-        cells: Arc::default(),
-        backend: Mutex::new(first.backend.lock_recover().clone()),
+        backend: Mutex::new(Some(first.backend())),
+        core: Mutex::default(),
         keep: Mutex::default(),
     };
     let after = SimNodes::new(
@@ -1248,15 +935,15 @@ async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_postgres() {
 
 /// Re-record the session image (`support/images.rs`): node A runs the turn
 /// until its cell's `Once` operation's outcome commits, and dies; the store
-/// it leaves is the fixture. It holds the turn checkpoint, the cell's VM
-/// continuation parked on the operation, the operation's run records and
-/// its outcome's material.
+/// it leaves is the fixture. It holds the turn checkpoint, the cell's
+/// snapshot parked on the operation, the operation's run records and its
+/// outcome's material.
 #[tokio::test]
 #[ignore = "regenerates crates/lash-durable-test/tests/fixtures/formats/session"]
 async fn regenerate_session_format_fixture() {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = images::database_path(dir.path());
-    let mut first = V0::new(Dialect::SqliteFile, None);
+    let mut first = V0::new(Protocol::Code, Dialect::SqliteFile, None);
     first.record_at = Some(path.clone());
     let clock = SimClock::new();
     let database = first.database(Arc::clone(&clock)).await;
@@ -1269,7 +956,7 @@ async fn regenerate_session_format_fixture() {
         first.config(),
         first.activation(),
     );
-    first.seed(&nodes).await.expect("the turn is seeded");
+    first.send().await.expect("the turn is sent");
     nodes.start("a");
     nodes.quiesce().await;
     while nodes.script().cuts().is_empty() {
@@ -1294,12 +981,12 @@ async fn regenerate_session_format_fixture() {
 
 /// The session image resumes on a fresh node of this build: it reaps the
 /// dead owner, claims the session in the build's session set, restores the
-/// turn from its checkpoint and the cell from its VM continuation, injects
-/// the operation's committed outcome and commits the turn, without running
-/// the operation's body or entering the cell's program again.
+/// turn from its checkpoint and the cell from its snapshot, injects the
+/// operation's committed outcome and commits the turn, without running the
+/// operation's body or entering the cell's program again.
 #[tokio::test]
 async fn a_session_decodes_and_resumes_from_its_1_0_image() {
-    let mut resumed = V0::new(Dialect::SqliteFile, None);
+    let mut resumed = V0::new(Protocol::Code, Dialect::SqliteFile, None);
     resumed.image = Some(&images::SESSION);
     let clock = SimClock::new();
     let database = resumed.database(Arc::clone(&clock)).await;
@@ -1366,7 +1053,7 @@ async fn a_session_decodes_and_resumes_from_its_1_0_image() {
     let programs: usize = counts.vm_programs.values().sum();
     if programs != 0 {
         violations.push(format!(
-            "the cell's program was entered {programs} times; it resumes from its continuation"
+            "the cell's program was entered {programs} times; it resumes from its snapshot"
         ));
     }
     let restores = counts
@@ -1383,41 +1070,4 @@ async fn a_session_decodes_and_resumes_from_its_1_0_image() {
         violations.join("\n  "),
         nodes.script().rendered_trace()
     );
-}
-
-/// The scenario's model calls no tool: its work runs in a code cell.
-struct NoTools;
-
-impl RoundTools for NoTools {
-    fn pin(&self, _call: &PendingToolCall, _now_ms: u64) -> MemberPin {
-        unreachable!("the vertical scenario calls no tool")
-    }
-
-    fn policies(&self) -> PolicyView {
-        PolicyView::default()
-    }
-
-    fn body(&self, _call: &PendingToolCall, _execution: &AdmittedExecution) -> MemberBody {
-        unreachable!("the vertical scenario calls no tool")
-    }
-
-    fn resolved(
-        &self,
-        _call: &PendingToolCall,
-        _execution: &AdmittedExecution,
-        _source: &lash_core_store::tool_run::CompletionSource,
-        _metadata: Option<&str>,
-        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
-        unreachable!("the vertical scenario calls no tool")
-    }
-
-    fn completed(
-        &self,
-        _call: &PendingToolCall,
-        _outcome: &AttemptOutcome,
-        _material: Option<&str>,
-    ) -> CompletedCall {
-        unreachable!("the vertical scenario calls no tool")
-    }
 }

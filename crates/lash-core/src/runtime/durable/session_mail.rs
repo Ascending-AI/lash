@@ -70,6 +70,19 @@ pub struct SessionMailAdmission {
     pub batches: Vec<BatchId>,
 }
 
+impl SessionMailAdmission {
+    /// What `admitted`'s run took, as its drain encoded it.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionMailError::Undecodable`] when the admission does not decode.
+    pub fn of(admitted: &AdmittedInputs) -> Result<Self, SessionMailError> {
+        serde_json::from_str(&admitted.admission_json).map_err(|error| {
+            SessionMailError::Undecodable(format!("run {} admission: {error}", admitted.run))
+        })
+    }
+}
+
 /// Why a drain failed.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionMailError {

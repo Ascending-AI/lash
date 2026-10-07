@@ -30,6 +30,10 @@ struct StoreParts {
     /// `postgres:<database>.<schema>`, the catalog this store set is over.
     binding: lash_core_execution::StoreBindingId,
     clock: Arc<dyn Clock>,
+    /// The clock the durable store reads in place of the database's: a
+    /// test's virtual clock, never set outside tests.
+    #[cfg(any(test, feature = "testing"))]
+    durable_clock: Option<Arc<dyn Clock>>,
     session_store_factory: Arc<PostgresStore>,
     process_registry: Arc<PostgresProcessRegistry>,
     trigger_store: Arc<PostgresTriggerStore>,
@@ -69,8 +73,25 @@ impl PostgresStoreSet {
                 process_env_store: Arc::new(storage.process_env_store()),
                 attachment_store,
                 clock,
+                #[cfg(any(test, feature = "testing"))]
+                durable_clock: None,
             }),
         }
+    }
+
+    /// The store set over `storage` with every port on `clock`, its durable
+    /// store included: a test moves time instead of waiting for it.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_clock_for_testing(
+        storage: &PostgresStorage,
+        attachment_store: Arc<dyn AttachmentStore>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        let mut set = Self::with_clock(storage, attachment_store, Arc::clone(&clock));
+        if let Some(parts) = Arc::get_mut(&mut set.inner) {
+            parts.durable_clock = Some(clock);
+        }
+        set
     }
 
     /// The storage every port of this store set runs over.
@@ -108,7 +129,12 @@ impl PostgresStoreSet {
 
 impl lash_core_execution::StoreSet for PostgresStoreSet {
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
-        Arc::new(self.inner.storage.durable_store())
+        let store = self.inner.storage.durable_store();
+        #[cfg(any(test, feature = "testing"))]
+        if let Some(clock) = &self.inner.durable_clock {
+            return Arc::new(store.with_clock_for_testing(Arc::clone(clock)));
+        }
+        Arc::new(store)
     }
 
     fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>> {

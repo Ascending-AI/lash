@@ -272,7 +272,7 @@ pub use lash_core::{
 // withdraw (FIG-4202): the settlement and the typed outcomes it carries.
 pub use lash_core::runtime::{
     CompactContextOutcome, OpenAgentFrameCommandOutcome, PluginOperationCommandOutcome,
-    PluginTaskCancelRequest, SessionCommandOutcome, SessionCommandSettlement,
+    SessionCommandOutcome, SessionCommandSettlement,
 };
 pub use lash_core::store::SessionHeadOwner;
 /// The one substrate a [`LashCore`] takes every persistence port and its

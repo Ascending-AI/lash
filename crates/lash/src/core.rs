@@ -11,6 +11,7 @@ use lash_core_worker::DurableProcessWorkerConfig;
 use lash_sansio::SessionId;
 
 mod drain;
+mod node;
 mod recovery;
 mod runtime_host_config;
 mod session_deletion;
@@ -50,6 +51,8 @@ pub struct LashCore {
     /// This core's seat in the recovery leader election (ADR 0109 §1.6);
     /// the core resigns it at shutdown.
     pub(crate) recovery: Arc<recovery::RecoverySlot>,
+    /// The node the backend's session actors run on (ADR 0132 §3).
+    pub(crate) node: Arc<node::NodeSlot>,
 }
 
 pub use lash_core::session_delete::SessionDeletion;
@@ -238,6 +241,7 @@ impl LashCore {
     }
 
     pub fn session(&self, session_id: SessionId) -> SessionBuilder {
+        self.node.ensure(self);
         SessionBuilder {
             core: self.clone(),
             session_id,
@@ -266,6 +270,8 @@ impl LashCore {
         // A stopping deployment hands recovery leadership over now rather
         // than after the lease's TTL (ADR 0109 §1.6).
         self.recovery.resign().await;
+        // The node stops before the plugins its turns run go.
+        self.node.stop().await;
         let factories = self
             .protocol_factory
             .iter()
@@ -610,6 +616,7 @@ pub struct LashCoreBuilder {
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
     trigger_route_restorer: Option<Arc<dyn lash_core::TriggerRouteRestorer>>,
+    serves_sessions: bool,
 }
 
 impl LashCoreBuilder {
@@ -643,7 +650,17 @@ impl LashCoreBuilder {
             live_replay_store: None,
             process_observation_config: Default::default(),
             trigger_route_restorer: None,
+            serves_sessions: true,
         }
+    }
+
+    /// Whether the core runs a node for its backend's session actors
+    /// (ADR 0132 §3); it does unless told otherwise. A core that serves
+    /// none still sends, reads and administers its sessions, and their
+    /// turns run on the deployment's other nodes.
+    pub fn serve_sessions(mut self, serve: bool) -> Self {
+        self.serves_sessions = serve;
+        self
     }
 
     pub fn protocol_plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
@@ -1012,7 +1029,7 @@ impl LashCoreBuilder {
 
         let substrate_slot = Arc::new(CoreWorkSlot::new(substrate));
         let plugin_factories = Arc::new(plugin_factories);
-        Ok(LashCore {
+        let core = LashCore {
             runtime_owner,
             env,
             backend,
@@ -1028,7 +1045,14 @@ impl LashCoreBuilder {
             host_process_engines,
             substrate_slot,
             recovery,
-        })
+            node: Arc::new(if self.serves_sessions {
+                node::NodeSlot::new()
+            } else {
+                node::NodeSlot::detached()
+            }),
+        };
+        core.node.ensure(&core);
+        Ok(core)
     }
 
     /// Bounds of the process observation hub: its per-process ring capacity

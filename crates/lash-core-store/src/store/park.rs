@@ -577,44 +577,6 @@ impl ParkCancelCause {
 pub type ParkEventColumns = (Option<String>, Option<String>, Option<i64>);
 
 impl ParkEventKind {
-    /// The event that ends a run's park when the run ends with `cause`
-    /// (FIG-4780). A run's terminal write is what ends its park, whatever
-    /// kind of run it is and however it ended, so every cause names one
-    /// event: a run that settled its work unparks, and a run whose work
-    /// was cancelled cancels the park.
-    #[must_use]
-    pub fn ending_run_park(cause: &super::RunTerminalCause) -> Self {
-        use super::RunTerminalCause as End;
-        match cause {
-            End::Committed { .. } => Self::Unparked {
-                cause: UnparkCause::TurnCommitted,
-            },
-            End::CommandsApplied => Self::Unparked {
-                cause: UnparkCause::CommandsApplied,
-            },
-            End::OperatorCancelled { intent } => Self::Cancelled {
-                cause: ParkCancelCause::Operator { intent: *intent },
-            },
-            End::Forked { intent, new_run } => Self::Cancelled {
-                cause: ParkCancelCause::Forked {
-                    intent: *intent,
-                    new_run: new_run.clone(),
-                },
-            },
-            End::SessionDeleted { .. } => Self::Cancelled {
-                cause: ParkCancelCause::SessionDeleted,
-            },
-            End::SubstrateLost { cancelled_by } => Self::Cancelled {
-                cause: ParkCancelCause::RunLost {
-                    cancelled_by: cancelled_by.clone(),
-                },
-            },
-            End::Refused { code, .. } => Self::Cancelled {
-                cause: ParkCancelCause::RunRefused { code: code.clone() },
-            },
-        }
-    }
-
     /// The stored `kind` column value.
     #[must_use]
     pub fn kind_code(&self) -> &'static str {

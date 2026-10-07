@@ -68,7 +68,11 @@ mod envelope_hash_tests {
                 session_id: SessionId::from("session"),
                 turn_id: TurnId::from("turn"),
             },
-            wait: lash_core_execution::AwaitEventWaitIdentity::SessionCommandCancelSignal,
+            wait: lash_core_execution::AwaitEventWaitIdentity::process_signal(
+                lash_core_execution::ProcessId::fixture("process"),
+                "signal",
+                1,
+            ),
             key_id: "key".to_string(),
             signature: "signature".to_string(),
         }

@@ -12,7 +12,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, ensure};
 use futures_util::future::try_join_all;
-use lash_core::runtime::durable::session::admit_mail;
 use lash_core_execution::StoreSet;
 use lash_durable::{
     ActorKey, CommitLabel, DurableStore, FormatSet, MailTx, NodeId, NodeLease, NodeSpec, Release,
@@ -94,7 +93,7 @@ async fn seed(
         for actor in chunk {
             tx.create_actor(actor.clone(), formats.clone()).append(
                 actor.clone(),
-                admit_mail(),
+                bench_mail(),
                 "{}".to_owned(),
             );
         }
@@ -353,7 +352,7 @@ async fn wake(report: &Report, url: &str, count: usize, events: usize) -> Result
         let actor = &owned[target];
         let started = Instant::now();
         let mut tx = MailTx::new();
-        tx.append(actor.clone(), admit_mail(), "{}".to_owned());
+        tx.append(actor.clone(), bench_mail(), "{}".to_owned());
         let commit = producer
             .store
             .commit_mail(tx, CommitLabel::MAIL_SESSION)
@@ -427,4 +426,9 @@ pub async fn run(
         eprintln!("store measurements at {count} nodes done");
     }
     Ok(())
+}
+
+/// The kind of the bench's mail: the store carries it, no actor runs it.
+fn bench_mail() -> lash_durable::MailKind {
+    lash_durable::MailKind::new("bench.mail")
 }

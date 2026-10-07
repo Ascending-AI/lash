@@ -89,7 +89,7 @@ async fn execute_owned_code(
     };
     let snapshots = Arc::new(lash_vm_broker::DurableSnapshotStore::new(
         ctx.actor_context(),
-        exec,
+        exec.clone(),
     ));
     let resumed = match &opened {
         Ok(_) => match cell_segment::ResumedCell::latest(&snapshots, &clean_code).await {
@@ -112,6 +112,11 @@ async fn execute_owned_code(
         },
         Err(_) => None,
     };
+    // A cell with no snapshot enters its program from the start: the one
+    // entry no resume may repeat (ADR 0132 §8, NR).
+    if resumed.is_none() && opened.is_ok() {
+        ctx.actor_context().probe().vm_program_entered(&exec);
+    }
     let cell = Arc::new(match &resumed {
         Some(resumed) => cell_run::CellRun::open_at(&ctx, resumed.envelope.ordinals.clone()),
         None => opened,

@@ -1370,14 +1370,10 @@ impl std::future::IntoFuture for CancelBuilder {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum CancelReceipt {
-    /// An operation was withdrawn before the engine admitted its task.
+    /// A host operation was withdrawn before its commit settled it: a task
+    /// still running stops, and nothing of it is applied.
     OperationWithdrawn {
         run: TurnId,
-    },
-    /// A host operation's durable cancellation signal accepted the request.
-    OperationRequested {
-        run: TurnId,
-        request: lash_core::runtime::PluginTaskCancelRequest,
     },
     /// The input was still queued: its row is cancelled and no turn applied
     /// it. Its handle answers Cancelled with no output.

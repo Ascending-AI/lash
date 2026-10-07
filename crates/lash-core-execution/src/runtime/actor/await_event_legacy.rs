@@ -2,10 +2,10 @@
 //! ports (L5, FIG-5173). Each is addressed by the retired [`AwaitEventKey`]:
 //! a scope and a wait identity anyone can recompute, which no wait row can
 //! serve without keeping that forgeable addressing alive. They are deleted
-//! with their callers' ports: the plugin task cancel signal to
-//! session mail, process signals to L6's mail. (Tool completion keys are
-//! L5 wait rows a round pins: L4, FIG-5174.) Until then each reaches the
-//! stub of the lane that owns its wait identity.
+//! with their callers' ports: process signals to L6's mail. (Tool completion
+//! keys are L5 wait rows a round pins: L4, FIG-5174; the plugin task cancel
+//! signal is the withdrawal of its session-mail batch: L3, FIG-5172.) Until
+//! then each reaches the stub of the lane that owns its wait identity.
 //!
 //! [`AwaitEventKey`]: crate::AwaitEventKey
 
@@ -17,9 +17,6 @@ use crate::AwaitEventWaitIdentity;
 /// The stub of the lane that ports `wait`'s callers.
 pub(super) fn port_pending(wait: &AwaitEventWaitIdentity) -> ! {
     match wait {
-        AwaitEventWaitIdentity::SessionCommandCancelSignal => {
-            todo!("L3 (FIG-5172): delete with the plugin task cancel signal's port to session mail")
-        }
         AwaitEventWaitIdentity::ProcessSignal { .. } => todo!(
             "L6 (FIG-5175): delete with the process signals' port to process mail and L5's pin and race"
         ),

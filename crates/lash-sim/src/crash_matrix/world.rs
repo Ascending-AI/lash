@@ -109,6 +109,8 @@ fn host_backend(backend: &Backend, nodes: &SimNodes) -> Backend {
 #[derive(Default)]
 pub struct World {
     tripwire: Arc<Tripwire>,
+    /// The core the run's cell sessions run behind ([`super::cells`]).
+    cell_core: OnceLock<lash::LashCore>,
     ledger: BodyLedger,
     parts: OnceLock<Parts>,
     host: Mutex<Option<HostParts>>,
@@ -121,6 +123,11 @@ impl World {
     /// The tripwire every activation reports to.
     pub fn tripwire(&self) -> &Arc<Tripwire> {
         &self.tripwire
+    }
+
+    /// The run's cell core, once built.
+    pub(crate) fn cell_core(&self) -> &OnceLock<lash::LashCore> {
+        &self.cell_core
     }
 
     /// The outside world's body ledger.

@@ -112,13 +112,12 @@ impl SessionHead {
     /// # Errors
     ///
     /// [`TurnError::Exec`] when the commit cannot be assembled.
-    pub fn commit(
+    pub async fn commit(
         &self,
         run: &TurnId,
         done: TurnDone,
         budget: CommitBudget,
     ) -> Result<TurnCommit, TurnError> {
-        let terminal = done.terminal();
         let outcome = done
             .outcome
             .unwrap_or(TurnOutcome::Stopped(crate::TurnStop::Incomplete));
@@ -131,13 +130,12 @@ impl SessionHead {
         .with_fleet_format(self.fleet);
         let commit = boundary
             .durable_commit(done.messages, &outcome, &[], None)
+            .await
             .map_err(|error| TurnError::Exec(format!("the turn's head commit: {error}")))?;
         Ok(TurnCommit {
             expected_head: commit.expected_head_revision,
             commit_json: crate::store::encode_session_commit(&commit)
                 .map_err(|error| TurnError::Exec(error.to_string()))?,
-            terminal,
-            cause_json: None,
         })
     }
 }

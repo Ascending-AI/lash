@@ -56,50 +56,6 @@ lash_rust_unit_test(
 )
 
 lash_rust_integration_test(
-    name = "drain_by_release__test",
-    crate_features = [],
-    crate_name = "drain_by_release",
-    crate_root = "tests/drain_by_release.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-internal-durable-test", "drain_by_release", "//crates/lash-durable-test:drain_by_release__test"),
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = ":lash-durable-test",
-    library_crate_name = "lash_durable_test",
-    manifest_dir = "crates/lash-durable-test",
-    package_name = "lash-internal-durable-test",
-    rustc_env = {},
-    tags = [
-        "hermetic-postgres",
-    ],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
-    name = "format_fixtures__test",
-    crate_features = [],
-    crate_name = "format_fixtures",
-    crate_root = "tests/format_fixtures.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-internal-durable-test", "format_fixtures", "//crates/lash-durable-test:format_fixtures__test"),
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = ":lash-durable-test",
-    library_crate_name = "lash_durable_test",
-    manifest_dir = "crates/lash-durable-test",
-    package_name = "lash-internal-durable-test",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
     name = "process_actor_laws__test",
     crate_features = [],
     crate_name = "process_actor_laws",

@@ -157,6 +157,12 @@ pub enum RunTerminalCause {
         turn: TurnId,
         outcome: RunCommittedOutcome,
     },
+    /// The session actor honoured a cancel request before the run's turn
+    /// committed (ADR 0132 §3): the run ends with the request's evidence and
+    /// the session head does not move.
+    Cancelled {
+        evidence: lash_sansio::TurnCancellationEvidence,
+    },
     /// An operator cancelled the parked run (its control intent).
     OperatorCancelled { intent: ControlIntentId },
     /// An operator forked the parked run; its held inputs now shift
@@ -194,9 +200,10 @@ impl RunTerminalCause {
     pub fn kind(&self) -> RunTerminalKind {
         match self {
             Self::Committed { outcome, .. } => RunTerminalKind::of_stop(outcome.stop()),
-            Self::OperatorCancelled { .. } | Self::Forked { .. } | Self::SessionDeleted { .. } => {
-                RunTerminalKind::Cancelled
-            }
+            Self::Cancelled { .. }
+            | Self::OperatorCancelled { .. }
+            | Self::Forked { .. }
+            | Self::SessionDeleted { .. } => RunTerminalKind::Cancelled,
             Self::SubstrateLost { cancelled_by } => {
                 if cancelled_by.is_some() {
                     RunTerminalKind::Cancelled

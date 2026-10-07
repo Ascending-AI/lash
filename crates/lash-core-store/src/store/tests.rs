@@ -202,6 +202,8 @@ fn intent_hash_golden_vector() {
     // FIG-3542: the frame-handoff batch list left the intent; a pending
     // follow-on enters it only when the commit leaves one on the head.
     // FIG-4236: the usage deltas left the intent (ADR 0125).
+    // FIG-5172: the interrupted-turn closure left the intent (turn cancel
+    // is session mail), and with it the always-present turn id field.
     let hash = intent_fixture().turn_commit_hash().expect("golden intent");
     assert_eq!(
         hash,

@@ -1,44 +1,28 @@
-//! The turn workload: one session, one turn, one cell, one `Once` operation.
+//! The turn workload: one session, one turn, one cell, one `Once` tool call.
 //!
 //! The scripted model answers the turn's first call with a TypeScript cell
-//! that calls `ext.write({ x: 7 })`, declared `Once`, and its second call
-//! (once the cell's result is in the transcript) with a final answer. The
-//! operation's body writes its witness entry, may hold, and answers what it
-//! wrote. Everything runs on the production session activation and its
-//! per-turn drive; only the protocol, the model and the operation's body are
-//! the runbook's. The turn commits the session's real head.
+//! that calls the `Once` tool `ext_write({ x: 7 })`, and its second call
+//! (once the cell's answer is in the transcript) with a final answer. The
+//! tool's body writes its witness entry, may hold, and answers what it
+//! wrote. Only the model and the tool's body are the runbook's: the session,
+//! its turn, the cell and the tool call run behind the lash facade on the
+//! production session activation, RLM worker path and tool dispatch, and the
+//! turn commits the session's real head.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core::facade_support::{CommitBudget, EffectId, Response};
-use lash_core::runtime::durable::head::SessionHead;
-use lash_core::runtime::durable::session::{
-    AdmittedInputs, CodeCell, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices,
-    admit_mail,
+use lash::rlm::Dialect as _;
+use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::ToolDefinitionBindingExt as _;
+use lash_core::facade_support::ProviderHandle;
+use lash_core::llm::types::{
+    LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
-use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
-use lash_core::{
-    DriverAction, DriverContextView, Effect, ExecResponse, LlmOutputPart, LlmRequest, LlmResponse,
-    Message, MessageRole, Part, ProtocolTurnOptions, TurnMachine, TurnMachineConfig,
-    facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::shared_parts,
-};
-use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, BodyOutput, CompletedCall, ExecutionDraft, MemberBody, MemberPin,
-    PolicyView, RoundTools,
-};
-use lash_core_execution::{ActorContext, Backend};
-use lash_core_store::effect_opener::EffectOpener;
-use lash_core_store::tool_run::{
-    AttemptOutcome, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
-};
-use lash_durable::domain::ExecKey;
-use lash_durable::{ActorKey, CommitLabel, DomainWrite, MailTx};
-use lash_sansio::sansio::ExecutionEnvironmentSync;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, ToolCallId, ToolId, TurnId};
-use lash_vm_broker::CodeCallIdentities;
-use lash_vm_broker::cell::{Cell, CellEnd, CellOperations, ResolvedOperation, run_cell};
-use lashlang::{ExecutionHostError, ResourceOperation, Value};
+use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
+use lash_core_execution::Backend;
+use lash_durable::ActorKey;
+use lash_sansio::{SessionId, TurnId};
 
 use crate::events::{Event, report};
 use crate::witness::{Hold, Witness};
@@ -47,15 +31,13 @@ use crate::witness::{Hold, Witness};
 pub const SESSION: &str = "workers-session";
 /// Its one turn.
 pub const RUN: &str = "workers-turn";
-/// The `Once` operation the cell calls.
+/// The `Once` tool the cell calls.
 pub const TOOL: &str = "ext_write";
+/// The scripted model's name.
+const MODEL: &str = "workers-model";
 
-/// The cell the model writes: one `Once` host operation, then a result that
-/// carries what the operation answered.
-const CELL: &str = "const written = await ext.write({ x: 7 });\nfinish({ written });";
-const CELL_PREFIX: &str = "CELL:";
-/// What marks the cell's result in the transcript, and so the second call.
-pub const RESULT_PREFIX: &str = "cell result: ";
+/// The cell the model writes: one `Once` tool call, and what it answered.
+const CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nprint(written);\n</typescript>";
 /// What the final answer starts with.
 pub const FINAL_PREFIX: &str = "final answer from ";
 
@@ -92,596 +74,202 @@ pub fn actor() -> ActorKey {
     ActorKey::session(SESSION).expect("a valid actor key")
 }
 
-/// Create the session at its creation head in the catalog, then commit the
-/// mail that creates its actor and admits its turn: what a producer outside
-/// the deployment does.
-///
-/// # Errors
-///
-/// The catalog or the store refused.
-pub async fn admit(backend: &Backend) -> Result<(), String> {
-    backend
-        .session_store_factory()
-        .admit_session(&lash_core_store::testing::store_fixtures::root_session_request(&session()))
-        .await
-        .map_err(|error| format!("admit the session: {error}"))?;
-    let messages = vec![Message {
-        id: "workers-input".to_owned(),
-        role: MessageRole::User,
-        parts: shared_parts(vec![Part::text(
-            "workers-input.p0".to_owned(),
-            "write x, then tell me what was written".to_owned(),
-            None,
-        )]),
-        origin: None,
-        reply_marker: None,
-    }];
-    let inputs = AdmittedInputs {
-        run: run(),
-        inputs: Vec::new(),
-        admission_json: serde_json::to_string(&messages).map_err(|error| error.to_string())?,
-    };
-    let mut seed = MailTx::new();
-    seed.create_actor(actor(), backend.formats().session().clone())
-        .append(actor(), admit_mail(), inputs.mail_body());
-    backend
-        .durable()
-        .commit_mail(seed, CommitLabel::MAIL_SESSION)
-        .await
-        .map_err(|error| format!("admit the turn: {error}"))?;
-    Ok(())
-}
-
-/// A material reference to an operation's payload: journal-local, named by a
-/// digest of its bytes.
-#[expect(clippy::expect_used, reason = "64 hex digits always parse as a digest")]
-fn material(role: MaterialRole, payload: &str) -> MaterialRef {
-    use std::hash::{Hash as _, Hasher as _};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    payload.hash(&mut hasher);
-    MaterialRef {
-        owner: MaterialOwner::Run {
-            opener: EffectOpener::turn(session(), run()),
-        },
-        role,
-        location: MaterialLocation::JournalLocal,
-        digest: MaterialDigest::parse(&format!("{:064x}", hasher.finish()))
-            .expect("a 64-digit hex digest"),
-    }
-}
-
-/// `ext.write`: a `Once` host operation whose body writes its witness entry,
-/// holds where the case asks, and answers what it wrote.
+/// `ext_write`: a `Once` tool whose body writes its witness entry, holds
+/// where the case asks, and answers what it wrote.
 struct ExtWrite {
     witness: Witness,
     hold: Hold,
 }
 
-impl CellOperations for ExtWrite {
-    fn resolve(
-        &self,
-        call: ToolCallId,
-        operation: &ResourceOperation,
-    ) -> Result<ResolvedOperation, ExecutionHostError> {
-        if operation.operation != "write" {
-            return Err(ExecutionHostError::new("only ext.write is declared"));
-        }
-        let args = serde_json::to_value(&operation.args)
-            .map_err(|error| ExecutionHostError::new(error.to_string()))?;
-        let request = args.to_string();
-        let draft = ExecutionDraft::new(
-            call.clone(),
-            ToolId::new(TOOL),
-            material(MaterialRole::PreparedRequest, &request),
-            ExecutionPolicy::Once,
-            ExecutionLimit {
-                expires_at: u64::MAX,
-                max_slice: Duration::from_secs(600),
+#[async_trait::async_trait]
+impl StaticToolExecute for ExtWrite {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let id = call.context.call_id().to_string();
+        let witness = &self.witness;
+        witness.entered(&id, TOOL).await;
+        report(
+            witness.node(),
+            Event::Body {
+                call: id.clone(),
+                tool: TOOL.to_owned(),
+                phase: "entered".to_owned(),
             },
-            None,
         );
-        let witness = self.witness.clone();
-        let hold = self.hold;
-        Ok(ResolvedOperation {
-            draft,
-            body: Box::new(move |_cancel| {
-                Box::pin(async move {
-                    let id = call.to_string();
-                    witness.entered(&id, TOOL).await;
-                    report(
-                        witness.node(),
-                        Event::Body {
-                            call: id.clone(),
-                            tool: TOOL.to_owned(),
-                            phase: "entered".to_owned(),
-                        },
-                    );
-                    match hold {
-                        Hold::Step => std::future::pending::<()>().await,
-                        Hold::StepUntilRelease => witness.released().await,
-                        Hold::Nothing | Hold::Model | Hold::ModelUntilRelease => {}
-                    }
-                    witness.returned(&id, TOOL).await;
-                    report(
-                        witness.node(),
-                        Event::Body {
-                            call: id,
-                            tool: TOOL.to_owned(),
-                            phase: "returned".to_owned(),
-                        },
-                    );
-                    let output = serde_json::json!({ "ok": true, "wrote": args }).to_string();
-                    BodyOutput {
-                        outcome: AttemptOutcome::Completed(material(
-                            MaterialRole::AttemptOutput,
-                            &output,
-                        )),
-                        material: Some(output),
-                    }
-                })
-            }),
-        })
-    }
-
-    fn value(
-        &self,
-        outcome: &AttemptOutcome,
-        material: Option<&str>,
-    ) -> Result<Value, ExecutionHostError> {
-        match (outcome, material) {
-            (AttemptOutcome::Completed(_), Some(payload)) => serde_json::from_str(payload)
-                .map(lashlang::from_json)
-                .map_err(|error| ExecutionHostError::new(error.to_string())),
-            (AttemptOutcome::Interrupted, _) => {
-                Err(ExecutionHostError::new("ext.write was interrupted"))
-            }
-            (outcome, _) => Err(ExecutionHostError::new(format!(
-                "ext.write ended {outcome:?}"
-            ))),
+        match self.hold {
+            Hold::Step => std::future::pending::<()>().await,
+            Hold::StepUntilRelease => witness.released().await,
+            Hold::Nothing | Hold::Model | Hold::ModelUntilRelease => {}
         }
-    }
-
-    fn policies(&self) -> PolicyView {
-        PolicyView::new([(ToolId::new(TOOL), ExecutionPolicy::Once)])
-    }
-}
-
-/// The scripted protocol: a response that starts with [`CELL_PREFIX`] runs
-/// as a TypeScript cell, any other ends the turn with it; a cell's result
-/// enters the transcript and the next iteration calls the model again.
-#[derive(Debug)]
-struct ScriptedProtocol;
-
-fn response_text(response: &LlmResponse) -> String {
-    response
-        .parts
-        .iter()
-        .filter_map(|part| match part {
-            LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect()
-}
-
-impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
-    fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        match ctx.project_llm_request(false) {
-            Ok(request) => vec![DriverAction::Start(PendingWork::Llm {
-                request,
-                driver_state: None,
-            })],
-            Err(error) => lash_sansio::sansio::stored_history_refusal_actions(error),
-        }
-    }
-
-    fn handle_llm_success(
-        &self,
-        _ctx: DriverContextView<'_>,
-        _request: Arc<LlmRequest>,
-        _driver_state: Option<lash_core::ProtocolDriverState>,
-        llm_response: LlmResponse,
-        _calls: &lash_sansio::ResponseToolCalls,
-        _text_streamed: bool,
-    ) -> Vec<DriverAction> {
-        let text = response_text(&llm_response);
-        match text.strip_prefix(CELL_PREFIX) {
-            Some(code) => vec![DriverAction::Start(PendingWork::Exec {
-                language: "typescript".to_owned(),
-                code: code.to_owned(),
-                driver_state: lash_core::ProtocolDriverState::new("workers", serde_json::json!({})),
-            })],
-            None => vec![DriverAction::Finish(TurnOutcome::Finished(
-                TurnFinish::AssistantMessage { text },
-            ))],
-        }
-    }
-
-    fn handle_tool_results(
-        &self,
-        _ctx: DriverContextView<'_>,
-        _completed: Vec<lash_core::sansio::CompletedToolCall>,
-    ) -> Vec<DriverAction> {
-        Vec::new()
-    }
-
-    fn handle_exec_result(
-        &self,
-        ctx: DriverContextView<'_>,
-        _driver_state: lash_core::ProtocolDriverState,
-        result: Result<ExecResponse, lash_core::ExecCodeFailure>,
-    ) -> Vec<DriverAction> {
-        let text = match result {
-            Ok(response) => response
-                .observations
-                .iter()
-                .map(|observation| observation.text.clone())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            Err(failure) => format!("{RESULT_PREFIX}failed {failure:?}"),
-        };
-        let id = format!("workers-result-{}", ctx.protocol_iteration());
-        let message = Message {
-            id: id.clone(),
-            role: MessageRole::User,
-            parts: shared_parts(vec![Part::text(format!("{id}.p0"), text, None)]),
-            origin: None,
-            reply_marker: None,
-        };
-        vec![
-            DriverAction::AppendEvents(vec![lash_core::SessionHistoryRecord::Conversation(
-                lash_core::session_model::ConversationRecord::from_message(message),
-            )]),
-            DriverAction::AdvanceProtocolIteration,
-            DriverAction::Start(PendingWork::Checkpoint {
-                checkpoint: lash_core::CheckpointKind::AfterWork,
-                on_empty: lash_core::sansio::CheckpointResumeAction::PrepareIteration,
-            }),
-        ]
+        witness.returned(&id, TOOL).await;
+        report(
+            witness.node(),
+            Event::Body {
+                call: id,
+                tool: TOOL.to_owned(),
+                phase: "returned".to_owned(),
+            },
+        );
+        ToolOutcome::ok(serde_json::json!({ "ok": true, "wrote": call.args })).into()
     }
 }
 
-/// The node's turn services: the scripted protocol and model, and cells
-/// compiled from TypeScript and run from their snapshots.
-#[derive(Clone)]
-pub struct WorkerServices {
-    witness: Witness,
-    hold: Hold,
-    driver: Arc<ScriptedProtocol>,
-}
-
-impl WorkerServices {
-    /// Services that write to `witness` and hold at `hold`.
-    #[must_use]
-    pub fn new(witness: Witness, hold: Hold) -> Self {
-        Self {
-            witness,
-            hold,
-            driver: Arc::new(ScriptedProtocol),
-        }
-    }
-
-    fn drive(&self, row: &TurnRow, machine: TurnMachine) -> Box<dyn TurnDrive> {
-        Box::new(WorkerDrive {
-            services: self.clone(),
-            run: row.run.clone(),
-            machine,
-        })
-    }
-}
-
-/// One turn's drive on this node: its machine, answered by the services.
-struct WorkerDrive {
-    services: WorkerServices,
-    run: TurnId,
-    machine: TurnMachine,
-}
-
-fn host_environment() -> Result<lashlang::LashlangHostEnvironment, String> {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
-    catalog
-        .add_module_operation_contract(
-            ["ext"],
-            "Ext",
-            "write",
-            "tool:ext/write",
-            &lashlang::OperationContract::new(
-                serde_json::json!({
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": { "x": { "type": "number" } },
-                    "required": ["x"]
-                }),
-                serde_json::json!({}),
-            ),
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(lashlang::LashlangHostEnvironment::new(
-        catalog,
-        lashlang::LashlangAbilities::all(),
+#[expect(clippy::expect_used, reason = "the tool's schemas are literals")]
+fn ext_write(witness: Witness, hold: Hold) -> Arc<dyn lash_core::ToolProvider> {
+    let definition = lash_core::ToolDefinition::raw(
+        TOOL,
+        TOOL,
+        "Writes x to the outside world, once.",
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "x": { "type": "number" } },
+            "required": ["x"]
+        }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("ext_write's schemas")
+    .with_execution_policy(ExecutionPolicy::Once)
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
+    Arc::new(StaticToolProvider::new(
+        vec![definition],
+        ExtWrite { witness, hold },
     ))
 }
 
-fn compile(code: &str) -> Result<Arc<lashlang::CompiledProgram>, String> {
-    let linked = lash_typescript::link(code, &host_environment()?).map_err(|d| d.to_string())?;
-    lashlang::compile(&linked.artifact, lashlang::Entry::Main, None)
-        .map(Arc::new)
-        .map_err(|error| error.to_string())
+/// The scripted model: before the transcript holds its own call it answers
+/// with the cell; after, with a final answer that quotes the transcript's
+/// end. Every attempt writes its witness entry first, numbered by the
+/// ledger; the first attempt of the first call holds where the case asks.
+fn model(witness: Witness, hold: Hold) -> ProviderHandle {
+    lash_core::testing::TestProvider::builder()
+        .kind("workers-scripted")
+        .requires_streaming(true)
+        .complete(move |request: LlmRequest| {
+            let witness = witness.clone();
+            async move {
+                let answered = request
+                    .messages
+                    .iter()
+                    .any(|message| message.role == LlmRole::Assistant);
+                let call = if answered { 2 } else { 1 };
+                let attempt = witness.model_attempt(call).await;
+                report(witness.node(), Event::ModelAttempt { call, attempt });
+                if call == 1 && attempt == 1 {
+                    match hold {
+                        Hold::Model => std::future::pending::<()>().await,
+                        Hold::ModelUntilRelease => witness.released().await,
+                        Hold::Nothing | Hold::Step | Hold::StepUntilRelease => {}
+                    }
+                }
+                let text = if answered {
+                    let rendered = serde_json::to_string(&request.messages).unwrap_or_default();
+                    let start = rendered.len().saturating_sub(160);
+                    let start = (start..rendered.len())
+                        .find(|at| rendered.is_char_boundary(*at))
+                        .unwrap_or(rendered.len());
+                    format!("{FINAL_PREFIX}{}", &rendered[start..])
+                } else {
+                    CELL.to_owned()
+                };
+                Ok(streamed(&request, &text))
+            }
+        })
+        .build()
+        .into_handle()
 }
 
-fn machine_config(
-    session: &SessionId,
-    run: &TurnId,
-    driver: &Arc<ScriptedProtocol>,
-) -> TurnMachineConfig {
-    TurnMachineConfig {
-        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
-        protocol_driver: Arc::clone(driver) as _,
-        projector: Arc::new(ChatContextProjector),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("workers-model"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
-                    "scripted".to_string(),
-                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                )
-                .with_capability(lash_core::LlmProfileCapability::default())
-                .with_extra_body(Default::default())
-                .with_request_defaults(Default::default()),
-            ),
-        )
-        .with_reasoning(Default::default()),
-        turn_budget: lash_core::TurnBudget::bounded(8),
-        no_progress_budget: Default::default(),
-        attachment_acceptance: Default::default(),
-        generation: lash_core::GenerationOptions::default(),
-        autonomous: false,
-        session_id: session.clone(),
-        agent_frame_id: "workers-frame".to_string(),
-        turn_id: run.clone(),
-        emit_llm_trace: false,
-        writer_formats: lash_core::build_newest_writer_formats(),
-        termination: ProtocolTurnOptions::default(),
-    }
-}
-
-#[async_trait::async_trait]
-impl TurnServices for WorkerServices {
-    fn execution_budgets(&self, _session: &SessionId) -> lash_core::ExecutionBudgets {
-        lash_core::ExecutionBudgets::default()
-    }
-
-    async fn machine_config(
-        &self,
-        _cx: &ActorContext,
-        row: &TurnRow,
-    ) -> Result<TurnMachineConfig, TurnError> {
-        Ok(machine_config(&row.session, &row.run, &self.driver))
-    }
-
-    async fn start(
-        &self,
-        _cx: &ActorContext,
-        row: &TurnRow,
-        _head: &SessionHead,
-    ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        // The turn is admitted with the messages it starts from.
-        let messages: Vec<Message> = serde_json::from_str(&row.admission_json)
-            .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let machine = TurnMachine::new(
-            machine_config(&row.session, &row.run, &self.driver),
-            messages,
-            Default::default(),
-            0,
-        );
-        Ok(self.drive(row, machine))
-    }
-
-    async fn resume(
-        &self,
-        _cx: &ActorContext,
-        row: &TurnRow,
-        machine: TurnMachine,
-    ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        Ok(self.drive(row, machine))
-    }
-}
-
-#[async_trait::async_trait]
-impl TurnDrive for WorkerDrive {
-    fn machine(&mut self) -> &mut TurnMachine {
-        &mut self.machine
-    }
-
-    fn tools(&mut self) -> Arc<dyn RoundTools> {
-        Arc::new(NoTools)
-    }
-
-    async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
-        match effect {
-            Effect::SyncExecutionEnvironment { id } => {
-                self.machine
-                    .handle_response(Response::ExecutionEnvironmentSynced {
-                        id,
-                        result: Ok(ExecutionEnvironmentSync {
-                            system_prompt: Arc::from("workers"),
-                            tool_specs: Arc::new(Vec::new()),
-                            projector_turn_inputs: Default::default(),
-                        }),
-                    });
-            }
-            Effect::Checkpoint { id, .. } => {
-                self.machine.handle_response(Response::Checkpoint {
-                    id,
-                    delivery: Default::default(),
-                });
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    /// The scripted model: before the transcript holds a cell result it
-    /// answers with the cell; after, with a final answer that quotes it.
-    /// The first attempt of the first call holds where the case asks.
-    async fn model_call(
-        &mut self,
-        _cx: &ActorContext,
-        id: EffectId,
-        request: Arc<LlmRequest>,
-        attempt: u32,
-        _limit: ExecutionLimit,
-    ) -> Result<(), TurnError> {
-        #[expect(clippy::expect_used, reason = "a model request always encodes")]
-        let rendered = serde_json::to_string(&*request).expect("a request encodes");
-        let result = rendered.find(RESULT_PREFIX);
-        let call = if result.is_some() { 2 } else { 1 };
-        let witness = &self.services.witness;
-        witness.model_attempt(call, attempt).await;
-        report(witness.node(), Event::ModelAttempt { call, attempt });
-        if call == 1 && attempt == 1 {
-            match self.services.hold {
-                Hold::Model => std::future::pending::<()>().await,
-                Hold::ModelUntilRelease => witness.released().await,
-                Hold::Nothing | Hold::Step | Hold::StepUntilRelease => {}
-            }
-        }
-        let text = match result {
-            None => format!("{CELL_PREFIX}{CELL}"),
-            Some(at) => {
-                let quoted: String = rendered[at..].chars().take(160).collect();
-                format!("{FINAL_PREFIX}{quoted}")
-            }
-        };
-        self.machine.handle_response(Response::LlmComplete {
-            id,
-            result: Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text,
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            }),
-            text_streamed: false,
+/// A text answer, streamed as one delta.
+fn streamed(request: &LlmRequest, text: &str) -> LlmResponse {
+    if let Some(stream) = request.stream_events.as_ref() {
+        stream.send(LlmStreamEvent::Delta {
+            block: StreamBlockIdentity::new("text:0", 0),
+            text: text.to_owned(),
         });
-        Ok(())
     }
-
-    async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
-        Ok(())
+    LlmResponse {
+        parts: vec![LlmOutputPart::Text {
+            text: text.to_owned(),
+            response_meta: None,
+        }],
+        ..LlmResponse::default()
     }
+}
 
-    async fn exec_cell(
-        &mut self,
-        cx: &ActorContext,
-        id: EffectId,
-        exec: ExecKey,
-        cell: CodeCell,
-        with: Vec<DomainWrite>,
-    ) -> Result<(), TurnError> {
-        if let ExecKey::Cell(_, _, cell) = &exec {
-            report(
-                self.services.witness.node(),
-                Event::Cell {
-                    cell: cell.as_str().to_owned(),
-                },
-            );
-        }
-        let program = compile(&cell.code).map_err(TurnError::Exec)?;
-        let operations = ExtWrite {
-            witness: self.services.witness.clone(),
-            hold: self.services.hold,
-        };
-        let identities =
-            CodeCallIdentities::cell(EffectOpener::turn(session(), run()), exec.stored());
-        let end = run_cell(
-            cx,
-            Cell {
-                exec,
-                program,
-                identities,
-                operations: &operations,
-            },
-            with,
+#[expect(clippy::expect_used, reason = "the model's metadata is a literal")]
+fn metadata() -> lash_core::LlmProfileMetadata {
+    lash_core::LlmProfileMetadata::builder(MODEL)
+        .context_window_tokens(200_000)
+        .build()
+        .expect("the model's metadata")
+}
+
+/// The dialect's worker service with its run deadlines off the clock: a
+/// held tool call keeps its cell waiting for as long as the case holds it.
+fn untimed_workers() -> lash::rlm::WorkerService {
+    const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+    let mut config = lash::rlm::TypescriptDialect
+        .worker_service()
+        .config()
+        .clone();
+    config.deadlines.compute = OFF_THE_CLOCK;
+    config.deadlines.serialization = OFF_THE_CLOCK;
+    config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
+    lash::rlm::WorkerService::new(config)
+}
+
+/// The runbook's deployment over `backend`, as `witness` writes to the
+/// outside world and holding at `hold`. It serves no node of its own: the
+/// node's runner serves its sessions ([`crate::node`]).
+///
+/// # Errors
+///
+/// The core does not build.
+pub fn core(backend: &Backend, witness: Witness, hold: Hold) -> Result<lash::LashCore, String> {
+    lash::LashCore::rlm_builder(
+        backend.clone(),
+        lash::rlm::RlmProtocolPluginFactory::new(
+            lash::rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash::rlm::RlmChannel::Cell)
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                .build(),
+            Arc::new(lash::rlm::TypescriptDialect),
+            backend,
         )
+        .with_worker_service(untimed_workers()),
+    )
+    .serve_sessions(false)
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .serve_test_llm_profile(model(witness.clone(), hold), metadata())
+    .tools(ext_write(witness.clone(), hold))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "workers-deployment",
+        witness.node(),
+    ))
+    .map_err(|error| format!("build the core: {error}"))
+}
+
+/// Create the session and send it the turn's input through `core`: what a
+/// host outside the deployment does.
+///
+/// # Errors
+///
+/// The facade refused.
+pub async fn admit(core: &lash::LashCore) -> Result<(), String> {
+    core.session(session())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+        )))
         .await
-        .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let (text, value) = match end {
-            CellEnd::Finished(value) => (format!("{RESULT_PREFIX}{value}"), value),
-            CellEnd::Failed(error) => (
-                format!("{RESULT_PREFIX}failed {error}"),
-                serde_json::Value::String(error),
-            ),
-        };
-        self.machine.handle_response(Response::ExecResult {
-            id,
-            result: Ok(ExecResponse {
-                observations: vec![lash_core::Observation {
-                    text,
-                    value,
-                    projection: Default::default(),
-                }],
-                output_archive: None,
-                calls: Vec::new(),
-                printed_images: Vec::new(),
-                error: None,
-                degraded_bindings: Vec::new(),
-                terminal_finish: None,
-                terminal_finish_retained: None,
-                suspended: false,
-            }),
-        });
-        Ok(())
-    }
-
-    async fn finish(
-        &mut self,
-        _cx: &ActorContext,
-        done: TurnDone,
-        head: &SessionHead,
-    ) -> Result<TurnCommit, TurnError> {
-        head.commit(&self.run, done, commit_budget())
-    }
-}
-
-/// The bounds of the turn's head commit.
-fn commit_budget() -> CommitBudget {
-    CommitBudget::bounded(1024 * 1024, 512)
-}
-
-/// The turn's model calls no tool: its `Once` work runs in its code cell.
-struct NoTools;
-
-impl RoundTools for NoTools {
-    fn pin(&self, _call: &PendingToolCall, _now_ms: u64) -> MemberPin {
-        unreachable!("the runbook's model calls no tool")
-    }
-
-    fn policies(&self) -> PolicyView {
-        PolicyView::default()
-    }
-
-    fn body(&self, _call: &PendingToolCall, _execution: &AdmittedExecution) -> MemberBody {
-        unreachable!("the runbook's model calls no tool")
-    }
-
-    fn resolved(
-        &self,
-        _call: &PendingToolCall,
-        _execution: &AdmittedExecution,
-        _source: &lash_core_store::tool_run::CompletionSource,
-        _metadata: Option<&str>,
-        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> BodyOutput {
-        unreachable!("the runbook's model calls no tool")
-    }
-
-    fn completed(
-        &self,
-        _call: &PendingToolCall,
-        _outcome: &AttemptOutcome,
-        _material: Option<&str>,
-    ) -> CompletedCall {
-        unreachable!("the runbook's model calls no tool")
-    }
+        .map_err(|error| format!("create the session: {error}"))?
+        .send(lash::TurnInput::text(
+            "write x, then tell me what was written",
+        ))
+        .id(run())
+        .await
+        .map(drop)
+        .map_err(|error| format!("send the turn's input: {error}"))
 }

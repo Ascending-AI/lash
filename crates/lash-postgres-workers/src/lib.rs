@@ -7,9 +7,9 @@
 //! (`lash_core::runtime::durable::node::serve`) over PostgreSQL. It runs one
 //! workload of each kind the cases need:
 //!
-//! - **a turn** ([`turn`]): a scripted model answers with a TypeScript cell
-//!   that calls the `Once` host operation `ext.write`, then with a final
-//!   answer;
+//! - **a turn** ([`turn`]): through the lash facade, a scripted model
+//!   answers with a TypeScript cell that calls the `Once` tool `ext_write`,
+//!   then with a final answer;
 //! - **a process** ([`process`]): a host engine that runs a `Once` step,
 //!   waits on a pinned key until its deadline, runs another `Once` step and
 //!   ends.

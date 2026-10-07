@@ -94,18 +94,29 @@ impl RuntimeEffectLocalRunner for NativeTransitionRunner {
 impl crate::runtime::LashRuntime {
     /// Publish the native plugin view before resolving a run's protocol config.
     /// A deferred session supplies no driver or renderer until this activation.
+    ///
+    /// A store-backed session runs the plugins its head recorded: its
+    /// session actor materializes them as admitted, and a build that does
+    /// not serve that admission is refused typed (ADR 0132 §4).
     pub(in crate::runtime) async fn materialize_turn_session(
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
     ) -> Result<(), crate::RuntimeError> {
         if self.session.is_none() {
-            let plugins = &self.services.plugins;
             if self.is_store_backed() {
-                return Err(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::Plugin,
-                    "store-backed preparation requires a published plugin transition",
-                ));
+                return Box::pin(self.materialize_published_session())
+                    .await
+                    .map_err(|error| match error {
+                        crate::SessionError::Plugin(error) => {
+                            crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+                        }
+                        error => crate::RuntimeError::new(
+                            crate::RuntimeErrorCode::SessionHeadRefresh,
+                            error.to_string(),
+                        ),
+                    });
             }
+            let plugins = &self.services.plugins;
             let target = match plugins.plugin_admission() {
                 Some(admission) => admission,
                 None => crate::runtime::plugin_transition::native_plugin_admission(plugins.host())

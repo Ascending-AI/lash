@@ -14,6 +14,8 @@ use lash_core_execution::DurableSettings;
 use stats_alloc::{INSTRUMENTED_SYSTEM, StatsAlloc};
 use std::alloc::System;
 
+#[path = "durable_substrate/cells.rs"]
+mod cells;
 #[path = "durable_substrate/deploy.rs"]
 mod deploy;
 #[path = "durable_substrate/process.rs"]

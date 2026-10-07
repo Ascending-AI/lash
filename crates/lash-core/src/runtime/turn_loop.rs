@@ -14,6 +14,7 @@ use lash_sansio::core_support::*;
 mod accept;
 mod commit;
 mod context_pressure;
+mod durable;
 mod execute;
 mod post_commit;
 #[cfg(feature = "testing")]
@@ -24,6 +25,7 @@ mod resident_session;
 
 pub(in crate::runtime) use commit::LogicalTurnErrorContext;
 use commit::{CancelledTurnFinishContext, TurnCommitContext, TurnFinishInput};
+pub(in crate::runtime) use durable::DurableTurn;
 pub(in crate::runtime) use execute::PreparedTurnExecuteContext;
 use execute::TurnDriverRemainder;
 use post_commit::PostCommitDelivery;

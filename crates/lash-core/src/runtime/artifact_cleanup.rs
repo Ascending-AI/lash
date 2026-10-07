@@ -74,16 +74,41 @@ pub struct StoreSetAuthorities {
     pub sessions: Arc<dyn crate::DeploymentStore>,
     pub processes: Arc<dyn ProcessRegistry>,
     pub triggers: Arc<dyn TriggerStore>,
+    /// The durable rows: whether a turn is still unfinished.
+    pub durable: Arc<dyn lash_durable::DurableStore>,
 }
 
 #[async_trait::async_trait]
 impl ArtifactCleanupAuthorities for StoreSetAuthorities {
-    /// No backend journals effects (ADR 0132): nothing replays or appends.
+    /// No backend journals effects (ADR 0132): an execution's journal is
+    /// settled once the execution ends. Until then its owner may still
+    /// publish under it: a turn while its run is the session's unfinished
+    /// one, a process until its record is terminal.
     async fn journal_replay(
         &self,
-        _journal: &lash_sansio::EffectJournalIdentity,
+        journal: &lash_sansio::EffectJournalIdentity,
     ) -> Result<JournalReplay, String> {
-        Ok(JournalReplay::Settled)
+        let running = match crate::ExecutionScope::from_journal_key(journal.key()) {
+            Some(crate::ExecutionScope::Turn {
+                session_id,
+                turn_id,
+            }) => lash_durable::DurableReads::turn(self.durable.as_ref(), &session_id)
+                .await
+                .map_err(|error| error.to_string())?
+                .is_some_and(|row| row.run == turn_id),
+            Some(crate::ExecutionScope::Process { process_id }) => self
+                .processes
+                .get_process(&process_id)
+                .await
+                .map_err(|error| error.to_string())?
+                .is_some_and(|record| !record.is_terminal()),
+            _ => false,
+        };
+        Ok(if running {
+            JournalReplay::MayReplay
+        } else {
+            JournalReplay::Settled
+        })
     }
 
     async fn frame_is_retained(&self, frame: &crate::FrameEnvironmentId) -> Result<bool, String> {
@@ -201,6 +226,7 @@ impl ArtifactCleanupRelay {
                 sessions: backend.session_store_factory(),
                 processes: backend.process_registry(),
                 triggers: backend.trigger_store(),
+                durable: Arc::clone(backend.durable()),
             }),
             process_env: backend.process_env_store(),
             modules: backend.module_artifacts(),

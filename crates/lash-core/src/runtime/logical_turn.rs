@@ -305,7 +305,7 @@ impl LogicalTurnStart {
 }
 
 impl LashRuntime {
-    fn emit_physical_turn_start(
+    pub(in crate::runtime) fn emit_physical_turn_start(
         observer: &TurnObserver,
         scoped_effect_controller: &ActorContext,
         turn_id: &TurnId,

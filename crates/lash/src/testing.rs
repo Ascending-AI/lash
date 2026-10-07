@@ -118,3 +118,18 @@ pub use lash_core::panic_containment::{is_loud, set_loud};
 pub use lash_core::runtime::{
     RuntimeNamedPhase, RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot,
 };
+
+/// What a session activation runs a session's turns with: machine build,
+/// model calls, tool rounds, code cells and the head commit. Nameable for
+/// [`session_turn_services`]' answer; its own surface is the runtime's, not
+/// the facade's.
+#[doc(hidden)]
+pub use lash_core::runtime::durable::session::TurnServices;
+
+/// The turn services a [`LashCore`](crate::LashCore)'s node runs its
+/// sessions' turns with, for a test that runs the session actors on nodes of
+/// its own (a core built with
+/// [`serve_sessions(false)`](crate::core::LashCoreBuilder::serve_sessions)).
+pub fn session_turn_services(core: &crate::LashCore) -> std::sync::Arc<dyn TurnServices> {
+    core.turn_services()
+}

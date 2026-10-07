@@ -44,8 +44,9 @@ pub struct NodeServe {
     pub drain: Drain,
     /// Runs the claimed sessions.
     pub sessions: Arc<SessionActivation>,
-    /// Runs the claimed processes.
-    pub processes: Arc<dyn Activation>,
+    /// Runs the claimed processes. A node given none claims no process: it
+    /// decodes only the session actor's formats.
+    pub processes: Option<Arc<dyn Activation>>,
 }
 
 /// Serve `backend` as one node until `stop` completes or the node loses its
@@ -60,21 +61,31 @@ pub async fn serve(
     stop: impl Future<Output = ()> + Send,
 ) -> Result<Stopped, DurableError> {
     let settings = backend.config().settings();
-    let dispatch = ActorDispatch {
-        session: serve.sessions,
-        process: serve.processes,
+    // The node decodes the backend's format sets: every one when it runs
+    // processes, the session's alone when it runs none.
+    let formats = backend.formats();
+    let mut decodes = vec![formats.session().clone()];
+    let activation: Arc<dyn Activation> = match serve.processes {
+        Some(process) => {
+            decodes = formats.decodes();
+            Arc::new(ActorDispatch {
+                session: serve.sessions,
+                process,
+            })
+        }
+        None => serve.sessions,
     };
     let mut runner = Runner::new(
         Arc::clone(backend.durable()),
         backend.clock(),
         RunnerConfig {
             node: serve.node,
-            decodes: backend.formats().decodes(),
+            decodes,
             lease: backend.config().lease(),
             max_active: settings.max_active,
             claim_batch: settings.claim_batch,
         },
-        Arc::new(dispatch),
+        activation,
     )
     .with_hints(backend.hints().clone())
     .with_drain(serve.drain);

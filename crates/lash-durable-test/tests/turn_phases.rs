@@ -33,6 +33,8 @@
 
 #[path = "support/dialect.rs"]
 mod dialect;
+#[path = "support/seed.rs"]
+mod seed;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -40,8 +42,8 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CodeCell, SessionActivation, TurnCancelRequest, TurnCommit, TurnDone,
-    TurnDrive, TurnError, TurnRow, TurnServices, admit_mail, request_turn_cancel, restore_turn,
+    AdmittedInputs, CodeCell, OpenTurn, SessionActivation, TurnCancelRequest, TurnCommit, TurnDone,
+    TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices, request_turn_cancel,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -56,7 +58,7 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::tool_run::AttemptOutcome;
-use lash_durable::domain::ExecKey;
+use lash_durable::domain::SESSION_ACTOR_FORMATS;
 use lash_durable::runner::Activation;
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite, DurableError, DurableStore,
@@ -74,7 +76,6 @@ use lash_sansio::{
 
 use dialect::Dialect;
 
-const FORMATS: &str = "l3";
 const SESSION: &str = "l3-session";
 const RUN: &str = "l3-turn";
 const AGAIN: &str = "again";
@@ -275,14 +276,6 @@ impl TurnServices for L3Services {
         }
     }
 
-    async fn machine_config(
-        &self,
-        _cx: &ActorContext,
-        row: &TurnRow,
-    ) -> Result<TurnMachineConfig, TurnError> {
-        Ok(machine_config(&row.session, &row.run))
-    }
-
     async fn start(
         &self,
         _cx: &ActorContext,
@@ -290,11 +283,9 @@ impl TurnServices for L3Services {
         head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
         // The turn starts from the session head's window, with the messages
-        // it was admitted with.
+        // its admission took.
         let window = head.window()?;
-        let admitted: Vec<Message> = serde_json::from_str(&row.admission_json)
-            .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let messages = window.then(admitted);
+        let messages = window.then(seed::admitted_messages(&self.backend(), row).await?);
         let machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run),
             window,
@@ -309,10 +300,28 @@ impl TurnServices for L3Services {
     async fn resume(
         &self,
         _cx: &ActorContext,
-        row: &TurnRow,
-        machine: TurnMachine,
-    ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        Ok(self.drive(row, machine))
+        restore: TurnRestore<'_>,
+    ) -> Result<OpenTurn, TurnError> {
+        let row = restore.row().clone();
+        let restored = restore
+            .restore(machine_config(&row.session, &row.run))
+            .await?;
+        Ok(OpenTurn {
+            drive: self.drive(&restored.row, restored.machine),
+            pending: restored.pending,
+            row: restored.row,
+        })
+    }
+
+    async fn apply_commands(
+        &self,
+        _cx: &ActorContext,
+        admitted: &AdmittedInputs,
+    ) -> Result<(), TurnError> {
+        Err(TurnError::Exec(format!(
+            "the scenario sends no command, yet run {} is one",
+            admitted.run
+        )))
     }
 }
 
@@ -461,8 +470,8 @@ impl TurnDrive for L3Drive {
         Ok(())
     }
 
-    fn tools(&mut self) -> Arc<dyn RoundTools> {
-        Arc::new(NoTools)
+    fn tools(&mut self) -> Result<Arc<dyn RoundTools>, TurnError> {
+        Ok(Arc::new(NoTools))
     }
 
     async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
@@ -476,9 +485,7 @@ impl TurnDrive for L3Drive {
         &mut self,
         _cx: &ActorContext,
         _id: EffectId,
-        _exec: ExecKey,
         _cell: CodeCell,
-        _with: Vec<DomainWrite>,
     ) -> Result<(), TurnError> {
         Err(TurnError::Exec("the L3 scenario runs no cell".to_owned()))
     }
@@ -489,7 +496,7 @@ impl TurnDrive for L3Drive {
         done: TurnDone,
         head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
-        head.commit(&self.run, done, commit_budget())
+        head.commit(&self.run, done, commit_budget()).await
     }
 }
 
@@ -534,12 +541,6 @@ fn commit_budget() -> lash_core::facade_support::CommitBudget {
     lash_core::facade_support::CommitBudget::bounded(1024 * 1024, 512)
 }
 
-/// Admit the scenario's session to the catalog, at its creation head.
-async fn create_session(backend: &Backend) {
-    let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
-    lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session()).await;
-}
-
 /// The L3 scenario on one dialect, fresh for every matrix cell.
 struct L3 {
     mode: Mode,
@@ -582,7 +583,7 @@ impl Scenario for L3 {
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
             lease: LeaseConfig::default(),
-            decodes: vec![FormatSet::new(FORMATS)],
+            decodes: vec![FormatSet::new(SESSION_ACTOR_FORMATS)],
             max_active: 4,
         }
     }
@@ -610,34 +611,7 @@ impl Scenario for L3 {
             .lock_recover()
             .clone()
             .expect("the database is built first");
-        create_session(&backend).await;
-        let admission = vec![Message {
-            id: "l3-input".to_owned(),
-            role: MessageRole::User,
-            parts: shared_parts(vec![Part::text(
-                "l3-input.p0".to_owned(),
-                "think twice".to_owned(),
-                None,
-            )]),
-            origin: None,
-            reply_marker: None,
-        }];
-        let inputs = AdmittedInputs {
-            run: run(),
-            inputs: Vec::new(),
-            admission_json: serde_json::to_string(&admission).map_err(|e| e.to_string())?,
-        };
-        let mut seed = MailTx::new();
-        seed.create_actor(actor(), FormatSet::new(FORMATS)).append(
-            actor(),
-            admit_mail(),
-            inputs.mail_body(),
-        );
-        nodes
-            .database()
-            .commit_mail(seed, CommitLabel::MAIL_SESSION)
-            .await
-            .map_err(|error| error.to_string())?;
+        seed::send_turn(&backend, &session(), &run(), "think twice").await?;
         nodes.start("a");
         nodes.quiesce().await;
         nodes.start("b");
@@ -671,6 +645,12 @@ impl Scenario for L3 {
         match database.turn(&session()).await {
             Ok(None) => {}
             other => violations.push(format!("the turn did not end: {other:?}")),
+        }
+        // No row stays bound to an ended run, however it ended: the session
+        // admits its next input (FIG-5172).
+        match database.session_mailbox(&session()).await {
+            Ok(mailbox) if mailbox.bound_run.is_none() => {}
+            other => violations.push(format!("the ended run still holds its rows: {other:?}")),
         }
 
         // NR-4: no outcome lookups for re-running code; at most one restore
@@ -876,8 +856,12 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
         .iter()
         .filter(|write| write.node == cut.node && write.kind == WriteKind::Actor)
     {
+        // Refused, or never entered: a zombie whose renewals stop stops
+        // itself and drops the write it held.
         match &write.stored {
-            Stored::Refused(DurableError::OwnershipLost(_)) => {}
+            Stored::Refused(DurableError::OwnershipLost(_))
+            | Stored::Pending
+            | Stored::NotEntered => {}
             other => violations.push(format!("F1: zombie write {write} was {other:?}")),
         }
     }
@@ -1041,6 +1025,7 @@ async fn move_head(backend: &Backend, run: &str, messages: Vec<Message>) -> u64 
             },
             commit_budget(),
         )
+        .await
         .expect("the head commit builds");
     let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
     catalog
@@ -1063,7 +1048,8 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     let (stores, _database) =
         dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
     let backend = Backend::for_testing(stores);
-    create_session(&backend).await;
+    let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
+    lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session()).await;
     let earlier = vec![
         session_message("earlier-question", MessageRole::User, "an earlier question"),
         session_message(
@@ -1137,14 +1123,12 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         written_epoch: lash_durable::Epoch(1),
         cancel: None,
     };
-    let restored = restore_turn(
-        &ActorContext::detached(backend.clone()),
-        machine_config(&session(), &run()),
-        &row,
-        &mut HeadCache::default(),
-    )
-    .await
-    .expect("the turn restores over its pinned window");
+    let cx = ActorContext::detached(backend.clone());
+    let mut heads = HeadCache::default();
+    let restored = TurnRestore::new(&cx, &row, &mut heads)
+        .restore(machine_config(&session(), &run()))
+        .await
+        .expect("the turn restores over its pinned window");
     assert_eq!(
         serde_json::to_string(restored.machine.messages().as_slice()).unwrap(),
         serde_json::to_string(machine.messages().as_slice()).unwrap(),

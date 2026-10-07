@@ -3,10 +3,11 @@
 //!
 //! The runner polls the turn's machine through its [`TurnDrive`] and commits
 //! at the catalog's labels: `model.start` pins a model call before its first
-//! byte, the cell's own commits carry the turn's rows, and `turn.commit`
-//! publishes the next revision of the head the owner cached with the turn's
-//! terminal in one fenced transaction, the store's compare-and-set against
-//! that head. Everything between commits is in memory and is
+//! byte, `model.done` commits the phase that re-delivers a round or a cell
+//! before it starts, and `turn.commit` publishes the next revision of the
+//! head the owner cached with the turn's terminal in one fenced
+//! transaction, the store's compare-and-set against that head. Everything
+//! between commits is in memory and is
 //! recomputed from committed state after a crash; nothing re-executes
 //! orchestration to reach a recorded outcome. On a draining node the turn
 //! stops where it would honour a cancel, before its next model call or cell
@@ -14,7 +15,7 @@
 
 use lash_durable::CommitLabel;
 use lash_durable::DomainWrite;
-use lash_durable::domain::{CellId, ExecKey, RunSeq, SessionCommitWrite, TurnWrite};
+use lash_durable::domain::{RunSeq, SessionCommitWrite, TurnWrite};
 
 use super::head::HeadCache;
 use super::session::{
@@ -139,22 +140,28 @@ pub async fn run_phases(
                     return Ok(PhaseExit::Drained);
                 }
                 model = None;
-                let exec = ExecKey::Cell(
-                    session.clone(),
-                    run.clone(),
-                    CellId::new(format!("e{}", id.0)),
-                );
-                let with = vec![DomainWrite::Turn(TurnWrite::Advance {
-                    session: session.clone(),
-                    run: run.clone(),
-                    phase: TurnPhase::Tools { run: RunSeq(id.0) },
-                    iteration: iteration(drive.machine()),
-                    checkpoint_ref: Some(encode_checkpoint(drive.machine())?),
-                    model: None,
-                })];
-                drive
-                    .exec_cell(cx, id, exec, CodeCell { language, code }, with)
-                    .await?;
+                // `model.done`: the model's answer is the cell the checkpoint
+                // re-delivers, committed before the cell starts. A restore
+                // re-delivers the cell, which resumes from its own latest
+                // snapshot, never the model call; the cell its row already
+                // names commits nothing again.
+                let phase = TurnPhase::Tools { run: RunSeq(id.0) };
+                if row.phase != phase || carry.is_some() {
+                    let mut tx = cx.begin().await?;
+                    if let Some(present) = carry.take() {
+                        tx.write(present);
+                    }
+                    tx.write(DomainWrite::Turn(TurnWrite::Advance {
+                        session: session.clone(),
+                        run: run.clone(),
+                        phase,
+                        iteration: iteration(drive.machine()),
+                        checkpoint_ref: Some(encode_checkpoint(drive.machine())?),
+                        model: None,
+                    }));
+                    cx.commit(tx, CommitLabel::MODEL_DONE).await?;
+                }
+                drive.exec_cell(cx, id, CodeCell { language, code }).await?;
             }
             Effect::ToolCalls { id, calls, .. } => {
                 model = None;
@@ -178,19 +185,17 @@ pub async fn run_phases(
                 event_delta,
                 protocol_iteration,
             } => {
+                let done = TurnDone {
+                    messages,
+                    event_delta,
+                    protocol_iteration,
+                    outcome: outcome.take(),
+                };
+                let terminal = done.terminal();
+                let cause_json = done.run_terminal_cause(&run)?;
                 let commit = drive
-                    .finish(
-                        cx,
-                        TurnDone {
-                            messages,
-                            event_delta,
-                            protocol_iteration,
-                            outcome: outcome.take(),
-                        },
-                        heads.head(cx, &session).await?,
-                    )
+                    .finish(cx, done, heads.head(cx, &session).await?)
                     .await?;
-                let terminal = commit.terminal;
                 let mut tx = cx.begin().await?;
                 if let Some(present) = carry.take() {
                     tx.write(present);
@@ -205,7 +210,7 @@ pub async fn run_phases(
                     session: session.clone(),
                     run: run.clone(),
                     terminal,
-                    cause_json: commit.cause_json,
+                    cause_json: Some(cause_json),
                     head_revision: Some(commit.expected_head.saturating_add(1)),
                 }));
                 // The turn's scope ends with its commit (L6b): its waits are

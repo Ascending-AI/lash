@@ -148,6 +148,34 @@ fn decode_batch(
     })
 }
 
+/// Settle what run `run` of `session` still holds as it ends: a turn whose
+/// commit settled its rows holds none, and a turn that ends with no commit
+/// (a cancel) leaves its inputs `cancelled` and its batches cancelled, so no
+/// row stays bound to an ended run (ADR 0132 §11).
+pub(super) async fn settle_held(
+    tx: &mut PgConnection,
+    session: &SessionId,
+    run: &TurnId,
+    now_ms: i64,
+) -> Result<(), DurableError> {
+    sqlx::query(SQL.session_mail.settle_held_inputs.sql())
+        .bind(session.as_str())
+        .bind(run.as_str())
+        .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+        .bind(now_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(sqlx_failure)?;
+    sqlx::query(SQL.session_mail.settle_held_batches.sql())
+        .bind(session.as_str())
+        .bind(run.as_str())
+        .bind(now_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(sqlx_failure)?;
+    Ok(())
+}
+
 /// Bind the admitted mail to its run, each row still open and unbound.
 pub(super) async fn apply(
     tx: &mut PgConnection,

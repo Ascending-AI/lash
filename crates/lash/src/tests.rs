@@ -148,6 +148,7 @@ fn untimed_fixture_workers() -> crate::rlm::WorkerService {
 mod core_session_builder;
 mod deployment_and_testing_facade;
 mod facade_construction;
+mod facade_turn;
 pub(crate) mod harness;
 pub(crate) use harness::{
     DecoratedBackend, explicit_ephemeral_facets, mock_llm_profile_spec, mock_session_spec,

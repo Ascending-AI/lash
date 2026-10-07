@@ -51,7 +51,7 @@ impl SessionRevision {
         self.0
     }
 
-    pub(super) fn from_runtime(runtime: &LashRuntime) -> Self {
+    pub(in crate::runtime) fn from_runtime(runtime: &LashRuntime) -> Self {
         observation_revision(&runtime.state)
     }
 

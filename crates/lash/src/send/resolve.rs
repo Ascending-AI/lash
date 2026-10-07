@@ -131,11 +131,24 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
         .await
         .map_err(store_error)?
         .map(|terminal| terminal.cause);
-    if let Some(RunTerminalCause::Committed { outcome, .. }) = &cause {
-        return Ok(Resolution::Settled {
-            run: run.clone(),
-            outcome: TurnOutcome::from(outcome.clone()),
-        });
+    match &cause {
+        Some(RunTerminalCause::Committed { outcome, .. }) => {
+            return Ok(Resolution::Settled {
+                run: run.clone(),
+                outcome: TurnOutcome::from(outcome.clone()),
+            });
+        }
+        // A cancel the session actor honoured before the turn committed: the
+        // run answers with its cancellation, and the head did not move.
+        Some(RunTerminalCause::Cancelled { evidence }) => {
+            return Ok(Resolution::Settled {
+                run: run.clone(),
+                outcome: TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled {
+                    evidence: evidence.clone(),
+                }),
+            });
+        }
+        _ => {}
     }
     if let Some(operation) =
         lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), run)
@@ -180,7 +193,8 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
         use lash_core::runtime::PluginOperationCommandOutcome;
         let ended = match &cause {
             Some(
-                RunTerminalCause::OperatorCancelled { .. }
+                RunTerminalCause::Cancelled { .. }
+                | RunTerminalCause::OperatorCancelled { .. }
                 | RunTerminalCause::Forked { .. }
                 | RunTerminalCause::SessionDeleted { .. }
                 | RunTerminalCause::SubstrateLost {
@@ -223,6 +237,14 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
             return Ok(Resolution::Settled {
                 run: run.clone(),
                 outcome: TurnOutcome::from(outcome),
+            });
+        }
+        Some(RunTerminalCause::Cancelled { evidence }) => {
+            return Ok(Resolution::Settled {
+                run: run.clone(),
+                outcome: TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled {
+                    evidence,
+                }),
             });
         }
         Some(RunTerminalCause::Refused {

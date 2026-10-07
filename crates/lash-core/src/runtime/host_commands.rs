@@ -23,10 +23,9 @@
 //!   own operation run (K8, binding Q2): that run's invocation journals the
 //!   task's effects under the command's own session-operation scope and owns
 //!   them until they drained, so a redrive of the unsettled command replays
-//!   them. A host's cancel reaches an admitted task through
-//!   its cancel signal ([`task_cancel`]), and a cancel the shift finds
-//!   requested once the task's code returned settles the command
-//!   `Cancelled`.
+//!   them. A host's cancel withdraws the task's command, which stops its
+//!   code ([`task_cancel`]); its commit then finds the row gone and applies
+//!   nothing.
 //! - A frame open opens the frame in the commit that settles it and restarts
 //!   the live interpreter from the frame's seed (F5).
 //!
@@ -39,8 +38,6 @@ use crate::facade_support::RuntimeSessionStateFacadeOps;
 use crate::runtime::turn_boundary::SeedCarries;
 
 mod task_cancel;
-use task_cancel::PluginTaskCancelSignal;
-pub use task_cancel::{PluginTaskCancelRequest, request_plugin_task_cancel};
 
 /// The named phase a runtime's turn-phase probe sees when a host command
 /// starts to apply: the shift read its run, and nothing of it has run.
@@ -197,12 +194,8 @@ impl LashRuntime {
     /// read.
     ///
     /// A task runs in its own operation run (K8, binding Q2), under
-    /// `run_controller` rescoped to the task's session-operation scope: the
-    /// run's invocation journals the task's work and owns it until it
-    /// drained. Whether a cancel was requested before the task ran is
-    /// recorded there too, so a replay of the run takes the same branch, and
-    /// a replay of a task the run already settled runs its journaled work
-    /// again and adopts the head its settling commit published.
+    /// `run_controller` rescoped to the task's session-operation scope, and
+    /// a host's withdrawal of its command stops its code ([`task_cancel`]).
     pub(super) async fn apply_plugin_operation_command(
         &mut self,
         operation: HostPluginOperation,
@@ -220,60 +213,14 @@ impl LashRuntime {
                     session_id: self.state.session_id.clone(),
                     operation_id: batch_id.to_string(),
                 };
-                let controller =
-                    super::step_controller(run_controller, operation.opener().admitted_scope())?;
-                let signal = PluginTaskCancelSignal::open(
-                    self.effect_host(),
-                    &self.state.session_id,
-                    batch_id.as_str(),
-                )
-                .await?;
-                Some((controller, signal))
+                Some(super::step_controller(
+                    run_controller,
+                    operation.opener().admitted_scope(),
+                )?)
             }
         };
-        let cancelled_before_it_ran = match &task {
-            Some((controller, Some(signal))) => {
-                signal.recorded_cancel_requested(controller, false).await?
-            }
-            Some((_, None)) | None => false,
-        };
-        let ran = if cancelled_before_it_ran {
-            Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled)
-        } else {
-            Box::pin(
-                self.run_host_plugin_operation(
-                    &name,
-                    args,
-                    &batch_id,
-                    task.as_ref()
-                        .map(|(controller, signal)| (controller, signal.as_ref())),
-                ),
-            )
-            .await?
-        };
-        if task.is_some() {
-            let store = self
-                .session
-                .as_ref()
-                .and_then(|session| session.history_store())
-                .ok_or_else(|| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::StoreCommitFailed,
-                        "a host task settles through the session's store",
-                    )
-                })?;
-            if self
-                .session_command_run_settled(&store, &completion)
-                .await?
-            {
-                // A replay of the operation run past its settling commit:
-                // the task replayed its journaled work, and the head its
-                // commit published is adopted, never committed again.
-                self.invalidate_resident_session_state();
-                self.reload_invalidated_resident_session_state().await?;
-                return Ok(true);
-            }
-        }
+        let ran =
+            Box::pin(self.run_host_plugin_operation(&name, args, &batch_id, task.as_ref())).await?;
         let outcome = match ran {
             Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled) => {
                 // Nothing of a cancelled task stays resident: the
@@ -312,19 +259,17 @@ impl LashRuntime {
     /// state, and fold what it did into that state: its graph appends, its
     /// runtime events, its plugin state and the turns it queued.
     ///
-    /// A task runs under `cancel_signal`'s watch, and the signal is peeked
-    /// the moment its code returns: a host's cancel requested by then answers
-    /// `Cancelled`, with nothing of the task folded into resident state. The
-    /// decision is durable only with the command's settling commit
-    /// (FIG-4453). The outer `Err` is the shift's fault (the peek did not
-    /// answer), which settles nothing; the inner one is the operation's
-    /// failure.
+    /// A task runs under a watch of its command's row: a host's withdrawal
+    /// stops its code and answers `Cancelled`, with nothing of the task
+    /// folded into resident state, and the command's settling commit finds
+    /// the row gone (FIG-4453). The outer `Err` is the session's fault,
+    /// which settles nothing; the inner one is the operation's failure.
     async fn run_host_plugin_operation(
         &mut self,
         name: &str,
         args: serde_json::Value,
         batch_id: &crate::BatchId,
-        task: Option<(&crate::ActorContext, Option<&PluginTaskCancelSignal>)>,
+        task: Option<&crate::ActorContext>,
     ) -> Result<
         Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError>,
         RuntimeError,
@@ -361,35 +306,40 @@ impl LashRuntime {
                     )
                     .await
             }
-            Some((operation_controller, cancel_signal)) => {
-                // The task's effects run under the command's own scope.
+            Some(operation_controller) => {
+                // The task's effects run under the command's own scope, and
+                // a host's withdrawal of the command stops its code.
                 let stop = tokio_util::sync::CancellationToken::new();
-                let ran = {
-                    let task = plugins.run_plugin_task(
-                        name,
-                        args,
-                        Some(session_id.clone()),
-                        true,
-                        services.state_service(),
-                        services.lifecycle_service(),
-                        services.graph_service(),
-                        services.process_service(),
-                        operation_controller.clone(),
-                        stop.clone(),
-                    );
-                    match cancel_signal {
-                        Some(signal) => run_until_returned(task, signal.watch(&stop)).await,
-                        None => task.await,
+                let task = plugins.run_plugin_task(
+                    name,
+                    args,
+                    Some(session_id.clone()),
+                    true,
+                    services.state_service(),
+                    services.lifecycle_service(),
+                    services.graph_service(),
+                    services.process_service(),
+                    operation_controller.clone(),
+                    stop.clone(),
+                );
+                let ran = match self.services.store.as_ref() {
+                    Some(store) => {
+                        run_until_returned(
+                            task,
+                            task_cancel::watch_withdrawal(
+                                operation_controller,
+                                store,
+                                batch_id,
+                                &stop,
+                            ),
+                        )
+                        .await
                     }
+                    None => task.await,
                 };
-                // The task's code returned: a cancel requested by now settles
-                // nothing of it. Record the decision in the operation's own
-                // journal before committing, so redrive keeps that outcome.
-                if let Some(signal) = cancel_signal
-                    && signal
-                        .recorded_cancel_requested(operation_controller, true)
-                        .await?
-                {
+                // A withdrawn task settles nothing of what it did: its
+                // command's commit finds the row gone.
+                if stop.is_cancelled() {
                     drop(services);
                     return Ok(Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled));
                 }

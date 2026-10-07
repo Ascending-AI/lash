@@ -24,7 +24,6 @@ use tokio::io::AsyncBufReadExt as _;
 use crate::events::{Command, Event, report};
 use crate::process::{WorkerEngine, WorkerSteps};
 use crate::recorded::{RecordedStore, RecordedStores};
-use crate::turn::WorkerServices;
 use crate::witness::{Hold, Witness};
 
 /// What a node runs as, read from its environment.
@@ -119,7 +118,8 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
     let recorded = RecordedStores::new(stores, &config.node);
     let store = recorded.store();
     let backend = Backend::assemble(BackendParts {
-        formats: Vec::new(),
+        // Its cells run on the RLM worker path: actors hold the VM's state.
+        formats: lash::formats::actor_state_surfaces(),
         stores: Arc::new(recorded),
         settings: settings(config.notifier),
         secrets: Some(secrets(&config.secret)?),
@@ -127,14 +127,15 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         providers: Arc::new(NoProjectionProviders),
     })
     .map_err(|error| format!("assemble the backend: {error}"))?;
-    if config.admit_turn {
-        admit_turn(&backend).await?;
-    }
     let witness = Witness::connect(&config.witness_url, &config.node)
         .map_err(|error| format!("connect the witness ledger: {error}"))?;
+    let core = crate::turn::core(&backend, witness.clone(), config.hold)?;
+    if config.admit_turn {
+        admit_turn(&backend, &core).await?;
+    }
     let sessions = SessionActivation::new(
         backend.clone(),
-        Arc::new(WorkerServices::new(witness.clone(), config.hold)),
+        lash::testing::session_turn_services(&core),
         Arc::new(NoProbe),
     );
     let processes = ProcessActivation::new(
@@ -155,7 +156,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
             node: NodeId::new(config.node.clone()),
             drain: lash_durable::runner::Drain::default(),
             sessions: Arc::new(sessions),
-            processes: Arc::new(processes),
+            processes: Some(Arc::new(processes)),
         },
         stop,
     )
@@ -172,7 +173,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
 }
 
 /// Admit the runbook's turn unless its session already exists.
-async fn admit_turn(backend: &Backend) -> Result<(), String> {
+async fn admit_turn(backend: &Backend, core: &lash::LashCore) -> Result<(), String> {
     let durable = backend.durable();
     let exists = durable
         .actor(&crate::turn::actor())
@@ -180,7 +181,7 @@ async fn admit_turn(backend: &Backend) -> Result<(), String> {
         .map_err(|error| format!("read the session: {error}"))?
         .is_some();
     if !exists {
-        crate::turn::admit(backend).await?;
+        crate::turn::admit(core).await?;
     }
     Ok(())
 }

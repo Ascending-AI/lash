@@ -8,8 +8,7 @@ mod builder;
 mod compact_context;
 pub use compact_context::COMPACT_CONTEXT_COMMITTED_PHASE;
 pub use host_commands::{
-    PluginTaskCancelRequest, SESSION_COMMAND_APPLYING_PHASE, SESSION_COMMAND_COMMITTED_PHASE,
-    SESSION_COMMAND_STAGED_PHASE, request_plugin_task_cancel,
+    SESSION_COMMAND_APPLYING_PHASE, SESSION_COMMAND_COMMITTED_PHASE, SESSION_COMMAND_STAGED_PHASE,
 };
 mod compaction_base;
 mod compaction_prompt;

@@ -20,11 +20,9 @@ pub mod turn;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core::Message;
-use lash_core::runtime::durable::session::{AdmittedInputs, admit_mail};
 use lash_core_execution::{
-    Ancestry, LifetimeDecision, ProcessId, ProcessInput, ProcessProvenance, ProcessRegistration,
-    ScopeGrant, ScopeId,
+    Ancestry, LifetimeDecision, PendingTurnInputDraft, ProcessId, ProcessInput, ProcessProvenance,
+    ProcessRegistration, ScopeGrant, ScopeId, TurnInput, TurnInputIngress,
 };
 use lash_durable::domain::TurnEnd;
 use lash_durable::{ActorKey, ActorState, CommitLabel, MailTx};
@@ -60,49 +58,42 @@ pub fn process_actor(process: &ProcessId) -> Result<ActorKey, String> {
     ActorKey::process(process.as_str()).map_err(|error| error.to_string())
 }
 
-/// Admit a session of `script` named by `tag` with its one turn: the
-/// session in the catalog at its creation head, its actor and the turn's
-/// admission mail, seeded uncut.
+/// Admit a session of `script` named by `tag` with its one turn, seeded
+/// uncut the way a host sends it: a cell session created and sent through the
+/// run's cell core, a scripted one created in the catalog at its creation
+/// head with its input's row, whose commit wakes its actor.
 ///
 /// # Errors
 ///
 /// A seed write is refused.
 pub async fn admit_turn(
-    world: &World,
-    nodes: &SimNodes,
+    world: &Arc<World>,
     script: TurnScript,
     tag: &str,
 ) -> Result<SessionId, String> {
-    let backend = world.backend()?;
     let session = script.session(tag);
-    let catalog: Arc<dyn lash_core::store::RuntimeStore> = backend.session_store_factory();
-    lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session).await;
-    let messages = vec![Message {
-        id: format!("{session}-input"),
-        role: lash_core::MessageRole::User,
-        parts: lash_core::facade_support::shared_parts(vec![lash_core::Part::text(
-            format!("{session}-input.p0"),
-            "go".to_owned(),
-            None,
-        )]),
-        origin: None,
-        reply_marker: None,
-    }];
-    let inputs = AdmittedInputs {
-        run: run_of(&session),
-        inputs: Vec::new(),
-        admission_json: serde_json::to_string(&messages).map_err(|error| error.to_string())?,
-    };
-    let actor = session_actor(&session)?;
-    let mut seed = MailTx::new();
-    seed.create_actor(actor.clone(), backend.formats().session().clone())
-        .append(actor.clone(), admit_mail(), inputs.mail_body());
-    nodes
-        .database()
-        .commit_mail(seed, CommitLabel::MAIL_SESSION)
-        .await
-        .map_err(|error| error.to_string())?;
-    world.track(actor);
+    let run = run_of(&session);
+    if matches!(script, TurnScript::Cell | TurnScript::CellKilled) {
+        let core = super::cells::cell_core(world)?;
+        super::cells::send(&core, &session, &run).await?;
+    } else {
+        let catalog: Arc<dyn lash_core::store::RuntimeStore> =
+            world.backend()?.session_store_factory();
+        lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session)
+            .await;
+        catalog
+            .enqueue_pending_turn_input(
+                PendingTurnInputDraft::new(
+                    session.clone(),
+                    TurnInputIngress::NextTurn,
+                    TurnInput::text("go"),
+                )
+                .with_source_key(run.as_str()),
+            )
+            .await
+            .map_err(|error| format!("send the turn's input: {error}"))?;
+    }
+    world.track(session_actor(&session)?);
     Ok(session)
 }
 

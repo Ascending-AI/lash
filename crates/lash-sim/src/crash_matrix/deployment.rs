@@ -164,18 +164,17 @@ async fn postgres(
     let storage = lash_postgres_store::PostgresStorage::connect(isolated.url())
         .await
         .map_err(|error| error.to_string())?;
-    let database: Arc<dyn DurableStore> =
-        Arc::new(storage.durable_store().with_clock_for_testing(clock));
-    let stores = lash_postgres_store::PostgresStoreSet::new(
+    // Every port reads the virtual clock, the durable store's included: a
+    // host's input row and its actor's wake are due when the nodes' clock
+    // says.
+    let stores = lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
         &storage,
         Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+        clock,
     );
-    let clocked = Arc::clone(&database);
-    let stores = lash_core::testing::runtime_helpers::LayeredStores::over(Arc::new(stores))
-        .map_durable_store(move |_| clocked)
-        .into_store_set();
+    let database = lash_core_execution::StoreSet::durable_store(&stores);
     keep.push(Box::new(isolated));
-    Ok((assemble(stores)?, database))
+    Ok((assemble(Arc::new(stores))?, database))
 }
 
 /// The URL of the isolated PostgreSQL database `keep` holds, for a fault
@@ -223,7 +222,8 @@ pub fn assemble(stores: Arc<dyn lash_core_execution::StoreSet>) -> Result<Backen
         secrets: Some(CompletionKeySecrets::for_testing()),
         engines: vec![Arc::new(SimProcessEngine)],
         providers: Arc::new(NoProjectionProviders),
-        formats: Vec::new(),
+        // Its cells run on the RLM worker path: actors hold the VM's state.
+        formats: lash::formats::actor_state_surfaces(),
     })
     .map_err(|error| error.to_string())
 }

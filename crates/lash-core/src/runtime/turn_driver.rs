@@ -2,6 +2,8 @@ use super::*;
 use crate::ActorContext;
 
 mod context;
+mod durable_drive;
+pub(in crate::runtime) use durable_drive::{DriveParts, RuntimeDrive};
 mod effects;
 pub(in crate::runtime) use effects::normalize_plugin_message_attachments;
 mod events;

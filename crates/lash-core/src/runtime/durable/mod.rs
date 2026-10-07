@@ -16,6 +16,7 @@ pub mod head;
 mod model_call;
 pub mod node;
 pub mod phases;
+pub mod services;
 pub mod session;
 pub mod session_close;
 pub mod session_mail;

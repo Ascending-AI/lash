@@ -27,15 +27,11 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use lash_core_execution::runtime::actor::round::{self, PolicyView, Recovery};
-use lash_core_store::tool_run::AttemptOutcome;
-use lash_durable::domain::{CellId, OwnerKey, RunRecordKind};
 use lash_durable::{ActorKey, CommitLabel, LeaseSettings, Notifier};
 use lash_postgres_workers::events::{Command, Event};
 use lash_postgres_workers::process::{AFTER, BEFORE, TRANSITIONS};
 use lash_postgres_workers::turn::{self, TOOL};
 use lash_postgres_workers::witness::Hold;
-use lash_sansio::{ExecutionPolicy, ToolId};
 use serde_json::Value;
 
 use support::cluster::{Cluster, Entry, until};
@@ -152,48 +148,47 @@ async fn once_law(cluster: &Cluster, tool: &str) -> Vec<support::cluster::Effect
         .collect()
 }
 
-/// The cell's `ext.write` outcome as the store folds it, with the epoch of
-/// the commit that wrote it.
-async fn cell_outcome(cluster: &Cluster) -> (Recovery, i64) {
-    let cell = cluster
+/// How the cell's `ext_write` call settled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CellOutcome {
+    /// Its body's outcome committed (`round.outcome`).
+    Completed,
+    /// A started `Once` whose owner was lost settled `Interrupted` when the
+    /// next owner resumed the cell (`cell.inject`).
+    Interrupted,
+}
+
+/// The cell's `ext_write` outcome, with the epoch of the commit that wrote
+/// it, from the commits the store acknowledged. The cell's run records do
+/// not outlive it: its last snapshot prunes every run no snapshot can feed
+/// back, so the store's acknowledgements of the two commits that settle an
+/// operation are the evidence. The operation settles exactly once.
+fn cell_outcome(cluster: &Cluster) -> (CellOutcome, i64) {
+    let settled: Vec<(CellOutcome, i64)> = cluster
         .reports()
         .iter()
-        .find_map(|entry| match &entry.event {
-            Event::Cell { cell } => Some(cell.clone()),
+        .filter_map(|entry| match &entry.event {
+            Event::Commit {
+                label,
+                outcome,
+                epoch,
+                ..
+            } if outcome == "committed" => {
+                if label == CommitLabel::ROUND_OUTCOME.as_str() {
+                    Some((CellOutcome::Completed, *epoch))
+                } else if label == CommitLabel::CELL_INJECT.as_str() {
+                    Some((CellOutcome::Interrupted, *epoch))
+                } else {
+                    None
+                }
+            }
             _ => None,
         })
-        .expect("a node ran the cell");
-    let owner = OwnerKey::Cell(turn::session(), turn::run(), CellId::new(cell));
-    let rows = cluster
-        .durable()
-        .run_records(&owner)
-        .await
-        .expect("read the cell's run records");
-    let fold = round::fold(
-        &rows,
-        &PolicyView::new([(ToolId::new(TOOL), ExecutionPolicy::Once)]),
-    )
-    .expect("the cell's records fold");
-    let recoveries: Vec<Recovery> = fold
-        .recoveries()
-        .iter()
-        .map(|(_, recovery)| recovery.clone())
         .collect();
-    let [recovery] = recoveries.as_slice() else {
-        panic!(
-            "the cell admitted {} operations: {recoveries:?}",
-            recoveries.len()
-        );
+    let [outcome] = settled.as_slice() else {
+        panic!("the operation settled {} times: {settled:?}", settled.len());
     };
-    let outcomes: Vec<i64> = rows
-        .iter()
-        .filter(|row| row.kind == RunRecordKind::XOutcome)
-        .map(|row| row.written_epoch.0)
-        .collect();
-    let [epoch] = outcomes.as_slice() else {
-        panic!("the operation has {} outcome rows", outcomes.len());
-    };
-    (recovery.clone(), *epoch)
+    *outcome
 }
 
 /// The epoch `node` claimed the session under, last.
@@ -257,11 +252,8 @@ async fn kill_mid_turn(notifier: Notifier, by: &str) -> (Duration, Duration) {
         entered.len() == 1 && entered[0].node == survivor,
         "ext.write ran {entered:?}, expected once on {survivor}"
     );
-    let (recovery, _) = cell_outcome(&cluster).await;
-    assert!(
-        matches!(recovery, Recovery::Settled(AttemptOutcome::Completed(_))),
-        "ext.write settled {recovery:?}"
-    );
+    let (recovery, _) = cell_outcome(&cluster);
+    assert_eq!(recovery, CellOutcome::Completed, "ext_write settled");
     let attempts = cluster.model_attempts().await;
     let first: Vec<(i32, &str)> = attempts
         .iter()
@@ -361,10 +353,10 @@ async fn a_once_step_killed_mid_body_settles_interrupted_on_another_node() {
         vec![("entered", victim.as_str())],
         "ext.write's witness"
     );
-    let (recovery, epoch) = cell_outcome(&cluster).await;
+    let (recovery, epoch) = cell_outcome(&cluster);
     assert_eq!(
         recovery,
-        Recovery::Settled(AttemptOutcome::Interrupted),
+        CellOutcome::Interrupted,
         "a started Once whose node died settles Interrupted"
     );
     let claimed = claim_epoch(&cluster, survivor);
@@ -583,12 +575,8 @@ async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses() {
 
     // The operation's one outcome is the survivor's `Interrupted`, and the
     // dropped body neither returned nor ran again.
-    let (recovery, epoch) = cell_outcome(&cluster).await;
-    assert_eq!(
-        recovery,
-        Recovery::Settled(AttemptOutcome::Interrupted),
-        "the outcome"
-    );
+    let (recovery, epoch) = cell_outcome(&cluster);
+    assert_eq!(recovery, CellOutcome::Interrupted, "the outcome");
     assert_eq!(
         epoch,
         claim_epoch(&cluster, survivor),
@@ -724,11 +712,8 @@ async fn a_postgres_restart_strands_no_work_and_reaps_no_node() {
         1,
         "ext.write ran once: {effects:?}"
     );
-    let (recovery, _) = cell_outcome(&cluster).await;
-    assert!(
-        matches!(recovery, Recovery::Settled(AttemptOutcome::Completed(_))),
-        "ext.write settled {recovery:?}"
-    );
+    let (recovery, _) = cell_outcome(&cluster);
+    assert_eq!(recovery, CellOutcome::Completed, "ext_write settled");
     let attempts = cluster.model_attempts().await;
     eprintln!(
         "case=postgres-restart held_on={} finished_on={finisher} outage_ms={} \

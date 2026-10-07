@@ -108,11 +108,6 @@ pub enum Event {
         /// `entered` or `returned`.
         phase: String,
     },
-    /// A code cell started or resumed on this node.
-    Cell {
-        /// The cell's id within its turn.
-        cell: String,
-    },
     /// The test blocked or unblocked this node's heartbeat.
     HeartbeatBlocked {
         /// Whether it is blocked now.

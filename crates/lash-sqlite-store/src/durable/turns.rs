@@ -177,6 +177,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                 SQL.delete_phase.sql(),
                 rusqlite::params![session.as_str(), run.as_str()],
             )?;
+            super::session_mail::settle_held(tx, session, run, commit.now.0)?;
             Ok(Ok(()))
         }
     }

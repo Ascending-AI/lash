@@ -45,8 +45,12 @@ lash_rust_unit_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-postgres-workers", "lash_postgres_workers", "//crates/lash-postgres-workers:lash-postgres-workers__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-postgres-workers",
     package_name = "lash-internal-postgres-workers",
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -59,7 +63,11 @@ lash_rust_binary(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-postgres-workers", "lash_postgres_workers_node"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-postgres-workers",
     library_crate_name = "lash_postgres_workers",
     manifest_dir = "crates/lash-postgres-workers",
@@ -82,8 +90,9 @@ lash_rust_integration_test(
     extra_data = [
         "native//:postgres",
         "native//:nss_wrapper",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    test_env = {"CARGO_BIN_EXE_lash-postgres-workers-node": "$(location :lash-postgres-workers-node__bin)", "LASH_WORKERS_NSS_WRAPPER": "$(location native//:nss_wrapper)", "LASH_WORKERS_POSTGRES": "$(location native//:postgres)", "RUST_TEST_THREADS": "1"},
+    test_env = {"CARGO_BIN_EXE_lash-postgres-workers-node": "$(location :lash-postgres-workers-node__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)", "LASH_WORKERS_NSS_WRAPPER": "$(location native//:nss_wrapper)", "LASH_WORKERS_POSTGRES": "$(location native//:postgres)", "RUST_TEST_THREADS": "1"},
     library = ":lash-postgres-workers",
     library_crate_name = "lash_postgres_workers",
     manifest_dir = "crates/lash-postgres-workers",

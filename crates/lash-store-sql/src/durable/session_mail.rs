@@ -56,6 +56,21 @@ crate::statements! {
              VALUES (?1, ?2, ?3)
              ON CONFLICT (session_id, input_id) DO NOTHING";
 
+        /// Settle the inputs run `?2` of session `?1` still holds as it
+        /// ends with no commit that settled them (a cancelled turn): into
+        /// state `?3` at `?4`.
+        settle_held_inputs = "UPDATE pending_turn_inputs
+             SET state = ?3, terminal_at_ms = ?4, admitted_run = NULL, admitted_by = NULL
+             WHERE session_id = ?1 AND admitted_run = ?2";
+
+        /// Settle the batches run `?2` of session `?1` still holds as it
+        /// ends with no commit that settled them: into their `cancelled`
+        /// tombstone at `?3`.
+        settle_held_batches = "UPDATE queued_work_batches
+             SET admitted_run = NULL, admitted_by = NULL,
+                 terminal_cause = 'cancelled', terminal_at_ms = ?3
+             WHERE session_id = ?1 AND admitted_run = ?2 AND terminal_cause IS NULL";
+
         /// Bind batch `?2` of session `?1` to run `?3`, its admitting owner;
         /// no row when it is no longer open and unbound.
         bind_batch = "UPDATE queued_work_batches

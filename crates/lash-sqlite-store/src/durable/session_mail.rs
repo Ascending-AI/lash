@@ -148,6 +148,28 @@ fn decode_batch(
     })
 }
 
+/// Settle what run `run` of `session` still holds as it ends: a turn whose
+/// commit settled its rows holds none, and a turn that ends with no commit
+/// (a cancel) leaves its inputs `cancelled` and its batches cancelled, so no
+/// row stays bound to an ended run (ADR 0132 §11).
+pub(super) fn settle_held(
+    tx: &Connection,
+    session: &SessionId,
+    run: &TurnId,
+    now_ms: i64,
+) -> rusqlite::Result<()> {
+    tx.prepare_cached(SQL.session_mail.settle_held_inputs.sql())?
+        .execute(rusqlite::params![
+            session.as_str(),
+            run.as_str(),
+            lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+            now_ms,
+        ])?;
+    tx.prepare_cached(SQL.session_mail.settle_held_batches.sql())?
+        .execute(rusqlite::params![session.as_str(), run.as_str(), now_ms])?;
+    Ok(())
+}
+
 /// Bind the admitted mail to its run, each row still open and unbound.
 pub(super) fn apply(
     tx: &Connection,

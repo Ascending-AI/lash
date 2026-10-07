@@ -46,13 +46,7 @@ impl RoundCase {
 #[async_trait::async_trait]
 impl Workload for RoundCase {
     async fn seed(&self, world: &Arc<World>, nodes: &Arc<SimNodes>) -> Result<(), String> {
-        let session = admit_turn(
-            world,
-            nodes,
-            TurnScript::Round,
-            &format!("round{}", self.tag),
-        )
-        .await?;
+        let session = admit_turn(world, TurnScript::Round, &format!("round{}", self.tag)).await?;
         *self.session.lock_recover() = Some(session);
         Ok(())
     }

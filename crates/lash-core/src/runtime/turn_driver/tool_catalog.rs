@@ -3,17 +3,13 @@ use crate::sansio::ExecutionEnvironmentSyncFailureKind as SyncFailureKind;
 pub(in crate::runtime) use crate::session::ExecutionEnvironmentSyncError as SyncFailure;
 use crate::{PluginError, ToolCatalog, TurnDriverPreamble};
 
-struct PreparedExecutionEnvironment {
+pub(super) struct PreparedExecutionEnvironment {
     tool_catalog: Arc<ToolCatalog>,
-    tool_definitions: Vec<crate::ToolDefinition>,
+    pub(super) tool_definitions: Vec<crate::ToolDefinition>,
     turn_driver_preamble: Arc<TurnDriverPreamble>,
 }
 
 impl RuntimeTurnDriver<'_> {
-    #[expect(
-        clippy::expect_used,
-        reason = "an admitted turn has a committed active agent frame and an opener scope"
-    )]
     pub(super) async fn prepare_turn_machine(
         &mut self,
         messages: crate::MessageSequence,
@@ -26,7 +22,6 @@ impl RuntimeTurnDriver<'_> {
             };
         }
 
-        let session_policy = self.policy.clone();
         match self.validate_recorded_selection() {
             Ok(()) => {}
             Err(event) => {
@@ -35,6 +30,21 @@ impl RuntimeTurnDriver<'_> {
                 return Err((messages.clone(), run_offset));
             }
         };
+        Ok(self.prepare_machine(messages, run_offset))
+    }
+
+    /// The turn's machine over `messages`, counting its protocol iterations
+    /// on from `run_offset`.
+    #[expect(
+        clippy::expect_used,
+        reason = "an admitted turn has a committed active agent frame and an opener scope"
+    )]
+    pub(super) fn prepare_machine(
+        &mut self,
+        messages: crate::MessageSequence,
+        run_offset: usize,
+    ) -> TurnMachine {
+        let session_policy = self.policy.clone();
         // The machine starts with no environment: its protocol-start sync
         // builds the prompt and the tool surface as a recorded step, so the
         // shift never reads a surface a replay could not reproduce (FIG-3672
@@ -78,7 +88,7 @@ impl RuntimeTurnDriver<'_> {
         self.mark_phase_end(RuntimeTurnPhase::PromptBuild);
         let mut machine = prepared.machine;
         machine.adopt_prepared_messages(self.prelude.context.messages.clone(), true);
-        Ok(machine)
+        machine
     }
 
     /// The step body of an execution-environment sync: builds the prompt and
@@ -186,7 +196,9 @@ impl RuntimeTurnDriver<'_> {
         })
     }
 
-    fn prepare_execution_environment(&self) -> Result<PreparedExecutionEnvironment, PluginError> {
+    pub(super) fn prepare_execution_environment(
+        &self,
+    ) -> Result<PreparedExecutionEnvironment, PluginError> {
         let state = self.turn_pipeline.state();
         let tool_surface = self.session.pin_tool_surface(
             &state.authority.tool_access,

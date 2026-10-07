@@ -24,6 +24,8 @@ Each row has one class:
 
 The protocol driver and the model are scripted in the test. The cell's host operation `ext.write` is a test `CellOperations`.
 
+Since L3 (FIG-5172) the proof runs the turn behind the lash facade on the production turn driver, the RLM protocol driver and the worker path, with `ext_write` a test tool behind the production tool dispatch; V0's in-process `run_cell` is deleted. The rows below are V0's audit as it stood.
+
 The following were not executed and are covered here only:
 
 - the production turn driver effect loop;

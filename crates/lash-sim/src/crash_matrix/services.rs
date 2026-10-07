@@ -2,8 +2,8 @@
 //! catalog tools and the code cells a turn runs.
 //!
 //! Everything else a turn does is the production session activation's: its
-//! phases, its round runner, its cell runner over the snapshot store and its
-//! head commit. Each session's [`TurnScript`] names what its model answers:
+//! phases, its round runner and its head commit. A cell session runs
+//! entirely on the production turn driver behind the facade ([`super::cells`]). Each session's [`TurnScript`] names what its model answers:
 //! the first call is answered with the script's work (tool calls or a
 //! TypeScript cell), every call that sees that work's results with a final
 //! answer. Every body writes its entry to the world's
@@ -16,9 +16,10 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    CodeCell, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices,
-    request_turn_cancel,
+    AdmittedInputs, CodeCell, OpenTurn, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive,
+    TurnError, TurnRestore, TurnRow, TurnServices, request_turn_cancel,
 };
+use lash_core::runtime::durable::session_mail::SessionMailAdmission;
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
     DriverAction, DriverContextView, Effect, ExecResponse, LlmOutputPart, LlmRequest, LlmResponse,
@@ -35,17 +36,13 @@ use lash_core_store::tool_run::{
     AttemptOutcome, KnownFailure, KnownFailureReason, MaterialLocation, MaterialOwner,
     MaterialPayload, MaterialRef, MaterialRole,
 };
-use lash_durable::DomainWrite;
-use lash_durable::domain::{ExecKey, OwnerKey};
+use lash_durable::domain::OwnerKey;
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::{
     ExecutionBudgets, ExecutionLimit, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallId,
     ToolCallOutput, ToolFailure, ToolFailureClass, ToolId, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy, TurnId,
 };
-use lash_vm_broker::CodeCallIdentities;
-use lash_vm_broker::cell::{Cell, CellEnd, CellOperations, ResolvedOperation, run_cell};
-use lashlang::{ExecutionHostError, ResourceOperation, Value};
 
 use super::world::{BodyEntry, World, retry};
 
@@ -125,14 +122,7 @@ pub fn turn_id(id: &str) -> TurnId {
 
 /// What marks a round's results in the transcript.
 const RESULTS_MARKER: &str = "sim-results";
-/// What marks a cell's result in the transcript.
-const RESULT_PREFIX: &str = "cell result: ";
-/// What starts a model answer that runs as a cell.
-const CELL_PREFIX: &str = "CELL:";
-/// The cell the model writes: one `Once` host operation, then a result that
-/// carries what it answered.
-const CELL: &str = "const written = await ext.write({ x: 7 });\nfinish({ written });";
-/// The cell's host operation.
+/// The `Once` tool a cell calls ([`super::cells`]).
 pub const EXT_WRITE: &str = "ext_write";
 /// The final answer's text.
 pub const FINAL: &str = "done";
@@ -230,10 +220,9 @@ fn result_message(id: String, text: String) -> Vec<DriverAction> {
     ]
 }
 
-/// The scripted protocol: an answer with tool calls starts their round, an
-/// answer that starts with [`CELL_PREFIX`] runs as a TypeScript cell, and
-/// any other answer finishes the turn with it. A round's or a cell's result
-/// joins the transcript and the model is called again.
+/// The scripted protocol: an answer with tool calls starts their round, and
+/// any other answer finishes the turn with it. A round's result joins the
+/// transcript and the model is called again.
 #[derive(Debug)]
 struct ScriptedProtocol;
 
@@ -259,20 +248,11 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
     ) -> Vec<DriverAction> {
         let ids = calls.call_ids(&llm_response);
         if ids.is_empty() {
-            let text = response_text(&llm_response);
-            return match text.strip_prefix(CELL_PREFIX) {
-                Some(code) => vec![DriverAction::Start(PendingWork::Exec {
-                    language: "typescript".to_owned(),
-                    code: code.to_owned(),
-                    driver_state: lash_core::ProtocolDriverState::new(
-                        "lash-sim",
-                        serde_json::json!({}),
-                    ),
-                })],
-                None => vec![DriverAction::Finish(TurnOutcome::Finished(
-                    TurnFinish::AssistantMessage { text },
-                ))],
-            };
+            return vec![DriverAction::Finish(TurnOutcome::Finished(
+                TurnFinish::AssistantMessage {
+                    text: response_text(&llm_response),
+                },
+            ))];
         }
         let pending = llm_response
             .parts
@@ -335,7 +315,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
                 .map(|observation| observation.text.clone())
                 .collect::<Vec<_>>()
                 .join("\n"),
-            Err(failure) => format!("{RESULT_PREFIX}failed {failure:?}"),
+            Err(failure) => format!("failed {failure:?}"),
         };
         result_message(format!("sim-cell-{}", ctx.protocol_iteration()), text)
     }
@@ -410,40 +390,115 @@ impl TurnServices for SimServices {
         ExecutionBudgets::default()
     }
 
-    async fn machine_config(
-        &self,
-        _cx: &ActorContext,
-        row: &TurnRow,
-    ) -> Result<TurnMachineConfig, TurnError> {
-        Ok(machine_config(&row.session, &row.run))
-    }
-
     async fn start(
         &self,
-        _cx: &ActorContext,
+        cx: &ActorContext,
         row: &TurnRow,
         _head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        // A turn is admitted with the messages it starts from.
-        let messages: Vec<Message> = serde_json::from_str(&row.admission_json)
-            .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let machine = TurnMachine::new(
+        if let Some(cells) = self.cells(&row.session)? {
+            return cells.start(cx, row).await;
+        }
+        // The turn starts from the session head's window, with the inputs
+        // its admission took.
+        let backend = self.world.backend().map_err(TurnError::Exec)?;
+        let window = SessionHead::load(&backend, &row.session, commit_budget())
+            .await?
+            .window()?;
+        let messages = window.then(admitted_messages(&backend, row).await?);
+        let machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run),
+            window,
             messages,
-            Default::default(),
+            Vec::new(),
             0,
+            Vec::new(),
         );
         Ok(self.drive(row, machine))
     }
 
     async fn resume(
         &self,
-        _cx: &ActorContext,
-        row: &TurnRow,
-        machine: TurnMachine,
-    ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        Ok(self.drive(row, machine))
+        cx: &ActorContext,
+        restore: TurnRestore<'_>,
+    ) -> Result<OpenTurn, TurnError> {
+        if let Some(cells) = self.cells(&restore.row().session)? {
+            return cells.resume(cx, restore).await;
+        }
+        let row = restore.row().clone();
+        let restored = restore
+            .restore(machine_config(&row.session, &row.run))
+            .await?;
+        Ok(OpenTurn {
+            drive: self.drive(&restored.row, restored.machine),
+            pending: restored.pending,
+            row: restored.row,
+        })
     }
+
+    async fn apply_commands(
+        &self,
+        cx: &ActorContext,
+        admitted: &AdmittedInputs,
+    ) -> Result<(), TurnError> {
+        let session = session_id(cx.actor().id());
+        match self.cells(&session)? {
+            Some(cells) => cells.apply_commands(cx, admitted).await,
+            None => Err(TurnError::Exec(format!(
+                "the scripted session {session} runs no commands"
+            ))),
+        }
+    }
+}
+
+impl SimServices {
+    /// The services a cell session runs with, or `None` for a scripted one.
+    fn cells(&self, session: &SessionId) -> Result<Option<Arc<dyn TurnServices>>, TurnError> {
+        match TurnScript::of(session) {
+            Some(TurnScript::Cell | TurnScript::CellKilled) => Ok(Some(super::cells::services(
+                &super::cells::cell_core(&self.world).map_err(TurnError::Exec)?,
+            ))),
+            _ => Ok(None),
+        }
+    }
+}
+
+/// The messages `row`'s turn starts with: one user message per input its
+/// admission took, read back from the session's store.
+async fn admitted_messages(
+    backend: &lash_core_execution::Backend,
+    row: &TurnRow,
+) -> Result<Vec<Message>, TurnError> {
+    let admission: SessionMailAdmission = serde_json::from_str(&row.admission_json)
+        .map_err(|error| TurnError::Exec(format!("the turn's admission: {error}")))?;
+    let catalog = backend.session_store_factory();
+    let mut messages = Vec::with_capacity(admission.inputs.len());
+    for input in &admission.inputs {
+        let read = catalog
+            .pending_turn_input(&row.session, input)
+            .await
+            .map_err(|error| TurnError::Exec(error.to_string()))?
+            .ok_or_else(|| TurnError::Exec(format!("input {input} is not stored")))?;
+        let text: String = read
+            .input
+            .input
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                lash_core_execution::InputItem::Text { text } => Some(text.as_str()),
+                lash_core_execution::InputItem::Attachment { .. } => None,
+            })
+            .collect();
+        let id = format!("input-{input}");
+        messages.push(Message {
+            id: id.clone(),
+            role: MessageRole::User,
+            parts: shared_parts(vec![Part::text(format!("{id}.p0"), text, None)]),
+            origin: None,
+            reply_marker: None,
+        });
+    }
+    Ok(messages)
 }
 
 /// One turn's drive: its machine, answered by the deployment's services.
@@ -467,12 +522,12 @@ impl TurnDrive for SimDrive {
         &mut self.machine
     }
 
-    fn tools(&mut self) -> Arc<dyn RoundTools> {
-        Arc::new(Catalog {
+    fn tools(&mut self) -> Result<Arc<dyn RoundTools>, TurnError> {
+        Ok(Arc::new(Catalog {
             services: self.services.clone(),
             session: self.session.clone(),
             run: self.run.clone(),
-        })
+        }))
     }
 
     async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
@@ -509,7 +564,7 @@ impl TurnDrive for SimDrive {
     ) -> Result<(), TurnError> {
         let rendered =
             serde_json::to_string(&*request).map_err(|error| TurnError::Exec(error.to_string()))?;
-        let answered = rendered.contains(RESULTS_MARKER) || rendered.contains(RESULT_PREFIX);
+        let answered = rendered.contains(RESULTS_MARKER);
         self.services.world.note(format!(
             "model.call {} {}",
             self.session,
@@ -540,12 +595,7 @@ impl TurnDrive for SimDrive {
                 })
                 .collect()
         } else {
-            let text = match self.script()? {
-                TurnScript::Cell | TurnScript::CellKilled if !answered => {
-                    format!("{CELL_PREFIX}{CELL}")
-                }
-                _ => FINAL.to_owned(),
-            };
+            let text = FINAL.to_owned();
             vec![LlmOutputPart::Text {
                 text,
                 response_meta: None,
@@ -569,62 +619,16 @@ impl TurnDrive for SimDrive {
 
     async fn exec_cell(
         &mut self,
-        cx: &ActorContext,
-        id: EffectId,
-        exec: ExecKey,
-        cell: CodeCell,
-        with: Vec<DomainWrite>,
+        _cx: &ActorContext,
+        _id: EffectId,
+        _cell: CodeCell,
     ) -> Result<(), TurnError> {
-        let program = compile(&cell.code).map_err(TurnError::Exec)?;
-        let operations = ExtWrite {
-            world: Arc::clone(&self.services.world),
-            owner: exec.owner(),
-            opener: EffectOpener::turn(self.session.clone(), self.run.clone()),
-            killed: self.script()? == TurnScript::CellKilled,
-            session: self.session.clone(),
-        };
-        let identities = CodeCallIdentities::cell(
-            EffectOpener::turn(self.session.clone(), self.run.clone()),
-            exec.stored(),
-        );
-        let end = run_cell(
-            cx,
-            Cell {
-                exec,
-                program,
-                identities,
-                operations: &operations,
-            },
-            with,
-        )
-        .await
-        .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let (text, value) = match end {
-            CellEnd::Finished(value) => (format!("{RESULT_PREFIX}{value}"), value),
-            CellEnd::Failed(error) => (
-                format!("{RESULT_PREFIX}failed {error}"),
-                serde_json::Value::String(error),
-            ),
-        };
-        self.machine.handle_response(Response::ExecResult {
-            id,
-            result: Ok(ExecResponse {
-                observations: vec![lash_core::Observation {
-                    text,
-                    value,
-                    projection: Default::default(),
-                }],
-                output_archive: None,
-                calls: Vec::new(),
-                printed_images: Vec::new(),
-                error: None,
-                degraded_bindings: Vec::new(),
-                terminal_finish: None,
-                terminal_finish_retained: None,
-                suspended: false,
-            }),
-        });
-        Ok(())
+        // The scripted protocol starts no cell: a cell session runs behind
+        // the facade.
+        Err(TurnError::Exec(format!(
+            "the scripted session {} runs no cell",
+            self.session
+        )))
     }
 
     async fn finish(
@@ -633,7 +637,7 @@ impl TurnDrive for SimDrive {
         done: TurnDone,
         head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
-        head.commit(&self.run, done, commit_budget())
+        head.commit(&self.run, done, commit_budget()).await
     }
 }
 
@@ -810,151 +814,13 @@ fn request_cancel(world: &Arc<World>, session: SessionId, run: TurnId) {
     });
 }
 
-/// The cell's host environment: `ext.write` declared.
-fn host_environment() -> Result<lashlang::LashlangHostEnvironment, String> {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
-    catalog
-        .add_module_operation_contract(
-            ["ext"],
-            "Ext",
-            "write",
-            "tool:ext/write",
-            &lashlang::OperationContract::new(
-                serde_json::json!({
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": { "x": { "type": "number" } },
-                    "required": ["x"]
-                }),
-                serde_json::json!({}),
-            ),
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(lashlang::LashlangHostEnvironment::new(
-        catalog,
-        lashlang::LashlangAbilities::all(),
-    ))
-}
-
-fn compile(code: &str) -> Result<Arc<lashlang::CompiledProgram>, String> {
-    let linked =
-        lash_typescript::link(code, &host_environment()?).map_err(|error| error.to_string())?;
-    lashlang::compile(&linked.artifact, lashlang::Entry::Main, None)
-        .map(Arc::new)
-        .map_err(|error| error.to_string())
-}
-
-/// `ext.write`: a `Once` host operation whose body writes to the outside
-/// world and answers what it wrote. Under [`TurnScript::CellKilled`] its
-/// first body holds forever, and the host kills the node that runs it.
-struct ExtWrite {
-    world: Arc<World>,
-    owner: OwnerKey,
-    opener: EffectOpener,
-    killed: bool,
-    session: SessionId,
-}
-
-impl CellOperations for ExtWrite {
-    fn resolve(
-        &self,
-        call: ToolCallId,
-        operation: &ResourceOperation,
-    ) -> Result<ResolvedOperation, ExecutionHostError> {
-        if operation.operation != "write" {
-            return Err(ExecutionHostError::new("only ext.write is declared"));
-        }
-        let args = serde_json::to_value(&operation.args)
-            .map_err(|error| ExecutionHostError::new(error.to_string()))?;
-        let request = turn_material(
-            &self.opener,
-            MaterialRole::PreparedRequest,
-            &args.to_string(),
-        )
-        .ok_or_else(|| ExecutionHostError::new("the request does not encode"))?;
-        let draft = ExecutionDraft::new(
-            call.clone(),
-            ToolId::new(EXT_WRITE),
-            request,
-            ExecutionPolicy::Once,
-            ExecutionLimit {
-                expires_at: u64::MAX,
-                max_slice: Duration::from_secs(60),
-            },
-            None,
-        );
-        let world = Arc::clone(&self.world);
-        let owner = self.owner.clone();
-        let opener = self.opener.clone();
-        let killed = self.killed;
-        let session = self.session.clone();
-        Ok(ResolvedOperation {
-            draft,
-            body: Box::new(move |_cancel| {
-                Box::pin(async move {
-                    let first = !world
-                        .ledger()
-                        .entries()
-                        .contains_key(&(owner.clone(), call.clone()));
-                    let admitted = world.admitted(&owner, &call).await;
-                    world.ledger().enter(
-                        &owner,
-                        &call,
-                        BodyEntry {
-                            tool: EXT_WRITE.to_owned(),
-                            policy: ExecutionPolicy::Once,
-                            attempt: 1,
-                            at_ms: world.now_ms(),
-                            admitted,
-                        },
-                    );
-                    if killed && first {
-                        kill_owner(&world, &session);
-                        std::future::pending::<()>().await;
-                    }
-                    let output = serde_json::json!({ "ok": true, "wrote": args }).to_string();
-                    match turn_material(&opener, MaterialRole::AttemptOutput, &output) {
-                        Some(material) => BodyOutput {
-                            outcome: AttemptOutcome::Completed(material),
-                            material: Some(output),
-                        },
-                        None => BodyOutput::from(AttemptOutcome::Interrupted),
-                    }
-                })
-            }),
-        })
-    }
-
-    fn value(
-        &self,
-        outcome: &AttemptOutcome,
-        material: Option<&str>,
-    ) -> Result<Value, ExecutionHostError> {
-        match (outcome, material) {
-            (AttemptOutcome::Completed(_), Some(payload)) => serde_json::from_str(payload)
-                .map(lashlang::from_json)
-                .map_err(|error| ExecutionHostError::new(error.to_string())),
-            (AttemptOutcome::Interrupted, _) => {
-                Err(ExecutionHostError::new("ext.write was interrupted"))
-            }
-            (outcome, _) => Err(ExecutionHostError::new(format!(
-                "ext.write ended {outcome:?}"
-            ))),
-        }
-    }
-
-    fn policies(&self) -> PolicyView {
-        PolicyView::new([(ToolId::new(EXT_WRITE), ExecutionPolicy::Once)])
-    }
-}
-
 /// How long a killed node stays down before its supervisor restarts it:
 /// past a failover, so another node reaps it first.
 const RESTART_AFTER: Duration = Duration::from_secs(30);
 
 /// The host kills the node that owns `session`'s actor, as a crash there
 /// would, and its supervisor restarts it once another node took over.
-fn kill_owner(world: &Arc<World>, session: &SessionId) {
+pub(super) fn kill_owner(world: &Arc<World>, session: &SessionId) {
     let Some(nodes) = world.nodes() else {
         return;
     };

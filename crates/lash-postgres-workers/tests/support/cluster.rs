@@ -311,7 +311,14 @@ impl Cluster {
     /// Admit the runbook's turn: what a producer outside the deployment
     /// commits.
     pub async fn admit_turn(&self) {
-        lash_postgres_workers::turn::admit(&self.backend)
+        let witness = lash_postgres_workers::witness::Witness::connect(
+            &self.server.url("lash_witness", "lash_witness_writer"),
+            "operator",
+        )
+        .expect("the witness URL parses");
+        let core = lash_postgres_workers::turn::core(&self.backend, witness, self.hold)
+            .expect("the operator's core builds");
+        lash_postgres_workers::turn::admit(&core)
             .await
             .expect("the turn is admitted");
     }

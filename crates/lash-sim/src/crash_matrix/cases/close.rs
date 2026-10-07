@@ -60,13 +60,7 @@ impl CloseCase {
 #[async_trait::async_trait]
 impl Workload for CloseCase {
     async fn seed(&self, world: &Arc<World>, nodes: &Arc<SimNodes>) -> Result<(), String> {
-        let session = admit_turn(
-            world,
-            nodes,
-            TurnScript::Plain,
-            &format!("close{}", self.tag),
-        )
-        .await?;
+        let session = admit_turn(world, TurnScript::Plain, &format!("close{}", self.tag)).await?;
         let child = register(world, hold("k"), Some(ScopeId::Session(session.clone()))).await?;
         *self.seeded.lock_recover() = Seeded {
             session: Some(session.clone()),

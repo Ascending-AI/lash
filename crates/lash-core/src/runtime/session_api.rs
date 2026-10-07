@@ -822,9 +822,8 @@ impl LashRuntime {
     /// retired under an execution the run read, whose settlement and commit write
     /// nothing to the journal.
     ///
-    /// The run stops at a host task: the shift that ran a task as its own
-    /// operation run is deleted, and the session actor's command drain is
-    /// L3's (K8, binding Q2).
+    /// A host task runs as its own operation run (K8, binding Q2) on the
+    /// session actor, which applies the command run its mail drain hands it.
     pub(super) async fn drain_next_session_command_run(
         &mut self,
         cancellation: tokio_util::sync::CancellationToken,
@@ -888,10 +887,6 @@ impl LashRuntime {
                 commands.as_slice(),
                 [crate::SessionCommand::RunPluginTask { .. }]
             );
-            let own = !task;
-            if !own {
-                return Ok(None);
-            }
             // A replayed read may name a run this run already applied. An
             // administrative compaction, a config transaction or a host
             // task runs again: it replays the steps it journaled, then finds

@@ -3,7 +3,7 @@
 //!
 //! # Contracts
 //!
-//! - The durable entry is: load rows, [`restore_turn`] (exactly one
+//! - The durable entry is: load rows, [`TurnRestore::restore`] (exactly one
 //!   `restore_from_checkpoint`), re-deliver the pending effect, then
 //!   the phase runner (`phases::run_phases`). The turn driver becomes this phase runner; it commits at
 //!   the catalog's labels (`turn.admit`, `turn.prepare`, `model.start`,
@@ -34,14 +34,12 @@
 
 use std::sync::Arc;
 
-use lash_durable::domain::{ExecKey, MailAnswer, MailDomainWrite, TurnWrite};
+use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnWrite};
 use lash_durable::runner::{Activation, Owned};
 use lash_durable::{
-    ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailKind,
-    MailTx, Release,
+    ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailTx, Release,
 };
 use lash_sansio::SavedTurn;
-use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use super::head::{HeadCache, SessionHead};
@@ -58,15 +56,10 @@ pub use lash_durable::domain::{
 use super::session_close::{
     SESSION_CLOSE_MAIL, SessionCloseError, SessionCloseExit, begin_session_close, run_session_close,
 };
+use super::session_mail::{
+    SessionMailAdmission, SessionMailError, SessionMailRunKind, drain_session_mail,
+};
 use super::turn_scope::{TurnChildrenStopError, await_turn_children, continue_scope_ends};
-
-/// The mail kind a producer admits a turn with until L3s's (FIG-5196) mail
-/// drain owns the session's mailbox: its body is
-/// [`AdmittedInputs::mail_body`].
-#[must_use]
-pub fn admit_mail() -> MailKind {
-    MailKind::new("session.admit")
-}
 
 /// What a session's turns run with: the deployment's protocol, model,
 /// environment and code cells. It opens one [`TurnDrive`] per turn an owner
@@ -76,18 +69,6 @@ pub trait TurnServices: Send + Sync {
     /// The budgets `session`'s turns run under: a model call's
     /// `model_total` among them.
     fn execution_budgets(&self, session: &SessionId) -> crate::ExecutionBudgets;
-
-    /// The configuration `row`'s turn restores its checkpoint under: the one
-    /// its machine was built with.
-    ///
-    /// # Errors
-    ///
-    /// [`TurnError`] when the session's configuration cannot be loaded.
-    async fn machine_config(
-        &self,
-        cx: &ActorContext,
-        row: &TurnRow,
-    ) -> Result<TurnMachineConfig, TurnError>;
 
     /// Start `row`'s turn from committed state alone: the session's `head`,
     /// as the owner loaded it, and what its admission bound. Nothing it
@@ -103,8 +84,10 @@ pub trait TurnServices: Send + Sync {
         head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError>;
 
-    /// Take over `row`'s turn, restored from its checkpoint as `machine`,
-    /// recomputing what the turn holds in memory from committed state.
+    /// Take over the turn `restore` names: build what the turn holds in
+    /// memory from committed state, and restore its machine from its
+    /// checkpoint with [`TurnRestore::restore`] under the configuration it
+    /// was built with.
     ///
     /// # Errors
     ///
@@ -112,9 +95,21 @@ pub trait TurnServices: Send + Sync {
     async fn resume(
         &self,
         cx: &ActorContext,
-        row: &TurnRow,
-        machine: TurnMachine,
-    ) -> Result<Box<dyn TurnDrive>, TurnError>;
+        restore: TurnRestore<'_>,
+    ) -> Result<OpenTurn, TurnError>;
+
+    /// Apply the session-command run `admitted` names (a command, or a
+    /// plugin task's operation): its commit settles the command's row, so a
+    /// pass that finds the row still open applies it again.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the run could not apply; nothing of it committed.
+    async fn apply_commands(
+        &self,
+        cx: &ActorContext,
+        admitted: &AdmittedInputs,
+    ) -> Result<(), TurnError>;
 }
 
 /// One turn an owner runs: its machine and the in-memory work around it. The
@@ -164,11 +159,18 @@ pub trait TurnDrive: Send {
 
     /// The tools the turn's rounds run: the turn's catalog, which pins each
     /// call at admission and gives each member its body (L4, FIG-5174).
-    fn tools(&mut self) -> Arc<dyn lash_core_execution::runtime::actor::round::RoundTools>;
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the turn's catalog does not resolve.
+    fn tools(
+        &mut self,
+    ) -> Result<Arc<dyn lash_core_execution::runtime::actor::round::RoundTools>, TurnError>;
 
-    /// Run the code cell `exec` of effect `id` from its latest snapshot, or
-    /// from the start, to its end, and answer the machine. `with` are the
-    /// turn's rows that commit with the cell's first commit.
+    /// Run the code cell of effect `id` from its latest snapshot, or from the
+    /// start, to its end, and answer the machine. The cell files its
+    /// snapshots under its own execution; `model.done` committed the turn's
+    /// `Tools` phase that re-delivers it before it started.
     ///
     /// # Errors
     ///
@@ -178,9 +180,7 @@ pub trait TurnDrive: Send {
         &mut self,
         cx: &ActorContext,
         id: EffectId,
-        exec: ExecKey,
         cell: CodeCell,
-        with: Vec<DomainWrite>,
     ) -> Result<(), TurnError>;
 
     /// The turn's commit to its session once its machine is done: the next
@@ -234,9 +234,55 @@ impl TurnDone {
             _ => TurnTerminal::Failed,
         }
     }
+
+    /// The run terminal `run`'s commit records: the outcome its turn
+    /// committed with, as the store reads every run's end back.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError::Exec`] when the outcome ends no run (a frame switch or a
+    /// segment boundary, whose follow-on turn the durable path does not run).
+    pub fn run_terminal_cause(&self, run: &TurnId) -> Result<String, TurnError> {
+        let outcome = self
+            .outcome
+            .clone()
+            .unwrap_or(TurnOutcome::Stopped(crate::TurnStop::Incomplete));
+        let committed =
+            crate::store::RunCommittedOutcome::of_turn_outcome(&outcome).ok_or_else(|| {
+                TurnError::Exec(format!(
+                    "turn {run} ended in {outcome:?}, which ends no run on the durable path"
+                ))
+            })?;
+        let commit = crate::store::TurnCommitId::of_physical_turn(run, run).ok_or_else(|| {
+            TurnError::Exec(format!("turn {run} is not its own run's physical turn"))
+        })?;
+        encode_cause(&crate::store::RunTerminalCause::Committed {
+            commit,
+            turn: run.clone(),
+            outcome: committed,
+        })
+    }
 }
 
-/// What `turn.commit` writes for a finished turn.
+/// The stored run terminal of a cancel the session actor honoured before
+/// the turn committed.
+///
+/// # Errors
+///
+/// [`TurnError::Exec`] when the cause does not encode.
+pub fn cancelled_cause(
+    evidence: crate::runtime::TurnCancellationEvidence,
+) -> Result<String, TurnError> {
+    encode_cause(&crate::store::RunTerminalCause::Cancelled { evidence })
+}
+
+fn encode_cause(cause: &crate::store::RunTerminalCause) -> Result<String, TurnError> {
+    serde_json::to_string(cause)
+        .map_err(|error| TurnError::Exec(format!("the run terminal does not encode: {error}")))
+}
+
+/// What `turn.commit` writes for a finished turn: the session head's next
+/// revision. Its terminal is the finished machine's ([`TurnDone`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnCommit {
     /// The head revision the commit replaces.
@@ -244,10 +290,6 @@ pub struct TurnCommit {
     /// The session head's commit, encoded by
     /// [`encode_session_commit`](crate::store::encode_session_commit).
     pub commit_json: String,
-    /// The turn's terminal.
-    pub terminal: TurnTerminal,
-    /// Its typed cause, if it has one.
-    pub cause_json: Option<String>,
 }
 
 /// The session actor's activation: claim, drain mail, admit and run phases,
@@ -340,23 +382,29 @@ impl SessionActivation {
         }
         let open = cx.durable_reads()?.turn(session).await?;
         let Some(row) = open else {
-            let admission = tx
-                .mail()
-                .iter()
-                .find(|mail| mail.kind == admit_mail())
-                .map(|mail| (mail.seq, mail.body.clone()));
-            return match admission {
-                Some((seq, body)) => {
-                    let inputs: AdmittedMail = serde_json::from_str(&body).map_err(|error| {
-                        TurnError::Exec(format!("admission mail does not decode: {error}"))
-                    })?;
-                    admit_turn(cx, &mut tx, inputs.into()).await?;
-                    tx.ack_through(seq);
-                    cx.commit(tx, CommitLabel::TURN_ADMIT).await?;
-                    Ok(Pass::Again)
-                }
+            // No unfinished turn: the mailbox says what runs next (L3s).
+            let drain = drain_session_mail(cx, &mut tx).await?;
+            return match drain.admit {
+                Some(admitted) => match SessionMailAdmission::of(&admitted)?.kind {
+                    SessionMailRunKind::Turn => {
+                        admit_turn(cx, &mut tx, admitted).await?;
+                        cx.commit(tx, CommitLabel::TURN_ADMIT).await?;
+                        Ok(Pass::Again)
+                    }
+                    // A command run binds nothing: the commit that applies
+                    // it settles its row, and until then every drain hands
+                    // it out again.
+                    SessionMailRunKind::Command | SessionMailRunKind::Operation => {
+                        drop(tx);
+                        self.services.apply_commands(cx, &admitted).await?;
+                        // A command's commit may move the head outside
+                        // `turn.commit`: the next turn loads it again.
+                        heads.evict();
+                        Ok(Pass::Again)
+                    }
+                },
                 None if release => {
-                    tx.ack_seen().give_up(Release::Idle);
+                    tx.give_up(Release::Idle);
                     cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
                     Ok(Pass::Released)
                 }
@@ -393,18 +441,9 @@ impl SessionActivation {
         }
         let turn = match row.checkpoint_ref {
             Some(_) => {
-                let config = self.services.machine_config(cx, &row).await?;
-                let RestoredTurn {
-                    machine,
-                    pending,
-                    row,
-                } = restore_turn(cx, config, &row, heads).await?;
-                let drive = self.services.resume(cx, &row, machine).await?;
-                OpenTurn {
-                    drive,
-                    pending,
-                    row,
-                }
+                self.services
+                    .resume(cx, TurnRestore::new(cx, &row, heads))
+                    .await?
             }
             None => {
                 let head = heads.head(cx, session).await?;
@@ -449,42 +488,6 @@ enum Pass {
     Released,
     /// Ownership was lost.
     Lost,
-}
-
-/// [`AdmittedInputs`] as the admission mail encodes it.
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct AdmittedMail {
-    run: TurnId,
-    inputs: Vec<InputId>,
-    admission_json: String,
-}
-
-impl From<AdmittedMail> for AdmittedInputs {
-    fn from(mail: AdmittedMail) -> Self {
-        Self {
-            run: mail.run,
-            inputs: mail.inputs,
-            admission_json: mail.admission_json,
-        }
-    }
-}
-
-impl AdmittedInputs {
-    /// The body of an [`admit_mail`] that admits these inputs.
-    #[must_use]
-    pub fn mail_body(&self) -> String {
-        #[expect(
-            clippy::expect_used,
-            reason = "ids and a string encode without failure"
-        )]
-        serde_json::to_string(&AdmittedMail {
-            run: self.run.clone(),
-            inputs: self.inputs.clone(),
-            admission_json: self.admission_json.clone(),
-        })
-        .expect("admission mail encodes")
-    }
 }
 
 #[async_trait::async_trait]
@@ -654,6 +657,9 @@ pub enum TurnError {
     /// The turn could not be admitted.
     #[error(transparent)]
     Admit(#[from] TurnAdmitRefusal),
+    /// The session's mailbox could not be drained.
+    #[error(transparent)]
+    Mail(#[from] SessionMailError),
     /// The session's close stopped at a step; the next claim resumes it.
     #[error(transparent)]
     Close(Box<SessionCloseError>),
@@ -722,51 +728,74 @@ fn session_of(cx: &ActorContext) -> SessionId {
     SessionId::try_from(cx.actor().id().to_owned()).expect("a session actor names its session")
 }
 
-/// Restore `row`'s turn under `config`: exactly one
-/// `restore_from_checkpoint`, over the committed window its checkpoint pins,
-/// reported to the context's probe, and the effect it re-delivers. The
-/// window is the head `heads` holds when the checkpoint pins that head, and
-/// is read back from the session store at the pin only when the head has
-/// moved past it.
-///
-/// # Errors
-///
-/// [`TurnRestoreError`].
-pub async fn restore_turn(
-    cx: &ActorContext,
-    config: TurnMachineConfig,
-    row: &TurnRow,
-    heads: &mut HeadCache,
-) -> Result<RestoredTurn, TurnRestoreError> {
-    let stored = row
-        .checkpoint_ref
-        .as_deref()
-        .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
-    let saved: SavedTurn<HostTurnProtocol> =
-        serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
-            run: row.run.clone(),
-            reason: error.to_string(),
-        })?;
-    let window = match saved.checkpoint.window_pin() {
-        Some(pin) => Some(
-            heads
-                .window_at(cx, &row.session, pin)
-                .await
-                .map_err(|source| TurnRestoreError::Window {
-                    run: row.run.clone(),
-                    source: Box::new(source),
-                })?,
-        ),
-        None => None,
-    };
-    cx.probe().checkpoint_restored(&row.session, &row.run);
-    let mut machine = TurnMachine::restore_from_checkpoint(config, saved, window)?;
-    let pending = next_work(&mut machine);
-    Ok(RestoredTurn {
-        machine,
-        pending,
-        row: row.clone(),
-    })
+/// The restore of one turn from its checkpoint, handed to
+/// [`TurnServices::resume`]: it runs at most once, so a takeover performs
+/// exactly one `restore_from_checkpoint`, reported to the context's probe.
+pub struct TurnRestore<'a> {
+    cx: &'a ActorContext,
+    row: &'a TurnRow,
+    heads: &'a mut HeadCache,
+}
+
+impl<'a> TurnRestore<'a> {
+    /// The restore of `row`'s turn on `cx`, over the head `heads` holds:
+    /// what the activation hands [`TurnServices::resume`] when it takes the
+    /// turn over.
+    #[must_use]
+    pub fn new(cx: &'a ActorContext, row: &'a TurnRow, heads: &'a mut HeadCache) -> Self {
+        Self { cx, row, heads }
+    }
+
+    /// The turn's row.
+    #[must_use]
+    pub fn row(&self) -> &TurnRow {
+        self.row
+    }
+
+    /// Restore the turn's machine under `config`, the configuration it was
+    /// built with, over the committed window its checkpoint pins, and the
+    /// effect its checkpoint re-delivers. The window is the head the owner
+    /// cached when the checkpoint pins that head, and is read back from the
+    /// session store at the pin only when the head has moved past it.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnRestoreError`].
+    pub async fn restore(
+        self,
+        config: TurnMachineConfig,
+    ) -> Result<RestoredTurn, TurnRestoreError> {
+        let row = self.row;
+        let stored = row
+            .checkpoint_ref
+            .as_deref()
+            .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
+        let saved: SavedTurn<HostTurnProtocol> =
+            serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
+                run: row.run.clone(),
+                reason: error.to_string(),
+            })?;
+        let window = match saved.checkpoint.window_pin() {
+            Some(pin) => Some(
+                self.heads
+                    .window_at(self.cx, &row.session, pin)
+                    .await
+                    .map_err(|source| TurnRestoreError::Window {
+                        run: row.run.clone(),
+                        source: Box::new(source),
+                    })?,
+            ),
+            None => None,
+        };
+        self.cx.probe().checkpoint_restored(&row.session, &row.run);
+        let mut machine = TurnMachine::restore_from_checkpoint(config, saved, window)?;
+        let pending = next_work(&mut machine);
+        Ok(RestoredTurn {
+            machine,
+            pending,
+            row: row.clone(),
+        })
+    }
 }
 
 /// The machine's next effect that needs work from the host, passing over
@@ -828,18 +857,10 @@ pub async fn cancel_open_turn(
         session: row.session.clone(),
         run: row.run.clone(),
         terminal: TurnTerminal::Cancelled,
-        cause_json: Some(cancel_cause_json(cause)?),
+        cause_json: Some(cancelled_cause(cause.clone())?),
         head_revision: None,
     }));
     Ok(Some(row))
-}
-
-/// The `Cancelled` terminal's typed cause.
-fn cancel_cause_json(
-    cause: &crate::runtime::TurnCancellationEvidence,
-) -> Result<String, TurnError> {
-    serde_json::to_string(cause)
-        .map_err(|error| TurnError::Exec(format!("the cancel cause does not encode: {error}")))
 }
 
 /// The evidence of the cancel `request` the turn accepted.

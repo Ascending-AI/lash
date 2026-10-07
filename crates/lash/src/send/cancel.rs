@@ -104,46 +104,32 @@ async fn cancel_run(
     if let Some(operation) =
         lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), run)
     {
-        let batch = parts.store.list_queued_work().await?.into_iter().find(|batch| {
+        // A task's command binds nothing until the commit that applies it
+        // settles it: withdrawing it reaches the task wherever it is.
+        let open = parts.store.list_queued_work().await?.into_iter().any(|batch| {
             batch.batch_id.as_str() == operation.operation_id
                 && matches!(&batch.payload, crate::persistence::QueuedWorkPayload::SessionCommand { command }
                     if matches!(command.as_ref(), lash_core::facade_support::SessionCommand::RunPluginTask { .. }))
         });
-        let Some(batch) = batch else {
-            return Ok(
-                if matches!(
-                    resolve::resolve_run(parts, run).await?,
-                    Resolution::OperationSettled { .. }
-                ) {
-                    CancelReceipt::AlreadySettled { run: run.clone() }
-                } else {
-                    CancelReceipt::NotFound
-                },
-            );
-        };
-        if parts
-            .ops
-            .cancel_queued_work_batch(&parts.store, &operation.operation_id)
-            .await?
-            .is_some()
+        if open
+            && parts
+                .ops
+                .cancel_queued_work_batch(&parts.store, &operation.operation_id)
+                .await?
+                .is_some()
         {
             return Ok(CancelReceipt::OperationWithdrawn { run: run.clone() });
         }
-        let receipt = lash_core::runtime::SessionCommandReceipt {
-            session_id: parts.session_id.clone(),
-            batch_id: batch.batch_id,
-            source_key: batch.source_key.unwrap_or_default(),
-        };
-        let request = lash_core::runtime::request_plugin_task_cancel(
-            parts.store.store().as_ref(),
-            &parts.effect_host,
-            &receipt,
-        )
-        .await?;
-        return Ok(CancelReceipt::OperationRequested {
-            run: run.clone(),
-            request,
-        });
+        return Ok(
+            if matches!(
+                resolve::resolve_run(parts, run).await?,
+                Resolution::OperationSettled { .. }
+            ) {
+                CancelReceipt::AlreadySettled { run: run.clone() }
+            } else {
+                CancelReceipt::NotFound
+            },
+        );
     }
     let driver = TurnWorkDriver::new(parts.effect_host.backend().clone());
     // The cancel addresses the run's running physical turn.

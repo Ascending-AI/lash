@@ -11,8 +11,6 @@
 //!   with the VM state they match.
 //! - [`snapshot`]: quiet points, admitted operation identities and the
 //!   [`SnapshotStore`] a VM's snapshots commit to.
-//! - [`cell`]: a code cell run from its snapshot, its operations admitted
-//!   at quiet points.
 //! - [`identity`]: the one derivation of a code command's `ToolCallId`.
 //! - [`effects`]: the parent's admission and body behind every operation.
 //! - [`broker`]: the run loop, quiet points, restore by identity, terminal
@@ -26,7 +24,6 @@
 
 pub mod authority;
 pub mod broker;
-pub mod cell;
 pub mod effects;
 pub mod identity;
 pub mod ledger;

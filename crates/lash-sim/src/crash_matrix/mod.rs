@@ -31,6 +31,7 @@
 
 pub mod cases;
 pub mod catalog_audit;
+pub mod cells;
 pub mod deployment;
 pub mod engine;
 pub mod findings;

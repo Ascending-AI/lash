@@ -293,6 +293,9 @@ impl LashRuntime {
             Some(crate::store::RunTerminalCause::Committed { outcome, .. }) => {
                 crate::TurnOutcome::from(outcome)
             }
+            Some(crate::store::RunTerminalCause::Cancelled { evidence }) => {
+                crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence })
+            }
             Some(crate::store::RunTerminalCause::Refused {
                 code,
                 message,

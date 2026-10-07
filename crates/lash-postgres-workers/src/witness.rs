@@ -74,21 +74,27 @@ impl Witness {
         .await;
     }
 
-    /// Record that attempt `attempt` of the turn's model call `call` started
-    /// on this node.
-    pub async fn model_attempt(&self, call: u32, attempt: u32) {
-        self.retry(|pool| async move {
-            sqlx::query(
-                "INSERT INTO witness_model_attempts (call_index, attempt, node) VALUES ($1, $2, $3)",
-            )
-            .bind(i32::try_from(call).unwrap_or(i32::MAX))
-            .bind(i32::try_from(attempt).unwrap_or(i32::MAX))
-            .bind(&self.node)
-            .execute(&pool)
-            .await
-            .map(drop)
-        })
-        .await;
+    /// Record that an attempt of the turn's model call `call` started on
+    /// this node, and answer its number: one more than the attempts the
+    /// ledger already holds for the call. An attempt writes its entry before
+    /// it does anything else, so the ledger counts every attempt the outside
+    /// world saw.
+    pub async fn model_attempt(&self, call: u32) -> u32 {
+        let attempt: i32 = self
+            .retry_answer(|pool| async move {
+                sqlx::query_scalar(
+                    "INSERT INTO witness_model_attempts (call_index, attempt, node) \
+                     SELECT $1, COALESCE(MAX(attempt), 0) + 1, $2 \
+                     FROM witness_model_attempts WHERE call_index = $1 \
+                     RETURNING attempt",
+                )
+                .bind(i32::try_from(call).unwrap_or(i32::MAX))
+                .bind(&self.node)
+                .fetch_one(&pool)
+                .await
+            })
+            .await;
+        u32::try_from(attempt).unwrap_or(u32::MAX)
     }
 
     /// Wait until the test records the nemesis marker `release`: a held
@@ -111,9 +117,17 @@ impl Witness {
         F: Fn(PgPool) -> Fut,
         Fut: std::future::Future<Output = Result<(), sqlx::Error>>,
     {
+        self.retry_answer(write).await;
+    }
+
+    async fn retry_answer<T, F, Fut>(&self, write: F) -> T
+    where
+        F: Fn(PgPool) -> Fut,
+        Fut: std::future::Future<Output = Result<T, sqlx::Error>>,
+    {
         loop {
             match write(self.pool.clone()).await {
-                Ok(()) => return,
+                Ok(answer) => return answer,
                 Err(error) => {
                     eprintln!("{}: witness write failed, retrying: {error}", self.node);
                     tokio::time::sleep(RETRY).await;

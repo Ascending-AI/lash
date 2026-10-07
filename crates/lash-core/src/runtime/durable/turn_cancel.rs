@@ -23,7 +23,9 @@ use std::future::Future;
 use lash_durable::CommitLabel;
 use lash_durable::domain::{DomainWrite, TurnWrite};
 
-use super::session::{TurnCancelRequest, TurnError, TurnRow, TurnTerminal, cancel_evidence};
+use super::session::{
+    TurnCancelRequest, TurnError, TurnRow, TurnTerminal, cancel_evidence, cancelled_cause,
+};
 use crate::{ActorContext, SessionId, TurnCancelMode};
 
 /// The cancel request the session's unfinished turn accepted, as of now.
@@ -71,7 +73,7 @@ pub(super) async fn unless_cancelled<F: Future>(
 }
 
 /// End `row`'s turn for its accepted `request`: the `Cancelled` terminal,
-/// with the request's evidence as its cause, in one `turn.cancel` commit. It
+/// with the request's evidence as its run's cause, in one `turn.cancel` commit. It
 /// starts no work; the session head does not move.
 ///
 /// # Errors
@@ -82,8 +84,7 @@ pub(super) async fn finalize(
     row: &TurnRow,
     request: &TurnCancelRequest,
 ) -> Result<TurnTerminal, TurnError> {
-    let cause = serde_json::to_string(&cancel_evidence(request))
-        .map_err(|error| TurnError::Exec(format!("the cancel cause does not encode: {error}")))?;
+    let cause = cancelled_cause(cancel_evidence(request))?;
     let mut tx = cx.begin().await?;
     super::tool_round::cancel_open_round(cx, &mut tx, row).await?;
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {

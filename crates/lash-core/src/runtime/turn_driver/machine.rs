@@ -247,7 +247,7 @@ impl RuntimeTurnDriver<'_> {
         Ok((crate::MessageSequence::default(), run_offset))
     }
 
-    async fn apply_progress_boundary(
+    pub(super) async fn apply_progress_boundary(
         &mut self,
         messages: crate::MessageSequence,
         event_delta: Vec<crate::SessionHistoryRecord>,

@@ -207,6 +207,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.protocol_iteration
     }
 
+    /// The configuration the machine was built with, the one its checkpoint
+    /// restores under ([`Self::restore_from_checkpoint`]).
+    pub fn into_config(self) -> TurnMachineConfig<M> {
+        self.config
+    }
+
     /// The machine's bounded checkpoint, with the transcript content it
     /// names by digest: what the turn added to the window it started from.
     pub fn checkpoint(&self) -> SavedTurn<M> {

@@ -141,7 +141,7 @@ pub(super) async fn apply(
                 .execute(&mut *tx)
                 .await
                 .map_err(sqlx_failure)?;
-            Ok(())
+            super::session_mail::settle_held(&mut *tx, session, run, commit.now.0).await
         }
     }
 }

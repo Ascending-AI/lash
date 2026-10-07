@@ -340,22 +340,35 @@ impl TurnAttach for TurnWorkDriver {
     }
 }
 
-/// The terminal a turn's row records.
+/// The terminal a turn's row records: its run's end, stored as every run's
+/// end is ([`RunTerminalCause`](crate::store::RunTerminalCause)).
 fn terminal_of(address: &TurnAddress, ended: &TurnEnd) -> Result<TurnTerminal, RuntimeError> {
-    let stop = ended
+    let decode_error = |error: String| {
+        RuntimeError::new(
+            crate::RuntimeErrorCode::TurnTerminalDecode,
+            format!(
+                "the terminal cause of turn `{}` in session `{}` does not decode: {error}",
+                address.turn_id, address.session_id
+            ),
+        )
+    };
+    let cause = ended
         .cause_json
         .as_deref()
-        .map(serde_json::from_str::<TurnStop>)
-        .transpose()
-        .map_err(|error| {
-            RuntimeError::new(
-                crate::RuntimeErrorCode::TurnTerminalDecode,
-                format!(
-                    "the terminal cause of turn `{}` in session `{}` does not decode: {error}",
-                    address.turn_id, address.session_id
-                ),
-            )
-        })?;
+        .ok_or_else(|| decode_error("the row records no cause".to_owned()))?;
+    let stop = match serde_json::from_str::<crate::store::RunTerminalCause>(cause)
+        .map_err(|error| decode_error(error.to_string()))?
+    {
+        crate::store::RunTerminalCause::Committed { outcome, .. } => outcome.stop().cloned(),
+        crate::store::RunTerminalCause::Cancelled { evidence } => {
+            Some(TurnStop::Cancelled { evidence })
+        }
+        other => {
+            return Err(decode_error(format!(
+                "a session actor's turn ends committed or cancelled, not {other:?}"
+            )));
+        }
+    };
     Ok(TurnTerminal::Committed { stop })
 }
 

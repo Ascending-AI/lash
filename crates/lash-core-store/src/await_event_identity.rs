@@ -12,11 +12,6 @@ pub enum AwaitEventWaitIdentity {
         signal_name: String,
         ordinal: u64,
     },
-    /// Reserved cancel signal of a host plugin task a session command runs
-    /// (FIG-4391), under the command's own session-operation scope. Only a host's
-    /// cancel resolves it, cancelled; how the command ended is its
-    /// settlement, never this signal (FIG-4453).
-    SessionCommandCancelSignal,
 }
 impl AwaitEventWaitIdentity {
     pub fn process_signal(
@@ -38,7 +33,6 @@ impl AwaitEventWaitIdentity {
                 ordinal,
                 ..
             } => signal_name.trim().is_empty() || *ordinal == 0,
-            Self::SessionCommandCancelSignal => false,
         };
         if invalid {
             return Err(RuntimeError::new(

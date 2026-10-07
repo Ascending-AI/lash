@@ -77,18 +77,14 @@ pub async fn open(
             let storage = lash_postgres_store::PostgresStorage::connect(isolated.url())
                 .await
                 .expect("the isolated database opens");
-            let database: Arc<dyn DurableStore> = Arc::new(
-                storage
-                    .durable_store()
-                    .with_clock_for_testing(Arc::clone(&clock) as _),
-            );
-            // The store set reads the scenario's clock too: a process it
-            // registers is ready at the instant the durable store claims at.
-            let stores = lash_postgres_store::PostgresStoreSet::with_clock(
+            // Every port reads the virtual clock, the durable store's
+            // included: a host's mail is due when the nodes' clock says.
+            let stores = lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
                 &storage,
                 Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
-                clock as _,
+                clock,
             );
+            let database = lash_core_execution::StoreSet::durable_store(&stores);
             keep.lock_recover().push(Box::new(isolated));
             (Arc::new(stores), database)
         }

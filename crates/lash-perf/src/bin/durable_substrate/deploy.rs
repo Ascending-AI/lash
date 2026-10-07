@@ -51,6 +51,8 @@ impl Database {
 pub struct Node {
     /// Its backend: producers on this node commit through it.
     pub backend: Backend,
+    /// Its cell core: cell sessions are created through it.
+    pub cells: lash::LashCore,
     storage: Option<PostgresStorage>,
     stop: Option<oneshot::Sender<()>>,
     task: JoinHandle<Result<Stopped, DurableError>>,
@@ -165,7 +167,8 @@ impl Deployment {
             secrets: Some(secrets()?),
             engines: vec![Arc::new(BenchEngine::new(Arc::clone(&self.board)))],
             providers: Arc::new(NoProjectionProviders),
-            formats: Vec::new(),
+            // Its cells run on the RLM worker path: actors hold the VM's state.
+            formats: lash::formats::actor_state_surfaces(),
         })
         .map_err(|error| anyhow::anyhow!("assemble the backend: {error}"))?;
         Ok((backend, storage))
@@ -180,11 +183,17 @@ impl Deployment {
         let name = format!("node-{}", self.booted);
         self.booted += 1;
         let (backend, storage) = self.backend(&name).await?;
+        let cells = crate::cells::core(
+            &backend,
+            Arc::clone(&self.scripts),
+            Arc::clone(&self.recorder),
+        )?;
         let sessions = SessionActivation::new(
             backend.clone(),
             Arc::new(BenchServices::new(
                 Arc::clone(&self.recorder),
                 Arc::clone(&self.scripts),
+                crate::cells::services(&cells),
             )),
             Arc::new(NoProbe),
         );
@@ -200,7 +209,7 @@ impl Deployment {
                     node,
                     drain: Drain::default(),
                     sessions: Arc::new(sessions),
-                    processes: Arc::new(processes),
+                    processes: Some(Arc::new(processes)),
                 },
                 async move {
                     let _ = stopped.await;
@@ -210,6 +219,7 @@ impl Deployment {
         });
         self.nodes.push(Node {
             backend,
+            cells,
             storage,
             stop: Some(stop),
             task,
@@ -238,6 +248,11 @@ impl Deployment {
     /// The node a producer of item `index` commits through.
     pub fn producer(&self, index: usize) -> &Backend {
         &self.nodes[index % self.nodes.len()].backend
+    }
+
+    /// Node `index`'s cell core.
+    pub fn cells(&self, index: usize) -> &lash::LashCore {
+        &self.nodes[index % self.nodes.len()].cells
     }
 }
 

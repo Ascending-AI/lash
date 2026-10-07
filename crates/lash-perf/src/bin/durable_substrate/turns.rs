@@ -14,7 +14,7 @@ use serde::Serialize;
 use crate::deploy::{Deployment, micros};
 use crate::recorder::Transaction;
 use crate::support::{Counters, Distribution, Snapshot, by_label};
-use crate::turn::{ADMISSION, Script, admission, create_session, session_actor, session_id};
+use crate::turn::{Script, admit, create_session, session_actor, session_id};
 use crate::{Case, Run};
 
 /// How long a turn may take before the bench gives up on it.
@@ -67,20 +67,11 @@ async fn one_turn(
     index: usize,
     session: &SessionId,
     run: &TurnId,
-    create: bool,
 ) -> Result<(Instant, Instant)> {
     let actor = session_actor(session)?;
     let committed = deployment.recorder.watch(&actor, CommitLabel::TURN_COMMIT);
-    let tx = admission(
-        session,
-        run,
-        create,
-        deployment.producer(index).formats().session(),
-    )?;
     let started = Instant::now();
-    deployment
-        .producer(index)
-        .commit_mail(tx, ADMISSION)
+    admit(deployment.producer(index), session, run)
         .await
         .with_context(|| format!("admit {run}"))?;
     let done = tokio::time::timeout(TURN_LIMIT, committed)
@@ -196,7 +187,7 @@ pub async fn rounds(run: &Run<'_>, case: &Case, sessions: usize) -> Result<()> {
             let deployment = &deployment;
             async move {
                 let run_id = turn_id(&format!("{session}-t0"))?;
-                one_turn(deployment, index, session, &run_id, true).await
+                one_turn(deployment, index, session, &run_id).await
             }
         }))
         .await?;
@@ -303,7 +294,6 @@ pub async fn resume(run: &Run<'_>, case: &Case, prior_turns: usize) -> Result<()
             0,
             &session,
             &turn_id(&format!("prior-{turn}"))?,
-            turn == 0,
         )
         .await?;
     }
@@ -317,14 +307,8 @@ pub async fn resume(run: &Run<'_>, case: &Case, prior_turns: usize) -> Result<()
         let reached = deployment.scripts.on_hold(&session);
         let run_id = turn_id(&format!("held-{sample_index}"))?;
         let committed = deployment.recorder.watch(&actor, CommitLabel::TURN_COMMIT);
-        let tx = admission(
-            &session,
-            &run_id,
-            prior_turns == 0 && sample_index == 0,
-            deployment.producer(0).formats().session(),
-        )?;
         let from = deployment.recorder.now_us();
-        deployment.producer(0).commit_mail(tx, ADMISSION).await?;
+        admit(deployment.producer(0), &session, &run_id).await?;
         tokio::time::timeout(TURN_LIMIT, reached)
             .await
             .context("the held call was never reached")??;
@@ -408,7 +392,7 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
     for batch in 0..run.samples {
         let session = session_id(&format!("{}-b{batch}", case.name))?;
         let actor = session_actor(&session)?.to_string();
-        create_session(deployment.producer(0), &session).await?;
+        crate::cells::create_session(deployment.cells(0), &session).await?;
         deployment.scripts.set(&session, case.script);
         let before = counters.read().await?;
         let from = deployment.recorder.now_us();
@@ -417,7 +401,6 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
             0,
             &session,
             &turn_id(&format!("{session}-t0"))?,
-            true,
         )
         .await?;
         let after = counters.read().await?;

@@ -473,7 +473,11 @@ fn source_holder() -> MaterialHolder {
     MaterialHolder::Source {
         source: AwaitEventKey {
             scope: ExecutionScope::turn("s", "t"),
-            wait: AwaitEventWaitIdentity::SessionCommandCancelSignal,
+            wait: AwaitEventWaitIdentity::process_signal(
+                crate::ProcessId::fixture("p"),
+                "signal",
+                1,
+            ),
             key_id: "key".into(),
             signature: "signature".into(),
         },

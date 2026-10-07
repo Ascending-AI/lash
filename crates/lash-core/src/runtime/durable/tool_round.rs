@@ -91,7 +91,7 @@ pub(super) async fn run(
     let owner = OwnerKey::Turn(session.clone(), row.run.clone());
     let opener = EffectOpener::turn(session.clone(), row.run.clone());
     let run = RunSeq(id.0);
-    let tools: Arc<dyn RoundTools> = drive.tools();
+    let tools: Arc<dyn RoundTools> = drive.tools()?;
     let policies = tools.policies();
     if calls.is_empty() {
         drive.machine().handle_response(Response::ToolResults {
