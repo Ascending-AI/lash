@@ -921,6 +921,20 @@ impl LashRuntime {
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
+        // The session actor opens the runtime a command run applies in from
+        // the committed head, which builds no plugins. A command that runs
+        // against the live session builds it first, as a turn does (ADR 0132
+        // §4, FIG-5245); one that only writes the head applies without it.
+        if matches!(
+            commands.as_slice(),
+            [crate::SessionCommand::RefreshToolCatalog { .. }
+                | crate::SessionCommand::ChangeToolState { .. }
+                | crate::SessionCommand::RunPluginCommand { .. }
+                | crate::SessionCommand::RunPluginTask { .. }
+                | crate::SessionCommand::CompactContext { .. }]
+        ) {
+            Box::pin(self.materialize_turn_session(effect_controller)).await?;
+        }
         // Compaction and host commands apply alone, under their own scope,
         // in the commit that settles them (FIG-4201, FIG-4202).
         match commands.as_slice() {
