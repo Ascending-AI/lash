@@ -316,7 +316,7 @@ mod tests {
 
     /// A supply without a process-work port cannot run the parent-end or
     /// process-terminal relay; one without session administration cannot run
-    /// the session-delete relay; a full supply runs every kind.
+    /// the trigger-delivery relay; a full supply runs every kind.
     #[test]
     fn a_supply_missing_a_kinds_delivery_names_that_kind() {
         let full = RelaySupply {
@@ -342,7 +342,7 @@ mod tests {
             }
             .check(),
             Err(ObligationRelayUnavailable {
-                kind: ObligationKind::ArtifactCleanup,
+                kind: ObligationKind::TriggerDelivery,
                 need: RelayNeed::SessionAdministration,
             })
         );
