@@ -252,7 +252,10 @@ compilation independently from tests that scan source at runtime.
 The default preserves the previous compilation geometry: target optimization,
 debug information, assertions, overflow checks, lints, features and metadata/full
 artifact behavior are part of the contract. Per-package optimization derives
-from `Cargo.toml`. Host proc macros and build tools retain separate optimization.
+from `Cargo.toml`: the dev wildcard compiles third-party dependencies at
+opt-level 2 while workspace crates keep their ordinary dev profile. Named
+package overrides take precedence over the wildcard. Host proc macros and
+build tools retain separate optimization.
 `--config=judged` changes target configuration without changing host tools.
 Cargo release and publishing profiles remain authoritative for their artifacts.
 Published `rust-version` retains its existing compatibility floor.

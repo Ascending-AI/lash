@@ -4,6 +4,7 @@ FIRST_PARTY_OPT_LEVELS = {
 }
 
 THIRD_PARTY_OPT_LEVELS = {
+    "*": 2,
     "insta": 3,
     "similar": 3
 }

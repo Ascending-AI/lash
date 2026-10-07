@@ -33,10 +33,12 @@ def _profile_kwargs(kwargs):
         "//tools/buck2:profile_optimized": _OPTIMIZED_FLAGS,
         "DEFAULT": [],
     }) + list(result.get("rustc_flags", []))
-    if package_name in THIRD_PARTY_OPT_LEVELS:
+    opt_level = THIRD_PARTY_OPT_LEVELS.get(package_name, THIRD_PARTY_OPT_LEVELS.get("*"))
+    if opt_level != None:
         flags += select({
             "//tools/buck2:profile_host": [],
-            "DEFAULT": ["-Copt-level={}".format(THIRD_PARTY_OPT_LEVELS[package_name])],
+            "//tools/buck2:profile_optimized": [],
+            "DEFAULT": ["-Copt-level={}".format(opt_level)],
         })
     flags += select({
         "//tools/buck2:profile_judged": ["-Cdebug-assertions=no", "-Coverflow-checks=no"],

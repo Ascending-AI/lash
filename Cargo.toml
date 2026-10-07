@@ -324,6 +324,10 @@ strip = true
 debug = "line-tables-only"
 
 [profile.dev.package]
+# Dependencies are reused across edits; optimize their runtime hot paths while
+# workspace crates retain fast development compiles.
+"*" = { opt-level = 2 }
+
 # These crates execute inside the proc-macro host while the workspace compiles.
 proc-macro2 = { opt-level = 2 }
 quote = { opt-level = 2 }

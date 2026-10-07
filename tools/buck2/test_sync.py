@@ -14,6 +14,7 @@ import sys
 import tempfile
 import tomllib
 from collections import defaultdict
+from unittest.mock import patch
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -758,6 +759,33 @@ def check_native_inputs() -> None:
     }, sorted(hermetic)
     assert all(tags == ["hermetic-postgres"] for tags in hermetic.values()), hermetic
     assert set(hermetic) <= set(inventory["workspace_dev_test_targets"])
+
+
+def check_dev_profile_wildcard_projection() -> None:
+    """Cargo's wildcard covers dependencies; named overrides take precedence."""
+    sys.path.insert(0, str(HERE))
+    import sync
+
+    canonical = {
+        "workspace_members": ["member"],
+        "packages": [{"id": "member", "name": "lash-regress"}],
+    }
+    manifest = {
+        "profile": {
+            "dev": {
+                "package": {
+                    "*": {"opt-level": 2},
+                    "lash-regress": {"opt-level": 2},
+                    "insta": {"opt-level": 3},
+                    "syn": {"opt-level": 2},
+                }
+            }
+        }
+    }
+    with patch.object(sync.tomllib, "loads", return_value=manifest):
+        projected = sync.profile_bzl(canonical)
+    assert bzl_value(projected, "FIRST_PARTY_OPT_LEVELS") == {"lash-regress": 2}
+    assert bzl_value(projected, "THIRD_PARTY_OPT_LEVELS") == {"*": 2, "insta": 3}
 
 
 def check_dependency_and_profile_projection() -> None:
@@ -1836,6 +1864,7 @@ def main() -> int:
         check_target_kind_rule,
         check_native_inputs,
         check_dependency_and_profile_projection,
+        check_dev_profile_wildcard_projection,
         check_sync_receipt,
         check_clippy_receipt_inputs,
         check_rust_edit_receipt_inputs,

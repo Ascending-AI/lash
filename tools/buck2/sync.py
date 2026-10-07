@@ -767,8 +767,6 @@ def profile_bzl(canonical: dict) -> str:
     first_party: dict[str, int] = {}
     third_party: dict[str, int] = {}
     for name, values in sorted(overrides.items()):
-        if name == "*":
-            continue
         if set(values) != {"opt-level"}:
             raise SystemExit(f"unsupported dev profile keys for {name}: {sorted(values)}")
         if name in member_names:
