@@ -36,10 +36,11 @@ use lash_durable::domain::{
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorKind, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause,
-    Claimed, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads, DurableStore,
-    Epoch, Fenced, FormatSet, HeartbeatOutcome, Mail, MailAnswer, MailCommit, MailDomainWrite,
-    MailKind, MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor,
-    Owner, Reaped, Release, StateRevision, StoreFailure, StoreFailureKind, Woken,
+    ClaimPurpose, Claimed, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads,
+    DurableStore, Epoch, Fenced, FormatSet, HeartbeatOutcome, Mail, MailAnswer, MailCommit,
+    MailDomainWrite, MailKind, MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease,
+    NodeSpec, OpenedActor, Owner, Reaped, Release, StateRevision, StoreFailure, StoreFailureKind,
+    Woken,
 };
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::park_events::ParkEventStatements;
@@ -120,22 +121,28 @@ lash_store_sql::statements! {
     /// The engine statements only PostgreSQL issues.
     pub(crate) struct PostgresDurableStatements @ "durable_postgres" {
         /// Boot `?2` of node `?1`'s lease, locked against a concurrent reap
-        /// for the rest of the transaction.
-        node_live = "SELECT 1 FROM nodes WHERE node_id = ?1 AND boot_id = ?2 FOR SHARE";
+        /// for the rest of the transaction: its draining flag, or no row.
+        node_live = "SELECT draining FROM nodes WHERE node_id = ?1 AND boot_id = ?2 FOR SHARE";
 
-        /// Give up to `?5` actors claimable at `?1` in a format set of `?4`
-        /// to boot `?3` of node `?2`, oldest first, bumping each epoch;
-        /// returns each with the state that made it claimable. A claim that
-        /// finds no commit since the previous claim counts one more failed
-        /// activation; any commit since resets the count.
+        /// Give up to `?5` actors claimable at `?1` in a format set of `?4`,
+        /// or process actors in another set with mail of kind `?6` (a
+        /// cancel) pending, to boot `?3` of node `?2`, oldest first, bumping
+        /// each epoch; returns each with the state that made it claimable
+        /// and its format set. A claim that finds no commit since the
+        /// previous claim counts one more failed activation; any commit
+        /// since resets the count.
         claim = "WITH c AS (
-                 SELECT actor_key, state FROM actors
-                 WHERE ((state = 'ready' AND ready_at_ms <= ?1)
-                     OR (state = 'waiting' AND next_due_ms <= ?1))
-                   AND formats = ANY(?4)
-                 ORDER BY COALESCE(ready_at_ms, next_due_ms), actor_key
+                 SELECT p.actor_key, p.state, p.formats FROM actors p
+                 WHERE ((p.state = 'ready' AND p.ready_at_ms <= ?1)
+                     OR (p.state = 'waiting' AND p.next_due_ms <= ?1))
+                   AND (p.formats = ANY(?4)
+                     OR (p.kind = 'process' AND EXISTS (
+                         SELECT 1 FROM actor_mail m
+                         WHERE m.actor_key = p.actor_key AND m.seq > p.acked_seq
+                           AND m.kind = ?6)))
+                 ORDER BY COALESCE(p.ready_at_ms, p.next_due_ms), p.actor_key
                  LIMIT ?5
-                 FOR UPDATE SKIP LOCKED
+                 FOR UPDATE OF p SKIP LOCKED
              )
              UPDATE actors AS a
              SET state = 'owned', epoch = a.epoch + 1, owner_node = ?2, owner_boot = ?3,
@@ -145,7 +152,7 @@ lash_store_sql::statements! {
                  claimed_revision = a.state_revision
              FROM c
              WHERE a.actor_key = c.actor_key
-             RETURNING a.actor_key, a.epoch, c.state";
+             RETURNING a.actor_key, a.epoch, c.state, c.formats";
 
         /// Lock the rows of actors `?1` in key order: a mailbox commit
         /// that wakes several actors takes their locks before any write,
@@ -444,13 +451,24 @@ impl PostgresDurableStore {
 }
 
 async fn node_live(tx: &mut PgConnection, node: &Owner) -> Result<bool, DurableError> {
-    Ok(sqlx::query(SQL.postgres.node_live.sql())
+    Ok(node_draining(tx, node).await?.is_some())
+}
+
+/// Whether `node` is draining, or `None` when it holds no lease.
+async fn node_draining(tx: &mut PgConnection, node: &Owner) -> Result<Option<bool>, DurableError> {
+    sqlx::query_scalar(SQL.postgres.node_live.sql())
         .bind(node.node.as_str())
         .bind(node.boot.as_str())
         .fetch_optional(tx)
         .await
-        .map_err(sqlx_failure)?
-        .is_some())
+        .map_err(sqlx_failure)
+}
+
+/// The format sets a node's stored `formats_json` names.
+fn decoded_sets(stored: &str) -> Result<Vec<FormatSet>, DurableError> {
+    let sets: Vec<String> =
+        serde_json::from_str(stored).map_err(|_| corrupt("node format sets", stored))?;
+    Ok(sets.into_iter().map(FormatSet::new).collect())
 }
 
 async fn release_owned_by(
@@ -512,6 +530,14 @@ async fn apply_owner(
     for domain in write.domain() {
         apply_domain(tx, &committing, domain).await?;
     }
+    if let Some(formats) = write.formats() {
+        sqlx::query(SQL.actor.stamp_formats.sql())
+            .bind(actor)
+            .bind(formats.as_str())
+            .execute(&mut ***tx)
+            .await
+            .map_err(sqlx_failure)?;
+    }
     if let Some(through) = write.ack() {
         for statement in [&SQL.actor.ack, &SQL.mail.delete_through] {
             sqlx::query(statement.sql())
@@ -569,6 +595,7 @@ async fn apply_owner(
         Some(rest) => {
             let (state, due) = match rest {
                 Release::Waiting { next_due } => ("waiting", next_due.map(|due| due.0)),
+                Release::Ready => ("ready", None),
                 _ => ("idle", None),
             };
             let stored: String = sqlx::query_scalar(SQL.actor.release.sql())
@@ -982,10 +1009,14 @@ impl DurableStore for PostgresDurableStore {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let (mut tx, now) = self.open(CommitLabel::CLAIM).await?;
         let outcome = async {
-            if !node_live(&mut tx, &node.owner).await? {
-                return Err(DurableError::NodeLeaseLost {
-                    node: node.owner.node.clone(),
-                });
+            match node_draining(&mut tx, &node.owner).await? {
+                None => {
+                    return Err(DurableError::NodeLeaseLost {
+                        node: node.owner.node.clone(),
+                    });
+                }
+                Some(true) => return Ok(Vec::new()),
+                Some(false) => {}
             }
             let rows = sqlx::query(SQL.postgres.claim.sql())
                 .bind(now.0)
@@ -993,6 +1024,7 @@ impl DurableStore for PostgresDurableStore {
                 .bind(node.owner.boot.as_str())
                 .bind(&formats)
                 .bind(limit)
+                .bind(lash_durable::domain::CANCEL_MAIL)
                 .fetch_all(&mut **tx)
                 .await
                 .map_err(sqlx_failure)?;
@@ -1007,6 +1039,7 @@ impl DurableStore for PostgresDurableStore {
                         } else {
                             ClaimCause::Ready
                         },
+                        purpose: ClaimPurpose::of(&node.decodes, &get::<String>(row, 3)?),
                     })
                 })
                 .collect::<Result<Vec<_>, DurableError>>()?;
@@ -1018,21 +1051,50 @@ impl DurableStore for PostgresDurableStore {
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
-        let rows: Vec<(String, i64)> = sqlx::query_as(SQL.actor.owned_by.sql())
+        let rows: Vec<(String, i64, String)> = sqlx::query_as(SQL.actor.owned_by.sql())
             .bind(node.owner.node.as_str())
             .bind(node.owner.boot.as_str())
             .fetch_all(&self.pool)
             .await
             .map_err(sqlx_failure)?;
         rows.into_iter()
-            .map(|(key, epoch)| {
+            .map(|(key, epoch, formats)| {
                 Ok(Claimed {
                     actor: actor_key(&key)?,
                     epoch: Epoch(epoch),
                     cause: ClaimCause::Adopted,
+                    purpose: ClaimPurpose::of(&node.decodes, &formats),
                 })
             })
             .collect()
+    }
+
+    async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
+        let (mut tx, _now) = self.open(CommitLabel::NODE_DRAIN).await?;
+        let outcome = async {
+            sqlx::query(SQL.node.mark_draining.sql())
+                .bind(node.owner.node.as_str())
+                .bind(node.owner.boot.as_str())
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(sqlx_failure)?
+                .map(|_| ())
+                .ok_or_else(|| DurableError::NodeLeaseLost {
+                    node: node.owner.node.clone(),
+                })
+        }
+        .await;
+        finish(tx, outcome).await
+    }
+
+    async fn live_decodes(&self) -> Result<Vec<Vec<FormatSet>>, DurableError> {
+        let now = self.now().await?;
+        let rows: Vec<String> = sqlx::query_scalar(SQL.node.live_decodes.sql())
+            .bind(now.0)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(sqlx_failure)?;
+        rows.iter().map(|stored| decoded_sets(stored)).collect()
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {

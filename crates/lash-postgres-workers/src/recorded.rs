@@ -166,6 +166,14 @@ impl DurableStore for RecordedStore {
         claimed
     }
 
+    async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
+        self.inner.mark_draining(node).await
+    }
+
+    async fn live_decodes(&self) -> Result<Vec<Vec<lash_durable::FormatSet>>, DurableError> {
+        self.inner.live_decodes().await
+    }
+
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         let owned = self.inner.owned(node).await;
         if let Ok(owned) = &owned {

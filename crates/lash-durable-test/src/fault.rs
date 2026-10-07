@@ -107,6 +107,7 @@ impl Effect for HeartbeatOutcome {}
 impl Effect for ActorCommit {}
 
 impl Effect for MailCommit {}
+impl Effect for () {}
 
 impl Effect for Vec<Reaped> {
     fn effective(&self) -> bool {
@@ -364,6 +365,24 @@ impl DurableStore for FaultStore {
             keep,
         )
         .await
+    }
+
+    async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
+        self.write(
+            WriteKind::Lease,
+            CommitLabel::NODE_DRAIN,
+            None,
+            self.call(|store| {
+                let node = node.clone();
+                async move { store.mark_draining(&node).await }
+            }),
+            keep,
+        )
+        .await
+    }
+
+    async fn live_decodes(&self) -> Result<Vec<Vec<lash_durable::FormatSet>>, DurableError> {
+        self.read(self.inner.live_decodes()).await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {

@@ -31,6 +31,8 @@
 
 #[path = "support/dialect.rs"]
 mod dialect;
+#[path = "support/images.rs"]
+mod images;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -53,7 +55,10 @@ use lash_core_execution::runtime::actor::round::{
     self, AdmittedExecution, BodyOutput, CompletedCall, ExecutionDraft, MemberBody, MemberPin,
     PolicyView, Recovery, RoundTools,
 };
-use lash_core_execution::{ActorContext, Backend};
+use lash_core_execution::{
+    ActorContext, Backend, BackendParts, CompletionKeySecrets, DurableSettings,
+    NoProjectionProviders, StoreSet,
+};
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
     AttemptOutcome, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
@@ -61,8 +66,7 @@ use lash_core_store::tool_run::{
 use lash_durable::domain::{ExecKey, RunRecordKind};
 use lash_durable::runner::Activation;
 use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DomainWrite, DurableError, DurableStore, FormatSet,
-    LeaseConfig, MailTx,
+    ActorKey, ActorState, CommitLabel, DomainWrite, DurableError, DurableStore, LeaseConfig, MailTx,
 };
 use lash_durable_test::{
     Cut, Fault, Life, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored,
@@ -77,7 +81,6 @@ use lashlang::{ExecutionHostError, ResourceOperation, Value};
 
 use dialect::Dialect;
 
-const FORMATS: &str = "v0";
 const SESSION: &str = "v0-session";
 const RUN: &str = "v0-turn";
 const TOOL: &str = "ext_write";
@@ -586,10 +589,30 @@ fn commit_budget() -> lash_core::facade_support::CommitBudget {
     lash_core::facade_support::CommitBudget::bounded(1024 * 1024, 512)
 }
 
+/// The runtime core's backend over `stores`, its actors in the shipped
+/// build's format sets: the core's own formats and the VM's.
+fn shipped_backend(stores: Arc<dyn StoreSet>) -> Backend {
+    Backend::assemble(BackendParts {
+        stores,
+        settings: DurableSettings::default(),
+        secrets: Some(CompletionKeySecrets::for_testing()),
+        engines: Vec::new(),
+        providers: Arc::new(NoProjectionProviders),
+        formats: lash::formats::actor_state_surfaces(),
+    })
+    .expect("the V0 backend assembles")
+}
+
 /// The V0 scenario on one dialect, fresh for every matrix cell.
 struct V0 {
     dialect: Dialect,
     postgres_url: Option<String>,
+    /// A committed store image the scenario opens instead of a fresh
+    /// database: a decode-and-resume fixture.
+    image: Option<&'static images::Image>,
+    /// The SQLite file a fixture is recorded from, instead of a fresh
+    /// database.
+    record_at: Option<std::path::PathBuf>,
     world: Arc<ExternalWorld>,
     tripwire: Arc<Tripwire>,
     cells: Arc<Mutex<Vec<ExecKey>>>,
@@ -602,12 +625,21 @@ impl V0 {
         Self {
             dialect,
             postgres_url,
+            image: None,
+            record_at: None,
             world: Arc::default(),
             tripwire: Arc::default(),
             cells: Arc::default(),
             backend: Mutex::default(),
             keep: Mutex::default(),
         }
+    }
+
+    fn backend(&self) -> Backend {
+        self.backend
+            .lock_recover()
+            .clone()
+            .expect("the database is built first")
     }
 
     /// The one cell the turn ran: every node names it by the same effect id,
@@ -623,21 +655,39 @@ impl V0 {
 #[async_trait::async_trait]
 impl Scenario for V0 {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
-        let (stores, database) = dialect::open(
-            self.dialect,
-            self.postgres_url.as_deref(),
-            clock,
-            &self.keep,
-        )
-        .await;
-        *self.backend.lock_recover() = Some(Backend::for_testing(stores));
+        let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) =
+            match (self.image, &self.record_at) {
+                (Some(image), _) => {
+                    let (stores, dir) = images::open(image, clock).await;
+                    self.keep.lock_recover().push(Box::new(dir));
+                    let database = Arc::new(stores.durable_store());
+                    (Arc::new(stores), database)
+                }
+                (None, Some(path)) => {
+                    let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(path, clock)
+                        .await
+                        .expect("the recorded store opens");
+                    let database = Arc::new(stores.durable_store());
+                    (Arc::new(stores), database)
+                }
+                (None, None) => {
+                    dialect::open(
+                        self.dialect,
+                        self.postgres_url.as_deref(),
+                        clock,
+                        &self.keep,
+                    )
+                    .await
+                }
+            };
+        *self.backend.lock_recover() = Some(shipped_backend(stores));
         database
     }
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
             lease: LeaseConfig::default(),
-            decodes: vec![FormatSet::new(FORMATS)],
+            decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
     }
@@ -692,11 +742,7 @@ impl V0 {
     async fn seed(&self, nodes: &SimNodes) -> Result<(), String> {
         // The session exists in the catalog at its creation head before
         // its turn is admitted.
-        let backend = self
-            .backend
-            .lock_recover()
-            .clone()
-            .ok_or("the database is built first")?;
+        let backend = self.backend();
         let catalog: Arc<dyn lash_core_store::store::RuntimeStore> =
             backend.session_store_factory();
         lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session())
@@ -718,11 +764,8 @@ impl V0 {
             admission_json: serde_json::to_string(&messages).map_err(|e| e.to_string())?,
         };
         let mut seed = MailTx::new();
-        seed.create_actor(actor(), FormatSet::new(FORMATS)).append(
-            actor(),
-            admit_mail(),
-            inputs.mail_body(),
-        );
+        seed.create_actor(actor(), backend.formats().session().clone())
+            .append(actor(), admit_mail(), inputs.mail_body());
         // The producer is outside the deployment under test: its mail is
         // seeded straight into the database, uncut.
         nodes
@@ -1109,6 +1152,8 @@ async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
     let cold = V0 {
         dialect,
         postgres_url,
+        image: None,
+        record_at: None,
         world: Arc::clone(&first.world),
         tripwire: Arc::clone(&first.tripwire),
         cells: Arc::default(),
@@ -1199,6 +1244,145 @@ async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_postgres() {
         return;
     };
     cold_resume(Dialect::Postgres, Some(url)).await;
+}
+
+/// Re-record the session image (`support/images.rs`): node A runs the turn
+/// until its cell's `Once` operation's outcome commits, and dies; the store
+/// it leaves is the fixture. It holds the turn checkpoint, the cell's VM
+/// continuation parked on the operation, the operation's run records and
+/// its outcome's material.
+#[tokio::test]
+#[ignore = "regenerates crates/lash-durable-test/tests/fixtures/formats/session"]
+async fn regenerate_session_format_fixture() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = images::database_path(dir.path());
+    let mut first = V0::new(Dialect::SqliteFile, None);
+    first.record_at = Some(path.clone());
+    let clock = SimClock::new();
+    let database = first.database(Arc::clone(&clock)).await;
+    let script = Script::new();
+    script.cut_on("a", CommitLabel::ROUND_OUTCOME, 1, Fault::CommitThenAbort);
+    let nodes = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        script,
+        first.config(),
+        first.activation(),
+    );
+    first.seed(&nodes).await.expect("the turn is seeded");
+    nodes.start("a");
+    nodes.quiesce().await;
+    while nodes.script().cuts().is_empty() {
+        // The cut kills A, which leaves no timer armed: the step that cuts
+        // can be the last.
+        let stepped = nodes.step().await;
+        assert!(
+            stepped.is_some() || !nodes.script().cuts().is_empty(),
+            "the turn stalled before its operation's outcome committed:\n{}",
+            nodes.script().rendered_trace()
+        );
+    }
+    nodes.kill("a");
+    nodes.quiesce().await;
+    assert_eq!(
+        first.world.writes().len(),
+        1,
+        "the operation's body did not run once before the cut"
+    );
+    images::regenerate(&path, images::SESSION.name);
+}
+
+/// The session image resumes on a fresh node of this build: it reaps the
+/// dead owner, claims the session in the build's session set, restores the
+/// turn from its checkpoint and the cell from its VM continuation, injects
+/// the operation's committed outcome and commits the turn, without running
+/// the operation's body or entering the cell's program again.
+#[tokio::test]
+async fn a_session_decodes_and_resumes_from_its_1_0_image() {
+    let mut resumed = V0::new(Dialect::SqliteFile, None);
+    resumed.image = Some(&images::SESSION);
+    let clock = SimClock::new();
+    let database = resumed.database(Arc::clone(&clock)).await;
+    let snapshot = database
+        .actor(&actor())
+        .await
+        .expect("the image reads")
+        .expect("the image holds the session");
+    assert_eq!(
+        &snapshot.formats,
+        resumed.backend().formats().session(),
+        "the image is in another build's set"
+    );
+    let nodes = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        Script::new(),
+        resumed.config(),
+        resumed.activation(),
+    );
+    nodes.start("b");
+    let horizon = clock.logical_ms() + 600_000;
+    while !resumed.done(&nodes).await {
+        assert!(
+            clock.logical_ms() < horizon,
+            "the resumed session is not done after 600 s of virtual time:\n{}",
+            nodes.script().rendered_trace()
+        );
+        assert!(
+            nodes.step().await.is_some(),
+            "the resumed session stalled:\n{}",
+            nodes.script().rendered_trace()
+        );
+    }
+    nodes.quiesce().await;
+
+    let mut violations = Vec::new();
+    let labels: Vec<CommitLabel> = nodes
+        .script()
+        .trace()
+        .iter()
+        .filter(|write| write.kind == WriteKind::Actor && write.committed())
+        .map(|write| write.point.label)
+        .collect();
+    if labels
+        != [
+            CommitLabel::CELL_SNAPSHOT,
+            CommitLabel::MODEL_START,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::SESSION_RELEASE,
+        ]
+    {
+        violations.push(format!(
+            "the resumed session committed {labels:?}, not the cell's end, the second model call's start, the turn's commit and the release"
+        ));
+    }
+    let writes = resumed.world.writes();
+    if !writes.is_empty() {
+        violations.push(format!(
+            "the operation's body ran again on resume: {writes:?}"
+        ));
+    }
+    let counts = resumed.tripwire.counts();
+    let programs: usize = counts.vm_programs.values().sum();
+    if programs != 0 {
+        violations.push(format!(
+            "the cell's program was entered {programs} times; it resumes from its continuation"
+        ));
+    }
+    let restores = counts
+        .restores
+        .get(&(session(), run()))
+        .copied()
+        .unwrap_or(0);
+    if restores != 1 {
+        violations.push(format!("the turn was restored {restores} times, not once"));
+    }
+    assert!(
+        violations.is_empty(),
+        "the session image's resume:\n  {}\n{}",
+        violations.join("\n  "),
+        nodes.script().rendered_trace()
+    );
 }
 
 /// The scenario's model calls no tool: its work runs in a code cell.

@@ -8,7 +8,9 @@
 //! terminal in one fenced transaction, the store's compare-and-set against
 //! that head. Everything between commits is in memory and is
 //! recomputed from committed state after a crash; nothing re-executes
-//! orchestration to reach a recorded outcome.
+//! orchestration to reach a recorded outcome. On a draining node the turn
+//! stops where it would honour a cancel, before its next model call or cell
+//! starts, and the next build resumes it from its rows.
 
 use lash_durable::CommitLabel;
 use lash_durable::DomainWrite;
@@ -79,6 +81,9 @@ pub async fn run_phases(
                 if turn_cancel::requested(cx, &session).await?.is_some() {
                     return Ok(PhaseExit::CancelRequested);
                 }
+                if cx.draining() {
+                    return Ok(PhaseExit::Drained);
+                }
                 let current = iteration(drive.machine());
                 let pinned = match model.take() {
                     Some((pinned, pin)) if pinned == current => Some(pin),
@@ -129,6 +134,9 @@ pub async fn run_phases(
             Effect::ExecCode { id, language, code } => {
                 if turn_cancel::requested(cx, &session).await?.is_some() {
                     return Ok(PhaseExit::CancelRequested);
+                }
+                if cx.draining() {
+                    return Ok(PhaseExit::Drained);
                 }
                 model = None;
                 let exec = ExecKey::Cell(

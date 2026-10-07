@@ -418,6 +418,7 @@ impl SessionActivation {
         match phases::run_phases(cx, self.services.as_ref(), turn, heads).await? {
             PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),
             PhaseExit::Lost => Ok(Pass::Lost),
+            PhaseExit::Drained => drain_release(cx).await,
             PhaseExit::Suspended { due } => {
                 let next_due = due.into_iter().chain(cx.next_due()).min();
                 let mut tx = cx.begin().await?;
@@ -427,6 +428,15 @@ impl SessionActivation {
             }
         }
     }
+}
+
+/// Release the session `ready` for the next build: what a draining node
+/// does at a committed phase.
+async fn drain_release(cx: &ActorContext) -> Result<Pass, TurnError> {
+    let mut tx = cx.begin().await?;
+    tx.give_up(Release::Ready);
+    cx.commit(tx, CommitLabel::DRAIN_RELEASE).await?;
+    Ok(Pass::Released)
 }
 
 /// What one activation pass left.
@@ -490,6 +500,15 @@ impl Activation for SessionActivation {
             CancellationToken::new(),
             Arc::clone(&self.probe),
         );
+        // A claim never takes a session in a set its node does not decode;
+        // one adopted in another set goes back unread.
+        if owned.purpose() == lash_durable::ClaimPurpose::CancelOnly {
+            if let Ok(mut tx) = cx.begin().await {
+                tx.give_up(Release::Idle);
+                let _ = cx.commit(tx, CommitLabel::SESSION_RELEASE).await;
+            }
+            return;
+        }
         // An owner with nothing to do keeps the actor hot for `idle_evict`,
         // reading its mailbox at every hint or poll, then releases it.
         let idle_evict = self.backend.config().settings().idle_evict;
@@ -500,7 +519,14 @@ impl Activation for SessionActivation {
             let release = idle_since.is_some_and(|since: std::time::Instant| {
                 owned.clock().now().saturating_duration_since(since) >= idle_evict
             });
-            match self.pass(&cx, &session, release, &mut heads).await {
+            // A draining node starts no pass: every commit before this one
+            // is a committed phase the next build resumes from.
+            let pass = if owned.draining() {
+                drain_release(&cx).await
+            } else {
+                self.pass(&cx, &session, release, &mut heads).await
+            };
+            match pass {
                 Ok(Pass::Again) => idle_since = None,
                 Ok(Pass::Idle) => {
                     idle_since.get_or_insert_with(|| owned.clock().now());
@@ -571,6 +597,10 @@ pub enum PhaseExit {
     /// The turn accepted a cancel request it honours here: its in-memory
     /// work stopped, and the next pass finalizes it from its row.
     CancelRequested,
+    /// The node is draining: the turn stopped at a committed phase, before
+    /// starting its next model call or cell, and the actor is released for
+    /// the next build to resume from its rows (ADR 0106 §1).
+    Drained,
 }
 
 /// Why a turn was not admitted; nothing was recorded.

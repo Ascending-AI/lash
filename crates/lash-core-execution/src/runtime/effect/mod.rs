@@ -9,8 +9,7 @@ use lash_core_store::effect_identity as identity_types;
 pub(crate) use tool_presentation::record_tool_presentation_plan;
 mod tool_presentation;
 pub use tool_presentation::{
-    PresentationBinding, SessionPresentationArtifacts, TOOL_PRESENTATION_VERSION, ToolPresentation,
-    retain_oversized_return,
+    PresentationBinding, SessionPresentationArtifacts, ToolPresentation, retain_oversized_return,
 };
 mod attempt_stream;
 mod request_digest;
@@ -19,7 +18,7 @@ pub use attempt_stream::{
     AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation, DecodedStreamEvent,
 };
 mod tool_attempt_capture;
-pub use tool_attempt_capture::{TOOL_ATTEMPT_CAPTURE_VERSION, ToolAttemptCapture};
+pub use tool_attempt_capture::ToolAttemptCapture;
 mod outcome;
 mod session_outcome;
 mod validation;

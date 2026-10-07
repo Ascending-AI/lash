@@ -84,6 +84,18 @@ law!(
     an_ending_scope_stays_recorded_until_its_last_batch,
     |store, _advance| { laws::an_ending_scope_stays_recorded_until_its_last_batch(store) }
 );
+law!(
+    a_node_claims_only_actors_whose_formats_it_decodes,
+    |store, _advance| { laws::a_node_claims_only_actors_whose_formats_it_decodes(store) }
+);
+law!(
+    a_newer_format_is_not_written_while_an_older_node_is_live,
+    |store, _advance| { laws::a_newer_format_is_not_written_while_an_older_node_is_live(store) }
+);
+law!(
+    a_draining_node_claims_nothing_and_releases_ready,
+    |store, _advance| { laws::a_draining_node_claims_nothing_and_releases_ready(store) }
+);
 
 /// A process-registry row and a trigger row keyed by `?1`.
 const REGISTRY_ROW: &str = "INSERT INTO process_tombstones \

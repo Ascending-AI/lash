@@ -59,11 +59,9 @@ use lash_core_execution::{
 use lash_core_store::tool_run::{
     AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
 };
-use lash_durable::domain::{OwnerKey, PROCESS_FORMATS, RunRecordKind};
+use lash_durable::domain::{OwnerKey, RunRecordKind};
 use lash_durable::runner::Activation;
-use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, LeaseConfig,
-};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -492,6 +490,7 @@ impl Scenario for Proof {
             .expect("an in-memory store set opens");
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let backend = Backend::assemble(BackendParts {
+            formats: Vec::new(),
             stores: Arc::new(stores),
             settings: settings(),
             secrets: Some(CompletionKeySecrets::for_testing()),
@@ -509,7 +508,13 @@ impl Scenario for Proof {
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
             lease: LeaseConfig::default(),
-            decodes: vec![FormatSet::new(PROCESS_FORMATS)],
+            decodes: self
+                .backend
+                .lock_recover()
+                .as_ref()
+                .expect("the database assembles the backend first")
+                .formats()
+                .decodes(),
             max_active: 8,
         }
     }

@@ -10,6 +10,7 @@
 pub mod cancel;
 pub mod cell;
 pub mod close;
+pub mod drain;
 pub mod process;
 pub mod round;
 pub mod signal;
@@ -26,12 +27,11 @@ use lash_core_execution::{
     ScopeGrant, ScopeId,
 };
 use lash_durable::domain::TurnEnd;
-use lash_durable::{ActorKey, ActorState, CommitLabel, FormatSet, MailTx};
+use lash_durable::{ActorKey, ActorState, CommitLabel, MailTx};
 use lash_durable_test::SimNodes;
 use lash_sansio::{SessionId, TurnId};
 use serde_json::Value;
 
-use super::deployment::SESSION_FORMATS;
 use super::engine::{KIND, declared_event_types};
 use super::services::{TurnScript, turn_id};
 use super::world::World;
@@ -95,7 +95,7 @@ pub async fn admit_turn(
     };
     let actor = session_actor(&session)?;
     let mut seed = MailTx::new();
-    seed.create_actor(actor.clone(), FormatSet::new(SESSION_FORMATS))
+    seed.create_actor(actor.clone(), backend.formats().session().clone())
         .append(actor.clone(), admit_mail(), inputs.mail_body());
     nodes
         .database()

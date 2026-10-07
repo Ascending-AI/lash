@@ -67,8 +67,7 @@ pub use effect::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-    RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
-    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_PRESENTATION_VERSION, ToolAttemptCapture,
+    RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec, ToolAttemptCapture,
     ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution, TurnPrelude,
     TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
 };

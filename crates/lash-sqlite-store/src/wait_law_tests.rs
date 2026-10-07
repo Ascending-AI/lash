@@ -14,6 +14,7 @@ async fn backend() -> Backend {
         .await
         .expect("open the memory store set");
     Backend::assemble(BackendParts {
+        formats: Vec::new(),
         stores: Arc::new(set),
         settings: wait_laws::settings(),
         secrets: Some(CompletionKeySecrets::for_testing()),

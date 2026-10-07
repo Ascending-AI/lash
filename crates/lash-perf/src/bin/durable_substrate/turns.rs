@@ -71,7 +71,12 @@ async fn one_turn(
 ) -> Result<(Instant, Instant)> {
     let actor = session_actor(session)?;
     let committed = deployment.recorder.watch(&actor, CommitLabel::TURN_COMMIT);
-    let tx = admission(session, run, create)?;
+    let tx = admission(
+        session,
+        run,
+        create,
+        deployment.producer(index).formats().session(),
+    )?;
     let started = Instant::now();
     deployment
         .producer(index)
@@ -312,7 +317,12 @@ pub async fn resume(run: &Run<'_>, case: &Case, prior_turns: usize) -> Result<()
         let reached = deployment.scripts.on_hold(&session);
         let run_id = turn_id(&format!("held-{sample_index}"))?;
         let committed = deployment.recorder.watch(&actor, CommitLabel::TURN_COMMIT);
-        let tx = admission(&session, &run_id, prior_turns == 0 && sample_index == 0)?;
+        let tx = admission(
+            &session,
+            &run_id,
+            prior_turns == 0 && sample_index == 0,
+            deployment.producer(0).formats().session(),
+        )?;
         let from = deployment.recorder.now_us();
         deployment.producer(0).commit_mail(tx, ADMISSION).await?;
         tokio::time::timeout(TURN_LIMIT, reached)

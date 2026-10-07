@@ -27,8 +27,8 @@ use lash_core_execution::{
 use lash_core_store::tool_run::{
     AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
 };
-use lash_durable::domain::{PROCESS_FORMATS, ParkEventKind};
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableInstant, FormatSet, LeaseConfig};
+use lash_durable::domain::ParkEventKind;
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableInstant, LeaseConfig};
 use lash_durable_test::{Fault, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
@@ -323,6 +323,7 @@ impl World {
                 refuse: Arc::clone(&refuse),
             })],
             providers: Arc::new(NoProjectionProviders),
+            formats: Vec::new(),
         })
         .expect("the law backend assembles");
         let activation = Arc::new(ProcessActivation::new(
@@ -336,7 +337,7 @@ impl World {
             script,
             SimNodesConfig {
                 lease: LeaseConfig::default(),
-                decodes: vec![FormatSet::new(PROCESS_FORMATS)],
+                decodes: backend.formats().decodes(),
                 max_active: 8,
             },
             activation,

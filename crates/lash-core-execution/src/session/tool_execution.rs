@@ -867,7 +867,6 @@ impl RuntimeExecutionContext<'_> {
         .await;
         triggers.extend(resumed_dispatch.trigger_outcomes.drain());
         let capture = crate::runtime::ToolAttemptCapture {
-            version: crate::runtime::TOOL_ATTEMPT_CAPTURE_VERSION,
             messages: resumed_dispatch.checkpoint_messages.drain(),
         };
         if !capture.is_empty() {

@@ -13,11 +13,6 @@ use lash_sansio::{CancelOrigin, ProcessId};
 
 use super::keys::ScopeKey;
 
-/// The format set a process actor is created in. One set for every
-/// process until L11 (FIG-5187) stamps each actor with its engine's format
-/// digest; a node that serves processes decodes it.
-pub const PROCESS_FORMATS: &str = "lash-process/1";
-
 /// The mail kind of a signal sent to a process: its body is the signal,
 /// encoded by its owner, and it reaches `advance` as one event.
 pub const SIGNAL_MAIL: &str = "signal";
@@ -56,6 +51,8 @@ pub struct ProcessStartRows {
     /// The registration (definition, engine kind, engine config), encoded
     /// by its owner.
     pub registration_json: String,
+    /// The format set the actor is created in: its engine's unstarted set.
+    pub formats: crate::FormatSet,
 }
 
 /// A process write inside an owner commit.

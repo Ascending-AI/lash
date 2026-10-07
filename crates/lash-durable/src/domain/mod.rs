@@ -40,8 +40,8 @@ pub mod waits;
 pub use keys::{CellId, ExecKey, Ordinal, OwnerKey, RunSeq, ScopeKey, StoredKeyError};
 pub use park_events::{ParkEventKind, ParkEventRow, ParkEventSeq, ParkEventWrite};
 pub use processes::{
-    CancelAnswer, CancelRequest, PROCESS_FORMATS, ProcessActorRow, ProcessStartRows, ProcessWrite,
-    RedriveAnswer, RedriveRequest, SIGNAL_MAIL,
+    CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite, RedriveAnswer,
+    RedriveRequest, SIGNAL_MAIL,
 };
 pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
 pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
@@ -55,8 +55,8 @@ pub use turns::{
     TurnTerminal, TurnWrite,
 };
 pub use waits::{
-    CANCEL_MAIL, KeyVersion, ResolveAnswer, TIMER_DIGEST, WaitId, WaitKind, WaitResolution,
-    WaitRow, WaitState, WaitWrite,
+    CANCEL_MAIL, KeyVersion, ResolveAnswer, TIMER_DIGEST, WAIT_ROW_FORMAT_VERSION, WaitId,
+    WaitKind, WaitResolution, WaitRow, WaitState, WaitWrite,
 };
 
 use crate::error::DurableError;

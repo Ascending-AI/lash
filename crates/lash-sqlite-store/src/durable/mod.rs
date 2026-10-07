@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     boot_id TEXT NOT NULL,
     formats_json TEXT NOT NULL,
     registered_at_ms INTEGER NOT NULL,
-    heartbeat_expires_at_ms INTEGER NOT NULL
+    heartbeat_expires_at_ms INTEGER NOT NULL,
+    draining INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_nodes_draining CHECK (draining IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS actors (
@@ -108,16 +109,23 @@ CREATE TABLE IF NOT EXISTS actor_mail (
 lash_store_sql::statements! {
     /// The engine statements only SQLite issues.
     pub(crate) struct SqliteDurableStatements @ "durable_sqlite" {
-        /// Whether boot `?2` of node `?1` holds a lease.
-        node_live = "SELECT 1 FROM nodes WHERE node_id = ?1 AND boot_id = ?2";
+        /// Whether boot `?2` of node `?1` holds a lease: its draining flag,
+        /// or no row.
+        node_live = "SELECT draining FROM nodes WHERE node_id = ?1 AND boot_id = ?2";
 
         /// Up to `?3` actors claimable at `?1` in a format set of JSON array
-        /// `?2`, oldest first, with the state that made each claimable.
-        claimable = "SELECT actor_key, state FROM actors
-             WHERE ((state = 'ready' AND ready_at_ms <= ?1)
-                 OR (state = 'waiting' AND next_due_ms <= ?1))
-               AND formats IN (SELECT value FROM json_each(?2))
-             ORDER BY COALESCE(ready_at_ms, next_due_ms), actor_key
+        /// `?2`, or process actors in another set with mail of kind `?4` (a
+        /// cancel) pending, oldest first, with the state that made each
+        /// claimable and its format set.
+        claimable = "SELECT a.actor_key, a.state, a.formats FROM actors a
+             WHERE ((a.state = 'ready' AND a.ready_at_ms <= ?1)
+                 OR (a.state = 'waiting' AND a.next_due_ms <= ?1))
+               AND (a.formats IN (SELECT value FROM json_each(?2))
+                 OR (a.kind = 'process' AND EXISTS (
+                     SELECT 1 FROM actor_mail m
+                     WHERE m.actor_key = a.actor_key AND m.seq > a.acked_seq
+                       AND m.kind = ?4)))
+             ORDER BY COALESCE(a.ready_at_ms, a.next_due_ms), a.actor_key
              LIMIT ?3";
 
         /// Give actor `?1` to boot `?3` of node `?2`, bumping its epoch. A
@@ -286,6 +294,13 @@ fn formats_json(spec: &[lash_durable::FormatSet]) -> String {
     serde_json::Value::from(formats).to_string()
 }
 
+/// The format sets a node's stored `formats_json` names.
+fn decoded_sets(stored: &str) -> Result<Vec<lash_durable::FormatSet>, DurableError> {
+    let sets: Vec<String> =
+        serde_json::from_str(stored).map_err(|_| corrupt("node format sets", stored))?;
+    Ok(sets.into_iter().map(lash_durable::FormatSet::new).collect())
+}
+
 fn owner(node: Option<String>, boot: Option<String>) -> Option<Owner> {
     Some(Owner {
         node: NodeId::new(node?),
@@ -327,10 +342,16 @@ fn fenced(tx: &Connection, actor: &ActorKey, held: Epoch) -> rusqlite::Result<Du
 }
 
 fn node_live(tx: &Connection, node: &Owner) -> rusqlite::Result<bool> {
+    node_draining(tx, node).map(|draining| draining.is_some())
+}
+
+/// Whether `node` is draining, or `None` when it holds no lease.
+fn node_draining(tx: &Connection, node: &Owner) -> rusqlite::Result<Option<bool>> {
     tx.prepare_cached(SQL.sqlite.node_live.sql())?
-        .query_row([node.node.as_str(), node.boot.as_str()], |_| Ok(()))
+        .query_row([node.node.as_str(), node.boot.as_str()], |row| {
+            row.get::<_, bool>(0)
+        })
         .optional()
-        .map(|row| row.is_some())
 }
 
 fn apply_owner(
@@ -361,6 +382,13 @@ fn apply_owner(
         if let Err(refusal) = apply_domain(tx, &committing, domain)? {
             return refuse(refusal);
         }
+    }
+    if let Some(formats) = write.formats() {
+        cached_execute(
+            tx,
+            SQL.actor.stamp_formats.sql(),
+            rusqlite::params![actor, formats.as_str()],
+        )?;
     }
     if let Some(through) = write.ack() {
         cached_execute(tx, SQL.actor.ack.sql(), rusqlite::params![actor, through.0])?;
@@ -411,6 +439,7 @@ fn apply_owner(
         Some(rest) => {
             let (state, due) = match rest {
                 Release::Waiting { next_due } => ("waiting", next_due.map(|due| due.0)),
+                Release::Ready => ("ready", None),
                 _ => ("idle", None),
             };
             let stored: String = tx
@@ -813,20 +842,32 @@ impl DurableStore for SqliteDurableStore {
         let owner = node.owner.clone();
         let formats = formats_json(&node.decodes);
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let decodes = node.decodes.clone();
         self.write(CommitLabel::CLAIM, move |tx, now| {
-            if !node_live(tx, &owner)? {
-                return refuse(DurableError::NodeLeaseLost {
-                    node: owner.node.clone(),
-                });
+            match node_draining(tx, &owner)? {
+                None => {
+                    return refuse(DurableError::NodeLeaseLost {
+                        node: owner.node.clone(),
+                    });
+                }
+                Some(true) => return commit(Vec::new()),
+                Some(false) => {}
             }
             let candidates = tx
                 .prepare_cached(SQL.sqlite.claimable.sql())?
-                .query_map(rusqlite::params![now.0, formats, limit], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
+                .query_map(
+                    rusqlite::params![now.0, formats, limit, lash_durable::domain::CANCEL_MAIL],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let mut claimed = Vec::with_capacity(candidates.len());
-            for (key, state) in candidates {
+            for (key, state, stored_formats) in candidates {
                 let epoch = tx.prepare_cached(SQL.sqlite.claim.sql())?.query_row(
                     rusqlite::params![key, owner.node.as_str(), owner.boot.as_str()],
                     |row| row.get::<_, i64>(0),
@@ -843,6 +884,7 @@ impl DurableStore for SqliteDurableStore {
                     } else {
                         ClaimCause::Ready
                     },
+                    purpose: lash_durable::ClaimPurpose::of(&decodes, &stored_formats),
                 });
             }
             commit(claimed)
@@ -852,23 +894,58 @@ impl DurableStore for SqliteDurableStore {
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         let owner = node.owner.clone();
+        let decodes = node.decodes.clone();
         self.read(move |tx| {
             let rows = tx
                 .prepare_cached(SQL.actor.owned_by.sql())?
                 .query_map([owner.node.as_str(), owner.boot.as_str()], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows
                 .into_iter()
-                .map(|(key, epoch)| {
+                .map(|(key, epoch, stored_formats)| {
                     actor_key(&key).map(|actor| Claimed {
                         actor,
                         epoch: Epoch(epoch),
                         cause: ClaimCause::Adopted,
+                        purpose: lash_durable::ClaimPurpose::of(&decodes, &stored_formats),
                     })
                 })
                 .collect())
+        })
+        .await
+    }
+
+    async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
+        let owner = node.owner.clone();
+        self.write(CommitLabel::NODE_DRAIN, move |tx, _now| {
+            let marked = tx
+                .prepare_cached(SQL.node.mark_draining.sql())?
+                .query_row([owner.node.as_str(), owner.boot.as_str()], |_| Ok(()))
+                .optional()?;
+            match marked {
+                Some(()) => commit(()),
+                None => refuse(DurableError::NodeLeaseLost {
+                    node: owner.node.clone(),
+                }),
+            }
+        })
+        .await
+    }
+
+    async fn live_decodes(&self) -> Result<Vec<Vec<lash_durable::FormatSet>>, DurableError> {
+        let now = self.instant();
+        self.read(move |tx| {
+            let rows = tx
+                .prepare_cached(SQL.node.live_decodes.sql())?
+                .query_map([now.0], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows.iter().map(|stored| decoded_sets(stored)).collect())
         })
         .await
     }

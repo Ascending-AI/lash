@@ -4,8 +4,8 @@
 //! A cell is {case} × {commit label and occurrence} × {mode} × {seed}. A case
 //! ([`Case`]) is one seam of the runtime: a turn, a tool round, a turn
 //! cancel, a code cell, a code cell killed inside its body, a process with
-//! its waits and cascade, a process's mail, a session close and a trigger
-//! occurrence. Each runs
+//! its waits and cascade, a process's mail, a session close, a trigger
+//! occurrence and a node's drain by release. Each runs
 //! as a [`deployment::Deployment`]: the production session and process
 //! activations behind one dispatch on simulated nodes `a` and `b` over one
 //! SQLite memory database, the host acting from outside through its own
@@ -72,11 +72,14 @@ pub enum Case {
     /// A trigger occurrence emitted by the host, starting a process per
     /// matching subscription.
     Trigger,
+    /// A rolling deploy by release: the serving node drained while a
+    /// process is parked, and its actors claimed by the next.
+    Drain,
 }
 
 impl Case {
     /// Every case, in registry order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Turn,
         Self::Round,
         Self::Cancel,
@@ -86,6 +89,7 @@ impl Case {
         Self::Signal,
         Self::Close,
         Self::Trigger,
+        Self::Drain,
     ];
 
     /// The case's name.
@@ -101,6 +105,7 @@ impl Case {
             Self::Signal => "signal",
             Self::Close => "close",
             Self::Trigger => "trigger",
+            Self::Drain => "drain",
         }
     }
 
@@ -124,6 +129,7 @@ impl Case {
             Self::Signal => Box::<cases::signal::SignalCase>::default(),
             Self::Close => Box::new(cases::close::CloseCase::tagged(tag)),
             Self::Trigger => Box::new(cases::trigger::TriggerCase::tagged(tag)),
+            Self::Drain => Box::<cases::drain::DrainCase>::default(),
         }
     }
 }

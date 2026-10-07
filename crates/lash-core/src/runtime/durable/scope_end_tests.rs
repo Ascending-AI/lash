@@ -21,8 +21,8 @@ use lash_core_execution::runtime::actor::process::{self, CascadeProgress, Proces
 use lash_core_execution::runtime::actor::round::ToolBody;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_durable::domain::{
-    ExecKey, OwnerKey, PROCESS_FORMATS, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow,
-    ScopeKey, SessionCloseRow, SessionCloseStep, SnapshotRow, TurnEnd, TurnRow, WaitId, WaitRow,
+    ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
+    SessionCloseRow, SessionCloseStep, SnapshotRow, TurnEnd, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, Claimed, CommitLabel, DurableError,
@@ -188,6 +188,14 @@ impl DurableStore for CutStore {
         self.inner.claim(node, limit).await
     }
 
+    async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
+        self.inner.mark_draining(node).await
+    }
+
+    async fn live_decodes(&self) -> Result<Vec<Vec<lash_durable::FormatSet>>, DurableError> {
+        self.inner.live_decodes().await
+    }
+
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.inner.owned(node).await
     }
@@ -278,6 +286,7 @@ impl World {
                 .into_store_set()
         };
         let backend = Backend::assemble(lash_core_execution::BackendParts {
+            formats: Vec::new(),
             stores: layered,
             settings,
             secrets: Some(lash_core_execution::CompletionKeySecrets::for_testing()),
@@ -1047,7 +1056,7 @@ impl ProcessNode {
             backend.clock(),
             lash_durable::runner::RunnerConfig::new(
                 NodeId::new("law-process-node"),
-                vec![FormatSet::new(PROCESS_FORMATS)],
+                backend.formats().decodes(),
                 backend.config(),
             ),
             Arc::new(ProcessActivation::new(
@@ -1136,7 +1145,7 @@ async fn end_process(backend: &Backend, process: &ProcessId) {
     let lease = durable
         .register_node(&NodeSpec {
             node: NodeId::new(format!("law-terminal-{process}")),
-            decodes: vec![FormatSet::new(PROCESS_FORMATS)],
+            decodes: backend.formats().decodes(),
             ttl_millis: 600_000,
         })
         .await

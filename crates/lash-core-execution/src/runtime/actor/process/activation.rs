@@ -17,7 +17,16 @@
 //! A parked process, one whose state this node cannot decode, and one that
 //! never started end without engine code when cancelled. A running or
 //! waiting one receives `Cancelled` once, and lash forces its terminal at
-//! `grace_until`.
+//! `grace_until`. A node claims a process in a format set it does not decode
+//! only for its pending cancel, and ends it without reading its state.
+//!
+//! **Formats.** A process is created in its engine's unstarted set; its
+//! first transition stamps the engine's state formats, so from then on only
+//! a node that decodes them claims it (ADR 0106 §1).
+//!
+//! **Drain.** On a draining node a pass starts nothing: it waits for the
+//! steps already running to commit their outcomes, then releases the actor
+//! `ready` under `drain.release`, for a node of the next build to claim.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -252,8 +261,9 @@ impl ProcessActivation {
                     owned.commit(tx, CommitLabel::STEP_OUTCOME).await?;
                 }
             }
-            () = owned.wait_for_mail() => {}
-            () = sleep => {}
+            // A draining owner waits for its running steps alone.
+            () = owned.wait_for_mail(), if !owned.draining() => {}
+            () = sleep, if !owned.draining() => {}
         }
         Ok(())
     }
@@ -274,6 +284,9 @@ impl ProcessActivation {
         };
         if row.terminal {
             return self.cascade(owned, reads, tx, process, &row).await;
+        }
+        if owned.purpose() == lash_durable::ClaimPurpose::CancelOnly {
+            return self.end_undecodable(owned, tx, process, live).await;
         }
         let record = self
             .backend
@@ -362,6 +375,17 @@ impl ProcessActivation {
         }));
         let fold = round::fold(&rows, &policies)
             .map_err(|error| corrupt("a process's run records", error))?;
+        // A draining node advances nothing more: it waits for the steps
+        // that run to commit their outcomes, then hands the process to the
+        // next build at this committed phase.
+        if owned.draining() {
+            if !live.running.is_empty() {
+                return Ok(Pass::Wait(fold, None));
+            }
+            tx.give_up(Release::Ready);
+            owned.commit(tx, CommitLabel::DRAIN_RELEASE).await?;
+            return Ok(Pass::Released);
+        }
         let event = match self
             .next_event(
                 &mut tx,
@@ -440,6 +464,13 @@ impl ProcessActivation {
             expected_rev: row.state_rev,
             driver_json: driver.encode(),
         }));
+        if row.state_rev == 0
+            && let Some(formats) = self.backend.formats().process(kind)
+        {
+            // The first transition writes the engine's state: from now on
+            // only a node that decodes it claims the process.
+            tx.stamp_formats(formats.clone());
+        }
         tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
             exec: ExecKey::Process(process.clone()),
             expected: snapshot_rev,
@@ -526,6 +557,39 @@ impl ProcessActivation {
         let tx = owned.begin().await?;
         self.park(owned, tx, &ProcessParkReason::CommitRefused { message })
             .await
+    }
+
+    /// A process claimed in a format set this node does not decode: it was
+    /// claimed only for its pending cancel, which ends it from registry
+    /// state. Without one (the cancel already ended it, or its mail was
+    /// something else) it goes back to idle, read nothing.
+    async fn end_undecodable(
+        &self,
+        owned: &Owned,
+        mut tx: ActorTx,
+        process: &ProcessId,
+        live: &mut Live,
+    ) -> Result<Pass, DurableError> {
+        let cancel = self
+            .backend
+            .process_registry()
+            .get_process(process)
+            .await
+            .map_err(|error| registry_failure(&error))?
+            .and_then(|record| {
+                record
+                    .cancel_request
+                    .as_deref()
+                    .map(|request| request.origin)
+            });
+        match cancel {
+            Some(origin) => self.end_engine_free(owned, tx, process, live, origin).await,
+            None => {
+                tx.give_up(Release::Idle);
+                owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                Ok(Pass::Released)
+            }
+        }
     }
 
     /// End a cancelled process without calling its engine: it is parked,

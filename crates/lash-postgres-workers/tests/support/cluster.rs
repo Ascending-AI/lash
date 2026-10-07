@@ -123,6 +123,7 @@ impl Cluster {
         );
         let durable = stores.durable_store();
         let backend = Backend::assemble(BackendParts {
+            formats: Vec::new(),
             stores: Arc::new(stores),
             settings: settings(notifier),
             secrets: Some(secrets(SECRET).expect("the secret is long enough")),

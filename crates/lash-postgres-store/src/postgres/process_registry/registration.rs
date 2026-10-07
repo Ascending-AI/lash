@@ -188,7 +188,7 @@ pub(crate) async fn apply_registration_tx(
     crate::durable::processes::create_actor_within(
         tx,
         &record.id,
-        lash_durable::domain::PROCESS_FORMATS,
+        record.input.unstarted_formats().as_str(),
         lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
     )
     .await

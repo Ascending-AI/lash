@@ -14,6 +14,13 @@
 //! All of its time is the injected [`Clock`]'s, so a simulated deployment
 //! runs the same loop on virtual time.
 //!
+//! A runner drains by release (ADR 0106 §1): once its [`Drain`] starts, it
+//! marks its node draining and claims nothing more; each activation sees
+//! [`Owned::draining`], finishes to its next committed phase and releases
+//! its actor `ready` under `drain.release`; when none is left the runner
+//! releases its node and returns [`Stopped::Drained`]. Nodes of the next
+//! build then claim the released actors they decode.
+//!
 //! With [`Signals`] (PostgreSQL), the runner also listens: it opens its
 //! listener before its first claim, so no hint sent after that scan is
 //! missed; it rescans after the listener resubscribes; it publishes what
@@ -25,7 +32,8 @@
 use crate::config::LeaseConfig;
 use crate::durable_config::DurableConfig;
 use crate::error::DurableError;
-use crate::ids::{ActorKey, CommitLabel, Epoch, FormatSet, NodeId};
+use crate::formats::FormatSet;
+use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
 use crate::port::{
     ActorCommit, ActorState, ClaimCause, Claimed, DurableStore, HeartbeatOutcome, MailCommit,
     NodeLease, NodeSpec, Owner, Woken,
@@ -83,6 +91,55 @@ pub enum Stopped {
     /// No heartbeat succeeded for `self_stop_after`, so it stopped before
     /// anyone may reap it.
     Unrenewed,
+    /// It drained: every activation released its actor at a committed
+    /// phase, and the node released its lease.
+    Drained,
+}
+
+#[derive(Default)]
+struct DrainInner {
+    started: AtomicBool,
+    notify: Notify,
+}
+
+/// A node's drain switch, shared by its runner and every activation it
+/// runs. Starting it is one-way: a draining node never claims again.
+#[derive(Clone, Default)]
+pub struct Drain {
+    inner: Arc<DrainInner>,
+}
+
+impl Drain {
+    /// Start draining.
+    pub fn start(&self) {
+        self.inner.started.store(true, Ordering::Release);
+        self.inner.notify.notify_waiters();
+    }
+
+    /// Whether the drain started.
+    #[must_use]
+    pub fn started(&self) -> bool {
+        self.inner.started.load(Ordering::Acquire)
+    }
+
+    /// Wait until the drain starts.
+    pub async fn wait(&self) {
+        loop {
+            let notified = self.inner.notify.notified();
+            if self.started() {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+impl std::fmt::Debug for Drain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Drain")
+            .field("started", &self.started())
+            .finish()
+    }
 }
 
 /// What a node does with one actor it claimed.
@@ -103,6 +160,7 @@ pub struct Owned {
     claimed: Claimed,
     hint: Arc<Notify>,
     poll: std::time::Duration,
+    drain: Drain,
 }
 
 impl Owned {
@@ -122,6 +180,28 @@ impl Owned {
     #[must_use]
     pub fn cause(&self) -> ClaimCause {
         self.claimed.cause
+    }
+
+    /// What the node claimed the actor for: a
+    /// [`ClaimPurpose::CancelOnly`](crate::ClaimPurpose::CancelOnly) claim
+    /// must not decode the actor's state.
+    #[must_use]
+    pub fn purpose(&self) -> crate::ClaimPurpose {
+        self.claimed.purpose
+    }
+
+    /// Whether the node is draining: the activation releases the actor
+    /// `ready` at its next committed phase, under `drain.release`, instead
+    /// of starting more work.
+    #[must_use]
+    pub fn draining(&self) -> bool {
+        self.drain.started()
+    }
+
+    /// The node's drain switch.
+    #[must_use]
+    pub fn drain(&self) -> &Drain {
+        &self.drain
     }
 
     /// Open an owner transaction over the actor at the owned epoch.
@@ -157,13 +237,15 @@ impl Owned {
     }
 
     /// What [`Owned::wait_for_mail`] waits on, for the activation's context
-    /// to wait on while it runs: a wake hint, or one claim-poll interval.
+    /// to wait on while it runs: a wake hint, the drain's start, or one
+    /// claim-poll interval.
     #[must_use]
     pub fn mail_waker(&self) -> MailWaker {
         MailWaker {
             hint: Arc::clone(&self.hint),
             clock: Arc::clone(&self.clock),
             poll: self.poll,
+            drain: self.drain.clone(),
         }
     }
 
@@ -184,21 +266,33 @@ impl Owned {
 /// Waits until mail may have arrived for one owned actor: a wake hint, or
 /// one claim-poll interval, whichever comes first. The per-actor poll is
 /// the correctness backstop for a hint that never came (a wake committed on
-/// another node); a hint only shortens the wait.
+/// another node); a hint only shortens the wait. The node's drain ends the
+/// wait too, so an idle owner releases at once.
 #[derive(Clone)]
 pub struct MailWaker {
     hint: Arc<Notify>,
     clock: Arc<dyn Clock>,
     poll: std::time::Duration,
+    drain: Drain,
 }
 
 impl MailWaker {
-    /// Wait for a hint or one poll interval.
+    /// Wait for a hint, the drain's start or one poll interval.
     pub async fn wait(&self) {
+        if self.drain.started() {
+            return;
+        }
         tokio::select! {
             () = self.hint.notified() => {}
+            () = self.drain.wait() => {}
             () = self.clock.sleep(self.poll) => {}
         }
+    }
+
+    /// Whether the node is draining.
+    #[must_use]
+    pub fn draining(&self) -> bool {
+        self.drain.started()
     }
 }
 
@@ -358,6 +452,7 @@ pub struct Runner {
     activation: Arc<dyn Activation>,
     hints: Hints,
     signals: Option<Arc<dyn Signals>>,
+    drain: Drain,
 }
 
 /// Publish the node's coalesced wakes, one flush at a time: whatever is
@@ -397,7 +492,15 @@ impl Runner {
             activation,
             hints: Hints::default(),
             signals: None,
+            drain: Drain::default(),
         }
+    }
+
+    /// This runner draining by release once `drain` starts.
+    #[must_use]
+    pub fn with_drain(mut self, drain: Drain) -> Self {
+        self.drain = drain;
+        self
     }
 
     /// This runner taking its wake hints from `hints`, which this node's
@@ -474,9 +577,31 @@ impl Runner {
         // listener session it was seen under.
         let mut seen_held: HashMap<Owner, u64> = HashMap::new();
         let mut adopt = false;
+        // Whether the store records this node draining: the drain switch
+        // alone already stops this runner's claims.
+        let mut marked_draining = false;
         tokio::pin!(stop);
         let stopped = 'serve: loop {
             let unrenewed = last_renewed + settings.self_stop_after;
+            if self.drain.started() {
+                if !marked_draining {
+                    let mark = self.store.mark_draining(&lease);
+                    match self.bounded(&mut stop, unrenewed, mark).await {
+                        Ok(Ok(())) => {
+                            marked_draining = true;
+                            // Idle owners release at once.
+                            self.hints.hint_all_running();
+                        }
+                        Ok(Err(DurableError::NodeLeaseLost { .. })) => break Stopped::LeaseLost,
+                        // Retried at the next turn of the loop.
+                        Ok(Err(_)) => {}
+                        Err(stopped) => break stopped,
+                    }
+                }
+                if marked_draining && active.is_empty() {
+                    break Stopped::Drained;
+                }
+            }
             let mut next = next_heartbeat.min(next_reap).min(next_claim).min(unrenewed);
             if feed.is_some() {
                 next = next.min(next_watch);
@@ -485,6 +610,7 @@ impl Runner {
                 biased;
                 () = &mut stop => break Stopped::Requested,
                 Some(_) = active.join_next(), if !active.is_empty() => continue,
+                () = self.drain.wait(), if !self.drain.started() => continue,
                 signal = next_signal(&mut feed) => match signal {
                     Signal::Ready => {
                         next_claim = self.clock.now();
@@ -569,7 +695,7 @@ impl Runner {
                     }
                 }
             }
-            if now >= next_claim {
+            if now >= next_claim && !self.drain.started() {
                 next_claim = now + settings.claim_poll;
                 let claimed = if adopt {
                     match self
@@ -625,7 +751,7 @@ impl Runner {
         };
         active.abort_all();
         while active.join_next().await.is_some() {}
-        if stopped == Stopped::Requested {
+        if matches!(stopped, Stopped::Requested | Stopped::Drained) {
             self.store.release_node(&lease).await?;
         }
         publisher.abort_all();
@@ -659,6 +785,7 @@ impl Runner {
             hint: self.hints.start(actor.clone()),
             claimed,
             poll: self.config.lease.settings().claim_poll,
+            drain: self.drain.clone(),
         };
         let activation = Arc::clone(&self.activation);
         let running = Running {

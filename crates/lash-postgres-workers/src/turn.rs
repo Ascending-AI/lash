@@ -33,7 +33,7 @@ use lash_core_store::tool_run::{
     AttemptOutcome, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
 };
 use lash_durable::domain::ExecKey;
-use lash_durable::{ActorKey, CommitLabel, DomainWrite, FormatSet, MailTx};
+use lash_durable::{ActorKey, CommitLabel, DomainWrite, MailTx};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, ToolCallId, ToolId, TurnId};
 use lash_vm_broker::CodeCallIdentities;
@@ -122,7 +122,7 @@ pub async fn admit(backend: &Backend) -> Result<(), String> {
         admission_json: serde_json::to_string(&messages).map_err(|error| error.to_string())?,
     };
     let mut seed = MailTx::new();
-    seed.create_actor(actor(), FormatSet::new(crate::SESSION_FORMATS))
+    seed.create_actor(actor(), backend.formats().session().clone())
         .append(actor(), admit_mail(), inputs.mail_body());
     backend
         .durable()

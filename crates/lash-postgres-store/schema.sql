@@ -853,7 +853,8 @@ CREATE TABLE IF NOT EXISTS lash_nodes (
     boot_id TEXT NOT NULL,
     formats_json TEXT NOT NULL,
     registered_at_ms BIGINT NOT NULL,
-    heartbeat_expires_at_ms BIGINT NOT NULL
+    heartbeat_expires_at_ms BIGINT NOT NULL,
+    draining BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- One scheduling row per session and per process: the only row a claim, a

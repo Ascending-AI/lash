@@ -117,7 +117,15 @@ impl Workload for ProcessCase {
 
 /// The host: read the root's pinned key from its event, then resolve it.
 async fn resolve_key(world: &Arc<World>, root_process: &ProcessId) {
-    let key = poll(world, LOOK_EVERY, LOOKS, || async {
+    if let Some(key) = pinned_key(world, root_process).await {
+        resolve(world, key).await;
+    }
+}
+
+/// The key `root_process` pinned, once its event is out: the root is then
+/// parked awaiting it.
+pub(super) async fn pinned_key(world: &Arc<World>, root_process: &ProcessId) -> Option<String> {
+    poll(world, LOOK_EVERY, LOOKS, || async {
         let backend = world.backend().ok()?;
         let events = backend
             .process_registry()
@@ -129,10 +137,11 @@ async fn resolve_key(world: &Arc<World>, root_process: &ProcessId) {
             .find(|event| event.event_type == KEY_EVENT)
             .and_then(|event| event.payload["key"].as_str().map(str::to_owned))
     })
-    .await;
-    let Some(key) = key else {
-        return;
-    };
+    .await
+}
+
+/// The host: resolve `key`, noting `key.resolved` when the resolve won.
+pub(super) async fn resolve(world: &Arc<World>, key: String) {
     let answer =
         retry(world, |host| {
             let key = key.clone();

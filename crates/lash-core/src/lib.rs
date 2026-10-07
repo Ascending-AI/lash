@@ -23,11 +23,14 @@ pub use lash_core_execution::compat;
 pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
 pub use lash_core_execution::engine;
+/// The durable store port (ruling #74), which the facade re-exports whole
+/// from `lash::durable`.
+#[doc(hidden)]
+pub use lash_core_execution::formats;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_execution::process_id_for_test;
 pub use lash_core_execution::process_id_from_handle_json;
 /// Durable tool-effect format versions, re-exported for the format manifest.
-pub use lash_core_execution::runtime::{TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_PRESENTATION_VERSION};
 pub use lash_core_execution::waits;
 pub use lash_core_execution::{
     CompletionKeySecrets, KeyVersion, NoProjectionProviders, PinnedKey, ProjectionProviders,
@@ -47,9 +50,6 @@ pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_referrers;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub use lash_core_store::surface_format;
-/// The durable store port (ruling #74), which the facade re-exports whole
-/// from `lash::durable`.
-#[doc(hidden)]
 pub use lash_durable as durable_port;
 /// The relays of the obligation kinds a store set still arms.
 pub use runtime::obligations;

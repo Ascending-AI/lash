@@ -9,7 +9,7 @@ use crate::clock::{SimClock, settle};
 use crate::fault::{Activity, FaultStore};
 use crate::life::{Life, NodeClock, NodeLife};
 use crate::script::Script;
-use lash_durable::runner::{Activation, Hints, Runner, RunnerConfig, Stopped};
+use lash_durable::runner::{Activation, Drain, Hints, Runner, RunnerConfig, Stopped};
 use lash_durable::{
     CommitLabel, DurableError, DurableStore, FormatSet, LeaseConfig, MailCommit, MailTx, NodeId,
 };
@@ -30,6 +30,7 @@ struct SimNode {
     life: Arc<NodeLife>,
     store: Arc<FaultStore>,
     hints: Hints,
+    drain: Drain,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     task: JoinHandle<Option<Result<Stopped, DurableError>>>,
 }
@@ -44,6 +45,9 @@ pub struct SimNodes {
     config: SimNodesConfig,
     activation: Arc<dyn Activation>,
     nodes: Arc<Mutex<BTreeMap<String, SimNode>>>,
+    /// The format sets a node decodes when it is not the config's: a node
+    /// of another build.
+    decodes: Mutex<BTreeMap<String, Vec<FormatSet>>>,
 }
 
 impl SimNodes {
@@ -64,6 +68,21 @@ impl SimNodes {
             config,
             activation,
             nodes: Arc::default(),
+            decodes: Mutex::default(),
+        }
+    }
+
+    /// Run every later boot of `node` as a build that decodes `decodes`.
+    pub fn decode_on(&self, node: &str, decodes: Vec<FormatSet>) {
+        self.decodes
+            .lock_recover()
+            .insert(node.to_string(), decodes);
+    }
+
+    /// Start draining `node`'s live boot by release.
+    pub fn drain(&self, node: &str) {
+        if let Some(sim) = self.nodes.lock_recover().get(node) {
+            sim.drain.start();
         }
     }
 
@@ -93,18 +112,26 @@ impl SimNodes {
             Arc::clone(&self.clock),
             Arc::clone(&self.activity),
         ));
+        let decodes = self
+            .decodes
+            .lock_recover()
+            .get(node)
+            .cloned()
+            .unwrap_or_else(|| self.config.decodes.clone());
+        let drain = Drain::default();
         let runner = Runner::new(
             Arc::clone(&store) as Arc<dyn DurableStore>,
             NodeClock::new(Arc::clone(&self.clock), Arc::clone(&life)),
             RunnerConfig {
                 node: NodeId::new(node),
-                decodes: self.config.decodes.clone(),
+                decodes,
                 lease: self.config.lease,
                 max_active: self.config.max_active,
                 claim_batch: self.config.max_active,
             },
             Arc::clone(&self.activation),
-        );
+        )
+        .with_drain(drain.clone());
         let hints = runner.hints();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let task_life = Arc::clone(&life);
@@ -122,6 +149,7 @@ impl SimNodes {
                 life,
                 store,
                 hints,
+                drain,
                 stop: Some(stop),
                 task,
             },

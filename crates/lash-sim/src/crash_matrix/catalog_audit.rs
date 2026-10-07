@@ -31,12 +31,13 @@ pub enum Coverage {
 }
 
 /// Every catalog label and how the matrix covers it.
-pub const COVERAGE: [(CommitLabel, Coverage); 42] = [
+pub const COVERAGE: [(CommitLabel, Coverage); 43] = [
     (CommitLabel::CLAIM, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::HEARTBEAT, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::REAP, Coverage::Cases(&[Case::CellKilled])),
     (CommitLabel::NODE_REGISTER, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::NODE_RELEASE, Coverage::Cases(&[Case::Turn])),
+    (CommitLabel::NODE_DRAIN, Coverage::Cases(&[Case::Drain])),
     (
         CommitLabel::TURN_ACCEPT,
         Coverage::Unemitted(
@@ -152,10 +153,7 @@ pub const COVERAGE: [(CommitLabel, Coverage); 42] = [
         CommitLabel::TRIGGER_START,
         Coverage::Cases(&[Case::Trigger]),
     ),
-    (
-        CommitLabel::DRAIN_RELEASE,
-        Coverage::Unemitted("a draining node's release is L11's (FIG-5187)"),
-    ),
+    (CommitLabel::DRAIN_RELEASE, Coverage::Cases(&[Case::Drain])),
 ];
 
 /// What the audit found over the uncut runs: the violations, and the share

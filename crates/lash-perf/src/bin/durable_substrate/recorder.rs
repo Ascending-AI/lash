@@ -21,8 +21,8 @@ use lash_durable::domain::{
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
-    DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit, MailTx,
-    NodeLease, NodeSpec, Reaped, Signals,
+    DurableInstant, DurableReads, DurableStore, Epoch, FormatSet, HeartbeatOutcome, MailCommit,
+    MailTx, NodeLease, NodeSpec, Reaped, Signals,
 };
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{ProcessId, SessionId, TurnId};
@@ -244,6 +244,18 @@ impl DurableStore for RecordingStore {
         self.recorder
             .record(started, self.node.clone(), "node.claim", answer.is_ok());
         answer
+    }
+
+    async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
+        let started = Instant::now();
+        let answer = self.inner.mark_draining(node).await;
+        self.recorder
+            .record(started, self.node.clone(), "node.drain", answer.is_ok());
+        answer
+    }
+
+    async fn live_decodes(&self) -> Result<Vec<Vec<FormatSet>>, DurableError> {
+        self.inner.live_decodes().await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {

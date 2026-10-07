@@ -85,7 +85,6 @@ impl<'run> AtomicToolAttempt<'run> {
         };
         let triggers = context.trigger_outcomes.drain();
         let capture = crate::runtime::ToolAttemptCapture {
-            version: crate::runtime::TOOL_ATTEMPT_CAPTURE_VERSION,
             messages: context.checkpoint_messages.drain(),
         };
         Ok(crate::ToolAttemptEffectOutcome {

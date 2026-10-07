@@ -75,6 +75,10 @@ pub struct BackendParts {
     pub engines: Vec<Arc<dyn crate::ProcessEngine>>,
     /// The projection providers' catalog.
     pub providers: Arc<dyn ProjectionProviders>,
+    /// The durable formats actor state holds beyond this crate's own: the
+    /// VM's continuation and snapshot formats when the assembler links the
+    /// VM. Part of every actor kind's format set (ADR 0106 §1).
+    pub formats: Vec<lash_durable::FormatSurface>,
 }
 
 /// The one value a runtime takes every port from: the store set, its
@@ -100,6 +104,8 @@ struct BackendInner {
     secrets: crate::runtime::actor::waits::CompletionKeySecrets,
     engines: BTreeMap<String, Arc<dyn crate::ProcessEngine>>,
     providers: Arc<dyn ProjectionProviders>,
+    /// The format sets this build writes and decodes.
+    formats: crate::formats::BuildFormats,
     /// The in-process half of a wake: the node runner this backend serves
     /// under, when it serves, takes its hints from here, so a mailbox commit
     /// made on this node reaches its actors without waiting for a poll.
@@ -132,6 +138,11 @@ impl Backend {
         let secrets = parts
             .secrets
             .ok_or(DurableBuildError::MissingCompletionSecrets)?;
+        let engine_formats: Vec<_> = engines
+            .values()
+            .map(|engine| engine.state_format())
+            .collect();
+        let formats = crate::formats::BuildFormats::new(&engine_formats, &parts.formats);
         Ok(Self {
             inner: Arc::new(BackendInner {
                 stores: parts.stores,
@@ -140,6 +151,7 @@ impl Backend {
                 secrets,
                 engines,
                 providers,
+                formats,
                 hints: Hints::default(),
             }),
         })
@@ -160,6 +172,7 @@ impl Backend {
             secrets: Some(crate::runtime::actor::waits::CompletionKeySecrets::for_testing()),
             engines: Vec::new(),
             providers: Arc::new(crate::runtime::actor::projection::NoProjectionProviders),
+            formats: Vec::new(),
         })
         .expect("a testing backend assembles")
     }
@@ -178,9 +191,17 @@ impl Backend {
                 secrets: self.inner.secrets.clone(),
                 engines: self.inner.engines.clone(),
                 providers: Arc::clone(&self.inner.providers),
+                formats: self.inner.formats.clone(),
                 hints: self.inner.hints.clone(),
             }),
         }
+    }
+
+    /// The format sets this build writes and decodes (ADR 0106 §1): a node
+    /// serving this backend registers [`BuildFormats::decodes`](crate::formats::BuildFormats::decodes).
+    #[must_use]
+    pub fn formats(&self) -> &crate::formats::BuildFormats {
+        &self.inner.formats
     }
 
     /// The store set.

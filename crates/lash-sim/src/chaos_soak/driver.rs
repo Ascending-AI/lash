@@ -120,11 +120,18 @@ pub async fn epoch(config: &SoakConfig, seed: u64) -> Epoch {
             return epoch;
         }
     };
+    let node_config = match world.backend() {
+        Ok(backend) => nodes_config(&backend),
+        Err(error) => {
+            epoch.violations.push(error);
+            return epoch;
+        }
+    };
     let nodes = Arc::new(SimNodes::new(
         database,
         Arc::clone(&clock),
         Script::new(),
-        nodes_config(),
+        node_config,
         activation,
     ));
     if let Err(error) = world.start_host(&nodes) {

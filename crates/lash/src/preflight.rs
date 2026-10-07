@@ -247,10 +247,9 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "identity, not a stamp: recomputed and compared when a retried request replays, \
              never read back at rest",
         ),
-        DurableFormat::ToolAttemptCapture | DurableFormat::ToolPresentation => {
+        DurableFormat::RunRecord | DurableFormat::WaitRow | DurableFormat::OutcomeMaterial => {
             SurfaceRelation::Unwalkable(
-                "no bounded surface: journaled on runtime-effect outcomes, refused when replay \
-             decodes them rather than at rest",
+                "actor state: decoded only by a node whose format set names it, under the claim filter",
             )
         }
         DurableFormat::TurnCheckpoint => SurfaceRelation::Unwalkable(

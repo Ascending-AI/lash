@@ -128,6 +128,14 @@ impl DurableStore for DummyDomainApply {
         self.inner.claim(node, limit).await
     }
 
+    async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
+        self.inner.mark_draining(node).await
+    }
+
+    async fn live_decodes(&self) -> Result<Vec<Vec<lash_durable::FormatSet>>, DurableError> {
+        self.inner.live_decodes().await
+    }
+
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.inner.owned(node).await
     }

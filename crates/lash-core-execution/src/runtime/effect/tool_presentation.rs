@@ -69,32 +69,6 @@ pub(crate) async fn record_tool_presentation_plan(
     })
 }
 
-/// The durable format version [`ToolPresentation`] stamps and
-/// [`ToolPresentation::validate`] refuses mismatches against.
-///
-/// Version 2 (FIG-3515) carries message parts whose tool results hold ordered
-/// text and attachment blocks, one result per call.
-///
-/// Version 3 (FIG-3607) names processes by their minted id alone, so a
-/// presented process handle carries no incarnation.
-///
-/// Under the pre-1.0 freeze the shape changes in place (FIG-1643): it
-/// journals the output-retention policy the boundary applied, and a result
-/// block may be a retained output — a bounded witness and the attachment
-/// holding the complete text.
-///
-/// version_guard(
-///     roots(path = "crates/lash-sansio/src/plugin.rs", PluginMessage),
-///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
-///     file(
-///         path = "crates/lash-sansio/src/identity.rs",
-///         cover("string_identity!", SessionId, ProcessId),
-///     ),
-/// )
-/// version_surface = "drain"
-/// format_manifest = "ToolPresentation"
-pub const TOOL_PRESENTATION_VERSION: u16 = 3;
-
 /// The journaled product of one tool result's presentation chain.
 ///
 /// `model_return` has no serde default on purpose: a presentation without one
@@ -105,8 +79,6 @@ pub const TOOL_PRESENTATION_VERSION: u16 = 3;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolPresentation {
-    /// The durable format version, refused rather than defaulted.
-    pub version: u16,
     /// The model-facing return the steps folded to, after the
     /// attachment-materialization notices computed under the recorded
     /// environment.
@@ -118,26 +90,6 @@ pub struct ToolPresentation {
     /// (FIG-1643). Recorded whether or not it retained anything, so a replay
     /// under another policy serves this decision unchanged.
     pub retention: crate::OutputRetentionPolicy,
-}
-
-impl ToolPresentation {
-    /// Refuses a presentation this build cannot read completely, the same
-    /// contract of a recorded presentation
-    /// gives the settlement record.
-    pub fn validate(&self) -> Result<(), RuntimeEffectControllerError> {
-        if self.version != TOOL_PRESENTATION_VERSION {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::ToolPresentationFormat,
-                format!(
-                    "tool presentation records format version {}, and this build reads version \
-                     {TOOL_PRESENTATION_VERSION}; a presentation that cannot be read completely is \
-                     refused rather than served as a prefix of what the chain produced",
-                    self.version
-                ),
-            ));
-        }
-        Ok(())
-    }
 }
 
 /// The [`crate::plugin::ToolPresentationArtifacts`] implementation the runtime
@@ -264,10 +216,4 @@ pub async fn retain_oversized_return(
     }
     model_return.parts = parts;
     Ok(())
-}
-
-impl lash_core_store::store::DurableRecord for ToolPresentation {
-    const SURFACE: lash_core_store::store::SurfaceFormat = lash_core_store::surface_format!(
-        crate::runtime::effect::tool_presentation::TOOL_PRESENTATION_VERSION
-    );
 }

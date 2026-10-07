@@ -35,81 +35,66 @@ Evidence: `crates/lash-core-execution/src/engine/contracts.rs`,
 
 ### 1. Long-running work and drain by release
 
-A build's format set names every durable format it decodes: turn checkpoints,
-VM continuations and snapshot blobs, the cell envelope used as snapshot data,
-Run record bodies, wait rows, engine-state format ids and outcome materials.
+A build's format set names every durable format its actors' state holds:
+turn checkpoints, the session-state generation, VM continuations and
+Lashlang snapshots, the RLM cell envelope used as snapshot data, Run record
+bodies, wait rows, outcome materials and each process engine's state format.
 Each format declares its version surface under
-[ADR 0131](0131-durable-types-declare-their-version-surface.md). A node
-records its decodable set in `lash_nodes.formats`; an actor records the format
-set of its state in `lash_actors.formats`. A claim takes only actors whose
-formats the claiming node decodes. An actor no live node can decode stays
-visible and can be cancelled without decoding its payload (ADR 0132 §11). The
-build's `SessionAdmissionWindow` (its supported session-state range and every
-writer pin the recorded `F` could select, FIG-4454) and its ordered plugin
-composition (each registered plugin's id and declared behaviour revision, in
-hook order, FIG-4744) are part of what it decodes. The fleet epoch `F`,
-described in §2, selects durable writer formats.
+[ADR 0131](0131-durable-types-declare-their-version-surface.md). A set is
+spelled canonically from its formats' ids and versions, per actor kind: one
+session set, and one set per process engine. A node records every set it
+decodes in `lash_nodes.formats_json`; an actor records the set its state is
+in, in `lash_actors.formats`. A process starts in its engine's unstarted set,
+which any node with the engine decodes, and its first transition stamps the
+engine's state set. A claim takes only actors in a set the claiming node
+decodes. An actor no live node decodes stays visible and ready; a pending
+cancel lets any node claim it to end it without decoding its state (ADR 0132
+§11).
 
-A build drains by release. An operator marks a node draining, and the node:
+A build drains by release. An operator starts a node's drain, and the node:
 
-1. stops claiming;
-2. finishes each actor it owns to its next committed phase, or to a snapshot
-   for a VM;
-3. releases it to `ready`.
+1. records `lash_nodes.draining` and stops claiming;
+2. finishes each actor it owns to its next committed phase: a session stops
+   before its next model call or cell, a process once its running steps have
+   committed their outcomes;
+3. releases it `ready` under `drain.release`, and stops when none is left.
 
-Nodes of the new build then claim the released actors, under the claim filter
-above. The drain moves no work by hand and parks nothing: a released actor
-resumes from committed state on whichever node claims it. A VM continuation
-bound to an executable identity whose bytecode contract changed finishes on a
-node of the old build or ends `Abandoned { ResumeRefused }`.
+Nodes of the new build then claim the released actors, under the claim
+filter above. The drain moves no work by hand and parks nothing: a released
+actor resumes from committed state on whichever node claims it. A VM
+continuation bound to an executable identity whose bytecode contract changed
+finishes on a node of the old build or ends `Abandoned { ResumeRefused }`.
+Plugin composition is not part of the session set: plugin state is refused
+or admitted at session admission, so a plugin roll needs no drain.
 
-Drain status counts the actors a draining node still owns, and the actors in
-the store whose formats only draining nodes decode. Parked work requires a
-decoding node or an operator control decision.
+Evidence: `crates/lash-durable/src/formats.rs`,
+`crates/lash-core-execution/src/formats.rs`,
+`crates/lash/src/formats.rs` (`actor_state_surfaces`),
+`crates/lash-durable/src/runner.rs`,
+`crates/lash-durable/src/laws/formats.rs`,
+`crates/lash-durable-test/tests/drain_by_release.rs`.
 
-Evidence: `crates/lash/src/formats.rs`,
-`crates/lash-core/src/runtime/shift/admission.rs`,
-`crates/lash-core-store/src/store/state_version.rs`. The substrate lanes
-implement the format set, the claim filter and drain by release.
-
-### 2. Shared rows: the fleet format and finalize
+### 2. Shared rows: the fleet format
 
 `F` is the durable release compatibility epoch in the fleet-format row.
-`FleetFormat::writer_version` maps a surface to the format that epoch selects.
-Writers use that selection; readers accept the surface's supported window.
-The normal build's writable epoch range is one epoch. Synthetic-next admits
-the predecessor epoch and its own, so upgrade tests can prove read-both and
-write-old behavior instead of checking equal constants.
+`FleetFormat::writer_version` maps a store-resident surface to the format
+that epoch selects. Writers use that selection; readers accept the surface's
+supported window. The normal build's writable epoch range is one epoch.
+Synthetic-next admits the predecessor epoch and its own, so upgrade tests can
+prove read-both and write-old behavior instead of checking equal constants.
+The release cut owns moving `F` (ADR 0115).
 
-Finalize closes the rollback window by moving `F` to the finalizing build's
-epoch. It requires that no live node lacks the newer formats: a newer format
-is never written while a node of the older build is live. An unread node table
-refuses the operation. PostgreSQL's automatic mode also refuses an operator hold; its
-explicit `--override-hold` mode bypasses only that hold. The fleet-row transaction
-moves `F` and fences stale writers. PostgreSQL finalize also runs eligible
-backfills.
+Actor state follows the same rule through the node table: a writer that knows
+several sets for an actor writes the newest one every live node serving such
+actors decodes (`fleet_writable` over `live_decodes`), so a newer format is
+never written while a node of the older build is live.
 
-The host owns the rollout and calls finalize as its final drain operation.
-`lashctl finalize` exposes the PostgreSQL operation. A status read does not
-schedule an automatic finalize. SQLite's schema migration runs on open;
-finalizing its fleet epoch is a separate store operation with no operator hold.
-It commits in one transaction of the one database, so there is no partial
-transition to complete. A build whose
-writable range excludes `F` refuses rather than writing another format.
-
-The two upgrade values remain distinct: `UpgradePolicy` describes how a
-surface crosses a release, while `FleetFormat` selects what a writer emits.
-Rollback is supported while the expanded store and writer formats remain
-inside the older build's read/write windows. After finalize fences it, the
-older build cannot keep serving writes.
+A build whose writable range excludes `F` refuses rather than writing another
+format. The two upgrade values remain distinct: `UpgradePolicy` describes how
+a surface crosses a release, while `FleetFormat` selects what a writer emits.
 
 Evidence: `crates/lash-core-store/src/store/fleet_format.rs`,
-`crates/lash-core-store/src/store/fleet_finalize.rs`,
-`crates/lash-postgres-store/src/postgres/finalize.rs`,
-`crates/lash-postgres-store/src/lib.rs`,
-`crates/lashctl/src/main.rs`,
-`crates/lash-sqlite-store/src/backend.rs`,
-`crates/lash-sqlite-store/src/finalize.rs`.
+`crates/lash-durable/src/formats.rs`.
 
 ### 3. Object state outside the store
 
@@ -134,7 +119,7 @@ manifests. Engine-state formats are declared by their process engines.
 | Immutable, hash-addressed history | Decode the admitted range and lift in memory without rewriting the stored bytes or identity preimage. |
 | Derived workflow graph and type facets | Their declared read ranges and projection policy. |
 | Content addresses and idempotency families | Preserve stored identity preimages; admit the declared family rather than re-derive an old identity with a new family. |
-| Turn checkpoints, VM snapshots, Run records, wait rows and engine state | Their declared payload read range, the claim filter and drain by release (§1). |
+| Turn checkpoints, VM snapshots, Run records, wait rows, outcome materials and engine state | The actor's format set, the claim filter and drain by release (§1); 1.0 decode-and-resume fixtures. |
 | Live remote wire | Negotiated or declared wire read/write windows, separately from stored-value versions. |
 | Release fixtures | Capture by release tag; synthetic-next supplies the current upgrade proof. |
 
@@ -157,8 +142,7 @@ Evidence: `scripts/discover_version_surfaces.py`,
 `crates/lash-core-store/src/store/state_version.rs`,
 `crates/lash-sqlite-store/src/persistence/session_commit.rs`,
 `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs`,
-`crates/lash-core-store/src/store/persisted_state_tests.rs`,
-`crates/lash-upgrade-harness/tests/phase_a/history_after_finalize.rs`.
+`crates/lash-core-store/src/store/persisted_state_tests.rs`.
 
 ### 5. PostgreSQL and SQLite schema changes
 
@@ -217,27 +201,23 @@ Evidence: `crates/lash-postgres-store/src/postgres/migrate.rs`,
 
 ### 6. Tests and gates
 
-Upgrade proofs use synthetic-next alongside the normal build. Phase A runs
-separate binaries and tests expanded-store rollback, drain by release,
-finalize racing writers, immutable history after finalize, negotiated wire,
-retention delivery and skipped-release refusal. The rolling harness exercises
-PostgreSQL overlap and SQLite stop-then-start, including rollback, drain,
-hold, finalize and contract. It tests the synthetic release window, not arbitrary
-pre-1.0 binary compatibility. The multi-node leg (`just e2e-rolling-cluster`)
-runs the same choreography under load on the Helm load topology, on demand
-rather than per PR (ADR 0115 §6).
-
 Storage laws run against SQLite file, SQLite memory and PostgreSQL. Laws run
 the production runtime over a fault-injecting store with labelled commits, a
-virtual clock and `SimNodes` (ADR 0132 §14). The drain-by-release law cuts at
-every commit of a release and requires each released actor to be claimed by a
-new-build node with no `Once` body started twice. The claim-filter law
-requires that a node lacking a format never claims an actor stored in it.
-Format-registry checks validate policy declarations; release fixture capture
-writes `fixtures/release/<tag>/`.
+virtual clock and `SimNodes` (ADR 0132 §14). The drain-by-release law cuts
+the release's `drain.release` commit under every fault and requires the
+released actor to finish on a node of the newer build with no `Once` body
+started twice. The claim-filter law requires that a node lacking a format set
+never claims an actor stored in it, that the actor stays visible, and that a
+pending cancel ends it engine-free; the fleet-format law requires that a newer
+set is not written while an older node is live. The 1.0 decode-and-resume
+fixtures commit encoded state in every format of the build's sets, and a
+check requires a fixture for every format id. Format-registry checks validate
+policy declarations; release fixture capture writes `fixtures/release/<tag>/`.
 
-Evidence: `crates/lash-upgrade-harness/tests/phase_a/main.rs`,
-`crates/lash-upgrade-harness/tests/rolling/main.rs`,
+Evidence: `crates/lash-durable/src/laws/formats.rs`,
+`crates/lash-durable-test/tests/drain_by_release.rs`,
+`crates/lash-durable-test/tests/format_fixtures.rs`,
+`crates/lash-core-execution/src/runtime/actor/process_laws.rs`,
 `scripts/capture_release_fixtures.py`,
 `scripts/check_format_registry.py`.
 
@@ -246,14 +226,14 @@ Evidence: `crates/lash-upgrade-harness/tests/phase_a/main.rs`,
 Startup and decoder admission refuse unsupported component and surface ranges,
 unregistered predecessor conversions, malformed compatibility records and
 integrity failures. Synthetic-next tests prove a skipped compatibility release
-refuses. A node never claims an actor whose formats it cannot decode.
-Finalize refuses while a node lacking the newer formats is live, on an unread
-node table, or on a hold in automatic mode. A stale writer refuses after the fleet
-epoch leaves its writable range. These are typed outcomes; missing evidence
+refuses. A node never claims an actor whose formats it cannot decode, except
+to end it on a pending cancel without decoding it. A writer never writes a
+newer format set while a live node lacks it. A stale writer refuses after the
+fleet epoch leaves its writable range. These are typed outcomes; missing evidence
 is not permission to mutate or decode under another contract.
 
 Evidence: `crates/lash-core-store/src/compat.rs`,
-`crates/lash-upgrade-harness/tests/phase_a/skipped_compatibility_release_refused.rs`.
+`crates/lash-durable/src/laws/formats.rs`.
 
 ### 8. The release boundary
 
@@ -281,7 +261,7 @@ runner.
 
 A supported upgrade needs its declared read/write window and conversion or
 drain path. The rollback boundary is the fleet-epoch flip, which requires that
-no node of the older build is live. Operators run schema migration, drain by
-release and finalize in that order. Immutable history retains its bytes and identities. The current
+no node of the older build is live. Operators run schema migration, then
+drain by release. Immutable history retains its bytes and identities. The current
 upgrade evidence comes from synthetic-next; the version freeze does not
 promise migration or rollback between arbitrary development builds.

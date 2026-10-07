@@ -89,6 +89,7 @@ impl DurableBackendBuilder {
             settings: self.settings,
             secrets: self.secrets,
             engines: self.engines,
+            formats: crate::formats::actor_state_surfaces(),
         })
     }
 }

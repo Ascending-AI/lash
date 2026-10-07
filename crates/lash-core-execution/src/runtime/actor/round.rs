@@ -81,6 +81,7 @@ mod store_local;
 mod tools;
 
 pub use fold::{MemberState, RoundMember, RoundView, fold};
+pub use records::RUN_RECORD_FORMAT_VERSION;
 pub use rounds::{admit_round, present, presentation, settle_retry, start_retry};
 pub use runner::{
     Discharge, MemberBodies, MemberBody, MemberResult, RoundEnd, RoundError, RoundRunner,

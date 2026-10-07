@@ -214,26 +214,6 @@ impl fmt::Display for BootId {
     }
 }
 
-/// The digest of a set of durable formats. An actor records the set its
-/// state is written in; a node declares the sets it decodes, and claims only
-/// actors it can decode.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct FormatSet(String);
-
-impl FormatSet {
-    /// A format-set digest as stored.
-    #[must_use]
-    pub fn new(digest: impl Into<String>) -> Self {
-        Self(digest.into())
-    }
-
-    /// The stored spelling.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 /// What a mail row is: its consumer's vocabulary, not the port's.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MailKind(String);
@@ -270,6 +250,8 @@ impl CommitLabel {
     pub const NODE_REGISTER: Self = Self("node.register");
     /// [`DurableStore::release_node`](crate::DurableStore::release_node)'s transaction.
     pub const NODE_RELEASE: Self = Self("node.release");
+    /// [`DurableStore::mark_draining`](crate::DurableStore::mark_draining)'s transaction.
+    pub const NODE_DRAIN: Self = Self("node.drain");
 
     /// Name a commit point.
     #[must_use]

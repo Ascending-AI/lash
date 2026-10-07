@@ -11,6 +11,7 @@ use lash_core::{
 
 fn parts() -> BackendParts {
     BackendParts {
+        formats: Vec::new(),
         stores: crate::conformance::StoreLawBackend::stores(),
         settings: DurableSettings::default(),
         secrets: Some(CompletionKeySecrets::for_testing()),

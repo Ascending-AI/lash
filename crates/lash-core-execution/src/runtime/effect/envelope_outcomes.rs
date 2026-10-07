@@ -38,7 +38,6 @@ impl RuntimeEffectOutcome {
                 capture,
             } => {
                 let capture = capture.map(|capture| *capture).unwrap_or_default();
-                capture.validate()?;
                 Ok(ToolAttemptEffectOutcome {
                     launch: *launch,
                     triggers,
@@ -53,19 +52,11 @@ impl RuntimeEffectOutcome {
     }
 
     /// Unpacks the recorded presentation of one settled tool result.
-    ///
-    /// Validates the record rather than trusting it: a journal entry written
-    /// by a build whose presentation format this build cannot read completely
-    /// is refused here, where the outcome is consumed, instead of serving the
-    /// model a prefix of what the chain produced.
     pub(crate) fn into_tool_presentation(
         self,
     ) -> Result<crate::runtime::effect::ToolPresentation, RuntimeEffectControllerError> {
         match self {
-            Self::PresentToolResult { presentation } => {
-                presentation.validate()?;
-                Ok(*presentation)
-            }
+            Self::PresentToolResult { presentation } => Ok(*presentation),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::PresentToolResult,
                 other.kind(),

@@ -238,6 +238,18 @@ impl PartialEq for ProcessInput {
 }
 
 impl ProcessInput {
+    /// The format set a process of this input is created in, before its
+    /// first transition: its engine's unstarted set, which any node with the
+    /// engine decodes, or the kernel set for a process with no engine. Its
+    /// first `process.advance` stamps the engine's state formats.
+    #[must_use]
+    pub fn unstarted_formats(&self) -> lash_durable::FormatSet {
+        match self {
+            Self::Engine { kind, .. } => lash_durable::FormatSet::unstarted_process(kind),
+            Self::SessionTurn { .. } => lash_durable::FormatSet::kernel_process(),
+        }
+    }
+
     /// Stored attachments this input carries, sorted and deduplicated: a
     /// `SessionTurn`'s turn input. Engine payloads are opaque JSON and carry
     /// no typed attachments (ADR 0124).

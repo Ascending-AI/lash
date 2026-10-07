@@ -46,6 +46,7 @@ L13 = FIG-5193.
 - **S9, signals (L8, FIG-5178):** `StoreSet` gained `durable_signals() -> Option<Arc<dyn lash_durable::Signals>>`, agreed with the orchestrator. PostgreSQL answers `PostgresSignals` (after-commit `pg_notify` wake hints, a listener per node that holds the boot's session advisory lock, liveness probes and the reap of a boot whose lock is released); SQLite and the test store sets answer `None`, because one node per database keeps its wakes in process. `serve` passes it to `Runner::with_signals` when `DurableConfig`'s notifier is `AfterCommit`, and every mailbox commit through `Backend::commit_mail` hands what it woke to the shared `Hints`, which hint in process or publish.
 - **S1, work ports:** `EffectEngine::{session_work, process_work}` became `DurableSessionWork` and `DurableProcessWork` (`runtime/work/durable.rs`), the facade core's session-work engine and process port over the backend. Session work is a producer's row and `Backend::wake_session` in one transaction (L3s), and a process start needs no delivery: registration creates its actor ready, and a trigger occurrence registers its processes in its own `trigger.start` transaction (L6); the shift ask, `schedule_shift` and `await_shift` are deleted, the terminal wait and its publication are L5's, and cancel delivery is L6's mail.
 - **S0, L6b:** the session-close domain also records a session's turn scopes whose cascade is still marking (`SessionCloseWrite::ScopeEnding` and `ScopeEnded`), and `DurableReads` gained `session_close` and `ending_scopes`. A deletion is session mail (`session.close`, under `mail.session`); the close runs as the session actor's closing state in `lash-core/src/runtime/durable/session_close.rs`, and a turn's scope end, its cascade cursor work and the bounded wait for its children (G1b) are in `durable/turn_scope.rs`.
+- **S0 and S2, formats and drain (L11, FIG-5187):** an actor's `FormatSet` is the canonical spelling of its state's formats (`FormatSet::of(kind, surfaces)`, `lash-durable/src/formats.rs`); `Backend::formats()` (`lash-core-execution/src/formats.rs`) spells the build's session set and one set per engine from the core formats and `BackendParts::formats`, which the facade's builder fills with the VM's (`lash::formats::actor_state_surfaces`). `NodeServe` takes its decodable sets from the backend and gains `drain`; `Runner::with_drain`, `Owned::{draining, purpose}` and `Stopped::Drained` drain a node by release; a session stops at its turn's cancel-check points (`PhaseExit::Drained`), a process once its running steps have committed. The port gained `DurableStore::mark_draining` and `live_decodes`, `Claimed::purpose` (`ClaimPurpose::Run`, or `CancelOnly` for a process in a set the node does not decode, claimed only so its pending cancel ends it engine-free; the enum keeps such a claim from reaching engine code), `Release::Ready` (the `drain.release` hand-off), `ActorTx::stamp_formats`, the `node.drain` label and `fleet_writable`. `PROCESS_FORMATS` is deleted: a process is created in its engine's unstarted set (`ProcessInput::unstarted_formats`, `ProcessStartRows::formats`) and its first `process.advance` stamps the engine's set.
 - **S1, perf:** the runtime-perf scenario `ScopedEffectController` is `ScopedEffects`; its report name `scoped_effect_controller` and its budget are unchanged.
 
 ## `execute_effect` variant classification
@@ -113,7 +114,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 
 | Table or columns | DDL | Statements |
 |---|---|---|
-| `nodes`, `actors`, `actor_mail` | L1 (landed) | L1; `actors.parked` state, `park_json`, `failed_activations`, progress counters: L6; `nodes.draining`: L11 |
+| `nodes`, `actors`, `actor_mail` | L1 (landed) | L1; `actors.parked` state, `park_json`, `failed_activations`, progress counters: L6; `nodes.draining`, the format stamp: L11 |
 | turn phase state (columns on the run row or a 1:1 side table, one-unfinished-run unique index) | V0 | V0, then L3 |
 | `lash_run_records` | **I0** | V0, then L4 |
 | `lash_exec_snapshots` (CAS on `rev`; no `exported_descriptors` column) | **I0** | V0, then L7 (L6 writes `p/<pid>` through S7) |
@@ -121,7 +122,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 | process actor columns, engine-state pointer, `cancel_requested_at_ms`, cascade cursor | L6 | L6 |
 | `lash_park_events` | L6 | L6 |
 | `session_close` (a closing session's last step, then its tombstone), `session_scope_ends` (a session's turn scopes whose cascade is still marking) | L6b | L6b |
-| format columns, fleet format | L11 | L11 |
+| format columns (`nodes.formats_json`, `nodes.draining`, `actors.formats`), fleet format | L1, L11 (`draining`) | L11 |
 | notifier, advisory lock (no tables; the liveness probe and the released-boot reap read and write `nodes` and `actors` through the PostgreSQL engine module) | none | L8 |
 | drops of replaced tables | the lane that replaces them | L10b squashes the 1.0 baseline last |
 

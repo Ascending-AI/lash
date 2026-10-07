@@ -35,6 +35,7 @@ pub mod domain;
 mod dues;
 mod durable_config;
 mod error;
+mod formats;
 mod ids;
 mod labels;
 #[cfg(feature = "testing")]
@@ -53,13 +54,14 @@ pub use durable_config::{
     DurableConfig, DurableConfigError, DurableSettings, GroupCommit, Notifier,
 };
 pub use error::{DurableError, Fenced, MailRefusal, StoreFailure, StoreFailureKind};
+pub use formats::{FormatSet, FormatSurface, fleet_writable};
 pub use ids::{
-    ActorKey, ActorKeyError, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, FormatSet,
-    MailKind, MailSeq, NodeId, StateRevision,
+    ActorKey, ActorKeyError, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, MailKind,
+    MailSeq, NodeId, StateRevision,
 };
 pub use port::{
-    ActorCommit, ActorSnapshot, ActorState, ClaimCause, Claimed, DurableStore, HeartbeatOutcome,
-    MailCommit, NodeLease, NodeSpec, Owner, Reaped, Woken,
+    ActorCommit, ActorSnapshot, ActorState, ClaimCause, ClaimPurpose, Claimed, DurableStore,
+    HeartbeatOutcome, MailCommit, NodeLease, NodeSpec, Owner, Reaped, Woken,
 };
 pub use probe::{DurableProbe, NoProbe};
 pub use signals::{BootLiveness, Signal, SignalFeed, Signals, WakeBatch};

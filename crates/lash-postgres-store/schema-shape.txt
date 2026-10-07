@@ -189,6 +189,7 @@ table lash_migrations
   primary-key (phase, migration)
 table lash_nodes
   column boot_id text not-null
+  column draining boolean not-null default
   column formats_json text not-null
   column heartbeat_expires_at_ms bigint not-null
   column node_id text not-null

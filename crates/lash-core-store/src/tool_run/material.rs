@@ -253,6 +253,21 @@ impl MaterialRefusal {
     }
 }
 
+/// The format of a stored tool outcome's material: a [`MaterialPayload`] in
+/// its [`MaterialEntry`] envelope, named by its [`MaterialRef`]. A payload
+/// records it in `format`, and a reader refuses any other. Every actor that
+/// runs tools carries it in its format set (ADR 0106 §1).
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-core-store/src/tool_run/material.rs",
+///         cover(MaterialPayload, MaterialEntry, MaterialRef),
+///     ),
+/// )
+/// version_surface = "drain"
+/// format_manifest = "OutcomeMaterial"
+pub const OUTCOME_MATERIAL_FORMAT_VERSION: u16 = 1;
+
 /// Canonical material bytes and their codec binding. The same wire value is
 /// used in an opener journal and in a retained handover artifact. Location is
 /// deliberately absent: moving bytes does not change their integrity digest.
@@ -291,7 +306,7 @@ impl MaterialPayload {
         Self {
             owner,
             role,
-            format: 1,
+            format: OUTCOME_MATERIAL_FORMAT_VERSION,
             revision,
             text,
         }
@@ -344,7 +359,7 @@ impl MaterialPayload {
             }
             .into());
         }
-        if self.format != 1 {
+        if self.format != OUTCOME_MATERIAL_FORMAT_VERSION {
             return Err(MaterialRefusal::FormatMismatch {
                 reference: Box::new(reference.clone()),
                 found: self.format,

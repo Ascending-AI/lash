@@ -34,6 +34,7 @@ crash_matrix! {
     a_process_signalled_and_cancelled_cut_at_every_label_ends_once => Signal;
     a_session_close_cut_at_every_label_ends_at_its_tombstone => Close;
     a_trigger_occurrence_cut_at_every_label_starts_each_delivery_once => Trigger;
+    a_drained_node_cut_at_every_label_releases_its_actors_to_the_next_once => Drain;
 }
 
 /// Every label the runtime emits is committed by some case's uncut run, so

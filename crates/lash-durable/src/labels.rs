@@ -121,12 +121,13 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 42] = [
+    pub const ALL: [Self; 43] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
         Self::NODE_REGISTER,
         Self::NODE_RELEASE,
+        Self::NODE_DRAIN,
         Self::TURN_ACCEPT,
         Self::TURN_ADMIT,
         Self::TURN_PREPARE,

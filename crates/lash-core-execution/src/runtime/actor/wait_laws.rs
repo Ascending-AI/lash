@@ -90,6 +90,7 @@ fn secrets(versions: &[(u16, u8)], current: u16) -> Result<CompletionKeySecrets,
 /// `backend`'s store set under other completion secrets.
 fn with_secrets(backend: &Backend, secrets: CompletionKeySecrets) -> Result<Backend, LawBroken> {
     Backend::assemble(BackendParts {
+        formats: Vec::new(),
         stores: backend.stores(),
         settings: settings(),
         secrets: Some(secrets),

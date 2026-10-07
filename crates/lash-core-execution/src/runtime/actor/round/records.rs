@@ -13,6 +13,21 @@ use super::{ExecutionDraft, PinnedWait};
 use crate::runtime::actor::waits::{KeyVersion, WaitDeadline, WaitId};
 use crate::{ToolCallId, ToolId};
 
+/// The format of a run record's body: the admission, start, outcome, retry
+/// and presentation records below. Bodies carry no stamp of their own: the
+/// record's actor carries this version in its format set, so only a node
+/// that decodes them claims it (ADR 0106 §1).
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-core-execution/src/runtime/actor/round/records.rs",
+///         cover(AdmitBody, AdmittedMember, StartBody, OutcomeBody, RetryBody, PresentBody),
+///     ),
+/// )
+/// version_surface = "drain"
+/// format_manifest = "RunRecord"
+pub const RUN_RECORD_FORMAT_VERSION: u32 = 1;
+
 /// The admission's ordinal.
 pub(super) const ADMIT_ORDINAL: Ordinal = Ordinal(0);
 

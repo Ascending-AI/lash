@@ -22,9 +22,8 @@ use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::{
     Backend, BackendParts, CompletionKeySecrets, DurableSettings, NoProjectionProviders,
 };
-use lash_durable::domain::PROCESS_FORMATS;
 use lash_durable::runner::Activation;
-use lash_durable::{ActorDispatch, ActorKey, DurableStore, FormatSet, LeaseConfig};
+use lash_durable::{ActorDispatch, ActorKey, DurableStore, LeaseConfig};
 use lash_durable_test::{Cut, Scenario, SimClock, SimNodes, SimNodesConfig};
 
 use super::Case;
@@ -33,8 +32,6 @@ use super::invariants;
 use super::services::SimServices;
 use super::world::World;
 
-/// The format set the deployment's sessions are written in.
-pub const SESSION_FORMATS: &str = "lash-sim-session/1";
 /// The deployment's nodes, in the order an even seed starts them.
 pub const NODES: [&str; 2] = ["a", "b"];
 /// How many `Until` children a cascade marks per batch: small, so a
@@ -78,15 +75,13 @@ pub fn settings() -> DurableSettings {
     }
 }
 
-/// How the deployment's nodes run.
+/// How the deployment's nodes run: each decodes every format set
+/// `backend`'s build writes.
 #[must_use]
-pub fn nodes_config() -> SimNodesConfig {
+pub fn nodes_config(backend: &Backend) -> SimNodesConfig {
     SimNodesConfig {
         lease: LeaseConfig::default(),
-        decodes: vec![
-            FormatSet::new(SESSION_FORMATS),
-            FormatSet::new(PROCESS_FORMATS),
-        ],
+        decodes: backend.formats().decodes(),
         max_active: 8,
     }
 }
@@ -221,6 +216,7 @@ pub fn assemble(stores: Arc<dyn lash_core_execution::StoreSet>) -> Result<Backen
         secrets: Some(CompletionKeySecrets::for_testing()),
         engines: vec![Arc::new(SimProcessEngine)],
         providers: Arc::new(NoProjectionProviders),
+        formats: Vec::new(),
     })
     .map_err(|error| error.to_string())
 }
@@ -340,8 +336,12 @@ impl Scenario for Deployment {
         database
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the matrix builds the database before the config"
+    )]
     fn config(&self) -> SimNodesConfig {
-        nodes_config()
+        nodes_config(&self.world.backend().expect("the database is built first"))
     }
 
     #[expect(

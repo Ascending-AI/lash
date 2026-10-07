@@ -11,8 +11,8 @@
 
 use lash_core_execution::runtime::actor::process::scope_index;
 use lash_durable::domain::{
-    CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, PROCESS_FORMATS, ProcessActorRow,
-    ProcessWrite, SIGNAL_MAIL, ScopeKey,
+    CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessWrite,
+    SIGNAL_MAIL, ScopeKey,
 };
 use lash_durable::{
     ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, StoreFailure, StoreFailureKind,
@@ -167,7 +167,7 @@ pub(crate) fn signal_mail_within(
 pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWrite) -> Answer<()> {
     match write {
         ProcessWrite::Register(rows) => {
-            create_actor_within(tx, &rows.process, PROCESS_FORMATS, commit.now)
+            create_actor_within(tx, &rows.process, rows.formats.as_str(), commit.now)
         }
         ProcessWrite::Advance {
             process,

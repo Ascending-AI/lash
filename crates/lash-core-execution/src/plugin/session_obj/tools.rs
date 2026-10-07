@@ -359,7 +359,6 @@ impl PluginSession {
             return Err(failure);
         }
         Ok(crate::runtime::effect::ToolPresentation {
-            version: crate::runtime::effect::TOOL_PRESENTATION_VERSION,
             model_return,
             artifacts: ctx.artifacts.retained(),
             retention,

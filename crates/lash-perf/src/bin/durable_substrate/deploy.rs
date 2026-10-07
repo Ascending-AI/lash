@@ -17,9 +17,8 @@ use lash_core_execution::{
     Backend, BackendParts, CompletionKeySecrets, DurableSettings, KeyVersion,
     NoProjectionProviders, SecretBytes, StoreSet,
 };
-use lash_durable::domain::PROCESS_FORMATS;
-use lash_durable::runner::Stopped;
-use lash_durable::{DurableError, FormatSet, NoProbe, NodeId};
+use lash_durable::runner::{Drain, Stopped};
+use lash_durable::{DurableError, NoProbe, NodeId};
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, PostgresStoreSet};
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -27,7 +26,7 @@ use tokio::task::JoinHandle;
 
 use crate::process::{BenchEngine, NoSteps, ProcessBoard};
 use crate::recorder::{Recorder, RecordingStores};
-use crate::turn::{BenchServices, SESSION_FORMATS, Scripts};
+use crate::turn::{BenchServices, Scripts};
 
 /// Which database the deployment serves.
 #[derive(Clone, Debug)]
@@ -166,6 +165,7 @@ impl Deployment {
             secrets: Some(secrets()?),
             engines: vec![Arc::new(BenchEngine::new(Arc::clone(&self.board)))],
             providers: Arc::new(NoProjectionProviders),
+            formats: Vec::new(),
         })
         .map_err(|error| anyhow::anyhow!("assemble the backend: {error}"))?;
         Ok((backend, storage))
@@ -198,10 +198,7 @@ impl Deployment {
                 &served,
                 NodeServe {
                     node,
-                    decodes: vec![
-                        FormatSet::new(SESSION_FORMATS),
-                        FormatSet::new(PROCESS_FORMATS),
-                    ],
+                    drain: Drain::default(),
                     sessions: Arc::new(sessions),
                     processes: Arc::new(processes),
                 },

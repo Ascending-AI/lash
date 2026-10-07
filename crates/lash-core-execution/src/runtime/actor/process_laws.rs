@@ -14,11 +14,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use lash_durable::domain::{PROCESS_FORMATS, ParkEventKind, ParkEventRow, SIGNAL_MAIL};
+use lash_durable::domain::{ParkEventKind, ParkEventRow, SIGNAL_MAIL};
 use lash_durable::runner::{Runner, RunnerConfig, Stopped};
 use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DurableError, FormatSet, MailKind, MailTx, NoProbe, NodeId,
-    NodeSpec,
+    ActorKey, ActorState, CommitLabel, DurableError, MailKind, MailTx, NoProbe, NodeId, NodeSpec,
 };
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use serde_json::{Value, json};
@@ -94,6 +93,7 @@ fn with_engines(
     engines: Vec<Arc<dyn ProcessEngine>>,
 ) -> Result<Backend, LawBroken> {
     Backend::assemble(BackendParts {
+        formats: Vec::new(),
         stores: backend.stores(),
         settings: settings(),
         secrets: Some(CompletionKeySecrets::for_testing()),
@@ -349,7 +349,7 @@ struct Serving {
 fn serve(backend: &Backend) -> Serving {
     let config = RunnerConfig::new(
         NodeId::new(NODE),
-        vec![FormatSet::new(PROCESS_FORMATS)],
+        backend.formats().decodes(),
         backend.config(),
     );
     let activation = Arc::new(ProcessActivation::new(
@@ -552,7 +552,7 @@ async fn crash_claims(backend: &Backend, process: &ProcessId, count: u32) -> Law
             .durable()
             .register_node(&NodeSpec {
                 node: NodeId::new(NODE),
-                decodes: vec![FormatSet::new(PROCESS_FORMATS)],
+                decodes: backend.formats().decodes(),
                 ttl_millis: TTL_MILLIS,
             })
             .await?;
@@ -959,10 +959,12 @@ pub async fn w1_an_await_cycle_ends_by_a_timeout_and_is_cancellable(
     Ok(())
 }
 
-/// Engine-free end: a process cancelled before it started, one whose engine
-/// this node does not have, and one whose state this node's engine cannot
-/// decode each end `Cancelled` without engine code. The parked ones were
-/// parked with their typed reason, and the cancel ended the park.
+/// Engine-free end and the claim filter (ADR 0106 §1, ADR 0132 §11): a
+/// process cancelled before it started, one whose engine this node does not
+/// have, and one whose state this node's engine cannot decode each end
+/// `Cancelled` without engine code. A node never claims the last two for
+/// anything but their cancel: until it arrives each stays visible and ready
+/// in its own format set, unparked.
 ///
 /// # Errors
 ///
@@ -986,10 +988,9 @@ pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawResult
     let serving = serve(&backend);
     eventually(
         SETTLE,
-        "the unstarted process ended and the others settled",
+        "the unstarted process ended and the undecodable one settled",
         || async {
             Ok(terminal(&backend, &unstarted).await?.is_some()
-                && actor_state(&backend, &unknown).await? == Some(ActorState::Parked)
                 && settled_waiting(&backend, &undecodable).await?)
         },
     )
@@ -1000,20 +1001,31 @@ pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawResult
         "a process cancelled before it started ran its engine: {:?}",
         advances(&unstarted_tag)
     );
-    // The next node's engine writes a state format the stored state is not in.
+    // The next node's engine writes a state format the stored state is not
+    // in, and it has no `law-missing` engine either.
     let newer = with_engines(&backend, vec![Arc::new(LawEngine { version: 1 })])?;
     let serving = serve(&newer);
     newer.wake_process(&undecodable).await?;
-    eventually(SETTLE, "the undecodable process parked", || async {
-        Ok(actor_state(&newer, &undecodable).await? == Some(ActorState::Parked))
-    })
-    .await?;
     let before = advances(&undecodable_tag);
+    // Settle with nothing it may claim: both stay ready and unowned.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    for (name, process) in [("unknown", &unknown), ("undecodable", &undecodable)] {
+        let snapshot = newer
+            .durable()
+            .actor(&actor(process)?)
+            .await?
+            .ok_or_else(|| LawBroken(format!("the {name} process's actor vanished")))?;
+        ensure!(
+            snapshot.state == ActorState::Ready
+                && !newer.formats().decodes().contains(&snapshot.formats),
+            "the {name} process is not visible and ready in a set this node does not decode: {snapshot:?}"
+        );
+    }
     cancel(&newer, &unknown).await?;
     cancel(&newer, &undecodable).await?;
-    let parked = [unknown.clone(), undecodable.clone()];
-    eventually(SETTLE, "the parked processes ended", || {
-        ended_all(&newer, &parked)
+    let ended = [unknown.clone(), undecodable.clone()];
+    eventually(SETTLE, "the undecodable processes ended", || {
+        ended_all(&newer, &ended)
     })
     .await?;
     serving.stop().await;
@@ -1022,9 +1034,10 @@ pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawResult
         "the undecodable process ran engine code: {:?}",
         advances(&undecodable_tag)
     );
-    for (name, process, parked_for) in [
-        ("unknown", &unknown, "unknown_engine"),
-        ("undecodable", &undecodable, "undecodable_state"),
+    for (name, process) in [
+        ("unknown", &unknown),
+        ("undecodable", &undecodable),
+        ("unstarted", &unstarted),
     ] {
         let end = terminal(&newer, process).await?.unwrap_or_default();
         ensure!(
@@ -1032,19 +1045,8 @@ pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawResult
             "the {name} process did not end cancelled: {end}"
         );
         let feed = park_feed(&newer, process).await?;
-        ensure!(
-            feed.iter()
-                .map(|row| row.kind)
-                .eq([ParkEventKind::Parked, ParkEventKind::Ended])
-                && reason(&feed[0]) == parked_for,
-            "the {name} process's park feed is not its {parked_for} park and its end: {feed:?}"
-        );
+        ensure!(feed.is_empty(), "the {name} process was parked: {feed:?}");
     }
-    let end = terminal(&newer, &unstarted).await?.unwrap_or_default();
-    ensure!(
-        cancellation(&end) == Some(("operator_requested".to_owned(), false)),
-        "the unstarted process did not end cancelled: {end}"
-    );
     Ok(())
 }
 

@@ -241,8 +241,7 @@ pub struct ToolDispatchOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
     /// Committed message facts in attempt order, applied exactly once at
-    /// the opener's incorporation boundary. Each capture validates its own
-    /// `TOOL_ATTEMPT_CAPTURE_VERSION`.
+    /// the opener's incorporation boundary.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub captures: Vec<crate::runtime::ToolAttemptCapture>,
     /// Trigger receipts the attempts emitted, carried to the same

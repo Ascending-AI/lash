@@ -2,9 +2,9 @@
 
 use crate::domain::{DurableReads, MailAnswer};
 use crate::error::DurableError;
+use crate::formats::FormatSet;
 use crate::ids::{
-    ActorKey, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, FormatSet, MailSeq, NodeId,
-    StateRevision,
+    ActorKey, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, MailSeq, NodeId, StateRevision,
 };
 use crate::tx::{ActorTx, MailTx};
 
@@ -124,6 +124,32 @@ pub struct Claimed {
     pub epoch: Epoch,
     /// Why it was claimable.
     pub cause: ClaimCause,
+    /// What the claiming node may do with it.
+    pub purpose: ClaimPurpose,
+}
+
+/// What a node claimed an actor for (ADR 0106 §1, ADR 0132 §11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClaimPurpose {
+    /// The node decodes the actor's format set: it runs the actor.
+    Run,
+    /// The node does not decode the actor's format set and claimed it only
+    /// for its pending cancel: the activation ends it from registry state
+    /// and never reads its state or calls its engine.
+    CancelOnly,
+}
+
+impl ClaimPurpose {
+    /// The purpose a node that decodes `decodes` claims an actor stored in
+    /// `formats` for.
+    #[must_use]
+    pub fn of(decodes: &[FormatSet], formats: &str) -> Self {
+        if decodes.iter().any(|set| set.as_str() == formats) {
+            Self::Run
+        } else {
+            Self::CancelOnly
+        }
+    }
 }
 
 /// One actor a reap released.
@@ -234,10 +260,23 @@ pub trait DurableStore: DurableReads {
     async fn release_node(&self, node: &NodeLease) -> Result<Vec<ActorKey>, DurableError>;
 
     /// Claim up to `limit` actors that are ready, or waiting with a passed
-    /// due time, in a format set `node` decodes. Each claim bumps the
-    /// actor's epoch. Refused with [`DurableError::NodeLeaseLost`] when the
-    /// node holds no live lease.
+    /// due time, in a format set `node` decodes; and process actors in a set
+    /// it does not decode that have a cancel request pending, so their
+    /// cancel ends them without decoding their state
+    /// ([`ClaimPurpose::CancelOnly`]). Each claim bumps the actor's
+    /// epoch. A draining node claims nothing. Refused with
+    /// [`DurableError::NodeLeaseLost`] when the node holds no live lease.
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError>;
+
+    /// Mark `node` draining (ADR 0106 §1): from this commit on it claims
+    /// nothing, and its owners release their actors at their next committed
+    /// phase. Refused with [`DurableError::NodeLeaseLost`] when the node
+    /// holds no live lease.
+    async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError>;
+
+    /// The format sets each live node decodes, one entry per node, for the
+    /// fleet-format gate ([`fleet_writable`](crate::fleet_writable)).
+    async fn live_decodes(&self) -> Result<Vec<Vec<FormatSet>>, DurableError>;
 
     /// The actors `node`'s boot owns now, with their current epochs, read
     /// unfenced. Each answers [`ClaimCause::Adopted`].

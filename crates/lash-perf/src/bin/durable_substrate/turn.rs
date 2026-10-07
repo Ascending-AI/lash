@@ -53,8 +53,6 @@ use tokio::sync::oneshot;
 
 use crate::recorder::Recorder;
 
-/// The format set the bench's sessions are written in.
-pub const SESSION_FORMATS: &str = "durable-substrate/1";
 const ECHO: &str = "benchmark_echo";
 const CELL_TOOL: &str = "ext_echo";
 const RESULTS: &str = "bench-results:";
@@ -134,7 +132,12 @@ pub async fn create_session(backend: &Backend, session: &SessionId) -> anyhow::R
 /// The mail transaction that admits `run` to `session` with one user
 /// input, creating the session's actor when `create` is set: what a
 /// producer outside the deployment commits.
-pub fn admission(session: &SessionId, run: &TurnId, create: bool) -> anyhow::Result<MailTx> {
+pub fn admission(
+    session: &SessionId,
+    run: &TurnId,
+    create: bool,
+    formats: &FormatSet,
+) -> anyhow::Result<MailTx> {
     let messages = vec![Message {
         id: format!("{run}-input"),
         role: MessageRole::User,
@@ -154,7 +157,7 @@ pub fn admission(session: &SessionId, run: &TurnId, create: bool) -> anyhow::Res
     let actor = session_actor(session)?;
     let mut tx = MailTx::new();
     if create {
-        tx.create_actor(actor.clone(), FormatSet::new(SESSION_FORMATS));
+        tx.create_actor(actor.clone(), formats.clone());
     }
     tx.append(actor, admit_mail(), inputs.mail_body());
     Ok(tx)

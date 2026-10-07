@@ -6,7 +6,8 @@
 //! never held open across an `.await` in the caller's code.
 
 use crate::domain::{DomainWrite, MailDomainWrite};
-use crate::ids::{ActorKey, DurableInstant, Epoch, FormatSet, MailKind, MailSeq, StateRevision};
+use crate::formats::FormatSet;
+use crate::ids::{ActorKey, DurableInstant, Epoch, MailKind, MailSeq, StateRevision};
 
 /// One mail row as the owner reads it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,6 +25,9 @@ pub struct Mail {
 /// How an owner gives an actor up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Release {
+    /// Claimable at once by any node that decodes it: a draining node's
+    /// release at a committed phase (`drain.release`).
+    Ready,
     /// Nothing to do until mail arrives.
     Idle,
     /// Blocked until mail arrives or, when set, until `next_due` passes.
@@ -60,6 +64,7 @@ pub struct ActorTx {
     domain: Vec<DomainWrite>,
     ack: Option<MailSeq>,
     release: Option<Release>,
+    formats: Option<FormatSet>,
 }
 
 /// What a fenced read saw of one owned actor.
@@ -95,6 +100,7 @@ impl ActorTx {
             domain: Vec::new(),
             ack: None,
             release: None,
+            formats: None,
         }
     }
 
@@ -165,6 +171,20 @@ impl ActorTx {
     #[must_use]
     pub fn release(&self) -> Option<Release> {
         self.release
+    }
+
+    /// The format set this transaction records the actor's state in, if it
+    /// moves it.
+    #[must_use]
+    pub fn formats(&self) -> Option<&FormatSet> {
+        self.formats.as_ref()
+    }
+
+    /// Record that the actor's state is written in `formats` from this
+    /// commit on: from then, only a node that decodes `formats` claims it.
+    pub fn stamp_formats(&mut self, formats: FormatSet) -> &mut Self {
+        self.formats = Some(formats);
+        self
     }
 
     /// Acknowledge everything the fenced read saw: its mail and its wakes.

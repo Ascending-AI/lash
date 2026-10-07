@@ -15,6 +15,20 @@ use super::keys::ScopeKey;
 /// that request a cancel (L3's turn cancel, L6's process cancel) append it.
 pub const CANCEL_MAIL: &str = "cancel";
 
+/// The format of a wait row: its columns, kinds and states below. A row
+/// carries no stamp of its own: its owner's format set carries this version,
+/// so only a node that decodes it claims the owner (ADR 0106 §1).
+///
+/// version_guard(
+///     items(
+///         path = "crates/lash-durable/src/domain/waits.rs",
+///         WaitRow, WaitKind, WaitState, WaitId, KeyVersion,
+///     ),
+/// )
+/// version_surface = "drain"
+/// format_manifest = "WaitRow"
+pub const WAIT_ROW_FORMAT_VERSION: u32 = 1;
+
 /// A wait's identity: 128 random bits, minted by the owner in the
 /// transaction that pins the wait.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

@@ -64,6 +64,18 @@ crate::statements! {
         renew = "UPDATE nodes SET heartbeat_expires_at_ms = ?3
              WHERE node_id = ?1 AND boot_id = ?2
              RETURNING heartbeat_expires_at_ms";
+
+        /// Mark boot `?2` of node `?1` draining; no row when it holds no
+        /// lease.
+        mark_draining = "UPDATE nodes SET draining = TRUE
+             WHERE node_id = ?1 AND boot_id = ?2
+             RETURNING boot_id";
+
+        /// The decoded format sets, as JSON arrays, of every node whose lease
+        /// is live at `?1`.
+        live_decodes = "SELECT formats_json FROM nodes
+             WHERE heartbeat_expires_at_ms >= ?1
+             ORDER BY node_id";
     }
 }
 
@@ -96,24 +108,28 @@ crate::statements! {
              WHERE owner_node = ?1 AND owner_boot = ?2 AND state = 'owned'
              RETURNING actor_key, epoch";
 
-        /// Every actor boot `?2` of node `?1` owns, with its epoch.
-        owned_by = "SELECT actor_key, epoch FROM actors
+        /// Every actor boot `?2` of node `?1` owns, with its epoch and
+        /// format set.
+        owned_by = "SELECT actor_key, epoch, formats FROM actors
              WHERE owner_node = ?1 AND owner_boot = ?2 AND state = 'owned'
              ORDER BY actor_key";
+
+        /// Record that actor `?1`'s state is written in format set `?2`.
+        stamp_formats = "UPDATE actors SET formats = ?2 WHERE actor_key = ?1";
 
         /// Acknowledge actor `?1`'s mailbox through `?2`.
         ack = "UPDATE actors SET acked_seq = ?2 WHERE actor_key = ?1 AND acked_seq < ?2";
 
-        /// Release actor `?1` to state `?2` (`idle` or `waiting`) due at
-        /// `?3`, or to `ready` at `?4` when it still has mail; the epoch is
-        /// bumped.
+        /// Release actor `?1` to state `?2` (`idle`, `waiting` or `ready`)
+        /// due at `?3`, or to `ready` at `?4` when it still has mail; the
+        /// epoch is bumped.
         release = "UPDATE actors
-             SET state = CASE WHEN mail_seq > acked_seq THEN 'ready'
-                              ELSE CAST(?2 AS TEXT) END,
-                 ready_at_ms = CASE WHEN mail_seq > acked_seq THEN CAST(?4 AS BIGINT)
-                                    ELSE NULL END,
-                 next_due_ms = CASE WHEN mail_seq > acked_seq THEN NULL
-                                    ELSE CAST(?3 AS BIGINT) END,
+             SET state = CASE WHEN mail_seq > acked_seq OR CAST(?2 AS TEXT) = 'ready'
+                              THEN 'ready' ELSE CAST(?2 AS TEXT) END,
+                 ready_at_ms = CASE WHEN mail_seq > acked_seq OR CAST(?2 AS TEXT) = 'ready'
+                                    THEN CAST(?4 AS BIGINT) ELSE NULL END,
+                 next_due_ms = CASE WHEN mail_seq > acked_seq OR CAST(?2 AS TEXT) = 'ready'
+                                    THEN NULL ELSE CAST(?3 AS BIGINT) END,
                  epoch = epoch + 1, owner_node = NULL, owner_boot = NULL
              WHERE actor_key = ?1
              RETURNING state";

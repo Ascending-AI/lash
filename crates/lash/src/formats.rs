@@ -54,16 +54,19 @@ pub use lash_core::engine::UpgradePolicy;
 pub use lash_core::plugin::PLUGIN_ADMISSION_CHECKPOINT_VERSION;
 pub use lash_core::session_model::PLUGIN_RUNTIME_EVENT_VERSION;
 
+pub use lash_core::durable_port::domain::WAIT_ROW_FORMAT_VERSION;
+pub use lash_core::formats::BuildFormats;
+pub use lash_core::formats::RUN_RECORD_FORMAT_VERSION;
 pub use lash_core::store::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, CHECKPOINT_COMPONENT_ENCODING_VERSION,
     CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION, CURRENT_SESSION_STATE_VERSION,
     RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION, RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
     SESSION_CHECKPOINT_SCHEMA_VERSION, SESSION_HEAD_META_SCHEMA_VERSION,
 };
+pub use lash_core::tool_run::material::OUTCOME_MATERIAL_FORMAT_VERSION;
 pub use lash_core::{
     PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-    SCOPE_STORAGE_PAYLOAD_VERSION, SESSION_NODE_BODY_SCHEMA_VERSION, TOOL_ATTEMPT_CAPTURE_VERSION,
-    TOOL_PRESENTATION_VERSION,
+    SCOPE_STORAGE_PAYLOAD_VERSION, SESSION_NODE_BODY_SCHEMA_VERSION,
 };
 #[cfg(feature = "rlm")]
 pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
@@ -121,12 +124,14 @@ pub enum DurableFormat {
     RecordConfigRequestIdentity,
     /// The identity encoding of a create-session semantic-boundary request.
     CreateSessionRequestIdentity,
-    /// The facts one atomic tool attempt journals with its outcome.
-    ToolAttemptCapture,
-    /// The journaled presentation record of one tool result.
-    ToolPresentation,
     /// The serialized sans-IO turn checkpoint.
     TurnCheckpoint,
+    /// The bodies of a tool round's run records.
+    RunRecord,
+    /// A wait row: a keyed promise, durable wait or timer.
+    WaitRow,
+    /// The material of a tool outcome.
+    OutcomeMaterial,
     /// The persisted runtime turn-commit receipt a committed turn replays
     /// from `runtime_turn_commits.result_json`.
     RuntimeCommitReceipt,
@@ -202,9 +207,10 @@ impl DurableFormat {
             DurableFormat::AppendRequestIdentity => "append request identity",
             DurableFormat::RecordConfigRequestIdentity => "record-config request identity",
             DurableFormat::CreateSessionRequestIdentity => "create-session request identity",
-            DurableFormat::ToolAttemptCapture => "tool attempt capture",
-            DurableFormat::ToolPresentation => "tool presentation",
             DurableFormat::TurnCheckpoint => "turn checkpoint",
+            DurableFormat::RunRecord => "run record",
+            DurableFormat::WaitRow => "wait row",
+            DurableFormat::OutcomeMaterial => "outcome material",
             DurableFormat::RuntimeCommitReceipt => "runtime commit receipt",
             DurableFormat::Bytecode => "bytecode",
             DurableFormat::VmContinuation => "VM continuation",
@@ -244,9 +250,10 @@ impl DurableFormat {
             DurableFormat::AppendRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::RecordConfigRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::CreateSessionRequestIdentity => UpgradePolicy::Coexist,
-            DurableFormat::ToolAttemptCapture => UpgradePolicy::Drain,
-            DurableFormat::ToolPresentation => UpgradePolicy::Drain,
             DurableFormat::TurnCheckpoint => UpgradePolicy::Drain,
+            DurableFormat::RunRecord => UpgradePolicy::Drain,
+            DurableFormat::WaitRow => UpgradePolicy::Drain,
+            DurableFormat::OutcomeMaterial => UpgradePolicy::Drain,
             DurableFormat::RuntimeCommitReceipt => UpgradePolicy::Migrate,
             DurableFormat::Bytecode => UpgradePolicy::Coexist,
             DurableFormat::VmContinuation => UpgradePolicy::Drain,
@@ -432,24 +439,31 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             probe: FormatProbe::IdentityOnly,
         },
         DurableFormatEntry {
-            format: DurableFormat::ToolAttemptCapture,
-            version: FormatVersion::Counter(TOOL_ATTEMPT_CAPTURE_VERSION as u32),
-            owning_crate: "lash-core",
-            constant: "TOOL_ATTEMPT_CAPTURE_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        DurableFormatEntry {
-            format: DurableFormat::ToolPresentation,
-            version: FormatVersion::Counter(TOOL_PRESENTATION_VERSION as u32),
-            owning_crate: "lash-core",
-            constant: "TOOL_PRESENTATION_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        DurableFormatEntry {
             format: DurableFormat::TurnCheckpoint,
             version: FormatVersion::Counter(TURN_CHECKPOINT_SCHEMA_VERSION),
             owning_crate: "lash-sansio",
             constant: "TURN_CHECKPOINT_SCHEMA_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::RunRecord,
+            version: FormatVersion::Counter(RUN_RECORD_FORMAT_VERSION),
+            owning_crate: "lash-core-execution",
+            constant: "RUN_RECORD_FORMAT_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::WaitRow,
+            version: FormatVersion::Counter(WAIT_ROW_FORMAT_VERSION),
+            owning_crate: "lash-durable",
+            constant: "WAIT_ROW_FORMAT_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::OutcomeMaterial,
+            version: FormatVersion::Counter(OUTCOME_MATERIAL_FORMAT_VERSION as u32),
+            owning_crate: "lash-core-store",
+            constant: "OUTCOME_MATERIAL_FORMAT_VERSION",
             probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {
@@ -558,4 +572,28 @@ fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
 /// "version zero" and is reported as such.
 pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
     durable_formats().find(|entry| entry.format == format)
+}
+
+/// The durable formats actor state holds beyond the runtime core's own
+/// (ADR 0106 §1): with `rlm`, the VM continuation and Lashlang snapshot a
+/// code cell or a lashlang process resumes from, and the RLM snapshot
+/// envelope a cell's snapshot data is. [`DurableBackendBuilder`] adds them to
+/// every actor kind's format set, beside the turn checkpoint, run records,
+/// wait rows, outcome materials and engine states the core declares.
+///
+/// [`DurableBackendBuilder`]: crate::durable::DurableBackendBuilder
+pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
+    #[cfg(feature = "rlm")]
+    {
+        use lash_core::durable_port::FormatSurface;
+        vec![
+            FormatSurface::new("vm-continuation", VM_CONTINUATION_FORMAT_VERSION),
+            FormatSurface::new("lashlang-snapshot", LASHLANG_SNAPSHOT_VERSION),
+            FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
+        ]
+    }
+    #[cfg(not(feature = "rlm"))]
+    {
+        Vec::new()
+    }
 }

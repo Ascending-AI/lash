@@ -16,9 +16,8 @@ use lash_core_execution::{
     Backend, BackendParts, CompletionKeySecrets, DurableSettings, KeyVersion,
     NoProjectionProviders, SecretBytes, StoreSet,
 };
-use lash_durable::domain::PROCESS_FORMATS;
 use lash_durable::runner::Stopped;
-use lash_durable::{FormatSet, NoProbe, NodeId, Notifier};
+use lash_durable::{NoProbe, NodeId, Notifier};
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet};
 use tokio::io::AsyncBufReadExt as _;
 
@@ -120,6 +119,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
     let recorded = RecordedStores::new(stores, &config.node);
     let store = recorded.store();
     let backend = Backend::assemble(BackendParts {
+        formats: Vec::new(),
         stores: Arc::new(recorded),
         settings: settings(config.notifier),
         secrets: Some(secrets(&config.secret)?),
@@ -153,10 +153,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         &backend,
         NodeServe {
             node: NodeId::new(config.node.clone()),
-            decodes: vec![
-                FormatSet::new(crate::SESSION_FORMATS),
-                FormatSet::new(PROCESS_FORMATS),
-            ],
+            drain: lash_durable::runner::Drain::default(),
             sessions: Arc::new(sessions),
             processes: Arc::new(processes),
         },
@@ -167,6 +164,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         Ok(Stopped::Requested) => "requested".to_owned(),
         Ok(Stopped::LeaseLost) => "lease_lost".to_owned(),
         Ok(Stopped::Unrenewed) => "unrenewed".to_owned(),
+        Ok(Stopped::Drained) => "drained".to_owned(),
         Err(error) => error.to_string(),
     };
     report(&config.node, Event::Stopped { why });

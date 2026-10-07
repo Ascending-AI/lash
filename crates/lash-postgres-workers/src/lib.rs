@@ -27,6 +27,3 @@ pub mod process;
 pub mod recorded;
 pub mod turn;
 pub mod witness;
-
-/// The format set the runbook's sessions are written in.
-pub const SESSION_FORMATS: &str = "lash-postgres-workers/1";

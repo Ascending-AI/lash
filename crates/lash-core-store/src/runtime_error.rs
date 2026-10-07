@@ -699,12 +699,8 @@ runtime_error_codes! {
         RuntimeEffectSleepCancelled = "runtime_effect_sleep_cancelled" => Redrivable,
         // the effect task died without reporting; nothing was recorded.
         RuntimeEffectTaskJoin = "runtime_effect_task_join" => Redrivable,
-        // the attempt capture version is unsupported.
-        RuntimeEffectToolAttemptCaptureVersion = "runtime_effect_tool_attempt_capture_version" => Terminal,
         // the attempt index is inconsistent.
         RuntimeEffectToolAttemptIndex = "runtime_effect_tool_attempt_index" => Terminal,
-        // the recorded presentation or execution environment cannot be reconstructed.
-        ToolPresentationFormat = "tool_presentation_format" => Terminal,
         // the recorded presentation or execution environment cannot be reconstructed.
         ProcessExecutionEnvRefused = "process_execution_env_refused" => Terminal,
         // the effect produced an outcome of the wrong kind for its command.

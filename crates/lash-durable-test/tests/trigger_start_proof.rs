@@ -40,7 +40,6 @@ use lash_core_execution::{
     ProcessEngine, ProcessInfraError, ProcessRecord, StepRequest, StoreSet, ToolCallId,
     TriggerOccurrenceRequest,
 };
-use lash_durable::domain::PROCESS_FORMATS;
 use lash_durable::runner::{Activation, Owned};
 use lash_durable::{
     ActorKey, ActorKind, ActorState, CommitLabel, DurableError, DurableStore, FormatSet,
@@ -397,6 +396,7 @@ impl Scenario for Proof {
             secrets: Some(CompletionKeySecrets::for_testing()),
             engines: vec![Arc::new(EndsAtOnce)],
             providers: Arc::new(NoProjectionProviders),
+            formats: Vec::new(),
         })
         .expect("the proof backend assembles");
         *self.backend.lock_recover() = Some(backend);
@@ -406,10 +406,13 @@ impl Scenario for Proof {
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
             lease: LeaseConfig::default(),
-            decodes: vec![
-                FormatSet::new(PROCESS_FORMATS),
-                FormatSet::new(EMITTER_FORMATS),
-            ],
+            decodes: self
+                .backend()
+                .formats()
+                .decodes()
+                .into_iter()
+                .chain([FormatSet::new(EMITTER_FORMATS)])
+                .collect(),
             max_active: 8,
         }
     }

@@ -27,6 +27,7 @@ macro_rules! law {
                 .await
                 .expect("open the isolated store");
             let backend = Backend::assemble(BackendParts {
+                formats: Vec::new(),
                 stores: Arc::new(PostgresStoreSet::new(
                     &storage,
                     Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),

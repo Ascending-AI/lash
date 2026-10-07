@@ -270,6 +270,17 @@ impl ActorContext {
         }
     }
 
+    /// Whether the node this context's claim runs on is draining: the
+    /// activation releases the actor at its next committed phase (ADR 0106
+    /// §1). False for a context that owns no claim.
+    #[must_use]
+    pub fn draining(&self) -> bool {
+        self.inner
+            .mail
+            .as_ref()
+            .is_some_and(lash_durable::runner::MailWaker::draining)
+    }
+
     /// Cancelled when the activation must stop.
     #[must_use]
     pub fn cancel(&self) -> &CancellationToken {

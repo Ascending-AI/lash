@@ -19,12 +19,18 @@
 //! - **Idle eviction and release** belong to each activation: a session
 //!   stays hot for `idle_evict` with nothing to do, and releases as
 //!   `waiting` with the earliest due time its sources noted.
+//! - **Formats:** the node decodes the backend's format sets, so it claims
+//!   only actors whose state this build decodes (ADR 0106 §1).
+//! - **Drain:** once the host starts [`NodeServe::drain`], the node claims
+//!   nothing more, each activation releases its actor `ready` at its next
+//!   committed phase, and `serve` returns [`Stopped::Drained`] when none is
+//!   left.
 
 use std::future::Future;
 use std::sync::Arc;
 
-use lash_durable::runner::{Activation, Runner, RunnerConfig, Stopped};
-use lash_durable::{ActorDispatch, DurableError, FormatSet, NodeId, Notifier};
+use lash_durable::runner::{Activation, Drain, Runner, RunnerConfig, Stopped};
+use lash_durable::{ActorDispatch, DurableError, NodeId, Notifier};
 
 use super::session::SessionActivation;
 use crate::Backend;
@@ -33,8 +39,9 @@ use crate::Backend;
 pub struct NodeServe {
     /// The node's stable name: a new boot of the same name fences the old.
     pub node: NodeId,
-    /// The format sets this build decodes; it claims only actors in one.
-    pub decodes: Vec<FormatSet>,
+    /// The node's drain switch: the host starts it to drain the node by
+    /// release.
+    pub drain: Drain,
     /// Runs the claimed sessions.
     pub sessions: Arc<SessionActivation>,
     /// Runs the claimed processes.
@@ -62,14 +69,15 @@ pub async fn serve(
         backend.clock(),
         RunnerConfig {
             node: serve.node,
-            decodes: serve.decodes,
+            decodes: backend.formats().decodes(),
             lease: backend.config().lease(),
             max_active: settings.max_active,
             claim_batch: settings.claim_batch,
         },
         Arc::new(dispatch),
     )
-    .with_hints(backend.hints().clone());
+    .with_hints(backend.hints().clone())
+    .with_drain(serve.drain);
     if settings.notifier == Notifier::AfterCommit
         && let Some(signals) = backend.stores().durable_signals()
     {
