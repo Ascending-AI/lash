@@ -9,7 +9,7 @@
 
 use std::collections::VecDeque;
 
-use lash_core::{ProcessId, SettledOutcome, StepName};
+use lash_core::{ProcessId, SettledOutput, StepName};
 use lash_vm_protocol::OpaqueVmState;
 use serde::{Deserialize, Serialize};
 
@@ -119,7 +119,7 @@ pub(crate) enum Leaf {
     Step {
         step: StepName,
         timer: bool,
-        outcome: Option<Box<SettledOutcome>>,
+        outcome: Option<Box<SettledOutput>>,
     },
     /// Settled when the operation was issued, without a step: a leaf
     /// refused before dispatch, or a language runtime value.

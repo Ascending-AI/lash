@@ -27,13 +27,12 @@ use lash_core::{
 };
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, BodyOutput, CompletedCall, MemberBody, MemberPin, MemberResult, PolicyView,
-    RoundTools,
+    AdmittedExecution, CompletedCall, Material, MemberBody, MemberPin, MemberResult, PolicyView,
+    RoundTools, SettledOutput,
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
-    AttemptOutcome, KnownFailure, KnownFailureReason, MaterialLocation, MaterialOwner,
-    MaterialPayload, MaterialRef, MaterialRole,
+    CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
 use lash_durable::domain::OwnerKey;
 use lash_sansio::sansio::ExecutionEnvironmentSync;
@@ -664,39 +663,28 @@ impl TurnDrive for SimDrive {
     async fn committed(&mut self) {}
 }
 
-/// A body's journal-local material, owned by its turn.
-fn turn_material(opener: &EffectOpener, role: MaterialRole, text: &str) -> Option<MaterialRef> {
-    MaterialPayload::new(
+/// A body's journal-local output, owned by its turn.
+fn turn_output(opener: &EffectOpener, text: String) -> Material {
+    Material::journal_local(
         MaterialOwner::Run {
             opener: opener.clone(),
         },
-        role,
-        None,
-        text.to_owned(),
+        MaterialRole::AttemptOutput,
+        text,
     )
-    .reference(MaterialLocation::JournalLocal)
-    .ok()
 }
 
 fn unencodable() -> MemberResult {
-    MemberResult::from(BodyOutput::from(AttemptOutcome::Interrupted))
+    MemberResult::from(SettledOutput::Interrupted)
 }
 
 /// A body whose effect was refused: its known failure, which a `Once` call
 /// records as its outcome.
 fn refused(opener: &EffectOpener, error: &str) -> MemberResult {
-    let text = format!("refused: {error}");
-    let Some(output) = turn_material(opener, MaterialRole::AttemptOutput, &text) else {
-        return unencodable();
-    };
-    MemberResult::from(BodyOutput {
-        outcome: AttemptOutcome::Failed(KnownFailure {
-            output,
-            reason: KnownFailureReason::Reported,
-            suggested_delay_ms: None,
-        }),
-        material: Some(text),
-    })
+    MemberResult::from(SettledOutput::Failed(
+        turn_output(opener, format!("refused: {error}"))
+            .failure(KnownFailureReason::Reported, None),
+    ))
 }
 
 /// The deployment's catalog: each tool's policy, body and answer.
@@ -722,12 +710,11 @@ impl RoundTools for Catalog {
         &self,
         _call: &PendingToolCall,
         _execution: &AdmittedExecution,
-        _source: &lash_core_store::tool_run::CompletionSource,
-        _metadata: Option<&str>,
+        _parked: &Material<CompletionSource>,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> BodyOutput {
+    ) -> SettledOutput {
         // No tool of this catalog parks, so no park ever resolves.
-        BodyOutput::from(AttemptOutcome::Interrupted)
+        SettledOutput::Interrupted
     }
 
     fn policies(&self) -> PolicyView {
@@ -775,9 +762,9 @@ impl RoundTools for Catalog {
                     Tool::Hang => {
                         request_cancel(&world, session, run);
                         token.cancelled().await;
-                        return MemberResult::from(BodyOutput::from(AttemptOutcome::Cancelled {
+                        return MemberResult::from(SettledOutput::Cancelled {
                             evidence: Default::default(),
-                        }));
+                        });
                     }
                     Tool::Spawn => match super::effects::spawn(&world, &call).await {
                         Ok(staged) => effects = staged,
@@ -801,24 +788,12 @@ impl RoundTools for Catalog {
                     }
                     Tool::WriteNow | Tool::Flaky => {}
                 }
-                let text = format!("{}#{attempt}", tool.name());
-                let Some(output) = turn_material(&opener, MaterialRole::AttemptOutput, &text)
-                else {
-                    return unencodable();
-                };
-                let outcome = if tool == Tool::Flaky && attempt == 1 {
-                    AttemptOutcome::Failed(KnownFailure {
-                        output,
-                        reason: KnownFailureReason::Reported,
-                        suggested_delay_ms: None,
-                    })
-                } else {
-                    AttemptOutcome::Completed(output)
-                };
+                let output = turn_output(&opener, format!("{}#{attempt}", tool.name()));
                 MemberResult {
-                    output: BodyOutput {
-                        outcome,
-                        material: Some(text),
+                    output: if tool == Tool::Flaky && attempt == 1 {
+                        SettledOutput::Failed(output.failure(KnownFailureReason::Reported, None))
+                    } else {
+                        SettledOutput::Completed(output)
                     },
                     store_local: effects,
                     terminal: None,
@@ -827,15 +802,10 @@ impl RoundTools for Catalog {
         })
     }
 
-    fn completed(
-        &self,
-        call: &PendingToolCall,
-        outcome: &AttemptOutcome,
-        material: Option<&str>,
-    ) -> CompletedCall {
-        let output = match (outcome, material) {
-            (AttemptOutcome::Completed(_), Some(text)) => ToolCallOutput::success(text),
-            (other, _) => ToolCallOutput::failure(ToolFailure::runtime(
+    fn completed(&self, call: &PendingToolCall, output: &SettledOutput) -> CompletedCall {
+        let output = match output {
+            SettledOutput::Completed(material) => ToolCallOutput::success(material.payload()),
+            other => ToolCallOutput::failure(ToolFailure::runtime(
                 ToolFailureClass::Execution,
                 "sim_unsettled",
                 format!("{other:?}"),

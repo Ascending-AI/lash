@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::{BodyOutput, ToolBody};
+use lash_core_execution::runtime::actor::round::{Material, SettledOutput, ToolBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Backend, BackendParts, DurableSettings, EngineAction, EngineEvent, EngineState,
@@ -24,9 +24,7 @@ use lash_core_execution::{
     ProcessRegistration, ProcessSignal, ProcessSignalIdentity, ProcessStatus, ProjectionWatermark,
     StartKey, StepName, StepRequest, ToolCallOutput, ToolCancellation,
 };
-use lash_core_store::tool_run::{
-    AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
-};
+use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::domain::ParkEventKind;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableInstant, LeaseConfig};
 use lash_durable_test::{Fault, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
@@ -281,11 +279,12 @@ impl ProcessSteps for LawSteps {
         _process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-        _source: &lash_core_store::tool_run::CompletionSource,
-        _metadata: Option<&str>,
+        _parked: &lash_core_execution::runtime::actor::round::Material<
+            lash_core_store::tool_run::CompletionSource,
+        >,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
-        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
+        lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
     }
 
     fn body(
@@ -298,20 +297,13 @@ impl ProcessSteps for LawSteps {
         Box::new(move |_token| {
             Box::pin(async move {
                 let output = json!({ "ok": true }).to_string();
-                let material = MaterialPayload::new(
+                SettledOutput::Completed(Material::journal_local(
                     MaterialOwner::Process {
                         process_id: process,
                     },
                     MaterialRole::AttemptOutput,
-                    None,
-                    output.clone(),
-                )
-                .reference(MaterialLocation::JournalLocal)
-                .expect("a step's output encodes");
-                BodyOutput {
-                    outcome: AttemptOutcome::Completed(material),
-                    material: Some(output),
-                }
+                    output,
+                ))
             })
         })
     }

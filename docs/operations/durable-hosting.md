@@ -307,8 +307,11 @@ action runs.
   the engine's own bodies, declared at registration with
   `ProcessEngineRegistration::with_engine_steps` (the `EngineSteps` trait).
   An engine step always runs `Repeatable`, so its body must be a pure
-  recomputation from its input. A step's `SettledOutcome` carries the
-  `AttemptOutcome` and, for `Completed` and `Failed`, the material's payload.
+  recomputation from its input. A step settles as a `SettledOutput`: its
+  `Completed` and `Failed` variants carry the material's payload, checked
+  against the digest the outcome names, and the stopped ones carry none. An
+  `Interrupted`, `TimedOut` or `Cancelled` step reads as
+  `SettledOutput::stopped_answer`, the answer a turn gives the same call.
   For parallel work, put several requests in one `Steps`; a single step is a
   one-element vector.
 - **Pin first.** Mint a key with `PinKey` before any step hands it out. The key

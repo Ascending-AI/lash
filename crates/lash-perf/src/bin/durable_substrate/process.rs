@@ -237,11 +237,12 @@ impl ProcessSteps for NoSteps {
         _process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-        _source: &lash_core_store::tool_run::CompletionSource,
-        _metadata: Option<&str>,
+        _parked: &lash_core_execution::runtime::actor::round::Material<
+            lash_core_store::tool_run::CompletionSource,
+        >,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
-        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
+        lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
     }
 
     fn body(
@@ -252,9 +253,7 @@ impl ProcessSteps for NoSteps {
     ) -> ToolBody {
         Box::new(|_token| {
             Box::pin(async {
-                lash_core_execution::runtime::actor::round::BodyOutput::from(
-                    lash_core_store::tool_run::AttemptOutcome::Interrupted,
-                )
+                lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
             })
         })
     }

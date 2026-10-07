@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use super::process::ProcessActivation;
 use super::wait_laws::{LawBroken, LawResult};
 use crate::runtime::actor::round::{
-    self, AdmittedExecution, BodyOutput, MemberState, PolicyView, ToolBody,
+    self, AdmittedExecution, Material, MemberState, PolicyView, SettledOutput, ToolBody,
 };
 use crate::runtime::actor::waits::{self, Resolution, WaitDeadline};
 use crate::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
@@ -38,8 +38,7 @@ use crate::{
     ToolCallOutput, ToolCancellation,
 };
 use lash_core_store::tool_run::{
-    AttemptOutcome, CompletionSource, KnownFailure, KnownFailureReason, MaterialLocation,
-    MaterialOwner, MaterialPayload, MaterialRef, MaterialRole,
+    CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
 
 macro_rules! ensure {
@@ -223,14 +222,14 @@ fn law_step(step: &str, tool: &str) -> EngineAction {
     }])
 }
 
-fn settled_name(outcome: &AttemptOutcome) -> &'static str {
+fn settled_name(outcome: &SettledOutput) -> &'static str {
     match outcome {
-        AttemptOutcome::Completed(_) => "completed",
-        AttemptOutcome::Waiting(_) => "waiting",
-        AttemptOutcome::Failed(_) => "failed",
-        AttemptOutcome::Interrupted => "interrupted",
-        AttemptOutcome::TimedOut { .. } => "timed_out",
-        AttemptOutcome::Cancelled { .. } => "cancelled",
+        SettledOutput::Completed(_) => "completed",
+        SettledOutput::Waiting(_) => "waiting",
+        SettledOutput::Failed(_) => "failed",
+        SettledOutput::Interrupted => "interrupted",
+        SettledOutput::TimedOut { .. } => "timed_out",
+        SettledOutput::Cancelled { .. } => "cancelled",
     }
 }
 
@@ -294,7 +293,7 @@ impl ProcessEngine for LawEngine {
             },
             EngineEvent::StepSettled { outcome, .. } if act == "retry" || act == "park" => {
                 ended(json!({
-                    "settled": settled_name(outcome.outcome()),
+                    "settled": settled_name(&outcome),
                     "payload": outcome.payload(),
                 }))
             }
@@ -401,19 +400,14 @@ fn step_tool(step: &StepRequest) -> &str {
     }
 }
 
-fn step_output(process: &ProcessId, text: &str) -> (MaterialRef, String) {
-    #[expect(clippy::expect_used, reason = "a law step's output always encodes")]
-    let material = MaterialPayload::new(
+fn step_output(process: &ProcessId, text: &str) -> Material {
+    Material::journal_local(
         MaterialOwner::Process {
             process_id: process.clone(),
         },
         MaterialRole::AttemptOutput,
-        None,
         text.to_owned(),
     )
-    .reference(MaterialLocation::JournalLocal)
-    .expect("a law step's output encodes");
-    (material, text.to_owned())
 }
 
 impl ProcessSteps for LawSteps {
@@ -448,19 +442,16 @@ impl ProcessSteps for LawSteps {
         process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &AdmittedExecution,
-        _source: &CompletionSource,
-        metadata: Option<&str>,
+        parked: &Material<CompletionSource>,
         resolution: Resolution,
-    ) -> BodyOutput {
+    ) -> SettledOutput {
         let text = match resolution {
-            Resolution::Ok(value) => json!({ "resolved": value, "parked": metadata }).to_string(),
+            Resolution::Ok(value) => {
+                json!({ "resolved": value, "parked": parked.payload() }).to_string()
+            }
             other => format!("{other:?}"),
         };
-        let (output, text) = step_output(&process.id, &text);
-        BodyOutput {
-            outcome: AttemptOutcome::Completed(output),
-            material: Some(text),
-        }
+        SettledOutput::Completed(step_output(&process.id, &text))
     }
 
     fn body(
@@ -493,42 +484,23 @@ impl ProcessSteps for LawSteps {
                     .entry(call.as_str().to_owned())
                     .or_default() += 1;
                 match tool.as_str() {
-                    LAW_FLAKY if attempt == 1 => {
-                        let (output, text) = step_output(&owner, "failed once");
-                        BodyOutput {
-                            outcome: AttemptOutcome::Failed(KnownFailure {
-                                output,
-                                reason: KnownFailureReason::Reported,
-                                suggested_delay_ms: Some(10),
-                            }),
-                            material: Some(text),
-                        }
-                    }
-                    LAW_FLAKY => {
-                        let (output, text) =
-                            step_output(&owner, &format!("succeeded on attempt {attempt}"));
-                        BodyOutput {
-                            outcome: AttemptOutcome::Completed(output),
-                            material: Some(text),
-                        }
-                    }
+                    LAW_FLAKY if attempt == 1 => SettledOutput::Failed(
+                        step_output(&owner, "failed once")
+                            .failure(KnownFailureReason::Reported, Some(10)),
+                    ),
+                    LAW_FLAKY => SettledOutput::Completed(step_output(
+                        &owner,
+                        &format!("succeeded on attempt {attempt}"),
+                    )),
                     LAW_PARK => {
                         let Some((wait, key)) = key else {
-                            return BodyOutput::from(AttemptOutcome::Interrupted);
+                            return SettledOutput::Interrupted;
                         };
                         PARKED_KEYS
                             .lock()
                             .unwrap_or_else(PoisonError::into_inner)
                             .insert(tag, key.as_str().to_owned());
-                        let (metadata, text) = step_output(&owner, "parked");
-                        BodyOutput {
-                            outcome: AttemptOutcome::Waiting(CompletionSource {
-                                wait: wait.to_hex(),
-                                terminal: None,
-                                metadata,
-                            }),
-                            material: Some(text),
-                        }
+                        SettledOutput::Waiting(step_output(&owner, "parked").parked(wait.to_hex()))
                     }
                     _ => std::future::pending().await,
                 }
@@ -1502,7 +1474,7 @@ pub async fn a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_
         ensure!(
             matches!(
                 member.state(),
-                MemberState::Final { start, outcome: AttemptOutcome::Completed(_) }
+                MemberState::Final { start, outcome: SettledOutput::Completed(_) }
                     if Some(start) == member.starts().get(1)
             ),
             "the step's final outcome {:?} is not its second ordinal's completion",

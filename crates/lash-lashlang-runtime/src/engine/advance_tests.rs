@@ -5,10 +5,9 @@
 
 use std::sync::Arc;
 
-use lash_core::tool_run::AttemptOutcome;
 use lash_core::{
     EngineAction, EngineEvent, EngineState, EngineStepKind, EngineStepRun, ProcessId,
-    SettledOutcome, StepName, StepRequest,
+    SettledOutput, StepName, StepRequest,
 };
 use lashlang::AggregateConsumer;
 use lashlang::testing::ast_builders as b;
@@ -38,14 +37,14 @@ fn snapshot(tag: &str) -> lash_vm_protocol::OpaqueVmState {
     )
 }
 
-fn step(name: &str, outcome: SettledOutcome) -> EngineEvent {
+fn step(name: &str, outcome: SettledOutput) -> EngineEvent {
     EngineEvent::StepSettled {
         step: StepName(name.to_owned()),
         outcome,
     }
 }
 
-fn parked(tag: &str, issued: IssuedOperation) -> SettledOutcome {
+fn parked(tag: &str, issued: IssuedOperation) -> SettledOutput {
     let output = VmRunOutput::Parked {
         program_hash: "program".to_owned(),
         vm: snapshot(tag),
@@ -57,7 +56,7 @@ fn parked(tag: &str, issued: IssuedOperation) -> SettledOutcome {
     )
 }
 
-fn ended(outcome: lash_core::ProcessOutcome) -> SettledOutcome {
+fn ended(outcome: lash_core::ProcessOutcome) -> SettledOutput {
     let output = VmRunOutput::Ended {
         outcome: Box::new(outcome),
     };
@@ -67,18 +66,18 @@ fn ended(outcome: lash_core::ProcessOutcome) -> SettledOutcome {
     )
 }
 
-fn tool_output(output: &lash_core::ToolCallOutput) -> SettledOutcome {
+fn tool_output(output: &lash_core::ToolCallOutput) -> SettledOutput {
     completed(
         &process(),
         serde_json::to_string(output).expect("encode the tool output"),
     )
 }
 
-fn success(value: serde_json::Value) -> SettledOutcome {
+fn success(value: serde_json::Value) -> SettledOutput {
     tool_output(&lash_core::ToolCallOutput::success(value))
 }
 
-fn rejection() -> SettledOutcome {
+fn rejection() -> SettledOutput {
     tool_output(&lash_core::ToolCallOutput::failure(
         lash_core::ToolFailure::runtime(
             lash_core::ToolFailureClass::Execution,
@@ -88,7 +87,7 @@ fn rejection() -> SettledOutcome {
     ))
 }
 
-fn fault() -> SettledOutcome {
+fn fault() -> SettledOutput {
     failed(&process(), &VmRunFault("the worker was lost".to_owned()))
 }
 
@@ -284,16 +283,13 @@ fn an_interrupted_call_is_injected_as_its_outcome_and_never_reissued() {
         batch: None,
         leaves: vec![tool("charge")],
     });
-    let resumed = driven.on(step(
-        "op.0.0",
-        SettledOutcome::new(AttemptOutcome::Interrupted, None).expect("an interrupted outcome"),
-    ));
+    let resumed = driven.on(step("op.0.0", SettledOutput::Interrupted));
     assert_eq!(step_names(&resumed), vec!["vm_run.1"], "only the VM runs");
     match injected(&resumed) {
         Injection::Leaves { leaves, .. } => assert!(matches!(
             leaves.as_slice(),
             [super::state::Leaf::Step { outcome: Some(outcome), .. }]
-                if matches!(outcome.outcome(), AttemptOutcome::Interrupted)
+                if matches!(**outcome, SettledOutput::Interrupted)
         )),
         other => panic!("the interrupted leaf, got {other:?}"),
     }
@@ -635,14 +631,10 @@ fn a_vm_run_past_its_limit_ends_the_process() {
     let (mut driven, _) = Driven::start();
     let EngineAction::Terminal(outcome) = driven.on(step(
         "vm_run.0",
-        SettledOutcome::new(
-            AttemptOutcome::TimedOut {
-                cause: lash_core::LimitCause::ExecutionTotal,
-                evidence: Default::default(),
-            },
-            None,
-        )
-        .expect("a timed-out outcome"),
+        SettledOutput::TimedOut {
+            cause: lash_core::LimitCause::ExecutionTotal,
+            evidence: Default::default(),
+        },
     )) else {
         panic!("the process ends");
     };
@@ -800,7 +792,7 @@ impl VmFixture {
         )
         .await;
         assert!(
-            matches!(settled.outcome(), AttemptOutcome::Completed(_)),
+            matches!(settled, SettledOutput::Completed(_)),
             "vm_run completes: {settled:?}"
         );
         serde_json::from_str(settled.payload().expect("a completion carries its output"))

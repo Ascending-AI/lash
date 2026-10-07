@@ -13,9 +13,9 @@
 use std::sync::{Arc, Mutex};
 
 use lash_core::sync::MutexExt as _;
+use lash_core_execution::runtime::actor::round::SettledOutput;
 use lash_core_execution::runtime::actor::round::{PolicyView, Recovery, fold};
 use lash_core_store::store::RunTerminalKind;
-use lash_core_store::tool_run::AttemptOutcome;
 use lash_durable::domain::OwnerKey;
 use lash_durable_test::{Cut, SimNodes};
 use lash_sansio::{SessionId, ToolCallId};
@@ -154,7 +154,7 @@ async fn outcomes(
         settled.push((
             tool,
             execution.call().clone(),
-            matches!(outcome, AttemptOutcome::Completed(_)),
+            matches!(outcome, SettledOutput::Completed(_)),
         ));
     }
     if settled.len() != 2 {

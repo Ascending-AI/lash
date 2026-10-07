@@ -20,13 +20,12 @@ use std::sync::Mutex;
 
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
-    self, AdmittedExecution, BodyOutput, ExecutionDraft, PolicyView, Recovery, RunFold,
+    self, AdmittedExecution, ExecutionDraft, Material, PolicyView, Recovery, RunFold, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits::{self, PinnedKey, WaitRef, WaitSpec};
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
-    AttemptOutcome, AvailableEvidence, KnownFailure, KnownFailureReason, MaterialDigest,
-    MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
+    AvailableEvidence, KnownFailureReason, MaterialOwner, MaterialRole,
 };
 use lash_durable::domain::{
     AdmittedId, ExecKey, Ordinal, RunRecordWrite, RunSeq, SnapshotRev, SnapshotWrite,
@@ -210,7 +209,7 @@ pub struct Committed {
 
 /// What restoring the operation a VM stands on feeds back: its outcome as
 /// the broker answers it ([`Performed`]), or as its run records hold it
-/// ([`BodyOutput`]).
+/// ([`SettledOutput`], its payload checked against its digest).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Recovered<T = Performed> {
     /// Its body ended: the VM is answered with what it performed.
@@ -277,11 +276,11 @@ pub fn outcomes_to_inject(
         return Ok(None);
     };
     let recovered = match recovery_of(operation, fold)? {
-        Recovery::Settled(AttemptOutcome::Interrupted) | Recovery::Interrupt => {
+        Recovery::Settled(SettledOutput::Interrupted) | Recovery::Interrupt => {
             Recovered::Interrupted
         }
-        Recovery::Settled(outcome) | Recovery::Vetoed(outcome) => {
-            Recovered::Settled(performed_of(fold, outcome)?)
+        Recovery::Settled(output) | Recovery::Vetoed(output) => {
+            Recovered::Settled(performed_of(output)?)
         }
         Recovery::RerunAtOrdinal(_) => Recovered::Rerun { waits: Vec::new() },
         Recovery::RetryDue { .. } | Recovery::NotStarted => {
@@ -313,26 +312,19 @@ fn recovery_of(operation: OperationId, fold: &RunFold) -> Result<&Recovery, Quie
         })
 }
 
-/// The settled outcome as the VM is answered with it.
-fn performed_of(fold: &RunFold, outcome: &AttemptOutcome) -> Result<Performed, QuietPointRefusal> {
-    let material = match outcome {
-        AttemptOutcome::Completed(material) => material,
-        AttemptOutcome::Failed(failure) => &failure.output,
-        AttemptOutcome::Cancelled { .. } => {
-            return Ok(Performed::outcome(EffectOutcome::Cancelled));
+/// The settled output as the VM is answered with it.
+fn performed_of(output: &SettledOutput) -> Result<Performed, QuietPointRefusal> {
+    match output {
+        SettledOutput::Completed(material) => decode_performed(material.payload()),
+        SettledOutput::Failed(failure) => decode_performed(failure.payload()),
+        SettledOutput::Cancelled { .. } => Ok(Performed::outcome(EffectOutcome::Cancelled)),
+        SettledOutput::Interrupted | SettledOutput::TimedOut { .. } | SettledOutput::Waiting(_) => {
+            Err(QuietPointRefusal(format!(
+                "a VM operation never settles as {:?}",
+                output.outcome()
+            )))
         }
-        AttemptOutcome::Interrupted
-        | AttemptOutcome::TimedOut { .. }
-        | AttemptOutcome::Waiting(_) => {
-            return Err(QuietPointRefusal(format!(
-                "a VM operation never settles as {outcome:?}"
-            )));
-        }
-    };
-    let payload = fold.material(material).ok_or_else(|| {
-        QuietPointRefusal("a VM operation's outcome lost its material".to_owned())
-    })?;
-    decode_performed(payload)
+    }
 }
 
 /// A checkpoint as its row stores it: JSON, whose VM bytes the protocol
@@ -503,19 +495,18 @@ impl DurableSnapshotStore {
         round::fold(&rows, &self.policies).map_err(|error| QuietPointRefusal(error.to_string()))
     }
 
-    /// The material a VM operation's outcome is stored under: its run's.
-    fn material(&self, payload: &str) -> Result<MaterialRef, QuietPointRefusal> {
+    /// `payload` as the material a VM operation's outcome is stored under:
+    /// its run's, minted by the material codec.
+    fn material(&self, payload: String) -> Material {
         let opener = match &self.exec {
             ExecKey::Cell(session, turn, _) => EffectOpener::turn(session.clone(), turn.clone()),
             ExecKey::Process(process) => EffectOpener::process(process.clone()),
         };
-        Ok(MaterialRef {
-            owner: MaterialOwner::Run { opener },
-            role: MaterialRole::AttemptOutput,
-            location: MaterialLocation::JournalLocal,
-            digest: MaterialDigest::parse(blake3::hash(payload.as_bytes()).to_hex().as_str())
-                .map_err(|error| QuietPointRefusal(error.to_string()))?,
-        })
+        Material::journal_local(
+            MaterialOwner::Run { opener },
+            MaterialRole::AttemptOutput,
+            payload,
+        )
     }
     /// The execution admitted, or restored to run again, as `operation`:
     /// what a host that runs the body itself runs it under.
@@ -534,7 +525,7 @@ impl DurableSnapshotStore {
     pub async fn settle_output(
         &self,
         operation: OperationId,
-        output: BodyOutput,
+        output: SettledOutput,
     ) -> Result<(), QuietPointRefusal> {
         let execution = self.admitted(operation).ok_or_else(|| {
             QuietPointRefusal(format!(
@@ -560,7 +551,7 @@ impl DurableSnapshotStore {
     pub async fn recover_output(
         &self,
         pending: &PendingOperation,
-    ) -> Result<Recovered<BodyOutput>, QuietPointRefusal> {
+    ) -> Result<Recovered<SettledOutput>, QuietPointRefusal> {
         let mut waits = Vec::with_capacity(pending.waits.len());
         for id in &pending.waits {
             let id = lash_durable::domain::WaitId(*id);
@@ -586,13 +577,8 @@ impl DurableSnapshotStore {
                 self.commit(tx, CommitLabel::CELL_INJECT).await?;
                 Ok(Recovered::Interrupted)
             }
-            Recovery::Settled(AttemptOutcome::Interrupted) => Ok(Recovered::Interrupted),
-            Recovery::Settled(outcome) | Recovery::Vetoed(outcome) => {
-                let material = round::outcome_material(&outcome)
-                    .and_then(|material| fold.material(material))
-                    .map(str::to_owned);
-                Ok(Recovered::Settled(BodyOutput { outcome, material }))
-            }
+            Recovery::Settled(SettledOutput::Interrupted) => Ok(Recovered::Interrupted),
+            Recovery::Settled(output) | Recovery::Vetoed(output) => Ok(Recovered::Settled(output)),
             Recovery::RerunAtOrdinal(_) => {
                 let execution = fold.admitted(&id).ok_or_else(|| {
                     QuietPointRefusal(format!("operation {operation:?} has no started execution"))
@@ -713,44 +699,27 @@ impl SnapshotStore for DurableSnapshotStore {
         operation: OperationId,
         performed: &Performed,
     ) -> Result<(), QuietPointRefusal> {
-        let payload = encode_performed(performed)?;
-        let material = self.material(&payload)?;
-        let outcome = match &performed.outcome {
-            EffectOutcome::Failed(_) => AttemptOutcome::Failed(KnownFailure {
-                output: material,
-                reason: KnownFailureReason::Reported,
-                suggested_delay_ms: None,
-            }),
-            EffectOutcome::Cancelled => AttemptOutcome::Cancelled {
+        let output = match &performed.outcome {
+            EffectOutcome::Failed(_) => SettledOutput::Failed(
+                self.material(encode_performed(performed)?)
+                    .failure(KnownFailureReason::Reported, None),
+            ),
+            EffectOutcome::Cancelled => SettledOutput::Cancelled {
                 evidence: AvailableEvidence::default(),
             },
             EffectOutcome::Value(_)
             | EffectOutcome::Unit
             | EffectOutcome::HandedOver
-            | EffectOutcome::Checkpoint { .. } => AttemptOutcome::Completed(material),
+            | EffectOutcome::Checkpoint { .. } => {
+                SettledOutput::Completed(self.material(encode_performed(performed)?))
+            }
         };
-        self.settle_output(
-            operation,
-            BodyOutput {
-                outcome,
-                material: Some(payload),
-            },
-        )
-        .await
+        self.settle_output(operation, output).await
     }
 
     async fn recover(&self, pending: &PendingOperation) -> Result<Recovered, QuietPointRefusal> {
         Ok(match self.recover_output(pending).await? {
-            Recovered::Settled(BodyOutput {
-                outcome: AttemptOutcome::Cancelled { .. },
-                ..
-            }) => Recovered::Settled(Performed::outcome(EffectOutcome::Cancelled)),
-            Recovered::Settled(output) => {
-                let payload = output.material.as_deref().ok_or_else(|| {
-                    QuietPointRefusal("a VM operation's outcome lost its material".to_owned())
-                })?;
-                Recovered::Settled(decode_performed(payload)?)
-            }
+            Recovered::Settled(output) => Recovered::Settled(performed_of(&output)?),
             Recovered::Interrupted => Recovered::Interrupted,
             Recovered::Rerun { waits } => Recovered::Rerun { waits },
         })

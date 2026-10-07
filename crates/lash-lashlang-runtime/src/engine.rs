@@ -16,7 +16,7 @@ pub(crate) mod vm_run;
 
 use std::sync::Arc;
 
-use lash_core::{EngineStepKind, EngineStepRun, SettledOutcome};
+use lash_core::{EngineStepKind, EngineStepRun, SettledOutput};
 use tokio_util::sync::CancellationToken;
 
 pub use state::{LASHLANG_SEGMENT_STATE_VERSION, TIMER_STEP, VM_RUN_STEP};
@@ -47,7 +47,7 @@ impl lash_core::EngineSteps for LashlangEngineSteps {
         ]
     }
 
-    async fn run(&self, run: EngineStepRun, cancel: CancellationToken) -> SettledOutcome {
+    async fn run(&self, run: EngineStepRun, cancel: CancellationToken) -> SettledOutput {
         if run.kind.0 == TIMER_STEP {
             vm_run::run_timer_step(run, cancel).await
         } else {

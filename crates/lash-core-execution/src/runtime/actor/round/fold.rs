@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_core_store::tool_run::{AttemptOutcome, CompletionSource};
+use lash_core_store::tool_run::CompletionSource;
 use lash_durable::DurableInstant;
 use lash_durable::domain::{AdmittedId, Ordinal, OwnerKey, RunRecordKind, RunRecordRow, RunSeq};
 
@@ -12,8 +12,8 @@ use super::records::{
     ADMIT_ORDINAL, AdmitBody, OutcomeBody, PresentBody, RetryBody, StartBody, first_start,
 };
 use super::{
-    AdmittedExecution, ExecutionDraft, FoldRefusal, PolicyView, Recovery, RunCursor, RunFold,
-    outcome_material,
+    AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PolicyView, Recovery, RunCursor,
+    RunFold, SettledOutput,
 };
 use crate::ToolCallId;
 
@@ -34,8 +34,8 @@ pub enum MemberState {
         start: Ordinal,
         /// The failed attempt.
         attempt: u32,
-        /// How it failed.
-        outcome: AttemptOutcome,
+        /// How it failed, with its payload.
+        outcome: SettledOutput,
         /// When the next attempt may start.
         due: DurableInstant,
     },
@@ -46,15 +46,15 @@ pub enum MemberState {
         start: Ordinal,
         /// The parked attempt.
         attempt: u32,
-        /// What it waits on.
-        source: CompletionSource,
+        /// What it waits on, with its pending completion's payload.
+        source: Material<CompletionSource>,
     },
     /// The call's final outcome, settling the attempt started at `start`.
     Final {
         /// The settled attempt's `x_start` ordinal.
         start: Ordinal,
-        /// The outcome.
-        outcome: AttemptOutcome,
+        /// The output, with its payload.
+        outcome: SettledOutput,
     },
 }
 
@@ -100,7 +100,7 @@ impl RoundMember {
 
     /// Its final outcome, once it has one.
     #[must_use]
-    pub fn outcome(&self) -> Option<&AttemptOutcome> {
+    pub fn outcome(&self) -> Option<&SettledOutput> {
         match &self.state {
             MemberState::Final { outcome, .. } => Some(outcome),
             MemberState::Started { .. }
@@ -285,7 +285,7 @@ pub fn fold(rows: &[RunRecordRow], current: &PolicyView) -> Result<RunFold, Fold
                 });
             }
         }
-        let view = fold_run(run, &records, &mut folded.materials)?;
+        let view = fold_run(run, &records)?;
         for member in &view.members {
             folded
                 .recoveries
@@ -296,11 +296,7 @@ pub fn fold(rows: &[RunRecordRow], current: &PolicyView) -> Result<RunFold, Fold
     Ok(folded)
 }
 
-fn fold_run(
-    run: RunSeq,
-    records: &[&RunRecordRow],
-    materials: &mut BTreeMap<String, String>,
-) -> Result<RoundView, FoldRefusal> {
+fn fold_run(run: RunSeq, records: &[&RunRecordRow]) -> Result<RoundView, FoldRefusal> {
     let Some(admit) = records
         .first()
         .filter(|row| row.ordinal == ADMIT_ORDINAL && row.kind == RunRecordKind::Admit)
@@ -367,7 +363,7 @@ fn fold_run(
             }
             RunRecordKind::XWait => {
                 let parked: OutcomeBody = decode(row)?;
-                let AttemptOutcome::Waiting(source) = parked.outcome else {
+                let SettledOutput::Waiting(source) = parked.output else {
                     return Err(out_of_order(row));
                 };
                 let member = open_attempt(&mut members, row, parked.start)?;
@@ -375,9 +371,6 @@ fn fold_run(
                 let MemberState::Started { attempt, .. } = member.state else {
                     return Err(out_of_order(row));
                 };
-                if let Some(payload) = parked.material {
-                    materials.insert(source.metadata.digest.as_str().to_owned(), payload);
-                }
                 member.state = MemberState::Waiting {
                     start: Ordinal(parked.start),
                     attempt,
@@ -386,18 +379,13 @@ fn fold_run(
             }
             RunRecordKind::XOutcome => {
                 let settled: OutcomeBody = decode(row)?;
-                if matches!(settled.outcome, AttemptOutcome::Waiting(_)) {
+                if matches!(settled.output, SettledOutput::Waiting(_)) {
                     return Err(out_of_order(row));
                 }
                 let member = open_attempt(&mut members, row, settled.start)?;
-                if let (Some(material), Some(payload)) =
-                    (outcome_material(&settled.outcome), settled.material)
-                {
-                    materials.insert(material.digest.as_str().to_owned(), payload);
-                }
                 member.state = MemberState::Final {
                     start: Ordinal(settled.start),
-                    outcome: settled.outcome,
+                    outcome: settled.output,
                 };
             }
             RunRecordKind::Retry => {
@@ -406,18 +394,13 @@ fn fold_run(
                 let MemberState::Started { attempt, .. } = member.state else {
                     return Err(out_of_order(row));
                 };
-                if !retry.outcome.may_repeat() || attempt >= member.draft.policy().max_attempts() {
+                if !retry.output.may_repeat() || attempt >= member.draft.policy().max_attempts() {
                     return Err(out_of_order(row));
-                }
-                if let (Some(material), Some(payload)) =
-                    (outcome_material(&retry.outcome), retry.material)
-                {
-                    materials.insert(material.digest.as_str().to_owned(), payload);
                 }
                 member.state = MemberState::RetryDue {
                     start: Ordinal(retry.start),
                     attempt,
-                    outcome: retry.outcome,
+                    outcome: retry.output,
                     due: DurableInstant(retry.due_at_ms),
                 };
             }

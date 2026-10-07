@@ -36,8 +36,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::round::{
-    self, BodyOutput, ExecutionDraft, MemberBodies, MemberBody, MemberResult, PolicyView,
-    RoundDraft, RoundEnd, RoundRunner, RunFold,
+    self, ExecutionDraft, Material, MemberBodies, MemberBody, MemberResult, PolicyView, RoundDraft,
+    RoundEnd, RoundRunner, RunFold, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits::{
     self, Resolution, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
@@ -45,8 +45,8 @@ use lash_core_execution::runtime::actor::waits::{
 use lash_core_execution::{ActorContext, AdmittedScope, Backend};
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
-    AttemptOutcome, CompletionSource, KnownFailure, KnownFailureReason, MaterialDigest,
-    MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
+    CompletionSource, KnownFailureReason, MaterialDigest, MaterialLocation, MaterialOwner,
+    MaterialRef, MaterialRole,
 };
 use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq};
 use lash_durable::runner::{Activation, Exit, Owned};
@@ -146,6 +146,17 @@ fn material(payload: &str) -> MaterialRef {
     }
 }
 
+/// `payload` as a member's journal-local output, owned by the turn.
+fn output(payload: String) -> Material {
+    Material::journal_local(
+        MaterialOwner::Run {
+            opener: EffectOpener::turn(session(), turn()),
+        },
+        MaterialRole::AttemptOutput,
+        payload,
+    )
+}
+
 /// What a member's tool does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tool {
@@ -216,13 +227,12 @@ impl MemberBodies for Catalog {
     fn resolved(
         &self,
         execution: &round::AdmittedExecution,
-        _source: &CompletionSource,
-        metadata: Option<&str>,
+        parked: &Material<CompletionSource>,
         resolution: Resolution,
-    ) -> round::BodyOutput {
+    ) -> SettledOutput {
         assert_eq!(
-            metadata,
-            Some("parked"),
+            parked.payload(),
+            "parked",
             "the park's material rides its row"
         );
         let answer = match resolution {
@@ -230,10 +240,7 @@ impl MemberBodies for Catalog {
             other => format!("{other:?}"),
         };
         assert!(execution.draft().pinned_wait().is_some());
-        BodyOutput {
-            outcome: AttemptOutcome::Completed(material(&answer)),
-            material: Some(answer),
-        }
+        SettledOutput::Completed(output(answer))
     }
 
     fn body(&self, execution: &round::AdmittedExecution) -> MemberBody {
@@ -254,24 +261,16 @@ impl MemberBodies for Catalog {
                         .await;
                 }
                 world.write(&call, attempt);
-                let output = format!("{call}#{attempt}");
+                let output = output(format!("{call}#{attempt}"));
                 let fails = match tool {
                     Tool::Write { .. } | Tool::Quick | Tool::Defer { .. } => false,
                     Tool::Flaky => attempt == 1,
                     Tool::Failing => true,
                 };
-                let outcome = if fails {
-                    AttemptOutcome::Failed(KnownFailure {
-                        output: material(&output),
-                        reason: KnownFailureReason::Reported,
-                        suggested_delay_ms: None,
-                    })
+                MemberResult::from(if fails {
+                    SettledOutput::Failed(output.failure(KnownFailureReason::Reported, None))
                 } else {
-                    AttemptOutcome::Completed(material(&output))
-                };
-                MemberResult::from(BodyOutput {
-                    outcome,
-                    material: Some(output),
+                    SettledOutput::Completed(output)
                 })
             })
         })
@@ -307,14 +306,9 @@ impl Catalog {
                     let _ =
                         waits::resolve_host(&backend, key.as_str(), Resolution::Ok(answer)).await;
                 });
-                MemberResult::from(BodyOutput {
-                    outcome: AttemptOutcome::Waiting(CompletionSource {
-                        wait: pinned.id.to_hex(),
-                        terminal: None,
-                        metadata: material("parked"),
-                    }),
-                    material: Some("parked".to_owned()),
-                })
+                MemberResult::from(SettledOutput::Waiting(
+                    output("parked".to_owned()).parked(pinned.id.to_hex()),
+                ))
             })
         })
     }
@@ -512,7 +506,7 @@ struct RoundScenario {
     /// The calls whose final outcomes committed, in commit order.
     outcomes: Arc<Mutex<Vec<ToolCallId>>>,
     /// Every final outcome each run of the scenario ended with.
-    settled: Arc<Mutex<Vec<AttemptOutcome>>>,
+    settled: Arc<Mutex<Vec<SettledOutput>>>,
 }
 
 impl RoundScenario {
@@ -762,16 +756,16 @@ fn round_laws(
                     ));
                 }
                 match outcome {
-                    AttemptOutcome::Completed(_) if writes.len() == 1 => {}
-                    AttemptOutcome::Interrupted => {}
-                    AttemptOutcome::Cancelled { .. } if cancelled => {}
+                    SettledOutput::Completed(_) if writes.len() == 1 => {}
+                    SettledOutput::Interrupted => {}
+                    SettledOutput::Cancelled { .. } if cancelled => {}
                     other => violations.push(format!(
                         "F2: Once {call} settled {other:?} after writing {writes:?}"
                     )),
                 }
             }
             Tool::Flaky => {
-                if !matches!(outcome, AttemptOutcome::Completed(_)) {
+                if !matches!(outcome, SettledOutput::Completed(_)) {
                     violations.push(format!("{call} settled {outcome:?}"));
                 }
                 if view_member.starts().len() != 2 {
@@ -785,10 +779,10 @@ fn round_laws(
                 }
             }
             Tool::Failing => match outcome {
-                AttemptOutcome::Failed(_) => {}
+                SettledOutput::Failed(_) => {}
                 // A cancel in the backoff ends the call before its next
                 // attempt.
-                AttemptOutcome::Cancelled { .. } if cancelled => {}
+                SettledOutput::Cancelled { .. } if cancelled => {}
                 other => violations.push(format!("{call} settled {other:?}")),
             },
             Tool::Defer { repeatable } => {
@@ -809,13 +803,12 @@ fn round_laws(
                         "L-B2: a rerun of {call} was handed another completion key"
                     ));
                 }
+                let answered = host_answer(call).to_string();
                 match outcome {
-                    AttemptOutcome::Completed(material_ref)
-                        if !writes.is_empty()
-                            && fold.material(material_ref)
-                                == Some(host_answer(call).to_string().as_str()) => {}
-                    AttemptOutcome::Interrupted if !repeatable => {}
-                    AttemptOutcome::Cancelled { .. } if cancelled => {}
+                    SettledOutput::Completed(answer)
+                        if !writes.is_empty() && answer.payload() == answered => {}
+                    SettledOutput::Interrupted if !repeatable => {}
+                    SettledOutput::Cancelled { .. } if cancelled => {}
                     other => violations.push(format!(
                         "Pending: {call} settled {other:?} after writing {writes:?}"
                     )),
@@ -829,8 +822,8 @@ fn round_laws(
                     ));
                 }
                 match outcome {
-                    AttemptOutcome::Completed(_) if !writes.is_empty() => {}
-                    AttemptOutcome::TimedOut {
+                    SettledOutput::Completed(_) if !writes.is_empty() => {}
+                    SettledOutput::TimedOut {
                         cause: LimitCause::ExecutionTotal,
                         ..
                     } if entries <= 1 => {}
@@ -971,7 +964,7 @@ async fn a_pending_member_parks_once_and_its_key_settles_it_across_every_cut() {
             tool: Tool::Write { millis: 0 },
         },
     ];
-    let settled: Arc<Mutex<Vec<AttemptOutcome>>> = Arc::default();
+    let settled: Arc<Mutex<Vec<SettledOutput>>> = Arc::default();
     let shared = Arc::clone(&settled);
     let report = matrix()
         .run(move || {
@@ -996,7 +989,7 @@ async fn a_pending_member_parks_once_and_its_key_settles_it_across_every_cut() {
         settled
             .lock_recover()
             .iter()
-            .any(|outcome| matches!(outcome, AttemptOutcome::Completed(_))),
+            .any(|outcome| matches!(outcome, SettledOutput::Completed(_))),
         "no run settled the parked call from its key"
     );
 }
@@ -1145,7 +1138,7 @@ async fn an_expired_limit_settles_at_once_on_resume_and_is_never_refreshed() {
         tool: Tool::Quick,
     }];
     let outcomes: Arc<Mutex<Vec<ToolCallId>>> = Arc::default();
-    let settled: Arc<Mutex<Vec<AttemptOutcome>>> = Arc::default();
+    let settled: Arc<Mutex<Vec<SettledOutput>>> = Arc::default();
     let shared = (Arc::clone(&outcomes), Arc::clone(&settled));
     // The limit is shorter than a failover, so a resumed rerun finds it
     // expired.
@@ -1161,7 +1154,7 @@ async fn an_expired_limit_settles_at_once_on_resume_and_is_never_refreshed() {
     assert!(
         settled.lock_recover().iter().any(|outcome| matches!(
             outcome,
-            AttemptOutcome::TimedOut {
+            SettledOutput::TimedOut {
                 cause: LimitCause::ExecutionTotal,
                 ..
             }
@@ -1185,7 +1178,7 @@ async fn a_turn_cancel_ends_unfinished_members_as_cancelled() {
             tool: Tool::Write { millis: 0 },
         },
     ];
-    let settled: Arc<Mutex<Vec<AttemptOutcome>>> = Arc::default();
+    let settled: Arc<Mutex<Vec<SettledOutput>>> = Arc::default();
     let shared = Arc::clone(&settled);
     let report = Matrix::new()
         .faults(&[])
@@ -1201,10 +1194,7 @@ async fn a_turn_cancel_ends_unfinished_members_as_cancelled() {
     assert!(
         matches!(
             settled.as_slice(),
-            [
-                AttemptOutcome::Cancelled { .. },
-                AttemptOutcome::Completed(_)
-            ]
+            [SettledOutput::Cancelled { .. }, SettledOutput::Completed(_)]
         ),
         "{settled:?}"
     );
@@ -1222,7 +1212,7 @@ async fn a_cancel_during_a_retry_backoff_starts_no_next_attempt() {
         tool: Tool::Failing,
     }];
     let world: Arc<ExternalWorld> = Arc::default();
-    let settled: Arc<Mutex<Vec<AttemptOutcome>>> = Arc::default();
+    let settled: Arc<Mutex<Vec<SettledOutput>>> = Arc::default();
     let shared = (Arc::clone(&world), Arc::clone(&settled));
     let report = Matrix::new()
         .faults(&[])
@@ -1239,7 +1229,7 @@ async fn a_cancel_during_a_retry_backoff_starts_no_next_attempt() {
     assert_eq!(world.writes(&call("call-f")), vec![1]);
     let settled = settled.lock_recover().clone();
     assert!(
-        matches!(settled.as_slice(), [AttemptOutcome::Cancelled { .. }]),
+        matches!(settled.as_slice(), [SettledOutput::Cancelled { .. }]),
         "{settled:?}"
     );
     let cancelled_at = report

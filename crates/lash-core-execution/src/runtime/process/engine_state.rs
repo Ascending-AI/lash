@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use lash_durable::DurableInstant;
 
+use crate::runtime::actor::round::SettledOutput;
 use crate::runtime::actor::waits::PinnedKey;
 use crate::{ProcessId, ProcessOutcome, ProcessSignal, Resolution};
 
@@ -194,7 +195,7 @@ pub trait EngineSteps: Send + Sync {
         &self,
         run: EngineStepRun,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> SettledOutcome;
+    ) -> SettledOutput;
 }
 
 /// Why an engine step was refused before admission.
@@ -271,70 +272,6 @@ pub enum EngineAction {
     Terminal(ProcessOutcome),
 }
 
-/// How one requested step settled: its attempt's outcome and, when the
-/// outcome names material (a completion's output or a known failure's), that
-/// material's payload. The payload is present exactly when the outcome names
-/// material.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SettledOutcome {
-    outcome: lash_core_store::tool_run::AttemptOutcome,
-    payload: Option<String>,
-}
-
-/// A [`SettledOutcome`] whose payload does not match its outcome.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum SettledOutcomeRefusal {
-    /// A completion or a known failure without its material's payload.
-    #[error("a step outcome that names material settled without its payload")]
-    MissingPayload,
-    /// A payload beside an outcome that names no material.
-    #[error("a step outcome that names no material settled with a payload")]
-    StrayPayload,
-}
-
-impl SettledOutcome {
-    /// `outcome` with `payload`, its material's payload.
-    ///
-    /// # Errors
-    ///
-    /// [`SettledOutcomeRefusal`] when the payload's presence does not match
-    /// the outcome.
-    pub fn new(
-        outcome: lash_core_store::tool_run::AttemptOutcome,
-        payload: Option<String>,
-    ) -> Result<Self, SettledOutcomeRefusal> {
-        use lash_core_store::tool_run::AttemptOutcome;
-        let names_material = matches!(
-            outcome,
-            AttemptOutcome::Completed(_) | AttemptOutcome::Failed(_)
-        );
-        match (names_material, payload.is_some()) {
-            (true, false) => Err(SettledOutcomeRefusal::MissingPayload),
-            (false, true) => Err(SettledOutcomeRefusal::StrayPayload),
-            _ => Ok(Self { outcome, payload }),
-        }
-    }
-
-    /// The attempt's outcome.
-    #[must_use]
-    pub fn outcome(&self) -> &lash_core_store::tool_run::AttemptOutcome {
-        &self.outcome
-    }
-
-    /// The payload of the material the outcome names.
-    #[must_use]
-    pub fn payload(&self) -> Option<&str> {
-        self.payload.as_deref()
-    }
-
-    /// The outcome and its payload.
-    #[must_use]
-    pub fn into_parts(self) -> (lash_core_store::tool_run::AttemptOutcome, Option<String>) {
-        (self.outcome, self.payload)
-    }
-}
-
 /// What happened to a process since its last transition.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineEvent {
@@ -348,7 +285,7 @@ pub enum EngineEvent {
         /// The step's name.
         step: StepName,
         /// How its attempt ended, with its material's payload.
-        outcome: SettledOutcome,
+        outcome: SettledOutput,
     },
     /// The event the last transition's [`EngineAction::Emit`] appended is
     /// committed.

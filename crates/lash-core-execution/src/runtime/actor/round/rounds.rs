@@ -8,8 +8,8 @@ use lash_durable::{ActorTx, DomainWrite, DurableInstant};
 
 use super::records::{PresentBody, RetryBody, append, encode, start_record};
 use super::{
-    AdmissionRefusal, AdmittedExecution, AdmittedRound, BodyOutput, PinnedWait, Presentation,
-    RoundDraft, RunFold, SettleRefusal, admit, check_drafts,
+    AdmissionRefusal, AdmittedExecution, AdmittedRound, PinnedWait, Presentation, RoundDraft,
+    RunFold, SettleRefusal, SettledOutput, admit, check_drafts,
 };
 use crate::runtime::actor::waits::{self, WaitKind, WaitSpec};
 
@@ -121,13 +121,13 @@ pub fn presentation(round: &AdmittedRound, fold: &RunFold) -> (Presentation, Opt
 pub fn settle_retry(
     tx: &mut ActorTx,
     failed: &AdmittedExecution,
-    output: BodyOutput,
+    output: SettledOutput,
     due: DurableInstant,
 ) -> Result<(), SettleRefusal> {
     if !failed
         .policy()
         .permits_repeat(failed.policy(), failed.attempt())
-        || !output.outcome.may_repeat()
+        || !output.may_repeat()
     {
         return Err(SettleRefusal::NotRetryable(failed.call().clone()));
     }
@@ -140,8 +140,7 @@ pub fn settle_retry(
         Some(failed.call()),
         encode(&RetryBody {
             start: id.ordinal.0,
-            outcome: output.outcome,
-            material: output.material,
+            output,
             due_at_ms: due.0,
         }),
     ));

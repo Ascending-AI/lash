@@ -29,8 +29,8 @@
 
 use std::collections::BTreeSet;
 
+use lash_core_execution::runtime::actor::round::SettledOutput;
 use lash_core_execution::runtime::actor::round::{PolicyView, Recovery, fold};
-use lash_core_store::tool_run::AttemptOutcome;
 use lash_durable::domain::{OwnerKey, RunRecordKind};
 use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, Fault, SimNodes, Stored, Write, WriteKind};
@@ -169,14 +169,14 @@ async fn once(world: &World, nodes: &SimNodes, paused_at: Option<u64>) -> Vec<St
                 ));
             }
             match recovery {
-                Recovery::Settled(AttemptOutcome::Completed(_) | AttemptOutcome::Failed(_))
+                Recovery::Settled(SettledOutput::Completed(_) | SettledOutput::Failed(_))
                     if entered == 0 =>
                 {
                     violations.push(format!(
                         "NR-1: {id:?} settled with a body's outcome but no body ran"
                     ));
                 }
-                Recovery::Settled(AttemptOutcome::Interrupted) if entered > 1 => {
+                Recovery::Settled(SettledOutput::Interrupted) if entered > 1 => {
                     violations.push(format!(
                         "NR-2: interrupted {id:?} was entered {entered} times"
                     ));
@@ -192,7 +192,7 @@ async fn once(world: &World, nodes: &SimNodes, paused_at: Option<u64>) -> Vec<St
                 && once
                 && matches!(
                     recovery,
-                    Recovery::Settled(AttemptOutcome::Interrupted) | Recovery::Interrupt
+                    Recovery::Settled(SettledOutput::Interrupted) | Recovery::Interrupt
                 )
                 && let Some(entries) = ledger.get(&(id.owner.clone(), execution.call().clone()))
                 && let Some(late) = entries.iter().find(|entry| entry.at_ms > paused_at)

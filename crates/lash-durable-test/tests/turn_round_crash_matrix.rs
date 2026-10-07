@@ -69,14 +69,13 @@ use lash_core::{
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core_execution::runtime::actor::round::{
-    self, AdmittedExecution, BodyOutput, CompletedCall, MemberBody, MemberPin, MemberResult,
-    PolicyView, RoundTools, RunFold,
+    self, AdmittedExecution, CompletedCall, Material, MemberBody, MemberPin, MemberResult,
+    PolicyView, RoundTools, RunFold, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits::{self, WaitDeadline};
 use lash_core_execution::{ActorContext, Backend, StoreSet};
 use lash_core_store::tool_run::{
-    AttemptOutcome, CompletionSource, KnownFailure, KnownFailureReason, MaterialLocation,
-    MaterialOwner, MaterialPayload, MaterialRef, MaterialRole,
+    CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
 use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq};
 use lash_durable::runner::Activation;
@@ -678,17 +677,14 @@ fn commit_budget() -> lash_core::facade_support::CommitBudget {
 }
 
 /// A member's output, owned by the turn: its journal-local material.
-fn output_material(text: &str) -> MaterialRef {
-    MaterialPayload::new(
+fn output_material(text: &str) -> Material {
+    Material::journal_local(
         MaterialOwner::Run {
             opener: lash_core_store::effect_opener::EffectOpener::turn(session(), run()),
         },
         MaterialRole::AttemptOutput,
-        None,
         text.to_owned(),
     )
-    .reference(MaterialLocation::JournalLocal)
-    .unwrap()
 }
 
 /// The scenario's catalog: each tool's policy, body and answer.
@@ -749,14 +745,9 @@ impl RoundTools for Catalog {
                             .lock_recover()
                             .approvals
                             .push((call.clone(), key.as_str().to_owned()));
-                        return MemberResult::from(BodyOutput {
-                            outcome: AttemptOutcome::Waiting(CompletionSource {
-                                wait: pinned.id.to_hex(),
-                                terminal: None,
-                                metadata: output_material("parked"),
-                            }),
-                            material: Some("parked".to_owned()),
-                        });
+                        return MemberResult::from(SettledOutput::Waiting(
+                            output_material("parked").parked(pinned.id.to_hex()),
+                        ));
                     }
                     Tool::Defer => {
                         let pinned = pinned.expect("a parking member's wait is pinned");
@@ -778,14 +769,9 @@ impl RoundTools for Catalog {
                             )
                             .await;
                         });
-                        return MemberResult::from(BodyOutput {
-                            outcome: AttemptOutcome::Waiting(CompletionSource {
-                                wait: pinned.id.to_hex(),
-                                terminal: None,
-                                metadata: output_material("parked"),
-                            }),
-                            material: Some("parked".to_owned()),
-                        });
+                        return MemberResult::from(SettledOutput::Waiting(
+                            output_material("parked").parked(pinned.id.to_hex()),
+                        ));
                     }
                     Tool::Write { millis } if millis > 0 => {
                         lash_core_ids::clock::Clock::sleep(&*clock, Duration::from_millis(millis))
@@ -795,26 +781,18 @@ impl RoundTools for Catalog {
                         world.write(&call, attempt);
                         services.request_cancel(TurnCancelMode::Immediate).await;
                         token.cancelled().await;
-                        return MemberResult::from(BodyOutput::from(AttemptOutcome::Cancelled {
+                        return MemberResult::from(SettledOutput::Cancelled {
                             evidence: Default::default(),
-                        }));
+                        });
                     }
                     Tool::Write { .. } | Tool::Flaky => {}
                 }
                 world.write(&call, attempt);
-                let text = format!("{}#{attempt}", tool.name());
-                let outcome = if tool == Tool::Flaky && attempt == 1 {
-                    AttemptOutcome::Failed(KnownFailure {
-                        output: output_material(&text),
-                        reason: KnownFailureReason::Reported,
-                        suggested_delay_ms: None,
-                    })
+                let output = output_material(&format!("{}#{attempt}", tool.name()));
+                MemberResult::from(if tool == Tool::Flaky && attempt == 1 {
+                    SettledOutput::Failed(output.failure(KnownFailureReason::Reported, None))
                 } else {
-                    AttemptOutcome::Completed(output_material(&text))
-                };
-                MemberResult::from(BodyOutput {
-                    outcome,
-                    material: Some(text),
+                    SettledOutput::Completed(output)
                 })
             })
         })
@@ -824,34 +802,25 @@ impl RoundTools for Catalog {
         &self,
         _call: &PendingToolCall,
         _execution: &AdmittedExecution,
-        _source: &CompletionSource,
-        metadata: Option<&str>,
+        parked: &Material<CompletionSource>,
         resolution: waits::Resolution,
-    ) -> BodyOutput {
+    ) -> SettledOutput {
         assert_eq!(
-            metadata,
-            Some("parked"),
+            parked.payload(),
+            "parked",
             "the park's material rides its row"
         );
         let text = match resolution {
             waits::Resolution::Ok(value) => value.to_string(),
             other => format!("{other:?}"),
         };
-        BodyOutput {
-            outcome: AttemptOutcome::Completed(output_material(&text)),
-            material: Some(text),
-        }
+        SettledOutput::Completed(output_material(&text))
     }
 
-    fn completed(
-        &self,
-        call: &PendingToolCall,
-        outcome: &AttemptOutcome,
-        material: Option<&str>,
-    ) -> CompletedCall {
-        let output = match (outcome, material) {
-            (AttemptOutcome::Completed(_), Some(text)) => ToolCallOutput::success(text),
-            (other, _) => ToolCallOutput::failure(ToolFailure::runtime(
+    fn completed(&self, call: &PendingToolCall, output: &SettledOutput) -> CompletedCall {
+        let output = match output {
+            SettledOutput::Completed(material) => ToolCallOutput::success(material.payload()),
+            other => ToolCallOutput::failure(ToolFailure::runtime(
                 ToolFailureClass::Execution,
                 "l4t_unsettled",
                 format!("{other:?}"),
@@ -1062,7 +1031,7 @@ impl Scenario for L4 {
                 let commits = committed(CommitLabel::TURN_COMMIT);
                 let cancels = committed(CommitLabel::TURN_CANCEL);
                 let stopped = fold.rounds().flat_map(|view| view.members()).any(|member| {
-                    matches!(member.outcome(), Some(AttemptOutcome::Cancelled { .. }))
+                    matches!(member.outcome(), Some(SettledOutput::Cancelled { .. }))
                 });
                 if commits + cancels != 1 || (stopped && cancels != 1) {
                     violations.push(format!(
@@ -1209,15 +1178,15 @@ fn mixed_laws(
                     ));
                 }
                 match outcome {
-                    AttemptOutcome::Completed(_) if writes.len() == 1 => {}
-                    AttemptOutcome::Interrupted => {}
+                    SettledOutput::Completed(_) if writes.len() == 1 => {}
+                    SettledOutput::Interrupted => {}
                     other => violations.push(format!(
                         "F2: Once {call} settled {other:?} after writing {writes:?}"
                     )),
                 }
             }
             Tool::Flaky => {
-                if !matches!(outcome, AttemptOutcome::Completed(_)) {
+                if !matches!(outcome, SettledOutput::Completed(_)) {
                     violations.push(format!("{call} settled {outcome:?}"));
                 }
                 if member.starts().len() != 2 {
@@ -1300,8 +1269,8 @@ fn pending_laws(
         }
         let answered = host_answer(call).to_string();
         match (tool, member.outcome()) {
-            (Tool::Defer | Tool::Approve, Some(AttemptOutcome::Completed(material)))
-                if !writes.is_empty() && fold.material(material) == Some(answered.as_str()) =>
+            (Tool::Defer | Tool::Approve, Some(SettledOutput::Completed(material)))
+                if !writes.is_empty() && material.payload() == answered =>
             {
                 let seen_answer = seen.requests.iter().any(|request| {
                     request.contains(RESULTS_MARKER) && request.contains("answered")
@@ -1310,8 +1279,8 @@ fn pending_laws(
                     violations.push(format!("Pending: the model never saw {call}'s resolution"));
                 }
             }
-            (_, Some(AttemptOutcome::Interrupted)) => {}
-            (Tool::Write { .. }, Some(AttemptOutcome::Completed(_))) if writes.len() == 1 => {}
+            (_, Some(SettledOutput::Interrupted)) => {}
+            (Tool::Write { .. }, Some(SettledOutput::Completed(_))) if writes.len() == 1 => {}
             (_, other) => violations.push(format!(
                 "Pending: {call} settled {other:?} after writing {writes:?}"
             )),
@@ -1336,7 +1305,7 @@ fn cancel_laws(fold: &RunFold, world: &ExternalWorld, seen: &Seen) -> Vec<String
             violations.push(format!("F2: Once {} wrote {writes:?}", member.call()));
         }
         match member.outcome() {
-            Some(AttemptOutcome::Cancelled { .. } | AttemptOutcome::Interrupted) => {}
+            Some(SettledOutput::Cancelled { .. } | SettledOutput::Interrupted) => {}
             other => violations.push(format!(
                 "cancel: {} settled {other:?} after the turn's cancel",
                 member.call()
@@ -1383,7 +1352,7 @@ fn after_step_laws(
     for member in fold.round(run).unwrap().members() {
         let writes = world.writes(member.call());
         match member.outcome() {
-            Some(AttemptOutcome::Completed(_)) if writes.len() == 1 => {}
+            Some(SettledOutput::Completed(_)) if writes.len() == 1 => {}
             other => violations.push(format!(
                 "after-step: {} settled {other:?} after writing {writes:?}",
                 member.call()

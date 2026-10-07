@@ -18,7 +18,7 @@ use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 
 use super::engine_state::StepRequest;
 use crate::ProcessRecord;
-use crate::runtime::actor::round::{AdmittedExecution, BodyOutput, ToolBody};
+use crate::runtime::actor::round::{AdmittedExecution, Material, SettledOutput, ToolBody};
 use crate::runtime::actor::waits::{Resolution, WaitDeadline};
 
 /// A step's admission: what its tool's declaration pins before it runs.
@@ -92,16 +92,15 @@ pub trait ProcessSteps: Send + Sync {
     ) -> ToolBody;
 
     /// The final answer of `execution`, an attempt of `step` of `process`
-    /// that parked on `source`, once one of its waits ended with
-    /// `resolution`: a pure function of the resolution and `metadata`, the
-    /// payload of the parked outcome's material. Runs no body.
+    /// that parked as `parked`, once one of its waits ended with
+    /// `resolution`: a pure function of the resolution and the payload of
+    /// the parked outcome's material. Runs no body.
     fn resolved(
         &self,
         process: &ProcessRecord,
         step: &StepRequest,
         execution: &AdmittedExecution,
-        source: &CompletionSource,
-        metadata: Option<&str>,
+        parked: &Material<CompletionSource>,
         resolution: Resolution,
-    ) -> BodyOutput;
+    ) -> SettledOutput;
 }

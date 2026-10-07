@@ -62,9 +62,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use lash_core_store::tool_run::{
-    AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, LimitCause,
-};
+use lash_core_store::tool_run::{AvailableEvidence, CompletionSource, LimitCause};
 use lash_durable::domain::{AdmittedId, DomainRefusal, RunRecordRow, RunRecordWrite, RunSeq};
 use lash_durable::{CommitLabel, DomainWrite, DueSource, DurableError, DurableInstant};
 use tokio::task::JoinSet;
@@ -74,8 +72,9 @@ use tracing::Instrument as _;
 use super::super::ActorContext;
 use super::super::waits::{self, RaceWinner, Resolution, WaitId, WaitKind, WaitRef};
 use super::{
-    AdmittedExecution, BodyOutput, PolicyView, Recovery, RoundError, RoundView, RunFold, Stop,
-    StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry, start_retry,
+    AdmittedExecution, Material, PolicyView, Recovery, RoundError, RoundView, RunFold,
+    SettledOutput, Stop, StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry,
+    start_retry,
 };
 
 /// What a member's body answers: its output, and the store-local effects
@@ -83,7 +82,7 @@ use super::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemberResult {
     /// The output.
-    pub output: BodyOutput,
+    pub output: SettledOutput,
     /// The store writes that commit with the output.
     pub store_local: Vec<StoreLocalEffect>,
     /// For a park, the process whose terminal the call also awaits: its
@@ -91,8 +90,8 @@ pub struct MemberResult {
     pub terminal: Option<crate::ProcessId>,
 }
 
-impl From<BodyOutput> for MemberResult {
-    fn from(output: BodyOutput) -> Self {
+impl From<SettledOutput> for MemberResult {
+    fn from(output: SettledOutput) -> Self {
         Self {
             output,
             store_local: Vec::new(),
@@ -111,16 +110,14 @@ pub trait MemberBodies: Send + Sync {
     /// The body of `execution`'s attempt, for its call and request.
     fn body(&self, execution: &AdmittedExecution) -> MemberBody;
 
-    /// The final answer of `execution`, which parked on `source`, once one
-    /// of its waits ended with `resolution`; `metadata` is the payload of
-    /// the parked outcome's material. Runs no body.
+    /// The final answer of `execution`, which parked as `parked`, once one
+    /// of its waits ended with `resolution`. Runs no body.
     fn resolved(
         &self,
         execution: &AdmittedExecution,
-        source: &CompletionSource,
-        metadata: Option<&str>,
+        parked: &Material<CompletionSource>,
         resolution: Resolution,
-    ) -> BodyOutput;
+    ) -> SettledOutput;
 
     /// Release what `execution`'s park launched, once its park ended:
     /// `cancelled` when the call ends cancelled. Runs before the call's
@@ -129,7 +126,7 @@ pub trait MemberBodies: Send + Sync {
     fn discharge<'a>(
         &'a self,
         _execution: &'a AdmittedExecution,
-        _metadata: Option<&'a str>,
+        _parked: &'a Material<CompletionSource>,
         _cancelled: bool,
     ) -> Discharge<'a> {
         Box::pin(async {})
@@ -152,9 +149,9 @@ pub enum Act {
     Idle(Idle),
 }
 
-/// A parked member: the wait it races, its execution, what it parked on and
-/// the payload of its pending completion's material.
-type Parked = (WaitRef, AdmittedExecution, CompletionSource, Option<String>);
+/// A parked member: the wait it races, its execution, and what it parked on
+/// with its pending completion's payload.
+type Parked = (WaitRef, AdmittedExecution, Material<CompletionSource>);
 
 /// What an idle lifecycle waits on.
 #[derive(Debug)]
@@ -361,7 +358,7 @@ impl Lifecycle {
                             if cancelled {
                                 cancelled_outcome()
                             } else {
-                                AttemptOutcome::Interrupted
+                                SettledOutput::Interrupted
                             },
                         )),
                         Recovery::RerunAtOrdinal(_) if cancelled => {
@@ -380,20 +377,12 @@ impl Lifecycle {
                             }
                         }
                         Recovery::Waiting(source) if cancelled => {
-                            self.bodies
-                                .discharge(&execution, folded.material(&source.metadata), true)
-                                .await;
+                            self.bodies.discharge(&execution, &source, true).await;
                             settlements.push((execution, cancelled_outcome()));
                         }
                         Recovery::Waiting(source) => {
-                            let metadata = folded.material(&source.metadata).map(str::to_owned);
-                            for wait in source_waits(&execution, &source)? {
-                                parked.push((
-                                    wait,
-                                    execution.clone(),
-                                    source.clone(),
-                                    metadata.clone(),
-                                ));
+                            for wait in source_waits(&execution, source.named())? {
+                                parked.push((wait, execution.clone(), source.clone()));
                             }
                         }
                     }
@@ -433,7 +422,7 @@ impl Lifecycle {
     async fn commit_one(
         &mut self,
         folded: &RunFold,
-        settlements: Vec<(AdmittedExecution, AttemptOutcome)>,
+        settlements: Vec<(AdmittedExecution, SettledOutput)>,
         due_starts: Vec<AdmittedExecution>,
         now: DurableInstant,
     ) -> Result<Option<Act>, RoundError> {
@@ -582,13 +571,11 @@ impl Lifecycle {
     /// cancelled or the scope revoked its waits.
     async fn parked_ended(&mut self, won: RaceWinner, parked: &[Parked]) {
         let member_of = |wait: &WaitRef| parked.iter().find(|(parked, ..)| parked == wait);
-        let mut ends: Vec<(&Parked, BodyOutput)> = Vec::new();
+        let mut ends: Vec<(&Parked, SettledOutput)> = Vec::new();
         match won {
             RaceWinner::Resolved { wait, resolution } => {
-                if let Some(entry @ (_, execution, source, metadata)) = member_of(&wait) {
-                    let output =
-                        self.bodies
-                            .resolved(execution, source, metadata.as_deref(), resolution);
+                if let Some(entry @ (_, execution, source)) = member_of(&wait) {
+                    let output = self.bodies.resolved(execution, source, resolution);
                     ends.push((entry, output));
                 }
             }
@@ -596,37 +583,31 @@ impl Lifecycle {
                 if let Some(entry) = member_of(&wait) {
                     ends.push((
                         entry,
-                        AttemptOutcome::TimedOut {
+                        SettledOutput::TimedOut {
                             cause: LimitCause::ExecutionTotal,
                             evidence: AvailableEvidence::default(),
-                        }
-                        .into(),
+                        },
                     ));
                 }
             }
             RaceWinner::Cancelled => {
-                for entry @ (_, execution, source, metadata) in parked {
+                for entry @ (_, execution, source) in parked {
                     if ends
                         .iter()
                         .all(|((_, end, ..), _)| end.id() != execution.id())
                     {
-                        let output = self.bodies.resolved(
-                            execution,
-                            source,
-                            metadata.as_deref(),
-                            Resolution::Cancelled,
-                        );
+                        let output = self
+                            .bodies
+                            .resolved(execution, source, Resolution::Cancelled);
                         ends.push((entry, output));
                     }
                 }
             }
         }
         let opened = self.cx.clock().now();
-        for ((_, execution, _, metadata), output) in ends {
-            let cancelled = matches!(output.outcome, AttemptOutcome::Cancelled { .. });
-            self.bodies
-                .discharge(execution, metadata.as_deref(), cancelled)
-                .await;
+        for ((_, execution, source), output) in ends {
+            let cancelled = matches!(output, SettledOutput::Cancelled { .. });
+            self.bodies.discharge(execution, source, cancelled).await;
             self.finished
                 .insert(execution.id().clone(), Ok(output.into()));
             self.batch_opened.get_or_insert(opened);
@@ -717,22 +698,21 @@ impl Lifecycle {
         let (mut output, store_local, terminal) = match result {
             Ok(result) => (result.output, result.store_local, result.terminal),
             Err(Stop::Limit(cause)) => (
-                AttemptOutcome::TimedOut {
+                SettledOutput::TimedOut {
                     cause,
                     evidence: AvailableEvidence::default(),
-                }
-                .into(),
+                },
                 Vec::new(),
                 None,
             ),
             Err(Stop::Cancelled | Stop::Activation | Stop::Lapsed) => {
-                (cancelled_outcome().into(), Vec::new(), None)
+                (cancelled_outcome(), Vec::new(), None)
             }
             Err(Stop::Durable(error)) => return Err(error.into()),
         };
         // A park whose resolver awaits a process waits on its terminal too:
         // the wait is pinned with the park, under the call's own deadline.
-        if let (AttemptOutcome::Waiting(source), Some(process)) = (&mut output.outcome, terminal) {
+        if let (SettledOutput::Waiting(source), Some(process)) = (&mut output, terminal) {
             let (wait, _) = waits::pin(
                 tx,
                 waits::WaitSpec {
@@ -748,9 +728,9 @@ impl Lifecycle {
                     message: refusal.to_string(),
                 }))
             })?;
-            source.terminal = Some(wait.id().to_hex());
+            source.await_terminal(wait.id().to_hex());
         }
-        if let Some(due) = self.retry_due(execution, &output.outcome, now) {
+        if let Some(due) = self.retry_due(execution, &output, now) {
             settle_retry(tx, execution, output, due)?;
             return Ok(Recorded::Retry);
         }
@@ -766,7 +746,7 @@ impl Lifecycle {
     fn retry_due(
         &self,
         execution: &AdmittedExecution,
-        outcome: &AttemptOutcome,
+        outcome: &SettledOutput,
         now: DurableInstant,
     ) -> Option<DurableInstant> {
         let pinned = execution.policy();
@@ -780,9 +760,7 @@ impl Lifecycle {
             return None;
         }
         let suggested = match outcome {
-            AttemptOutcome::Failed(KnownFailure {
-                suggested_delay_ms, ..
-            }) => *suggested_delay_ms,
+            SettledOutput::Failed(failure) => failure.named().suggested_delay_ms,
             _ => None,
         };
         let delay = pinned.delay_ms_for_retry(execution.attempt() - 1, suggested);
@@ -799,8 +777,8 @@ enum Recorded {
     Outcome,
 }
 
-fn cancelled_outcome() -> AttemptOutcome {
-    AttemptOutcome::Cancelled {
+fn cancelled_outcome() -> SettledOutput {
+    SettledOutput::Cancelled {
         evidence: AvailableEvidence::default(),
     }
 }
@@ -821,10 +799,7 @@ fn parks(result: &Result<MemberResult, Stop>) -> bool {
     matches!(
         result,
         Ok(MemberResult {
-            output: BodyOutput {
-                outcome: AttemptOutcome::Waiting(_),
-                ..
-            },
+            output: SettledOutput::Waiting(_),
             ..
         })
     )

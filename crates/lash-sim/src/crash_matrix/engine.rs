@@ -17,16 +17,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core_execution::runtime::actor::round::{BodyOutput, ToolBody};
+use lash_core_execution::runtime::actor::round::{Material, SettledOutput, ToolBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
     ProcessEngine, ProcessEventType, ProcessId, ProcessInfraError, ProcessOutcome, ProcessRecord,
     StepName, StepRequest, ToolCallOutput, ToolCancellation,
 };
-use lash_core_store::tool_run::{
-    AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
-};
+use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::domain::OwnerKey;
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
 use serde_json::{Value, json};
@@ -302,11 +300,12 @@ impl ProcessSteps for SimSteps {
         _process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-        _source: &lash_core_store::tool_run::CompletionSource,
-        _metadata: Option<&str>,
+        _parked: &lash_core_execution::runtime::actor::round::Material<
+            lash_core_store::tool_run::CompletionSource,
+        >,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
-        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
+        lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
     }
 
     fn body(
@@ -337,22 +336,13 @@ impl ProcessSteps for SimSteps {
                 );
                 world.sleep(BODY).await;
                 let output = json!({ "ok": true }).to_string();
-                match MaterialPayload::new(
+                SettledOutput::Completed(Material::journal_local(
                     MaterialOwner::Process {
                         process_id: process,
                     },
                     MaterialRole::AttemptOutput,
-                    None,
-                    output.clone(),
-                )
-                .reference(MaterialLocation::JournalLocal)
-                {
-                    Ok(material) => BodyOutput {
-                        outcome: AttemptOutcome::Completed(material),
-                        material: Some(output),
-                    },
-                    Err(_) => BodyOutput::from(AttemptOutcome::Interrupted),
-                }
+                    output,
+                ))
             })
         })
     }

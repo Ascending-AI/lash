@@ -32,6 +32,7 @@ mod tests;
 mod validation;
 mod wake;
 
+pub use super::actor::round::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use awaiter::{
     ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, ProcessEventSinkRegistration,
     WatchedRegistry, watch_process_registry, watch_process_registry_with_sink,
@@ -64,8 +65,7 @@ pub use engine::{
 };
 pub use engine_state::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal,
-    EngineStepRun, EngineSteps, HostWaitKind, KeyName, SettledOutcome, SettledOutcomeRefusal,
-    StepName, StepRequest,
+    EngineStepRun, EngineSteps, HostWaitKind, KeyName, StepName, StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,

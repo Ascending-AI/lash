@@ -10,9 +10,8 @@
 //! settled operation is answered from the state, and only `vm_run`, an
 //! effect-free stretch of VM, is ever run again.
 
-use lash_core::tool_run::AttemptOutcome;
 use lash_core::{
-    EngineAction, EngineEvent, EngineState, EngineStepKind, ProcessInfraError, SettledOutcome,
+    EngineAction, EngineEvent, EngineState, EngineStepKind, ProcessInfraError, SettledOutput,
     StepName, StepRequest,
 };
 
@@ -191,7 +190,7 @@ fn standing(state: &LashlangEngineState) -> Result<EngineAction, ProcessInfraErr
 fn step_settled(
     state: &mut LashlangEngineState,
     step: &StepName,
-    outcome: SettledOutcome,
+    outcome: SettledOutput,
 ) -> Result<EngineAction, ProcessInfraError> {
     match &mut state.phase {
         Phase::Running { step: running, .. } if running == step => vm_run_settled(state, outcome),
@@ -237,15 +236,14 @@ fn step_settled(
 
 fn vm_run_settled(
     state: &mut LashlangEngineState,
-    settled: SettledOutcome,
+    settled: SettledOutput,
 ) -> Result<EngineAction, ProcessInfraError> {
-    let (outcome, payload) = settled.into_parts();
-    let output = match (&outcome, payload) {
-        (AttemptOutcome::Completed(_), Some(payload)) => {
-            serde_json::from_str::<VmRunOutput>(&payload)
+    let output = match settled {
+        SettledOutput::Completed(output) => {
+            serde_json::from_str::<VmRunOutput>(output.payload())
                 .map_err(|error| infra(format!("vm_run answered {error}")))?
         }
-        (AttemptOutcome::TimedOut { cause, .. }, _) => {
+        SettledOutput::TimedOut { cause, .. } => {
             state.phase = Phase::Ended;
             return Ok(EngineAction::Terminal(
                 crate::process::process_lashlang_failure(

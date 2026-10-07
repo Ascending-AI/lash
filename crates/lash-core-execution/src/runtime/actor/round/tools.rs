@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
-    AttemptOutcome, AvailableEvidence, MaterialLocation, MaterialOwner, MaterialPayload,
+    AvailableEvidence, CompletionSource, MaterialLocation, MaterialOwner, MaterialPayload,
     MaterialRef, MaterialRole,
 };
 use lash_durable::ActorTx;
@@ -24,11 +24,10 @@ use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use super::super::ActorContext;
 use super::super::waits::{Resolution, WaitDeadline};
 use super::{
-    AdmittedExecution, BodyOutput, ExecutionDraft, MemberBodies, MemberBody, PolicyView,
-    RoundError, fold, settle,
+    AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PolicyView, RoundError,
+    SettledOutput, fold, settle,
 };
 use crate::{ToolCallId, ToolId};
-use lash_core_store::tool_run::CompletionSource;
 
 /// A settled member as the turn's machine is answered with it.
 pub type CompletedCall = lash_sansio::sansio::CompletedToolCall<crate::ToolIntentExecutionOutcome>;
@@ -66,18 +65,17 @@ pub trait RoundTools: Send + Sync {
     /// store-local effect that commits with a completion.
     fn body(&self, call: &PendingToolCall, execution: &AdmittedExecution) -> MemberBody;
 
-    /// The final answer of `execution`, an attempt of `call` that parked on
-    /// `source`, once one of its waits ended with `resolution`: a pure
-    /// function of the resolution and `metadata`, the parked call's pending
-    /// completion as its `Waiting` outcome recorded it. Runs no body.
+    /// The final answer of `execution`, an attempt of `call` that parked as
+    /// `parked`, once one of its waits ended with `resolution`: a pure
+    /// function of the resolution and the parked call's pending completion,
+    /// as its `Waiting` outcome recorded it. Runs no body.
     fn resolved(
         &self,
         call: &PendingToolCall,
         execution: &AdmittedExecution,
-        source: &CompletionSource,
-        metadata: Option<&str>,
+        parked: &Material<CompletionSource>,
         resolution: Resolution,
-    ) -> BodyOutput;
+    ) -> SettledOutput;
 
     /// Release what `execution`, an attempt of `call`, launched for its
     /// park, once the park ended: `cancelled` when the call ends cancelled.
@@ -86,20 +84,15 @@ pub trait RoundTools: Send + Sync {
         &'a self,
         _call: &'a PendingToolCall,
         _execution: &'a AdmittedExecution,
-        _metadata: Option<&'a str>,
+        _parked: &'a Material<CompletionSource>,
         _cancelled: bool,
     ) -> super::lifecycle::Discharge<'a> {
         Box::pin(async {})
     }
 
     /// What the machine is answered with for `call`: a pure function of its
-    /// committed `outcome` and the material that outcome names.
-    fn completed(
-        &self,
-        call: &PendingToolCall,
-        outcome: &AttemptOutcome,
-        material: Option<&str>,
-    ) -> CompletedCall;
+    /// committed `output`, with the payload of the material it names.
+    fn completed(&self, call: &PendingToolCall, output: &SettledOutput) -> CompletedCall;
 
     /// The round's admission refusal, read from the catalog: when it refuses
     /// any member of `calls`, what every member answers instead, in declared
@@ -119,20 +112,16 @@ pub trait RoundTools: Send + Sync {
 pub fn completed_material(
     owner: &EffectOpener,
     completed: &CompletedCall,
-) -> Result<(MaterialRef, String), RoundCallsRefusal> {
-    let unencodable = || RoundCallsRefusal::Unencodable(completed.call_id.clone());
-    let text = serde_json::to_string(completed).map_err(|_| unencodable())?;
-    let reference = MaterialPayload::new(
+) -> Result<Material, RoundCallsRefusal> {
+    let text = serde_json::to_string(completed)
+        .map_err(|_| RoundCallsRefusal::Unencodable(completed.call_id.clone()))?;
+    Ok(Material::journal_local(
         MaterialOwner::Run {
             opener: owner.clone(),
         },
         MaterialRole::AttemptOutput,
-        None,
-        text.clone(),
-    )
-    .reference(MaterialLocation::JournalLocal)
-    .map_err(|_| unencodable())?;
-    Ok((reference, text))
+        text,
+    ))
 }
 
 /// The answer [`completed_material`] encoded.
@@ -226,28 +215,25 @@ impl MemberBodies for RoundCalls {
     fn resolved(
         &self,
         execution: &AdmittedExecution,
-        source: &CompletionSource,
-        metadata: Option<&str>,
+        parked: &Material<CompletionSource>,
         resolution: Resolution,
-    ) -> BodyOutput {
+    ) -> SettledOutput {
         match self.calls.get(execution.call()) {
-            Some(call) => self
-                .tools
-                .resolved(call, execution, source, metadata, resolution),
-            None => BodyOutput::from(AttemptOutcome::Cancelled {
+            Some(call) => self.tools.resolved(call, execution, parked, resolution),
+            None => SettledOutput::Cancelled {
                 evidence: AvailableEvidence::default(),
-            }),
+            },
         }
     }
 
     fn discharge<'a>(
         &'a self,
         execution: &'a AdmittedExecution,
-        metadata: Option<&'a str>,
+        parked: &'a Material<CompletionSource>,
         cancelled: bool,
     ) -> super::lifecycle::Discharge<'a> {
         match self.calls.get(execution.call()) {
-            Some(call) => self.tools.discharge(call, execution, metadata, cancelled),
+            Some(call) => self.tools.discharge(call, execution, parked, cancelled),
             None => Box::pin(async {}),
         }
     }
@@ -259,9 +245,9 @@ impl MemberBodies for RoundCalls {
             // never asked for. Answer as a stop rather than run anything.
             None => Box::new(|_| {
                 Box::pin(async {
-                    super::BodyOutput::from(AttemptOutcome::Cancelled {
+                    SettledOutput::Cancelled {
                         evidence: AvailableEvidence::default(),
-                    })
+                    }
                     .into()
                 })
             }),
@@ -322,7 +308,7 @@ pub async fn settle_cancelled(
             settle(
                 tx,
                 &view.execution(member),
-                AttemptOutcome::Cancelled {
+                SettledOutput::Cancelled {
                     evidence: AvailableEvidence::default(),
                 },
                 Vec::new(),

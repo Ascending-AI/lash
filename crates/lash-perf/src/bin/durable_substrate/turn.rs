@@ -26,14 +26,12 @@ use lash_core::{
     facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, BodyOutput, CompletedCall, MemberBody, MemberPin, MemberResult, PolicyView,
-    RoundTools,
+    AdmittedExecution, CompletedCall, Material, MemberBody, MemberPin, MemberResult, PolicyView,
+    RoundTools, SettledOutput,
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::effect_opener::EffectOpener;
-use lash_core_store::tool_run::{
-    AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef, MaterialRole,
-};
+use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
 use lash_durable::ActorKey;
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
@@ -592,17 +590,14 @@ impl TurnDrive for BenchDrive {
     async fn committed(&mut self) {}
 }
 
-fn output_material(session: &SessionId, run: &TurnId, text: &str) -> Option<MaterialRef> {
-    MaterialPayload::new(
+fn output_material(session: &SessionId, run: &TurnId, text: String) -> Material {
+    Material::journal_local(
         MaterialOwner::Run {
             opener: EffectOpener::turn(session.clone(), run.clone()),
         },
         MaterialRole::AttemptOutput,
-        None,
-        text.to_owned(),
+        text,
     )
-    .reference(MaterialLocation::JournalLocal)
-    .ok()
 }
 
 /// `benchmark_echo`: a `Once` tool that answers its arguments at once.
@@ -630,40 +625,24 @@ impl RoundTools for EchoTools {
         &self,
         _call: &PendingToolCall,
         _execution: &AdmittedExecution,
-        _source: &lash_core_store::tool_run::CompletionSource,
-        _metadata: Option<&str>,
+        _parked: &Material<CompletionSource>,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> BodyOutput {
+    ) -> SettledOutput {
         // No tool of this catalog parks, so no park ever resolves.
-        BodyOutput::from(AttemptOutcome::Interrupted)
+        SettledOutput::Interrupted
     }
 
     fn body(&self, call: &PendingToolCall, _execution: &AdmittedExecution) -> MemberBody {
-        let text = call.args.to_string();
-        let material = output_material(&self.session, &self.run, &text);
+        let output = output_material(&self.session, &self.run, call.args.to_string());
         Box::new(move |_token| {
-            Box::pin(async move {
-                let outcome = match material {
-                    Some(material) => AttemptOutcome::Completed(material),
-                    None => AttemptOutcome::Interrupted,
-                };
-                MemberResult::from(BodyOutput {
-                    outcome,
-                    material: Some(text),
-                })
-            })
+            Box::pin(async move { MemberResult::from(SettledOutput::Completed(output)) })
         })
     }
 
-    fn completed(
-        &self,
-        call: &PendingToolCall,
-        outcome: &AttemptOutcome,
-        material: Option<&str>,
-    ) -> CompletedCall {
-        let output = match (outcome, material) {
-            (AttemptOutcome::Completed(_), Some(text)) => ToolCallOutput::success(text),
-            (other, _) => ToolCallOutput::failure(ToolFailure::runtime(
+    fn completed(&self, call: &PendingToolCall, output: &SettledOutput) -> CompletedCall {
+        let output = match output {
+            SettledOutput::Completed(material) => ToolCallOutput::success(material.payload()),
+            other => ToolCallOutput::failure(ToolFailure::runtime(
                 ToolFailureClass::Execution,
                 "bench_unsettled",
                 format!("{other:?}"),

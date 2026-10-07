@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::{BodyOutput, ToolBody};
+use lash_core_execution::runtime::actor::round::ToolBody;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Backend, EngineStepRun, EngineSteps as _, LifetimeDecision, ProcessId, ProcessIdMint,
@@ -139,11 +139,12 @@ impl ProcessSteps for LashlangSteps {
         _process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-        _source: &lash_core_store::tool_run::CompletionSource,
-        _metadata: Option<&str>,
+        _parked: &lash_core_execution::runtime::actor::round::Material<
+            lash_core_store::tool_run::CompletionSource,
+        >,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
-        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
+        lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
     }
 
     fn body(
@@ -181,10 +182,7 @@ impl ProcessSteps for LashlangSteps {
             entered
                 .lock_recover()
                 .push(format!("{}:{from}", run.kind.0));
-            Box::pin(async move {
-                let (outcome, material) = steps.run(run, token).await.into_parts();
-                BodyOutput { outcome, material }
-            })
+            Box::pin(async move { steps.run(run, token).await })
         })
     }
 }

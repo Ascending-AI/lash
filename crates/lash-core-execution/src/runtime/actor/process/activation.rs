@@ -40,8 +40,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core_store::tool_run::{
-    AttemptOutcome, AvailableEvidence, CompletionSource, MaterialLocation, MaterialOwner,
-    MaterialPayload, MaterialRole,
+    AvailableEvidence, CompletionSource, MaterialLocation, MaterialOwner, MaterialPayload,
+    MaterialRole,
 };
 use lash_durable::domain::{
     CANCEL_MAIL, ExecKey, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite, RunSeq,
@@ -61,12 +61,12 @@ use super::terminal::{ProcessParkReason, cancelled, record_park, record_terminal
 use super::{CascadeProgress, end_scope};
 use crate::runtime::actor::round::lifecycle::{Act, Idle, Lifecycle};
 use crate::runtime::actor::round::{
-    self, AdmittedExecution, BodyOutput, ExecutionDraft, MemberBodies, MemberBody, PolicyView,
-    RoundDraft, RoundError, RunFold,
+    self, AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PolicyView,
+    RoundDraft, RoundError, RunFold, SettledOutput,
 };
 use crate::runtime::actor::waits::{self, Resolution, WaitDeadline, WaitKind, WaitSpec};
 use crate::runtime::process::engine_state::{
-    EngineAction, EngineEvent, EngineState, HostWaitKind, SettledOutcome, StepRequest,
+    EngineAction, EngineEvent, EngineState, HostWaitKind, StepRequest,
 };
 use crate::runtime::process::steps::ProcessSteps;
 use crate::{
@@ -779,7 +779,7 @@ impl ProcessActivation {
                 Immediate::Emitted => EngineEvent::Emitted,
             }));
         }
-        if let Some(event) = settled_event(driver, fold)? {
+        if let Some(event) = settled_event(driver, fold) {
             return Ok(Next::Event(event));
         }
         if let Some(mail) = tx
@@ -1083,30 +1083,23 @@ fn refused(message: String) -> crate::ProcessOutcome {
 }
 
 /// The engine-event adapter: the first in-flight step whose call the fold
-/// settled, as its `StepSettled` event. Its lifecycle recorded the outcome;
-/// the step leaves the driver with the transition that hands it over.
-fn settled_event(driver: &mut Driver, fold: &RunFold) -> Result<Option<EngineEvent>, DurableError> {
-    for (name, step) in &driver.steps {
-        let Some(outcome) = fold
-            .round(RunSeq(step.run))
-            .and_then(|view| view.members().get(usize::try_from(step.member).ok()?))
-            .and_then(round::RoundMember::outcome)
-        else {
-            continue;
-        };
-        let payload = round::outcome_material(outcome)
-            .and_then(|material| fold.material(material))
-            .map(str::to_owned);
-        let outcome = SettledOutcome::new(outcome.clone(), payload)
-            .map_err(|refusal| corrupt("a process step's outcome", refusal))?;
-        let name = name.clone();
-        driver.steps.remove(&name);
-        return Ok(Some(EngineEvent::StepSettled {
-            step: name,
-            outcome,
-        }));
-    }
-    Ok(None)
+/// settled, as its `StepSettled` event, with its payload as the fold
+/// checked it. Its lifecycle recorded the outcome; the step leaves the
+/// driver with the transition that hands it over.
+fn settled_event(driver: &mut Driver, fold: &RunFold) -> Option<EngineEvent> {
+    let (name, outcome) = driver.steps.iter().find_map(|(name, step)| {
+        let outcome = fold
+            .round(RunSeq(step.run))?
+            .members()
+            .get(usize::try_from(step.member).ok()?)?
+            .outcome()?;
+        Some((name.clone(), outcome.clone()))
+    })?;
+    driver.steps.remove(&name);
+    Some(EngineEvent::StepSettled {
+        step: name,
+        outcome,
+    })
 }
 
 /// A steps' lifecycle failure as the activation reports it: a store
@@ -1156,10 +1149,10 @@ impl StepBodies {
     }
 }
 
-fn unknown_step() -> BodyOutput {
-    BodyOutput::from(AttemptOutcome::Cancelled {
+fn unknown_step() -> SettledOutput {
+    SettledOutput::Cancelled {
         evidence: AvailableEvidence::default(),
-    })
+    }
 }
 
 impl MemberBodies for StepBodies {
@@ -1178,14 +1171,13 @@ impl MemberBodies for StepBodies {
     fn resolved(
         &self,
         execution: &AdmittedExecution,
-        source: &CompletionSource,
-        metadata: Option<&str>,
+        parked: &Material<CompletionSource>,
         resolution: Resolution,
-    ) -> BodyOutput {
+    ) -> SettledOutput {
         match self.step(execution.call()) {
             Some((record, step)) => self
                 .steps
-                .resolved(&record, &step, execution, source, metadata, resolution),
+                .resolved(&record, &step, execution, parked, resolution),
             None => unknown_step(),
         }
     }

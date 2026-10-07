@@ -7,8 +7,7 @@
 //! A catalog tool step's payload is its `ToolCallOutput`, as the step's
 //! outcome recorded it.
 
-use lash_core::SettledOutcome;
-use lash_core::tool_run::AttemptOutcome;
+use lash_core::SettledOutput;
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionHostError, ResourceOperationBatchOutcome,
     ResourceOperationOutcome, Value,
@@ -16,13 +15,6 @@ use lashlang::{
 
 use super::state::{Decision, Injection, Leaf};
 use crate::bridge::{ExecutionCancellation, protocol_tool_output_to_lashlang_value};
-
-/// The code a `Once` call's failure carries when it started and never
-/// settled: it is not run again, and the guest may catch it.
-pub(crate) const TOOL_INTERRUPTED_CODE: &str = "tool_interrupted";
-
-/// The code a call's failure carries when it ran past its limit.
-pub(crate) const TOOL_TIMED_OUT_CODE: &str = "tool_timed_out";
 
 /// Why an injection could not answer the reissued operation: the state and
 /// the snapshot disagree, which no guest may observe.
@@ -37,6 +29,8 @@ pub(crate) enum InjectionFault {
     Payload(serde_json::Error),
     #[error("an outcome settled at issue does not decode: {0}")]
     Settled(String),
+    #[error("step `{0}` settled as a park, which answers nothing")]
+    Parked(String),
 }
 
 fn decode_output(payload: &str) -> Result<lash_core::ToolCallOutput, InjectionFault> {
@@ -45,56 +39,36 @@ fn decode_output(payload: &str) -> Result<lash_core::ToolCallOutput, InjectionFa
 
 /// Whether a step's settlement fulfils: a completion whose tool output is a
 /// success.
-pub(crate) fn fulfilled(outcome: &SettledOutcome) -> bool {
-    matches!(outcome.outcome(), AttemptOutcome::Completed(_))
-        && outcome
-            .payload()
-            .and_then(|payload| decode_output(payload).ok())
-            .is_some_and(|output| matches!(output.outcome, lash_core::ToolCallOutcome::Success(_)))
+pub(crate) fn fulfilled(outcome: &SettledOutput) -> bool {
+    match outcome {
+        SettledOutput::Completed(output) => decode_output(output.payload())
+            .is_ok_and(|output| matches!(output.outcome, lash_core::ToolCallOutcome::Success(_))),
+        _ => false,
+    }
 }
 
-/// One step's settlement as the VM reads it.
+/// One step's settlement as the VM reads it: its tool output, or the answer
+/// every reader gives an interruption, a limit or a cancel.
 fn step_result(
     key: &str,
     timer: bool,
-    outcome: &SettledOutcome,
+    outcome: &SettledOutput,
     cancellation: &ExecutionCancellation,
 ) -> Result<Result<Value, ExecutionHostError>, InjectionFault> {
-    let failure = |class, code: &str, message: String| {
-        Err(ExecutionHostError::from_tool_failure(
-            &lash_core::ToolFailure::runtime(class, code, message),
-            key,
-        ))
+    let output = match outcome {
+        SettledOutput::Completed(_) if timer => return Ok(Ok(Value::Undefined)),
+        SettledOutput::Completed(output) => decode_output(output.payload())?,
+        SettledOutput::Failed(failure) => decode_output(failure.payload())?,
+        // A step settles once its park ends: a park is never its settlement.
+        unanswered => unanswered
+            .stopped_answer()
+            .ok_or_else(|| InjectionFault::Parked(key.to_owned()))?,
     };
-    Ok(match (outcome.outcome(), outcome.payload()) {
-        (AttemptOutcome::Completed(_), Some(_)) if timer => Ok(Value::Undefined),
-        (AttemptOutcome::Completed(_) | AttemptOutcome::Failed(_), Some(payload)) => {
-            protocol_tool_output_to_lashlang_value(&decode_output(payload)?, key, cancellation)
-        }
-        (AttemptOutcome::Interrupted, _) => failure(
-            lash_core::ToolFailureClass::Execution,
-            TOOL_INTERRUPTED_CODE,
-            format!("call `{key}` started and never settled; it is not run again"),
-        ),
-        (AttemptOutcome::TimedOut { cause, .. }, _) => failure(
-            lash_core::ToolFailureClass::Timeout,
-            TOOL_TIMED_OUT_CODE,
-            format!("call `{key}` ran past its limit ({cause:?})"),
-        ),
-        (AttemptOutcome::Cancelled { .. }, _) => {
-            cancellation.cancel();
-            Err(crate::LashlangHostError::ToolCancelled {
-                message: format!("call `{key}` was cancelled"),
-            }
-            .into())
-        }
-        (AttemptOutcome::Waiting(_), _)
-        | (AttemptOutcome::Completed(_) | AttemptOutcome::Failed(_), None) => failure(
-            lash_core::ToolFailureClass::Internal,
-            TOOL_INTERRUPTED_CODE,
-            format!("call `{key}` settled without a result"),
-        ),
-    })
+    Ok(protocol_tool_output_to_lashlang_value(
+        &output,
+        key,
+        cancellation,
+    ))
 }
 
 fn leaf_result(
@@ -243,4 +217,69 @@ pub(crate) fn answer(
         (AbilityOp::ProcessEvent(_), Injection::Emitted { .. }) => Ok(AbilityOutcome::Unit),
         (_, inject) => return Err(mismatch(&inject)),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use lash_core::SettledOutput;
+
+    use super::super::state::Leaf;
+    use super::step_result;
+    use crate::bridge::ExecutionCancellation;
+
+    /// A step that started and never settled reads as the turn presents an
+    /// interrupted call: the one `tool_interrupted` failure, with its
+    /// `Interrupted` cause, for every reader of an attempt's outcome.
+    #[test]
+    fn an_interrupted_step_is_answered_as_a_turn_presents_an_interrupted_call() {
+        let answer = step_result(
+            "charge",
+            false,
+            &SettledOutput::Interrupted,
+            &ExecutionCancellation::new(),
+        )
+        .expect("an interrupted step is answered");
+        let turn = lash_core::ToolFailure::runtime(
+            lash_core::ToolFailureClass::Execution,
+            "tool_interrupted",
+            "tool was interrupted by a runtime restart; it may or may not have taken effect, and may still be running.",
+        )
+        .with_cause(lash_core::ToolFailureCause::Interrupted);
+        assert_eq!(
+            answer,
+            Err(lashlang::ExecutionHostError::from_tool_failure(
+                &turn, "charge"
+            ))
+        );
+    }
+
+    /// A parked operation's step leaf decodes only with the payload its
+    /// outcome names: a missing payload or other bytes are refused.
+    #[test]
+    fn a_step_leaf_decodes_only_with_the_payload_its_outcome_names() {
+        let process = lash_core::ProcessId::fixture("leaf-law");
+        let leaf = Leaf::Step {
+            step: lash_core::StepName("op.0.0".to_owned()),
+            timer: false,
+            outcome: Some(Box::new(super::super::vm_run::completed(
+                &process,
+                "\"alpha\"".to_owned(),
+            ))),
+        };
+        let json = serde_json::to_string(&leaf).expect("a leaf encodes");
+        assert_eq!(
+            serde_json::from_str::<Leaf>(&json).expect("a leaf decodes"),
+            leaf
+        );
+        for forged in [
+            json.replace(r#""\"alpha\"""#, r#""\"omega\"""#),
+            json.replace(r#""\"alpha\"""#, "null"),
+        ] {
+            assert_ne!(forged, json);
+            assert!(
+                serde_json::from_str::<Leaf>(&forged).is_err(),
+                "{forged} is refused"
+            );
+        }
+    }
 }

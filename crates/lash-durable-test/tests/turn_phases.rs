@@ -62,7 +62,6 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
-use lash_core_store::tool_run::AttemptOutcome;
 use lash_durable::domain::TurnWrite;
 use lash_durable::runner::Activation;
 use lash_durable::{
@@ -531,18 +530,18 @@ impl RoundTools for NoTools {
         &self,
         _call: &PendingToolCall,
         _execution: &AdmittedExecution,
-        _source: &lash_core_store::tool_run::CompletionSource,
-        _metadata: Option<&str>,
+        _parked: &lash_core_execution::runtime::actor::round::Material<
+            lash_core_store::tool_run::CompletionSource,
+        >,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
         unreachable!("the L3 scenario calls no tool")
     }
 
     fn completed(
         &self,
         _call: &PendingToolCall,
-        _outcome: &AttemptOutcome,
-        _material: Option<&str>,
+        _output: &lash_core_execution::runtime::actor::round::SettledOutput,
     ) -> CompletedCall {
         unreachable!("the L3 scenario calls no tool")
     }

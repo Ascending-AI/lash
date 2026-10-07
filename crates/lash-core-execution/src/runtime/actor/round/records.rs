@@ -3,13 +3,13 @@
 
 use std::time::Duration;
 
-use lash_core_store::tool_run::{AttemptOutcome, MaterialRef};
+use lash_core_store::tool_run::MaterialRef;
 use lash_durable::domain::{Ordinal, OwnerKey, RunRecordKind, RunRecordWrite, RunSeq};
 use lash_durable::{DomainWrite, DurableInstant};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use serde::{Deserialize, Serialize};
 
-use super::{ExecutionDraft, PinnedWait};
+use super::{ExecutionDraft, PinnedWait, SettledOutput};
 use crate::runtime::actor::waits::{WaitDeadline, WaitId};
 use crate::{ToolCallId, ToolId};
 
@@ -112,14 +112,14 @@ pub(super) struct StartBody {
     pub(super) attempt: u32,
 }
 
-/// An `x_outcome` record's body: the call's final outcome, settling the
-/// attempt started at `start`.
+/// An `x_outcome` or `x_wait` record's body: the call's final output, or
+/// its park, settling the attempt started at `start`. It decodes only with
+/// the payload its outcome names.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct OutcomeBody {
     pub(super) start: u64,
-    pub(super) outcome: AttemptOutcome,
-    pub(super) material: Option<String>,
+    pub(super) output: SettledOutput,
 }
 
 /// A `retry` record's body: the attempt started at `start` failed in a way
@@ -129,8 +129,7 @@ pub(super) struct OutcomeBody {
 #[serde(deny_unknown_fields)]
 pub(super) struct RetryBody {
     pub(super) start: u64,
-    pub(super) outcome: AttemptOutcome,
-    pub(super) material: Option<String>,
+    pub(super) output: SettledOutput,
     pub(super) due_at_ms: i64,
 }
 

@@ -94,8 +94,8 @@ async fn interrupted_hang(
     session: &SessionId,
     run: &lash_sansio::TurnId,
 ) -> bool {
+    use lash_core_execution::runtime::actor::round::SettledOutput;
     use lash_core_execution::runtime::actor::round::{PolicyView, Recovery, fold};
-    use lash_core_store::tool_run::AttemptOutcome;
     let owner = lash_durable::domain::OwnerKey::Turn(session.clone(), run.clone());
     let Ok(rows) = nodes.database().run_records(&owner).await else {
         return false;
@@ -107,6 +107,6 @@ async fn interrupted_hang(
         folded
             .admitted(id)
             .is_some_and(|execution| execution.draft().tool().as_str() == Tool::Hang.name())
-            && matches!(recovery, Recovery::Settled(AttemptOutcome::Interrupted))
+            && matches!(recovery, Recovery::Settled(SettledOutput::Interrupted))
     })
 }

@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
-    AttemptOutcome, KnownFailure, KnownFailureReason, MaterialDigest, MaterialLocation,
-    MaterialOwner, MaterialRef, MaterialRole,
+    KnownFailureReason, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
 };
 use lash_durable::domain::{Ordinal, OwnerKey, RunRecordRow, RunRecordWrite, RunSeq};
 use lash_durable::{
@@ -16,8 +15,8 @@ use lash_durable::{
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
 
 use super::{
-    AdmittedExecution, ExecutionDraft, FoldRefusal, PolicyView, Recovery, RunFold, admit, fold,
-    settle, settle_retry, start_retry,
+    AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PolicyView, Recovery, RunFold,
+    SettledOutput, admit, fold, settle, settle_retry, start_retry,
 };
 use crate::{ToolCallId, ToolId};
 
@@ -67,15 +66,20 @@ fn rows(tx: &ActorTx) -> Vec<RunRecordRow> {
         .collect()
 }
 
+fn run_owner() -> MaterialOwner {
+    MaterialOwner::Run {
+        opener: EffectOpener::turn(
+            SessionId::try_from("s".to_owned()).unwrap(),
+            TurnId::try_from("t".to_owned()).unwrap(),
+        ),
+    }
+}
+
+/// A request reference: the fold never reads its bytes.
 fn material(payload: &str) -> MaterialRef {
     MaterialRef {
-        owner: MaterialOwner::Run {
-            opener: EffectOpener::turn(
-                SessionId::try_from("s".to_owned()).unwrap(),
-                TurnId::try_from("t".to_owned()).unwrap(),
-            ),
-        },
-        role: MaterialRole::AttemptOutput,
+        owner: run_owner(),
+        role: MaterialRole::PreparedRequest,
         location: MaterialLocation::JournalLocal,
         digest: MaterialDigest::parse(&format!("{:064x}", payload.len())).unwrap(),
     }
@@ -99,12 +103,15 @@ fn draft(name: &str, tool: &str, policy: ExecutionPolicy) -> ExecutionDraft {
     )
 }
 
-fn failed() -> AttemptOutcome {
-    AttemptOutcome::Failed(KnownFailure {
-        output: material("failed"),
-        reason: KnownFailureReason::Reported,
-        suggested_delay_ms: None,
-    })
+/// `payload` as journal-local material of the turn's run, minted by the
+/// material codec.
+fn journal(payload: &str) -> Material {
+    Material::journal_local(run_owner(), MaterialRole::AttemptOutput, payload.to_owned())
+}
+
+/// A known failure, with the bytes its output names.
+fn failed() -> SettledOutput {
+    SettledOutput::Failed(journal("failed").failure(KnownFailureReason::Reported, None))
 }
 
 fn admitted(tx: &mut ActorTx, drafts: Vec<ExecutionDraft>) -> Vec<AdmittedExecution> {
@@ -158,7 +165,7 @@ fn a_current_once_vetoes_a_stored_repeat_and_never_upgrades_a_stored_once() {
 fn a_current_once_vetoes_a_due_retry() {
     let mut tx = opened();
     let members = admitted(&mut tx, vec![draft("a", "repeats", repeatable())]);
-    settle_retry(&mut tx, &members[0], failed().into(), DurableInstant(50)).unwrap();
+    settle_retry(&mut tx, &members[0], failed(), DurableInstant(50)).unwrap();
     let rows = rows(&tx);
     assert_eq!(
         recoveries(&fold(&rows, &PolicyView::default()).unwrap()),
@@ -201,20 +208,8 @@ fn a_gap_in_a_runs_ordinals_is_refused() {
 fn a_second_final_of_a_call_is_refused() {
     let mut tx = opened();
     let members = admitted(&mut tx, vec![draft("a", "once", ExecutionPolicy::Once)]);
-    settle(
-        &mut tx,
-        &members[0],
-        AttemptOutcome::Interrupted,
-        Vec::new(),
-    )
-    .unwrap();
-    settle(
-        &mut tx,
-        &members[0],
-        AttemptOutcome::Interrupted,
-        Vec::new(),
-    )
-    .unwrap();
+    settle(&mut tx, &members[0], SettledOutput::Interrupted, Vec::new()).unwrap();
+    settle(&mut tx, &members[0], SettledOutput::Interrupted, Vec::new()).unwrap();
     assert_eq!(
         fold(&rows(&tx), &PolicyView::default()),
         Err(FoldRefusal::SecondFinal(ToolCallId::fixture("a")))
@@ -228,7 +223,7 @@ fn a_retried_attempt_takes_the_next_ordinal_only_after_its_retry() {
     let mut tx = opened();
     let members = admitted(&mut tx, vec![draft("a", "repeats", repeatable())]);
     let early = rows(&tx);
-    settle_retry(&mut tx, &members[0], failed().into(), DurableInstant(50)).unwrap();
+    settle_retry(&mut tx, &members[0], failed(), DurableInstant(50)).unwrap();
     let next = start_retry(&mut tx, &members[0]);
     assert_eq!(next.ordinal(), Ordinal(3));
     assert_eq!(next.attempt(), 2);
@@ -260,7 +255,7 @@ fn a_retried_attempt_takes_the_next_ordinal_only_after_its_retry() {
 fn a_call_whose_retry_is_due_ends_at_its_failed_attempt() {
     let mut tx = opened();
     let members = admitted(&mut tx, vec![draft("a", "repeats", repeatable())]);
-    settle_retry(&mut tx, &members[0], failed().into(), DurableInstant(50)).unwrap();
+    settle_retry(&mut tx, &members[0], failed(), DurableInstant(50)).unwrap();
     let due = fold(&rows(&tx), &PolicyView::default()).unwrap();
     let view = due.round(RUN).unwrap();
     let execution = view.execution(&view.members()[0]);
@@ -269,4 +264,63 @@ fn a_call_whose_retry_is_due_ends_at_its_failed_attempt() {
         recoveries(&fold(&rows(&tx), &PolicyView::default()).unwrap()),
         vec![Recovery::Settled(failed())]
     );
+}
+
+/// An outcome record decodes only with the payload its outcome names: an
+/// `x_outcome`, `x_wait` or `retry` record whose payload is missing, or
+/// whose bytes do not hash to the outcome's digest, is refused when the
+/// fold decodes it.
+#[test]
+fn an_outcome_record_without_its_payload_or_with_other_bytes_is_refused_at_decode() {
+    let mut tx = opened();
+    let members = admitted(
+        &mut tx,
+        vec![
+            draft("a", "once", ExecutionPolicy::Once),
+            draft("b", "repeats", repeatable()),
+            draft("c", "parks", ExecutionPolicy::Once),
+        ],
+    );
+    settle(
+        &mut tx,
+        &members[0],
+        SettledOutput::Completed(journal("alpha-out")),
+        Vec::new(),
+    )
+    .unwrap();
+    settle_retry(
+        &mut tx,
+        &members[1],
+        SettledOutput::Failed(journal("alpha-fail").failure(KnownFailureReason::Reported, None)),
+        DurableInstant(50),
+    )
+    .unwrap();
+    settle(
+        &mut tx,
+        &members[2],
+        SettledOutput::Waiting(journal("alpha-park").parked("00".repeat(16))),
+        Vec::new(),
+    )
+    .unwrap();
+    let rows = rows(&tx);
+    assert!(fold(&rows, &PolicyView::default()).is_ok());
+    for payload in ["alpha-out", "alpha-fail", "alpha-park"] {
+        for forged in ["\"omega\"", "null"] {
+            let tampered: Vec<RunRecordRow> = rows
+                .iter()
+                .cloned()
+                .map(|mut row| {
+                    row.record_json = row.record_json.replace(&format!("\"{payload}\""), forged);
+                    row
+                })
+                .collect();
+            assert!(
+                matches!(
+                    fold(&tampered, &PolicyView::default()),
+                    Err(FoldRefusal::Undecodable { .. })
+                ),
+                "{payload} as {forged} is refused at decode"
+            );
+        }
+    }
 }

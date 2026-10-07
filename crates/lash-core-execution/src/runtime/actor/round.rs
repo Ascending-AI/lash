@@ -52,9 +52,11 @@
 //! A call has at most one `x_outcome`: a `retry` settles a failed attempt
 //! without ending the call, and an `x_wait` parks it on the completion wait
 //! its admission pinned until its `x_outcome`, at the same start, settles
-//! it. An outcome's material payload rides in its row:
-//! the record is the payload's journal-local home, and the fold hands it back
-//! by digest.
+//! it. An outcome's material payload rides in its row as one
+//! [`SettledOutput`]: the record is the payload's journal-local home, and a
+//! record whose payload is missing or does not hash to its outcome's digest
+//! does not decode, so the fold refuses it. A vetoed retry's final record
+//! carries the retry's payload again: no record leans on another's bytes.
 //!
 //! [`DomainRefusal::RunOrdinalGap`]: lash_durable::domain::DomainRefusal::RunOrdinalGap
 
@@ -63,7 +65,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use lash_core_store::tool_run::{AttemptOutcome, MaterialRef};
+use lash_core_store::tool_run::{CompletionSource, MaterialRef};
 use lash_durable::domain::{AdmittedId, Ordinal, RunRecordKind};
 use lash_durable::{ActorTx, DurableError};
 use lash_sansio::{ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause};
@@ -80,6 +82,7 @@ mod fold;
 #[cfg(test)]
 mod fold_tests;
 pub mod lifecycle;
+mod output;
 mod records;
 mod rounds;
 mod runner;
@@ -88,6 +91,7 @@ mod tools;
 
 pub use fold::{MemberState, RoundMember, RoundView, fold};
 pub use lifecycle::{Discharge, MemberBodies, MemberBody, MemberResult};
+pub use output::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use records::RUN_RECORD_FORMAT_VERSION;
 pub use rounds::{admit_round, present, presentation, settle_retry, start_retry};
 pub use runner::{RoundEnd, RoundError, RoundRunner, SettledRound};
@@ -330,45 +334,12 @@ impl AdmittedExecution {
     }
 }
 
-/// What a body answers: its outcome, and the payload of the material the
-/// outcome names when that material is journal-local (its home is the
-/// outcome's own record).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BodyOutput {
-    /// The outcome.
-    pub outcome: AttemptOutcome,
-    /// The payload of [`outcome_material`]'s reference, encoded by the body.
-    pub material: Option<String>,
-}
-
-impl From<AttemptOutcome> for BodyOutput {
-    fn from(outcome: AttemptOutcome) -> Self {
-        Self {
-            outcome,
-            material: None,
-        }
-    }
-}
-
-/// The material an outcome names: a completion's output, a known failure's,
-/// or a parked call's pending completion.
-#[must_use]
-pub fn outcome_material(outcome: &AttemptOutcome) -> Option<&MaterialRef> {
-    match outcome {
-        AttemptOutcome::Completed(material) => Some(material),
-        AttemptOutcome::Failed(failure) => Some(&failure.output),
-        AttemptOutcome::Waiting(source) => Some(&source.metadata),
-        AttemptOutcome::Interrupted
-        | AttemptOutcome::TimedOut { .. }
-        | AttemptOutcome::Cancelled { .. } => None,
-    }
-}
-
 /// An admitted execution's body: the catalog tool's work, given the cancel
 /// token it must observe. Its lifecycle bounds it by the execution's limit
 /// and the stop grace.
-pub type ToolBody =
-    Box<dyn FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = BodyOutput> + Send>> + Send>;
+pub type ToolBody = Box<
+    dyn FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = SettledOutput> + Send>> + Send,
+>;
 
 /// Why an admission was refused; nothing was recorded.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -478,7 +449,7 @@ impl PolicyView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Recovery {
     /// It has its outcome.
-    Settled(AttemptOutcome),
+    Settled(SettledOutput),
     /// A `Once` started without an outcome: record `Interrupted` and never
     /// enter its body again.
     Interrupt,
@@ -494,10 +465,11 @@ pub enum Recovery {
         attempt: u32,
     },
     /// A retry was recorded, but the current declaration vetoes the repeat:
-    /// the failed attempt's outcome becomes the call's final one.
-    Vetoed(AttemptOutcome),
+    /// the failed attempt's output, payload and all, becomes the call's
+    /// final one.
+    Vetoed(SettledOutput),
     /// The attempt parked: race its waits, never enter its body again.
-    Waiting(lash_core_store::tool_run::CompletionSource),
+    Waiting(Material<CompletionSource>),
     /// Admitted but never started.
     NotStarted,
 }
@@ -507,7 +479,6 @@ pub enum Recovery {
 pub struct RunFold {
     recoveries: Vec<(AdmittedId, Recovery)>,
     rounds: std::collections::BTreeMap<RunSeq, RoundView>,
-    materials: std::collections::BTreeMap<String, String>,
 }
 
 impl RunFold {
@@ -517,7 +488,6 @@ impl RunFold {
         Self {
             recoveries,
             rounds: std::collections::BTreeMap::new(),
-            materials: std::collections::BTreeMap::new(),
         }
     }
 
@@ -578,14 +548,6 @@ impl RunFold {
     /// Every admission's state, by run.
     pub fn rounds(&self) -> impl Iterator<Item = &RoundView> {
         self.rounds.values()
-    }
-
-    /// The journal-local payload a settled outcome's `material` names.
-    #[must_use]
-    pub fn material(&self, material: &MaterialRef) -> Option<&str> {
-        self.materials
-            .get(material.digest.as_str())
-            .map(String::as_str)
     }
 }
 
@@ -689,7 +651,7 @@ impl AdmittedRound {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Presentation {
     calls: Vec<ToolCallId>,
-    outcomes: Vec<Option<AttemptOutcome>>,
+    outcomes: Vec<Option<SettledOutput>>,
 }
 
 impl Presentation {
@@ -700,7 +662,7 @@ impl Presentation {
         Self { calls, outcomes }
     }
 
-    pub(crate) fn of(entries: Vec<(ToolCallId, Option<AttemptOutcome>)>) -> Self {
+    pub(crate) fn of(entries: Vec<(ToolCallId, Option<SettledOutput>)>) -> Self {
         let (calls, outcomes) = entries.into_iter().unzip();
         Self { calls, outcomes }
     }
@@ -713,7 +675,7 @@ impl Presentation {
 
     /// Each presented call with its committed outcome, in declared order;
     /// `None` for a call with none yet.
-    pub fn entries(&self) -> impl Iterator<Item = (&ToolCallId, Option<&AttemptOutcome>)> {
+    pub fn entries(&self) -> impl Iterator<Item = (&ToolCallId, Option<&SettledOutput>)> {
         self.calls
             .iter()
             .zip(self.outcomes.iter().map(Option::as_ref))
@@ -811,7 +773,7 @@ pub(crate) async fn run_bounded(
     admitted: &AdmittedExecution,
     body: ToolBody,
     member_cancel: &CancellationToken,
-) -> Result<BodyOutput, Stop> {
+) -> Result<SettledOutput, Stop> {
     // The admission may have been acknowledged after the node paused past
     // its self-stop deadline: by then the actor's new owner may have
     // settled it, so its body never starts here.
@@ -864,14 +826,13 @@ pub(crate) async fn run_bounded(
 pub fn settle(
     tx: &mut ActorTx,
     admitted: &AdmittedExecution,
-    output: impl Into<BodyOutput>,
+    output: SettledOutput,
     store_local: Vec<StoreLocalEffect>,
 ) -> Result<(), SettleRefusal> {
-    let output = output.into();
     if !store_local.is_empty() {
         if !matches!(
-            output.outcome,
-            AttemptOutcome::Completed(_) | AttemptOutcome::Waiting(_)
+            output,
+            SettledOutput::Completed(_) | SettledOutput::Waiting(_)
         ) {
             return Err(SettleRefusal::ForeignEffect(admitted.call().clone()));
         }
@@ -900,14 +861,14 @@ pub fn settle_interrupted(
         run: id.run,
         ordinal: id.ordinal,
     })?;
-    record_outcome(tx, &admitted, AttemptOutcome::Interrupted.into());
+    record_outcome(tx, &admitted, SettledOutput::Interrupted);
     Ok(())
 }
 
-fn record_outcome(tx: &mut ActorTx, admitted: &AdmittedExecution, output: BodyOutput) {
+fn record_outcome(tx: &mut ActorTx, admitted: &AdmittedExecution, output: SettledOutput) {
     let id = admitted.id();
     // A park is no outcome: the call's one `x_outcome` follows it.
-    let kind = if matches!(output.outcome, AttemptOutcome::Waiting(_)) {
+    let kind = if matches!(output, SettledOutput::Waiting(_)) {
         RunRecordKind::XWait
     } else {
         RunRecordKind::XOutcome
@@ -920,8 +881,7 @@ fn record_outcome(tx: &mut ActorTx, admitted: &AdmittedExecution, output: BodyOu
         Some(admitted.call()),
         encode(&OutcomeBody {
             start: id.ordinal.0,
-            outcome: output.outcome,
-            material: output.material,
+            output,
         }),
     ));
 }

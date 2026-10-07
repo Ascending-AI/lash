@@ -161,15 +161,11 @@ pub(super) async fn run(
             .map_err(exec)?;
             if let Some(refused) = &refused {
                 for (member, answer) in admitted.members().iter().zip(refused) {
-                    let (output, material) =
-                        round::completed_material(&opener, answer).map_err(exec)?;
+                    let output = round::completed_material(&opener, answer).map_err(exec)?;
                     round::settle(
                         &mut tx,
                         member,
-                        round::BodyOutput {
-                            outcome: lash_core_store::tool_run::AttemptOutcome::Completed(output),
-                            material: Some(material),
-                        },
+                        round::SettledOutput::Completed(output),
                         Vec::new(),
                     )
                     .map_err(exec)?;
@@ -215,12 +211,10 @@ pub(super) async fn run(
         .iter()
         .zip(view.members())
         .map(|(call, member)| {
-            let outcome = member
+            let output = member
                 .outcome()
                 .ok_or_else(|| exec(format!("call {} ended without an outcome", call.call_id)))?;
-            let material =
-                round::outcome_material(outcome).and_then(|material| end.fold().material(material));
-            Ok(tools.completed(call, outcome, material))
+            Ok(tools.completed(call, output))
         })
         .collect::<Result<Vec<_>, TurnError>>()?;
     let admitted = end

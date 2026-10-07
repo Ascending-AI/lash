@@ -19,11 +19,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash_core::tool_run::{
-    AttemptOutcome, KnownFailure, KnownFailureReason, MaterialLocation, MaterialOwner,
-    MaterialPayload, MaterialRole,
-};
-use lash_core::{EngineStepRun, ProcessId, SettledOutcome};
+use lash_core::tool_run::{AvailableEvidence, KnownFailureReason, MaterialOwner, MaterialRole};
+use lash_core::{EngineStepRun, Material, ProcessId, SettledOutput};
 use lash_sansio::sync::MutexExt;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use lashlang::{AbilityOp, AbilityOutcome, ExecutionHostError, Value};
@@ -54,7 +51,7 @@ pub(crate) async fn run_vm_step(
     engine: &LashlangProcessEngine,
     run: EngineStepRun,
     stop: CancellationToken,
-) -> SettledOutcome {
+) -> SettledOutput {
     let process = run.process.clone();
     match vm_run(engine, run, stop).await {
         Ok(output) => match serde_json::to_string(&output) {
@@ -67,7 +64,7 @@ pub(crate) async fn run_vm_step(
 
 /// Run a [`TIMER_STEP`](super::state::TIMER_STEP): settle at its deadline.
 /// Re-run after a crash, it settles at the same deadline.
-pub(crate) async fn run_timer_step(run: EngineStepRun, stop: CancellationToken) -> SettledOutcome {
+pub(crate) async fn run_timer_step(run: EngineStepRun, stop: CancellationToken) -> SettledOutput {
     let process = run.process.clone();
     let input: TimerInput = match serde_json::from_value(run.input) {
         Ok(input) => input,
@@ -78,45 +75,27 @@ pub(crate) async fn run_timer_step(run: EngineStepRun, stop: CancellationToken) 
         () = run.clock.sleep(std::time::Duration::from_millis(wait)) => {
             completed(&process, "null".to_owned())
         }
-        () = stop.cancelled() => settled(AttemptOutcome::Cancelled {
-            evidence: Default::default(),
-        }, None),
+        () = stop.cancelled() => SettledOutput::Cancelled {
+            evidence: AvailableEvidence::default(),
+        },
     }
 }
 
-fn settled(outcome: AttemptOutcome, payload: Option<String>) -> SettledOutcome {
-    #[expect(
-        clippy::expect_used,
-        reason = "each caller pairs a payload with exactly the outcomes that name material"
-    )]
-    SettledOutcome::new(outcome, payload).expect("the payload matches the outcome")
-}
-
-fn material(process: &ProcessId, text: &str) -> lash_core::tool_run::MaterialRef {
-    #[expect(
-        clippy::expect_used,
-        reason = "a material payload is plain data whose encoding cannot fail"
-    )]
-    MaterialPayload::new(
+fn material(process: &ProcessId, text: String) -> Material {
+    Material::journal_local(
         MaterialOwner::Process {
             process_id: process.clone(),
         },
         MaterialRole::AttemptOutput,
-        None,
-        text.to_owned(),
-    )
-    .reference(MaterialLocation::JournalLocal)
-    .expect("a material payload encodes")
-}
-
-pub(super) fn completed(process: &ProcessId, text: String) -> SettledOutcome {
-    settled(
-        AttemptOutcome::Completed(material(process, &text)),
-        Some(text),
+        text,
     )
 }
 
-pub(super) fn failed(process: &ProcessId, fault: &VmRunFault) -> SettledOutcome {
+pub(super) fn completed(process: &ProcessId, text: String) -> SettledOutput {
+    SettledOutput::Completed(material(process, text))
+}
+
+pub(super) fn failed(process: &ProcessId, fault: &VmRunFault) -> SettledOutput {
     tracing::warn!(process = %process, error = %fault, "vm_run reached no quiet point");
     let output = lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
         lash_core::ToolFailureClass::Internal,
@@ -124,14 +103,7 @@ pub(super) fn failed(process: &ProcessId, fault: &VmRunFault) -> SettledOutcome 
         fault.to_string(),
     ));
     let text = serde_json::to_string(&output).unwrap_or_default();
-    settled(
-        AttemptOutcome::Failed(KnownFailure {
-            output: material(process, &text),
-            reason: KnownFailureReason::Reported,
-            suggested_delay_ms: None,
-        }),
-        Some(text),
-    )
+    SettledOutput::Failed(material(process, text).failure(KnownFailureReason::Reported, None))
 }
 
 async fn vm_run(

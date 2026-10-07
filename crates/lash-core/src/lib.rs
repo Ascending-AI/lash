@@ -624,7 +624,7 @@ pub use plugin::{
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 
-pub use lash_core_execution::{SettledOutcome, SettledOutcomeRefusal};
+pub use lash_core_execution::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,

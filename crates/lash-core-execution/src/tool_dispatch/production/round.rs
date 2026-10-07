@@ -5,15 +5,14 @@
 //! `x_outcome` (ADR 0132 §5).
 use super::*;
 use crate::runtime::actor::round::{
-    AdmittedExecution, BodyOutput, CompletedCall, Discharge, MemberBody, MemberPin, MemberResult,
-    PolicyView, RoundTools, StoreLocalEffect, completed_material, decode_completed,
+    AdmittedExecution, CompletedCall, Discharge, Material, MemberBody, MemberPin, MemberResult,
+    PolicyView, RoundTools, SettledOutput, StoreLocalEffect, completed_material, decode_completed,
 };
 use crate::runtime::actor::waits::{self, Resolution, WaitDeadline};
 use crate::session::tool_execution::ToolInvocation;
 use crate::tool_dispatch::call_run::{AdmittedToolCall, AttemptEnd, CallEnd};
 use crate::tool_run::{
-    AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
-    MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
+    AvailableEvidence, CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
 
 /// How one attempt of a round member ended.
@@ -75,41 +74,6 @@ fn unavailable() -> ToolCallOutput {
     ))
 }
 
-/// The answer of an outcome that names no material: what a crash, a limit
-/// or a cancel left of the call.
-fn outcome_output(outcome: &AttemptOutcome) -> ToolCallOutput {
-    match outcome {
-        AttemptOutcome::Interrupted => ToolCallOutput::failure(
-            crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Execution,
-                "tool_interrupted",
-                "tool was interrupted by a runtime restart; it may or may not have taken effect, and may still be running.",
-            )
-            .with_cause(crate::ToolFailureCause::Interrupted),
-        ),
-        AttemptOutcome::TimedOut { cause, .. } => ToolCallOutput::failure(
-            crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Timeout,
-                "tool_timed_out",
-                format!(
-                    "tool exceeded its {cause:?} limit; it may have partly run, and may still be running."
-                ),
-            )
-            .with_cause(crate::ToolFailureCause::ExecutionLimit { cause: *cause }),
-        ),
-        AttemptOutcome::Cancelled { .. } => ToolCallOutput::cancelled(
-            crate::ToolCancellation::runtime("the turn cancelled the call"),
-        ),
-        AttemptOutcome::Completed(_) | AttemptOutcome::Failed(_) | AttemptOutcome::Waiting(_) => {
-            ToolCallOutput::failure(crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Internal,
-                "tool_outcome_unreadable",
-                "the call's committed outcome names no readable answer",
-            ))
-        }
-    }
-}
-
 /// A parked member's answer: `Waiting` on the completion wait its round
 /// pinned, the parked call riding as its material, and the process whose
 /// terminal its runner pins a wait on beside it.
@@ -121,21 +85,20 @@ fn parked_output(
 ) -> MemberResult {
     let encoded = execution.draft().pinned_wait().and_then(|pinned| {
         let text = serde_json::to_string(parked).ok()?;
-        let metadata = MaterialPayload::new(
-            MaterialOwner::Run {
-                opener: owner.clone(),
-            },
-            MaterialRole::AttemptOutput,
-            None,
-            text.clone(),
+        Some(
+            Material::journal_local(
+                MaterialOwner::Run {
+                    opener: owner.clone(),
+                },
+                MaterialRole::AttemptOutput,
+                text,
+            )
+            .parked(pinned.id.to_hex()),
         )
-        .reference(MaterialLocation::JournalLocal)
-        .ok()?;
-        Some((pinned, metadata, text))
     });
     // A call whose round pinned no wait never had a key to take, so it
     // cannot park; nor can one whose park does not encode.
-    let Some((pinned, metadata, text)) = encoded else {
+    let Some(source) = encoded else {
         return member_output(
             owner,
             MemberEnd::Final(answered(
@@ -150,14 +113,7 @@ fn parked_output(
         .into();
     };
     MemberResult {
-        output: BodyOutput {
-            outcome: AttemptOutcome::Waiting(CompletionSource {
-                wait: pinned.id.to_hex(),
-                terminal: None,
-                metadata,
-            }),
-            material: Some(text),
-        },
+        output: SettledOutput::Waiting(source),
         store_local: Vec::new(),
         terminal: parked.awaited_process().cloned(),
     }
@@ -165,16 +121,15 @@ fn parked_output(
 
 /// A member's answer as its attempt's output: a final completes, a
 /// repeatable failure is a known failure, a cancel is `Cancelled`.
-fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> BodyOutput {
+fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> SettledOutput {
     let (completed, failure) = match end {
         MemberEnd::Cancelled => {
-            return AttemptOutcome::Cancelled {
+            return SettledOutput::Cancelled {
                 evidence: AvailableEvidence::default(),
-            }
-            .into();
+            };
         }
         // A park is answered by `parked_output`.
-        MemberEnd::Parked(_) => return AttemptOutcome::Interrupted.into(),
+        MemberEnd::Parked(_) => return SettledOutput::Interrupted,
         MemberEnd::Final(completed) => (completed, None),
         MemberEnd::Retry {
             failure,
@@ -183,19 +138,14 @@ fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> BodyOutput {
     };
     // An answer that does not encode reached no durable form: the call may
     // or may not have taken effect.
-    let Ok((output, text)) = completed_material(owner, &completed) else {
-        return AttemptOutcome::Interrupted.into();
+    let Ok(output) = completed_material(owner, &completed) else {
+        return SettledOutput::Interrupted;
     };
-    BodyOutput {
-        outcome: match failure {
-            None => AttemptOutcome::Completed(output),
-            Some(suggested_delay_ms) => AttemptOutcome::Failed(KnownFailure {
-                output,
-                reason: KnownFailureReason::Reported,
-                suggested_delay_ms,
-            }),
-        },
-        material: Some(text),
+    match failure {
+        None => SettledOutput::Completed(output),
+        Some(suggested_delay_ms) => {
+            SettledOutput::Failed(output.failure(KnownFailureReason::Reported, suggested_delay_ms))
+        }
     }
 }
 
@@ -496,7 +446,7 @@ impl RoundTools for ProductionRoundTools {
         Box::new(move |token| {
             Box::pin(async move {
                 let Some(ordinal) = ordinal else {
-                    return BodyOutput::from(AttemptOutcome::Interrupted).into();
+                    return SettledOutput::Interrupted.into();
                 };
                 // Each attempt owns its handlers: an inline body stops on the
                 // member's cancel, which the round fires on a turn cancel.
@@ -530,8 +480,8 @@ impl RoundTools for ProductionRoundTools {
                 // The effects commit with the completion or the park that
                 // staged them; any other answer leaves them unwritten.
                 if matches!(
-                    result.output.outcome,
-                    AttemptOutcome::Completed(_) | AttemptOutcome::Waiting(_)
+                    result.output,
+                    SettledOutput::Completed(_) | SettledOutput::Waiting(_)
                 ) {
                     result.store_local = store_local;
                 }
@@ -544,11 +494,10 @@ impl RoundTools for ProductionRoundTools {
         &self,
         call: &crate::sansio::PendingToolCall,
         _execution: &AdmittedExecution,
-        _source: &CompletionSource,
-        metadata: Option<&str>,
+        parked: &Material<CompletionSource>,
         resolution: Resolution,
-    ) -> BodyOutput {
-        let parked = metadata.and_then(|text| serde_json::from_str::<ParkedCall>(text).ok());
+    ) -> SettledOutput {
+        let parked = serde_json::from_str::<ParkedCall>(parked.payload()).ok();
         let output = crate::tool_result::tool_output_from_completion_resolution(
             resolution,
             parked
@@ -576,13 +525,11 @@ impl RoundTools for ProductionRoundTools {
         &'a self,
         call: &'a crate::sansio::PendingToolCall,
         _execution: &'a AdmittedExecution,
-        metadata: Option<&'a str>,
+        parked: &'a Material<CompletionSource>,
         cancelled: bool,
     ) -> Discharge<'a> {
         Box::pin(async move {
-            let Some(parked) =
-                metadata.and_then(|text| serde_json::from_str::<ParkedCall>(text).ok())
-            else {
+            let Ok(parked) = serde_json::from_str::<ParkedCall>(parked.payload()) else {
                 return;
             };
             let Some(process_id) = parked
@@ -625,12 +572,24 @@ impl RoundTools for ProductionRoundTools {
     fn completed(
         &self,
         call: &crate::sansio::PendingToolCall,
-        outcome: &AttemptOutcome,
-        material: Option<&str>,
+        output: &SettledOutput,
     ) -> CompletedCall {
-        material
+        if let Some(answer) = output.stopped_answer() {
+            return answered(call, answer);
+        }
+        output
+            .payload()
             .and_then(decode_completed)
-            .unwrap_or_else(|| answered(call, outcome_output(outcome)))
+            .unwrap_or_else(|| {
+                answered(
+                    call,
+                    ToolCallOutput::failure(crate::ToolFailure::runtime(
+                        crate::ToolFailureClass::Internal,
+                        "tool_outcome_unreadable",
+                        "the call's committed output is not a tool answer",
+                    )),
+                )
+            })
     }
 }
 
