@@ -473,3 +473,150 @@ async fn a_refresh_queued_during_a_turn_applies_after_its_commit_and_the_next_tu
     );
     accounts.core.shutdown().await.expect("shutdown");
 }
+
+/// FIG-5263: every call of all three steps survives an owner loss between
+/// steps, and a cold follower reads the same records without live activity.
+#[tokio::test]
+async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
+    let (_, capture) = lash_core::testing::trace_capture::capturing(|| async {
+        let mut uninterrupted = None;
+        for crash in [false, true] {
+            let stores = sqlite_memory_store_set().await;
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let calls = Arc::new(AtomicUsize::new(0));
+            let provider = crate::testing::TestProvider::builder()
+                .kind("three-steps")
+                .complete({
+                    let entered = Arc::clone(&entered);
+                    let calls = Arc::clone(&calls);
+                    move |request: LlmRequest| {
+                        let entered = Arc::clone(&entered);
+                        let calls = Arc::clone(&calls);
+                        async move {
+                            let results = request
+                                .messages
+                                .iter()
+                                .flat_map(|message| message.blocks.iter())
+                                .filter(|block| matches!(block, LlmContentBlock::ToolResult { .. }))
+                                .count();
+                            if crash && results == 2 && calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                                entered.notify_one();
+                                std::future::pending::<()>().await;
+                            }
+                            if results == 6 {
+                                return Ok(text_response("all six calls finished"));
+                            }
+                            Ok(LlmResponse {
+                                parts: (results..results + 2)
+                                    .map(|index| LlmOutputPart::ToolCall {
+                                        call_id: format!("call-{index}"),
+                                        tool_name: lash_core::testing::FIXTURE_ECHO_TOOL.to_owned(),
+                                        input_json:
+                                            serde_json::json!({"value": format!("value-{index}")})
+                                                .to_string(),
+                                        replay: None,
+                                    })
+                                    .collect(),
+                                ..LlmResponse::default()
+                            })
+                        }
+                    }
+                })
+                .build()
+                .into_handle();
+            let build = |owner: &str| {
+                explicit_ephemeral_facets(LashCore::standard_builder(
+                    lash_conformance::backend_over(stores.clone()),
+                ))
+                .serve_test_llm_profile(provider.clone(), mock_llm_profile_spec())
+                .tools(Arc::new(lash_core::testing::FixtureTools))
+                .build(lash_core::LeaseOwnerIdentity::opaque(owner, "boot"))
+                .expect("core")
+            };
+            let old = build("three-steps-old");
+            let id = lash_sansio::SessionId::try_from("three-steps".to_owned()).expect("id");
+            let session = old
+                .session(id.clone())
+                .create(crate::SessionCreation::root(mock_session_spec()))
+                .await
+                .expect("created");
+            let input = crate::TurnId::parse("three-step-input").expect("input id");
+            let handle = session
+                .send(crate::TurnInput::text("call six tools"))
+                .id(input.clone());
+            let output = tokio::spawn(handle.output());
+            let new = if crash {
+                tokio::time::timeout(std::time::Duration::from_secs(60), entered.notified())
+                    .await
+                    .expect("second step started");
+                // Stop drops the active turn in the second model call. The next
+                // node restores the checkpoint after the first round committed.
+                old.node.stop().await;
+                Some(build("three-steps-new"))
+            } else {
+                None
+            };
+            let output = tokio::time::timeout(std::time::Duration::from_secs(60), output)
+                .await
+                .expect("turn finishes")
+                .expect("output task")
+                .expect("turn answers");
+            assert_eq!(output.assistant_message(), Some("all six calls finished"));
+            let records = &output.result.tool_calls;
+            assert_eq!(records.len(), 6, "all calls, crash={crash}: {records:?}");
+            for (index, record) in records.iter().enumerate() {
+                assert_eq!(
+                    record.provider_call_id.as_deref(),
+                    Some(format!("call-{index}").as_str())
+                );
+                assert_eq!(
+                    record.args,
+                    serde_json::json!({"value": format!("value-{index}")})
+                );
+                assert!(record.output.is_success());
+            }
+            if let Some(expected) = &uninterrupted {
+                assert_eq!(
+                    records, expected,
+                    "a resumed turn reports the uninterrupted records"
+                );
+            } else {
+                uninterrupted = Some(records.clone());
+            }
+            let core = new.as_ref().unwrap_or(&old);
+            let durable = core.session(id).durable().await.expect("durable session");
+            let cold = durable
+                .attach_id(input)
+                .output()
+                .await
+                .expect("cold answer");
+            assert_eq!(
+                cold.result.tool_calls, *records,
+                "no live activity is needed"
+            );
+            if let Some(new) = new {
+                new.shutdown().await.expect("shutdown new");
+            }
+            old.shutdown().await.expect("shutdown old");
+        }
+    })
+    .await;
+    let warnings: Vec<_> = capture
+        .events
+        .lock_recover()
+        .iter()
+        .filter(|event| {
+            event.level == "WARN"
+                && event.target == "lash_core::runtime::observation"
+                && event.contains_field("message")
+                && event
+                    .field("message")
+                    .contains("failed to capture plugin query services")
+        })
+        .cloned()
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "normal durable turns warned: {warnings:?}"
+    );
+}

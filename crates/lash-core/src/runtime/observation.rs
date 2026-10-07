@@ -107,21 +107,33 @@ impl RuntimeObservation {
             // is what the adopted head recorded (FIG-5139).
             (None, _) => runtime.state.tool_state_snapshot().cloned(),
         };
-        let plugin_services = match (runtime.session.as_ref(), runtime.runtime_session_services()) {
-            (Some(session), Ok(services)) => Some(ObservationPluginServices {
-                session: Arc::clone(session.plugins()),
-                read: services.read_service(),
-                process_read: services.process_read_service(),
-            }),
-            (_, Err(err)) => {
-                tracing::warn!(
-                    session_id = %runtime.session_id(),
-                    error = %err,
-                    "failed to capture plugin query services for observation",
-                );
-                None
+        // A durable admission or command invalidates resident capabilities
+        // until the async reload gate adopts the committed head. Publication
+        // projects that head without consulting stale plugin services.
+        let plugin_services = if !runtime.resident_session.is_valid() {
+            tracing::debug!(
+                session_id = %runtime.session_id(),
+                "observation omits plugin query services until resident state reloads",
+            );
+            None
+        } else if let Some(session) = runtime.session.as_ref() {
+            match runtime.runtime_session_services() {
+                Ok(services) => Some(ObservationPluginServices {
+                    session: Arc::clone(session.plugins()),
+                    read: services.read_service(),
+                    process_read: services.process_read_service(),
+                }),
+                Err(err) => {
+                    tracing::warn!(
+                        session_id = %runtime.session_id(),
+                        error = %err,
+                        "failed to capture plugin query services for observation",
+                    );
+                    None
+                }
             }
-            (None, _) => None,
+        } else {
+            None
         };
         Self {
             session_id: runtime.session_id().clone(),

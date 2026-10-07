@@ -162,3 +162,54 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_declaration(lash_core::ToolDeclaration::deferring())
 }
+
+/// FIG-5263: observation publication after durable admission uses the
+/// adopted snapshot while resident services await reload, without a warning.
+#[tokio::test]
+async fn durable_observation_skips_invalidated_services_without_warning() {
+    let (_, capture) = trace_capture::capturing(|| async {
+        let backend = sqlite_memory_store_backend().await;
+        let mut runtime = runtime_with_plugins_and_tools(
+            &backend,
+            Vec::new(),
+            Arc::new(EmptyTools),
+            mock_provider(Vec::new()),
+        )
+        .await;
+        runtime.invalidate_resident_session_state();
+        let handle = RuntimeHandle::new(runtime);
+        assert!(handle.observe().plugin_services.is_none());
+        let writer = handle.writer();
+        let mut runtime = writer.lock().await;
+        runtime
+            .reload_invalidated_resident_session_state()
+            .await
+            .expect("reload");
+        handle.adopt_observation_from(&runtime);
+        assert!(
+            matches!(
+                runtime.resident_session.validity(),
+                ResidentSessionState::Valid
+            ),
+            "reload adopts the durable head"
+        );
+    })
+    .await;
+    let warnings: Vec<_> = capture
+        .events
+        .lock_recover()
+        .iter()
+        .filter(|event| {
+            event.level == "WARN"
+                && event.target == "lash_core::runtime::observation"
+                && event
+                    .field("message")
+                    .contains("failed to capture plugin query services")
+        })
+        .cloned()
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "normal durable invalidation warned: {warnings:?}"
+    );
+}

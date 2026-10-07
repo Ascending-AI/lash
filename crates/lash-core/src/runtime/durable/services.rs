@@ -56,6 +56,80 @@ impl RuntimeTurnServices {
         Self { runtimes }
     }
 
+    /// Rebuild a turn's retained tool-call records from its durable rounds,
+    /// in admission order. This reads every step under the turn's owner, so
+    /// an owner change or a gap in live activity cannot drop earlier calls.
+    /// Cell host operations are not catalog tool calls. Calls that settled
+    /// without material have no retained request/output record and remain
+    /// accounted for in the omitted-call summary.
+    ///
+    /// # Errors
+    ///
+    /// [`lash_durable::DurableError`] when the records do not read, fold or decode.
+    pub async fn recorded_tool_calls(
+        cx: &ActorContext,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<
+        (Vec<crate::ToolCallRecord>, Option<crate::OmittedToolCalls>),
+        lash_durable::DurableError,
+    > {
+        use lash_core_execution::runtime::actor::round::{self, PolicyView};
+        use lash_durable::domain::OwnerKey;
+
+        let corrupt = |message| {
+            lash_durable::DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Corrupt,
+                message,
+            })
+        };
+        let owner = OwnerKey::Turn(session.clone(), run.clone());
+        let rows = cx.durable_reads()?.run_records(&owner).await?;
+        // Reporting folds only settled facts and never consults live policies
+        // to run a recovery. The empty policy view executes nothing.
+        let fold = round::fold(&rows, &PolicyView::new([]))
+            .map_err(|error| corrupt(format!("the turn's tool records: {error}")))?;
+        let mut calls = Vec::new();
+        let mut omitted = None;
+        for round in fold.rounds() {
+            for member in round.members() {
+                if member.draft().tool().as_str().starts_with("cell-host:") {
+                    continue;
+                }
+                let Some(payload) = member.outcome().and_then(round::SettledOutput::payload) else {
+                    let summary = omitted.get_or_insert_with(|| crate::OmittedToolCalls {
+                        count: 0,
+                        failures: 0,
+                        attachments: Vec::new(),
+                    });
+                    summary.count += 1;
+                    summary.failures += 1;
+                    continue;
+                };
+                let completed = round::decode_completed(payload).ok_or_else(|| {
+                    corrupt(format!(
+                        "call {} has no readable tool answer",
+                        member.call()
+                    ))
+                })?;
+                if completed.call_id != *member.call() {
+                    return Err(corrupt(format!(
+                        "call {} has another call's recorded answer",
+                        member.call(),
+                    )));
+                }
+                calls.push(crate::ToolCallRecord {
+                    call_id: completed.call_id,
+                    provider_call_id: completed.provider_call_id,
+                    tool: completed.tool_name,
+                    args: completed.args,
+                    output: completed.output,
+                });
+            }
+        }
+        Ok((calls, omitted))
+    }
+
     /// Open `row`'s session and prepare its turn under the turn's own scope
     /// of `cx`.
     async fn prepare(

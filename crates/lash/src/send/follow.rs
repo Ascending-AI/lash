@@ -677,7 +677,7 @@ async fn finish_settled(
         Subject::Input(receipt) => Some(receipt.clone()),
         Subject::Run(_) => None,
     };
-    let mut result = durable_report(ctx, outcome, acceptance).await?;
+    let mut result = durable_report(ctx, &run, outcome, acceptance).await?;
     // The terminal is durable. Preserve the sealed calls this follower
     // actually observed beside their activities; unavailable history stays a
     // reported gap. Retain duplicates and contradictions for validation.
@@ -699,10 +699,19 @@ async fn finish_settled(
 /// and thin (D1 §1.5 3b).
 pub(super) async fn durable_report(
     ctx: &SendContext,
+    run: &TurnId,
     outcome: TurnOutcome,
     acceptance: Option<TurnInputAcceptanceReceipt>,
 ) -> Result<TurnReport> {
     let state = ctx.session_snapshot().await?;
+    let (tool_calls, omitted) =
+        lash_core::runtime::durable::services::RuntimeTurnServices::recorded_tool_calls(
+            &ctx.parts.effect_host,
+            &ctx.parts.session_id,
+            run,
+        )
+        .await
+        .map_err(EmbedError::Durable)?;
     let assistant_output = match &outcome {
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { text }) => {
             lash_core::facade_support::AssistantOutput {
@@ -724,8 +733,8 @@ pub(super) async fn durable_report(
         usage: Default::default(),
         llm_calls: Vec::new(),
         failure_evidence: Vec::new(),
-        tool_calls: Vec::new(),
-        omitted: None,
+        tool_calls,
+        omitted,
         execution: Default::default(),
         errors: Vec::new(),
         acceptance,
