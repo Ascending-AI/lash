@@ -54,13 +54,13 @@ tags = ["hermetic-postgres"]
 # file and PostgreSQL, and L11's drain by release (FIG-5187) on SQLite memory
 # and PostgreSQL; the tool-semantics laws (FIG-5210), the core node's
 # process laws (FIG-5216), the cell restore laws (FIG-5224) and the tool
-# activity laws (FIG-5251) run on all three tiers, and the pool-width laws
-# (FIG-5237) on PostgreSQL. Each
+# activity laws (FIG-5251) and the after-turn laws (FIG-5283) run on all
+# three tiers, and the pool-width laws (FIG-5237) on PostgreSQL. Each
 # PostgreSQL leg gets a server of its own.
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
-targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity", "session_send"]
+targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity", "session_send", "after_turn_crash_laws"]
 tags = ["hermetic-postgres"]
 
 # The declared-start crash laws (FIG-5216) are five matrices and two single

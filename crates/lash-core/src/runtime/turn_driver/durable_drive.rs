@@ -16,6 +16,8 @@ use crate::runtime::durable::session::{
 };
 use crate::runtime::turn_loop::DurableTurn;
 
+use super::after_turn::FinishedTurn;
+
 /// One turn the session actor runs through the turn driver.
 pub(in crate::runtime) struct RuntimeDrive {
     driver: Box<RuntimeTurnDriver<'static>>,
@@ -31,6 +33,17 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// The head the turn's commit is published against.
     commit: Option<CommitBase>,
     published: Arc<PublishedHeads>,
+    /// What the turn's commit carries for after its acknowledgement: the
+    /// after-turn callbacks' staged state, and the finalized turn for the
+    /// lifecycle observers. Dropped with a commit that was not acknowledged,
+    /// the staged state fences its namespaces.
+    after_commit: AfterCommit,
+}
+
+#[derive(Default)]
+struct AfterCommit {
+    state: Option<crate::plugin::StagedPluginState>,
+    finalized: Option<crate::AssembledTurn>,
 }
 
 impl Drop for RuntimeDrive {
@@ -145,6 +158,7 @@ impl RuntimeDrive {
             publisher,
             commit,
             published,
+            after_commit: AfterCommit::default(),
         }
     }
 }
@@ -328,10 +342,11 @@ impl TurnDrive for RuntimeDrive {
 
     /// The commit is built over the head the runtime opened at; the store
     /// refuses it once the session's head, `head` among its readers, is
-    /// elsewhere.
+    /// elsewhere. The turn's after-turn callbacks run first, once its
+    /// outcome is known (FIG-5283): what they decide commits with it.
     async fn finish(
         &mut self,
-        _cx: &ActorContext,
+        cx: &ActorContext,
         done: TurnDone,
         _head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
@@ -343,6 +358,19 @@ impl TurnDrive for RuntimeDrive {
         let outcome = done
             .outcome
             .unwrap_or(TurnOutcome::Stopped(TurnStop::Incomplete));
+        let plugins = Arc::clone(driver.session.plugins());
+        let observed = plugins.has_runtime_event_hooks();
+        let finished = if plugins.has_after_turn_hooks() || observed {
+            Some(FinishedTurn::read(cx, &driver.session_id, &driver.turn_id, &outcome).await?)
+        } else {
+            None
+        };
+        let after_turn = match &finished {
+            Some(finished) => Box::pin(driver.run_after_turn(finished, &self.observer))
+                .await
+                .map_err(runtime)?,
+            None => None,
+        };
         let failure_evidence = driver.failure_evidence.clone();
         let mut commit = driver
             .turn_pipeline
@@ -351,9 +379,16 @@ impl TurnDrive for RuntimeDrive {
                 &outcome,
                 &failure_evidence,
                 Some(&mut driver.session),
+                after_turn.as_ref(),
             )
             .await
             .map_err(|error| TurnError::Exec(format!("the turn's head commit: {error}")))?;
+        self.after_commit = AfterCommit {
+            state: after_turn.map(|after_turn| after_turn.state),
+            finalized: finished
+                .filter(|_| observed)
+                .map(|finished| finished.finalized(driver.turn_pipeline.state().to_snapshot())),
+        };
         if !self.settlement.completed_inputs.is_empty()
             || !self.settlement.completed_batches.is_empty()
         {
@@ -366,10 +401,22 @@ impl TurnDrive for RuntimeDrive {
         })
     }
 
-    /// What the turn held back for its commit is published with it, and the
-    /// publisher ends once everything queued reached the live stream; then
-    /// the commit itself, which settles the turn's provisional activity.
+    /// The after-turn callbacks' state publishes from the acknowledged
+    /// commit. What the turn held back for its commit is published with it,
+    /// and the publisher ends once everything queued reached the live
+    /// stream; then the commit itself, which settles the turn's provisional
+    /// activity; then the lifecycle observers see the finalized turn.
     async fn committed(&mut self) {
+        let AfterCommit { state, finalized } = std::mem::take(&mut self.after_commit);
+        let plugins = Arc::clone(self.driver.session.plugins());
+        if let Some(state) = state
+            && let Err(error) = plugins.publish_committed_state(state.resolutions())
+        {
+            tracing::warn!(
+                %error,
+                "a committed turn's after-turn state did not publish; its namespaces are fenced"
+            );
+        }
         self.observer.release_terminal();
         self.observer.close();
         if let Err(error) = (&mut self.publisher).await {
@@ -383,6 +430,16 @@ impl TurnDrive for RuntimeDrive {
                     Some(&self.driver.turn_id),
                 )
                 .await;
+        }
+        // The lifecycle observers see the turn once it is final: they have
+        // no veto, and what they fail with is reported, not committed.
+        if let Some(turn) = finalized
+            && let Err(error) = plugins
+                .dispatch(self.driver.turn_phase_probe.as_ref())
+                .emit_runtime_event(crate::PluginLifecycleEvent::TurnFinalized(Arc::new(turn)))
+                .await
+        {
+            tracing::warn!(%error, "a finalized turn's lifecycle observers failed");
         }
     }
 }

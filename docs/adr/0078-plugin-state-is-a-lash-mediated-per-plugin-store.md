@@ -183,7 +183,8 @@ installed without them.
 - `crates/lash-core-store/src/tool_run/state_command.rs` defines commands, slot authority, refusals, reduction and the frontier.
 - `crates/lash-core-execution/src/plugin/state.rs` implements the read-only view, bounds and native hydration.
 - `crates/lash-core-execution/src/plugin/state/publication.rs` is the coordinator: private reduction, recorded resolutions and publication.
-- `crates/lash-core-execution/src/plugin/recorded_callbacks.rs` records before-turn, after-turn and deferred result-check callbacks.
+- `crates/lash-core-execution/src/plugin/recorded_callbacks.rs` records before-turn and deferred result-check callbacks.
+- `crates/lash-core/src/runtime/turn_driver/after_turn.rs` runs a finished turn's after-turn callbacks; their decisions and staged state commit in its `turn.commit` (FIG-5283).
 - `crates/lash-core-execution/src/plugin/transition.rs` defines complete transitions and checkpoint native views.
 - `crates/lash-core/src/runtime/shift/plugin_transition.rs` prepares and publishes the session transition.
 - `crates/lash-core/src/runtime/process_runtime.rs` adopts a process's recorded transition.

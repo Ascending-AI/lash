@@ -1,6 +1,7 @@
 use super::*;
 use crate::ActorContext;
 
+mod after_turn;
 mod context;
 mod durable_drive;
 pub(in crate::runtime) use durable_drive::{DriveParts, RuntimeDrive};
@@ -48,6 +49,12 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// cardinality capped at one component per sealed provider attempt.
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub(super) session_services: Arc<RuntimeSessionServices>,
+    /// What the turn's after-turn callbacks read sessions through: the
+    /// committed head the turn started from, with its durable node
+    /// identities, so a graph append they fence to its leaf lands on the
+    /// branch the turn's commit extends. `Some` exactly when the session has
+    /// after-turn callbacks.
+    pub(super) after_turn_reads: Option<Arc<dyn crate::plugin::SessionReadService>>,
     pub(super) protocol_turn_options: crate::ProtocolTurnOptions,
     pub(super) turn_context: crate::TurnContext,
     pub(super) turn_causes: Vec<crate::TurnCause>,

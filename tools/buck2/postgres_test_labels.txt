@@ -1,3 +1,4 @@
+//crates/lash-durable-test:after_turn_crash_laws__test
 //crates/lash-durable-test:cell_restore_laws__test
 //crates/lash-durable-test:core_node_processes__test
 //crates/lash-durable-test:declared_start__test

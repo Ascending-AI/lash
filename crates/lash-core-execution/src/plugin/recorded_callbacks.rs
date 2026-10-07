@@ -1,10 +1,11 @@
 //! The recorded step of a sequential callback slot (K10, FIG-4878).
 //!
-//! Before-turn and after-turn callbacks run inside one recorded step per
-//! turn. The step records the slot's decisions
-//! with the resolutions of the state commands its callbacks returned; replay
-//! serves both and runs no callback or reducer. A callback's failure is the
-//! step's recorded answer, and publishes none of the slot's commands.
+//! A turn's before-turn callbacks run inside one recorded step. The step
+//! records the slot's decisions with the resolutions of the state commands
+//! its callbacks returned; replay serves both and runs no callback or
+//! reducer. A callback's failure is the step's recorded answer, and
+//! publishes none of the slot's commands. A turn's after-turn decisions
+//! commit with the turn itself (FIG-5283).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -20,8 +21,6 @@ use crate::{RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectOut
 pub enum RecordedCallbackPhase {
     /// A turn's before-turn callbacks.
     BeforeTurn,
-    /// A turn's after-turn callbacks.
-    AfterTurn,
 }
 
 /// The callbacks a step runs, to their decisions.

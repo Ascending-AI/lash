@@ -1123,6 +1123,21 @@ impl PluginSession {
         self.in_recorded_formats(self.capture_state())
     }
 
+    /// The state a commit carrying `staged` writes: [`Self::committed_state`]
+    /// with `staged`'s resolutions applied, which publish only once that
+    /// commit is acknowledged.
+    ///
+    /// # Errors
+    ///
+    /// A resolution its namespace's frontier refuses, or a namespace the
+    /// recorded formats cannot encode.
+    pub fn committed_state_with(
+        &self,
+        staged: &StagedPluginState,
+    ) -> Result<PluginState, PluginError> {
+        self.in_recorded_formats(self.state_with(staged.resolutions())?)
+    }
+
     pub fn require_runtime_owner(&self) -> Result<(), PluginError> {
         if self.host.export_plugin_namespaces {
             Ok(())

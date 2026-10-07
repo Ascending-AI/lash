@@ -235,8 +235,9 @@ pub trait TurnDrive: Send {
 
     /// The turn's commit to its session once its machine is done: the next
     /// revision of `head`, the session's head as the owner loaded it, which
-    /// `turn.commit` publishes with the turn's terminal. The store refuses
-    /// it once the head is elsewhere.
+    /// `turn.commit` publishes with the turn's terminal, and what the turn's
+    /// after-turn callbacks decided over its outcome. The store refuses it
+    /// once the head is elsewhere.
     ///
     /// # Errors
     ///
@@ -249,8 +250,8 @@ pub trait TurnDrive: Send {
     ) -> Result<TurnCommit, TurnError>;
 
     /// The turn's `turn.commit` was acknowledged: publish what the turn held
-    /// back for it, its stop's terminal among it (ADR 0122), and everything
-    /// queued before it. A drive whose commit was refused, or whose
+    /// back for it, its after-turn callbacks' state and its stop's terminal
+    /// among it (ADR 0122), and everything queued before it. A drive whose commit was refused, or whose
     /// acknowledgement was lost, is dropped without it and publishes none of
     /// what it held.
     async fn committed(&mut self);

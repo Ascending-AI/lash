@@ -106,68 +106,41 @@ impl PluginDispatchContext<'_> {
              }| (events, Vec::new(), session),
         ))
     }
+}
 
-    /// Run every after-turn callback over `turn`, in recorded registration
-    /// order, and return their decisions. Their state commands go to the
-    /// recorded body this runs in, which carries them with these decisions.
+impl PluginSession {
+    /// Run every after-turn callback over `ctx`, in registration order, for
+    /// the turn whose commit `address` names, and return their decisions
+    /// with the resolutions of the state commands they returned, staged to
+    /// commit with that turn: nothing they change is published until the
+    /// commit is acknowledged.
+    ///
+    /// # Errors
+    ///
+    /// A callback's failure, or a namespace a refused publication fenced:
+    /// nothing is staged.
     pub async fn after_turn_decisions(
-        &self,
+        self: &Arc<Self>,
+        phase_probe: Option<&Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
         ctx: TurnResultHookContext,
-    ) -> Result<Vec<RecordedTurnContribution>, PluginError> {
-        Ok(recorded_contributions(
-            self.after_turn(ctx).await?,
+        address: crate::EffectAddress,
+    ) -> Result<AfterTurnDecisions, PluginError> {
+        let segment = self.state_segment();
+        let (contributions, proposals) =
+            super::state::collect_proposals(self, self.dispatch(phase_probe).after_turn(ctx)).await;
+        let decisions = recorded_contributions(
+            contributions?,
             |AfterTurnContributions {
                  events,
                  records,
                  session,
                  ..
              }| (events, records, session),
-        ))
-    }
-
-    /// Apply the after-turn decisions to `turn`, in recorded callback order,
-    /// then deliver the finalized turn to the lifecycle observers.
-    pub async fn finalize_turn(
-        &self,
-        mut turn: AssembledTurn,
-        recorded: Vec<RecordedTurnContribution>,
-        turn_scope_id: &str,
-        clock: &dyn crate::Clock,
-    ) -> TurnFinalization {
-        let mut events = Vec::new();
-        let mut next_plugin_ordinal = 0usize;
-        for RecordedTurnContribution {
-            plugin_id,
-            events: plugin_events,
-            records,
-            ..
-        } in recorded
-        {
-            events.extend(crate::plugin::plugin_runtime_session_events(
-                &plugin_id,
-                plugin_events,
-            ));
-            for PluginRecordContribution { plugin_type, body } in records {
-                turn.state.session_graph.append_node_drafts_at(
-                    &format!("{turn_scope_id}:after_turn:{plugin_id}:plugin:{next_plugin_ordinal}"),
-                    [crate::session_graph::SessionNodeDraft::plugin(
-                        plugin_type,
-                        body,
-                    )],
-                    clock.node_timestamp(),
-                );
-                next_plugin_ordinal += 1;
-            }
-        }
-
-        if self.session.has_runtime_event_hooks()
-            && let Err(error) = self
-                .emit_runtime_event(PluginLifecycleEvent::TurnFinalized(Arc::new(turn.clone())))
-                .await
-        {
-            turn.errors.push(super::plugin_lifecycle_hook_issue(error));
-        }
-
-        TurnFinalization { turn, events }
+        );
+        let resolutions = Box::pin(self.reduce_proposals(&address, segment, proposals)).await?;
+        Ok(AfterTurnDecisions {
+            decisions,
+            state: super::EffectPublication::begin(Arc::clone(self), address).stage(resolutions),
+        })
     }
 }

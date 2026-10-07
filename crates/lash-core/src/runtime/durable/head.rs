@@ -129,7 +129,7 @@ impl SessionHead {
         )
         .with_fleet_format(self.fleet);
         let commit = boundary
-            .durable_commit(done.messages, &outcome, &[], None)
+            .durable_commit(done.messages, &outcome, &[], None, None)
             .await
             .map_err(|error| TurnError::Exec(format!("the turn's head commit: {error}")))?;
         Ok(TurnCommit {

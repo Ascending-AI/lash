@@ -8,6 +8,9 @@ use std::future::Future;
 pub(crate) use support::*;
 
 #[cfg(test)]
+#[path = "tests/after_turn_note.rs"]
+mod after_turn_note_tests;
+#[cfg(test)]
 #[path = "tests/mail_payload.rs"]
 mod mail_payload_tests;
 #[cfg(test)]

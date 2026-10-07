@@ -138,7 +138,10 @@ cancelled candidate publishes none. One refusal publishes nothing. Two
 members of one round that change one namespace apply in the order they
 reduce: the second reduces only once the first's outcome committed and
 published, against that committed value, so no member reads another's
-uncommitted state.
+uncommitted state. A turn's after-turn callbacks run once its outcome is
+known: their commands are reduced and staged the same way, commit in the
+turn's `turn.commit` with its head, and publish once that commit is
+acknowledged (FIG-5283).
 
 The namespace a member's resolutions publish into is its owner's. A turn's
 round members and a code cell's calls change the session's namespaces. An

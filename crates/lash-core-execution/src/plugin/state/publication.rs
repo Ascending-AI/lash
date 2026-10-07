@@ -15,7 +15,9 @@
 //! lifecycle publishes them from the committed record, only once that
 //! commit is acknowledged; a resume publishes them from the same record
 //! before the round is presented. Nothing a member reduced is visible
-//! before its outcome is durable.
+//! before its outcome is durable. A turn's after-turn callbacks stage theirs
+//! the same way: they ride the turn's head commit in its `turn.commit`, and
+//! publish once that commit is acknowledged (FIG-5283).
 //!
 //! A namespace has at most one reduced publication the engine has not yet
 //! returned. The next reduction of that namespace waits for it, so it never
@@ -627,6 +629,41 @@ impl crate::PluginSession {
         drop(registry);
         self.release_publication(address);
         Ok(())
+    }
+
+    /// The published state with `staged` applied over it, each resolution in
+    /// its namespace's order: what a commit carrying `staged` holds. Nothing
+    /// resident changes.
+    ///
+    /// # Errors
+    ///
+    /// A resolution its namespace's frontier refuses.
+    pub(crate) fn state_with(
+        &self,
+        staged: &[StateResolution],
+    ) -> Result<PluginState, PluginStateError> {
+        let registry = self.state.lock_recover();
+        let mut data = registry.data.clone();
+        for resolution in staged {
+            let namespace = data
+                .plugins
+                .entry(resolution.plugin.plugin.clone())
+                .or_default();
+            match publish_one(namespace, registry.segment, resolution)? {
+                Published::Applied | Published::AlreadyApplied => {}
+                // A staged resolution was reduced against the published
+                // namespace, so it follows it at once.
+                Published::Ahead => {
+                    return Err(PluginStateError::Frontier {
+                        plugin: resolution.plugin.plugin.clone(),
+                        refusal: FrontierRefusal::OutOfOrder {
+                            found: resolution.ordinal.0,
+                        },
+                    });
+                }
+            }
+        }
+        Ok(data)
     }
 
     /// Release what `address` reserved, and wake every waiting reduction: a

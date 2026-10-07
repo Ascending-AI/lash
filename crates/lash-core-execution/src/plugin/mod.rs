@@ -143,9 +143,9 @@ pub use state::{
     StateReducer, StateReduction, StateResolution, StateResolutionOutcome,
 };
 pub use tool_catalog::{
-    AfterTurnContributions, CheckpointApplication, PluginAbort, PluginRecordContribution,
-    RecordedTurnContribution, SessionContributions, ToolCatalogContext, ToolMembershipContribution,
-    TurnContributions, TurnFinalization, TurnPreparation,
+    AfterTurnContributions, AfterTurnDecisions, CheckpointApplication, PluginAbort,
+    PluginRecordContribution, RecordedTurnContribution, SessionContributions, ToolCatalogContext,
+    ToolMembershipContribution, TurnContributions, TurnPreparation,
 };
 pub use tool_catalog::{observe_plugin_runtime_events, plugin_runtime_session_events};
 pub use tool_hooks::{

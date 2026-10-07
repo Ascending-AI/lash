@@ -323,6 +323,13 @@ impl LashRuntime {
             )
             .await
             .map_err(super::runtime_error_from_store_commit)?;
+        let after_turn_reads = if plugins.has_after_turn_hooks() {
+            Some(self.session_read_service().map_err(|err| {
+                RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
+            })?)
+        } else {
+            None
+        };
         let resolved_turn_policy = self
             .host
             .resolve_session_policy(&self.state.session_id, turn_policy)
@@ -347,6 +354,7 @@ impl LashRuntime {
             llm_calls: Vec::new(),
             failure_evidence: Vec::new(),
             session_services: manager,
+            after_turn_reads,
             protocol_turn_options: effective_protocol_turn_options,
             turn_context: input.turn_context,
             turn_causes: initial_turn_causes,

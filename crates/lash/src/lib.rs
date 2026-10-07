@@ -878,6 +878,17 @@ pub mod plugins {
         StaticPluginFactory, ToolCatalogContext, ToolMembershipContribution,
         ToolPresentationPresenter, ToolResultProjectionContext, TurnContributions, TurnHookReport,
     };
+    /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
+    pub use lash_core::plugin::{
+        AfterTurnDecisions, CheckpointApplication, CheckpointComponentKey, CodeExecutionOutcome,
+        CodeExecutorPlugin, ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState,
+        InvalidExecutionLeafName, LeafChange, PluginAbort, PluginNamespaceState,
+        PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
+        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
+        ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
+        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, TurnPreparation,
+    };
     /// The attachment-omission history policy (ADR 0133): a plugin names the
     /// attachments of a turn's projected history its request omits, and core
     /// omits them with one placeholder. It cannot add text or touch history.
@@ -892,18 +903,6 @@ pub mod plugins {
         BehaviorRevision, FormatVersion, PluginCallbackIdentity, PluginComposition,
         PluginDeclaration, PluginDeclarationError, PluginDefinition, PluginExecutionRefusal,
         PluginId, PluginMetadata, PluginRevision,
-    };
-    /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
-    pub use lash_core::plugin::{
-        CheckpointApplication, CheckpointComponentKey, CodeExecutionOutcome, CodeExecutorPlugin,
-        ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState, InvalidExecutionLeafName,
-        LeafChange, PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
-        PluginSessionRequest, PluginState, PluginStateEffect, PluginTransitionBase,
-        PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
-        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
-        ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
-        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, TurnFinalization,
-        TurnPreparation,
     };
     /// The registration groups [`PluginRegistrar`]'s accessors return
     /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take

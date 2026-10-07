@@ -68,7 +68,7 @@ The slot is not consulted at every hook boundary.
 
 The runtime binds `PluginSession::dispatch` to that resolved probe. Its borrowed
 `PluginDispatchContext` carries the session and probe through `prepare_turn`,
-`before_turn`, `finalize_turn`, `after_turn` and `emit_runtime_event`. The latter
+`before_turn`, `after_turn` and `emit_runtime_event`. The latter
 clones the probe only for concurrent lifecycle hooks. The context borrows the
 session rather than cloning its contributions, performs no registry lookup,
 and adds no shared mutable instrumentation state to plugin sessions. Binding

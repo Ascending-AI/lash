@@ -240,6 +240,8 @@ pub(super) fn turn_effect_executor(
         llm_calls: Vec::new(),
         failure_evidence: Vec::new(),
         session_services: Arc::clone(&driver.session_services),
+        // A step body runs no after-turn callback.
+        after_turn_reads: None,
         protocol_turn_options: driver.protocol_turn_options.clone(),
         turn_context: driver.turn_context.clone(),
         turn_causes: driver.turn_causes.clone(),

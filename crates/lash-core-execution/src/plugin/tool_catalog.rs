@@ -87,15 +87,16 @@ pub struct TurnContributions {
     pub session: SessionContributions,
 }
 
-/// What one after-turn observer contributes, applied before the turn's
-/// final commit.
+/// What one after-turn observer contributes once the turn's outcome is
+/// known: it commits in the turn's own `turn.commit`.
 #[derive(Clone, Debug, Default)]
 pub struct AfterTurnContributions {
     pub events: Vec<PluginRuntimeEvent>,
     /// Durable plugin records appended to the turn's graph, outside the
     /// conversation.
     pub records: Vec<PluginRecordContribution>,
-    /// Published with the callback's recorded decision (K10).
+    /// Committed with the turn, and published once that commit is
+    /// acknowledged.
     pub state: super::StateCommands,
     pub session: SessionContributions,
 }
@@ -108,9 +109,10 @@ pub struct PluginRecordContribution {
     pub body: serde_json::Value,
 }
 
-/// One before-turn or after-turn observer's recorded decision: what it
-/// contributed apart from its state commands, whose resolution the same
-/// recorded step carries. Replay serves it without running the observer.
+/// One before-turn or after-turn observer's decision: what it contributed
+/// apart from its state commands. A before-turn decision is its recorded
+/// step's, whose resolutions the same step carries; an after-turn decision
+/// commits with its turn.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedTurnContribution {
@@ -135,10 +137,13 @@ pub struct CheckpointApplication {
     pub events: Vec<crate::SessionStreamEvent>,
 }
 
-#[derive(Clone, Debug)]
-pub struct TurnFinalization {
-    pub turn: AssembledTurn,
-    pub events: Vec<crate::SessionStreamEvent>,
+/// What a turn's after-turn callbacks decided: their decisions in callback
+/// order, and the resolutions of their state commands, staged to commit
+/// with the turn and published only once that commit is acknowledged.
+#[derive(Debug)]
+pub struct AfterTurnDecisions {
+    pub decisions: Vec<RecordedTurnContribution>,
+    pub state: super::StagedPluginState,
 }
 
 /// Publishes a plugin's runtime events as session observations under
