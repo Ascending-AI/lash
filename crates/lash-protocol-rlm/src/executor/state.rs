@@ -1034,6 +1034,21 @@ impl RlmExecutionState {
         Ok(())
     }
 
+    /// Every binding the session holds, read from the runtime roots that own
+    /// them rather than the host view, which omits a binding with no host
+    /// shape (ADR 0076).
+    #[cfg(test)]
+    pub(crate) fn binding_names(&self) -> impl Iterator<Item = &str> {
+        self.vm.state().binding_names()
+    }
+
+    /// The globals a cell boundary dropped for holding a function, which a
+    /// later cell's reference is refused by name for.
+    #[cfg(test)]
+    pub(crate) fn expired_functions(&self) -> &BTreeSet<String> {
+        self.vm.state().expired_functions()
+    }
+
     /// The bindings the "Bound Variables" section shows by summary: the ones
     /// with no host view (ADR 0076), each with its bounded runtime summary,
     /// under the same exclusions as [`Self::bound_variable_values`].

@@ -1,3 +1,8 @@
+mod cell_conformance;
+mod durable_host;
+
+pub(crate) use durable_host::DurableHost;
+
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -57,8 +62,68 @@ pub(crate) fn sqlite_memory_artifact_store_blocking() -> lashlang::LashlangArtif
     lashlang::LashlangArtifacts::of_backend(&sqlite_recording_backend_blocking())
 }
 
+/// The scope a context built with no parent invocation claims: the builder's
+/// default test turn. Open the [`DurableHost`] whose context serves it for it.
+pub(crate) fn default_cell_scope() -> lash_core::AdmittedScope {
+    lash_core::AdmittedScope::turn(
+        lash_core::SessionId::from("test-session"),
+        lash_core::TurnId::from("test-turn"),
+    )
+}
+
+/// The render a session records at creation: the builtin renderer under the
+/// default parameters.
+pub(crate) fn recorded_test_render() -> lash_core::RecordedRender {
+    lash_core::RecordedRender {
+        renderer_id: crate::render::CodeRendererSlot::default()
+            .0
+            .id()
+            .to_string(),
+        params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
+            .expect("test render params serialize"),
+    }
+}
+
 // The executor's TypeScript entry points for cell-level tests: each runs one
 // cell under the TypeScript dialect a host would select.
+
+/// Run one TypeScript cell through the production executor entry.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_code_with_channel_and_bounds(
+    state: &mut crate::executor::RlmExecutionState,
+    ctx: lash_core::RuntimeExecutionContext<'_>,
+    request: lash_core::ExecRequest,
+    artifact_store: lashlang::LashlangArtifacts,
+    lashlang_surface: lash_lashlang_runtime::LashlangSurface,
+    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    session_projected_bindings: crate::projection::RlmProjectedBindings,
+    execution_trace: Option<lash_core::plugin::PluginExecutionTrace>,
+    execution_bounds: lashlang::ExecutionBounds,
+    channel: crate::plugin::RlmChannel,
+    code_renderer: crate::render::CodeRendererSlot,
+) -> lash_core::ExecResponse {
+    let ctx = match execution_trace {
+        Some(trace) => ctx.with_trace_standing(trace.into_standing()),
+        None => ctx,
+    };
+    Box::pin(
+        crate::executor::execute_code_with_channel_and_bounds_with_trigger_resolver(
+            &crate::dialect::TypescriptDialect,
+            state,
+            ctx,
+            request,
+            artifact_store,
+            lashlang_surface,
+            deferred_tool_resolver,
+            None,
+            session_projected_bindings,
+            execution_bounds,
+            channel,
+            code_renderer,
+        ),
+    )
+    .await
+}
 
 #[cfg(test)]
 pub(crate) fn deferred_link() -> lash_lashlang_runtime::DeferredLink {
