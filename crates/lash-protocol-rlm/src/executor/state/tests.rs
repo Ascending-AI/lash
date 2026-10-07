@@ -3,7 +3,7 @@
 
 use super::*;
 use lashlang::{
-    DurableBaseline, DurableFragment, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue,
+    DurableBaseline, DurableFragment, ProjectedReadRequest, ProjectedReadResponse,
     Record as FlowRecord, State as FlowState, Value as FlowValue,
 };
 use serde_json::json;
@@ -597,11 +597,13 @@ async fn includes_globals_excludes_history_and_named() {
 async fn excludes_top_level_globals_containing_nested_projected_values() {
     let mut state = RlmExecutionState::new();
     let mut record = FlowRecord::new();
+    // A scalar projection is plain data (ADR 0132 §9); a resource projection
+    // is the one that stays a projection inside a held value.
     record.insert(
         "body".to_string(),
-        FlowValue::Projected(ProjectedValue::scalar(
+        FlowValue::Projected(lashlang::testing::projection::test_view(
             "body",
-            FlowValue::String("host".into()),
+            Arc::new(CountingProjectedValue::default()),
         )),
     );
     record.insert("title".to_string(), FlowValue::String("local".into()));

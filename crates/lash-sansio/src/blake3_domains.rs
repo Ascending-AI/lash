@@ -103,6 +103,7 @@ pub(crate) const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
     "lash-process-lease/v2",
     "lash-protocol-materialization/v1",
     "lash-queued-work-claim-lease/v2",
+    "lash-rlm-cell-projection-namespace/v1",
     "lash-rolling-history-compaction/v1",
     "lash-rolling-history-compaction/v2",
     "lash-runtime-effect-envelope/v2",
