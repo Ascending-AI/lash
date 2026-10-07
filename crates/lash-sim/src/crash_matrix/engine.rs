@@ -1,0 +1,334 @@
+//! The deployment's process engine and its steps.
+//!
+//! [`SimProcessEngine`] is a pure state machine; its start payload names what
+//! a process does (`act`):
+//!
+//! - `root` runs a `Once` and a `Repeatable` step, pins a custom key and
+//!   emits it for the host (`sim.key`), awaits the key's resolution, then
+//!   awaits the process `await` with a one-second deadline, and ends when
+//!   that wait times out or the process ends;
+//! - `hold` idles until it is cancelled; a signal it receives is emitted
+//!   back (`sim.signalled`).
+//!
+//! Every process answers its cancel with its terminal. A counter makes every
+//! committed state distinct. The step bodies write their entries to the
+//! world's ledger before anything else.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use lash_core_execution::runtime::actor::round::{BodyOutput, ToolBody};
+use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
+use lash_core_execution::{
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
+    ProcessEngine, ProcessEventType, ProcessId, ProcessInfraError, ProcessOutcome, ProcessRecord,
+    StepName, StepRequest, ToolCallId, ToolCallOutput, ToolCancellation,
+};
+use lash_core_store::tool_run::{
+    AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
+};
+use lash_durable::domain::OwnerKey;
+use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
+use serde_json::{Value, json};
+
+use super::world::{BodyEntry, World};
+
+/// The engine's kind.
+pub const KIND: &str = "lash-sim";
+/// The `Once` step a root runs.
+pub const ONCE: &str = "sim_once";
+/// The `Repeatable` step a root runs.
+pub const AGAIN: &str = "sim_again";
+/// The event a root emits its pinned key in.
+pub const KEY_EVENT: &str = "sim.key";
+/// The event a holding process answers a signal with.
+pub const SIGNALLED_EVENT: &str = "sim.signalled";
+/// How long a root awaits the process it names.
+pub const AWAIT_MS: u64 = 1_000;
+/// How long a root's key stays open.
+pub const KEY_MS: u64 = 30_000;
+/// The pinned key's name.
+const KEY: &str = "answer";
+
+fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
+    ProcessInfraError::new(lash_core_execution::PluginError::Session(error.to_string()))
+}
+
+fn step(name: &str, tool: &str) -> StepRequest {
+    StepRequest::Tool {
+        step: StepName(name.to_owned()),
+        tool: ToolId::new(tool),
+        input: json!({ "step": name }),
+    }
+}
+
+fn event_type(name: &str) -> Result<ProcessEventType, ProcessInfraError> {
+    Ok(ProcessEventType {
+        name: name.to_owned(),
+        payload_schema: lash_sansio::JsonSchema::admit(json!({ "type": "object" }))
+            .map_err(infra)?,
+        semantics: Default::default(),
+    })
+}
+
+/// The event types the engine emits, which a registration declares.
+///
+/// # Errors
+///
+/// A payload schema is refused.
+pub fn declared_event_types() -> Result<Vec<ProcessEventType>, ProcessInfraError> {
+    Ok(vec![event_type(KEY_EVENT)?, event_type(SIGNALLED_EVENT)?])
+}
+
+/// A root's start payload: it awaits `await` once its steps and its key are
+/// done.
+#[must_use]
+pub fn root(tag: &str, await_process: &ProcessId) -> Value {
+    json!({ "tag": tag, "act": "root", "await": await_process.as_str() })
+}
+
+/// A holding process's start payload.
+#[must_use]
+pub fn hold(tag: &str) -> Value {
+    json!({ "tag": tag, "act": "hold" })
+}
+
+/// A process's start payload that ends with its success as soon as it
+/// starts: what a trigger's deliveries start.
+#[must_use]
+pub fn ends_at_once(tag: &str) -> Value {
+    json!({ "tag": tag, "act": "ends_at_once" })
+}
+
+fn ended(value: Value) -> EngineAction {
+    EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::success(
+        value,
+    )))
+}
+
+/// The deployment's process engine.
+#[derive(Debug, Default)]
+pub struct SimProcessEngine;
+
+#[async_trait::async_trait]
+impl ProcessEngine for SimProcessEngine {
+    fn kind(&self) -> &'static str {
+        KIND
+    }
+
+    fn state_format(&self) -> EngineStateFormat {
+        EngineStateFormat {
+            kind: KIND.to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn program_identity(
+        &self,
+        _payload: &Value,
+    ) -> Option<lash_core_execution::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &lash_core_execution::ProcessExecutionEnvSpec,
+    ) -> Result<Option<Value>, lash_core_execution::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        state: EngineState,
+        event: EngineEvent,
+    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+        let mut script: Value = match &event {
+            EngineEvent::Started { payload } => payload.clone(),
+            _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
+        };
+        script["n"] = json!(script["n"].as_u64().unwrap_or(0) + 1);
+        let root = script["act"] == "root";
+        let action = match event {
+            EngineEvent::Cancelled { origin, .. } => {
+                EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
+                    ToolCancellation::runtime("the simulator's engine answered its cancel")
+                        .with_origin(origin),
+                )))
+            }
+            EngineEvent::Started { .. } if script["act"] == "ends_at_once" => {
+                ended(json!({ "ended": true, "tag": script["tag"] }))
+            }
+            EngineEvent::Started { .. } if root => {
+                EngineAction::Steps(vec![step("once", ONCE), step("again", AGAIN)])
+            }
+            EngineEvent::StepSettled { .. } if root => {
+                let settled = script["settled"].as_u64().unwrap_or(0) + 1;
+                script["settled"] = json!(settled);
+                if settled == 2 {
+                    EngineAction::PinKey {
+                        name: KeyName(KEY.to_owned()),
+                        kind: HostWaitKind::Custom,
+                        deadline: Some(Duration::from_millis(KEY_MS)),
+                    }
+                } else {
+                    EngineAction::Idle
+                }
+            }
+            EngineEvent::KeyPinned { key, .. } if root => EngineAction::Emit {
+                event_type: event_type(KEY_EVENT)?,
+                payload: json!({ "key": key.as_str() }),
+            },
+            EngineEvent::Emitted if root => EngineAction::AwaitExternal {
+                name: KeyName(KEY.to_owned()),
+            },
+            EngineEvent::ExternalResolved { .. } | EngineEvent::ExternalTimedOut { .. } if root => {
+                script["key"] = json!(matches!(event, EngineEvent::ExternalResolved { .. }));
+                EngineAction::AwaitProcess {
+                    process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
+                        .map_err(infra)?,
+                    deadline: Some(Duration::from_millis(AWAIT_MS)),
+                }
+            }
+            EngineEvent::ProcessWaitTimedOut { .. } if root => {
+                ended(json!({ "timed_out": true, "key": script["key"] }))
+            }
+            EngineEvent::ProcessEnded { .. } if root => {
+                ended(json!({ "timed_out": false, "key": script["key"] }))
+            }
+            EngineEvent::Signal(_) => EngineAction::Emit {
+                event_type: event_type(SIGNALLED_EVENT)?,
+                payload: json!({ "n": script["n"] }),
+            },
+            _ => EngineAction::Idle,
+        };
+        let bytes = serde_json::to_vec(&script).map_err(infra)?;
+        Ok((
+            EngineState {
+                format: self.state_format(),
+                bytes,
+            },
+            action,
+        ))
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &Value,
+    ) -> Result<Vec<lash_core_execution::ArtifactName>, lash_core_execution::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &lash_core_execution::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &lash_core_execution::ReferrerClaim,
+        artifact_ref: &str,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        Err(lash_core_execution::PluginError::Session(format!(
+            "the simulator's engine stores no artifact `{artifact_ref}`"
+        )))
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &lash_core_execution::ProcessDefinitionRef,
+    ) -> Result<
+        lash_core_execution::ProcessDefinitionResolution,
+        lash_core_execution::ProcessDefinitionRefusal,
+    > {
+        Ok(lash_core_execution::ProcessDefinitionResolution::new(
+            lash_core_execution::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
+    }
+}
+
+fn policy(tool: &ToolId) -> ExecutionPolicy {
+    if tool.as_str() == AGAIN {
+        ExecutionPolicy::repeatable(std::num::NonZeroU32::MIN.saturating_add(2), 0, 0)
+    } else {
+        ExecutionPolicy::Once
+    }
+}
+
+/// The engine's steps: each body notes its entry and completes.
+pub struct SimSteps {
+    world: Arc<World>,
+}
+
+impl SimSteps {
+    /// Steps that write to `world`'s ledger.
+    #[must_use]
+    pub fn new(world: Arc<World>) -> Self {
+        Self { world }
+    }
+}
+
+impl ProcessSteps for SimSteps {
+    fn admit(
+        &self,
+        _process: &ProcessRecord,
+        step: &StepRequest,
+        now_ms: u64,
+    ) -> Result<StepAdmission, StepRefusal> {
+        Ok(StepAdmission {
+            policy: policy(&step.admitted_tool(KIND)),
+            limit: ExecutionLimit::starting_at(
+                now_ms,
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+            ),
+        })
+    }
+
+    fn body(&self, process: &ProcessRecord, step: &StepRequest, call: &ToolCallId) -> ToolBody {
+        let world = Arc::clone(&self.world);
+        let process = process.id.clone();
+        let tool = step.admitted_tool(KIND);
+        let call = call.clone();
+        Box::new(move |_token| {
+            Box::pin(async move {
+                let owner = OwnerKey::Process(process.clone());
+                let admitted = world.admitted(&owner, &call).await;
+                world.ledger().enter(
+                    &owner,
+                    &call,
+                    BodyEntry {
+                        tool: tool.as_str().to_owned(),
+                        policy: policy(&tool),
+                        attempt: 1,
+                        at_ms: world.now_ms(),
+                        admitted,
+                    },
+                );
+                let output = json!({ "ok": true }).to_string();
+                match MaterialPayload::new(
+                    MaterialOwner::Process {
+                        process_id: process,
+                    },
+                    MaterialRole::AttemptOutput,
+                    None,
+                    output.clone(),
+                )
+                .reference(MaterialLocation::JournalLocal)
+                {
+                    Ok(material) => BodyOutput {
+                        outcome: AttemptOutcome::Completed(material),
+                        material: Some(output),
+                    },
+                    Err(_) => BodyOutput::from(AttemptOutcome::Interrupted),
+                }
+            })
+        })
+    }
+}

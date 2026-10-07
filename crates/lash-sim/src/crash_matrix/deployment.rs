@@ -1,0 +1,398 @@
+//! One deployment of the production durable runtime under the matrix: the
+//! session and process activations behind one [`ActorDispatch`], on
+//! [`SimNodes`] `a` and `b` over one SQLite memory database, with the
+//! host's writes through its own producer store.
+//!
+//! One node serves and the other stands by: a supervisor starts the standby
+//! the moment the primary stops serving or pauses, and the standby then
+//! reaps the primary and takes its actors over. With one node claiming at a
+//! time, which node runs an actor is a function of the run, so every cut
+//! point the uncut run recorded recurs when the matrix re-runs it.
+//!
+//! A [`Deployment`] is one cell's run of one [`Case`] at one seed. It is a
+//! [`Scenario`]: the matrix builds a fresh one for every cell, runs it to
+//! quiescence and asks it for its laws, which are the common
+//! [`invariants`](super::invariants) and the case's own.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use lash_core::runtime::durable::session::SessionActivation;
+use lash_core_execution::runtime::actor::process::ProcessActivation;
+use lash_core_execution::{
+    Backend, BackendParts, CompletionKeySecrets, DurableSettings, NoProjectionProviders,
+};
+use lash_durable::domain::PROCESS_FORMATS;
+use lash_durable::runner::Activation;
+use lash_durable::{ActorDispatch, ActorKey, DurableStore, FormatSet, LeaseConfig};
+use lash_durable_test::{Cut, Scenario, SimClock, SimNodes, SimNodesConfig};
+
+use super::Case;
+use super::engine::{SimProcessEngine, SimSteps};
+use super::invariants;
+use super::services::SimServices;
+use super::world::World;
+
+/// The format set the deployment's sessions are written in.
+pub const SESSION_FORMATS: &str = "lash-sim-session/1";
+/// The deployment's nodes, in the order an even seed starts them.
+pub const NODES: [&str; 2] = ["a", "b"];
+/// How many `Until` children a cascade marks per batch: small, so a
+/// cascade over a few children takes several batches.
+pub const CASCADE_BATCH: usize = 2;
+/// How long a session with nothing to do stays hot before it releases.
+pub const IDLE_EVICT: Duration = Duration::from_secs(1);
+
+/// One case's work in a deployment: what it seeds, when it is done and the
+/// laws of its own seam.
+#[async_trait::async_trait]
+pub trait Workload: Send + Sync {
+    /// Seed the case's rows and start its host's tasks.
+    async fn seed(&self, world: &Arc<World>, nodes: &Arc<SimNodes>) -> Result<(), String>;
+
+    /// Whether the case reached its end.
+    async fn done(&self, world: &World, nodes: &SimNodes) -> bool;
+
+    /// The case's own laws after the run, one line per violation.
+    async fn laws(&self, world: &World, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String>;
+
+    /// The virtual time the uncut case takes at most; a cell's bound adds a
+    /// failover and the stop grace for its one cut.
+    fn bound(&self) -> Duration {
+        Duration::from_secs(30)
+    }
+
+    /// How often one turn of the case restores from its checkpoint uncut.
+    fn max_restores(&self) -> usize {
+        1
+    }
+}
+
+/// The substrate parameters the deployment runs under.
+#[must_use]
+pub fn settings() -> DurableSettings {
+    DurableSettings {
+        cascade_batch: CASCADE_BATCH,
+        idle_evict: IDLE_EVICT,
+        ..DurableSettings::default()
+    }
+}
+
+/// How the deployment's nodes run.
+#[must_use]
+pub fn nodes_config() -> SimNodesConfig {
+    SimNodesConfig {
+        lease: LeaseConfig::default(),
+        decodes: vec![
+            FormatSet::new(SESSION_FORMATS),
+            FormatSet::new(PROCESS_FORMATS),
+        ],
+        max_active: 8,
+    }
+}
+
+/// How long a failover takes: past a dead owner's lease, a reap and a
+/// claim.
+#[must_use]
+pub fn failover() -> Duration {
+    let lease = LeaseConfig::default().settings();
+    lease.ttl + lease.reap_every + lease.claim_poll
+}
+
+/// The database a deployment runs over.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Dialect {
+    /// SQLite in memory: the cheapest tier.
+    SqliteMemory,
+    /// A fresh isolated database on the PostgreSQL server at this URL.
+    Postgres(String),
+}
+
+impl Dialect {
+    /// PostgreSQL when `LASH_POSTGRES_DATABASE_URL` names a server, else
+    /// `None`: a PostgreSQL leg without one is skipped.
+    #[must_use]
+    pub fn postgres_from_env() -> Option<Self> {
+        std::env::var("LASH_POSTGRES_DATABASE_URL")
+            .ok()
+            .filter(|url| !url.trim().is_empty())
+            .map(Self::Postgres)
+    }
+}
+
+/// What must outlive a deployment's database: an isolated PostgreSQL
+/// database, dropped with the run.
+pub type Keep = Vec<Box<dyn std::any::Any + Send + Sync>>;
+
+/// The backend of a deployment over a fresh database of `dialect` on
+/// `clock`, and the durable store the nodes run on. What the database needs
+/// to live is pushed onto `keep`.
+///
+/// # Errors
+///
+/// The database does not open or the backend does not assemble.
+pub async fn open(
+    dialect: &Dialect,
+    clock: Arc<SimClock>,
+    keep: &mut Keep,
+) -> Result<(Backend, Arc<dyn DurableStore>), String> {
+    match dialect {
+        Dialect::SqliteMemory => sqlite(clock).await,
+        Dialect::Postgres(url) => postgres(url, clock, keep).await,
+    }
+}
+
+/// A fresh isolated PostgreSQL database on the server at `url`, its durable
+/// store on `clock`.
+async fn postgres(
+    url: &str,
+    clock: Arc<SimClock>,
+    keep: &mut Keep,
+) -> Result<(Backend, Arc<dyn DurableStore>), String> {
+    let base = url.to_owned();
+    // Made on a thread and runtime of its own: its future is not `Send`
+    // for every lifetime, and the deployment's runtime alone observes its
+    // quiescence.
+    let isolated = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map(|runtime| {
+                runtime.block_on(lash_postgres_store::testing::IsolatedDatabase::create(
+                    &base,
+                ))
+            })
+            .map_err(|error| error.to_string())
+    })
+    .join()
+    .map_err(|_| "the isolated database's setup panicked".to_owned())??;
+    let storage = lash_postgres_store::PostgresStorage::connect(isolated.url())
+        .await
+        .map_err(|error| error.to_string())?;
+    let database: Arc<dyn DurableStore> =
+        Arc::new(storage.durable_store().with_clock_for_testing(clock));
+    let stores = lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+    );
+    let clocked = Arc::clone(&database);
+    let stores = lash_core::testing::runtime_helpers::LayeredStores::over(Arc::new(stores))
+        .map_durable_store(move |_| clocked)
+        .into_store_set();
+    keep.push(Box::new(isolated));
+    Ok((assemble(stores)?, database))
+}
+
+/// The URL of the isolated PostgreSQL database `keep` holds, for a fault
+/// that acts on the database itself.
+#[must_use]
+pub fn isolated_url(keep: &Keep) -> Option<String> {
+    keep.iter().find_map(|kept| {
+        kept.downcast_ref::<lash_postgres_store::testing::IsolatedDatabase>()
+            .map(|isolated| isolated.url().to_owned())
+    })
+}
+
+/// The backend of a deployment over a fresh SQLite memory store set on
+/// `clock`, and the store set's durable store.
+///
+/// # Errors
+///
+/// The store set does not open or the backend does not assemble.
+pub async fn sqlite(clock: Arc<SimClock>) -> Result<(Backend, Arc<dyn DurableStore>), String> {
+    let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
+        .await
+        .map_err(|error| error.to_string())?;
+    let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
+    let backend = assemble(Arc::new(stores))?;
+    Ok((backend, database))
+}
+
+/// The deployment's backend over `stores`: its settings, the testing
+/// completion secrets and the simulator's process engine.
+///
+/// # Errors
+///
+/// The backend does not assemble.
+pub fn assemble(stores: Arc<dyn lash_core_execution::StoreSet>) -> Result<Backend, String> {
+    Backend::assemble(BackendParts {
+        stores,
+        settings: settings(),
+        secrets: Some(CompletionKeySecrets::for_testing()),
+        engines: vec![Arc::new(SimProcessEngine)],
+        providers: Arc::new(NoProjectionProviders),
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// What every node runs for each actor it claims: the production session
+/// and process activations over `world`'s backend.
+///
+/// # Errors
+///
+/// The world has no backend yet.
+pub fn activation(world: &Arc<World>, slow: Duration) -> Result<Arc<dyn Activation>, String> {
+    let backend = world.backend()?;
+    Ok(Arc::new(ActorDispatch {
+        session: Arc::new(SessionActivation::new(
+            backend.clone(),
+            Arc::new(SimServices::new(Arc::clone(world), slow)),
+            Arc::clone(world.tripwire()) as _,
+        )),
+        process: Arc::new(ProcessActivation::new(
+            backend,
+            Arc::new(SimSteps::new(Arc::clone(world))),
+            Arc::clone(world.tripwire()) as _,
+        )),
+    }))
+}
+
+/// The latency of [`Tool::WriteSlow`](super::services::Tool::WriteSlow) at
+/// `seed`.
+#[must_use]
+pub fn slow(seed: u64) -> Duration {
+    Duration::from_millis(50 + 30 * (seed % 2))
+}
+
+/// How often the supervisor looks at the primary.
+const SUPERVISE_EVERY: Duration = Duration::from_millis(250);
+
+/// The supervisor: once `primary` stops serving or pauses, start `standby`.
+async fn supervise(
+    world: Arc<World>,
+    nodes: std::sync::Weak<SimNodes>,
+    primary: &'static str,
+    standby: &'static str,
+) {
+    loop {
+        world.sleep(SUPERVISE_EVERY).await;
+        let Some(nodes) = nodes.upgrade() else {
+            return;
+        };
+        if !nodes.serving(primary) || nodes.life(primary) == lash_durable_test::Life::Paused {
+            nodes.start(standby);
+            world.note(format!("standby {standby} started"));
+            return;
+        }
+    }
+}
+
+/// The primary and the standby at `seed`.
+#[must_use]
+pub fn start_order(seed: u64) -> [&'static str; 2] {
+    if seed.is_multiple_of(2) {
+        NODES
+    } else {
+        [NODES[1], NODES[0]]
+    }
+}
+
+/// One cell's run of `case` at `seed`.
+pub struct Deployment {
+    case: Case,
+    seed: u64,
+    dialect: Dialect,
+    world: Arc<World>,
+    workload: Box<dyn Workload>,
+    keep: std::sync::Mutex<Keep>,
+}
+
+impl Deployment {
+    /// A fresh run of `case` at `seed` over `dialect`.
+    #[must_use]
+    pub fn new(case: Case, seed: u64, dialect: Dialect) -> Self {
+        Self {
+            case,
+            seed,
+            dialect,
+            world: Arc::default(),
+            workload: case.workload(),
+            keep: std::sync::Mutex::default(),
+        }
+    }
+
+    /// The run's world.
+    #[must_use]
+    pub fn world(&self) -> &Arc<World> {
+        &self.world
+    }
+}
+
+impl Drop for Deployment {
+    fn drop(&mut self) {
+        self.world.stop_tasks();
+    }
+}
+
+#[async_trait::async_trait]
+impl Scenario for Deployment {
+    #[expect(
+        clippy::expect_used,
+        reason = "a cell cannot run without its database; the matrix reports the panic"
+    )]
+    async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        let mut keep = Keep::new();
+        let (backend, database) = open(&self.dialect, Arc::clone(&clock), &mut keep)
+            .await
+            .expect("the cell's database opens");
+        lash_core::sync::MutexExt::lock_recover(&self.keep).extend(keep);
+        self.world.set_parts(backend, clock);
+        database
+    }
+
+    fn config(&self) -> SimNodesConfig {
+        nodes_config()
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the matrix builds the database before the activation"
+    )]
+    fn activation(&self) -> Arc<dyn Activation> {
+        activation(&self.world, slow(self.seed)).expect("the database is built first")
+    }
+
+    async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        self.world.start_host(nodes)?;
+        self.workload.seed(&self.world, nodes).await?;
+        let [primary, standby] = start_order(self.seed);
+        nodes.start(primary);
+        nodes.quiesce().await;
+        self.world.spawn(supervise(
+            Arc::clone(&self.world),
+            Arc::downgrade(nodes),
+            primary,
+            standby,
+        ));
+        Ok(())
+    }
+
+    fn actors(&self) -> Vec<ActorKey> {
+        self.world.actors()
+    }
+
+    async fn done(&self, nodes: &SimNodes) -> bool {
+        self.workload.done(&self.world, nodes).await
+    }
+
+    async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
+        let bound = self.workload.bound()
+            + failover()
+            + lash_sansio::ExecutionBudgets::default().stop_grace();
+        let bound_ms = u64::try_from(bound.as_millis()).unwrap_or(u64::MAX);
+        let mut violations = invariants::check(
+            &self.world,
+            nodes,
+            cut,
+            bound_ms,
+            self.workload.max_restores(),
+        )
+        .await;
+        violations.extend(self.workload.laws(&self.world, nodes, cut).await);
+        self.world.stop_tasks();
+        violations
+            .into_iter()
+            .map(|violation| format!("{} seed {}: {violation}", self.case.name(), self.seed))
+            .collect()
+    }
+}

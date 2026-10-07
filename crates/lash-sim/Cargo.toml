@@ -26,6 +26,9 @@ chrono = { workspace = true }
 fastrand = { workspace = true }
 lash = { workspace = true, features = ["rlm", "testing"] }
 lash-core = { workspace = true, features = ["testing"] }
+lash-core-execution = { workspace = true, features = ["testing"] }
+lash-core-store = { workspace = true, features = ["testing"] }
+lash-durable = { workspace = true }
 lash-durable-test = { workspace = true }
 lash-llm-transport = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
@@ -39,10 +42,13 @@ lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-subagents = { workspace = true }
+lash-typescript = { workspace = true }
+lash-vm-broker = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+sqlx = { workspace = true, default-features = false, features = ["postgres"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
@@ -57,4 +63,3 @@ lash-provider-google = { workspace = true, features = ["testing"] }
 lash-provider-openai = { workspace = true, features = ["testing"] }
 rmp-serde = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
-sqlx = { workspace = true, default-features = false, features = ["postgres"] }

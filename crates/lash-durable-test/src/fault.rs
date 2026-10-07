@@ -80,6 +80,9 @@ impl Activity {
 /// One write, owning its arguments, ready to send.
 type Call<T> = Pin<Box<dyn Future<Output = Result<T, DurableError>> + Send>>;
 
+/// What a store does with a mailbox commit's wakes once it committed.
+pub(crate) type Wakes = Arc<dyn Fn(&MailCommit) + Send + Sync>;
+
 /// One node's store: the deployment's database under the deployment's
 /// fault script.
 pub struct FaultStore {
@@ -89,6 +92,7 @@ pub struct FaultStore {
     life: Arc<NodeLife>,
     clock: Arc<SimClock>,
     activity: Arc<Activity>,
+    wakes: Option<Wakes>,
 }
 
 /// How a write's result reads as a stored outcome.
@@ -134,7 +138,15 @@ impl FaultStore {
             life,
             clock,
             activity,
+            wakes: None,
         }
+    }
+
+    /// Hand every committed mailbox write's wakes to `wakes`, as a
+    /// producer's backend hints the nodes it woke.
+    pub(crate) fn with_wakes(mut self, wakes: Wakes) -> Self {
+        self.wakes = Some(wakes);
+        self
     }
 
     /// One read: a paused or dead node makes none.
@@ -268,6 +280,21 @@ impl DurableStore for FaultStore {
     }
 
     async fn heartbeat(&self, node: &NodeLease) -> Result<HeartbeatOutcome, DurableError> {
+        if self.life.partitioned() {
+            self.life.running().await;
+            let entry = self.script.enter(
+                &self.node,
+                WriteKind::Lease,
+                CommitLabel::HEARTBEAT,
+                None,
+                self.clock.logical_ms(),
+            );
+            entry.finish(Stored::NotEntered);
+            return Err(DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Unavailable,
+                message: "injected: the node is partitioned from its lease".to_owned(),
+            }));
+        }
         self.write(
             WriteKind::Lease,
             CommitLabel::HEARTBEAT,
@@ -348,14 +375,19 @@ impl DurableStore for FaultStore {
         tx: MailTx,
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
-        self.write(
-            WriteKind::Mail,
-            label,
-            None,
-            self.call(|store| async move { store.commit_mail(tx, label).await }),
-            |commit: &mut MailCommit| commit.woken.clear(),
-        )
-        .await
+        let commit = self
+            .write(
+                WriteKind::Mail,
+                label,
+                None,
+                self.call(|store| async move { store.commit_mail(tx, label).await }),
+                |commit: &mut MailCommit| commit.woken.clear(),
+            )
+            .await?;
+        if let Some(wakes) = &self.wakes {
+            wakes(&commit);
+        }
+        Ok(commit)
     }
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {

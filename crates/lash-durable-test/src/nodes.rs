@@ -43,7 +43,7 @@ pub struct SimNodes {
     activity: Arc<Activity>,
     config: SimNodesConfig,
     activation: Arc<dyn Activation>,
-    nodes: Mutex<BTreeMap<String, SimNode>>,
+    nodes: Arc<Mutex<BTreeMap<String, SimNode>>>,
 }
 
 impl SimNodes {
@@ -63,7 +63,7 @@ impl SimNodes {
             activity: Arc::default(),
             config,
             activation,
-            nodes: Mutex::default(),
+            nodes: Arc::default(),
         }
     }
 
@@ -228,22 +228,50 @@ impl SimNodes {
                 node: NodeId::new(node),
             })?;
         let commit = store.commit_mail(tx, label).await?;
-        let nodes = self.nodes.lock_recover();
-        for woken in &commit.woken {
-            match &woken.owner {
-                Some(owner) => {
-                    if let Some(sim) = nodes.get(owner.node.as_str()) {
-                        sim.hints.wake(woken);
-                    }
-                }
-                None => {
-                    for sim in nodes.values() {
-                        sim.hints.wake(woken);
-                    }
-                }
-            }
-        }
+        deliver(&self.nodes, &commit);
         Ok(commit)
+    }
+
+    /// Cut `node` off from its lease: every heartbeat it sends fails before
+    /// it enters the store, while its bodies and every other call carry on,
+    /// so past its lease it is a zombie whose commits a fence must refuse.
+    pub fn partition(&self, node: &str) {
+        if let Some(sim) = self.nodes.lock_recover().get(node) {
+            sim.life.partition(true);
+        }
+    }
+
+    /// Reconnect a partitioned `node` to its lease.
+    pub fn heal(&self, node: &str) {
+        if let Some(sim) = self.nodes.lock_recover().get(node) {
+            sim.life.partition(false);
+        }
+    }
+
+    /// A producer's store: the database as a host outside every node writes
+    /// it (an admission, a cancel request, a resolve), labelled and cut
+    /// under the script as `name`'s writes. It runs no runner and owns no
+    /// actor; a fault that kills it parks every later call it makes.
+    ///
+    /// Its wakes reach the woken actor's owner when it is owned, and
+    /// otherwise the first running node by name only, as one notification
+    /// reaches one listener first: the other nodes find the actor at their
+    /// next poll, so which node claims it stays a function of the run.
+    pub fn producer(&self, name: &str) -> Arc<dyn DurableStore> {
+        let nodes = Arc::clone(&self.nodes);
+        Arc::new(
+            FaultStore::new(
+                Arc::clone(&self.database),
+                Arc::from(name),
+                Arc::clone(&self.script.shared),
+                NodeLife::new(),
+                Arc::clone(&self.clock),
+                Arc::clone(&self.activity),
+            )
+            .with_wakes(Arc::new(move |commit: &MailCommit| {
+                deliver_first(&nodes, commit);
+            })),
+        )
     }
 
     /// Wait until no node waits on the database and every task woken so far
@@ -269,6 +297,43 @@ impl SimNodes {
         let due = self.clock.advance_to_next_due().await;
         self.quiesce().await;
         due
+    }
+}
+
+/// Deliver `commit`'s wakes: to the woken actor's owner when it is owned,
+/// else to every node's claim loop. A wake a fault lost reaches nobody.
+fn deliver(nodes: &Mutex<BTreeMap<String, SimNode>>, commit: &MailCommit) {
+    let nodes = nodes.lock_recover();
+    for woken in &commit.woken {
+        match &woken.owner {
+            Some(owner) => {
+                if let Some(sim) = nodes.get(owner.node.as_str()) {
+                    sim.hints.wake(woken);
+                }
+            }
+            None => {
+                for sim in nodes.values() {
+                    sim.hints.wake(woken);
+                }
+            }
+        }
+    }
+}
+
+/// Deliver `commit`'s wakes to the woken actor's owner when it is owned,
+/// else to the first running node by name.
+fn deliver_first(nodes: &Mutex<BTreeMap<String, SimNode>>, commit: &MailCommit) {
+    let nodes = nodes.lock_recover();
+    for woken in &commit.woken {
+        let target = match &woken.owner {
+            Some(owner) => nodes.get(owner.node.as_str()),
+            None => nodes
+                .values()
+                .find(|sim| sim.life.get() == Life::Running && !sim.task.is_finished()),
+        };
+        if let Some(sim) = target {
+            sim.hints.wake(woken);
+        }
     }
 }
 

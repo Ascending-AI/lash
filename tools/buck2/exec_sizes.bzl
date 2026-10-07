@@ -453,6 +453,8 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-sansio:lash-sansio__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-sansio:lash-sansio__unit_test__fv_adbdc017": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-sansio:lash-sansio__unit_test__fv_c9515550": {"cpu_count": 1, "memory_kb": 262144},
+    "//crates/lash-sim:chaos_soak__test": {"cpu_count": 4, "memory_kb": 524288},
+    "//crates/lash-sim:crash_matrix__test": {"cpu_count": 4, "memory_kb": 524288},
     "//crates/lash-sim:cross_backend_store_differential__test": {"cpu_count": 4, "memory_kb": 262144},
     "//crates/lash-sim:lash-sim__bin__unit_test": {"cpu_count": 4, "memory_kb": 262144},
     "//crates/lash-sim:lash-sim__unit_test": {"cpu_count": 4, "memory_kb": 3670016},

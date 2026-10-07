@@ -9,6 +9,7 @@
 use crate::clock::SimClock;
 use lash_core_ids::clock::Clock;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
@@ -24,13 +25,25 @@ pub enum Life {
 #[derive(Debug)]
 pub(crate) struct NodeLife {
     state: watch::Sender<Life>,
+    /// Cut off from the database's lease: every heartbeat fails before it
+    /// enters the store, while every other call gets through.
+    partitioned: AtomicBool,
 }
 
 impl NodeLife {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             state: watch::Sender::new(Life::Running),
+            partitioned: AtomicBool::new(false),
         })
+    }
+
+    pub(crate) fn partition(&self, partitioned: bool) {
+        self.partitioned.store(partitioned, Ordering::SeqCst);
+    }
+
+    pub(crate) fn partitioned(&self) -> bool {
+        self.partitioned.load(Ordering::SeqCst)
     }
 
     pub(crate) fn get(&self) -> Life {

@@ -3,7 +3,9 @@ pub mod backend_fault;
 #[cfg(test)]
 mod cache_regression;
 mod canonical_scripts;
+pub mod chaos_soak;
 pub mod content_oracle;
+pub mod crash_matrix;
 #[cfg(test)]
 mod oracle_coverage_tests;
 #[cfg(test)]
