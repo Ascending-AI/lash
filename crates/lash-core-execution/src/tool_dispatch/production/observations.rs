@@ -3,7 +3,9 @@ use super::*;
 
 impl ProductionToolHandlers<'_> {
     /// Observe an admitted call's start live, under its own trace scope,
-    /// from the request its admission prepared.
+    /// from the request its admission prepared: traced, and published to
+    /// the host as provisional activity before its outcome commits, which
+    /// settles it (ADR 0002).
     pub(super) fn started_observation(
         &self,
         request: &SingletonPreparedRequest,
@@ -15,15 +17,25 @@ impl ProductionToolHandlers<'_> {
                     error.to_string(),
                 )
             })?;
+        let call = &prepared.call;
         let start = crate::session::ToolCallStart {
-            call_id: &prepared.call.call_id,
-            provider_call_id: prepared.call.provider_call_id.as_deref(),
-            tool: &prepared.call.tool_name,
-            args: &prepared.call.args,
+            call_id: &call.call_id,
+            provider_call_id: call.provider_call_id.as_deref(),
+            tool: &call.tool_name,
+            args: &call.args,
         };
-        self.context
-            .with_tool_observation_attribution(&prepared.input.attribution)
-            .trace_tool_call_started(start, self.context.dispatch().clock.timestamp_ms())
+        let context = self
+            .context
+            .with_tool_observation_attribution(&prepared.input.attribution);
+        context.trace_tool_call_started(start, self.context.dispatch().clock.timestamp_ms())?;
+        context.emit_tool_call_started(
+            call.call_id.as_str(),
+            &crate::tool_dispatch::ToolCallIds::of(call),
+            &call.tool_name,
+            call.args.clone(),
+            crate::session::tool_execution::tool_activity_id(&call.call_id),
+        );
+        Ok(())
     }
 
     pub(super) fn observed_record(

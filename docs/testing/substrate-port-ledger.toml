@@ -24616,7 +24616,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::spawn_agent_record_carries_child_identity"
 status = "deleted"
 owed = "spawn agent record carries child identity, through send()"
-note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18. The record's kind, label, originator and session capability are read from the registry; the model-hidden handle from the transcript, since a durable turn publishes no tool activity to a host sink (reported)"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18. The record's kind, label, originator and session capability are read from the registry, the model-hidden handle from the transcript; FIG-5251 restored the receipt half: the host's activity carries one executed-start receipt for the call, naming the child"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24646,7 +24646,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults"
 status = "deleted"
 owed = "declared start child runs under recorded facts on a worker with other defaults, through send()"
-note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the recorded environment and the child session's builds carry the parent's facts over the node's other default. The process-owner plugin half is gone: a SessionTurn process builds no process-owner plugin runtime (reported)"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the recorded environment and the child session's builds carry the parent's facts over the node's other default; FIG-5251 restored the process-owner plugin half: the node builds the SessionTurn process's own plugin runtime under the recorded facts"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"

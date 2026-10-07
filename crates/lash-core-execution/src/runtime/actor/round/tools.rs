@@ -77,6 +77,18 @@ pub trait RoundTools: Send + Sync {
         resolution: Resolution,
     ) -> SettledOutput;
 
+    /// Present `output`, the final answer [`resolved`](Self::resolved) gave
+    /// `call`'s park as `execution`: its outcome as the call's presentation
+    /// makes it. See [`MemberBodies::present`](super::MemberBodies::present).
+    fn present<'a>(
+        &'a self,
+        _call: &'a PendingToolCall,
+        _execution: &'a AdmittedExecution,
+        output: SettledOutput,
+    ) -> super::lifecycle::Presented<'a> {
+        Box::pin(async move { output })
+    }
+
     /// Release what `execution`, an attempt of `call`, launched for its
     /// park, once the park ended: `cancelled` when the call ends cancelled.
     /// See [`MemberBodies::discharge`](super::MemberBodies::discharge).
@@ -223,6 +235,17 @@ impl MemberBodies for RoundCalls {
             None => SettledOutput::Cancelled {
                 evidence: AvailableEvidence::default(),
             },
+        }
+    }
+
+    fn present<'a>(
+        &'a self,
+        execution: &'a AdmittedExecution,
+        output: SettledOutput,
+    ) -> super::lifecycle::Presented<'a> {
+        match self.calls.get(execution.call()) {
+            Some(call) => self.tools.present(call, execution, output),
+            None => Box::pin(async move { output }),
         }
     }
 

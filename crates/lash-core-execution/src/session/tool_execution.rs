@@ -178,7 +178,7 @@ impl RuntimeExecutionContext<'_> {
     /// caller's positional material (`{iteration}:{index}:{call_id}` on the
     /// protocol path, `{batch_id}:{index}:{call_id}` in a batch) — qualified
     /// against this context's observation base (ADR 0105 §1).
-    pub(crate) async fn emit_tool_call_started(
+    pub(crate) fn emit_tool_call_started(
         &self,
         call_key: &str,
         ids: &ToolCallIds,
@@ -513,8 +513,7 @@ impl RuntimeExecutionContext<'_> {
             &outcome.record.tool,
             outcome.record.args.clone(),
             tool_activity_id(&ids.call_id),
-        )
-        .await;
+        );
         self.complete_tool_call(ids, tool_id, replay, outcome, call_key, duration_ms)
             .await
     }
@@ -550,8 +549,7 @@ impl RuntimeExecutionContext<'_> {
             &completed.tool_name,
             completed.args.clone(),
             tool_activity_id(&completed.call_id),
-        )
-        .await;
+        );
         // The call completed host-side; no measured window exists on this
         // path, so the observation reports 0 rather than a live clock read
         // made long after the work ran (FIG-3696).

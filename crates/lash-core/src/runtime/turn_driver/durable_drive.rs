@@ -8,6 +8,7 @@ use std::sync::Arc;
 use lash_core_execution::runtime::actor::round::RoundTools;
 
 use super::*;
+use crate::runtime::durable::commit_publication::{CommitBase, PublishedHeads};
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
     CellExit, CodeCell, OpenTurn, RestoredTurn, TurnCommit, TurnDone, TurnDrive, TurnError,
@@ -27,6 +28,9 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// Publishes the turn's activity to the live stream: drained once the
     /// turn committed, aborted when the drive is dropped without a commit.
     publisher: tokio::task::JoinHandle<()>,
+    /// The head the turn's commit is published against.
+    commit: Option<CommitBase>,
+    published: Arc<PublishedHeads>,
 }
 
 impl Drop for RuntimeDrive {
@@ -41,6 +45,8 @@ pub(in crate::runtime) struct DriveParts {
     pub(in crate::runtime) settlement: crate::store::IngressSettlement,
     pub(in crate::runtime) live: Arc<dyn crate::LiveReplayStore>,
     pub(in crate::runtime) publisher: tokio::task::JoinHandle<()>,
+    pub(in crate::runtime) commit: Option<CommitBase>,
+    pub(in crate::runtime) published: Arc<PublishedHeads>,
 }
 
 impl RuntimeDrive {
@@ -110,6 +116,8 @@ impl RuntimeDrive {
             settlement,
             live,
             publisher,
+            commit,
+            published,
         } = parts;
         Self {
             driver,
@@ -119,6 +127,8 @@ impl RuntimeDrive {
             tools: None,
             live,
             publisher,
+            commit,
+            published,
         }
     }
 }
@@ -318,12 +328,22 @@ impl TurnDrive for RuntimeDrive {
     }
 
     /// What the turn held back for its commit is published with it, and the
-    /// publisher ends once everything queued reached the live stream.
+    /// publisher ends once everything queued reached the live stream; then
+    /// the commit itself, which settles the turn's provisional activity.
     async fn committed(&mut self) {
         self.observer.release_terminal();
         self.observer.close();
         if let Err(error) = (&mut self.publisher).await {
             tracing::warn!(%error, "a committed turn's live publisher did not finish");
+        }
+        if let Some(commit) = &self.commit {
+            commit
+                .publish(
+                    self.live.as_ref(),
+                    &self.published,
+                    Some(&self.driver.turn_id),
+                )
+                .await;
         }
     }
 }

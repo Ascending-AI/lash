@@ -40,6 +40,17 @@ same `base_revision` and `rows`. Replace the preview for each record's typed
 turn provenance, then style its neutral content. Read `durable.transcript()`
 for a complete retained transcript after reconnecting across a replay gap.
 
+On the durable substrate the node that commits publishes the commit once its
+owner's commit is acknowledged: a turn's `turn.commit` after the turn's own
+activity, and a session command's or compaction's `session.command`, each with
+an `AgentFrameSwitched` ahead of it when the commit opened a frame. An owner
+that lost a commit's acknowledgement, or a node lost before it published, is
+covered by the next pass over the session: it announces the durable head as a
+`Committed` whose `base_revision` is the head itself and whose `rows` are
+empty. A consumer holding the head skips it as a redelivery; one holding an
+earlier revision cannot extend it and rebuilds from the durable head, which
+the recoverable-chat feed answers as a replay gap.
+
 ```rust,ignore
 if let lash::observe::SessionObservationEventPayload::Committed { rows, .. } = &event.payload {
     for row in rows.iter().filter(|row| row.suppressed.is_none()) {

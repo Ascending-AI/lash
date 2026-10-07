@@ -128,6 +128,19 @@ pub trait MemberBodies: Send + Sync {
         resolution: Resolution,
     ) -> SettledOutput;
 
+    /// Present `output`, the final answer [`resolved`](Self::resolved) gave
+    /// `execution`'s park: what the call's presentation makes of it, which
+    /// is recorded as its outcome. A body presents its own answer; a park's
+    /// answer is presented here, before its outcome commits, so a crash in
+    /// between presents it again. Runs no body.
+    fn present<'a>(
+        &'a self,
+        _execution: &'a AdmittedExecution,
+        output: SettledOutput,
+    ) -> Presented<'a> {
+        Box::pin(async move { output })
+    }
+
     /// Release what `execution`'s park launched, once its park ended:
     /// `cancelled` when the call ends cancelled. Runs before the call's
     /// final outcome is recorded, so a crash in between repeats it; it is
@@ -141,6 +154,9 @@ pub trait MemberBodies: Send + Sync {
         Box::pin(async {})
     }
 }
+
+/// A park's presented answer: see [`MemberBodies::present`].
+pub type Presented<'a> = Pin<Box<dyn Future<Output = SettledOutput> + Send + 'a>>;
 
 /// A park's discharge: see [`MemberBodies::discharge`].
 pub type Discharge<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
@@ -627,6 +643,7 @@ impl Lifecycle {
         }
         let opened = self.cx.clock().now();
         for ((_, execution, source), output) in ends {
+            let output = self.bodies.present(execution, output).await;
             let cancelled = matches!(output, SettledOutput::Cancelled { .. });
             self.bodies.discharge(execution, source, cancelled).await;
             self.finished

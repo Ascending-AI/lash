@@ -108,6 +108,12 @@ pub trait TurnServices: Send + Sync {
         cx: &ActorContext,
         admitted: &AdmittedInputs,
     ) -> Result<(), TurnError>;
+
+    /// Before each of `cx`'s passes over `session`: announce its committed
+    /// head when this node has not published it, should the owner that
+    /// committed it have lost the commit's acknowledgement or its life
+    /// before it published the commit. Commits nothing.
+    async fn announce_head(&self, _cx: &ActorContext, _session: &SessionId) {}
 }
 
 /// One turn an owner runs: its machine and the in-memory work around it. The
@@ -550,6 +556,7 @@ impl Activation for SessionActivation {
             let pass = if owned.draining() {
                 drain_release(&cx).await
             } else {
+                self.services.announce_head(&cx, &session).await;
                 self.pass(&cx, &session, release, &mut heads).await
             };
             if pass.is_ok() {

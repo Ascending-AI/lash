@@ -1,10 +1,11 @@
 use super::*;
 
 impl RuntimeSessionServices {
-    /// Mail a `ProcessInput::SessionTurn`'s turn (FIG-5208): initialize the
-    /// recorded child session, or reopen the one an earlier pass created,
-    /// and accept the turn's input into it under the child turn's id. The
-    /// child's session actor runs the turn; the process waits for its end.
+    /// Mail a `ProcessInput::SessionTurn`'s turn (FIG-5208): build the
+    /// process's own plugin runtime, initialize the recorded child session,
+    /// or reopen the one an earlier pass created, and accept the turn's
+    /// input into it under the child turn's id. The child's session actor
+    /// runs the turn; the process waits for its end.
     ///
     /// A request this deployment can never run answers
     /// [`SessionTurnMail::Refused`](lash_core_execution::runtime::actor::process::SessionTurnMail)
@@ -17,6 +18,10 @@ impl RuntimeSessionServices {
         turn_input: crate::TurnInput,
     ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnMail, crate::PluginError>
     {
+        // The process's plugin runtime is built from the facts its start
+        // recorded, which its child session is created from, never from
+        // this node's defaults (FIG-4396).
+        self.current.plugins.materialize()?;
         let create_request = self.child_create_request(process_id, create_request);
         let turn_id = crate::runtime::process_session_turn_id(process_id);
         match Box::pin(self.initialize_session_and_mail_turn(

@@ -936,8 +936,9 @@ fn assert_answered_the_child(world: &World, index: usize) {
 // --- the laws ----------------------------------------------------------------
 
 /// The spawn's child is a `subagent` labelled `spawn`, started by the parent
-/// session's frame and bound to it, and the model sees the child's value
-/// only, never its handle.
+/// session's frame and bound to it; the host's activity carries one receipt
+/// for the call, an executed start naming the child; and the model sees the
+/// child's value only, never its handle.
 async fn spawn_agent_record_carries_child_identity(tier: Tier) {
     let Some(world) = World::new(tier, "identity", Shape::one_child()).await else {
         return;
@@ -966,6 +967,48 @@ async fn spawn_agent_record_carries_child_identity(tier: Tier) {
         child.session_capability.as_ref(),
         Some(&parent),
         "the child is bound to its parent's session"
+    );
+    let spawned = output
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            lash_core::TurnEvent::ToolCallStarted {
+                call_id,
+                provider_call_id: Some(provider),
+                ..
+            } if provider == "declared-start-spawn-0" => Some(call_id.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        spawned.len(),
+        1,
+        "the host saw the spawn start once: {:#?}",
+        output.activities
+    );
+    let receipts = output
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            lash_core::TurnEvent::ToolIntentOutcome { call_id, outcome } => {
+                Some((call_id.clone(), outcome.clone()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(receipts.len(), 1, "one intent outcome: {receipts:#?}");
+    let (call_id, receipt) = &receipts[0];
+    assert_eq!(call_id, &spawned[0], "the receipt is the spawn's");
+    let lash_core::ToolIntentExecutionOutcome::Executed {
+        realized: lash_core::ToolIntentRealized::StartProcess(result),
+        ..
+    } = receipt
+    else {
+        panic!("the receipt is an executed start: {receipt:?}");
+    };
+    assert_eq!(
+        &result.process_id, &child.id,
+        "the receipt names the child process"
     );
     let saw = world.script.parent_saw();
     assert!(
@@ -1019,9 +1062,10 @@ async fn a_session_lifetime_subagent_survives_its_waiting_turn(tier: Tier) {
 ///
 /// The parent's creator states [`PARENT_FACTS`]; the core installs the
 /// owner under [`NODE_FACTS_DEFAULT`]. The child's `SessionTurn` process
-/// captures the parent's recorded environment at its start, and the child
-/// session it creates from that environment records, and runs under, the
-/// parent's value.
+/// captures the parent's recorded environment at its start, the node builds
+/// the process's own plugin runtime from it, and the child session it
+/// creates from that environment records, and runs under, the parent's
+/// value.
 async fn declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults(
     tier: Tier,
 ) {
@@ -1060,6 +1104,14 @@ async fn declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_d
         environment.plugin_config.config.get(FACTS),
         recorded.as_ref(),
         "the captured environment is the parent's recorded config"
+    );
+    let process_builds = world
+        .facts
+        .built_for(&lash_core::RuntimeOwner::Process(child.id.clone()).to_string());
+    assert!(
+        !process_builds.is_empty() && process_builds.iter().all(|seen| *seen == recorded),
+        "the node built the child process's runtime under the recorded facts, not its own \
+         default: {process_builds:?}"
     );
 
     let child_session = process_child_session_id(&child.id);

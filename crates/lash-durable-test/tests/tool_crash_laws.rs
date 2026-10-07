@@ -17,6 +17,15 @@
 //!   native calls counts its own group; a cell counts its total.
 //! - **Identity:** an RLM turn of two cells, three probe calls: every body
 //!   entry of one call sees one call id, and the three calls are three ids.
+//! - **Activity (FIG-5251):** a step of one native call cut at its
+//!   `round.outcome`: the host's sink was handed the call's
+//!   `ToolCallStarted` and `ToolCallCompleted` (a dead owner's provisional
+//!   activity may precede the redrive's), and the session's committed
+//!   observation holds exactly one outcome for the call. Cut at its
+//!   `turn.commit`, the commit reaches a host following the session's
+//!   recoverable chat from before the turn even when the owner lost the
+//!   commit's acknowledgement or its life before it published the commit: a
+//!   `TerminalReplacement`, or a `ReplayGap` with the durable head.
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -51,6 +60,11 @@ use served::Tier;
 const SESSION: &str = "tool-crash-session";
 const INPUT: &str = "tool-crash-turn";
 const PROBE: &str = "crash_probe";
+/// The label of the [`Turn::Activity`] call.
+const ACTIVITY: &str = "activity";
+/// How long the recoverable chat may take to yield what is already on the
+/// live stream.
+const PUBLISHED_WITHIN: Duration = Duration::from_secs(10);
 
 /// The `max_tool_calls` the limit scenarios' session records. One call
 /// fills it: a first group of one commits its outcome in one write, so
@@ -74,6 +88,8 @@ enum Turn {
     LimitCell,
     /// Two cells: one probe call, then two.
     CellIdentity,
+    /// One step of one native call, followed by a host's sink.
+    Activity,
 }
 
 impl Turn {
@@ -120,6 +136,11 @@ impl Turn {
                     aggregate(leaves(LIMIT..LIMIT + 1)),
                 ))]
             }
+            Self::Activity => vec![served::response(vec![served::call(
+                &format!("call-{ACTIVITY}"),
+                PROBE,
+                serde_json::json!({ "label": ACTIVITY }),
+            )])],
             Self::CellIdentity => vec![
                 served::cell(&format!("await {};", call("cell-one"))),
                 served::cell(&format!(
@@ -147,6 +168,7 @@ impl Turn {
                 ],
                 Vec::new(),
             ),
+            Self::Activity => (vec![ACTIVITY.to_owned()], Vec::new()),
         }
     }
 
@@ -156,7 +178,7 @@ impl Turn {
         let (counted, requested) = match self {
             Self::LimitStep => (0, LIMIT + 1),
             Self::LimitCell => (LIMIT, 1),
-            Self::CellIdentity => return None,
+            Self::CellIdentity | Self::Activity => return None,
         };
         let exceeded = lash::ToolCallLimitExceeded {
             scope: lash::ToolCallLimitScope::Cell,
@@ -170,7 +192,7 @@ impl Turn {
     fn max_tool_calls(self) -> usize {
         match self {
             Self::LimitStep | Self::LimitCell => LIMIT,
-            Self::CellIdentity => 64,
+            Self::CellIdentity | Self::Activity => 64,
         }
     }
 }
@@ -253,6 +275,17 @@ struct Crash {
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<lash::Backend>>,
     core: Mutex<Option<lash::LashCore>>,
+    /// The host's session and its send, which [`Turn::Activity`] follows.
+    host: Mutex<Option<(lash::DurableSession, lash::SendHandle)>>,
+    /// The session opened for observation, and the updates of its
+    /// recoverable chat, followed from the head before the turn, which
+    /// [`Turn::Activity`] reads.
+    chat: Mutex<
+        Option<(
+            lash::LashSession,
+            tokio::sync::mpsc::UnboundedReceiver<lash::recoverable_chat::RecoverableChatUpdate>,
+        )>,
+    >,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
@@ -269,6 +302,8 @@ impl Crash {
             tripwire: Arc::default(),
             backend: Mutex::default(),
             core: Mutex::default(),
+            host: Mutex::default(),
+            chat: Mutex::default(),
             keep: Mutex::default(),
         }
     }
@@ -371,6 +406,9 @@ impl Crash {
             }
         }
 
+        if self.turn == Turn::Activity {
+            violations.extend(self.activity_laws(cut).await);
+        }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
         }
@@ -381,6 +419,142 @@ impl Crash {
             }
         }
         violations
+    }
+
+    /// The [`Turn::Activity`] laws, once the turn ended: the host follows
+    /// its send to the settled turn, and reads its session's committed
+    /// observation.
+    async fn activity_laws(&self, cut: Option<&Cut>) -> Vec<String> {
+        let mut violations = Vec::new();
+        // The chat is read before the host's follow below, whose resolution
+        // adopts the head into this process's resident session, which
+        // publishes a commit of its own.
+        violations.extend(self.chat_laws().await);
+        let Some((session, handle)) = self.host.lock_recover().take() else {
+            return vec!["the host sent nothing".to_owned()];
+        };
+        let sink = Collected::default();
+        match tokio::time::timeout(served::WATCHDOG, handle.outcome_into(&sink)).await {
+            Ok(Ok(lash::SendOutcome::Settled { .. })) => {}
+            other => violations.push(format!("the host's follow did not settle: {other:?}")),
+        }
+        // The live stream is provisional: a dead owner's activity may come
+        // before the redrive's, but the call's start and completion arrive,
+        // from the run that answers the call. A cut at `turn.commit` resumes
+        // past the answered round and runs the call in no later run, and
+        // what a lost owner never published is not promised (ADR 0122 §4).
+        let provider = format!("call-{ACTIVITY}");
+        let rerun = cut.is_none_or(|cut| cut.point.label != CommitLabel::TURN_COMMIT);
+        let activities = sink.0.lock_recover().clone();
+        let started = activities.iter().any(|activity| {
+            matches!(
+                &activity.event,
+                lash_core::TurnEvent::ToolCallStarted { provider_call_id: Some(id), .. }
+                    if *id == provider
+            )
+        });
+        let completed = activities.iter().any(|activity| {
+            matches!(
+                &activity.event,
+                lash_core::TurnEvent::ToolCallCompleted { provider_call_id: Some(id), .. }
+                    if *id == provider
+            )
+        });
+        if rerun && (!started || !completed) {
+            violations.push(format!(
+                "the host's sink was not handed the call's start and completion: {activities:#?}"
+            ));
+        }
+        // The committed observation settles it: one outcome for the call.
+        match session.read().await {
+            Ok(Some(view)) => {
+                let parts = view
+                    .messages()
+                    .iter()
+                    .flat_map(|message| message.parts.iter())
+                    .collect::<Vec<_>>();
+                let called = parts
+                    .iter()
+                    .filter(|part| {
+                        part.kind() == lash_core::PartKind::ToolCall
+                            && part.provider_call_id() == Some(provider.as_str())
+                    })
+                    .filter_map(|part| part.call_id().cloned())
+                    .collect::<Vec<_>>();
+                let answered = parts
+                    .iter()
+                    .filter(|part| {
+                        part.kind() == lash_core::PartKind::ToolResult
+                            && called.first().is_some_and(|id| part.call_id() == Some(id))
+                    })
+                    .count();
+                if called.len() != 1 || answered != 1 {
+                    violations.push(format!(
+                        "the committed observation holds {} calls and {answered} outcomes for \
+                         the call, not one of each",
+                        called.len()
+                    ));
+                }
+            }
+            other => violations.push(format!("the committed observation: {other:?}")),
+        }
+        violations
+    }
+
+    /// The host following the session's recoverable chat from before the
+    /// turn reached the durable head: by the commit's `TerminalReplacement`,
+    /// or by a `ReplayGap` whose snapshot is the head. The session's owner
+    /// published it before it released the session, so it is on the live
+    /// stream by now: the chat waits for it only [`PUBLISHED_WITHIN`].
+    async fn chat_laws(&self) -> Vec<String> {
+        use lash::recoverable_chat::RecoverableChatUpdate;
+        let Some((_observed, mut chat)) = self.chat.lock_recover().take() else {
+            return vec!["the host follows no recoverable chat".to_owned()];
+        };
+        let factory = self.backend().stores().session_store_factory();
+        let head = match lash_core::SessionCommitStore::load_session_head_meta(
+            factory.as_ref(),
+            &crate::session(),
+        )
+        .await
+        {
+            Ok(Some(head)) => lash_core::SessionRevision::of_durable_head(&head),
+            other => return vec![format!("the session's head: {other:?}")],
+        };
+        let mut seen = Vec::new();
+        loop {
+            let update = match tokio::time::timeout(PUBLISHED_WITHIN, chat.recv()).await {
+                Ok(Some(update)) => update,
+                other => {
+                    return vec![format!(
+                        "the recoverable chat never reached the head {head:?}: {other:?} \
+                         after {seen:#?}"
+                    )];
+                }
+            };
+            let reached = match &update {
+                RecoverableChatUpdate::TerminalReplacement { event, .. } => {
+                    event.revision() >= head
+                }
+                RecoverableChatUpdate::ReplayGap { gap, .. } => gap.latest_revision >= head,
+                _ => false,
+            };
+            seen.push(update);
+            if reached {
+                return Vec::new();
+            }
+        }
+    }
+}
+
+/// A host's activity sink: everything it was handed, in order.
+#[derive(Default)]
+struct Collected(Mutex<Vec<lash_core::TurnActivity>>);
+
+#[async_trait::async_trait]
+impl lash_core::facade_support::TurnActivitySink for Collected {
+    async fn emit(&self, activity: lash_core::TurnActivity) {
+        self.0.lock_recover().push(activity);
     }
 }
 
@@ -424,11 +598,41 @@ impl Scenario for Crash {
             )))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
-        session
+        if self.turn == Turn::Activity {
+            let observed = self
+                .core()
+                .session(crate::session())
+                .open()
+                .await
+                .map_err(|error| format!("open the session for observation: {error}"))?;
+            let snapshot = observed
+                .observe()
+                .recoverable_chat_snapshot()
+                .await
+                .map_err(|error| format!("snapshot the session: {error}"))?;
+            let mut chat = observed
+                .observe()
+                .subscribe_recoverable_chat(snapshot.cursor);
+            // The host follows the chat while the deployment runs, as a
+            // host's live view does.
+            let (updates, received) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(async move {
+                use lash::observe::Stream as _;
+                while let Some(Ok(update)) =
+                    std::future::poll_fn(|cx| std::pin::Pin::new(&mut chat).poll_next(cx)).await
+                {
+                    if updates.send(update).is_err() {
+                        return;
+                    }
+                }
+            });
+            *self.chat.lock_recover() = Some((observed, received));
+        }
+        let handle = session
             .send(lash::TurnInput::text(INPUT))
             .await
-            .map(drop)
             .map_err(|error| format!("send the turn's input: {error}"))?;
+        *self.host.lock_recover() = Some((session, handle));
         // A starts and claims first, B once A is settled, so the matrix
         // cuts the uncut run's writes by node.
         nodes.start("a");
@@ -479,6 +683,12 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
 
 /// Cut `turn` on `tier` at every label of its uncut run.
 async fn prove(turn: Turn, tier: Tier) {
+    prove_at(turn, tier, &[]).await;
+}
+
+/// Cut `turn` on `tier` at every write of its uncut run labelled one of
+/// `cut_labels`, or at every label when `cut_labels` is empty.
+async fn prove_at(turn: Turn, tier: Tier, cut_labels: &[CommitLabel]) {
     let (dialect, postgres_url) = match tier {
         Tier::SqliteMemory => (Dialect::SqliteMemory, None),
         Tier::SqliteFile => (Dialect::SqliteFile, None),
@@ -490,7 +700,12 @@ async fn prove(turn: Turn, tier: Tier) {
             (Dialect::Postgres, Some(url))
         }
     };
-    let report = Matrix::new()
+    let matrix = if cut_labels.is_empty() {
+        Matrix::new()
+    } else {
+        Matrix::new().labels(cut_labels)
+    };
+    let report = matrix
         .faults(&[
             Fault::FailBefore,
             Fault::AckHidden,
@@ -509,11 +724,16 @@ async fn prove(turn: Turn, tier: Tier) {
         labels.join(", ")
     );
     report.assert_held();
-    for label in [
-        CommitLabel::MODEL_DONE,
-        CommitLabel::ROUND_OUTCOME,
-        CommitLabel::TURN_COMMIT,
-    ] {
+    let expected = if cut_labels.is_empty() {
+        vec![
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::TURN_COMMIT,
+        ]
+    } else {
+        cut_labels.to_vec()
+    };
+    for label in expected {
         assert!(
             report.labels().contains(&label),
             "{turn:?}: the matrix never cut {label}"
@@ -543,8 +763,24 @@ async fn code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill(tier
     prove(Turn::CellIdentity, tier).await;
 }
 
+/// A native call cut at its `round.outcome` and redriven on the other node
+/// streams its start and completion to the host's sink, and the session's
+/// committed observation holds exactly one outcome for it (FIG-5251).
+async fn a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome(tier: Tier) {
+    prove_at(Turn::Activity, tier, &[CommitLabel::ROUND_OUTCOME]).await;
+}
+
+/// A turn cut at its `turn.commit`, its acknowledgement or its owner lost
+/// after the commit landed and before it was published, still reaches the
+/// host following the session's recoverable chat (FIG-5251).
+async fn a_commit_whose_publication_was_lost_still_reaches_the_host(tier: Tier) {
+    prove_at(Turn::Activity, tier, &[CommitLabel::TURN_COMMIT]).await;
+}
+
 tiered_laws!(
     current_thread:
+    a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome,
+    a_commit_whose_publication_was_lost_still_reaches_the_host,
     tool_call_limit_refuses_the_same_call_across_a_crash,
     tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell,
     code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill,

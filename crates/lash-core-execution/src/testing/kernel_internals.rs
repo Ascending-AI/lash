@@ -184,19 +184,6 @@ pub async fn await_process_with_cancellation(
         .await
 }
 
-pub async fn emit_tool_call_started(
-    context: &crate::RuntimeExecutionContext<'_>,
-    call_key: &str,
-    ids: &crate::tool_dispatch::ToolCallIds,
-    name: &str,
-    args: serde_json::Value,
-    activity_id: crate::TurnActivityId,
-) {
-    context
-        .emit_tool_call_started(call_key, ids, name, args, activity_id)
-        .await;
-}
-
 /// `dispatch_tool_call_with_execution_context`: dispatches one call by name
 /// under the dispatch state `call` configures.
 pub async fn dispatch_tool_call_with_execution_context<'run>(

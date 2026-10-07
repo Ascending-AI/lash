@@ -16,6 +16,7 @@
 //! - [`turn_scope`]: a turn's scope ending with its commit or cancel, the
 //!   cascade's cursor work and the bounded wait for its children (L6b).
 
+pub(in crate::runtime) mod commit_publication;
 pub mod head;
 mod model_call;
 pub mod node;

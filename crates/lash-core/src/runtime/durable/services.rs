@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
+use super::commit_publication::{CommitBase, PublishedHeads, announce_head};
 use super::head::SessionHead;
 use super::session::{
     AdmittedInputs, OpenTurn, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
@@ -40,6 +41,8 @@ pub trait SessionRuntimes: Send + Sync {
 /// [`TurnServices`] over a deployment's [`SessionRuntimes`].
 pub struct RuntimeTurnServices {
     runtimes: Arc<dyn SessionRuntimes>,
+    /// The session heads this node published to the live stream.
+    published: Arc<PublishedHeads>,
 }
 
 impl std::fmt::Debug for RuntimeTurnServices {
@@ -53,7 +56,10 @@ impl RuntimeTurnServices {
     /// The turn services of the sessions `runtimes` opens.
     #[must_use]
     pub fn new(runtimes: Arc<dyn SessionRuntimes>) -> Self {
-        Self { runtimes }
+        Self {
+            runtimes,
+            published: Arc::default(),
+        }
     }
 
     /// Rebuild a turn's retained tool-call records from its durable rounds,
@@ -156,7 +162,8 @@ impl RuntimeTurnServices {
         };
         let controller = cx.scoped(AdmittedScope::turn(row.session.clone(), row.run.clone()))?;
         let live = self.runtimes.live_replay();
-        let (observer, publisher) = live_observer(&runtime, &live);
+        let commit = CommitBase::of(&runtime);
+        let (observer, publisher) = live_observer(&runtime, &live, &row.run);
         let turn = runtime
             .prepare_durable_turn(&controller, &row.run, admissions, &observer)
             .await?;
@@ -167,6 +174,8 @@ impl RuntimeTurnServices {
                 settlement,
                 live,
                 publisher,
+                commit,
+                published: Arc::clone(&self.published),
             },
         ))
     }
@@ -220,11 +229,27 @@ impl TurnServices for RuntimeTurnServices {
         }
         // The command drain reads the session's leading open command run,
         // the one the mail drain handed out, and applies it: its commit
-        // settles the row.
+        // settles the row, and is published once it is acknowledged.
+        let commit = CommitBase::of(&runtime);
         runtime
             .drain_next_session_command_with_cancellation(CancellationToken::new(), &controller)
             .await?;
+        if let Some(commit) = commit {
+            commit
+                .publish(self.runtimes.live_replay().as_ref(), &self.published, None)
+                .await;
+        }
         Ok(())
+    }
+
+    async fn announce_head(&self, cx: &ActorContext, session: &SessionId) {
+        announce_head(
+            cx.backend(),
+            self.runtimes.live_replay().as_ref(),
+            &self.published,
+            session,
+        )
+        .await;
     }
 }
 
@@ -291,10 +316,15 @@ async fn admitted_rows(
 }
 
 /// The turn's observer, and the task that publishes its activity to `live`
-/// at the session's head revision.
+/// at the session's head revision. Every activity the turn publishes is
+/// addressed to its run `turn`, so a host following the run adopts it: its
+/// tool calls, prose and progress stream live as provisional activity, which
+/// the turn's commit settles (ADR 0002), while its terminal waits for that
+/// commit (ADR 0122).
 fn live_observer(
     runtime: &LashRuntime,
     live: &Arc<dyn LiveReplayStore>,
+    turn: &TurnId,
 ) -> (TurnObserver, tokio::task::JoinHandle<()>) {
     let sink = Arc::new(LiveActivity {
         live: Arc::clone(live),
@@ -306,6 +336,7 @@ fn live_observer(
         sink.as_ref(),
         runtime.delta_framing(),
     );
+    let observer = observer.for_turn(turn);
     let publisher = crate::task::spawn(async move {
         while let Some(observation) =
             std::future::poll_fn(|context| observations.poll_next(context)).await

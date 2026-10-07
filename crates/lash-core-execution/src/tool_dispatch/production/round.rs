@@ -6,7 +6,8 @@
 use super::*;
 use crate::runtime::actor::round::{
     AdmittedExecution, CompletedCall, Discharge, Material, MemberBody, MemberPin, MemberResult,
-    PolicyView, RoundTools, SettledOutput, StoreLocalEffect, completed_material, decode_completed,
+    PolicyView, Presented, RoundTools, SettledOutput, StoreLocalEffect, completed_material,
+    decode_completed,
 };
 use crate::runtime::actor::waits::{self, Resolution, WaitDeadline};
 use crate::session::tool_execution::ToolInvocation;
@@ -392,6 +393,90 @@ pub(super) fn resolved_member(
     member_output(owner, MemberEnd::Final(completed))
 }
 
+/// The final answer `output` that a park of the member `call`, a call of
+/// `tool`, resolved to, presented as a body presents its own (ADR 0099 §6):
+/// the session's presentation steps run over it, and what they make of its
+/// model-facing return is recorded as the call's outcome. The call's
+/// settlement, its intent outcomes and its completion, is published to the
+/// host live, as provisional activity that the turn's commit settles.
+pub(super) async fn present_resolved(
+    context: &RuntimeExecutionContext<'static>,
+    owner: &crate::EffectOpener,
+    call: &crate::sansio::PendingToolCall,
+    tool: &crate::ToolId,
+    output: SettledOutput,
+) -> SettledOutput {
+    let SettledOutput::Completed(material) = &output else {
+        return output;
+    };
+    let Some(mut completed) = decode_completed(material.payload()) else {
+        return output;
+    };
+    let dispatch = context.dispatch();
+    let mut projected = completed.output.clone();
+    super::super::attempt_coordinator::project_recorded_intent_outcomes(
+        &mut projected,
+        &completed.intent_outcomes,
+    );
+    let projection = crate::plugin::ToolResultProjectionContext {
+        owner: dispatch.owner.runtime_owner(),
+        call_id: call.call_id.clone(),
+        tool_id: tool.clone(),
+        tool_name: call.tool_name.clone(),
+        render: dispatch.execution_env_spec.render.clone(),
+        args: call.args.clone(),
+        output: projected,
+        duration_ms: 0,
+        artifacts: Arc::new(crate::runtime::effect::SessionPresentationArtifacts::new(
+            context.attachment_store(),
+        )),
+    };
+    let facts = Arc::new(crate::plugin::ToolPresentationFacts {
+        intent_outcomes: completed.intent_outcomes.clone(),
+    });
+    match dispatch
+        .plugins
+        .present_tool_result(
+            projection,
+            facts,
+            &dispatch.plugins.tool_presentation_plan(),
+            &dispatch.execution_env_spec.policy.attachment_acceptance,
+        )
+        .await
+    {
+        Ok(presentation) => completed.model_return = presentation.model_return,
+        // A presentation that faults leaves the call nothing to show, as a
+        // body's does.
+        Err(error) => {
+            completed = answered(
+                call,
+                ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "tool_run_fault",
+                    error.to_string(),
+                )),
+            );
+        }
+    }
+    context.emit_tool_intent_outcome_activities(
+        call.call_id.as_str(),
+        &call.call_id,
+        &completed.intent_outcomes,
+    );
+    context.emit_tool_call_completed_activity(
+        call.call_id.as_str(),
+        &ToolCallRecord {
+            call_id: completed.call_id.clone(),
+            provider_call_id: completed.provider_call_id.clone(),
+            tool: completed.tool_name.clone(),
+            args: completed.args.clone(),
+            output: completed.output.clone(),
+        },
+        0,
+    );
+    member_output(owner, MemberEnd::Final(completed))
+}
+
 /// Discharges the child a parked call's declared start launched (ADR 0116
 /// §3.6): a call that ends cancelled under
 /// [`CancelHint::CancelExternalWork`](crate::CancelHint) cancels it, and the
@@ -648,6 +733,21 @@ impl RoundTools for ProductionRoundTools {
         resolution: Resolution,
     ) -> SettledOutput {
         resolved_member(&self.owner, call, parked, resolution)
+    }
+
+    fn present<'a>(
+        &'a self,
+        call: &'a crate::sansio::PendingToolCall,
+        execution: &'a AdmittedExecution,
+        output: SettledOutput,
+    ) -> Presented<'a> {
+        Box::pin(present_resolved(
+            &self.context,
+            &self.owner,
+            call,
+            execution.draft().tool(),
+            output,
+        ))
     }
 
     fn discharge<'a>(
