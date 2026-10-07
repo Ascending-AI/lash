@@ -74,8 +74,11 @@ impl LashCore {
     ///
     /// The backend is the builder's only source of ports: there is no
     /// setter for a store, a registry or an effect host, so a core cannot mix
-    /// substrates, and there is no in-memory default. The zero-infra
-    /// backend for local tests is a Restate engine over a SQLite memory store set.
+    /// substrates, and there is no in-memory default. Build the backend with
+    /// [`DurableBackendBuilder`](crate::durable::DurableBackendBuilder); the
+    /// zero-infra backend for local tests is the durable backend over a
+    /// SQLite memory store set. `docs/operations/durable-hosting.md` is the
+    /// host guide.
     ///
     /// The builder takes deployment facts only: the backend, the plugins,
     /// the model registry, tracing and the like. A core keeps no session

@@ -2,7 +2,9 @@
 
 This guide is for operators deploying lash 1.0 and planning a roll to the next
 release. [ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
-defines the compatibility contract.
+defines the compatibility contract. [Hosting lash 1.0 on the durable
+substrate](durable-hosting.md) covers what a node runs, its configuration,
+and the contracts a host implements.
 
 ## Upgrading lash before 1.0
 
@@ -86,7 +88,9 @@ never work. `Notifier::PollOnly` turns the listener off, and with it the fast
 crash detection.
 
 The topology is the host's (ADR 0132 §13): `Once` survives a database
-failover only when acknowledged commits survive promotion.
+failover only when acknowledged commits survive promotion. The host guide
+explains what that means for [synchronous and asynchronous
+replicas](durable-hosting.md#durability-across-a-failover).
 
 ## Read the compatibility report
 

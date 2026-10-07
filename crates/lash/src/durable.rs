@@ -1,5 +1,9 @@
 //! The durable substrate's backend (ADR 0132 §1). I0 (FIG-5194) pins this
 //! builder's full shape, and L3 (FIG-5172) makes a built backend serve.
+//!
+//! `docs/operations/durable-hosting.md` is the host guide: node identity,
+//! topology, the completion secret, `DurableSettings` and the process-engine
+//! contract.
 
 use std::sync::Arc;
 
