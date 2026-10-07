@@ -43762,6 +43762,7 @@
           "clippy_label": "//crates/lash-durable-test:declared_start__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:declared_start__test",
+          "shard_count": 4,
           "tags": [
             "hermetic-postgres"
           ]
@@ -43805,6 +43806,7 @@
           "clippy_label": "//crates/lash-durable-test:frame_switch_crash_proof__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:frame_switch_crash_proof__test",
+          "shard_count": 4,
           "tags": []
         },
         {
@@ -43895,6 +43897,7 @@
           "clippy_label": "//crates/lash-durable-test:tool_batches__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:tool_batches__test",
+          "shard_count": 3,
           "tags": [
             "hermetic-postgres"
           ]
@@ -43951,7 +43954,7 @@
           "clippy_label": "//crates/lash-durable-test:turn_phases__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:turn_phases__test",
-          "shard_count": 2,
+          "shard_count": 6,
           "tags": [
             "hermetic-postgres"
           ]
@@ -43972,6 +43975,7 @@
           "clippy_label": "//crates/lash-durable-test:vertical_crash_proof__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:vertical_crash_proof__test",
+          "shard_count": 4,
           "tags": [
             "hermetic-postgres"
           ]
