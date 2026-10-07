@@ -39,7 +39,7 @@ use crate::port::{
     NodeLease, NodeSpec, Owner, Woken,
 };
 use crate::signals::{Signal, SignalFeed, Signals, WakeBatch};
-use crate::tx::ActorTx;
+use crate::tx::{ActorTx, Release};
 use lash_core_ids::clock::Clock;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -100,6 +100,8 @@ pub enum Stopped {
 struct DrainInner {
     started: AtomicBool,
     notify: Notify,
+    /// The actors released under `drain.release`, in commit order.
+    released: Mutex<Vec<ActorKey>>,
 }
 
 /// A node's drain switch, shared by its runner and every activation it
@@ -114,6 +116,40 @@ impl Drain {
     pub fn start(&self) {
         self.inner.started.store(true, Ordering::Release);
         self.inner.notify.notify_waiters();
+    }
+
+    /// Release `tx`'s actor `ready` under `drain.release`, for a node of
+    /// the next build to claim, and record it among the actors this drain
+    /// released.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal; nothing is recorded.
+    pub async fn release(
+        &self,
+        store: &dyn DurableStore,
+        mut tx: ActorTx,
+    ) -> Result<ActorCommit, DurableError> {
+        let actor = tx.actor().clone();
+        tx.give_up(Release::Ready);
+        let commit = store.commit(tx, CommitLabel::DRAIN_RELEASE).await?;
+        self.inner
+            .released
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(actor);
+        Ok(commit)
+    }
+
+    /// The actors this drain released, in commit order: each one whose
+    /// `drain.release` commit was acknowledged.
+    #[must_use]
+    pub fn released(&self) -> Vec<ActorKey> {
+        self.inner
+            .released
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Whether the drain started.
@@ -244,6 +280,18 @@ impl Owned {
     #[must_use]
     pub fn drain(&self) -> &Drain {
         &self.drain
+    }
+
+    /// Release the actor `ready` under `drain.release` with `tx`'s writes:
+    /// what a draining activation does at a committed phase
+    /// ([`Drain::release`]).
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal; [`DurableError::OwnershipLost`] once the actor
+    /// is someone else's.
+    pub async fn drain_release(&self, tx: ActorTx) -> Result<ActorCommit, DurableError> {
+        self.drain.release(self.store.as_ref(), tx).await
     }
 
     /// The node's lease as its own clock sees it.

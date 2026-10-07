@@ -150,6 +150,7 @@ mod deployment_and_testing_facade;
 mod facade_construction;
 mod facade_turn;
 pub(crate) mod harness;
+mod node_drain;
 pub(crate) use harness::{
     DecoratedBackend, explicit_ephemeral_facets, mock_llm_profile_spec, mock_session_spec,
     recorded_llm_profile, sqlite_memory_store_backend, sqlite_memory_store_set,

@@ -476,9 +476,7 @@ impl SessionActivation {
 /// Release the session `ready` for the next build: what a draining node
 /// does at a committed phase.
 async fn drain_release(cx: &ActorContext) -> Result<Pass, TurnError> {
-    let mut tx = cx.begin().await?;
-    tx.give_up(Release::Ready);
-    cx.commit(tx, CommitLabel::DRAIN_RELEASE).await?;
+    cx.drain_release().await?;
     Ok(Pass::Released)
 }
 

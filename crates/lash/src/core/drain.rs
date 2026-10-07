@@ -63,6 +63,57 @@ impl serde::Serialize for DeploymentDrainStatus {
     }
 }
 
+/// What a drained node handed to the next build (ADR 0106 §1): each
+/// session and process actor it released `ready` at a committed phase, in
+/// release order. Nodes that decode their formats claim them and resume
+/// each from its committed rows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NodeDrainReport {
+    /// The sessions it released.
+    pub sessions: Vec<lash_core::SessionId>,
+    /// The processes it released.
+    pub processes: Vec<lash_core::ProcessId>,
+}
+
+impl NodeDrainReport {
+    /// The report of the actors a drain released.
+    pub(crate) fn of(released: &[lash_core::durable_port::ActorKey]) -> Self {
+        let mut report = Self::default();
+        // An activation runs only an actor whose id parses, so each one it
+        // released does.
+        for actor in released {
+            match actor.kind() {
+                lash_core::durable_port::ActorKind::Session => report
+                    .sessions
+                    .extend(lash_core::SessionId::try_from(actor.id().to_owned()).ok()),
+                lash_core::durable_port::ActorKind::Process => report
+                    .processes
+                    .extend(lash_core::ProcessId::parse(actor.id()).ok()),
+            }
+        }
+        report
+    }
+}
+
+/// Why [`LashCore::drain`](crate::LashCore::drain) did not end with its node
+/// drained.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum NodeDrainError {
+    /// The core runs no node: it was built not to serve sessions, or it
+    /// shut down before its node started.
+    #[error("this core runs no node to drain")]
+    NotServing,
+    /// The node stopped before it drained: its lease was lost or went
+    /// unrenewed, or the core shut down during the drain. Whatever it still
+    /// owned is fenced and claimed by other nodes as after a crash.
+    #[error("the core's node stopped ({0:?}) before it drained")]
+    Stopped(lash_core::durable_port::runner::Stopped),
+    /// The store refused the node's registration or its release.
+    #[error("the core's node did not drain: {0}")]
+    Store(#[from] lash_core::durable_port::DurableError),
+}
+
 #[cfg(test)]
 mod tests {
     use lash_core::store::ObligationKind;

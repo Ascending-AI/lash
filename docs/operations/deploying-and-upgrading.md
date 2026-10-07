@@ -13,10 +13,14 @@ stored shapes in place without moving a version, so unchanged versions are
 not evidence that two builds are compatible.
 
 Every lash version bump before 1.0 must therefore reset lash's state
-instead of rolling: stop the old build and recreate the stores.
+instead of rolling: stop the old build and recreate the stores. Drain by
+release does not make a pre-1.0 roll safe: with the versions frozen, both
+builds spell the same format sets, so the next build would claim state whose
+shape it may not decode.
 
 From 1.0 on, any format change moves its version, and the upgrade path in
-this guide applies.
+this guide applies: the old build drains by release and the next build
+claims what it released.
 [ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 states the freeze in its release-cut guardrails and defines the post-1.0
 contract.
@@ -27,7 +31,9 @@ contract.
 §12): the host configures its path, and the session catalog, the process
 registry, the trigger store and the durability core all live in it, so one
 transaction commits rows of every family or none. One host owns the file.
-Stop that host before replacing its binary. The current `lashctl` store
+Stop that host before replacing its binary. When the release changes a
+durable format, drain the old build first (`LashCore::drain`, below), shut it
+down, then start the new one: its node claims what the old one released. The current `lashctl` store
 commands require `LASH_POSTGRES_DATABASE_URL` and do not migrate SQLite:
 SQLite migrates on open, after a backup. A configured path that is a
 directory holding the retired layout of three database files
@@ -118,9 +124,9 @@ lashctl preflight --json
 This command currently checks the PostgreSQL store and returns its database,
 release and fleet-format verdict. Run it with the build that is about to serve
 traffic. The JSON exit codes are 0 for done, 1 for an unexpected failure, 2
-for invalid usage, 3 for a refused precondition, 4 for an incompatible store,
-and 5 for a drain still pending. Exit 5 can include a useful `result` as well
-as an `error`; keep both in the deployment record.
+for invalid usage, 3 for a refused precondition and 4 for an incompatible
+store. A refusal can carry a useful `result` as well as an `error`; keep both
+in the deployment record.
 
 An incompatible store may report a typed refusal:
 
@@ -167,11 +173,19 @@ affected state while investigating the refusal.
    watch both builds' errors and in-flight work. Do not stop N during the
    roll.
 
-3. Build generations, their drain marks and `lashctl drain` and `end-drain`
-   are gone (FIG-5200). Stopping N waits for the drain by release that
-   replaces them.
+3. Drain N by release once N+1 serves. On each N node, call
+   `LashCore::drain()`
+   ([durable hosting](durable-hosting.md#drain-by-release)): the node claims
+   nothing more, stops each session it owns at its next committed phase and
+   releases it `ready`, then stops. It answers a `NodeDrainReport` naming
+   the sessions and processes it released; record it. N+1's nodes claim
+   them and resume each from its committed rows. Then call `shutdown` on N.
+   A node that serves processes through `node::serve` drains when the host
+   starts its `NodeServe::drain`, and `serve` returns `Stopped::Drained`.
+   A drain that answers `NodeDrainError::Stopped` lost its node first; what
+   it held is claimed as after a crash, and nothing acknowledged is lost.
 
-   Until then, read the stalled artifact cleanups before you stop N (the
+   Before you stop N, also read the stalled artifact cleanups (the
    one obligation kind left, `artifact_cleanup`; every other kind is a
    mailbox write in its producer's transaction, ADR 0132 §12).
    `lashctl stalled list <kind>` lists each one of a kind in id order, with
@@ -187,9 +201,10 @@ affected state while investigating the refusal.
 
 ## Finalize the release
 
-No build moves the fleet epoch `F` now. The generation drain's finalize and
-`lashctl finalize-hold` are gone (FIG-5200), and the drain by release replaces
-them. Backfill and contract below still wait for `F` to move.
+No build moves the fleet epoch `F` now: the release cut owns moving it
+(ADR 0115). The generation drain's finalize and `lashctl finalize-hold` are
+gone; actor state crosses the release by the drain in step 3. Backfill and
+contract below still wait for `F` to move.
 
 A backfill rewrites rows into N+1's shape in batches. Each batch is one
 transaction that rewrites a bounded run of rows after the backfill's cursor

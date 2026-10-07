@@ -390,8 +390,7 @@ impl ProcessActivation {
             if !live.running.is_empty() {
                 return Ok(Pass::Wait(fold, None));
             }
-            tx.give_up(Release::Ready);
-            owned.commit(tx, CommitLabel::DRAIN_RELEASE).await?;
+            owned.drain_release(tx).await?;
             return Ok(Pass::Released);
         }
         let event = match self

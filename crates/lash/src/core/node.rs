@@ -5,29 +5,47 @@
 //! the first session the core opens, when it was built outside one), and
 //! stops when the core shuts down or its last clone is dropped. Its name is
 //! the core's stable owner id: a new boot of the same owner fences the old.
+//!
+//! The host drains it by release (ADR 0106 §1) with [`LashCore::drain`]: the
+//! node claims nothing more, hands each actor it owns to the next build at a
+//! committed phase, and stops. A drained core never starts a node again.
 
 use std::sync::{Arc, Mutex};
 
+use lash_core::durable_port::DurableError;
+use lash_core::durable_port::runner::{Drain, Stopped};
 use lash_core::facade_support::LashRuntime;
 use lash_core::runtime::durable::node::{NodeServe, serve};
 use lash_core::runtime::durable::services::{RuntimeTurnServices, SessionRuntimes};
 use lash_core::runtime::durable::session::{SessionActivation, TurnError, TurnServices};
 use lash_core::{ExecutionBudgets, LiveReplayStore, SessionId};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::LashCore;
+use super::drain::{NodeDrainError, NodeDrainReport};
+
+/// How the node's serving ended.
+type Served = Result<Stopped, DurableError>;
 
 /// The core's one node, shared by its clones.
 pub(crate) struct NodeSlot {
     stop: CancellationToken,
-    task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// The node's drain switch; started, the node never starts again.
+    drain: Drain,
+    /// Whether the node started.
+    started: Mutex<bool>,
+    /// How the node's serving ended, once it has.
+    served: watch::Sender<Option<Served>>,
 }
 
 impl NodeSlot {
     pub(crate) fn new() -> Self {
         Self {
             stop: CancellationToken::new(),
-            task: Mutex::new(None),
+            drain: Drain::default(),
+            started: Mutex::new(false),
+            served: watch::Sender::new(None),
         }
     }
 
@@ -45,10 +63,10 @@ impl NodeSlot {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let Ok(mut task) = self.task.lock() else {
+        let Ok(mut started) = self.started.lock() else {
             return;
         };
-        if task.is_some() || self.stop.is_cancelled() {
+        if *started || self.stop.is_cancelled() || self.drain.started() {
             return;
         }
         // The node opens runtimes through a clone of the core that holds no
@@ -60,35 +78,59 @@ impl NodeSlot {
             Arc::new(lash_core::durable_port::NoProbe),
         ));
         let node = lash_core::durable_port::NodeId::new(core.runtime_owner.owner_id.clone());
+        let drain = self.drain.clone();
         let stop = self.stop.clone();
-        *task = Some(runtime.spawn(async move {
-            let served = serve(
+        let served = self.served.clone();
+        *started = true;
+        runtime.spawn(async move {
+            let outcome = serve(
                 &backend,
                 NodeServe {
                     node,
-                    // The core stops its node on shutdown; it has no drain
-                    // lever of its own.
-                    drain: lash_core::durable_port::runner::Drain::default(),
+                    drain,
                     sessions,
                     processes: None,
                 },
                 stop.cancelled_owned(),
             )
             .await;
-            match served {
+            match &outcome {
                 Ok(stopped) => tracing::debug!(?stopped, "the core's node stopped"),
                 Err(error) => tracing::error!(%error, "the core's node stopped"),
             }
-        }));
+            served.send_replace(Some(outcome));
+        });
+    }
+
+    /// How the node's serving ended, once it has; `None` when it never
+    /// started.
+    async fn ended(&self) -> Option<Served> {
+        if !self.started.lock().is_ok_and(|started| *started) {
+            return None;
+        }
+        let mut served = self.served.subscribe();
+        let ended = served.wait_for(Option::is_some).await;
+        ended.ok().and_then(|ended| ended.clone())
+    }
+
+    /// Drain `core`'s node by release and wait until it stops.
+    pub(crate) async fn drain(&self, core: &LashCore) -> Result<NodeDrainReport, NodeDrainError> {
+        // A core built outside a runtime starts its node now, so a drain
+        // always meets a node that registered.
+        self.ensure(core);
+        self.drain.start();
+        match self.ended().await {
+            Some(Ok(Stopped::Drained)) => Ok(NodeDrainReport::of(&self.drain.released())),
+            Some(Ok(stopped)) => Err(NodeDrainError::Stopped(stopped)),
+            Some(Err(error)) => Err(NodeDrainError::Store(error)),
+            None => Err(NodeDrainError::NotServing),
+        }
     }
 
     /// Stop the node and wait for it.
     pub(crate) async fn stop(&self) {
         self.stop.cancel();
-        let task = self.task.lock().ok().and_then(|mut task| task.take());
-        if let Some(task) = task {
-            let _ = task.await;
-        }
+        let _ = self.ended().await;
     }
 }
 

@@ -82,6 +82,9 @@ pub(super) struct Inner {
     /// What the claim's activation waits on for mail; a context that owns
     /// no claim polls on the backend's claim interval.
     mail: Option<lash_durable::runner::MailWaker>,
+    /// The claiming node's drain switch; a context that owns no claim
+    /// never drains.
+    drain: Option<lash_durable::runner::Drain>,
     /// The claiming node's lease as its own clock sees it; a context that
     /// owns no claim holds no node lease.
     liveness: Option<lash_durable::runner::Liveness>,
@@ -125,6 +128,7 @@ impl ActorContext {
                 actor,
                 epoch,
                 mail: None,
+                drain: None,
                 liveness: None,
                 clock,
                 cancel,
@@ -153,6 +157,7 @@ impl ActorContext {
                 actor: owned.actor().clone(),
                 epoch: owned.epoch(),
                 mail: Some(owned.mail_waker()),
+                drain: Some(owned.drain().clone()),
                 liveness: Some(owned.liveness().clone()),
                 clock: Arc::clone(owned.clock()),
                 cancel,
@@ -179,6 +184,7 @@ impl ActorContext {
                 actor: ActorKey::session("unavailable").expect("a constant actor id"),
                 epoch: Epoch(0),
                 mail: None,
+                drain: None,
                 liveness: None,
                 clock: Arc::new(crate::SystemClock),
                 cancel: CancellationToken::new(),
@@ -282,9 +288,28 @@ impl ActorContext {
     #[must_use]
     pub fn draining(&self) -> bool {
         self.inner
-            .mail
+            .drain
             .as_ref()
-            .is_some_and(lash_durable::runner::MailWaker::draining)
+            .is_some_and(lash_durable::runner::Drain::started)
+    }
+
+    /// Release the claimed actor `ready` under `drain.release`, at the
+    /// committed phase its rows hold, for a node of the next build; the
+    /// node's drain records it among the actors it released.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal: [`DurableError::OwnershipLost`] once the actor
+    /// is someone else's; unavailable for a context that owns no claim.
+    pub async fn drain_release(&self) -> Result<ActorCommit, DurableError> {
+        let Some(drain) = &self.inner.drain else {
+            return Err(DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Unavailable,
+                message: "a context that owns no claim has no drain".to_owned(),
+            }));
+        };
+        let tx = self.begin().await?;
+        drain.release(self.durable()?.as_ref(), tx).await
     }
 
     /// Whether the claiming node still holds its lease by its own clock:

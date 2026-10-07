@@ -18,7 +18,7 @@ mod session_deletion;
 pub use session_deletion::SessionDeleteCompletion;
 mod work_drivers;
 
-pub use drain::DeploymentDrainStatus;
+pub use drain::{DeploymentDrainStatus, NodeDrainError, NodeDrainReport};
 use work_drivers::CoreWorkSetup;
 pub(crate) use work_drivers::CoreWorkSlot;
 #[derive(Clone)]
@@ -248,6 +248,30 @@ impl LashCore {
 
             tool_source_policy: None,
         }
+    }
+
+    /// Drain this core's node by release (ADR 0106 §1) and wait until it
+    /// stops: what a host does to its old build when a release changes a
+    /// durable format, in place of resetting lash's state.
+    ///
+    /// The node records itself draining and claims nothing more. Each
+    /// session it owns stops at its next committed phase (before its next
+    /// model call or cell) and each process once its running steps have
+    /// committed their outcomes; each is released `ready` for whichever
+    /// node of the next build decodes it, which resumes it from its rows.
+    /// When none is left the node releases its lease and the drain answers
+    /// what it released. The core still admits work: a send writes its mail
+    /// and wakes its session, which the next build's nodes claim. A drained
+    /// core never starts a node again, and draining it again answers the
+    /// same report.
+    ///
+    /// # Errors
+    ///
+    /// [`NodeDrainError::NotServing`] when the core runs no node,
+    /// [`NodeDrainError::Stopped`] when the node stopped for another reason
+    /// first, and [`NodeDrainError::Store`] for the store's refusal.
+    pub async fn drain(&self) -> std::result::Result<NodeDrainReport, NodeDrainError> {
+        self.node.drain(self).await
     }
 
     /// Shut down registered plugin factories after the host has stopped intake.

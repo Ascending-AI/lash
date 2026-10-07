@@ -14,25 +14,17 @@ unless they say otherwise.
 
 ## What has not landed yet
 
-Four host-facing parts are still open. The guide says where each applies.
+One host-facing part is still open.
 
-- **Session mail** (L3s, FIG-5196). Session input written as mail with a wake
-  in its producer's transaction, and its drain inside the session actor, are
-  still stubs (`Backend::wake_session`, the durable shift work).
-  [§1](#no-engine-server) describes the end state.
-- **Serving through the facade.** A node is served today by
-  `lash_core::runtime::durable::node::serve` (the
+- **Processes on the core's node** (FIG-5216). A `LashCore` runs one node,
+  and that node serves its backend's session actors only: it claims no
+  process actor. A process that a session or the host starts is written and
+  woken, but nothing served through the facade runs it. A node that runs
+  processes is served today by `lash_core::runtime::durable::node::serve`
+  with a `ProcessActivation` over the host's `ProcessSteps`, as the
   [`lash-postgres-workers` runbook](../../runbooks/lash-postgres-workers/README.md)
-  does this). The facade does not re-export it yet. That waits on the facade
-  turn wiring that follows FIG-5172.
-- **Drain by release** (L11, FIG-5187). Until it lands, a pre-1.0 version
-  bump resets lash's state instead of rolling
-  ([Deploying and upgrading](deploying-and-upgrading.md#upgrading-lash-before-10)).
-- **Completion keys for Pending tools.** The wait rows, keys and
-  `Completions::resolve` are live, and a host process engine's `PinKey`
-  mints its keys through them. A Pending tool call's completion key still
-  goes through the retired `AwaitEventKey` path until the tool-completion
-  port lands (fig-5174-pending).
+  does. The facade does not re-export them. [§4](#4-host-process-engines)
+  describes the end state.
 
 ## 1. What a host runs
 
@@ -81,7 +73,7 @@ let backend = DurableBackendBuilder::new(stores)
 let core = lash::LashCore::builder(backend)
     .execution_budgets(budgets)
     // providers, plugins, models, tracing ...
-    .build()?;
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(node_name, boot_id))?;
 ```
 
 `build` validates the settings and refuses with `lash::durable::DurableBuildError`:
@@ -97,14 +89,20 @@ let core = lash::LashCore::builder(backend)
 
 ### Node identity
 
-A node serves under a `lash::durable::NodeId`, a stable name the host
-chooses: the pod name, the host name, or a configured value. Every start of
-the process is a new boot. A new boot under a name that is still registered
-fences the old boot: the old boot's commits fail with `OwnershipLost`. Never
-give two live nodes the same name.
+A `LashCore` runs one node from the moment it is built on a runtime (or from
+the first session it opens, when it was built outside one). The node serves
+under the `owner_id` of the `lash::persistence::LeaseOwnerIdentity` the
+builder's `build` takes: a stable name the host chooses, such as the pod
+name, the host name or a configured value. Every start of the process is a
+new boot. A new boot under a name that is still registered fences the old
+boot: the old boot's commits fail with `OwnershipLost`. Never give two live
+nodes the same name. `LashCoreBuilder::serve_sessions(false)` builds a core
+that runs no node; it still sends, reads and administers, and its sessions'
+turns run on the deployment's other nodes.
 
-`NodeServe` also names the format sets the node decodes (`decodes`). A node
-claims only actors whose state is written in one of them ([§5](#format-compatibility)).
+A node decodes the format sets of its backend's build (`Backend::formats`)
+and claims only actors whose state is written in one of them
+([§8](#format-compatibility)).
 
 ### Heartbeat, self-stop and reap
 
@@ -135,26 +133,61 @@ failover runbook measured 257 ms with the lock and 15 963 ms without it
 
 ### Clean shutdown
 
-`serve(&backend, serve, stop)` returns when its `stop` future completes, when
-the node loses its lease, or when it fails to renew:
+`LashCore::shutdown` resigns the core's recovery leadership, stops its node,
+then shuts down its plugin factories. A node stops with one of the runner's
+reasons (`lash::durable::runner::Stopped`):
 
-- `Stopped::Requested`: the host asked. The node releases its actors, and
-  another node claims them within a claim poll. The runbook measured a 7 ms
-  handover.
-- `Stopped::LeaseLost`: another node reaped this one.
-- `Stopped::Unrenewed`: renewals failed for `self_stop_after`.
+- `Requested`: the host asked. The node releases its actors, and another node
+  claims them within a claim poll. The runbook measured a 7 ms handover.
+- `LeaseLost`: another node reaped this one, or a newer boot of its name
+  replaced it.
+- `Unrenewed`: renewals failed for `self_stop_after`, so it stopped before
+  anyone could reap it.
+- `Drained`: it drained by release ([below](#drain-by-release)).
 
-Complete `stop` on SIGTERM, before the platform's kill deadline. A node killed
-without stopping costs one reap: one claim poll with the liveness lock, or
-`ttl` + `reap_every` without it. No acknowledged work is lost either way.
-`LashCore::shutdown` releases plugin-factory resources. Call it after the node
-has stopped.
+Call `shutdown` on SIGTERM, after the host stops intake and before the
+platform's kill deadline. A node killed without stopping costs one reap: one
+claim poll with the liveness lock, or `ttl` + `reap_every` without it. No
+acknowledged work is lost either way. A node served directly with
+`node::serve(&backend, serve, stop)` stops when its `stop` future completes,
+for the same reasons.
 
-The runner awaits its heartbeat inline. While one heartbeat call hangs, the
-node neither stops itself nor polls `stop`
-([finding 1](../../runbooks/lash-postgres-workers/README.md#findings)). The
-epoch fence keeps that safe, but bound the store's connect and statement
-timeouts so a hung call ends.
+Every store call the runner makes races the host's stop and the self-stop
+deadline, so a heartbeat that hangs still stops the node at `self_stop_after`,
+and its activations with it. Bound the store's connect and statement timeouts
+anyway, so a hung call ends.
+
+### Drain by release
+
+A release that changes a durable format retires the old build by draining it
+([ADR 0106 §1](../adr/0106-durable-formats-upgrade-by-migration-or-drain.md#1-long-running-work-and-drain-by-release)).
+`LashCore::drain()` drains the core's node and waits until it stops:
+
+1. the node records itself draining and claims nothing more;
+2. each session it owns stops at its next committed phase, before its next
+   model call or code cell; a turn's model call or tool round that is
+   already running finishes and commits first;
+3. each one is released `ready` under `drain.release`, and when none is left
+   the node releases its lease.
+
+Nodes of the next build claim the released actors whose formats they decode
+and resume each from its committed rows: nothing is re-run that committed,
+and a `SendHandle` taken on the old build still answers when the turn
+finishes elsewhere. `drain` answers a `lash::NodeDrainReport` naming the
+`sessions` and `processes` it released, in release order. It refuses with
+`lash::NodeDrainError`:
+
+| Refusal | Cause |
+| --- | --- |
+| `NotServing` | The core runs no node: it serves no sessions, or it shut down first. |
+| `Stopped(Stopped)` | The node stopped for another reason before it drained, such as a lost lease or a `shutdown` during the drain. What it still owned is claimed by other nodes as after a crash. |
+| `Store(DurableError)` | The store refused the node's registration or its release. |
+
+A drained core never starts a node again, and draining it again answers the
+same report. It still admits work: a send writes its mail and wakes its
+session, and the next build's nodes run it. Call `shutdown` once the old
+build's intake has moved. A node served directly drains when the host starts
+the `Drain` its `NodeServe` holds, and `serve` returns `Stopped::Drained`.
 
 ## 2. PostgreSQL topology
 
@@ -668,13 +701,13 @@ runnable until the cursor is drained.
 
 ### Format compatibility
 
-Every actor records the format set its state is written in. A node declares
-the format sets it decodes (`NodeServe::decodes`) and claims only actors in
-them. An actor in a format no running node decodes stays unclaimed until a
+Every actor records the format set its state is written in. A node registers
+the format sets its build decodes (`Backend::formats`) and claims only actors
+in them. An actor in a format no running node decodes stays unclaimed until a
 build that decodes it runs. Changing kernel code never needs a drain. Changing
-a durable format does, under [ADR 0106](../adr/0106-durable-formats-upgrade-by-migration-or-drain.md).
-Drain by release, which retires a format by letting the old build finish its
-actors, is L11's (FIG-5187) and has not landed.
+a durable format does, under [ADR 0106](../adr/0106-durable-formats-upgrade-by-migration-or-drain.md):
+the old build [drains by release](#drain-by-release) and finishes nothing by
+hand.
 
 ### Two non-guarantees
 

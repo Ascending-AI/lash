@@ -193,7 +193,8 @@ pub use crate::admin::{
     SessionCommandWithdrawal, SessionTriggerAdmin, ToolAdmin,
 };
 pub use crate::core::{
-    DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteCompletion, SessionDeletion,
+    DeploymentDrainStatus, LashCore, LashCoreBuilder, NodeDrainError, NodeDrainReport,
+    SessionDeleteCompletion, SessionDeletion,
 };
 pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};
