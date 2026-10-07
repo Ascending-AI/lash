@@ -35,19 +35,18 @@ impl SessionReadView {
         active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
     ) -> Self {
         Self(
-            Arc::new(SessionReadState {
+            Arc::new(SessionReadState::new(
                 meta,
-                graph: SessionReadGraph::Derived {
+                SessionReadGraph::Derived {
                     cache: OnceLock::new(),
                     base_graph,
                 },
-                read_model: crate::session_graph::SessionReadModel {
+                crate::session_graph::SessionReadModel {
                     active_events,
                     messages: messages.shared(),
                     prompt_render_cache: Arc::new(crate::BaseRenderCache::new()),
                 },
-                chronological_projection: OnceLock::new(),
-            }),
+            )),
             Default::default(),
         )
     }
@@ -57,12 +56,11 @@ impl SessionReadView {
     pub fn from_snapshot(snapshot: &SessionSnapshot) -> Self {
         let read_model = snapshot.read_model();
         Self(
-            Arc::new(SessionReadState {
-                meta: SessionReadMeta::from_snapshot_ref(snapshot),
-                graph: SessionReadGraph::Owned(snapshot.session_graph.clone()),
+            Arc::new(SessionReadState::new(
+                SessionReadMeta::from_snapshot_ref(snapshot),
+                SessionReadGraph::Owned(snapshot.session_graph.clone()),
                 read_model,
-                chronological_projection: OnceLock::new(),
-            }),
+            )),
             Default::default(),
         )
     }
@@ -71,12 +69,11 @@ impl SessionReadView {
     /// implementors while validating and applying durable session transitions.
     pub fn from_persisted_state(state: &RuntimeSessionState) -> Self {
         Self(
-            Arc::new(SessionReadState {
-                meta: SessionReadMeta::from_persisted_ref(state),
-                graph: SessionReadGraph::Owned(state.session_graph.clone()),
-                read_model: state.read_model(),
-                chronological_projection: OnceLock::new(),
-            }),
+            Arc::new(SessionReadState::new(
+                SessionReadMeta::from_persisted_ref(state),
+                SessionReadGraph::Owned(state.session_graph.clone()),
+                state.read_model(),
+            )),
             Default::default(),
         )
     }
@@ -90,12 +87,11 @@ impl SessionReadView {
         let mut meta = SessionReadMeta::from_persisted_ref(state);
         meta.durable_relation = Some(relation);
         Self(
-            Arc::new(SessionReadState {
+            Arc::new(SessionReadState::new(
                 meta,
-                graph: SessionReadGraph::Owned(state.session_graph.clone()),
-                read_model: state.read_model(),
-                chronological_projection: OnceLock::new(),
-            }),
+                SessionReadGraph::Owned(state.session_graph.clone()),
+                state.read_model(),
+            )),
             Default::default(),
         )
     }
@@ -106,14 +102,13 @@ impl SessionReadView {
         protocol_turn_options: crate::ProtocolTurnOptions,
     ) -> Self {
         Self(
-            Arc::new(SessionReadState {
-                meta: SessionReadMeta::from_persisted_ref(state)
+            Arc::new(SessionReadState::new(
+                SessionReadMeta::from_persisted_ref(state)
                     .with_policy(policy)
                     .with_protocol_turn_options(protocol_turn_options),
-                graph: SessionReadGraph::Owned(state.session_graph.clone()),
-                read_model: state.read_model(),
-                chronological_projection: OnceLock::new(),
-            }),
+                SessionReadGraph::Owned(state.session_graph.clone()),
+                state.read_model(),
+            )),
             Default::default(),
         )
     }
@@ -132,12 +127,11 @@ impl SessionReadView {
             meta.plugin_config = view.sticky.plugin_config.clone();
         }
         Self(
-            Arc::new(SessionReadState {
+            Arc::new(SessionReadState::new(
                 meta,
-                graph: SessionReadGraph::Owned(state.session_graph.clone()),
-                read_model: state.read_model(),
-                chronological_projection: OnceLock::new(),
-            }),
+                SessionReadGraph::Owned(state.session_graph.clone()),
+                state.read_model(),
+            )),
             Default::default(),
         )
     }
@@ -193,6 +187,15 @@ impl SessionReadView {
         self.0.meta.durable_relation.as_ref()
     }
 
+    /// Borrows the current agent frame identity, cached when this view was built.
+    ///
+    /// Returns `None` when the active graph has no frame. This does not project
+    /// a snapshot or materialize a derived view's message tail. Compare
+    /// `current_frame()` in your before-turn hook to detect compaction or a frame switch.
+    pub fn current_frame(&self) -> Option<&crate::FrameNodeId> {
+        self.0.current_frame.as_ref()
+    }
+
     pub fn policy(&self) -> &SessionPolicy {
         &self.0.meta.policy
     }
@@ -245,7 +248,9 @@ impl SessionReadView {
     /// Projects this `SessionReadView` into snapshot form for store, effect-host, and protocol
     /// implementors while materializing, executing, or persisting a session turn.
     pub fn to_snapshot(&self) -> SessionSnapshot {
-        self.0.meta.to_snapshot(self.session_graph().clone())
+        self.0
+            .meta
+            .to_snapshot(self.session_graph().clone(), self.current_frame().cloned())
     }
 }
 
@@ -253,9 +258,34 @@ impl SessionReadView {
 pub struct SessionReadState {
     meta: SessionReadMeta,
     graph: SessionReadGraph,
+    current_frame: Option<crate::FrameNodeId>,
     read_model: crate::session_graph::SessionReadModel,
     chronological_projection: OnceLock<Arc<crate::ChronologicalProjection>>,
 }
+impl SessionReadState {
+    fn new(
+        meta: SessionReadMeta,
+        graph: SessionReadGraph,
+        read_model: crate::session_graph::SessionReadModel,
+    ) -> Self {
+        // Rewriting a derived view's message tail preserves the base frame.
+        let source = match &graph {
+            SessionReadGraph::Owned(graph) => graph,
+            SessionReadGraph::Derived { base_graph, .. } => base_graph,
+        };
+        let current_frame = source
+            .nearest_frame_node_id(source.leaf_node_id.as_deref())
+            .and_then(|node_id| crate::FrameNodeId::new(node_id.as_str()).ok());
+        Self {
+            meta,
+            graph,
+            current_frame,
+            read_model,
+            chronological_projection: OnceLock::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SessionReadMeta {
     session_id: SessionId,
@@ -315,15 +345,11 @@ impl SessionReadMeta {
         self
     }
 
-    fn to_snapshot(&self, session_graph: crate::SessionGraph) -> SessionSnapshot {
-        // Frame identity is derived from the graph this view already carries.
-        // Leaving it out made a durable frame switch (FIG-3107) invisible to
-        // every read-view consumer: the plugin that opens a recovery frame
-        // then derives the next frame key from an empty parent, and a host
-        // reading the view cannot tell which frame the session is resident in.
-        let current_frame_node_id = session_graph
-            .nearest_frame_node_id(session_graph.leaf_node_id.as_deref())
-            .and_then(|node_id| crate::FrameNodeId::new(node_id.as_str()).ok());
+    fn to_snapshot(
+        &self,
+        session_graph: crate::SessionGraph,
+        current_frame_node_id: Option<crate::FrameNodeId>,
+    ) -> SessionSnapshot {
         // An unreadable frame set is the same blind state this projection just
         // stopped producing, so it is reported rather than silently defaulted.
         // `to_snapshot` is infallible on every read-view consumer (stores,

@@ -924,10 +924,9 @@ mod tests {
             Some(opened.frame_node_id.as_str())
         );
         assert_eq!(
-            state
-                .session_graph
-                .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref())
-                .map(crate::NodeId::as_str),
+            crate::SessionReadView::from_persisted_state(&state)
+                .current_frame()
+                .map(crate::FrameNodeId::as_str),
             Some(opened.frame_node_id.as_str())
         );
         let read = state.read_model();

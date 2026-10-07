@@ -801,6 +801,61 @@ fn projection_text(id: &str) -> crate::Message {
     }
 }
 
+fn assert_read_views_current_frame(
+    state: &RuntimeSessionState,
+    expected: Option<&crate::FrameNodeId>,
+) {
+    let snapshot = state.to_snapshot();
+    let policy = state.policy.clone();
+    let options = crate::ProtocolTurnOptions::default();
+    let views = [
+        crate::SessionReadView::from_snapshot(&snapshot),
+        crate::SessionReadView::from_persisted_state(state),
+        crate::SessionReadView::from_persisted_state_with_relation(
+            state,
+            crate::SessionRelation::Root,
+        ),
+        crate::SessionReadView::from_runtime_state(state, policy.clone(), options.clone()),
+        crate::SessionReadView::recorded_from_runtime_state(state),
+        crate::SessionReadView::derived_from_persisted_state(
+            state,
+            policy.clone(),
+            state.turn_index,
+            options.clone(),
+            std::sync::Arc::new(state.session_graph.clone()),
+            crate::MessageSequence::from(vec![projection_text("projected")]),
+        ),
+        crate::SessionReadView::derived_from_persisted_state(
+            state,
+            policy,
+            state.turn_index,
+            options,
+            std::sync::Arc::new(state.session_graph.clone()),
+            crate::MessageSequence::default(),
+        ),
+    ];
+    for view in views {
+        assert_eq!(view.current_frame(), expected);
+        assert_eq!(
+            view.current_frame(),
+            view.to_snapshot().current_frame_node_id.as_ref()
+        );
+    }
+}
+
+/// FIG-5248: a fresh session exposes its initial frame without a snapshot projection.
+#[test]
+fn read_view_current_frame_is_the_initial_frame() {
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
+    assert_read_views_current_frame(&state, None);
+    state.ensure_agent_frame_initialized();
+    let initial_frame = state.current_frame_node_id.as_ref().expect("initial frame");
+    assert_read_views_current_frame(&state, Some(initial_frame));
+}
+
 /// ADR 0112 §9, §14 test 6: once a frame switch is durable, the resident
 /// graph is the new frame. The window base is the new `FrameOpen`,
 /// `persisted_node_ids` stays a subset of the resident ids, and one frame
@@ -818,6 +873,7 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
     };
     state.append_active_conversation_messages(&[projection_text("a1"), projection_text("a2")]);
     let old_frame = state.current_frame_node_id.clone().expect("initial frame");
+    let old_view = crate::SessionReadView::from_persisted_state(&state);
     let durable = state
         .session_graph
         .nodes
@@ -862,6 +918,9 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
     state.mark_node_ids_persisted(committed);
 
     assert_eq!(state.current_frame_node_id.as_ref(), Some(&new_frame));
+    assert_ne!(new_frame, old_frame);
+    assert_read_views_current_frame(&state, Some(&new_frame));
+    assert_eq!(old_view.current_frame(), Some(&old_frame));
     let anchor = state.session_graph.anchor().expect("re-anchored").clone();
     assert_eq!(anchor.frame_node_id, new_frame);
     assert_eq!(anchor.previous_frame_node_id.as_ref(), Some(&old_frame));
