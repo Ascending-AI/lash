@@ -51,7 +51,7 @@ pub struct SessionBuilder {
 /// store transaction. Nothing here is written again on open.
 #[derive(Clone, Debug)]
 pub struct SessionCreation {
-    /// The session's whole config, stated by its creator (FIG-4594): the
+    /// The session's execution config, stated by its creator (FIG-4594): the
     /// model key, turn budget and tool-call limit [`SessionSpec::new`] takes, and reasoning,
     /// attachment acceptance, generation, the other execution controls and
     /// plugin creation options as its setters state them. Nothing of the
@@ -59,7 +59,8 @@ pub struct SessionCreation {
     /// lash documents for it. A host that wants a default keeps its own
     /// `SessionSpec` value and passes it. The model key is minted into a
     /// recorded binding by the core's models when the session is created;
-    /// every open runs that recorded binding.
+    /// every open runs that recorded binding. The initial prompt plan is
+    /// stated separately in [`prompt_plan`](Self::prompt_plan).
     ///
     /// Every plugin the core installs, the protocol among them, creates its
     /// own namespace from its key of the spec's
@@ -75,26 +76,37 @@ pub struct SessionCreation {
     /// This is the only facade path to a related session: the session is an
     /// ordinary session with its own Session Binding and its own usage
     /// ledger — rolling related sessions together is host policy, not a
-    /// facade service. The child starts with a copy of this parent's
-    /// committed prompt plan, which it then configures independently.
+    /// facade service. Parentage copies no configuration.
     /// `None` creates a root session.
     pub parent: Option<SessionId>,
+    /// The initial prompt plan chosen by the creator. `None` uses the neutral
+    /// default for roots and related sessions alike.
+    pub prompt_plan: Option<crate::prompt::PromptPlan>,
 }
 
 impl SessionCreation {
     /// A root session created from `spec`.
     pub fn root(spec: SessionSpec) -> Self {
-        Self { spec, parent: None }
+        Self {
+            spec,
+            parent: None,
+            prompt_plan: None,
+        }
     }
 
     /// A session created from `spec` and recorded as `parent`'s child
-    /// (ADR 0089). It records `spec` and a copy of its parent's committed
-    /// prompt plan; later configuration is independent (FIG-5273).
+    /// (ADR 0089). It records only the configuration its creator supplies.
     pub fn child_of(parent: SessionId, spec: SessionSpec) -> Self {
         Self {
             spec,
             parent: Some(parent),
+            prompt_plan: None,
         }
+    }
+    /// Start with exactly `plan`, without consulting any parent session.
+    pub fn with_prompt_plan(mut self, plan: crate::prompt::PromptPlan) -> Self {
+        self.prompt_plan = Some(plan);
+        self
     }
 }
 
@@ -239,25 +251,24 @@ impl SessionBuilder {
     /// is refused before admission as [`CoreConfigRefusal::UnsafeRetriesAboveCeiling`](crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling)
     /// inside [`SessionError::SessionConfigRefused`].
     pub async fn create(self, creation: SessionCreation) -> Result<DurableSession> {
-        let SessionCreation { spec, parent } = creation;
-        // A related session records the spec its creator states (ADR 0089)
-        // and starts with its parent's committed prompt plan (FIG-5273).
+        let SessionCreation {
+            spec,
+            parent,
+            prompt_plan,
+        } = creation;
+        // Parentage is only a relation: creation records its explicit input.
         let policy = self.minted_policy(&spec)?;
         let plugin_options = spec.plugin_options;
         lash_core::CoreConfigOwner::validate_charge_safety(&policy.charge_safety)
             .map_err(lash_core::CoreConfigOwner::creation_refusal)
             .map_err(lash_core::SessionError::SessionConfigRefused)?;
         let mut config = lash_core::PersistedSessionConfig::from(&policy);
-        if let Some(parent_id) = parent.as_ref() {
-            let parent_store =
-                resolve_existing_session(&self.core.store_factory, parent_id).await?;
-            let head = parent_store
-                .load_session_head_meta()
-                .await?
-                .ok_or_else(|| EmbedError::UnknownSession {
-                    session_id: parent_id.clone(),
-                })?;
-            config.prompt_plan = head.config.prompt_plan;
+        if let Some(plan) = prompt_plan {
+            plan.validate()
+                .map_err(|error| lash_core::CoreConfigRefusal::PromptPlanRefused { error })
+                .map_err(lash_core::CoreConfigOwner::creation_refusal)
+                .map_err(lash_core::SessionError::SessionConfigRefused)?;
+            config.prompt_plan = plan;
         }
         // Every plugin the core installs resolves its recorded namespace —
         // the protocol's among them — from what the creator stated (FIG-4379).

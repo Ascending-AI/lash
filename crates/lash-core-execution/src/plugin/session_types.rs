@@ -229,6 +229,10 @@ pub struct SessionCreateRequest {
     pub start: SessionStartPoint,
     #[serde(default)]
     pub policy: Option<SessionPolicy>,
+    /// The initial prompt plan chosen by the creator. An unstated plan uses
+    /// the neutral default, regardless of the session relation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_plan: Option<crate::prompt_sections::PromptPlan>,
     /// A model key the child runs instead of the recorded model its policy
     /// carries. The creating runtime's models mint it when the child is
     /// created, and the child records that binding with its config. `None`
@@ -275,6 +279,7 @@ impl SessionCreateRequest {
             plugin_options,
             model: None,
             reasoning: None,
+            prompt_plan: None,
         }
     }
 
@@ -299,6 +304,7 @@ impl SessionCreateRequest {
             plugin_options,
             model: None,
             reasoning: None,
+            prompt_plan: None,
         }
     }
 
@@ -324,7 +330,14 @@ impl SessionCreateRequest {
             plugin_options,
             model: None,
             reasoning: None,
+            prompt_plan: None,
         }
+    }
+
+    /// Start with exactly `plan`, without consulting any parent session.
+    pub fn with_prompt_plan(mut self, plan: crate::prompt_sections::PromptPlan) -> Self {
+        self.prompt_plan = Some(plan);
+        self
     }
 
     /// Run the child on `key`, minted when the child is created.

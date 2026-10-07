@@ -26,6 +26,7 @@ fn a_creation_has_no_default() {
 fn a_creation_states_its_spec() {
     let _ = lash::SessionCreation {
         parent: None,
+        prompt_plan: None,
     };
 }
 

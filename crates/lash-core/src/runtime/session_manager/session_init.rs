@@ -60,27 +60,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
 ) -> Result<SessionInitPlan, crate::PluginError> {
     let (session_id, request) = identified_create_request(request)?;
     let facts = resolve_child_facts(&StarterFacts::of(current), &request, &session_id)?;
-    let mut plan = plan_session_init(current, request, session_id, facts)?;
-    if let Some(parent) = plan.relation.parent_session_id() {
-        // D-PSECREV (FIG-5273): inherit the committed head, never worker
-        // defaults or a turn's uncommitted view. The child's admission writes
-        // this copy with its initial config; later commands affect only it.
-        let store = durable_session_store(current, parent).await?;
-        let head = match store {
-            Some(store) => store
-                .load_session_head_meta()
-                .await
-                .map_err(crate::PluginError::from)?,
-            None => None,
-        }
-        .ok_or_else(|| {
-            crate::PluginError::from(crate::StoreError::SessionNotFound {
-                session_id: parent.clone(),
-            })
-        })?;
-        plan.initial_runtime_state.authority.prompt_plan = head.config.prompt_plan;
-    }
-    Ok(plan)
+    plan_session_init(current, request, session_id, facts)
 }
 
 /// The plan that finishes a partial create from the config its admission
@@ -99,15 +79,12 @@ fn recorded_creation_plan(
     let policy = created.policy.clone();
     request.tool_access = created.authority.tool_access.clone();
     request.subagent = created.authority.subagent.clone();
+    request.prompt_plan = Some(created.authority.prompt_plan.clone());
     let facts = ChildFacts {
         policy,
         plugin_config: created.authority.plugin_config.clone(),
     };
-    let mut plan = plan_session_init(current, request, session_id, facts)?;
-    // A partial create already recorded its inherited plan. Redelivery must
-    // finish that config even if the parent's plan has changed since.
-    plan.initial_runtime_state.authority.prompt_plan = created.authority.prompt_plan.clone();
-    Ok(plan)
+    plan_session_init(current, request, session_id, facts)
 }
 
 /// `request` with its session identified: the id it names, or a minted one.
@@ -141,6 +118,16 @@ fn plan_session_init(
     session_id: SessionId,
     facts: ChildFacts,
 ) -> Result<SessionInitPlan, crate::PluginError> {
+    if let Some(plan) = request.prompt_plan.as_ref() {
+        plan.validate().map_err(|error| {
+            crate::PluginError::Runtime(crate::RuntimeError::session_config_refused(
+                &session_id,
+                crate::CoreConfigOwner::creation_refusal(
+                    crate::CoreConfigRefusal::PromptPlanRefused { error },
+                ),
+            ))
+        })?;
+    }
     // Every session initializes empty: `SessionStartPoint::Empty` is the only
     // start point initialisation admits. Durable forks and resumed sessions
     // get their state from the store, not from the create request.
@@ -393,6 +380,7 @@ fn build_runtime_state(
     base.policy = policy.clone();
     base.authority.tool_access = request.tool_access.clone();
     base.authority.subagent = request.subagent.clone();
+    base.authority.prompt_plan = request.prompt_plan.clone().unwrap_or_default();
     base.session_graph = crate::SessionGraph::default();
     base.agent_frames.clear();
     base.current_frame_node_id = None;
