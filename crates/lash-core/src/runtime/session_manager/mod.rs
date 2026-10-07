@@ -607,4 +607,248 @@ pub(super) fn emit_session_events(event_tx: &TurnObserver, plugin_events: Vec<Se
 }
 
 #[cfg(test)]
-mod process_visibility_tests {}
+mod process_visibility_tests {
+    use super::{ProcessVisibility, RuntimeSessionProcessService};
+    use crate::SessionId;
+    use crate::TurnId;
+
+    use crate::runtime::tests::helpers::standard_test_policy;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const SESSION_ID: &str = "process-visibility-table-session";
+
+    #[derive(Clone, Copy, Debug)]
+    enum Operation {
+        ListVisible,
+        ListVisibleForAttempt,
+        ValidateVisible,
+        SignalPossessed,
+    }
+
+    struct CountingFilter {
+        invocations: AtomicUsize,
+        hidden: std::sync::OnceLock<crate::ProcessId>,
+    }
+
+    impl CountingFilter {
+        fn reset(&self) {
+            self.invocations.store(0, Ordering::SeqCst);
+        }
+
+        fn invocations(&self) -> usize {
+            self.invocations.load(Ordering::SeqCst)
+        }
+    }
+
+    impl crate::ProcessToolVisibilityFilter for CountingFilter {
+        fn narrow(
+            &self,
+            _session: &crate::SessionId,
+            candidates: &[crate::ProcessId],
+        ) -> Vec<crate::ProcessId> {
+            self.invocations.fetch_add(1, Ordering::SeqCst);
+            candidates
+                .iter()
+                .filter(|process_id| Some(*process_id) != self.hidden.get())
+                .cloned()
+                .collect()
+        }
+    }
+
+    async fn test_service(
+        visibility: ProcessVisibility,
+    ) -> (
+        RuntimeSessionProcessService,
+        Arc<CountingFilter>,
+        crate::Backend,
+        crate::ProcessId,
+    ) {
+        let filter = Arc::new(CountingFilter {
+            invocations: AtomicUsize::new(0),
+            hidden: std::sync::OnceLock::new(),
+        });
+        let backend = crate::testing::sqlite_memory_store_backend().await;
+        let registry = backend.process_registry();
+        let core = crate::RuntimeHostConfig::new(
+            backend.clone(),
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_process_tool_visibility_filter(filter.clone());
+        let env = crate::RuntimeEnvironment::builder(core)
+            .with_plugin_host(Arc::new(crate::PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )))
+            .with_process_work(crate::testing::process_work_wiring_for_registry(
+                registry.clone(),
+            ))
+            .build();
+        let policy = standard_test_policy();
+        let runtime = crate::LashRuntime::from_environment(
+            &env,
+            policy.clone(),
+            crate::RuntimeSessionState {
+                session_id: SessionId::fixture(SESSION_ID.to_string()),
+                policy,
+                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ))
+            },
+            None,
+            crate::testing::runtime_lease_owner(),
+        )
+        .await
+        .expect("runtime with counting process visibility filter");
+
+        let mut registered = Vec::new();
+        for _ in ["visible", "hidden"] {
+            let process_id = registry
+                .register_process_with_observers(
+                    crate::testing::held_engine_registration(
+                        serde_json::Value::Null,
+                        crate::ProcessProvenance::host(),
+                        crate::Lifetime::Detached,
+                    )
+                    .with_extra_event_types([crate::ProcessEventType {
+                        name: "signal.ready".to_string(),
+                        payload_schema: crate::JsonSchema::any(),
+                        semantics: crate::ProcessEventSemanticsSpec::default(),
+                    }]),
+                    &[SessionId::fixture(SESSION_ID.to_string())],
+                )
+                .await
+                .expect("register observed process for visibility table")
+                .id;
+            registered.push(process_id);
+        }
+        let hidden_process_id = registered.pop().expect("the hidden process");
+        filter
+            .hidden
+            .set(hidden_process_id.clone())
+            .expect("the hidden process is registered once");
+
+        let services = runtime
+            .runtime_session_services()
+            .expect("runtime session services");
+        (
+            RuntimeSessionProcessService {
+                services,
+                visibility,
+            },
+            filter,
+            backend,
+            hidden_process_id,
+        )
+    }
+
+    /// One turn's execution context lends each operation its scope: `signal`
+    /// executes its command through it, and the read operations share the
+    /// same shape so the filter observation is identical.
+    fn operation_scope(backend: &crate::Backend) -> crate::ActorContext {
+        crate::ActorContext::detached(backend.clone())
+            .scoped(crate::AdmittedScope::turn(
+                SessionId::from(SESSION_ID),
+                TurnId::fixture(uuid::Uuid::new_v4().to_string()),
+            ))
+            .expect("a turn's scope")
+    }
+
+    fn contains_hidden(records: &[crate::ProcessRecord], hidden: &crate::ProcessId) -> bool {
+        records.iter().any(|record| record.id == *hidden)
+    }
+
+    #[tokio::test]
+    #[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses every process command as RuntimeEffectLocalExecutorMismatch; repro lash-core-execution store_backed process_local::a_process_start_issued_through_the_actor_context_registers_its_process"]
+    async fn process_service_filter_policy_is_enforced_by_every_production_operation() {
+        let cases = [
+            (ProcessVisibility::Full, true),
+            (ProcessVisibility::ModelTool, false),
+        ];
+        let operations = [
+            Operation::ListVisible,
+            Operation::ListVisibleForAttempt,
+            Operation::ValidateVisible,
+            Operation::SignalPossessed,
+        ];
+
+        for (visibility, hidden_is_visible) in cases {
+            for operation in operations {
+                let (service, filter, backend, hidden_process_id) =
+                    Box::pin(test_service(visibility)).await;
+                filter.reset();
+                let expected_invocations = match (visibility, operation) {
+                    (ProcessVisibility::ModelTool, Operation::ListVisible)
+                    | (ProcessVisibility::ModelTool, Operation::ListVisibleForAttempt) => 2,
+                    (ProcessVisibility::ModelTool, Operation::ValidateVisible) => 1,
+                    _ => 0,
+                };
+
+                match operation {
+                    Operation::ListVisible => {
+                        let scope = operation_scope(&backend);
+                        let records = crate::ProcessService::list_visible(
+                            &service,
+                            &SessionId::from(SESSION_ID),
+                            crate::ProcessListMode::Live,
+                            crate::ProcessOpScope::new(scope),
+                        )
+                        .await
+                        .expect("list visible process records");
+                        assert_eq!(
+                            contains_hidden(&records, &hidden_process_id),
+                            hidden_is_visible
+                        );
+                    }
+                    Operation::ListVisibleForAttempt => {
+                        let records = crate::ProcessService::list_visible_for_attempt(
+                            &service,
+                            &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
+                            crate::ProcessListMode::Live,
+                        )
+                        .await
+                        .expect("list visible process records for attempt");
+                        assert_eq!(
+                            contains_hidden(&records, &hidden_process_id),
+                            hidden_is_visible
+                        );
+                    }
+                    Operation::ValidateVisible => {
+                        let scope = operation_scope(&backend);
+                        let result = crate::ProcessService::validate_visible(
+                            &service,
+                            &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
+                            std::slice::from_ref(&hidden_process_id),
+                            crate::ProcessOpScope::new(scope),
+                        )
+                        .await;
+                        assert_eq!(result.is_ok(), hidden_is_visible);
+                    }
+                    Operation::SignalPossessed => {
+                        // Callers own the visibility boundary through validate_visible;
+                        // signal_possessed must not evaluate the filter a second time.
+                        let scope = operation_scope(&backend);
+                        crate::ProcessService::signal_possessed(
+                            &service,
+                            &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
+                            &hidden_process_id,
+                            "ready".to_string(),
+                            uuid::Uuid::new_v4().to_string(),
+                            serde_json::Value::Null,
+                            crate::ProcessOpScope::new(scope),
+                        )
+                        .await
+                        .expect("signal an already-validated possessed process");
+                    }
+                }
+
+                assert_eq!(
+                    filter.invocations(),
+                    expected_invocations,
+                    "unexpected filter calls for {visibility:?} {operation:?}"
+                );
+            }
+        }
+    }
+}

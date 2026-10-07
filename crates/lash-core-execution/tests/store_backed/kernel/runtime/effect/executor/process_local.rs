@@ -273,6 +273,456 @@ mod tests {
         )
     }
 
+    /// The start `envelope` carries, run by the process executor as a
+    /// store-local effect: its registration is its own record, and nothing
+    /// replays it.
+    async fn execute_start(
+        envelope: crate::RuntimeEffectEnvelope,
+        executor: crate::RuntimeEffectLocalExecutor<'static>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let crate::RuntimeEffectCommand::Process { command } = envelope.command else {
+            panic!("a start envelope carries a process command");
+        };
+        let result = executor
+            .into_process()
+            .expect("a process executor")
+            .execute(envelope.invocation.execution_scope(), *command)
+            .await?;
+        Ok(crate::RuntimeEffectOutcome::Process { result })
+    }
+
+    fn started_record(outcome: crate::RuntimeEffectOutcome) -> crate::ProcessRecord {
+        let crate::RuntimeEffectOutcome::Process {
+            result: ProcessEffectOutcome::Start { record, .. },
+        } = outcome
+        else {
+            panic!("wrong start outcome: {outcome:?}")
+        };
+        *record
+    }
+
+    fn start_claim(key: &crate::StartKey) -> crate::ReferrerClaim {
+        crate::ReferrerClaim::guarded(crate::ReferrerGuard::Start {
+            start_key: key.clone(),
+            starter: crate::ExecutionScope::runtime_operation("runtime")
+                .journal_identity()
+                .expect("runtime journal"),
+        })
+    }
+
+    fn carry_env(
+        from: crate::ArtifactReferrer,
+        to: crate::ArtifactReferrer,
+        env_ref: &crate::ProcessExecutionEnvRef,
+    ) -> crate::ResolvedArtifactCleanup {
+        crate::ResolvedArtifactCleanup {
+            referrer: from,
+            carries: vec![crate::ArtifactCarry {
+                artifact: crate::ArtifactName {
+                    store: crate::ArtifactStoreId::ProcessEnv,
+                    artifact_ref: env_ref.as_str().to_owned(),
+                },
+                to,
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn process_start_replays_and_carries_environment_to_process() {
+        let key = "owned-env-start";
+        let backend = crate::support::sqlite_memory_store_backend().await;
+        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
+        let env_spec = crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        );
+        let env_ref = env_spec.stable_ref().expect("stable environment reference");
+        let command = start_envelope(
+            env_store.as_ref(),
+            "owned-env-start",
+            engine_registration(key, "original"),
+            env_spec,
+        )
+        .await;
+        let executor = || {
+            crate::RuntimeEffectLocalExecutor::processes(
+                Arc::clone(&registry),
+                Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+                crate::testing::process_engine_fixture(),
+                crate::runtime::HostStartAdmission::default(),
+            )
+            .with_process_env_store(Arc::clone(&env_store))
+        };
+        let first = started_record(
+            execute_start(command.clone(), executor())
+                .await
+                .expect("initial process start"),
+        );
+        // The second attempt runs the local start again, as a crash after the
+        // start's registration and before its caller recorded the outcome
+        // leaves it: nothing is replayed, so the start runs against the same
+        // registry and environment store.
+        let rerun = started_record(
+            execute_start(command, executor())
+                .await
+                .expect("re-run process start before guard cleanup"),
+        );
+        assert_eq!(
+            rerun.id, first.id,
+            "the start key returns the retained process, never a second one"
+        );
+        let record = registry
+            .get_process(&first.id)
+            .await
+            .expect("read registered process")
+            .expect("registered process remains live");
+
+        let start = crate::ArtifactReferrer::Start(crate::StartKey::for_host(key));
+        let process = crate::ArtifactReferrer::ProcessRecord(record.id.clone());
+        env_store
+            .end_process_env_referrer(&carry_env(start, process.clone(), &env_ref))
+            .await
+            .expect("carry start environment to process");
+        env_store
+            .end_process_env_referrer(&end(process))
+            .await
+            .expect("end process environment referrer");
+        assert_eq!(
+            env_store
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read reclaimed environment"),
+            None,
+            "the process record was the only surviving referrer after the carry"
+        );
+    }
+
+    /// A store that fences the start just before its first acquire, as a
+    /// concurrent attempt can settle the same key before this one stages.
+    struct FenceStartBeforeFirstAcquire {
+        inner: Arc<dyn crate::ProcessExecutionEnvStore>,
+        start: crate::ArtifactReferrer,
+        interleavings: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ProcessExecutionEnvStore for FenceStartBeforeFirstAcquire {
+        async fn publish_process_execution_env(
+            &self,
+            claim: &crate::ReferrerClaim,
+            env_ref: &crate::ProcessExecutionEnvRef,
+            bytes: &[u8],
+        ) -> Result<(), crate::ArtifactStoreError> {
+            self.inner
+                .publish_process_execution_env(claim, env_ref, bytes)
+                .await
+        }
+
+        async fn acquire_process_execution_env(
+            &self,
+            claim: &crate::ReferrerClaim,
+            env_ref: &crate::ProcessExecutionEnvRef,
+        ) -> Result<(), crate::ArtifactStoreError> {
+            if self.interleavings.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.inner
+                    .end_process_env_referrer(&end(self.start.clone()))
+                    .await?;
+            }
+            self.inner
+                .acquire_process_execution_env(claim, env_ref)
+                .await
+        }
+
+        async fn end_process_env_referrer(
+            &self,
+            cleanup: &crate::ResolvedArtifactCleanup,
+        ) -> Result<(), crate::ArtifactStoreError> {
+            self.inner.end_process_env_referrer(cleanup).await
+        }
+
+        async fn get_process_execution_env(
+            &self,
+            env_ref: &crate::ProcessExecutionEnvRef,
+        ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
+            self.inner.get_process_execution_env(env_ref).await
+        }
+    }
+
+    /// FIG-3090: a start whose referrer is fenced before acquisition still
+    /// leaves the registered process holding its environment.
+    ///
+    /// This is the trigger-delivery shape: the registration names an environment
+    /// a subscription already published. A concurrent attempt fences the
+    /// shared start referrer before this attempt acquires; the runtime then
+    /// acquires the same bytes directly for the registered process.
+    #[tokio::test]
+    async fn a_start_acquires_its_environment_after_a_concurrent_attempt_fences_its_referrer() {
+        let key = "raced-staging-owner-start";
+        let backend = crate::support::sqlite_memory_store_backend().await;
+        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let env_spec = crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        );
+        let env_ref = env_spec.stable_ref().expect("stable environment reference");
+        let bytes = env_spec.to_store_bytes().expect("encode environment");
+        let inner: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
+        // The subscription's own edge, exactly as a registered trigger holds it.
+        let subscription = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
+        let subscription_claim =
+            crate::ReferrerClaim::unguarded(subscription.clone()).expect("subscription pin claim");
+        inner
+            .publish_process_execution_env(&subscription_claim, &env_ref, &bytes)
+            .await
+            .expect("publish the subscription environment");
+        let env_store = Arc::new(FenceStartBeforeFirstAcquire {
+            inner: Arc::clone(&inner),
+            start: crate::ArtifactReferrer::Start(crate::StartKey::for_host(key)),
+            interleavings: AtomicUsize::new(0),
+        });
+        let envelope = crate::RuntimeEffectEnvelope::new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::runtime_operation("runtime"),
+                    "raced-staging-owner-start",
+                )
+                .expect("valid process-start test address"),
+                crate::RuntimeAttribution::none(),
+                "raced-staging-owner-start",
+            ),
+            crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
+                registration: engine_registration(key, "delivery")
+                    .with_execution_env_ref(Some(env_ref.clone()))
+                    .into(),
+                observers: Vec::new(),
+                execution_context: Box::new(crate::ProcessExecutionContext::default()),
+            }),
+        );
+        let executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry),
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+            crate::testing::process_engine_fixture(),
+            crate::runtime::HostStartAdmission::default(),
+        )
+        .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>);
+
+        let started = started_record(
+            execute_start(envelope, executor)
+                .await
+                .expect("a severed staging edge must not fail the start"),
+        );
+
+        assert_eq!(
+            env_store.interleavings.load(Ordering::SeqCst),
+            2,
+            "the start first tries its fenced claim, then acquires for the process"
+        );
+        let record = registry
+            .get_process(&started.id)
+            .await
+            .expect("read registered process")
+            .expect("registered process remains live");
+        let process = crate::ArtifactReferrer::ProcessRecord(record.id.clone());
+        inner
+            .end_process_env_referrer(&end(subscription))
+            .await
+            .expect("end the subscription pin");
+        assert_eq!(
+            inner
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read the retained environment"),
+            Some(bytes.clone()),
+            "the registered process must own its environment after the race"
+        );
+        inner
+            .end_process_env_referrer(&end(process))
+            .await
+            .expect("end the process referrer");
+        assert_eq!(
+            inner
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read the reclaimed environment"),
+            None,
+            "the process owner must be the only surviving edge"
+        );
+    }
+
+    /// ADR 0107: a changed-content retry under a trusted key keeps the
+    /// retained process's environment.
+    ///
+    /// The first attempt acquired E1 under the start referrer, registered
+    /// the process naming E1, and crashed before its cleanup. The retry
+    /// publishes E2 under the same start referrer, then returns the retained
+    /// process. The cleanup carries E1 to that process and reclaims E2.
+    #[tokio::test]
+    async fn a_changed_content_retry_after_a_crash_keeps_the_retained_environment() {
+        let backend = crate::support::sqlite_memory_store_backend().await;
+        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
+        let env = |budget: crate::TurnBudget| {
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(budget, crate::MaxToolCalls::new(1024)),
+            )
+        };
+        let first_env = env(crate::TurnBudget::Unbounded);
+        let retry_env = env(crate::TurnBudget::Bounded(
+            std::num::NonZeroUsize::new(3).expect("non-zero budget"),
+        ));
+        let first_ref = first_env.stable_ref().expect("first environment reference");
+        let retry_ref = retry_env.stable_ref().expect("retry environment reference");
+        assert_ne!(first_ref, retry_ref, "the retry submits different content");
+        let key = crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(
+            &crate::derive_tool_intent_identity(
+                &crate::RuntimeOwner::Session(crate::SessionId::from("session")),
+                "runtime",
+                &lash_core_execution::ToolCallId::fixture("crashed-start"),
+                0,
+            ),
+        );
+        let registration = |marker: &str| {
+            let mut registration = engine_registration("crashed-start", marker);
+            registration.start_key = Some(key.clone());
+            registration
+        };
+        let staging = start_claim(&key);
+
+        // The first attempt: staged, registered, crashed before settling.
+        crate::publish_process_execution_env(env_store.as_ref(), &staging, &first_env)
+            .await
+            .expect("stage the first attempt's environment");
+        let retained = registry
+            .register_process(registration("first").with_execution_env_ref(Some(first_ref.clone())))
+            .await
+            .expect("the first attempt registered its process");
+
+        // The retry, which no record of the first attempt answers, with
+        // changed content.
+        let retry_ref =
+            crate::publish_process_execution_env(env_store.as_ref(), &staging, &retry_env)
+                .await
+                .expect("publish retry environment");
+        let envelope = crate::RuntimeEffectEnvelope::new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::runtime_operation("runtime"),
+                    "crashed-start",
+                )
+                .expect("valid process-start test address"),
+                crate::RuntimeAttribution::none(),
+                "crashed-start",
+            ),
+            crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
+                registration: registration("retry")
+                    .with_execution_env_ref(Some(retry_ref.clone()))
+                    .into(),
+                observers: Vec::new(),
+                execution_context: Box::new(crate::ProcessExecutionContext::default()),
+            }),
+        );
+        let executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry),
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+            crate::testing::process_engine_fixture(),
+            crate::runtime::HostStartAdmission::default(),
+        )
+        .with_process_env_store(Arc::clone(&env_store));
+        let returned = started_record(
+            execute_start(envelope, executor)
+                .await
+                .expect("the retry is returned the retained process"),
+        );
+        assert_eq!(returned.id, retained.id);
+        assert_eq!(returned.env_ref.as_ref(), Some(&first_ref));
+
+        let process = crate::ArtifactReferrer::ProcessRecord(retained.id.clone());
+        env_store
+            .end_process_env_referrer(&carry_env(
+                crate::ArtifactReferrer::Start(key.clone()),
+                process.clone(),
+                &first_ref,
+            ))
+            .await
+            .expect("carry the retained environment and reclaim the retry's bytes");
+
+        assert!(
+            env_store
+                .get_process_execution_env(&first_ref)
+                .await
+                .expect("read the retained environment")
+                .is_some(),
+            "the retained process's environment survives the retry"
+        );
+        assert_eq!(
+            env_store
+                .get_process_execution_env(&retry_ref)
+                .await
+                .expect("read the retry's environment"),
+            None,
+            "the retry's unadopted bytes are reclaimed by start cleanup"
+        );
+        env_store
+            .end_process_env_referrer(&end(process))
+            .await
+            .expect("end the process edge");
+        assert_eq!(
+            env_store
+                .get_process_execution_env(&first_ref)
+                .await
+                .expect("read the reclaimed environment"),
+            None,
+            "the process record held the environment after start cleanup"
+        );
+    }
+
+    /// A process command an execution context issues runs as its store-local
+    /// effect through `ActorContext::process_effect`, the one path a signal,
+    /// a start, a cancel or a session's process delete takes.
+    #[tokio::test]
+    #[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (runtime/effect/executor.rs:1042)"]
+    async fn a_process_start_issued_through_the_actor_context_registers_its_process() {
+        let key = "actor-context-start";
+        let backend = crate::support::sqlite_memory_store_backend().await;
+        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let env_store = backend.process_env_store();
+        let envelope = start_envelope(
+            env_store.as_ref(),
+            key,
+            engine_registration(key, "context"),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
+        )
+        .await;
+        let executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry),
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+            crate::testing::process_engine_fixture(),
+            crate::runtime::HostStartAdmission::default(),
+        )
+        .with_process_env_store(env_store);
+        let outcome = crate::ActorContext::detached(backend.clone())
+            .process_effect(envelope, executor)
+            .await
+            .expect("the actor context runs the start");
+        let record = started_record(outcome);
+        assert!(
+            registry
+                .get_process(&record.id)
+                .await
+                .expect("read the started process")
+                .is_some(),
+            "the start registered its process"
+        );
+    }
+
     /// A `ProcessWorkSubstrate` whose advisory poke always fails.
     struct PokeAlwaysFails {
         pokes: AtomicUsize,

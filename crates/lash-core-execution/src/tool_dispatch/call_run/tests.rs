@@ -311,3 +311,149 @@ async fn an_aborted_run_admits_nothing_more() {
         .expect_err("an aborted Run forms no aggregate");
     assert_eq!(control(&refused), Some((aborted_id, true)));
 }
+
+/// An ordinary call whose tool also has a registered process
+/// implementation: its body answers slowly with `body`, and every execution
+/// and every start launch is counted.
+struct SlowOrdinary {
+    body: SingletonBodyOutcome,
+    engines: crate::ProcessEngineRegistry,
+    executions: std::sync::atomic::AtomicUsize,
+    launches: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl SingletonToolHandlers for SlowOrdinary {
+    fn process_engines(&self) -> Option<&crate::ProcessEngineRegistry> {
+        Some(&self.engines)
+    }
+
+    fn isolated_start(
+        &self,
+        _call: &SingletonToolCall,
+    ) -> Option<crate::tool_dispatch::IsolatedToolStart> {
+        Some(crate::tool_dispatch::IsolatedToolStart {
+            registration: crate::testing::held_engine_registration(
+                serde_json::Value::Null,
+                crate::ProcessProvenance::host(),
+                crate::Lifetime::Detached,
+            )
+            .into(),
+        })
+    }
+
+    async fn prepare(&self, _call: &SingletonToolCall) -> Result<serde_json::Value, String> {
+        Ok(serde_json::Value::Null)
+    }
+
+    async fn before_checks(
+        &self,
+        _call: &SingletonToolCall,
+        _request: &SingletonPreparedRequest,
+    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
+        Ok(Vec::new())
+    }
+
+    async fn execute(
+        &self,
+        _attempt: SingletonAttempt<'_>,
+    ) -> Result<SingletonBodyOutcome, String> {
+        self.executions
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        Ok(self.body.clone())
+    }
+
+    async fn after_checks(
+        &self,
+        _call_id: &ToolCallId,
+        _capture: &SingletonCapture,
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
+        Ok(Vec::new())
+    }
+
+    async fn present(
+        &self,
+        _call_id: &ToolCallId,
+        capture: &SingletonCapture,
+    ) -> Result<String, SingletonPresentationError> {
+        Ok(capture.output().unwrap_or_default().to_owned())
+    }
+
+    fn emit_stream(&self, _call_id: &ToolCallId, _stream: &crate::runtime::effect::AttemptStream) {}
+
+    async fn launch_start(
+        &self,
+        _obligation: &crate::runtime::process::DeclaredStartObligation,
+    ) -> Result<StartLaunch, String> {
+        self.launches
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err("an ordinary call launches no process".into())
+    }
+
+    async fn discharge_start(
+        &self,
+        _obligation: &crate::runtime::process::DeclaredStartObligation,
+        _process_id: &ProcessId,
+        _cancel: bool,
+    ) -> Result<(), String> {
+        Err("an ordinary call discharges no start".into())
+    }
+}
+
+/// Q3 and D04: ordinary work stays cooperative. A slow success, or the
+/// body's own transport timeout, is that one ordinary attempt even when the
+/// tool also has a registered process implementation: isolation is chosen
+/// by the declaration at admission, never by how the attempt went, so
+/// nothing is launched as a process.
+#[tokio::test]
+async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
+    for body in [
+        SingletonBodyOutcome::Failed {
+            output: "transport timed out".into(),
+            suggested_delay_ms: None,
+        },
+        SingletonBodyOutcome::Done {
+            output: "done".into(),
+            commands: crate::plugin::StateCommands::default(),
+            intents: Vec::new(),
+            start: None,
+        },
+    ] {
+        let handlers = Arc::new(SlowOrdinary {
+            body,
+            engines: crate::testing::process_engine_fixture(),
+            executions: Default::default(),
+            launches: Default::default(),
+        });
+        let call = Calls::default().call("ordinary");
+        assert!(!call.declaration.isolated, "the call is ordinary");
+        let call_id = call.call_id.clone();
+        let mut run = run();
+        run.start(call, handlers.clone()).unwrap();
+        run.next_end().await;
+        assert!(
+            matches!(
+                run.end(&call_id).unwrap(),
+                Some(CallEnd::Final {
+                    capture: SingletonCapture::Failed { .. } | SingletonCapture::Done { .. },
+                    launched: None,
+                    ..
+                })
+            ),
+            "the ordinary attempt is the call's final: {:?}",
+            run.end(&call_id)
+        );
+        assert_eq!(
+            handlers
+                .executions
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert_eq!(
+            handlers.launches.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "no process was launched"
+        );
+    }
+}

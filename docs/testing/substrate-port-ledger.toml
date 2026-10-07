@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1377 rows over 808 files, 3686 laws.
-# By class: mechanical 143, semantic 99, delete 735, replace 400.
-# By lane: L1b 11, L3 16, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 325, L9d 70, L9e 90, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 465, ported 48, deleted 864.
+# 1379 rows over 808 files, 3686 laws.
+# By class: mechanical 143, semantic 99, delete 735, replace 402.
+# By lane: L1b 11, L3 16, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 325, L9d 72, L9e 90, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 451, ported 52, deleted 876.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -241,36 +241,18 @@
 #   a session-config runbook selects the recorded-config, stale-revision, redrive and tool-call-limit laws once they run on the durable harness
 # - L9d: crates/lash-protocol-rlm/src/executor/tests/per_process_surface.rs
 #   trigger fired process runs under session contributed event type
-# - L9d: crates/lash-restate-test/tests/admission_invariant.rs
-#   a process whose verdict or start admission invariant fails ends Failed, typed
 # - L9d: crates/lash-restate-test/tests/crash_windows/attachment_delivery.rs
-#   a process start-input acquisition fault retries the same registered process, and a permanent incompatibility stays distinct from a gone source
-# - L9d: crates/lash-restate-test/tests/crash_windows/journal_settlement_cleanup.rs
-#   an artifact cleanup awaited by an unsettled run, process or session operation is retained until it settles and then released
-# - L9d: crates/lash-restate-test/tests/process_successor_after_prune.rs
-#   a process started with the start key of a pruned process is a new process with its own lifecycle
+#   a process start-input acquisition fault retries the same registered process
 # - L9d: crates/lash-restate-test/tests/resource_capacity.rs
 #   process and session lifecycles release their native resources when they end
-# - L9d: crates/lash-restate/src/tests/declared_start_run_drain_on_the_double.rs::slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process
-#   ordinary tool work that is slow or timed out is never re-run as a process
-# - L9d: crates/lash-restate/src/tests/declared_start_run_drain_on_the_double/terminal_failure.rs
-#   a child run's failure reaches its awaiting parent as typed output
 # - L9d: crates/lash-restate/src/tests/durable_wait_source_seal.rs::l02_l12_process_terminal_source_keeps_material_after_producer_pruning
 #   a process-terminal wait source keeps its outcome after its producer is pruned
 # - L9d: crates/lash-restate/src/tests/process_session_turn_laws.rs
 #   a session-turn process (subagent) crashed at create, acceptance or final commit resumes once from its recorded creation config, keeps its durable rows when cancelled, and a child panic is typed while the parent lives
-# - L9d: crates/lash-restate/src/tests/process_signal_admission.rs
-#   a duplicate signal delivered after its wait advanced never resolves the next wait, and a signal resent with a changed payload is refused before resolution
-# - L9d: crates/lash-restate/src/tests/process_source_wait_end.rs
-#   a cancelled process source detaches without ending the process or accepting a late result, and a process result is held by its source until the logical run retires
-# - L9d: crates/lash-restate/src/tests/process_start_store_refusals.rs
-#   a typed store refusal at a process start's claim or settlement is the start's recorded outcome, and a transient store fault retries without being recorded
-# - L9d: crates/lash-restate/src/tests/process_workflow.rs::opaque_process_infrastructure_failure_does_not_become_terminal_process_truth
-#   an opaque infrastructure failure in a process activation is retried and never becomes the process's terminal
 # - L9d: crates/lash-restate/src/tests/run_control_witnesses/process_run.rs
 #   a live process keeps its child run, and a run admitted ahead of its own, until it is terminal; a terminal process releases them
 # - L9d: crates/lash-restate/src/tests/store_fault_journaling.rs
-#   a process step whose append or read meets a transient store fault is retried and never recorded as its answer; a typed refusal is its recorded answer
+#   a process step's typed append refusal is its recorded answer
 # - L9d: crates/lash/src/tests/agent_scenarios/cases.rs
 #   agent scenario awaited process attachment is a parent commit gc root; and 3 more law(s) of the file, by test name
 # - L9d: crates/lash/src/tests/agent_scenarios/plugin_operations.rs
@@ -694,6 +676,7 @@ law = "a tool's declared intents realize as store-local effects in its outcome's
 [planned."SIGNAL1"]
 owner = "L6"
 law = "signals reach a process engine's advance as events in mailbox order per sender, and a redelivered signal is one event: it never resolves a later wait"
+path = "crates/lash-durable-test/tests/process_actor_laws.rs::a_signal_is_admitted_once_and_a_changed_resend_is_refused"
 
 [planned."DEFER1"]
 owner = "L7"
@@ -717,7 +700,8 @@ laws = [
   "a_local_signal_redelivered_after_its_wait_advances_resolves_only_its_admitted_wait",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "L9d (FIG-5182) re-wrote the three start laws L10a deleted on a SQLite memory backend, run by the process executor as the store-local start it is; the signal law has its own row"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/mod.rs"
@@ -746,7 +730,8 @@ laws = [
   "env_store_reports_typed_referrer_fences_and_carry_refusals",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "L9d (FIG-5182) re-wrote delete_session_process_command_revokes_only_observer_edges on a SQLite memory store set, run by the process executor"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/process_handles.rs"
@@ -762,7 +747,8 @@ laws = [
   "a_realized_start_intent_grants_the_run_possession_of_its_child",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "L9d (FIG-5182) re-wrote a_realized_start_intent_grants_the_run_possession_of_its_child on a SQLite memory backend: its presentation runs in place inside the call's admitted execution (L4)"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/check_contributions.rs"
@@ -788,8 +774,9 @@ lane = "L9d"
 laws = [
   "a_replayed_declared_start_launch_grants_the_run_possession_of_its_child_once",
 ]
-disposition = "port"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
+note = "the law replayed a declared start's journaled launch; nothing replays (ADR 0132): a call's start launches and discharges in memory inside its admitted execution (L4, call_run), a resumed round re-runs no frame, and the realized start's possession grant is process_handles.rs::a_realized_start_intent_grants_the_run_possession_of_its_child"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/loser_progress.rs"
@@ -876,6 +863,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the tests left run without an engine; TriggerRouter::emit starts its delivery's process through process_effect (triggers/router.rs:844): blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/support.rs"
@@ -888,8 +876,8 @@ laws = [
   "(no test functions) defines: sqlite_recording_backend, kernel_double, sqlite_memory_store_set, sqlite_memory_store_backend, after_millisecond_tick, scoped_controller, runtime_operation_controller, plugin_host, dispatch_scope, open_dispatch_handler",
 ]
 disposition = "port"
-status = "todo"
-note = "the store_backed test binary's backend over the double"
+status = "ported"
+note = "the double-backed helpers (kernel_double, the scoped and runtime-operation controllers, the dispatch handler) went with the double: a test's effect context is ActorContext::detached or a claimed one; the store-only helpers remain"
 
 [[row]]
 path = "crates/lash-core/src/runtime/environment.rs"
@@ -917,6 +905,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "L9d (FIG-5182) re-wrote the law on a SQLite memory backend with a detached turn context; it lands #[ignore]d, red: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
 
 [[row]]
 path = "crates/lash-core/src/runtime/shift/attempt_drop_tests.rs"
@@ -1172,6 +1161,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/commit_placement.rs"
@@ -1311,6 +1301,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail; the re-emission starts its process through process_effect: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect/fig2471.rs"
@@ -1493,6 +1484,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/support.rs"
@@ -1506,6 +1498,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the scenario runner (run, phase, session_id, host_behavior) went with the double; it is rewritten with the cases of runtime_scenarios/cases.rs; owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/session_freshness.rs"
@@ -1594,6 +1587,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the capability fixture and every law run a command or turn Run through execute_next_run; owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tracing.rs"
@@ -1697,6 +1691,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/config_transactions.rs"
@@ -1738,6 +1733,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
@@ -1798,6 +1794,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/frame_residency.rs"
@@ -1895,6 +1892,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash-core/tests/runtime_support/effect_recording_authority.rs"
@@ -1939,6 +1937,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the direct and recorded-intent starts both run through ProcessOpScope's context; blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime_support/session_capabilities.rs"
@@ -2907,6 +2906,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the tests left run without an engine; standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback runs its turn through execute_turn's acceptance: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail; its start and signal intents realize through process_effect: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
 
 [[row]]
 path = "crates/lash-protocol-standard/tests/render_cache_law.rs"
@@ -3127,9 +3127,10 @@ laws = [
   "a_verdict_admission_invariant_ends_the_process_failed",
   "a_start_admission_invariant_ends_the_process_failed",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::a_refused_step_admission_ends_the_process_failed_and_its_awaiter_reads_it"
+status = "deleted"
 owed = "a process whose verdict or start admission invariant fails ends Failed, typed"
+note = "the broken invariant was a retained segment handover without its execution start (segments are gone); the property, an admission failure ends the process Failed typed with one terminal and its awaiter reads it, is the new law"
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows.rs"
@@ -3182,14 +3183,29 @@ class = "replace"
 lane = "L9d"
 laws = [
   "start_input_acquisition_fault_retries_the_same_registered_process",
-  "acquisition_keeps_permanent_incompatibility_and_source_gone_distinct",
   "start_law",
-  "contrast_law",
   "laws! generates: sqlite_memory, sqlite_file, postgres",
 ]
 disposition = "owed"
 status = "todo"
-owed = "a process start-input acquisition fault retries the same registered process, and a permanent incompatibility stays distinct from a gone source"
+owed = "a process start-input acquisition fault retries the same registered process"
+note = "its start runs through core.processes().start: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red); the session turn it starts: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+
+[[row]]
+path = "crates/lash-restate-test/tests/crash_windows/attachment_delivery.rs"
+test = "acquisition_keeps_permanent_incompatibility_and_source_gone_distinct"
+area = "processes"
+needs = ["process"]
+class = "replace"
+lane = "L9d"
+laws = [
+  "acquisition_keeps_permanent_incompatibility_and_source_gone_distinct",
+  "contrast_law",
+]
+disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/runtime/attachment_delivery.rs::acquisition_keeps_permanent_incompatibility_and_source_gone_distinct"
+status = "deleted"
+owed = "a permanent acquisition incompatibility stays distinct from a gone source"
+note = "L9d (FIG-5182) wrote the engine-free half on a SQLite memory store set"
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/attachment_delivery.rs"
@@ -3218,9 +3234,10 @@ laws = [
   "session_operation_deferral_retains_then_releases_awaiting_cleanups",
   "laws! generates: sqlite_memory, sqlite_file, postgres",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "an artifact cleanup awaited by an unsettled run, process or session operation is retained until it settles and then released"
+note = "the cleanups were retained while their journal's JournalReplay verdict was MayReplay; no backend journals effects (ADR 0132), StoreSetAuthorities answers Settled for every journal, and the shift handlers that held the journals open are gone"
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/journal_settlement_cleanup.rs"
@@ -3715,8 +3732,8 @@ lane = "L9d"
 laws = [
   "a_same_start_key_successor_after_prune_runs_its_own_workflow",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::a_start_under_a_pruned_processs_key_is_a_new_process_with_its_own_lifecycle"
+status = "deleted"
 owed = "a process started with the start key of a pruned process is a new process with its own lifecycle"
 
 [[row]]
@@ -3732,6 +3749,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "process and session lifecycles release their native resources when they end"
+note = "its process half starts through core.processes().start; blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red); its session half needs a served facade core: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash-restate-test/tests/run_close.rs"
@@ -4758,8 +4776,8 @@ lane = "L9d"
 laws = [
   "slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-core-execution/src/tool_dispatch/call_run/tests.rs::slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process"
+status = "deleted"
 owed = "ordinary tool work that is slow or timed out is never re-run as a process"
 
 [[row]]
@@ -4799,9 +4817,10 @@ lane = "L9d"
 laws = [
   "l02_l08_a_child_run_failure_reaches_its_awaiting_parent_as_typed_output",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::a_refused_step_admission_ends_the_process_failed_and_its_awaiter_reads_it"
+status = "deleted"
 owed = "a child run's failure reaches its awaiting parent as typed output"
+note = "the child Run and the parent's Run source went with the Run journal (L4); a child process's typed failure reaching the process awaiting it is the new law"
 
 [[row]]
 path = "crates/lash-restate/src/tests/determinism.rs"
@@ -4871,6 +4890,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a process-terminal wait source keeps its outcome after its producer is pruned"
+note = "L9d (FIG-5182) wrote the law as crates/lash-durable-test/tests/process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended; it lands #[ignore]d, red: blocked: L6 (FIG-5175): the awaiter's pass reads its pruned target with get_process, maps ProcessNoLongerRetained to a store failure and retries forever, and the Resolved wait arm ignores the outcome the wait row holds (runtime/actor/process/activation.rs next_event, Blocked::Process)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/durable_wait_source_seal.rs"
@@ -5910,6 +5930,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a session-turn process (subagent) crashed at create, acceptance or final commit resumes once from its recorded creation config, keeps its durable rows when cancelled, and a child panic is typed while the parent lives"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail; ProcessActivation releases a kernel (session-turn) process idle without running it (runtime/actor/process/activation.rs pass)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_session_turn_laws.rs"
@@ -5948,8 +5969,8 @@ laws = [
   "duplicate_signal_after_wait_advances_does_not_resolve_next_wait",
   "partial_signal_replay_rejects_changed_request_before_resolution",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::a_signal_is_admitted_once_and_a_changed_resend_is_refused"
+status = "deleted"
 owed = "a duplicate signal delivered after its wait advanced never resolves the next wait, and a signal resent with a changed payload is refused before resolution"
 
 [[row]]
@@ -5963,9 +5984,10 @@ laws = [
   "a_cancelled_source_detaches_without_ending_the_process_or_accepting_a_late_result",
   "a_process_result_is_held_by_its_source_until_the_logical_run_retires",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "covered-by:crates/lash-core-execution/src/runtime/actor/process_laws.rs::w1_await_process_times_out_and_its_awaiters_cancel_ends_it"
+status = "deleted"
 owed = "a cancelled process source detaches without ending the process or accepting a late result, and a process result is held by its source until the logical run retires"
+note = "a cancelled awaiter ends and revokes its wait, leaving its target running (W1); the source's hold of the result until its logical Run retired went with the Run journal and its sources (L4)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_start_engine_cancel.rs"
@@ -6013,9 +6035,10 @@ laws = [
   "a_transient_start_claim_fault_retries_without_recording_the_fault",
   "a_transient_start_settlement_fault_retries_without_recording_the_fault",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "a typed store refusal at a process start's claim or settlement is the start's recorded outcome, and a transient store fault retries without being recorded"
+note = "the claim and settlement were the ProcessStart relay obligation's journaled steps, and the law pinned what their journal recorded and replayed; nothing is journaled (ADR 0132), and a durable start is its registration, which creates the actor ready (L6)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_terminal_await.rs"
@@ -6113,9 +6136,10 @@ lane = "L9d"
 laws = [
   "opaque_process_infrastructure_failure_does_not_become_terminal_process_truth",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::an_opaque_advance_failure_parks_the_process_and_a_redrive_runs_it_on"
+status = "deleted"
 owed = "an opaque infrastructure failure in a process activation is retried and never becomes the process's terminal"
+note = "a store fault inside an activation never becomes a terminal either: process_crash_proof cuts every process label"
 
 [[row]]
 path = "crates/lash-restate/src/tests/recording_context.rs"
@@ -6401,6 +6425,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "a live process keeps its child run, and a run admitted ahead of its own, until it is terminal; a terminal process releases them"
+note = "its runs are a SessionTurn process's: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail; ProcessActivation releases a kernel (session-turn) process idle without running it (runtime/actor/process/activation.rs pass)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_control_witnesses/process_run.rs"
@@ -6914,13 +6939,28 @@ needs = ["process"]
 class = "replace"
 lane = "L9d"
 laws = [
-  "an_emit_whose_append_meets_a_store_fault_is_never_journaled_as_its_answer",
-  "an_await_whose_read_meets_a_store_fault_is_never_journaled_as_its_answer",
   "a_refused_append_is_the_steps_journaled_answer",
 ]
 disposition = "owed"
 status = "todo"
-owed = "a process step whose append or read meets a transient store fault is retried and never recorded as its answer; a typed refusal is its recorded answer"
+owed = "a process step's typed append refusal is its recorded answer"
+note = "L9d (FIG-5182) wrote the law as crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal; it lands #[ignore]d, red: blocked: L6 (FIG-5175): the registry's refusal of an Emit refuses the whole process.advance commit as Corrupt, and the activation retries it every poll forever, never ending or parking the process (runtime/actor/process/activation.rs apply, EngineAction::Emit)"
+
+[[row]]
+path = "crates/lash-restate/src/tests/store_fault_journaling.rs"
+test = "an_emit_whose_append_meets_a_store_fault_is_never_journaled_as_its_answer"
+area = "store-faults"
+needs = ["process"]
+class = "replace"
+lane = "L9d"
+laws = [
+  "an_emit_whose_append_meets_a_store_fault_is_never_journaled_as_its_answer",
+  "an_await_whose_read_meets_a_store_fault_is_never_journaled_as_its_answer",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_whose_commit_meets_a_store_fault_is_appended_exactly_once"
+status = "deleted"
+owed = "a process step whose append or read meets a transient store fault is retried and never recorded as its answer"
+note = "an await's reads are a pass's, and a failed pass commits nothing; process_crash_proof cuts the await's wait.timeout commit under every fault"
 
 [[row]]
 path = "crates/lash-restate/src/tests/substrate_lost.rs"
@@ -7781,6 +7821,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the tests left run without an engine; the spawn laws run a child session turn: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail; ProcessActivation releases a kernel (session-turn) process idle without running it (runtime/actor/process/activation.rs pass)"
 
 [[row]]
 path = "crates/lash-subagents/tests/declared_start.rs"
@@ -8298,7 +8339,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "shared harness of crates/lash's unit tests: backend, restart and reconcile helpers"
+note = "the double-backed helpers went with the double; the served durable facade backend the facade laws need is written with the first of them that can run: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash/src/tests/isolated_tool_route.rs"
@@ -8844,6 +8885,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash/src/tests/store_faults.rs"
@@ -9118,6 +9160,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "a host start runs through process_effect: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red); the started session turn: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash/tests/integration/mcp_catalog.rs"
@@ -9194,6 +9237,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash/tests/llm_profiles/session_turn_starts.rs"
@@ -9207,6 +9251,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash/tests/replay_after_advance/harness.rs"
@@ -10887,7 +10932,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "trigger fired process runs under session contributed event type"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. A trigger emission starts its process through process_effect: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/testing/cell_conformance/durable_values.rs"
@@ -13440,7 +13485,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "agent scenario awaited process attachment is a parent commit gc root; and 3 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash/src/tests/agent_scenarios/plugin_operations.rs"
@@ -13461,7 +13506,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "operation run follow returns the task terminal; and 6 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash/src/tests/aggregate_await_comprehension.rs"
@@ -14596,7 +14641,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "native process await sink and prune end to end"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash/src/tests/response_phase_replay/catalog_fork.rs"
@@ -14627,7 +14672,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "stack budget rlm lashlang process turn"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
 
 [[row]]
 path = "crates/lash/src/tests/tool_intent_ingress.rs"
@@ -14642,7 +14687,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "start env store error is typed and registers no process"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. A start intent realizes through process_effect (tool_dispatch/intent_executor.rs:625): blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
 
 [[row]]
 path = "crates/lash/src/tests/tool_restore_report.rs"

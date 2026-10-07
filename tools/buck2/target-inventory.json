@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 158,
+  "cargo_target_count": 159,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_323c0170[static]",
     "//crates/lash-conformance:lash-conformance__fv_39401c96[static]",
@@ -42952,7 +42952,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 219,
+  "generated_label_count": 220,
   "packages": [
     {
       "declared_features": [
@@ -43599,6 +43599,15 @@
           "tags": []
         },
         {
+          "build_label": "//crates/lash-durable-test:process_actor_laws__test",
+          "cargo": "process_actor_laws",
+          "check_label": "//crates/lash-durable-test:process_actor_laws__test[check]",
+          "clippy_label": "//crates/lash-durable-test:process_actor_laws__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:process_actor_laws__test",
+          "tags": []
+        },
+        {
           "build_label": "//crates/lash-durable-test:process_crash_proof__test",
           "cargo": "process_crash_proof",
           "check_label": "//crates/lash-durable-test:process_crash_proof__test[check]",
@@ -43652,6 +43661,7 @@
         "label": "//crates/lash-durable-test:test_batch",
         "members": [
           "//crates/lash-durable-test:lash-durable-test__unit_test",
+          "//crates/lash-durable-test:process_actor_laws__test",
           "//crates/lash-durable-test:process_crash_proof__test",
           "//crates/lash-durable-test:round_crash_matrix__test",
           "//crates/lash-durable-test:turn_round_crash_matrix__test"
@@ -46989,6 +46999,7 @@
     "//crates/lash-core:turn_event_schema__test__fv_04295738": 300,
     "//crates/lash-core:turn_event_schema__test__fv_92094e66": 300,
     "//crates/lash-durable-test:lash-durable-test__unit_test": 300,
+    "//crates/lash-durable-test:process_actor_laws__test": 300,
     "//crates/lash-durable-test:process_crash_proof__test": 300,
     "//crates/lash-durable-test:round_crash_matrix__test": 300,
     "//crates/lash-durable-test:test_batch": 300,
@@ -47398,6 +47409,7 @@
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-durable-test:lash-durable-test[static]",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
     "//crates/lash-durable-test:turn_phases__test",
@@ -47619,6 +47631,7 @@
     "//crates/lash-core:turn_event_schema__test[check]",
     "//crates/lash-durable-test:lash-durable-test[check]",
     "//crates/lash-durable-test:lash-durable-test__unit_test[check]",
+    "//crates/lash-durable-test:process_actor_laws__test[check]",
     "//crates/lash-durable-test:process_crash_proof__test[check]",
     "//crates/lash-durable-test:round_crash_matrix__test[check]",
     "//crates/lash-durable-test:turn_phases__test[check]",
@@ -47839,6 +47852,7 @@
     "//crates/lash-core:turn_event_schema__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:lash-durable-test__clippy[clippy.txt]",
     "//crates/lash-durable-test:lash-durable-test__unit_test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:process_actor_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:process_crash_proof__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:round_crash_matrix__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:turn_phases__test__clippy[clippy.txt]",
@@ -48059,6 +48073,7 @@
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-durable-test:lash-durable-test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
     "//crates/lash-durable-test:turn_phases__test",
@@ -48279,6 +48294,7 @@
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-durable-test:lash-durable-test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
     "//crates/lash-durable-test:turn_phases__test",
@@ -48684,6 +48700,7 @@
     "//crates/lash-core:tool_execution_grant_layout__test",
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
     "//crates/lash-durable-test:turn_phases__test",
@@ -48933,6 +48950,7 @@
     ],
     "//crates/lash-durable-test:test_batch": [
       "//crates/lash-durable-test:lash-durable-test__unit_test",
+      "//crates/lash-durable-test:process_actor_laws__test",
       "//crates/lash-durable-test:process_crash_proof__test",
       "//crates/lash-durable-test:round_crash_matrix__test",
       "//crates/lash-durable-test:turn_round_crash_matrix__test"
@@ -49122,6 +49140,7 @@
     "//crates/lash-core:tool_execution_grant_layout__test",
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-durable-test:lash-durable-test__unit_test",
+    "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:round_crash_matrix__test",
     "//crates/lash-durable-test:turn_phases__test",
