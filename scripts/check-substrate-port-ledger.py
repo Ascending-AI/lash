@@ -8,7 +8,9 @@ fails when:
 
 - a `.rs` file that names `lash_restate_test`, a `Cargo.toml` that depends on
   `lash-restate-test`, or a test file of the Restate crates has no `*` row;
-- a row is malformed: an unknown class, lane, need or status, no laws, a
+- the ledger is not TOML (a union merge can fold two rows into one table);
+- a row is duplicated (a union merge keeps both sides' copies of a row) or
+  malformed: an unknown class, lane, need or status, no laws, a
   disposition that does not fit its class or status, a `replace` row without
   the law it owes, or a reference to a planned law or ledger row that does
   not exist;
@@ -246,7 +248,10 @@ def violations(root: Path, final: bool) -> list[str]:
     try:
         ledger = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
-        return [f"{LEDGER}: {error}"]
+        return [
+            f"{LEDGER}: {error}; the ledger merges with merge=union (.gitattributes), which can "
+            "fold two rows added at one place under one [[row]] header: give each its own"
+        ]
     rows = ledger.get("row", [])
     planned = ledger.get("planned", {})
     found = check_planned(planned)

@@ -158,6 +158,16 @@ class SubstratePortLedgerTests(unittest.TestCase):
     def test_a_function_row_without_its_file_row_fails(self) -> None:
         self.assert_fails(self.tree(rows=ROWS[1:]), f"{PORTED}::a_journal_law has no '*' row")
 
+    def test_what_a_union_merge_can_leave_fails(self) -> None:
+        # The ledger merges with merge=union: two landings that add one row
+        # leave two copies of it, and two that add rows at one place can
+        # share one [[row]] header.
+        self.assert_fails(self.tree(rows=[*ROWS, ROWS[1]]), f"{PORTED}::a_journal_law has two rows")
+        root = self.tree()
+        ledger = root / LEDGER
+        ledger.write_text(ledger.read_text() + '\n[[row]]\npath = "crates/a.rs"\npath = "crates/b.rs"\n')
+        self.assert_fails(root, "give each its own")
+
     def test_malformed_rows_fail(self) -> None:
         cases = {
             "class must be one of": {"class": "port"},

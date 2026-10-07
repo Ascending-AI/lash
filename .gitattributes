@@ -1,3 +1,9 @@
 # Vendored Test262 sources stay byte-identical to the pinned upstream
 # (`sync.mjs check`), whitespace included.
 crates/lash-typescript/tests/test262/test/** whitespace=-blank-at-eol,-blank-at-eof,-trailing-space
+
+# Landings add port-ledger rows at one place; a union merge keeps both
+# sides. scripts/check-substrate-port-ledger.py refuses what that can leave:
+# a duplicated row, two rows folded under one [[row]] header, or a stale
+# summary.
+docs/testing/substrate-port-ledger.toml merge=union
