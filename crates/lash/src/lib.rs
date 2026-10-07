@@ -743,11 +743,9 @@ pub mod persistence {
 
 /// Plugin contracts, manifests, and operation types.
 ///
-/// Compare [`SessionReadView::current_frame()`](SessionReadView::current_frame)
+/// Compare [`SessionReadView::current_frame()`](crate::persistence::SessionReadView::current_frame)
 /// in your before-turn hook to detect compaction or a frame switch.
 pub mod plugins {
-    /// The session read projection supplied to plugin hooks.
-    pub use lash_core::SessionReadView;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::ConfigRegistry;
     pub use lash_core::plugin::{

@@ -63,7 +63,7 @@ fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
 }
 
 fn plugin_current_frame_is_borrowed(
-    view: &lash::plugins::SessionReadView,
+    view: &lash::persistence::SessionReadView,
 ) -> Option<&lash::plugins::FrameNodeId> {
     view.current_frame()
 }
