@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
+use super::head::SessionHead;
 use super::session::{
     AdmittedInputs, OpenTurn, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
 };
@@ -104,10 +105,14 @@ impl TurnServices for RuntimeTurnServices {
         self.runtimes.execution_budgets()
     }
 
+    /// The runtime opens at the session's committed head itself; the owner's
+    /// cached `head` is the same revision, which the store's compare-and-set
+    /// on the turn's head commit checks.
     async fn start(
         &self,
         cx: &ActorContext,
         row: &TurnRow,
+        _head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
         let (turn, parts) = self.prepare(cx, row).await?;
         Ok(Box::new(RuntimeDrive::start(turn, parts)?))
@@ -229,7 +234,7 @@ fn live_observer(
         sink.as_ref(),
         runtime.delta_framing(),
     );
-    let publisher = tokio::spawn(async move {
+    let publisher = crate::task::spawn(async move {
         while let Some(observation) =
             std::future::poll_fn(|context| observations.poll_next(context)).await
         {

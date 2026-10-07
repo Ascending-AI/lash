@@ -861,19 +861,6 @@
             "ordinal"
           ],
           "type": "object"
-        },
-        {
-          "description": "Reserved cancel signal of a host plugin task a session command runs\n(FIG-4391), under the command's own session-operation scope. Only a host's\ncancel resolves it, cancelled; how the command ended is its\nsettlement, never this signal (FIG-4453).",
-          "properties": {
-            "type": {
-              "const": "session_command_cancel_signal",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
         }
       ]
     },

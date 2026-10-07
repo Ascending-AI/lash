@@ -388,6 +388,10 @@ impl SessionActivation {
                 Some(admitted) => match SessionMailAdmission::of(&admitted)?.kind {
                     SessionMailRunKind::Turn => {
                         admit_turn(cx, &mut tx, admitted).await?;
+                        // The turn's rows are this build's session state:
+                        // from now only a node that decodes it claims the
+                        // session.
+                        tx.stamp_formats(cx.backend().formats().session().clone());
                         cx.commit(tx, CommitLabel::TURN_ADMIT).await?;
                         Ok(Pass::Again)
                     }

@@ -192,18 +192,19 @@ mod envelope_hash_tests {
                 "checkpoint",
                 "d5d9bde834af9f145e121cd2af8fd6d6e630602ccc448c847b0f68d36f9c9768",
             ),
-            // Moved, with `peek_await_event`, by FIG-5174: the key's
-            // `ToolCompletion` wait identity is deleted (a tool completion
-            // is an L5 `tool_completion` wait), so the corpus key names the
-            // plugin task cancel signal instead. Re-pinned in place under the
-            // version freeze.
+            // Moved, with `peek_await_event`, by FIG-5174 and again by
+            // FIG-5172: the key's `ToolCompletion` and then its plugin task
+            // cancel signal wait identities are deleted (a tool completion is
+            // an L5 `tool_completion` wait; a plugin task's cancel is the
+            // withdrawal of its session-mail batch), so the corpus key names
+            // a process signal. Re-pinned in place under the version freeze.
             (
                 "await_event",
-                "2553f41e1527149fdb6f7d98459d7057cde4157ee04d9526e5ac65389d4f2dfb",
+                "424371e20eaf3de5f7ac554ec6b6d3da50876038b8da281fee2c0304e2f9fbbe",
             ),
             (
                 "peek_await_event",
-                "07f71ffd5dec425a8a37a007e346f2c84b174e48a8989286c3e88e884e494b39",
+                "fc5b9e768f90e46629a88bd4c0971cc72d4f73552943fd42b49f220d17479a76",
             ),
         ];
         let corpus = ungrouped_corpus();

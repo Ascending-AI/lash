@@ -62,7 +62,7 @@ impl TurnCase {
 
 #[async_trait::async_trait]
 impl Workload for TurnCase {
-    async fn seed(&self, world: &Arc<World>, nodes: &Arc<SimNodes>) -> Result<(), String> {
+    async fn seed(&self, world: &Arc<World>, _nodes: &Arc<SimNodes>) -> Result<(), String> {
         let session = admit_turn(world, TurnScript::Plain, &format!("turn{}", self.tag)).await?;
         *self.session.lock_recover() = Some(session.clone());
         let host = Arc::clone(world);

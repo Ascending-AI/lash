@@ -58,9 +58,7 @@ use lash_core_execution::{
     Backend, BackendParts, CompletionKeySecrets, DurableSettings, NoProjectionProviders, StoreSet,
 };
 use lash_durable::runner::Activation;
-use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig,
-};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
 use lash_durable_test::{
     Cut, Fault, Life, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored,
     Tripwire, Verdict, WriteKind,
@@ -637,12 +635,8 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
         .iter()
         .filter(|write| write.node == cut.node && write.kind == WriteKind::Actor)
     {
-        // Refused, or never entered: a zombie whose renewals stop stops
-        // itself and drops the write it held.
         match &write.stored {
-            Stored::Refused(DurableError::OwnershipLost(_))
-            | Stored::Pending
-            | Stored::NotEntered => {}
+            Stored::Refused(DurableError::OwnershipLost(_)) => {}
             other => violations.push(format!("P5: zombie write {write} was {other:?}")),
         }
     }

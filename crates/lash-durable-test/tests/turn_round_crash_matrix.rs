@@ -69,12 +69,9 @@ use lash_core_store::tool_run::{
     AttemptOutcome, CompletionSource, KnownFailure, KnownFailureReason, MaterialLocation,
     MaterialOwner, MaterialPayload, MaterialRef, MaterialRole,
 };
-use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq, SESSION_ACTOR_FORMATS};
+use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq};
 use lash_durable::runner::Activation;
-use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DomainWrite, DurableError, DurableStore, FormatSet,
-    LeaseConfig,
-};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -802,7 +799,13 @@ impl Scenario for L4 {
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
             lease: LeaseConfig::default(),
-            decodes: vec![FormatSet::new(SESSION_ACTOR_FORMATS)],
+            decodes: self
+                .backend
+                .lock_recover()
+                .as_ref()
+                .expect("the database is built first")
+                .formats()
+                .decodes(),
             max_active: 4,
         }
     }
@@ -1175,12 +1178,8 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
         .iter()
         .filter(|write| write.node == cut.node && write.kind == WriteKind::Actor)
     {
-        // Refused, or never entered: a zombie whose renewals stop stops
-        // itself and drops the write it held.
         match &write.stored {
-            Stored::Refused(DurableError::OwnershipLost(_))
-            | Stored::Pending
-            | Stored::NotEntered => {}
+            Stored::Refused(DurableError::OwnershipLost(_)) => {}
             other => violations.push(format!("F1: zombie write {write} was {other:?}")),
         }
     }

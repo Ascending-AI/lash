@@ -41,7 +41,7 @@ impl CancelCase {
 
 #[async_trait::async_trait]
 impl Workload for CancelCase {
-    async fn seed(&self, world: &Arc<World>, nodes: &Arc<SimNodes>) -> Result<(), String> {
+    async fn seed(&self, world: &Arc<World>, _nodes: &Arc<SimNodes>) -> Result<(), String> {
         let session = admit_turn(world, TurnScript::Hang, &format!("cancel{}", self.tag)).await?;
         *self.session.lock_recover() = Some(session);
         Ok(())

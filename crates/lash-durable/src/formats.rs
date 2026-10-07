@@ -79,6 +79,13 @@ impl FormatSet {
         Self(format!("process:unstarted/{}", escape(kind)))
     }
 
+    /// The set of a session actor a producer's first wake created: it holds
+    /// no turn yet, so every node that serves sessions decodes it.
+    #[must_use]
+    pub fn unstarted_session() -> Self {
+        Self::new(crate::domain::SESSION_ACTOR_FORMATS)
+    }
+
     /// The set of a kernel process (one with no engine, such as a child
     /// session's turn): it holds no engine state, and every node that serves
     /// processes decodes it.

@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use lash_core_execution::runtime::actor::round::RoundTools;
 
 use super::*;
+use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
     CodeCell, OpenTurn, RestoredTurn, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
 };
@@ -260,10 +260,14 @@ impl TurnDrive for RuntimeDrive {
         .map_err(runtime)
     }
 
+    /// The commit is built over the head the runtime opened at; the store
+    /// refuses it once the session's head, `head` among its readers, is
+    /// elsewhere.
     async fn finish(
         &mut self,
         _cx: &ActorContext,
         done: TurnDone,
+        _head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
         let driver = &mut self.driver;
         driver.turn_pipeline.apply_event_delta(done.event_delta);

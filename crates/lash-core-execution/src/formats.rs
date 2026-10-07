@@ -98,11 +98,19 @@ impl BuildFormats {
         self.processes.get(kind)
     }
 
-    /// Every set a node of this build decodes: the session set, each
+    /// The sets a node of this build that serves sessions decodes: the
+    /// session set, and the unstarted one a producer's wake creates.
+    #[must_use]
+    pub fn session_decodes(&self) -> Vec<FormatSet> {
+        vec![self.session.clone(), FormatSet::unstarted_session()]
+    }
+
+    /// Every set a node of this build decodes: the session sets, each
     /// engine's unstarted and started sets, and the kernel process set.
     #[must_use]
     pub fn decodes(&self) -> Vec<FormatSet> {
-        let mut decodes = vec![self.session.clone(), FormatSet::kernel_process()];
+        let mut decodes = self.session_decodes();
+        decodes.push(FormatSet::kernel_process());
         for (kind, set) in &self.processes {
             decodes.push(FormatSet::unstarted_process(kind));
             decodes.push(set.clone());

@@ -370,6 +370,8 @@ fn commit_budget() -> CommitBudget {
 /// One node's turn services.
 #[derive(Clone)]
 pub struct BenchServices {
+    /// The node's backend: what an admission's inputs are read from.
+    backend: Backend,
     recorder: Arc<Recorder>,
     scripts: Arc<Scripts>,
     driver: Arc<Protocol>,
@@ -387,6 +389,7 @@ impl BenchServices {
         cells: Arc<dyn TurnServices>,
     ) -> Self {
         Self {
+            backend,
             recorder,
             scripts,
             driver: Arc::new(Protocol),

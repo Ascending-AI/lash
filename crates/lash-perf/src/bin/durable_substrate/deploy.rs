@@ -191,6 +191,7 @@ impl Deployment {
         let sessions = SessionActivation::new(
             backend.clone(),
             Arc::new(BenchServices::new(
+                backend.clone(),
                 Arc::clone(&self.recorder),
                 Arc::clone(&self.scripts),
                 crate::cells::services(&cells),

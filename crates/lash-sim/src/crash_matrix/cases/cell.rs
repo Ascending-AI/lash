@@ -59,7 +59,7 @@ impl CellCase {
 
 #[async_trait::async_trait]
 impl Workload for CellCase {
-    async fn seed(&self, world: &Arc<World>, nodes: &Arc<SimNodes>) -> Result<(), String> {
+    async fn seed(&self, world: &Arc<World>, _nodes: &Arc<SimNodes>) -> Result<(), String> {
         let script = if self.killed {
             TurnScript::CellKilled
         } else {
@@ -124,13 +124,12 @@ impl Workload for CellCase {
         violations
     }
 
+    /// A cell runs on the RLM worker subprocess, whose compute and respawn
+    /// after a node's death the virtual clock does not see: every step the
+    /// nodes take while the worker works moves time on. The cell is bounded
+    /// by the matrix horizon alone, which its run must still end within.
     fn bound(&self) -> Duration {
-        if self.killed {
-            // The kill's own failover and restart.
-            Duration::from_secs(60)
-        } else {
-            Duration::from_secs(30)
-        }
+        crate::crash_matrix::HORIZON
     }
 
     fn max_restores(&self) -> usize {

@@ -27,21 +27,18 @@ fn processes_area_witnesses() {
     });
     // W0002: lash::AwaitEventWaitIdentity::ProcessSignal::ordinal [field]
     field_witness(|value: &lash::AwaitEventWaitIdentity| {
-        if let lash::AwaitEventWaitIdentity::ProcessSignal { ordinal, .. } = value {
-            let _ = ordinal;
-        }
+        let lash::AwaitEventWaitIdentity::ProcessSignal { ordinal, .. } = value;
+        let _ = ordinal;
     });
     // W0003: lash::AwaitEventWaitIdentity::ProcessSignal::process_id [field]
     field_witness(|value: &lash::AwaitEventWaitIdentity| {
-        if let lash::AwaitEventWaitIdentity::ProcessSignal { process_id, .. } = value {
-            let _ = process_id;
-        }
+        let lash::AwaitEventWaitIdentity::ProcessSignal { process_id, .. } = value;
+        let _ = process_id;
     });
     // W0004: lash::AwaitEventWaitIdentity::ProcessSignal::signal_name [field]
     field_witness(|value: &lash::AwaitEventWaitIdentity| {
-        if let lash::AwaitEventWaitIdentity::ProcessSignal { signal_name, .. } = value {
-            let _ = signal_name;
-        }
+        let lash::AwaitEventWaitIdentity::ProcessSignal { signal_name, .. } = value;
+        let _ = signal_name;
     });
     // W0005: lash::AwaitEventWaitIdentity::process_signal [function]
     let _ =

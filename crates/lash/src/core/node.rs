@@ -66,6 +66,9 @@ impl NodeSlot {
                 &backend,
                 NodeServe {
                     node,
+                    // The core stops its node on shutdown; it has no drain
+                    // lever of its own.
+                    drain: lash_core::durable_port::runner::Drain::default(),
                     sessions,
                     processes: None,
                 },

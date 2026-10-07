@@ -9,7 +9,6 @@
 //! the row is withdrawn; the task's settling commit then finds the row gone
 //! and applies nothing of it.
 
-use super::*;
 use crate::ActorContext;
 use tokio_util::sync::CancellationToken;
 
@@ -25,7 +24,7 @@ pub(super) async fn watch_withdrawal(
     loop {
         controller.wait_for_mail().await;
         match store.list_queued_work().await {
-            Ok(open) if open.iter().any(|batch| &batch.batch_id == batch_id) => {}
+            Ok(open) if open.iter().any(|batch| batch.batch_id == *batch_id) => {}
             Ok(_) => {
                 stop.cancel();
                 return;

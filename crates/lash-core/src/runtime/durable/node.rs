@@ -64,7 +64,7 @@ pub async fn serve(
     // The node decodes the backend's format sets: every one when it runs
     // processes, the session's alone when it runs none.
     let formats = backend.formats();
-    let mut decodes = vec![formats.session().clone()];
+    let mut decodes = formats.session_decodes();
     let activation: Arc<dyn Activation> = match serve.processes {
         Some(process) => {
             decodes = formats.decodes();

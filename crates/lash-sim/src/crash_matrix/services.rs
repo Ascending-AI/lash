@@ -28,8 +28,8 @@ use lash_core::{
 };
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, BodyOutput, CompletedCall, ExecutionDraft, MemberBody, MemberPin,
-    MemberResult, PolicyView, RoundTools,
+    AdmittedExecution, BodyOutput, CompletedCall, MemberBody, MemberPin, MemberResult, PolicyView,
+    RoundTools,
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
@@ -39,9 +39,9 @@ use lash_core_store::tool_run::{
 use lash_durable::domain::OwnerKey;
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::{
-    ExecutionBudgets, ExecutionLimit, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallId,
-    ToolCallOutput, ToolFailure, ToolFailureClass, ToolId, TurnCancelMode,
-    TurnCancelUndeliveredInputPolicy, TurnId,
+    ExecutionBudgets, ExecutionLimit, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput,
+    ToolFailure, ToolFailureClass, ToolId, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
+    TurnId,
 };
 
 use super::world::{BodyEntry, World, retry};
@@ -394,17 +394,15 @@ impl TurnServices for SimServices {
         &self,
         cx: &ActorContext,
         row: &TurnRow,
-        _head: &SessionHead,
+        head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
         if let Some(cells) = self.cells(&row.session)? {
-            return cells.start(cx, row).await;
+            return cells.start(cx, row, head).await;
         }
         // The turn starts from the session head's window, with the inputs
         // its admission took.
         let backend = self.world.backend().map_err(TurnError::Exec)?;
-        let window = SessionHead::load(&backend, &row.session, commit_budget())
-            .await?
-            .window()?;
+        let window = head.window()?;
         let messages = window.then(admitted_messages(&backend, row).await?);
         let machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run),

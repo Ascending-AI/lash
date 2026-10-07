@@ -11,8 +11,11 @@
 
 use lash_sansio::{BatchId, InputId, SessionId, TurnId};
 
-/// The format set a session actor's state is written in, which every
-/// producer that creates the actor with its first wake records.
+/// The set of a session actor before its first turn: the one every producer
+/// that creates the actor with its first wake records. A producer is not
+/// the build that serves the session, so it names no state format, and
+/// every node that serves sessions decodes it; the owner's `turn.admit`
+/// stamps its build's session set (ADR 0106 §1).
 pub const SESSION_ACTOR_FORMATS: &str = "lash.session/1";
 
 /// One open, unbound next-turn input of the session.
