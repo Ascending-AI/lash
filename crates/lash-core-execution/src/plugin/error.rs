@@ -1460,9 +1460,6 @@ mod classification_tests {
         use crate::compat::{CompatRefusal, VersionRange};
         use crate::store::StoreRefusal;
         for refusal in [
-            StoreRefusal::TurnCancelClosureOwnerReleased {
-                participant_id: "postgres-catalog:released-owner".into(),
-            },
             StoreRefusal::WriterFenced {
                 recorded: 2,
                 writable: VersionRange::exactly(1),
@@ -1472,11 +1469,6 @@ mod classification_tests {
                     component: "postgres".into(),
                     writing_release: None,
                 },
-            },
-            StoreRefusal::TurnCancelBindingMismatch {
-                session_id: crate::SessionId::from("bound-elsewhere"),
-                expected: "the admitted authority".into(),
-                presented: "another authority".into(),
             },
         ] {
             let plugin = PluginError::from(refusal.clone().into_store_error());
@@ -1508,10 +1500,10 @@ mod classification_tests {
     #[test]
     fn stored_corruption_keeps_its_fields_across_plugin_and_runtime_boundaries() {
         let expected = serde_json::json!({
-            "kind": "stored_data_corrupt", "record_kind": "TurnCancellationBinding", "message": "invalid scope",
+            "kind": "stored_data_corrupt", "record_kind": "TurnCancelRequest", "message": "invalid scope",
         });
         let plugin = PluginError::from(crate::StoreError::StoredDataCorrupt {
-            record_kind: "TurnCancellationBinding",
+            record_kind: "TurnCancelRequest",
             message: "invalid scope".into(),
         });
         assert!(plugin.is_terminal());

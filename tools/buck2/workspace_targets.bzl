@@ -689,6 +689,7 @@ WORKSPACE_TEST_SUITE_LABELS = [
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
     "//crates/lash-durable-test:test_batch",
+    "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable:lash-durable__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
@@ -794,6 +795,7 @@ WORKSPACE_DEV_SUITE_LABELS = [
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
     "//crates/lash-durable-test:test_batch",
+    "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable:lash-durable__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
@@ -1197,7 +1199,6 @@ WORKSPACE_TEST_BATCHES = {
         "//crates/lash-durable-test:lash-durable-test__unit_test",
         "//crates/lash-durable-test:process_crash_proof__test",
         "//crates/lash-durable-test:round_crash_matrix__test",
-        "//crates/lash-durable-test:turn_phases__test",
     ],
     "//crates/lash-llm-transport:test_batch": [
         "//crates/lash-llm-transport:lash-llm-transport__unit_test",

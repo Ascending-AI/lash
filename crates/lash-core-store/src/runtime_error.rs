@@ -740,13 +740,6 @@ runtime_error_codes! {
         // the store refuses this build or this session on every attempt.
         /// A store returned state belonging to another session.
         StoreSessionMismatch = "store_session_mismatch" => Terminal,
-        // the session admitted another cancellation authority.
-        /// The deployment runs over stores whose session admitted another
-        /// cancellation authority.
-        TurnCancelBindingMismatch = "turn_cancel_binding_mismatch" => Terminal,
-        /// A catalog retained a binding to an effect host that has ended.
-        /// Rebind the catalog before authorizing or retiring cancellation work.
-        TurnCancelClosureOwnerReleased = "turn_cancel_closure_owner_released" => Terminal,
         // the storage substrate faulted; the identical operation is safe to make again.
         RuntimeStore = "runtime_store" => Retryable,
         // durable state is corrupt or a counter is exhausted.

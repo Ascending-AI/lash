@@ -886,32 +886,6 @@
           "type": "object"
         },
         {
-          "description": "Reserved first-writer-wins cancellation-versus-completion gate for a\nforeground turn.",
-          "properties": {
-            "type": {
-              "const": "turn_cancel_gate",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "Reserved terminal publication promise for a foreground turn.",
-          "properties": {
-            "type": {
-              "const": "turn_terminal",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
           "properties": {
             "key": {
               "type": "string"
@@ -924,19 +898,6 @@
           "required": [
             "type",
             "key"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "Reserved first-writer-wins escalation promise for a foreground turn:\nwritten only by an immediate request that found the cancellation gate\nalready holding an after-step request.",
-          "properties": {
-            "type": {
-              "const": "turn_cancel_escalation",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
           ],
           "type": "object"
         },
@@ -12889,49 +12850,6 @@
             "type",
             "found",
             "current"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "The deployment presented another cancellation authority than the one\nthe session durably admitted: it runs over these stores under an\nauthority they were not written under, and no retry changes that.",
-          "properties": {
-            "expected": {
-              "type": "string"
-            },
-            "presented": {
-              "type": "string"
-            },
-            "session_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": {
-              "const": "turn_cancel_binding_mismatch",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "session_id",
-            "expected",
-            "presented"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "The bound cancellation owner has ended. Rebind the catalog to a live host.",
-          "properties": {
-            "participant_id": {
-              "type": "string"
-            },
-            "type": {
-              "const": "turn_cancel_closure_owner_released",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "participant_id"
           ],
           "type": "object"
         }

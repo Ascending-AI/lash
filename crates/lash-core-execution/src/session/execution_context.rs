@@ -1,4 +1,3 @@
-use crate::ActorContext;
 use crate::ProcessId;
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
@@ -32,9 +31,6 @@ use crate::tool_dispatch::ToolDispatchContext;
 #[derive(Clone, Default)]
 pub(crate) struct RecordedTurnCancel {
     observed: Arc<std::sync::atomic::AtomicBool>,
-    control: Option<Arc<crate::runtime::turn_control::ActiveTurnControl>>,
-    /// The deployment host a recorded step body watches the gate pair over.
-    host: Option<ActorContext>,
     /// Cooperative cancellation for recorded tool bodies, fired with the turn fact.
     lent: Option<CancellationToken>,
 }
@@ -283,7 +279,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// The owned actor's context this execution runs under: what its VM
     /// snapshots and their operations' admissions commit through.
-    pub fn actor_context(&self) -> &ActorContext {
+    pub fn actor_context(&self) -> &crate::ActorContext {
         &self.dispatch.effect_controller
     }
 
@@ -705,46 +701,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.turn_cancel.note();
     }
 
-    /// A code cell's cancel checkpoint (FIG-3672 P9): a journaled peek of the
-    /// turn's gate pair under the checkpoint's own identity, which advances
-    /// this execution's recorded fact when the turn must stop now. A replay
-    /// issues the same checkpoints at the same instruction counts and is
-    /// served the same answers. Answers whether the turn is cancelled.
-    ///
-    /// An execution with no gate control (a process body, a test context)
-    /// has no checkpoint and answers from its fact alone.
+    /// A code cell's cancel checkpoint: whether this execution's recorded
+    /// fact says the turn is cancelled. A cancel requested while a cell runs
+    /// is the session's mail: the phase runner stops the cell at its next
+    /// commit and ends the turn `Cancelled` (L3, FIG-5172).
     pub async fn turn_cancel_checkpoint(
         &self,
-        checkpoint: u64,
+        _checkpoint: u64,
     ) -> Result<bool, crate::RuntimeEffectControllerError> {
-        if self.turn_cancel.is_observed() {
-            return Ok(true);
-        }
-        let Some(control) = self.turn_cancel.control.as_ref() else {
-            return Ok(false);
-        };
-        let Some(cell) = self
-            .parent_invocation
-            .as_ref()
-            .and_then(crate::RuntimeInvocation::effect_replay_key)
-            .map(str::to_string)
-        else {
-            return Ok(false);
-        };
-        let observed = control
-            .observe_pending_cancel(
-                &self.dispatch.effect_controller,
-                crate::runtime::turn_control::TurnCancelPeekIdentity::CellCheckpoint {
-                    cell,
-                    checkpoint,
-                },
-            )
-            .await
-            .map_err(crate::RuntimeEffectControllerError::from)?;
-        if observed.is_some() {
-            self.turn_cancel.note();
-        }
-        Ok(observed.is_some())
+        Ok(self.turn_cancel.is_observed())
     }
 
     pub fn without_turn_cancel_observation(mut self) -> Self {

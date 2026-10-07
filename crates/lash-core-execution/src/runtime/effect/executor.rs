@@ -23,7 +23,6 @@ mod task_panic;
 mod tool_attempt;
 mod trigger;
 mod turn_cancel_wait;
-mod turn_control_authority;
 pub use turn_cancel_wait::{ProcessTurnCancellation, TurnCancelWait};
 
 pub use await_event_support::await_event_scope_not_retirable;
@@ -32,7 +31,6 @@ pub use control::{
     CompletionKeyPreparation, EffectJournalIdentity, EffectJournalRetirement, EffectRetirementGate,
     ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDriveStep, RecordedKeyFence,
     RefusedWriteRange, Resolution, ResolveOutcome, RunRecordStep, SegmentProgress, ServedOnlyRange,
-    TurnCancelClosureOwnerBinding,
 };
 pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::admitted_scope::AdmittedScope;
@@ -40,13 +38,7 @@ pub use lash_core_store::effect_opener::EffectOpener;
 #[cfg(feature = "testing")]
 pub(crate) use process_local::process_terminal_resolution;
 
-pub use lash_core_store::turn_control_binding::admitted_turn_cancel_scope;
-pub use lash_core_store::turn_control_binding::turn_control_binding_id_for_scope;
-pub use lash_core_store::turn_control_binding::{TurnControlBindingId, TurnControlBindingIdError};
 pub use trigger::TriggerLocalExecution;
-pub use turn_control_authority::{
-    TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding,
-};
 
 use crate::ProcessRegistry;
 

@@ -261,12 +261,6 @@ pub(crate) async fn commit(
         None
     };
     let receipt = ShiftAdmissionReceipt {
-        cancel_intent: super::turn_cancel::load_turn_cancel_intent_snapshot_tx(
-            &mut tx,
-            session,
-            &selection.run,
-        )
-        .await?,
         selection,
         run_start: request.run_start.clone(),
         seal,

@@ -32,7 +32,7 @@ impl RecoverySlot {
     /// authority that owns the effect state, in the storage the backend's
     /// store set holds.
     pub(crate) fn new(env: &RuntimeEnvironment, config: RecoveryLeaseConfig) -> Self {
-        let authority = env.core.control.effect_host.turn_control_binding_id();
+        let authority = env.core.control.effect_host.backend().binding_identity();
         Self::over(
             env.core.backend().recovery_leader(),
             LeaseName::new(format!("recovery:{authority}")),

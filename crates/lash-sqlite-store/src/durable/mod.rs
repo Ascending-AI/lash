@@ -157,6 +157,7 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
 pub struct SqliteDurableStore {
     conn: SqliteConnection,
     clock: Arc<dyn Clock>,
+    blob_profile: crate::BuiltinBlobProfile,
 }
 
 impl std::fmt::Debug for SqliteDurableStore {
@@ -184,6 +185,8 @@ pub(crate) struct Committing<'a> {
     /// The fleet format the transaction's fence read: registry rows a
     /// domain write touches are encoded under it.
     pub(crate) fleet: lash_core_execution::FleetFormat,
+    /// How the session store a head commit writes keeps its blobs.
+    pub(crate) blob_profile: crate::BuiltinBlobProfile,
 }
 
 fn refuse<T>(error: DurableError) -> Flow<T> {
@@ -195,8 +198,16 @@ fn commit<T>(value: T) -> Flow<T> {
 }
 
 impl SqliteDurableStore {
-    pub(crate) fn new(conn: SqliteConnection, clock: Arc<dyn Clock>) -> Self {
-        Self { conn, clock }
+    pub(crate) fn new(
+        conn: SqliteConnection,
+        clock: Arc<dyn Clock>,
+        blob_profile: crate::BuiltinBlobProfile,
+    ) -> Self {
+        Self {
+            conn,
+            clock,
+            blob_profile,
+        }
     }
 
     fn instant(&self) -> DurableInstant {
@@ -315,9 +326,13 @@ fn node_live(tx: &Connection, node: &Owner) -> rusqlite::Result<bool> {
         .map(|row| row.is_some())
 }
 
-fn apply_owner(tx: &FencedTx<'_>, write: ActorTx, now: DurableInstant) -> Flow<ActorCommit> {
+fn apply_owner(
+    tx: &FencedTx<'_>,
+    write: ActorTx,
+    now: DurableInstant,
+    blob_profile: crate::BuiltinBlobProfile,
+) -> Flow<ActorCommit> {
     let fleet = tx.fleet();
-    let tx: &Connection = tx;
     let actor = write.actor().as_str().to_owned();
     let fence = tx
         .prepare_cached(SQL.actor.fence.sql())?
@@ -333,6 +348,7 @@ fn apply_owner(tx: &FencedTx<'_>, write: ActorTx, now: DurableInstant) -> Flow<A
         epoch: write.epoch(),
         now,
         fleet,
+        blob_profile,
     };
     for domain in write.domain() {
         if let Err(refusal) = apply_domain(tx, &committing, domain)? {
@@ -456,7 +472,7 @@ pub(crate) fn wake_within(
 }
 
 /// Apply one owner-commit domain write by its domain's module.
-fn apply_domain(tx: &Connection, committing: &Committing<'_>, write: &DomainWrite) -> Answer<()> {
+fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWrite) -> Answer<()> {
     match write {
         DomainWrite::Turn(write) => turns::apply(tx, committing, write),
         DomainWrite::SessionCommit(write) => turns::apply_session_commit(tx, committing, write),
@@ -824,8 +840,9 @@ impl DurableStore for SqliteDurableStore {
                 actor: tx.actor().clone(),
             });
         }
+        let blob_profile = self.blob_profile;
         self.write(label, move |connection, now| {
-            apply_owner(connection, tx, now)
+            apply_owner(connection, tx, now, blob_profile)
         })
         .await
     }
@@ -912,6 +929,16 @@ impl DurableReads for SqliteDurableStore {
     ) -> Result<Option<TurnRow>, DurableError> {
         let session = session.clone();
         self.read(move |tx| turns::turn(tx, &session)).await
+    }
+
+    async fn turn_end(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+    ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
+        let (session, run) = (session.clone(), run.clone());
+        self.read(move |tx| turns::turn_end(tx, &session, &run))
+            .await
     }
 
     async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {

@@ -260,7 +260,7 @@ fn release_run_rows_conn(
             .active_turn_id()
             .is_some_and(|turn| ended.contains(turn))
         {
-            addressed.push((row.input_id, row.input_json));
+            addressed.push(row.input_id);
         }
     }
     if addressed.is_empty() {
@@ -270,9 +270,9 @@ fn release_run_rows_conn(
         crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session_id, run)?;
     let disposition = request.as_ref().map_or(
         lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer,
-        |record| record.request.undelivered,
+        |request| request.undelivered,
     );
-    for (input_id, input_json) in addressed {
+    for input_id in addressed {
         if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
             crate::conn::cached_execute(
                 tx,
@@ -285,21 +285,6 @@ fn release_run_rows_conn(
                 ],
             )
             .map_err(sqlite_error)?;
-        }
-        if request.is_some() {
-            crate::persistence::turn_cancel::append_turn_cancel_outcome_conn(
-                tx,
-                session_id,
-                run,
-                lash_core_execution::TurnCancelAffectedInput {
-                    input_id: input_id.try_into()?,
-                    payload: crate::persistence::turn_cancel::decode_stored_json(
-                        &input_json,
-                        "turn input",
-                    )?,
-                    disposition,
-                },
-            )?;
         }
     }
     Ok(())
@@ -450,11 +435,7 @@ fn write_unanswered_run_end_conn(
     let session = &target.session;
     let run = &target.run;
     let record = crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session, run)?;
-    let cause = cause(
-        record
-            .as_ref()
-            .map(|record| record.request.request_id.clone()),
-    );
+    let cause = cause(record.as_ref().map(|request| request.request_id.clone()));
     let terminal = RunTerminal {
         session_id: session.clone(),
         run: run.clone(),

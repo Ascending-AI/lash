@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1177 rows over 713 files, 3329 laws.
-# By class: mechanical 142, semantic 99, delete 621, replace 315.
-# By lane: L1b 11, L4 7, L5 2, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 475, ported 42, deleted 660.
+# 1193 rows over 727 files, 3363 laws.
+# By class: mechanical 142, semantic 99, delete 637, replace 315.
+# By lane: L1b 11, L3 16, L4 7, L5 2, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 475, ported 42, deleted 676.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -19190,3 +19190,245 @@ laws = [
 disposition = "covered-by:crates/lash-vm-broker/tests/snapshot_matrix.rs"
 status = "deleted"
 note = "L7 (FIG-5177) rewrote the broker's unit laws on quiet points; the file's other laws stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory/turn_cancel.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "turn_cancel_exact_replay_preserves_different_pending_authorization",
+  "turn_cancel_scope_retirement_serializes_with_authorization",
+  "turn_cancel_request_escalation_advances_intent_without_replacing_base",
+  "turn_cancel_repair_preserves_base_across_escalation_and_reopen",
+  "turn_cancel_repair_orders_intent_and_ordinary_redefer",
+  "turn_cancel_final_commit_intent_cas_is_atomic",
+  "turn_cancel_conflicting_repeat_leaves_no_durable_trace",
+  "turn_cancel_concurrent_opposing_requests_converge",
+  "turn_cancel_wrong_binding_is_refused_at_every_phase",
+  "turn_cancel_undelivered_crash_matrix",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_store_factory/turn_cancel/closure_receipts.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "a_stale_fence_receipt_replay_leaves_the_store_byte_identical",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_control.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "turn_work_driver",
+  "after_step_request_defers_until_immediate_escalates_it",
+  "after_step_request_is_honoured_at_the_step_boundary",
+  "cancel_before_start_duplicate_replay_and_terminal_attach",
+  "completion_seal_vs_cancel_is_first_writer_wins",
+  "exact_scope_and_session_sweep_isolation",
+  "session_deletion_revokes_control_promises",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/cancelled_turn_withheld_input.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "immediate_cancel_defers_withheld_inject_now_input",
+  "immediate_cancel_defers_withheld_process_wakes",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_close.rs"
+test = "*"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "a_refused_deletion_closes_nothing",
+  "a_deletion_retried_after_its_close_is_not_refused_by_a_pin_the_close_superseded",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_delete.rs"
+test = "*"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "the_physical_delete_retires_the_closure_pins_its_close_superseded",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "run_admission_binds_cancellation_authority_with_its_rows",
+  "preparing_or_refusing_admission_leaves_cancellation_authority_unbound",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core-execution/src/runtime/turn_control/tests.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "every law of the file: the keyed gate pair, its escalation promise and closure authorization",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row"
+
+[[row]]
+path = "crates/lash-core-store/src/store/tests.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "cancellation_evidence_changes_intent_hash_from_current_shape",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core-store/src/store/runtime_commit_plan.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "commit_refuses_a_closure_authorized_in_another_session_with_its_typed_cause",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-core/src/runtime/error/host_commit_outcome_tests.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "cancellation_intent_change_maps_to_superseded_commit_if_it_escapes",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/error/host_commit_outcome_tests.rs::head_cas_supersession_requires_reload_before_retry"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/admission_atomicity.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "a_final_commit_cannot_ignore_the_admitted_cancel_intent",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+test = "a_stale_fence_receipt_replay_leaves_the_store_byte_identical"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "a_stale_fence_receipt_replay_leaves_the_store_byte_identical",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "a_stale_fence_receipt_replay_leaves_the_store_byte_identical"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "a_stale_fence_receipt_replay_leaves_the_store_byte_identical",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/turn_cancel_receipt_consistency.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "postgres_turn_cancel_receipt_survives_vacuum_when_configured",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/admission_laws.rs"
+test = "*"
+area = "turn-cancel"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "open_input_addressed_to_an_ended_run_is_next_turn_input: its recorded-Drop case and the outcome record it read back",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"

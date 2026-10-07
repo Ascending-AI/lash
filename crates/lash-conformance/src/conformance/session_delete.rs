@@ -1,10 +1,9 @@
-//! L-D7 through L-D9, L-D11 and L-D12: a session's two-phase delete (ADR
-//! 0109 §4). The close's acknowledgement arms the session's `SessionDelete`
+//! L-D7 through L-D9 and L-D12: a session's two-phase delete (ADR 0109 §4).
+//! The close's acknowledgement arms the session's `SessionDelete`
 //! obligation, the obligation counts exactly the session's undelivered
 //! cleanup, and its delivery — the physical delete — waits for that cleanup
-//! and then deletes the session, closure pins its close superseded
-//! included; the frame cleanup that delete arms outlives a claimant that
-//! dies inside it.
+//! and then deletes the session; the frame cleanup that delete arms outlives
+//! a claimant that dies inside it.
 
 use crate::ActorContext;
 use crate::conformance::DeploymentViewExt as _;
@@ -21,15 +20,13 @@ use lash_core::shift::relay::{
 };
 use lash_core::store::session_delete::SessionCleanup;
 use lash_core::store::{
-    ControlIntentState, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
-    ObligationSettlement, ObligationStanding, ObligationState, StallReason,
+    ObligationId, ObligationKey, ObligationKind, ObligationLedger, ObligationSettlement,
+    ObligationStanding, ObligationState, StallReason,
 };
 use lash_core::testing::TestClock;
 use lash_core::{ScopeId, StoreSet, TurnId};
 
-use super::session_close::{
-    CloseSink, administration, close, intent_relay, pin_a_turn_cancel_closure, session,
-};
+use super::session_close::{CloseSink, administration, close, intent_relay, session};
 
 /// A claim on `id` settled as `settlement`: what a kind's relay does, done by
 /// hand for a ledger whose producer slice is not the law's subject.
@@ -403,69 +400,6 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
     );
 }
 
-/// L-D11 (FIG-3873 S3): the physical delete retires the turn-cancel closure
-/// pins of the closing session it deletes. The close ended every run the
-/// session had, so a pin is a turn's whose final commit the close cut short:
-/// no activation of a closing session will drain it, and a delete that
-/// refused it would stay owed for good.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn the_physical_delete_retires_the_closure_pins_its_close_superseded(
-    prefix: &str,
-    host: ActorContext,
-    stores: Arc<dyn StoreSet>,
-    _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
-) {
-    let factory = stores.session_store_factory();
-    let clock = stores.clock();
-    let (id, store) = session(&stores, prefix, "delete-superseded-pin").await;
-    pin_a_turn_cancel_closure(store.as_ref(), &id).await;
-    let intent = factory
-        .begin_session_close(&id, clock.timestamp_ms())
-        .await
-        .expect("commit the close's store half")
-        .expect("the session exists");
-    // The close's engine half, as its obligation's relay delivers it: its
-    // acknowledgement arms the delete.
-    let delivered = intent_relay(
-        &stores,
-        CloseSink::new(Arc::clone(&factory), 0),
-        Arc::clone(&clock),
-    )
-    .deliver_intent(&intent)
-    .await
-    .expect("deliver the close");
-    assert!(
-        matches!(delivered, ControlIntentState::Acknowledged { .. }),
-        "{delivered:?}"
-    );
-    let delete = stores
-        .session_delete_ledger()
-        .delete_obligation(&id)
-        .await
-        .expect("read the delete obligation")
-        .expect("the acknowledgement armed the delete");
-    let admin = administration(host, &stores, CloseSink::new(Arc::clone(&factory), 0));
-    let verdict = deliver_now(&SessionDeleteRelay::new(admin), &delete.id, clock.as_ref())
-        .await
-        .expect("attempt the delete");
-    assert!(
-        matches!(verdict, RelayVerdict::ClaimLost),
-        "the physical delete removed the row its obligation lived on: {verdict:?}"
-    );
-    assert!(factory.is_deleted(&id).await.expect("read the tombstone"));
-    assert!(
-        factory
-            .pending_turn_cancel_closure_pins(&id)
-            .await
-            .expect("read the pins")
-            .is_empty(),
-        "the pin went with the session's storage"
-    );
-}
-
 /// A cleanup pass whose deployment dies inside the frame's delivery (the
 /// chaos soak's S3 death, FIG-4129): it claims the page, applies the frame's
 /// cleanup in full, and never settles it.
@@ -539,8 +473,6 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
             ),
         ),
     };
-    // The orphaned run: a turn whose final commit the close cuts short.
-    pin_a_turn_cancel_closure(store.as_ref(), &id).await;
     let intent = factory
         .begin_session_close(&id, clock.timestamp_ms())
         .await

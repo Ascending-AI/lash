@@ -399,514 +399,7 @@ impl SqliteStore {
                         planner,
                     ))));
                 }
-                let fleet = tx.fleet();
-                let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
-                    let commit = planner.commit();
-                    // The commit's plugin state and config namespaces are
-                    // admitted against the fleet record's writer ranges
-                    // before anything of the commit is written (FIG-4746).
-                    tx.admit_plugin_writers(planner.plugin_publication())
-                        .map_err(sqlite_error)?;
-                    ensure_session_not_deleted_conn(tx, &commit.session_id)?;
-                    let admitted = tx
-                        .query_row(
-                            session_sql().meta_sqlite.exists_materialized.sql(),
-                            params![commit.session_id.as_str()],
-                            |_| Ok(()),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?
-                        .is_some();
-                    if !admitted {
-                        return Err(StoreError::SessionNotFound {
-                            session_id: commit.session_id.clone(),
-                        });
-                    }
-                    // A successor's seal refuses the commit before anything
-                    // is written (ADR 0105 §2). A commit already stored still
-                    // answers from its receipt below, since a shift that runs
-                    // several runs in one journal replays an earlier run's
-                    // commit after a later run's seal (FIG-4498).
-                    let superseded = super::shift_epoch::commit_fence_superseded_conn(tx, commit)?;
-                    let existing =
-                        try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
-                    planner.validate_node_derivation()?;
-                    // A run's commit settles its park (FIG-3586, FIG-3600
-                    // S7), in the commit's transaction, whichever of its
-                    // physical turns committed; another run's commit
-                    // leaves it.
-                    if let Some(turn_id) = commit.settled_park_run()
-                        && superseded.is_none()
-                    {
-                        let released: Option<(String, i64)> = tx
-                            .query_row(
-                                crate::turn_ingress::turn_ingress_sql()
-                                    .turn_parks
-                                    .delete_for_turn_returning
-                                    .sql(),
-                                params![commit.session_id.as_str(), turn_id.as_str()],
-                                |row| Ok((row.get(0)?, row.get(1)?)),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?;
-                        if let Some((released_turn_id, released_park_id)) = released {
-                            crate::persistence::turn_park_feed::log_turn_park_closed_conn(
-                                tx,
-                                &commit.session_id,
-                                &released_turn_id,
-                                released_park_id,
-                                &lash_core_execution::store::ParkEventKind::Unparked {
-                                    cause: lash_core_execution::store::UnparkCause::TurnCommitted,
-                                },
-                                crate::clamp_epoch_ms(now),
-                            )?;
-                        }
-                    }
-                    {
-                        let prior: Option<PriorReceiptRow> = tx
-                            .query_row(
-                                session_sql().turn_commits.select_receipt.sql(),
-                                params![commit.session_id.as_str(), planner.operation_key()],
-                                |row| {
-                                    Ok((
-                                        row.get(0)?,
-                                        row.get(1)?,
-                                        row.get(2)?,
-                                        row.get(3)?,
-                                        row.get(4)?,
-                                        row.get(5)?,
-                                    ))
-                                },
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?;
-                        if let Some((
-                            stored_hash,
-                            result_json,
-                            stored_outcome,
-                            stored_identity,
-                            stored_version,
-                            stored_requested_node_count,
-                        )) = prior
-                        {
-                            // One codec owns the unit-shape and integer-range checks.
-                            // The ancestor stays write-only because the request hash binds it.
-                            let append_request_identity =
-                                lash_core_execution::store_backend_support::decode_append_request_identity(
-                                    &commit.turn_commit.operation.key,
-                                    stored_identity,
-                                    stored_version,
-                                    stored_requested_node_count,
-                                )?;
-                            let result =
-                                lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
-                                    &commit.session_id,
-                                    planner.operation_key(),
-                                    &result_json,
-                                    fleet,
-                                )?;
-                            lash_core_execution::store::validate_turn_commit_outcome_code(
-                                &result, stored_outcome.as_deref(),
-                            )?;
-                            let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
-                                turn_commit_hash: stored_hash,
-                                result,
-                                append_request_identity,
-                            };
-                            let replay = match planner.decide_receipt(Some(prior)) {
-                                Ok(replay) => replay,
-                                // Only the stored commit's exact replay answers under a
-                                // superseded fence.
-                                Err(conflict) => return Err(superseded.unwrap_or(conflict)),
-                            };
-                            if let Some(replay) = replay {
-                                // A stale receipt replay has no write authority,
-                                // including cleanup of its own settled closure.
-                                if let Some(interrupted) = commit.interrupted_turn.as_ref()
-                                    && superseded.is_none()
-                                {
-                                    let closure = interrupted.settlement.authorization();
-                                    crate::conn::cached_execute(tx, crate::turn_ingress::turn_ingress_sql().closures.delete_settled.sql(),
-                                        params![closure.session_id().as_str(), closure.turn_id().as_str(), encode_json(closure)?],
-                                    ).map_err(sqlite_error)?;
-                                }
-                                return Ok(replay.into_result());
-                            }
-                        }
-                    }
-                    if let Some(superseded) = superseded {
-                        return Err(superseded);
-                    }
-                    let root = commit.shift_fence.as_ref().map(|fence| super::shift_admission::read_conn(tx, &commit.session_id, fence.admission())).transpose()?.flatten();
-                    let admission = if commit.turn_commit.operation.key == "final" {
-                        commit.settled_park_run().map(|run| crate::session_runs::run_admission_conn(tx, &commit.session_id, run)).transpose()?.flatten()
-                    } else { None };
-                    let intent_authoritative = commit.validate_admitted_cancel_intent(root.as_ref().map(|root| &root.cancel_intent).or_else(|| admission.as_ref().and_then(|admission| admission.cancel_intent.as_ref())))?;
-                    if let Some(interrupted) = commit.interrupted_turn.as_ref() {
-                        let closure = interrupted.settlement.authorization();
-                        if intent_authoritative && !super::turn_input::check_turn_cancellation_conn(
-                            tx, closure.session_id(), closure.binding_id(), closure.admitted_scope(),
-                        )? {
-                            return Err(StoreError::TurnCancelBindingMismatch {
-                                session_id: closure.session_id().clone(), expected: String::new(),
-                                presented: closure.binding_id().into(),
-                            });
-                        }
-
-                        if closure.admitted_scope().session_id().is_none() {
-                            let scope_id = closure.admitted_scope().journal_identity()
-                                .map_err(|error| StoreError::Backend(error.to_string()))?.key().to_string();
-                            let retired = tx.query_row(
-                                crate::turn_ingress::turn_ingress_sql()
-                                    .retired_scopes
-                                    .exists_for_scope
-                                    .sql(),
-                                params![scope_id], |row| row.get::<_, bool>(0),
-                            ).map_err(sqlite_error)?;
-                            if retired { return Err(StoreError::TurnCancelClosureScopeRetired { scope_id }); }
-                        }
-                        let final_key = lash_core_execution::OperationId::turn(closure.session_id(), closure.turn_id(), "final").storage_key()?;
-                        let committed = tx.query_row(
-                            session_sql().turn_commits.exists_for_turn.sql(),
-                            params![closure.session_id().as_str(), final_key], |row| row.get::<_, bool>(0),
-                        ).map_err(sqlite_error)?;
-                        if committed {
-                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                                session_id: closure.session_id().clone(), turn_id: closure.turn_id().clone(),
-                            });
-                        }
-
-                    }
-                    if let Some(interrupted) = commit.interrupted_turn.as_ref()
-                        && load_turn_cancel_intent_snapshot_conn(
-                            tx,
-                            &commit.session_id,
-                            interrupted.turn_id(),
-                        )? != interrupted.observed_intent
-                    {
-                        return Err(StoreError::TurnCancelIntentChanged {
-                            session_id: commit.session_id.clone(),
-                            turn_id: interrupted.turn_id().clone(),
-                        });
-                    }
-                    let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
-                    let old_leaf_node_id = existing
-                        .as_ref()
-                        .and_then(|head| head.leaf_node_id.clone());
-                    let parent_leaf = old_leaf_node_id
-                        .as_deref()
-                        .map(|leaf_node_id| {
-                            tx.query_row(
-                                session_sql().graph_sqlite.select_parent_facts.sql(),
-                                params![leaf_node_id],
-                                |row| {
-                                    Ok((
-                                        row.get::<_, i64>(0)?,
-                                        row.get::<_, String>(1)?,
-                                        row.get::<_, String>(2)?,
-                                    ))
-                                },
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?
-                            .map(|(generation, frame_node_id, owner)| -> Result<_, StoreError> {
-                                let generation = u64::try_from(generation).map_err(|_| {
-                                    stored_data_corrupt(
-                                        "SessionGraph node",
-                                        format!("negative generation {generation}"),
-                                    )
-                                })?;
-                                Ok((
-                                    lash_core_execution::store::ParentNodeFacts {
-                                        node_id: leaf_node_id.to_string().try_into()?,
-                                        generation,
-                                        frame_node_id: frame_node_id.try_into()?,
-                                    },
-                                    lash_core_execution::store_backend_support::PathNode {
-                                        node_id: leaf_node_id.to_string().try_into()?,
-                                        owner_session_id: owner.try_into()?,
-                                        generation,
-                                    },
-                                ))
-                            })
-                            .transpose()
-                        })
-                        .transpose()?
-                        .flatten();
-                    let (parent_node_facts, parent_path_node) = parent_leaf.unzip();
-                    // The ceilings select the requested ancestor; the head
-                    // leaf's parent edges decide whether it is active
-                    // (ADR 0057, edge authority).
-                    let requested_ancestor_is_active = match (
-                        requested_append_ancestor(&commit.turn_commit),
-                        parent_node_facts.as_ref(),
-                    ) {
-                        (None, _) => true,
-                        (Some(_), None) => false,
-                        (Some(required), Some(parent)) => match tx
-                            .query_row(
-                                session_sql().graph_sqlite.select_readable_ancestor.sql(),
-                                params![required, commit.session_id.as_str(), i64::try_from(parent.generation).map_err(|_| {
-                                    StoreError::Backend("parent generation does not fit SQLite INTEGER".to_string())
-                                })?],
-                                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?
-                        {
-                            None => false,
-                            Some((owner, generation)) => crate::history::head_reaches(
-                                tx,
-                                parent_path_node.clone(),
-                                lash_core_execution::store_backend_support::PathNode {
-                                    node_id: required.to_string().try_into()?,
-                                    owner_session_id: owner.try_into()?,
-                                    generation: u64::try_from(generation).map_err(|_| {
-                                        stored_data_corrupt(
-                                            "SessionGraph node",
-                                            format!("negative generation {generation}"),
-                                        )
-                                    })?,
-                                },
-                            )?,
-                        },
-                    };
-                    let occupied_node_ids = occupied_node_ids_conn(tx, commit.graph.nodes())?;
-                    let published_leaf = match old_leaf_node_id {
-                        None => lash_core_execution::store::PublishedLeafFacts::Absent,
-                        Some(node_id) => match parent_node_facts {
-                            Some(parent) => lash_core_execution::store::PublishedLeafFacts::Live(parent),
-                            None => lash_core_execution::store::PublishedLeafFacts::Retired { node_id },
-                        },
-                    };
-                    let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
-                        actual_head_revision: actual_revision,
-                        published_leaf,
-                        requested_ancestor_is_active,
-                        occupied_node_ids,
-                        existing_pending_follow_on: existing
-                            .as_ref()
-                            .and_then(|meta| meta.pending_follow_on.clone()),
-                    })?;
-                    // The bound turn owns the head (FIG-4202): a write
-                    // outside every shift is refused while a run, an owed
-                    // follow-on or an open command owns it. A replayed
-                    // receipt above answered its first outcome already, and
-                    // the plan's own refusals (a follow-on the commit would
-                    // drop, a moved head) answer first.
-                    if lash_core_execution::store::head_write_needs_ownership(
-                        commit.shift_fence.is_some(),
-                        existing
-                            .as_ref()
-                            .is_some_and(|head| !head.is_created()),
-                    ) {
-                        let facts = crate::session_runs::head_ownership_facts_conn(
-                            tx,
-                            &commit.session_id,
-                            lash_core_execution::store::follow_on_owning_the_head(
-                                existing
-                                    .as_ref()
-                                    .and_then(|meta| meta.pending_follow_on.as_ref()),
-                                commit.pending_follow_on.as_ref(),
-                            ),
-                        )?;
-                        lash_core_execution::store::require_unowned_head(
-                            &commit.session_id,
-                            facts,
-                        )?;
-                    }
-                    let sql_head_revision = sql_monotonic_counter_value(
-                        "session_head_revision",
-                        plan.actual_head_revision(),
-                        plan.next_head_revision(),
-                    )?;
-                    let stored_checkpoint =
-                        Self::put_checkpoint_conn(tx, &commit.checkpoint, blob_profile, fleet)?;
-
-                    insert_graph_nodes_conn(tx, &commit.session_id, commit.graph.nodes(), &plan)?;
-                    let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());
-                    // Divergence ruling (FIG-3381): SQLite carries no CAS
-                    // predicate on its head upsert and needs none. `existing`
-                    // was read inside this `BEGIN IMMEDIATE` transaction,
-                    // which is SQLite's database-wide single-writer lock, so
-                    // no revision can move between that read and this write.
-                    // The invariant is asserted rather than assumed: if the
-                    // head read is ever moved out of the write transaction,
-                    // this refuses the publication instead of publishing over
-                    // a revision nobody held.
-                    lash_core_execution::store_backend_support::require_single_writer_head_publication(
-                        &commit.session_id,
-                        crate::SQLITE_BACKEND,
-                        !tx.is_autocommit(),
-                    )?;
-                    // Read the published revision again, inside the same
-                    // write transaction, and let the shared verdict decide.
-                    // This is SQLite's equivalent of PostgreSQL's
-                    // `SELECT head_revision … FOR UPDATE`: under
-                    // `BEGIN IMMEDIATE` it must still be the revision the plan
-                    // was built on, and if the earlier read is ever moved out
-                    // of this transaction it will not be.
-                    let published_revision = tx
-                        .query_row(
-                            session_sql().head.select_revision.sql(),
-                            params![commit.session_id.as_str()],
-                            |row| row.get::<_, i64>(0),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?
-                        .map(|revision| {
-                            u64_from_sql("SessionHeadMeta", "head_revision", revision)
-                        })
-                        .transpose()
-                        .map_err(sqlite_error)?
-                        .unwrap_or(0);
-                    match lash_core_execution::store_backend_support::head_publication_verdict(
-                        plan.actual_head_revision(),
-                        published_revision,
-                    ) {
-                        lash_core_execution::store_backend_support::HeadPublicationVerdict::Publish => {}
-                        lash_core_execution::store_backend_support::HeadPublicationVerdict::HeadMoved {
-                            observed_head_revision,
-                            ..
-                        } => {
-                            return Err(StoreError::HeadRevisionConflict {
-                                expected: plan.actual_head_revision(),
-                                actual: observed_head_revision,
-                            });
-                        }
-                    }
-                    let left = lash_core_execution::store::frames_left_by_commit(
-                        existing.as_ref().and_then(|head| head.current_frame_node_id.as_ref()),
-                        &commit.graph,
-                        meta.current_frame_node_id.as_ref(),
-                    );
-                    if let Some(transition) = &commit.frame_transition {
-                        if transition.ended.session_id() != commit.session_id
-                            || transition.successor.session_id() != commit.session_id
-                            || !left.contains(transition.ended.frame_node_id())
-                            || meta.current_frame_node_id.as_ref()
-                                != Some(transition.successor.frame_node_id())
-                        {
-                            return Err(StoreError::Backend(
-                                "frame transition does not match the committed head".into(),
-                            ));
-                        }
-                        commit_frame_transition_tx(tx, transition, &left, now)?;
-                    } else {
-                        end_frames_tx(tx, &commit.session_id, &left, None, now)?;
-                    }
-                    let head_json = encode_json(&meta.payload())?;
-                    // The published head is a retained revision from this
-                    // transaction on. Recording it reads no pin: a pin
-                    // resolves to it by query whenever something asks.
-                    crate::revisions::record_revision_conn(
-                        tx,
-                        &commit.session_id,
-                        sql_head_revision,
-                        meta.leaf_node_id.as_deref(),
-                        meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
-                        &head_json,
-                    )?;
-                    let changed = crate::conn::cached_execute(tx,
-                        session_sql().head_sqlite.upsert_cas.sql(),
-                        params![
-                            meta.session_id.as_str(),
-                            sql_head_revision,
-                            lash_core_execution::store::pending_follow_on::encode_pending_follow_on(
-                                meta.pending_follow_on.as_ref(),
-                            )?,
-                            plan.actual_head_revision() as i64,
-                        ],
-                    )
-                    .map_err(sqlite_error)?;
-                    if changed != 1 {
-                        return Err(StoreError::HeadRevisionConflict {
-                            expected: plan.actual_head_revision(),
-                            actual: published_revision,
-                        });
-                    }
-                    let retention = tx
-                        .prepare_cached(session_sql().meta.touch_last_commit.sql())
-                        .map_err(sqlite_error)?
-                        .query_row(
-                            params![commit.session_id.as_str(), crate::clamp_epoch_ms(now)],
-                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?
-                        .map_or(
-                            Ok(lash_core_execution::Retention::default()),
-                            |(kind, last_turns)| {
-                                lash_core_execution::Retention::from_stored(&kind, last_turns)
-                            },
-                        )?;
-                    if plan.head_changed()
-                        && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
-                    {
-                        retire_unreachable_ancestry_conn(tx, old_leaf_node_id)?;
-                    }
-                    let turn_cancel_input_outcome =
-                        super::ingress_settlement::settle_commit_ingress_conn(tx, commit, now)?;
-                    let claim = lash_core_execution::ReferrerClaim::unguarded(lash_core_execution::ArtifactReferrer::Session(commit.session_id.clone())).map_err(|error| error.into_store_error("attachment session referrer"))?;
-                    crate::attachments::acquire_attachment_refs_conn(tx, &claim, &commit.committed_attachment_ids, now)?;
-                    crate::session_runs::write_commit_run_terminal_conn(tx, commit, plan.next_head_revision(), now)?;
-                    // `until_gc` releases nothing here and reads no pin. The
-                    // other policies release what this publication moved out
-                    // of their window, once the run's terminal names it.
-                    if retention.releases_at_commit() {
-                        crate::revisions::release_unretained_conn(
-                            tx,
-                            false,
-                            Some(&commit.session_id),
-                        )?;
-                    }
-                    let mut result = plan.result(
-                        stored_checkpoint.checkpoint_ref,
-                        stored_checkpoint.manifest,
-                        now,
-                        commit.pending_follow_on.is_some() || tx.query_row(
-                            crate::turn_ingress::turn_ingress_sql().family.has_admissible_work.sql(),
-                            [commit.session_id.as_str()],
-                            |row| row.get::<_, bool>(0),
-                        ).map_err(sqlite_error)?,
-                    );
-                    result.turn_cancel_input_outcome = turn_cancel_input_outcome;
-                    {
-                        let receipt = plan.receipt_write(&result);
-                        let result_json = encode_json(receipt.result)?;
-                        let identity = append_identity_columns(receipt.append_request_identity);
-                        crate::conn::cached_execute(tx,
-                            session_sql().turn_commits.insert.sql(),
-                            params![
-                                receipt.session_id.as_str(),
-                                receipt.operation_key,
-                                receipt.turn_commit_hash,
-                                result_json,
-                                receipt.result.outcome.as_ref().map(|outcome| outcome.as_str()),
-                                now as i64,
-                                identity.0,
-                                identity.1,
-                                identity.2,
-                                !result.failure_evidence.is_empty(),
-                                crate::catalog::catalog_reads::next_turn_change_sequence(tx)?,
-                            ],
-                        )
-                        .map_err(sqlite_error)?;
-                    }
-                    if let Some(interrupted) = commit.interrupted_turn.as_ref() {
-                        let closure = interrupted.settlement.authorization();
-                        crate::conn::cached_execute(tx,
-                            crate::turn_ingress::turn_ingress_sql()
-                                .closures
-                                .delete_by_turn
-                                .sql(),
-                            params![closure.session_id().as_str(), closure.turn_id().as_str()],
-                        )
-                        .map_err(sqlite_error)?;
-                    }
-
-                    Ok(result)
-                })();
+                let outcome = apply_runtime_commit_conn(tx, &planner, blob_profile, now);
                 // Roll back on a `StoreError` so a failure after the first
                 // write (e.g. a head-revision conflict surfaced mid-commit, or a
                 // backend write error) does not leave the partial transaction
@@ -919,6 +412,470 @@ impl SqliteStore {
             .await
             .map_err(sqlite_error)
     }
+}
+
+/// Apply `planner`'s runtime commit inside the open write transaction `tx`:
+/// the receipt replay, the head compare-and-set and every write of the
+/// commit, or a typed refusal with the transaction left for the caller to
+/// roll back. The runtime store's own commit and a turn's `turn.commit`
+/// (in the durable owner's fenced transaction) both apply a commit here.
+pub(crate) fn apply_runtime_commit_conn(
+    tx: &crate::conn::FencedTx<'_>,
+    planner: &lash_core_execution::store::RuntimeCommitPlanner,
+    blob_profile: crate::BuiltinBlobProfile,
+    now: u64,
+) -> Result<RuntimeCommitReceipt, StoreError> {
+    let fleet = tx.fleet();
+    let commit = planner.commit();
+    // The commit's plugin state and config namespaces are
+    // admitted against the fleet record's writer ranges
+    // before anything of the commit is written (FIG-4746).
+    tx.admit_plugin_writers(planner.plugin_publication())
+        .map_err(sqlite_error)?;
+    ensure_session_not_deleted_conn(tx, &commit.session_id)?;
+    let admitted = tx
+        .query_row(
+            session_sql().meta_sqlite.exists_materialized.sql(),
+            params![commit.session_id.as_str()],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .is_some();
+    if !admitted {
+        return Err(StoreError::SessionNotFound {
+            session_id: commit.session_id.clone(),
+        });
+    }
+    // A successor's seal refuses the commit before anything
+    // is written (ADR 0105 §2). A commit already stored still
+    // answers from its receipt below, since a shift that runs
+    // several runs in one journal replays an earlier run's
+    // commit after a later run's seal (FIG-4498).
+    let superseded = super::shift_epoch::commit_fence_superseded_conn(tx, commit)?;
+    let existing = try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
+    planner.validate_node_derivation()?;
+    // A run's commit settles its park (FIG-3586, FIG-3600
+    // S7), in the commit's transaction, whichever of its
+    // physical turns committed; another run's commit
+    // leaves it.
+    if let Some(turn_id) = commit.settled_park_run()
+        && superseded.is_none()
+    {
+        let released: Option<(String, i64)> = tx
+            .query_row(
+                crate::turn_ingress::turn_ingress_sql()
+                    .turn_parks
+                    .delete_for_turn_returning
+                    .sql(),
+                params![commit.session_id.as_str(), turn_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        if let Some((released_turn_id, released_park_id)) = released {
+            crate::persistence::turn_park_feed::log_turn_park_closed_conn(
+                tx,
+                &commit.session_id,
+                &released_turn_id,
+                released_park_id,
+                &lash_core_execution::store::ParkEventKind::Unparked {
+                    cause: lash_core_execution::store::UnparkCause::TurnCommitted,
+                },
+                crate::clamp_epoch_ms(now),
+            )?;
+        }
+    }
+    {
+        let prior: Option<PriorReceiptRow> = tx
+            .query_row(
+                session_sql().turn_commits.select_receipt.sql(),
+                params![commit.session_id.as_str(), planner.operation_key()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        if let Some((
+            stored_hash,
+            result_json,
+            stored_outcome,
+            stored_identity,
+            stored_version,
+            stored_requested_node_count,
+        )) = prior
+        {
+            // One codec owns the unit-shape and integer-range checks.
+            // The ancestor stays write-only because the request hash binds it.
+            let append_request_identity =
+                lash_core_execution::store_backend_support::decode_append_request_identity(
+                    &commit.turn_commit.operation.key,
+                    stored_identity,
+                    stored_version,
+                    stored_requested_node_count,
+                )?;
+            let result = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+                &commit.session_id,
+                planner.operation_key(),
+                &result_json,
+                fleet,
+            )?;
+            lash_core_execution::store::validate_turn_commit_outcome_code(
+                &result,
+                stored_outcome.as_deref(),
+            )?;
+            let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
+                turn_commit_hash: stored_hash,
+                result,
+                append_request_identity,
+            };
+            let replay = match planner.decide_receipt(Some(prior)) {
+                Ok(replay) => replay,
+                // Only the stored commit's exact replay answers under a
+                // superseded fence.
+                Err(conflict) => return Err(superseded.unwrap_or(conflict)),
+            };
+            if let Some(replay) = replay {
+                return Ok(replay.into_result());
+            }
+        }
+    }
+    if let Some(superseded) = superseded {
+        return Err(superseded);
+    }
+    let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
+    let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
+    let parent_leaf = old_leaf_node_id
+        .as_deref()
+        .map(|leaf_node_id| {
+            tx.query_row(
+                session_sql().graph_sqlite.select_parent_facts.sql(),
+                params![leaf_node_id],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)?
+            .map(
+                |(generation, frame_node_id, owner)| -> Result<_, StoreError> {
+                    let generation = u64::try_from(generation).map_err(|_| {
+                        stored_data_corrupt(
+                            "SessionGraph node",
+                            format!("negative generation {generation}"),
+                        )
+                    })?;
+                    Ok((
+                        lash_core_execution::store::ParentNodeFacts {
+                            node_id: leaf_node_id.to_string().try_into()?,
+                            generation,
+                            frame_node_id: frame_node_id.try_into()?,
+                        },
+                        lash_core_execution::store_backend_support::PathNode {
+                            node_id: leaf_node_id.to_string().try_into()?,
+                            owner_session_id: owner.try_into()?,
+                            generation,
+                        },
+                    ))
+                },
+            )
+            .transpose()
+        })
+        .transpose()?
+        .flatten();
+    let (parent_node_facts, parent_path_node) = parent_leaf.unzip();
+    // The ceilings select the requested ancestor; the head
+    // leaf's parent edges decide whether it is active
+    // (ADR 0057, edge authority).
+    let requested_ancestor_is_active = match (
+        requested_append_ancestor(&commit.turn_commit),
+        parent_node_facts.as_ref(),
+    ) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(required), Some(parent)) => match tx
+            .query_row(
+                session_sql().graph_sqlite.select_readable_ancestor.sql(),
+                params![
+                    required,
+                    commit.session_id.as_str(),
+                    i64::try_from(parent.generation).map_err(|_| {
+                        StoreError::Backend(
+                            "parent generation does not fit SQLite INTEGER".to_string(),
+                        )
+                    })?
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+        {
+            None => false,
+            Some((owner, generation)) => crate::history::head_reaches(
+                tx,
+                parent_path_node.clone(),
+                lash_core_execution::store_backend_support::PathNode {
+                    node_id: required.to_string().try_into()?,
+                    owner_session_id: owner.try_into()?,
+                    generation: u64::try_from(generation).map_err(|_| {
+                        stored_data_corrupt(
+                            "SessionGraph node",
+                            format!("negative generation {generation}"),
+                        )
+                    })?,
+                },
+            )?,
+        },
+    };
+    let occupied_node_ids = occupied_node_ids_conn(tx, commit.graph.nodes())?;
+    let published_leaf = match old_leaf_node_id {
+        None => lash_core_execution::store::PublishedLeafFacts::Absent,
+        Some(node_id) => match parent_node_facts {
+            Some(parent) => lash_core_execution::store::PublishedLeafFacts::Live(parent),
+            None => lash_core_execution::store::PublishedLeafFacts::Retired { node_id },
+        },
+    };
+    let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
+        actual_head_revision: actual_revision,
+        published_leaf,
+        requested_ancestor_is_active,
+        occupied_node_ids,
+        existing_pending_follow_on: existing
+            .as_ref()
+            .and_then(|meta| meta.pending_follow_on.clone()),
+    })?;
+    // The bound turn owns the head (FIG-4202): a write
+    // outside every shift is refused while a run, an owed
+    // follow-on or an open command owns it. A replayed
+    // receipt above answered its first outcome already, and
+    // the plan's own refusals (a follow-on the commit would
+    // drop, a moved head) answer first.
+    if lash_core_execution::store::head_write_needs_ownership(
+        commit.shift_fence.is_some(),
+        existing.as_ref().is_some_and(|head| !head.is_created()),
+    ) {
+        let facts = crate::session_runs::head_ownership_facts_conn(
+            tx,
+            &commit.session_id,
+            lash_core_execution::store::follow_on_owning_the_head(
+                existing
+                    .as_ref()
+                    .and_then(|meta| meta.pending_follow_on.as_ref()),
+                commit.pending_follow_on.as_ref(),
+            ),
+        )?;
+        lash_core_execution::store::require_unowned_head(&commit.session_id, facts)?;
+    }
+    let sql_head_revision = sql_monotonic_counter_value(
+        "session_head_revision",
+        plan.actual_head_revision(),
+        plan.next_head_revision(),
+    )?;
+    let stored_checkpoint =
+        SqliteStore::put_checkpoint_conn(tx, &commit.checkpoint, blob_profile, fleet)?;
+
+    insert_graph_nodes_conn(tx, &commit.session_id, commit.graph.nodes(), &plan)?;
+    let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());
+    // Divergence ruling (FIG-3381): SQLite carries no CAS
+    // predicate on its head upsert and needs none. `existing`
+    // was read inside this `BEGIN IMMEDIATE` transaction,
+    // which is SQLite's database-wide single-writer lock, so
+    // no revision can move between that read and this write.
+    // The invariant is asserted rather than assumed: if the
+    // head read is ever moved out of the write transaction,
+    // this refuses the publication instead of publishing over
+    // a revision nobody held.
+    lash_core_execution::store_backend_support::require_single_writer_head_publication(
+        &commit.session_id,
+        crate::SQLITE_BACKEND,
+        !tx.is_autocommit(),
+    )?;
+    // Read the published revision again, inside the same
+    // write transaction, and let the shared verdict decide.
+    // This is SQLite's equivalent of PostgreSQL's
+    // `SELECT head_revision … FOR UPDATE`: under
+    // `BEGIN IMMEDIATE` it must still be the revision the plan
+    // was built on, and if the earlier read is ever moved out
+    // of this transaction it will not be.
+    let published_revision = tx
+        .query_row(
+            session_sql().head.select_revision.sql(),
+            params![commit.session_id.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+        .transpose()
+        .map_err(sqlite_error)?
+        .unwrap_or(0);
+    match lash_core_execution::store_backend_support::head_publication_verdict(
+        plan.actual_head_revision(),
+        published_revision,
+    ) {
+        lash_core_execution::store_backend_support::HeadPublicationVerdict::Publish => {}
+        lash_core_execution::store_backend_support::HeadPublicationVerdict::HeadMoved {
+            observed_head_revision,
+            ..
+        } => {
+            return Err(StoreError::HeadRevisionConflict {
+                expected: plan.actual_head_revision(),
+                actual: observed_head_revision,
+            });
+        }
+    }
+    let left = lash_core_execution::store::frames_left_by_commit(
+        existing
+            .as_ref()
+            .and_then(|head| head.current_frame_node_id.as_ref()),
+        &commit.graph,
+        meta.current_frame_node_id.as_ref(),
+    );
+    if let Some(transition) = &commit.frame_transition {
+        if transition.ended.session_id() != commit.session_id
+            || transition.successor.session_id() != commit.session_id
+            || !left.contains(transition.ended.frame_node_id())
+            || meta.current_frame_node_id.as_ref() != Some(transition.successor.frame_node_id())
+        {
+            return Err(StoreError::Backend(
+                "frame transition does not match the committed head".into(),
+            ));
+        }
+        commit_frame_transition_tx(tx, transition, &left, now)?;
+    } else {
+        end_frames_tx(tx, &commit.session_id, &left, None, now)?;
+    }
+    let head_json = encode_json(&meta.payload())?;
+    // The published head is a retained revision from this
+    // transaction on. Recording it reads no pin: a pin
+    // resolves to it by query whenever something asks.
+    crate::revisions::record_revision_conn(
+        tx,
+        &commit.session_id,
+        sql_head_revision,
+        meta.leaf_node_id.as_deref(),
+        meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
+        &head_json,
+    )?;
+    let changed = crate::conn::cached_execute(
+        tx,
+        session_sql().head_sqlite.upsert_cas.sql(),
+        params![
+            meta.session_id.as_str(),
+            sql_head_revision,
+            lash_core_execution::store::pending_follow_on::encode_pending_follow_on(
+                meta.pending_follow_on.as_ref(),
+            )?,
+            plan.actual_head_revision() as i64,
+        ],
+    )
+    .map_err(sqlite_error)?;
+    if changed != 1 {
+        return Err(StoreError::HeadRevisionConflict {
+            expected: plan.actual_head_revision(),
+            actual: published_revision,
+        });
+    }
+    let retention = tx
+        .prepare_cached(session_sql().meta.touch_last_commit.sql())
+        .map_err(sqlite_error)?
+        .query_row(
+            params![commit.session_id.as_str(), crate::clamp_epoch_ms(now)],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .map_or(
+            Ok(lash_core_execution::Retention::default()),
+            |(kind, last_turns)| lash_core_execution::Retention::from_stored(&kind, last_turns),
+        )?;
+    if plan.head_changed()
+        && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
+    {
+        retire_unreachable_ancestry_conn(tx, old_leaf_node_id)?;
+    }
+    let turn_cancel_input_outcome =
+        super::ingress_settlement::settle_commit_ingress_conn(tx, commit, now)?;
+    let claim = lash_core_execution::ReferrerClaim::unguarded(
+        lash_core_execution::ArtifactReferrer::Session(commit.session_id.clone()),
+    )
+    .map_err(|error| error.into_store_error("attachment session referrer"))?;
+    crate::attachments::acquire_attachment_refs_conn(
+        tx,
+        &claim,
+        &commit.committed_attachment_ids,
+        now,
+    )?;
+    crate::session_runs::write_commit_run_terminal_conn(
+        tx,
+        commit,
+        plan.next_head_revision(),
+        now,
+    )?;
+    // `until_gc` releases nothing here and reads no pin. The
+    // other policies release what this publication moved out
+    // of their window, once the run's terminal names it.
+    if retention.releases_at_commit() {
+        crate::revisions::release_unretained_conn(tx, false, Some(&commit.session_id))?;
+    }
+    let mut result = plan.result(
+        stored_checkpoint.checkpoint_ref,
+        stored_checkpoint.manifest,
+        now,
+        commit.pending_follow_on.is_some()
+            || tx
+                .query_row(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .family
+                        .has_admissible_work
+                        .sql(),
+                    [commit.session_id.as_str()],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sqlite_error)?,
+    );
+    result.turn_cancel_input_outcome = turn_cancel_input_outcome;
+    {
+        let receipt = plan.receipt_write(&result);
+        let result_json = encode_json(receipt.result)?;
+        let identity = append_identity_columns(receipt.append_request_identity);
+        crate::conn::cached_execute(
+            tx,
+            session_sql().turn_commits.insert.sql(),
+            params![
+                receipt.session_id.as_str(),
+                receipt.operation_key,
+                receipt.turn_commit_hash,
+                result_json,
+                receipt
+                    .result
+                    .outcome
+                    .as_ref()
+                    .map(|outcome| outcome.as_str()),
+                now as i64,
+                identity.0,
+                identity.1,
+                identity.2,
+                !result.failure_evidence.is_empty(),
+                crate::catalog::catalog_reads::next_turn_change_sequence(tx)?,
+            ],
+        )
+        .map_err(sqlite_error)?;
+    }
+
+    Ok(result)
 }
 
 use lash_core_execution::store::{

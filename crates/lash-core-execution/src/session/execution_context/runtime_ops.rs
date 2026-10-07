@@ -1,4 +1,3 @@
-use crate::ActorContext;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -11,33 +10,22 @@ use super::{
 
 impl RuntimeExecutionContext<'_> {
     /// Execution-side only: run one recorded step body that this execution
-    /// issues in process (a tool attempt) under a cooperative stop that fires
-    /// when the turn's gate pair asks it to stop now (FIG-3672 P9). The body
-    /// gets the stop; what it returns is the step's recorded outcome. A watch
-    /// that gives up leaves the body running to its end (the engine records
-    /// every tool outcome, so the fault must not become one). An execution
-    /// with no gate control runs the body under its own token.
+    /// issues in process (a tool attempt) under a child of the execution's
+    /// cooperative stop. The body gets the stop; what it returns is the
+    /// step's recorded outcome.
     pub(crate) async fn run_turn_step_body<T, F, Fut>(&self, body: F) -> T
     where
         F: FnOnce(Option<CancellationToken>) -> Fut,
         Fut: std::future::Future<Output = T>,
     {
-        let (Some(control), Some(host)) = (
-            self.turn_cancel.control.as_ref(),
-            self.turn_cancel.host.as_ref(),
-        ) else {
-            // Each native body owns a child of the process stop: Closing
-            // can stop a loser without firing the parent's other bodies.
-            let stop = self
-                .cancellation_token
-                .as_ref()
-                .map(CancellationToken::child_token)
-                .unwrap_or_default();
-            return body(Some(stop)).await;
-        };
-        control
-            .run_recorded_step_body(host, self.is_cancelled(), |stop| body(Some(stop)))
-            .await
+        // Each native body owns a child of the execution's stop: Closing
+        // can stop a loser without firing the parent's other bodies.
+        let stop = self
+            .cancellation_token
+            .as_ref()
+            .map(CancellationToken::child_token)
+            .unwrap_or_default();
+        body(Some(stop)).await
     }
 
     /// Called only by the body of a Run record. Its decision captures the
@@ -48,9 +36,6 @@ impl RuntimeExecutionContext<'_> {
     ) -> Result<bool, crate::RuntimeError> {
         if self.turn_cancel.is_observed() {
             return Ok(true);
-        }
-        if let (Some(control), Some(host)) = (&self.turn_cancel.control, &self.turn_cancel.host) {
-            return control.peek_immediate(host).await;
         }
         // A turn answered from its gate above; the stop it lends is never
         // authority. A process has no turn gate: its own lent stop, which only
@@ -96,18 +81,11 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
 
     /// Starts this execution's recorded turn-cancel fact: `honoured` is
     /// whether the turn had already recorded a cancellation when it built
-    /// this execution, `control` is the gate pair a code cell's cancel
-    /// checkpoints peek, and `lent` is the stop the turn lends its tool
+    /// this execution, and `lent` is the stop the turn lends its tool
     /// children, fired when the fact advances. The turn driver is the only
     /// caller.
     #[must_use]
-    fn with_recorded_turn_cancel(
-        self,
-        honoured: bool,
-        control: Arc<crate::runtime::turn_control::ActiveTurnControl>,
-        host: ActorContext,
-        lent: CancellationToken,
-    ) -> Self;
+    fn with_recorded_turn_cancel(self, honoured: bool, lent: CancellationToken) -> Self;
 
     /// The opener state this context incorporates against and hands groups to.
     #[must_use]
@@ -214,13 +192,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         });
         self
     }
-    fn with_recorded_turn_cancel(
-        mut self,
-        honoured: bool,
-        control: Arc<crate::runtime::turn_control::ActiveTurnControl>,
-        host: ActorContext,
-        lent: CancellationToken,
-    ) -> Self {
+    fn with_recorded_turn_cancel(mut self, honoured: bool, lent: CancellationToken) -> Self {
         // A tool this execution runs in process cooperates through the same
         // lent stop its group children get: it fires only when the recorded
         // fact advances, so a tool's cancel is never a live read of the gate.
@@ -229,8 +201,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         }
         let turn_cancel = RecordedTurnCancel {
             observed: Arc::default(),
-            control: Some(control),
-            host: Some(host),
             lent: Some(lent),
         };
         if honoured {
@@ -254,20 +224,12 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
 
 impl RuntimeExecutionContext<'_> {
     /// Called only inside X, before state and declarations can escape an inline
-    /// body: whether the turn's gate accepted an immediate stop. A fired body
-    /// token is cooperative delivery, not this authority: Closing fires it too.
+    /// body: whether this execution's recorded fact says the turn stopped. A
+    /// fired body token is cooperative delivery, not this authority: Closing
+    /// fires it too.
     pub(crate) async fn inline_turn_stop_requested(
         &self,
     ) -> Result<bool, crate::RuntimeEffectControllerError> {
-        let (Some(control), Some(host)) = (
-            self.turn_cancel.control.as_ref(),
-            self.turn_cancel.host.as_ref(),
-        ) else {
-            return Ok(false);
-        };
-        control
-            .inline_stop_requested(host)
-            .await
-            .map_err(Into::into)
+        Ok(self.turn_cancel.is_observed())
     }
 }

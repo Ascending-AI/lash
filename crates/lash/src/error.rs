@@ -833,11 +833,6 @@ mod tests {
                 found: 4,
                 current: 3,
             },
-            StoreRefusal::TurnCancelBindingMismatch {
-                session_id: SessionId::from("bound"),
-                expected: "admitted".to_owned(),
-                presented: "presented".to_owned(),
-            },
         ];
         let codes = refusals
             .iter()

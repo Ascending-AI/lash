@@ -74,11 +74,8 @@ pub use effect::{
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
     RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
     TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_PRESENTATION_VERSION, ToolAttemptCapture,
-    ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
-    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
-    TurnPreludeRef, TurnPreludeStore, turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution, TurnPrelude,
+    TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
@@ -173,13 +170,10 @@ pub use queued_drain_policy::{
 pub use session_catalog::*;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 pub use turn_control::{
-    LocalTurnStop, StopDeliveryGuard, TurnAddress, TurnAttach, TurnCancelAffectedInput,
-    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelGatePair,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOutcome,
-    TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,
-    TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
-    retry_cancel_watch, run_step_body_until_cancelled,
+    LocalTurnStop, TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelAffectedWake,
+    TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
+    TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal,
+    TurnWorkDriver,
 };
 #[cfg(feature = "testing")]
 pub use turn_queue::SessionCommandSettlement;

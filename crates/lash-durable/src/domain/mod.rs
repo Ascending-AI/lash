@@ -45,7 +45,7 @@ pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
 pub use session_close::{SessionCloseStep, SessionCloseWrite};
 pub use snapshots::{SnapshotRev, SnapshotRow, SnapshotWrite};
 pub use turns::{
-    ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnPhase, TurnRow,
+    ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnPhase, TurnRow,
     TurnTerminal, TurnWrite,
 };
 pub use waits::{
@@ -204,6 +204,16 @@ pub enum DomainRefusal {
         /// The head revision stored.
         found: Option<u64>,
     },
+    /// The session store refused the turn's head commit for a reason other
+    /// than a moved head: the session is gone, or the commit breaks one of
+    /// the store's own rules.
+    #[error("session {session} refused the turn's head commit: {reason}")]
+    SessionCommitRefused {
+        /// The session.
+        session: SessionId,
+        /// The store's refusal.
+        reason: String,
+    },
 }
 
 /// The owner's and operators' reads of domain rows, unfenced.
@@ -215,6 +225,13 @@ pub enum DomainRefusal {
 pub trait DurableReads: Send + Sync {
     /// V0, then L3: the session's unfinished turn, if any.
     async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError>;
+
+    /// L3: how `run` of `session` ended, once it ended.
+    async fn turn_end(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Option<TurnEnd>, DurableError>;
 
     /// V0, then L4: every run record of `owner`, ordered by run and ordinal.
     async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError>;

@@ -31,5 +31,3 @@ mod process_prune_reclaim;
 
 #[path = "release_stamp.rs"]
 mod release_stamp;
-#[path = "turn_cancel_receipt_consistency.rs"]
-mod turn_cancel_receipt_consistency;

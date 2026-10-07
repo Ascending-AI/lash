@@ -55,7 +55,6 @@ pub struct ShiftAdmissionReceipt {
     pub selection: ShiftAdmissionSelection,
     pub run_start: RunStartNonce,
     pub seal: ShiftEpochSeal,
-    pub cancel_intent: crate::TurnCancelIntentSnapshot,
     pub run_admission: Option<RunAdmissionAnswer>,
 }
 

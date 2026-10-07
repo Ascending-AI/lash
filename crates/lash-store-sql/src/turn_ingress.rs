@@ -8,22 +8,16 @@
 //!   a session. A row a run admitted names it (`admitted_run`), written
 //!   under the session's current shift fence, and only that run's commit or
 //!   terminal write lets go of it again (FIG-3927).
-//! * **cancellation** — [`cancellation_bindings`], [`cancel_requests`],
-//!   [`closure_authorizations`] and
-//!   [`retired_scopes`] carry the durable cancellation facts a turn's closure
-//!   is settled against.
+//! * **cancellation** — [`cancel_requests`] holds the cancel request a turn
+//!   accepted, which its session's owner honours.
 //!
 //! [`tool_intent_submissions`] is the process registry's replay ledger for
 //! submitted tool intents; it shares this family because it is the fourth
 //! `(replay_key) -> payload` ingress ledger and has no other home.
 
-pub mod cancel_affected_inputs;
 pub mod cancel_requests;
-pub mod cancellation_bindings;
-pub mod closure_authorizations;
 pub mod pending_inputs;
 pub mod queued_batches;
-pub mod retired_scopes;
 pub mod run_specs;
 pub mod tool_intent_submissions;
 pub mod turn_park_clock;

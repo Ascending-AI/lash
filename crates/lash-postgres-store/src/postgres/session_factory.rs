@@ -35,14 +35,6 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         Ok(report)
     }
 
-    async fn retire_turn_cancel_closure_scope(
-        &self,
-        scope: &lash_core_execution::ExecutionScope,
-    ) -> Result<(), StoreError> {
-        crate::turn_cancel_closure::retire_scope(&self.pool, &self.fence, scope).await?;
-        Ok(())
-    }
-
     async fn count_unsettled_turns(
         &self,
     ) -> Result<lash_core_execution::store::UnsettledTurnCounts, StoreError> {
@@ -1161,19 +1153,6 @@ pub(crate) async fn delete_session_tx(
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
-    // A closing session's pins are its ended runs': the close cut their
-    // turns' final commits short and no activation will ever drain them, so
-    // they go with the storage below. Any other pin is a live turn's
-    // closure, and refuses the delete.
-    let closing: Option<Option<i64>> =
-        sqlx::query_scalar(session_sql().meta.select_closing_intent.sql())
-            .bind(session_id.as_str())
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    if closing.flatten().is_none() {
-        crate::turn_cancel_closure::ensure_session_not_pinned_tx(tx, session_id).await?;
-    }
     let materialized =
         sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
             .bind(session_id.as_str())
@@ -1314,10 +1293,6 @@ pub(crate) async fn delete_session_tx(
             .delete_sequence
             .sql(),
         turn_ingress.cancel_requests.delete_by_session.sql(),
-        // Administration revokes the session's effect authority before store
-        // deletion, after which the pinned closure obligation may be retired.
-        turn_ingress.closures.delete_by_session.sql(),
-        turn_ingress.bindings.delete_by_session.sql(),
     ] {
         sqlx::query(statement)
             .bind(session_id.as_str())

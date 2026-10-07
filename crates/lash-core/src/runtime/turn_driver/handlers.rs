@@ -178,15 +178,7 @@ impl RuntimeTurnDriver<'_> {
         // away from mid-flight. The durable contract is therefore cancellation
         // between iterations. The run's body watches the gate itself and stops
         // on an immediate request, and that result is journaled (FIG-3672 P9).
-        let pending_cancel = self
-            .turn_control
-            .observe_pending_cancel(
-                &self.scoped_effect_controller,
-                crate::runtime::turn_control::TurnCancelPeekIdentity::AfterLlm {
-                    protocol_iteration: machine.protocol_iteration(),
-                },
-            )
-            .await?;
+        let pending_cancel = self.turn_control.honoured(&self.turn_id, false);
         if let Some(evidence) = pending_cancel {
             self.record_turn_cancel(evidence.clone());
             // The stop is recorded here: its `Done` is the terminal's first
@@ -325,13 +317,13 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<(), RuntimeError> {
         let pending_cancel = self
             .turn_control
-            .observe_pending_cancel(
-                &self.scoped_effect_controller,
-                crate::runtime::turn_control::TurnCancelPeekIdentity::AfterStep {
-                    protocol_iteration: closed_iteration,
-                },
-            )
-            .await?;
+            .honoured(&self.turn_id, true)
+            .map(|mut evidence| {
+                if evidence.mode == crate::TurnCancelMode::AfterStep {
+                    evidence.honoured_after_step = Some(closed_iteration);
+                }
+                evidence
+            });
         let Some(evidence) = pending_cancel else {
             return Ok(());
         };
@@ -601,15 +593,8 @@ impl RuntimeTurnDriver<'_> {
         if self.turn_cancel.is_some() || !stopped_on_host {
             return Ok(self.turn_cancel.clone());
         }
-        let observed = self
-            .turn_control
-            .observe_pending_cancel(
-                &self.scoped_effect_controller,
-                crate::runtime::turn_control::TurnCancelPeekIdentity::AfterCell {
-                    cell: cell_key.to_string(),
-                },
-            )
-            .await?;
+        let _ = cell_key;
+        let observed = self.turn_control.honoured(&self.turn_id, false);
         if let Some(evidence) = observed.clone() {
             self.record_turn_cancel(evidence);
         }

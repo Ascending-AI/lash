@@ -157,13 +157,6 @@ impl LashRuntime {
                     TurnStop::InvalidInput,
                 );
                 let turn_index = self.physical_turn_index(admitted_turn_index);
-                let turn_control_binding = turn_control_binding(&scoped_effect_controller).await?;
-                let turn_control_resolver = turn_control_binding.resolver();
-                let turn_control = ActiveTurnControl::new(
-                    turn_control_resolver,
-                    TurnAddress::new(&self.state.session_id, &trace_turn_id),
-                )
-                .await?;
                 let messages = crate::MessageSequence::from_base(self.state.read_model().messages);
                 let mut turn_pipeline = TurnBoundary::from_state_with_clock(
                     self.state.clone(),
@@ -194,7 +187,6 @@ impl LashRuntime {
                     scoped_effect_controller: &scoped_effect_controller,
                     honoured_cancel: None,
                     shift_fence,
-                    turn_control: &turn_control,
                     observer,
                 }))
                 .await;

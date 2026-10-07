@@ -398,17 +398,11 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     let other_session_id = "runtime-perf-turn-input-other";
     let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let (store, mut commit_state, _engine, turn_control) = run
+    let (store, mut commit_state) = run
         .build(async {
             let store = memory_perf_store(&session_id).await?;
             let commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
-            // The effect host that owns the turn-control promises the
-            // deferrals settle: the in-process lane's durable host.
-            let engine = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
-            let host = lash::runtime::ActorContext::detached(engine.clone());
-            let turn_control =
-                lash_core::TurnCancellationAuthority::new(host.turn_control_binding_id(), host);
-            Ok((store, commit_state, engine, turn_control))
+            Ok((store, commit_state))
         })
         .await?;
 
@@ -609,15 +603,8 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                         .completed_inputs
                         .push(active_admission.completion());
                 }
-                let deferral =
-                    lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
-                        store.as_ref(),
-                        &turn_control,
-                        &fence,
-                        turn_id.clone(),
-                        completing,
-                    )
-                    .await?;
+                let mut deferral = completing;
+                deferral.shift_fence = Some(Box::new(fence.clone()));
                 let (_, phase) = Box::pin(measure_runtime_perf_async_phase(
                     "turn_input_ingress.complete_active_and_defer",
                     async {

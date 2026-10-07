@@ -308,21 +308,13 @@ pub mod facade_support {
     pub use crate::runtime::TurnAttach;
     pub use crate::runtime::TurnCancelAffectedInput;
     pub use crate::runtime::TurnCancelAffectedWake;
-    pub use crate::runtime::TurnCancelClosureAuthorization;
-    pub use crate::runtime::TurnCancelClosureAuthorizationOutcome;
-    pub use crate::runtime::TurnCancelClosureProposal;
-    pub use crate::runtime::TurnCancelClosureSettlement;
     pub use crate::runtime::TurnCancelInputOutcome;
-    pub use crate::runtime::TurnCancelIntentSnapshot;
     pub use crate::runtime::TurnCancelMode;
     pub use crate::runtime::TurnCancelOutcome;
     pub use crate::runtime::TurnCancelReceipt;
     pub use crate::runtime::TurnCancelRequest;
-    pub use crate::runtime::TurnCancelRequestRecord;
     pub use crate::runtime::TurnCancelUndeliveredInputPolicy;
-    pub use crate::runtime::TurnCancellationAuthority;
     pub use crate::runtime::TurnCancellationEvidence;
-    pub use crate::runtime::TurnControlAttachment;
     pub use crate::runtime::TurnExecutionMetrics;
     pub use crate::runtime::TurnInputAcceptanceReceipt;
     pub use crate::runtime::TurnIssue;
@@ -344,7 +336,6 @@ pub mod facade_support {
     pub use crate::runtime::registry_transitions;
     pub use crate::runtime::release_bound_trigger_delivery_pins;
     pub use crate::runtime::terminal_append_request;
-    pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
@@ -833,20 +824,16 @@ pub use runtime::{
     SessionView, SessionWorkEngine, SettledOutcome, SettledOutcomeRefusal, SleepSpec, SlotId,
     StartCx, StartCxError, StartKey, StepName, StepRequest, StoreRealization, StoredDataCorruption,
     Target, ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
-    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
-    TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
-    TurnCancelUndeliveredInputPolicy, TurnCancellationAuthority, TurnContext,
-    TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputState, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore,
-    WaitKind, WaitState, WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
-    WorkCadencePolicy, admit_session_state_generation, admit_session_view, apply_parent_end_plan,
-    artifact_referrer_ended, end_parent_scope, end_session_runs, lifetime, live_session_view,
-    mint_process_id, parent_end_delivery_key, parent_end_requester,
-    park_turn_refused_by_generation, session_is_live,
+    TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode,
+    TurnCancelUndeliveredInputPolicy, TurnContext, TurnEvent, TurnFailureCause,
+    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
+    TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
+    TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnLaneAdmissionPolicy,
+    TurnPrelude, TurnPreludeRef, TurnPreludeStore, WaitKind, WaitState, WakeId, WatchedRegistry,
+    WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
+    admit_session_view, apply_parent_end_plan, artifact_referrer_ended, end_parent_scope,
+    end_session_runs, lifetime, live_session_view, mint_process_id, parent_end_delivery_key,
+    parent_end_requester, park_turn_refused_by_generation, session_is_live,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

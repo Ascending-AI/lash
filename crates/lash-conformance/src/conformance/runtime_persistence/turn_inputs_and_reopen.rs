@@ -702,12 +702,8 @@ pub async fn accepted_turn_input_released_by_its_run_terminal_is_cancelled_and_v
 )]
 pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     store: Arc<dyn RuntimeStore>,
-    effect_host: ActorContext,
+    _effect_host: ActorContext,
 ) {
-    let authority = crate::TurnCancellationAuthority::new(
-        effect_host.turn_control_binding_id(),
-        effect_host as ActorContext,
-    );
     let turn_id = "cancel-active-turn";
     let lease =
         seal_shift_fence_for_test(&store, &SessionId::from("root"), "cancel-input-owner").await;
@@ -756,21 +752,11 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
 
     // The interrupted turn's final commit ends its run.
     store
-        .commit_runtime_state(
-            lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
-                store.as_ref(),
-                &authority,
-                &lease,
-                turn_id,
-                final_commit(
-                    head_commit(&store, &SessionId::from("root")).await,
-                    &lease,
-                    completing_admission(turn_id, &run),
-                ),
-            )
-            .await
-            .expect("authorize interrupt deferral"),
-        )
+        .commit_runtime_state(final_commit(
+            head_commit(&store, &SessionId::from("root")).await,
+            &lease,
+            completing_admission(turn_id, &run),
+        ))
         .await
         .expect("interrupt commit defers uncancelled active input");
 
@@ -824,12 +810,8 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
 )]
 pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     store: Arc<dyn RuntimeStore>,
-    effect_host: ActorContext,
+    _effect_host: ActorContext,
 ) {
-    let authority = crate::TurnCancellationAuthority::new(
-        effect_host.turn_control_binding_id(),
-        effect_host as ActorContext,
-    );
     let turn_id = "active-turn-1";
     let lease =
         seal_shift_fence_for_test(&store, &SessionId::from("root"), "active-input-owner").await;
@@ -912,27 +894,17 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     // The interrupted turn's final commit completes what it accepted and
     // ends its run.
     store
-        .commit_runtime_state(
-            lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
-                store.as_ref(),
-                &authority,
-                &lease,
-                turn_id,
-                final_commit(
-                    head_commit(&store, &SessionId::from("root")).await,
-                    &lease,
-                    {
-                        let mut settlement = completing_admission(turn_id, &run);
-                        settlement
-                            .completed_inputs
-                            .push(admitted_inputs.completion());
-                        settlement
-                    },
-                ),
-            )
-            .await
-            .expect("authorize active input deferral"),
-        )
+        .commit_runtime_state(final_commit(
+            head_commit(&store, &SessionId::from("root")).await,
+            &lease,
+            {
+                let mut settlement = completing_admission(turn_id, &run);
+                settlement
+                    .completed_inputs
+                    .push(admitted_inputs.completion());
+                settlement
+            },
+        ))
         .await
         .expect("interrupt commit completes accepted inputs and defers unaccepted inputs");
     let pending_after_interrupt = store
@@ -1249,12 +1221,8 @@ fn assert_source_key_conflict(
 )]
 pub async fn identical_retry_after_defer_is_existing_not_conflict(
     store: Arc<dyn RuntimeStore>,
-    effect_host: ActorContext,
+    _effect_host: ActorContext,
 ) {
-    let authority = crate::TurnCancellationAuthority::new(
-        effect_host.turn_control_binding_id(),
-        effect_host as ActorContext,
-    );
     let session_id = SessionId::from("root");
     let ended_turn = "fig3544-ended-turn";
     let dead_turn =
@@ -1290,21 +1258,11 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
     // The turn's final commit defers its undelivered input and ends the
     // run, whose later physical turn the other input names.
     store
-        .commit_runtime_state(
-            lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
-                store.as_ref(),
-                &authority,
-                &lease,
-                ended_turn,
-                final_commit(
-                    head_commit(&store, &session_id).await,
-                    &lease,
-                    completing_admission(ended_turn, &run),
-                ),
-            )
-            .await
-            .expect("authorize the final-commit deferral"),
-        )
+        .commit_runtime_state(final_commit(
+            head_commit(&store, &session_id).await,
+            &lease,
+            completing_admission(ended_turn, &run),
+        ))
         .await
         .expect("the turn's final commit defers its undelivered input");
 

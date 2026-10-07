@@ -1,6 +1,5 @@
 use super::*;
 use crate::ActorContext;
-use crate::runtime::turn_control::ActiveTurnControl;
 
 mod context;
 mod effects;
@@ -76,7 +75,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// The logical run the turn's checkpoint admissions bind rows to.
     pub(super) shift_run: Option<crate::TurnId>,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
-    pub(super) turn_control: Arc<ActiveTurnControl>,
+    /// The host-local stop the turn reads at its boundaries.
+    pub(super) turn_control: crate::LocalTurnStop,
     /// Names the reply the protocol driver materialized, for the boundary's
     /// terminal materialization to recognize by identity.
     pub(super) protocol_reply: machine::ProtocolReplyTracker,

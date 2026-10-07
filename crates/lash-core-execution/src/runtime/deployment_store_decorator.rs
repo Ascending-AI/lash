@@ -8,12 +8,12 @@
 use std::num::NonZeroUsize;
 
 use super::DeploymentStore;
+use crate::StoreError;
 use crate::store::{
     ControlIntent, ControlIntentId, MaintenanceResult, ParkFeedCursor, ParkFeedPage,
     RetentionBound, RetentionReport, RunTerminal, RuntimeStoreDecorator, TurnChangeCursor,
     TurnChangePage, TurnPark, TurnParkQuery, TurnParkTarget, UnsettledTurnCounts,
 };
-use crate::{ExecutionScope, StoreError};
 
 /// Every asynchronous [`DeploymentStore`] operation: the single place each
 /// deployment signature is written. `bind_effect_host`, the one synchronous
@@ -33,7 +33,6 @@ macro_rules! deployment_operations {
             fn non_terminal_runs_page(&self, after: Option<&crate::engine::RunRef>, limit: NonZeroUsize) -> Result<Vec<crate::engine::OpenRun>, StoreError>;
             fn end_lost_run(&self, target: &crate::engine::RunRef, loss: crate::engine::RunLoss, at_ms: u64) -> Result<Option<RunTerminal>, StoreError>;
             fn list_control_intents(&self, after: Option<ControlIntentId>, limit: NonZeroUsize) -> Result<Vec<ControlIntent>, StoreError>;
-            fn retire_turn_cancel_closure_scope(&self, scope: &ExecutionScope) -> Result<(), StoreError>;
             fn reclaim_retained_evidence(&self, bound: RetentionBound) -> MaintenanceResult<RetentionReport>;
         }
     };

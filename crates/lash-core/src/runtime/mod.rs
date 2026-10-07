@@ -228,11 +228,8 @@ pub use effect::{
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
     RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
-    ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
-    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
-    TurnPreludeRef, TurnPreludeStore, turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution, TurnPrelude,
+    TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
 };
 pub use environment::{ParkRefused, ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
@@ -356,13 +353,10 @@ use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_
 #[cfg(feature = "testing")]
 pub use turn_boundary::{RecordedTurnAssembly, classify_output_state};
 pub use turn_control::{
-    LocalTurnStop, StopDeliveryGuard, TurnAddress, TurnAttach, TurnCancelAffectedInput,
-    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelGatePair,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOutcome,
-    TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,
-    TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
-    retry_cancel_watch,
+    LocalTurnStop, TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelAffectedWake,
+    TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
+    TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal,
+    TurnWorkDriver,
 };
 #[cfg(feature = "testing")]
 pub use turn_input_ingress::ingress_message_id;

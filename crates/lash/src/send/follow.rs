@@ -328,11 +328,7 @@ impl TerminalWait {
         {
             return;
         }
-        let driver = TurnWorkDriver::for_session(
-            ctx.parts.effect_host.clone(),
-            ctx.parts.session_id.to_string(),
-            std::sync::Arc::clone(ctx.parts.store.store()),
-        );
+        let driver = TurnWorkDriver::new(ctx.parts.effect_host.backend().clone());
         let address = TurnAddress::new(
             ctx.parts.session_id.clone(),
             PhysicalTurn::derive_turn_id(run, self.ordinal),

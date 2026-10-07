@@ -1055,28 +1055,6 @@ impl Processes {
             );
             return Err(err.into());
         }
-        // Survey exactly the rows the registry's prune will delete, with the
-        // registry's own eligibility predicate (retired status, cutoff,
-        // projection watermark, no pending wake delivery, no parent-end
-        // plan, filter): a process the registry keeps keeps its journal and
-        // its promises too. The fence lands before the row goes, so the
-        // interval between prune and any re-registration of the same id is
-        // covered (ADR 0049).
-        let prunable = registry
-            .prunable_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
-            .await?;
-        for process_id in prunable {
-            let process_scope = lash_core::ExecutionScope::process(process_id.clone());
-            // This is the cancellation-admission serialization point. The
-            // factory checks every persisted closure and writes the scope
-            // tombstone under the same backend fence later authorization
-            // uses. Either an existing/new pin makes this call fail, or
-            // every later authorization is refused before it is written.
-            self.core
-                .store_factory
-                .retire_turn_cancel_closure_scope(&process_scope)
-                .await?;
-        }
         let mut report = match registry
             .prune_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
             .await

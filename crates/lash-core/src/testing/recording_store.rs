@@ -43,7 +43,6 @@ pub struct RecordingStore {
     fail_next_end_refused_run: Mutex<Option<StoreError>>,
     before_next_end_refused_run: Mutex<Option<EndRefusedRunHook>>,
     before_next_runtime_commit: Mutex<Option<EndRefusedRunHook>>,
-    inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
     fail_next_load_session_head_meta: AtomicBool,
     fail_load_session_on_call: Mutex<Option<usize>>,
     session_admission_count: AtomicUsize,
@@ -76,7 +75,6 @@ impl RecordingStore {
             fail_next_end_refused_run: Mutex::new(None),
             before_next_end_refused_run: Mutex::new(None),
             before_next_runtime_commit: Mutex::new(None),
-            inject_turn_cancel_before_next_runtime_commit: Mutex::new(None),
             fail_next_load_session_head_meta: AtomicBool::new(false),
             fail_load_session_on_call: Mutex::new(None),
             session_admission_count: AtomicUsize::new(0),
@@ -192,15 +190,6 @@ impl RecordingStore {
         *self.before_next_runtime_commit.lock_recover() = Some(hook);
     }
 
-    /// Record `request` on the wrapped store immediately before the next
-    /// runtime commit reaches it: a cancel that races the commit and lands
-    /// first.
-    pub fn inject_turn_cancel_before_next_runtime_commit(&self, request: crate::TurnCancelRequest) {
-        *self
-            .inject_turn_cancel_before_next_runtime_commit
-            .lock_recover() = Some(request);
-    }
-
     pub fn fail_next_load_session_head_meta(&self) {
         self.fail_next_load_session_head_meta
             .store(true, Ordering::SeqCst);
@@ -310,13 +299,6 @@ impl RuntimeStoreDecorator for RecordingStore {
             && let Some(error) = self.fail_next_turn_terminal_commit.lock_recover().take()
         {
             return Err(error);
-        }
-        let injected_cancel = self
-            .inject_turn_cancel_before_next_runtime_commit
-            .lock_recover()
-            .take();
-        if let Some(request) = injected_cancel {
-            self.inner.record_turn_cancel_request(request).await?;
         }
         let applied = commit.clone();
         let receipt = self.inner.commit_runtime_state(commit).await?;

@@ -1001,18 +1001,14 @@ impl World {
 
     /// Requests the turn's immediate cancel, as a host does.
     async fn request_cancel(&self) {
-        crate::TurnWorkDriver::for_session(
-            self.effect_host.clone(),
-            self.session_id.clone(),
-            Arc::clone(&self.store),
-        )
-        .request_cancel(crate::TurnCancelRequest::new(
-            crate::TurnAddress::new(self.session_id.clone(), self.turn_id.clone()),
-            "declared-start-law-cancel",
-            None,
-        ))
-        .await
-        .expect("request the turn's cancel");
+        crate::TurnWorkDriver::new(self.effect_host.backend().clone())
+            .request_cancel(crate::TurnCancelRequest::new(
+                crate::TurnAddress::new(self.session_id.clone(), self.turn_id.clone()),
+                "declared-start-law-cancel",
+                None,
+            ))
+            .await
+            .expect("request the turn's cancel");
     }
 
     /// [`Self::request_cancel`] from a hook that cannot wait, after `delay`.

@@ -182,7 +182,7 @@ pub(crate) use shift_epoch::shift_epoch_conn;
 mod ingress_settlement;
 mod maintenance;
 mod queued_work;
-mod session_commit;
+pub(crate) mod session_commit;
 pub(crate) mod turn_cancel;
 mod turn_input;
 pub(crate) mod turn_park;

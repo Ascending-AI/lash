@@ -687,7 +687,6 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     replay_commit.park_run = stamped_commit.park_run.clone();
     replay_commit.ingress = stamped_commit.ingress.clone();
     replay_commit.run_terminal = stamped_commit.run_terminal.clone();
-    replay_commit.interrupted_turn = stamped_commit.interrupted_turn.clone();
     let replay_hash = replay_commit
         .turn_commit_hash()
         .expect("replay commit hash");
@@ -714,7 +713,6 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     retry_from_new_head.park_run = stamped_commit.park_run.clone();
     retry_from_new_head.ingress = stamped_commit.ingress.clone();
     retry_from_new_head.run_terminal = stamped_commit.run_terminal.clone();
-    retry_from_new_head.interrupted_turn = stamped_commit.interrupted_turn.clone();
     let retry_hash = retry_from_new_head
         .turn_commit_hash()
         .expect("retry commit hash");

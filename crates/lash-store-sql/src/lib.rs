@@ -133,14 +133,10 @@ pub const TABLES: &[&str] = &[
     trigger::subscriptions::TABLE,
     trigger::subscription_changes::TABLE,
     trigger::subscription_change_clock::TABLE,
-    turn_ingress::cancel_affected_inputs::TABLE,
     turn_ingress::cancel_requests::TABLE,
-    turn_ingress::cancellation_bindings::TABLE,
-    turn_ingress::closure_authorizations::TABLE,
     turn_ingress::pending_inputs::TABLE,
     turn_ingress::run_specs::TABLE,
     turn_ingress::queued_batches::TABLE,
-    turn_ingress::retired_scopes::TABLE,
     turn_ingress::tool_intent_submissions::TABLE,
     turn_ingress::tool_intent_submissions::RETIRED_OWNERS_TABLE,
     tool_receipts::TABLE,
@@ -229,15 +225,8 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(session_runs::control_intents::ControlIntentStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::TurnIngressStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::cancel_requests::CancelRequestStatements::NEUTRAL);
-    statements.extend_from_slice(
-        turn_ingress::cancellation_bindings::CancellationBindingStatements::NEUTRAL,
-    );
-    statements.extend_from_slice(
-        turn_ingress::closure_authorizations::ClosureAuthorizationStatements::NEUTRAL,
-    );
     statements.extend_from_slice(turn_ingress::pending_inputs::PendingInputStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::queued_batches::QueuedBatchStatements::NEUTRAL);
-    statements.extend_from_slice(turn_ingress::retired_scopes::RetiredScopeStatements::NEUTRAL);
     statements.extend_from_slice(
         turn_ingress::tool_intent_submissions::ToolIntentSubmissionStatements::NEUTRAL,
     );

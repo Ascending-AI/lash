@@ -32,47 +32,6 @@ pub(super) async fn delete_session_from_catalog(
             lash_core_execution::SessionBlobReclaimReport,
             lash_core_execution::StoreError,
         > = (|| {
-            // A closing session's pins are its ended runs': the close cut
-            // their turns' final commits short and no activation will ever
-            // drain them, so they go with the storage below. Any other pin is
-            // a live turn's closure, and refuses the delete.
-            let closing = tx
-                .query_row(
-                    session_sql().meta.select_closing_intent.sql(),
-                    params![session_id.as_str()],
-                    |row| row.get::<_, Option<i64>>(0),
-                )
-                .optional()
-                .map_err(sqlite_error)?
-                .flatten()
-                .is_some();
-            let pending_count = if closing {
-                0
-            } else {
-                tx.query_row(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .closures
-                        .count_by_session
-                        .sql(),
-                    params![session_id.as_str()],
-                    |row| row.get::<_, i64>(0),
-                )
-                .map_err(sqlite_error)?
-            };
-            let pending_count = usize::try_from(pending_count).map_err(|_| {
-                lash_core_execution::StoreError::StoredDataCorrupt {
-                    record_kind: "TurnCancelClosureAuthorization",
-                    message: "negative pending closure count".to_string(),
-                }
-            })?;
-            if pending_count != 0 {
-                return Err(
-                    lash_core_execution::StoreError::TurnCancelClosureLifecyclePinned {
-                        session_id: session_id.clone(),
-                        pending_count,
-                    },
-                );
-            }
             let existed = tx
                 .query_row(
                     session_sql().meta_sqlite.exists_materialized.sql(),
@@ -281,8 +240,6 @@ pub(super) async fn delete_session_from_catalog(
                     .delete_sequence
                     .sql(),
                 turn_ingress.cancel_requests.delete_by_session.sql(),
-                turn_ingress.closures.delete_by_session.sql(),
-                turn_ingress.bindings.delete_by_session.sql(),
             ] {
                 crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
                     .map_err(sqlite_error)?;

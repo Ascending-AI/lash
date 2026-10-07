@@ -152,7 +152,6 @@ impl RuntimeCommitPlanner {
     ) -> Result<Self, StoreError> {
         commit.validate_budget()?;
         validate_commit_lane(&commit)?;
-        validate_interrupted_turn_plan(&commit)?;
         commit.validate_operation_session()?;
 
         let turn_commit_hash = commit.turn_commit_hash()?;
@@ -540,20 +539,6 @@ fn validate_commit_lane(commit: &RuntimeCommit) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn validate_interrupted_turn_plan(commit: &RuntimeCommit) -> Result<(), StoreError> {
-    // The closure names its turn and evidence itself; the one fact left to
-    // agree is the session it was authorized in.
-    if let Some(closure) = commit.interrupted_turn.as_ref()
-        && *closure.session_id() != commit.session_id
-    {
-        return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-            session_id: commit.session_id.clone(),
-            turn_id: closure.turn_id().clone(),
-        });
-    }
-    Ok(())
-}
-
 fn validate_head_revision(expected: u64, actual: u64) -> Result<(), StoreError> {
     if expected != actual {
         return Err(StoreError::HeadRevisionConflict { expected, actual });
@@ -607,36 +592,6 @@ mod tests {
         // A deterministic refusal, not a substrate fault: the host error is
         // not retryable the way `Backend` was.
         assert!(!error.is_transient());
-    }
-
-    #[test]
-    fn commit_refuses_a_closure_authorized_in_another_session_with_its_typed_cause() {
-        let state = crate::RuntimeSessionState {
-            session_id: SessionId::from("closure-of-another-session"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            ))
-        };
-        let commit = RuntimeCommit::persisted_state_for_test(&state).closing_interrupted_turn(
-            crate::store::tests::settled_closure_for_test("another-session", "turn-1", None),
-            crate::TurnCancelIntentSnapshot::Absent,
-        );
-
-        let error =
-            match RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current()) {
-                Ok(_) => panic!("a closure settles only its own session's commit"),
-                Err(error) => error,
-            };
-        assert!(
-            matches!(
-                &error,
-                StoreError::TurnCancelClosureAuthorizationMismatch { session_id, turn_id }
-                    if session_id.as_str() == "closure-of-another-session"
-                        && turn_id.as_str() == "turn-1"
-            ),
-            "{error:?}"
-        );
     }
 
     #[test]

@@ -64,43 +64,6 @@ pub(crate) async fn active_run(
     .await
 }
 
-/// [`active_run`] headed by a process wake instead of an input, for a law
-/// whose assertions read the session's pending inputs: the run's own head
-/// is then no pending input.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: the head and its admission are established by the setup"
-)]
-pub(crate) async fn active_run_on_wake(
-    store: &Arc<dyn crate::RuntimeStore>,
-    session_id: &crate::SessionId,
-    run: &crate::TurnId,
-) -> RunAdmission {
-    let fence = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
-        store,
-        session_id,
-        run.as_str(),
-    )
-    .await;
-    let head = store
-        .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
-            session_id,
-            &format!("{run}-starter"),
-            1,
-            "start the run",
-            crate::DeliveryPolicy::EarliestSafeBoundary,
-        ))
-        .await
-        .expect("enqueue the running run's head");
-    admitted_run(
-        store,
-        &fence,
-        run.as_str(),
-        AdmittedHead::Batch(head.batch_id),
-    )
-    .await
-}
-
 /// Admit `run` headed by `head` under `fence`, composing its prefix with
 /// `policy`.
 #[expect(
@@ -350,20 +313,7 @@ pub fn prepare_final_commit(
                 crate::store::AdmittedHead::Input(input)
             }
         };
-        let mut request = admit_run_request_for_test(&fence, &run, head);
-        let scope = crate::ExecutionScope::turn(&session, &turn);
-        let binding = commit.interrupted_turn.as_ref().map_or_else(
-            || "lash-conformance-final-turn".to_owned(),
-            |closure| closure.settlement.authorization().binding_id().to_owned(),
-        );
-        let admitted_scope = commit.interrupted_turn.as_ref().map_or_else(
-            || scope.clone(),
-            |closure| closure.settlement.authorization().admitted_scope().clone(),
-        );
-        request.turn_cancellation = Some(crate::store::TurnCancellationBinding {
-            binding_id: binding.clone(),
-            admitted_scope: admitted_scope.clone(),
-        });
+        let request = admit_run_request_for_test(&fence, &run, head);
         let admission = store
             .admit_run(&request)
             .await
@@ -386,52 +336,6 @@ pub fn prepare_final_commit(
                 TurnCommitId::of_physical_turn(&run, &turn).unwrap_or_else(|| end.commit.clone());
             end.turn = turn.clone();
             commit.run_terminal = Some(Box::new(end));
-        }
-        if commit.interrupted_turn.is_none() {
-            let address = crate::TurnAddress::new(&session, &turn);
-            let observed = store
-                .turn_cancel_request_intent(&address)
-                .await
-                .expect("read cancel intent");
-            assert_eq!(
-                observed,
-                crate::TurnCancelIntentSnapshot::Absent,
-                "completion fixture carries no cancellation request"
-            );
-            let key = |wait, suffix: &str| crate::AwaitEventKey {
-                scope: scope.clone(),
-                wait,
-                key_id: format!("{turn}:{suffix}"),
-                signature: format!("conformance-final:{suffix}"),
-            };
-            let authorization = crate::TurnCancelClosureAuthorization::new(
-                address,
-                binding,
-                admitted_scope,
-                key(crate::AwaitEventWaitIdentity::TurnCancelGate, "cancel"),
-                key(
-                    crate::AwaitEventWaitIdentity::TurnCancelEscalation,
-                    "escalation",
-                ),
-                key(crate::AwaitEventWaitIdentity::TurnTerminal, "terminal"),
-                crate::TurnCancelClosureProposal::CompletionSealed,
-                observed.clone(),
-                &fence,
-            )
-            .expect("construct final closure");
-            store
-                .authorize_turn_cancel_closure(&fence, &authorization)
-                .await
-                .expect("retain the final closure");
-            commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
-                settlement: crate::TurnCancelClosureSettlement::settled_for_test(
-                    authorization,
-                    None,
-                    None,
-                ),
-                observed_intent: observed,
-                admitted_intent: admission.cancel_intent.clone(),
-            });
         }
         commit
     })

@@ -683,11 +683,6 @@ pub struct RunAdmission {
     /// anchor that one offers. `None` on an admission recorded without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<lash_trace::DurableTraceScope>,
-    /// Cancellation intent read in the admission transaction. Final commits
-    /// validate this recorded authority before publishing. The nonce admission
-    /// producer populates it; a final turn requires this authority.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
     /// Whether this call recorded the admission. It is the call's receipt,
     /// never stored or journaled: an admission read back from the run's row
     /// or from a journal is one an earlier call recorded.
@@ -955,14 +950,6 @@ pub enum RunAdmissionRefusal {
     HeldByAnotherExecutor,
 }
 
-/// The host authority a run's admission selects for cancellation. This is
-/// request data: the binding is stored only with the committed admission.
-#[derive(Clone, Debug)]
-pub struct TurnCancellationBinding {
-    pub binding_id: String,
-    pub admitted_scope: crate::ExecutionScope,
-}
-
 /// A run's admission request ([`RunStore::admit_run`]). `base` is the
 /// resident head the run is admitted on; the store replaces its
 /// `generation` with the durable state generation it reads inside the
@@ -986,10 +973,6 @@ pub struct AdmitRunRequest {
     /// The admitting build's plugin composition and the writer chosen for
     /// each plugin, recorded as given by the first admission.
     pub plugins: super::plugin_writers::PluginAdmission,
-    /// The host's cancellation authority, validated during preparation and
-    /// selected in the transaction that binds the admitted rows. Store-only
-    /// admissions without an effect host have no authority to select.
-    pub turn_cancellation: Option<TurnCancellationBinding>,
     /// The runtime's scope factory, called outside the admission transaction.
     pub trace_scopes: std::sync::Arc<dyn lash_trace::TraceScopeFactory>,
 }

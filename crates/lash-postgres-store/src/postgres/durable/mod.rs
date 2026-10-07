@@ -482,7 +482,7 @@ async fn fenced(
 }
 
 async fn apply_owner(
-    tx: &mut PgConnection,
+    tx: &mut Tx,
     write: &ActorTx,
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
@@ -491,7 +491,7 @@ async fn apply_owner(
     let fence: Option<i64> = sqlx::query_scalar(SQL.actor.fence.sql())
         .bind(actor)
         .bind(write.epoch().0)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut ***tx)
         .await
         .map_err(sqlx_failure)?;
     let Some(revision) = fence else {
@@ -511,7 +511,7 @@ async fn apply_owner(
             sqlx::query(statement.sql())
                 .bind(actor)
                 .bind(through.0)
-                .execute(&mut *tx)
+                .execute(&mut ***tx)
                 .await
                 .map_err(sqlx_failure)?;
         }
@@ -525,7 +525,7 @@ async fn apply_owner(
             let cancel_pending = sqlx::query(SQL.park.pending_mail_of_kind.sql())
                 .bind(actor)
                 .bind(lash_durable::domain::CANCEL_MAIL)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut ***tx)
                 .await
                 .map_err(sqlx_failure)?
                 .is_some();
@@ -535,13 +535,13 @@ async fn apply_owner(
                     .bind("idle")
                     .bind(Option::<i64>::None)
                     .bind(now.0)
-                    .fetch_one(&mut *tx)
+                    .fetch_one(&mut ***tx)
                     .await
                     .map_err(sqlx_failure)?
             } else {
                 sqlx::query_scalar(SQL.park.park.sql())
                     .bind(actor)
-                    .fetch_one(&mut *tx)
+                    .fetch_one(&mut ***tx)
                     .await
                     .map_err(sqlx_failure)?
             };
@@ -550,12 +550,12 @@ async fn apply_owner(
         Some(Release::Terminal) => {
             sqlx::query(SQL.mail.delete_all.sql())
                 .bind(actor)
-                .execute(&mut *tx)
+                .execute(&mut ***tx)
                 .await
                 .map_err(sqlx_failure)?;
             let stored: String = sqlx::query_scalar(SQL.actor.end.sql())
                 .bind(actor)
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut ***tx)
                 .await
                 .map_err(sqlx_failure)?;
             actor_state(&stored)?
@@ -570,7 +570,7 @@ async fn apply_owner(
                 .bind(state)
                 .bind(due)
                 .bind(now.0)
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut ***tx)
                 .await
                 .map_err(sqlx_failure)?;
             actor_state(&stored)?
@@ -632,7 +632,7 @@ pub(crate) async fn wake_within(
 
 /// Apply one owner-commit domain write by its domain's module.
 async fn apply_domain(
-    tx: &mut PgConnection,
+    tx: &mut Tx,
     committing: &Committing<'_>,
     write: &DomainWrite,
 ) -> Result<(), DurableError> {
@@ -1063,6 +1063,14 @@ impl DurableReads for PostgresDurableStore {
         session: &lash_sansio::SessionId,
     ) -> Result<Option<TurnRow>, DurableError> {
         turns::turn(&mut *self.reader().await?, session).await
+    }
+
+    async fn turn_end(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+    ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
+        turns::turn_end(&mut *self.reader().await?, session, run).await
     }
 
     async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {

@@ -9,7 +9,6 @@
 //! crate-private function is reached through a wrapper here; a type or
 //! function already declared `pub` inside a private module is re-exported.
 
-use crate::ActorContext;
 // The crate-root short paths (`crate::X`) the relocated tests used in-crate
 // that the root re-exports only to the crate. Each item is already public at
 // its own path; these re-exports keep the short path the tests were written
@@ -196,40 +195,6 @@ pub async fn emit_tool_call_started(
     context
         .emit_tool_call_started(call_key, ids, name, args, activity_id)
         .await;
-}
-
-/// The turn's cancellation-escalation await-event key, so a test can peek or
-/// forge the escalation row a host journals.
-pub async fn turn_escalation_key(
-    resolver: &ActorContext,
-    address: &crate::runtime::TurnAddress,
-) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-    crate::runtime::turn_control::escalation_key(resolver, address).await
-}
-
-/// The turn's base cancellation-gate await-event key.
-pub async fn turn_cancel_gate_key(
-    resolver: &ActorContext,
-    address: &crate::runtime::TurnAddress,
-) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-    crate::runtime::turn_control::cancel_gate_key(resolver, address).await
-}
-
-/// The resolution a cancellation gate records when `evidence` wins it, so a
-/// test can resolve a gate as a peer writer would.
-pub fn cancel_requested_gate_resolution(
-    evidence: crate::runtime::TurnCancellationEvidence,
-) -> Result<crate::Resolution, crate::RuntimeError> {
-    crate::runtime::turn_control::gate_resolution(
-        crate::runtime::turn_control::TurnGateTerminal::CancelRequested(evidence),
-    )
-}
-
-/// The evidence an active turn records when it cancels itself internally.
-pub fn active_turn_internal_evidence(
-    active: &crate::runtime::turn_control::ActiveTurnControl,
-) -> crate::runtime::TurnCancellationEvidence {
-    active.internal_evidence(None)
 }
 
 /// `dispatch_tool_call_with_execution_context`: dispatches one call by name

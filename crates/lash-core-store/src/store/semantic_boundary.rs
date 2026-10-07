@@ -56,7 +56,6 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
         ("applied_commands", commit.applied_commands.is_some()),
         ("command_outcomes", !commit.command_outcomes.is_empty()),
         ("outcome", commit.outcome.is_some()),
-        ("interrupted_turn", commit.interrupted_turn.is_some()),
         ("adopted_intent_rows", commit.adopted_intent_rows != 0),
         (
             "committed_attachment_ids",
@@ -117,7 +116,6 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         applied_commands: _,         // refused present by validation
         command_outcomes: _,         // refused present by validation
         pending_follow_on: _,        // head fact carried unchanged; the store refuses a change
-        interrupted_turn: _,         // refused present by validation
         adopted_intent_rows: _,      // refused non-zero by validation
         committed_attachment_ids: _, // refused non-empty by validation
     } = commit;

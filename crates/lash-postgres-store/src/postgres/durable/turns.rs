@@ -12,8 +12,8 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_undelivered_wire,
 };
 use lash_durable::domain::{
-    DomainRefusal, ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnPhase,
-    TurnRow, TurnWrite,
+    DomainRefusal, ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd,
+    TurnPhase, TurnRow, TurnTerminal, TurnWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -147,39 +147,46 @@ pub(super) async fn apply(
 }
 
 pub(super) async fn apply_session_commit(
-    tx: &mut PgConnection,
-    _commit: &Committing<'_>,
+    tx: &mut super::Tx,
+    commit: &Committing<'_>,
     write: &SessionCommitWrite,
 ) -> Result<(), DurableError> {
-    let session = write.session.as_str();
-    let found: Option<i64> = sqlx::query_scalar(SQL.head.sql())
-        .bind(session)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(sqlx_failure)?;
-    let found = found.map(|head| u64::try_from(head).unwrap_or(0));
-    if found.unwrap_or(0) != write.expected_head {
-        return refuse(DomainRefusal::HeadMoved {
+    use lash_core_execution::StoreError;
+    let refused = |reason: String| {
+        DurableError::Domain(DomainRefusal::SessionCommitRefused {
             session: write.session.clone(),
-            expected: write.expected_head,
-            found,
-        });
+            reason,
+        })
+    };
+    let runtime_commit = lash_core_execution::store::decode_session_commit(&write.commit_json)
+        .map_err(|error| refused(error.to_string()))?;
+    if runtime_commit.session_id != write.session
+        || runtime_commit.expected_head_revision != write.expected_head
+    {
+        return Err(refused(format!(
+            "the commit names session {} at head {}, not {} at {}",
+            runtime_commit.session_id,
+            runtime_commit.expected_head_revision,
+            write.session,
+            write.expected_head
+        )));
     }
-    let next = signed(write.expected_head.saturating_add(1));
-    sqlx::query(SQL.insert_revision.sql())
-        .bind(session)
-        .bind(next)
-        .bind(&write.commit_json)
-        .execute(&mut *tx)
-        .await
-        .map_err(sqlx_failure)?;
-    sqlx::query(SQL.move_head.sql())
-        .bind(session)
-        .bind(next)
-        .execute(&mut *tx)
-        .await
-        .map_err(sqlx_failure)?;
-    Ok(())
+    let planner =
+        lash_core_execution::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
+            .map_err(|error| refused(error.to_string()))?;
+    let now = u64::try_from(commit.now.0).unwrap_or(0);
+    match crate::runtime_persistence::apply_runtime_commit_tx(tx, &planner, now).await {
+        Ok(_) => Ok(()),
+        Err(StoreError::HeadRevisionConflict { expected, actual }) => {
+            Err(DurableError::Domain(DomainRefusal::HeadMoved {
+                session: write.session.clone(),
+                expected,
+                found: Some(actual),
+            }))
+        }
+        Err(error @ StoreError::Contended) => Err(super::store_failure(error)),
+        Err(error) => Err(refused(error.to_string())),
+    }
 }
 
 pub(super) async fn request_cancel(
@@ -269,6 +276,32 @@ async fn cancel_of(
         reason,
         undelivered,
         mode,
+    }))
+}
+
+pub(super) async fn turn_end(
+    tx: &mut PgConnection,
+    session: &SessionId,
+    run: &TurnId,
+) -> Result<Option<TurnEnd>, DurableError> {
+    let Some(row) = sqlx::query(SQL.ended.sql())
+        .bind(session.as_str())
+        .bind(run.as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(sqlx_failure)?
+    else {
+        return Ok(None);
+    };
+    let terminal: String = row.try_get(0).map_err(sqlx_failure)?;
+    let cause_json: Option<String> = row.try_get(1).map_err(sqlx_failure)?;
+    let head_revision: Option<i64> = row.try_get(2).map_err(sqlx_failure)?;
+    let terminal =
+        TurnTerminal::parse(&terminal).ok_or_else(|| corrupt("turn terminal", &terminal))?;
+    Ok(Some(TurnEnd {
+        terminal,
+        cause_json: cause_json.filter(|cause| cause != "null"),
+        head_revision: head_revision.and_then(|revision| u64::try_from(revision).ok()),
     }))
 }
 

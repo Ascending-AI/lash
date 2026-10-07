@@ -39,50 +39,6 @@ pub use config_commands::{
 };
 pub use creation_budget::session_creation_refuses_a_head_no_commit_fits;
 mod state_version;
-mod turn_cancel;
-pub use turn_cancel::a_stale_fence_receipt_replay_leaves_the_store_byte_identical;
-
-/// Adapt one `turn_cancel` law to the factory type the catalogue in
-/// `macros.rs` addresses laws through. The bodies live in the `turn_cancel`
-/// submodule; these are the names the registration macro sees.
-macro_rules! turn_cancel_law {
-    ($($name:ident: $what:literal,)*) => {$(
-        pub async fn $name(factory: Arc<dyn crate::store::ConformanceDeployment>) {
-            turn_cancel::$name(factory).await;
-        }
-    )*};
-}
-
-turn_cancel_law! {
-    turn_cancel_exact_replay_preserves_different_pending_authorization:
-        "an exact commit replay cannot consume a different pending \
-         cancellation-closure authorization on the same turn address",
-    turn_cancel_scope_retirement_serializes_with_authorization:
-        "cancellation closure scope retirement serializes with authorization",
-    turn_cancel_request_escalation_advances_intent_without_replacing_base:
-        "escalation advances intent without replacing the durable base",
-    turn_cancel_repair_preserves_base_across_escalation_and_reopen:
-        "repair retains the base cancellation across escalation and reopen",
-    turn_cancel_repair_orders_intent_and_ordinary_redefer:
-        "repair orders cancellation intent and ordinary redefer atomically",
-    turn_cancel_final_commit_intent_cas_is_atomic:
-        "final commit applies its cancellation-intent CAS atomically",
-    turn_cancel_conflicting_repeat_leaves_no_durable_trace:
-        "a conflicting-disposition repeat leaves no durable trace",
-    turn_cancel_concurrent_opposing_requests_converge:
-        "opposing first requests racing on one address converge on a single \
-         accepted policy, durably and across reopen",
-}
-
-/// A closure artifact minted under another binding is refused at every phase
-/// that could carry it across. The settle phase runs on `effect_host`'s
-/// resolver, which owns turn cancellation for the substrate.
-pub async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
-    factory: Arc<dyn crate::store::ConformanceDeployment>,
-    effect_host: ActorContext,
-) {
-    turn_cancel::turn_cancel_wrong_binding_is_refused_at_every_phase(factory, effect_host).await;
-}
 
 /// `make` must return a fresh, empty factory on each call.
 ///
@@ -110,7 +66,6 @@ where
     session_store_factory_round_trips_every_relation_shape(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
-    turn_cancel::turn_cancel_undelivered_crash_matrix(make()).await;
     session_store_factory_admissible_queued_work_peek(make()).await;
     config_commands::session_store_factory_runs_every_config_command_alone(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;

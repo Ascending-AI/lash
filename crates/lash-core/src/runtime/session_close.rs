@@ -53,20 +53,6 @@ pub struct SessionCloseServices {
     pub policy: crate::shift::relay::RelayPolicy,
 }
 
-/// Whether session `session_id` is already closing: its close committed,
-/// under the `CloseSession` intent its stored shift epoch names.
-async fn session_is_closing(
-    stores: &dyn DeploymentStore,
-    session_id: &SessionId,
-) -> Result<bool, StoreError> {
-    match stores.lookup_session(session_id).await? {
-        crate::store::SessionLookup::Live(_) => {
-            Ok(stores.shift_epoch(session_id).await?.closing.is_some())
-        }
-        crate::store::SessionLookup::Deleted | crate::store::SessionLookup::Absent => Ok(false),
-    }
-}
-
 /// A session's close, as its deletion saw it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionClosed {
@@ -129,26 +115,6 @@ pub async fn close_session(
             )
             .into());
         }
-    }
-    // The refusals below are asked before anything is closed. A deletion
-    // retried after its close committed is past its point of no return: it
-    // replays the recorded step, and a pin found now is one its close
-    // superseded (a turn whose final commit the close cut short), which the
-    // physical delete retires with the session's storage. Refusing it here
-    // would wedge the deletion for good, and answer a replay differently
-    // from the run that recorded the step.
-    let closed = session_is_closing(stores.as_ref(), session_id).await?;
-    let pins = if closed {
-        Vec::new()
-    } else {
-        stores.pending_turn_cancel_closure_pins(session_id).await?
-    };
-    if !pins.is_empty() {
-        return Err(StoreError::TurnCancelClosureLifecyclePinned {
-            session_id: session_id.clone(),
-            pending_count: pins.len(),
-        }
-        .into());
     }
     let invocation = RuntimeEffectInvocation::new(
         EffectAddress::new(

@@ -57,14 +57,13 @@ struct TurnPreambleContext<'preamble, 'run> {
 }
 
 /// The effect loop's own inputs: the driver, the observer it publishes
-/// through, and the turn-control handle its start-gate peek runs against.
+/// through, and the host-local stop its start gate reads.
 struct TurnEffectLoopContext<'loop_run, 'run> {
     driver: &'loop_run mut RuntimeTurnDriver<'run>,
     messages: crate::MessageSequence,
     event_tx: TurnObserver,
     protocol_run_offset: usize,
-    turn_control: Arc<ActiveTurnControl>,
-    cancel_controller: &'loop_run ActorContext,
+    turn_control: LocalTurnStop,
 }
 
 impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
@@ -154,33 +153,10 @@ async fn run_turn_effect_loop(
         event_tx,
         protocol_run_offset,
         turn_control,
-        cancel_controller,
     } = context;
-    // The start gate can change the handler's control flow before its first
-    // effect, so it is observed through the handler-scoped controller, which
-    // journals the observation and replays the same answer after an owner
-    // crash. It is the loop's only look at the gate before its steps: from
-    // here on a cancellation reaches the loop only through its steps'
-    // recorded outcomes and its journaled boundary peeks (FIG-3672 P9).
-    //
-    // The observation is attempted once (FIG-3647): an error it returns is
-    // final. On Restate the peek is a call that surfaces only terminal
-    // errors, because Restate retries transient failures itself, and each
-    // further call would be a fresh peek of the same terminal cause. On the
-    // SQL engines the failure is sealed under the gate's replay key, so a
-    // second attempt would replay it. A fault outside the journal aborts the
-    // turn for the substrate to redrive.
-    let start_gate = crate::runtime::RuntimeNamedPhase::begin(
-        driver.turn_phase_probe.clone(),
-        "turn_cancel.start_gate",
-    );
-    let pending_cancel = turn_control
-        .observe_pending_cancel(
-            cancel_controller,
-            crate::runtime::turn_control::TurnCancelPeekIdentity::StartGate,
-        )
-        .await?;
-    drop(start_gate);
+    // The start gate: a stop already requested ends the turn before its
+    // first effect.
+    let pending_cancel = turn_control.honoured(&driver.turn_id, true);
     if let Some(evidence) = pending_cancel {
         driver.record_turn_cancel(evidence);
     }
@@ -288,27 +264,7 @@ impl LashRuntime {
             scoped_effect_controller.for_physical_turn(trace_turn_id.clone());
         let turn_observer = logical_observer.for_turn(&trace_turn_id);
         let observer = &turn_observer;
-        let turn_control_host = self.host.core.control.effect_host.clone();
-        let turn_control_binding = turn_control_binding(&scoped_effect_controller).await?;
-        let turn_control_resolver = turn_control_binding.resolver();
-        let turn_control = Arc::new(
-            ActiveTurnControl::new(
-                turn_control_resolver,
-                TurnAddress::new(&self.state.session_id, &trace_turn_id),
-            )
-            .await?,
-        );
-        // Host glue, not shift code: a host-local stop becomes a durable
-        // request on this turn's gate for as long as the turn runs, and the
-        // turn sees it only where it sees any request — its journaled peeks
-        // and its steps' recorded outcomes.
-        let _local_stop_forwarding = local_stop
-            .forward_to(
-                Arc::clone(&turn_control),
-                turn_control_host.clone(),
-                self.services.store.clone(),
-            )
-            .await;
+        let turn_control = local_stop;
         let turn_policy = self.state.effective_policy().clone();
         // The run's recorded view: its protocol turn options are a view of
         // the protocol namespace of the configuration it was admitted under.
@@ -424,7 +380,6 @@ impl LashRuntime {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
         let finish_scoped_effect_controller = scoped_effect_controller.clone();
-        let turn_cancel_peek_controller = &finish_scoped_effect_controller;
         // Work an earlier turn of the logical run withheld for the run's
         // follow-on: this turn's commit carries it on with its own, or hands
         // it to a cancellation (FIG-4044).
@@ -494,7 +449,7 @@ impl LashRuntime {
             shift_fence: shift_fence.cloned(),
             shift_run: self.shift_run.as_ref().map(|run| run.run().clone()),
             turn_phase_probe: self.turn_phase_probe.clone(),
-            turn_control: Arc::clone(&turn_control),
+            turn_control: turn_control.clone(),
             protocol_reply: Default::default(),
             opener_state,
             turn_cancel: None,
@@ -519,8 +474,7 @@ impl LashRuntime {
             messages: prepared.messages,
             event_tx: observer.clone(),
             protocol_run_offset,
-            turn_control: Arc::clone(&turn_control),
-            cancel_controller: turn_cancel_peek_controller,
+            turn_control: turn_control.clone(),
         }))
         .await;
         let (new_messages, _new_protocol_iteration) = match run_result {
@@ -531,17 +485,13 @@ impl LashRuntime {
                 // cancellation the loop already recorded honouring, or — for
                 // an abort a step's recorded outcome typed as a cancellation —
                 // the journaled post-abort peek.
-                let honoured =
-                    match driver.turn_cancel.clone() {
-                        Some(evidence) => Some(evidence),
-                        None if aborted_by_turn_cancel(&err.code) => turn_control
-                            .observe_pending_cancel(
-                                turn_cancel_peek_controller,
-                                crate::runtime::turn_control::TurnCancelPeekIdentity::PostAbortGate,
-                            )
-                            .await?,
-                        None => None,
-                    };
+                let honoured = match driver.turn_cancel.clone() {
+                    Some(evidence) => Some(evidence),
+                    None if aborted_by_turn_cancel(&err.code) => {
+                        turn_control.honoured(&trace_turn_id, true)
+                    }
+                    None => None,
+                };
                 if let Some(evidence) = honoured {
                     driver.record_turn_cancel(evidence);
                     let cancellation_messages = driver.turn_pipeline.message_sequence();
@@ -558,7 +508,6 @@ impl LashRuntime {
                             cancellation_messages,
                             finish_scoped_effect_controller: &finish_scoped_effect_controller,
                             shift_fence,
-                            turn_control: turn_control.as_ref(),
                             turn_index,
                             trace_turn_id,
                             observer,
@@ -625,7 +574,6 @@ impl LashRuntime {
                 scoped_effect_controller: &finish_scoped_effect_controller,
                 honoured_cancel: turn_cancel,
                 shift_fence,
-                turn_control: turn_control.as_ref(),
                 observer,
             }),
         )

@@ -290,6 +290,7 @@ impl SqliteStoreSet {
         crate::SqliteDurableStore::new(
             self.inner.process_env_store.conn.clone(),
             Arc::clone(&self.inner.clock),
+            self.inner.process_env_store.options.blob_profile,
         )
     }
 

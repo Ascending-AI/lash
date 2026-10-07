@@ -39,15 +39,6 @@ async fn postgres_a_partial_admission_rolls_back_through_both_entry_points() {
             "{entry:?}: a partial admission is refused"
         );
         assert_eq!(bound, 0, "{entry:?}: the first row's bind must roll back");
-        let bindings: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM lash_turn_cancellation_bindings")
-                .fetch_one(storage.pool())
-                .await
-                .unwrap();
-        assert_eq!(
-            bindings, 0,
-            "{entry:?}: a refused admission must roll back its cancellation authority"
-        );
         assert_eq!(
             case.admit().await.unwrap().len(),
             2,

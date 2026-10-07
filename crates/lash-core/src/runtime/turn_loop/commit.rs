@@ -84,12 +84,9 @@ struct TurnCommitRequest<'commit, 'run> {
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-    interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
-    turn_control_resolver: &'commit ActorContext,
-    admissions: &'commit LogicalTurnAdmissions,
-    opener: Option<crate::runtime::turn_driver::OpenerForCommit<'run>>,
-    attachment_store: &'commit crate::RuntimeAttachmentStore,
-    attachment_source_policy: &'commit dyn crate::AttachmentSourcePolicy,
+    /// The cancellation the commit settles, when the turn was cancelled.
+    cancellation: Option<crate::TurnCancellationEvidence>,
+    run: std::marker::PhantomData<&'run ()>,
 }
 
 /// The local commit-admission handles: only the head-advancing attempt uses
@@ -148,69 +145,22 @@ impl PreparedTurn {
         request: TurnCommitRequest<'_, '_>,
     ) -> Result<CommittedTurn, crate::StoreError> {
         let TurnCommitRequest {
-            mut session,
-            mut commit_effects,
+            session,
+            commit_effects,
             trace_turn_id: _,
             recorded_attachment_intent_ids,
-            mut interrupted_turn,
-            turn_control_resolver,
-            admissions,
-            mut opener,
-            attachment_store,
-            attachment_source_policy,
+            cancellation,
+            run: std::marker::PhantomData,
         } = request;
-        let work_remaining = loop {
-            match Box::pin(self.turn_pipeline.final_commit(
-                &mut self.turn,
-                session.as_deref_mut(),
-                commit_effects.ingress_settlement.clone(),
-                commit_effects.pending_follow_on.clone(),
-                interrupted_turn.clone(),
-                Some(turn_control_resolver),
-                recorded_attachment_intent_ids.clone(),
-            ))
-            .await
-            {
-                Ok(remaining) => break remaining,
-                Err(error @ crate::StoreError::TurnCancelIntentChanged { .. }) => {
-                    let Some(interrupted) = interrupted_turn.as_mut() else {
-                        return Err(error);
-                    };
-                    let Some(store) = session.as_deref().and_then(Session::history_store) else {
-                        return Err(error);
-                    };
-                    self.turn_pipeline
-                        .refresh_cancelled_commit(&mut self.turn, interrupted, &store)
-                        .await?;
-                    if let Some(opener) = opener.take() {
-                        let mut facts = opener.close().await.map_err(|error| {
-                            crate::StoreError::TurnOutcomeMaterializationRefused {
-                                error: Box::new(error),
-                            }
-                        })?;
-                        crate::runtime::turn_driver::normalize_plugin_message_attachments(
-                            &mut facts,
-                            attachment_store,
-                            attachment_source_policy,
-                        )
-                        .await
-                        .map_err(|error| {
-                            crate::StoreError::TurnOutcomeMaterializationRefused {
-                                error: Box::new(error),
-                            }
-                        })?;
-                        self.turn_pipeline
-                            .append_cancelled_opener_messages(&opener_messages(
-                                interrupted.turn_id(),
-                                facts,
-                            ));
-                        self.turn.state = self.turn_pipeline.state().to_snapshot();
-                    }
-                    commit_effects = admissions.commit_effects(&self.turn.outcome, None);
-                }
-                Err(error) => return Err(error),
-            }
-        };
+        let work_remaining = Box::pin(self.turn_pipeline.final_commit(
+            &mut self.turn,
+            session,
+            commit_effects.ingress_settlement,
+            commit_effects.pending_follow_on,
+            cancellation,
+            recorded_attachment_intent_ids,
+        ))
+        .await?;
         Ok(CommittedTurn {
             turn: self.turn,
             events: self.events,
@@ -273,7 +223,6 @@ pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
     /// peek's answer, never a live token (FIG-3672 P9).
     pub(in crate::runtime) honoured_cancel: Option<crate::TurnCancellationEvidence>,
     pub(in crate::runtime) shift_fence: Option<&'commit ShiftFence>,
-    pub(in crate::runtime) turn_control: &'commit ActiveTurnControl,
     /// What the turn publishes through. The terminal publication waits
     /// until the host has received every event the turn queued (see
     /// `turn_observer`'s host contract).
@@ -288,7 +237,6 @@ pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
     pub(super) cancellation_messages: crate::MessageSequence,
     pub(super) finish_scoped_effect_controller: &'cancel ActorContext,
     pub(super) shift_fence: Option<&'cancel ShiftFence>,
-    pub(super) turn_control: &'cancel ActiveTurnControl,
     pub(super) turn_index: usize,
     pub(super) trace_turn_id: TurnId,
     pub(super) observer: &'cancel TurnObserver,
@@ -323,12 +271,6 @@ impl LashRuntime {
     ) -> Result<(), RuntimeError> {
         self.uninstall_run_view()?;
         let controller = opts.scoped_effect_controller();
-        let binding = turn_control_binding(&controller).await?;
-        let control = ActiveTurnControl::new(
-            binding.resolver(),
-            TurnAddress::new(&self.state.session_id, &run),
-        )
-        .await?;
         let (observer, _observations) = TurnObserver::open(
             opts.events_or_noop(),
             opts.turn_events_or_noop(),
@@ -363,7 +305,6 @@ impl LashRuntime {
             scoped_effect_controller: &controller,
             honoured_cancel: None,
             shift_fence: None,
-            turn_control: &control,
             observer: &observer,
         })
         .await
@@ -501,12 +442,8 @@ impl LashRuntime {
             scoped_effect_controller,
             honoured_cancel,
             shift_fence,
-            turn_control,
             observer,
         } = context;
-        let turn_control_binding = turn_control_binding(scoped_effect_controller).await?;
-        let turn_control_resolver = turn_control_binding.resolver();
-        let turn_control_binding_id = turn_control_binding.binding_id().to_string();
         let TurnFinishInput {
             mut turn_pipeline,
             recorded_assembly: assembly,
@@ -526,97 +463,9 @@ impl LashRuntime {
             Some(TurnOutcome::Stopped(TurnStop::Cancelled { evidence })) => Some(evidence.clone()),
             _ => None,
         };
-        let interrupted_turn_cancel_intent =
-            match self.session.as_ref().and_then(Session::history_store) {
-                Some(store) => Some(
-                    store
-                        .turn_cancel_request_intent(&crate::TurnAddress::new(
-                            &self.state.session_id,
-                            &trace_turn_id,
-                        ))
-                        .await
-                        .map_err(runtime_error_from_store_commit)?,
-                ),
-                None => None,
-            };
-        let admitted_cancel_intent = self
-            .shift_run
-            .as_ref()
-            .and_then(|execution| execution.cancel_intent.clone());
-        let turn_cancel_closure_authorization = match (
-            self.session.as_ref().and_then(Session::history_store),
-            shift_fence,
-            interrupted_turn_cancel_intent.clone(),
-        ) {
-            (Some(_store), Some(fence), Some(observed)) => {
-                let address = crate::TurnAddress::new(&self.state.session_id, &trace_turn_id);
-                let admitted_scope = crate::runtime::effect::executor::admitted_turn_cancel_scope(
-                    &address,
-                    scoped_effect_controller.execution_scope(),
-                    &turn_control_binding_id,
-                );
-                if admitted_cancel_intent.is_none() {
-                    return Err(runtime_error_from_store_commit(
-                        crate::StoreError::TurnCancelClosureAuthorizationMismatch {
-                            session_id: address.session_id.clone(),
-                            turn_id: address.turn_id.clone(),
-                        },
-                    ));
-                }
-                let durable = observed
-                    .request()
-                    .map(crate::TurnCancelRequest::evidence)
-                    .or_else(|| assembled_cancellation.clone());
-                Some(turn_control.closure_authorization(
-                    &turn_control_binding_id,
-                    admitted_scope,
-                    fence,
-                    observed,
-                    honoured_cancel.as_ref(),
-                    durable,
-                )?)
-            }
-            _ => None,
-        };
-        let interrupted_turn = match (
-            turn_cancel_closure_authorization.as_ref(),
-            interrupted_turn_cancel_intent,
-        ) {
-            (Some(authorization), Some(observed_intent)) => {
-                Some(crate::store::InterruptedTurnClosure {
-                    settlement: turn_control
-                        .settle_admitted_intent(authorization.clone(), honoured_cancel.as_ref()),
-                    observed_intent,
-                    admitted_intent: admitted_cancel_intent.clone(),
-                })
-            }
-            // A turn that commits to a store closes its cancellation gate
-            // under its run's shift fence. With no fence no closure was
-            // authorized, and the store has nothing to settle the turn by.
-            (None, Some(_)) => {
-                return Err(runtime_error_from_store_commit(
-                    crate::StoreError::TurnCancelClosureAuthorizationMismatch {
-                        session_id: self.state.session_id.clone(),
-                        turn_id: trace_turn_id.clone(),
-                    },
-                ));
-            }
-            (_, None) => None,
-        };
-        let cancellation = match interrupted_turn.as_ref() {
-            Some(interrupted) => interrupted.cancellation().cloned(),
-            None => {
-                turn_control
-                    .settle_before_commit(
-                        turn_control_resolver,
-                        honoured_cancel.as_ref(),
-                        assembled_cancellation,
-                    )
-                    .await?
-            }
-        };
-        // Snapshot-bearing admissions derive interruption from durable intent.
-        // The final transaction validates that intent with the fence and head CAS.
+        // The turn's cancellation: the one it recorded honouring, else the
+        // one its assembled outcome names.
+        let cancellation = honoured_cancel.or(assembled_cancellation);
         let interrupted = cancellation.is_some();
         if segment_boundary.is_none() || interrupted {
             let opener = match opener {
@@ -704,14 +553,6 @@ impl LashRuntime {
             turn_trace.conclude();
             observer.release_terminal();
             observer.published().await;
-            publish_terminal_after_commit(
-                turn_control,
-                turn_control_resolver,
-                &TurnTerminal::committed(&assembled.outcome),
-                &self.state.session_id,
-                &trace_turn_id,
-            )
-            .await;
             return Ok(PhysicalTurnExecution {
                 turn: assembled,
                 post_commit_delivery_failed: false,
@@ -871,12 +712,8 @@ impl LashRuntime {
                                 .execution_scope()
                                 .journal_identity()?,
                         ),
-                    interrupted_turn,
-                    turn_control_resolver,
-                    admissions,
-                    opener,
-                    attachment_store: self.host.core.durability.attachment_store.as_ref(),
-                    attachment_source_policy: self.host.core.attachment_source_policy.as_ref(),
+                    cancellation: cancellation.clone(),
+                    run: std::marker::PhantomData,
                 },
                 TurnCommitAdmission {
                     turn_phase_probe: self.turn_phase_probe.clone(),
@@ -928,10 +765,6 @@ impl LashRuntime {
         };
         self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
-        let cancellation = match &committed.turn.outcome {
-            TurnOutcome::Stopped(TurnStop::Cancelled { evidence }) => Some(evidence.clone()),
-            _ => cancellation,
-        };
         let mut delivery = committed.adopt(self, &trace_turn_id)?;
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
@@ -939,24 +772,6 @@ impl LashRuntime {
         observer.release_terminal();
         emit_session_events(observer, delivery.events);
         observer.published().await;
-        if admitted_cancel_intent.is_some()
-            && let Err(error) = turn_control
-                .notify_committed_cancellation(turn_control_resolver, cancellation.clone())
-                .await
-        {
-            delivery.turn.errors.push(post_commit_delivery_issue(
-                (&error.code).into(),
-                error.to_string(),
-            ));
-        }
-        publish_terminal_after_commit(
-            turn_control,
-            turn_control_resolver,
-            &TurnTerminal::committed(&delivery.turn.outcome),
-            &self.state.session_id,
-            &trace_turn_id,
-        )
-        .await;
         if matches!(delivery.turn.outcome, TurnOutcome::AgentFrameSwitch { .. })
             && let Err(err) = self.restore_protocol_session_after_frame_open().await
         {
@@ -1019,7 +834,6 @@ impl LashRuntime {
             cancellation_messages,
             finish_scoped_effect_controller,
             shift_fence,
-            turn_control,
             turn_index,
             trace_turn_id,
             observer,
@@ -1035,7 +849,8 @@ impl LashRuntime {
         } = driver;
         // Only a recorded cancellation reaches this finisher; lash's own
         // evidence stands in for none (FIG-3672 P9).
-        let evidence = turn_cancel.unwrap_or_else(|| turn_control.internal_evidence(None));
+        let evidence = turn_cancel
+            .unwrap_or_else(|| crate::TurnCancellationEvidence::internal(&trace_turn_id));
         hold_terminal_sequence(
             &mut recorded_assembly,
             observer,
@@ -1071,7 +886,6 @@ impl LashRuntime {
             scoped_effect_controller: finish_scoped_effect_controller,
             honoured_cancel: Some(evidence),
             shift_fence,
-            turn_control,
             observer,
         }))
         .await
@@ -1095,15 +909,6 @@ impl LashRuntime {
         // A recovered follow-on's terminal commits at the index its run's
         // decision recorded, on the head it adopted (FIG-4380).
         let admitted_turn_index = self.admitted_turn_index.take();
-        let turn_control_binding = turn_control_binding(&scoped_effect_controller).await?;
-        let turn_control_resolver = turn_control_binding.resolver();
-        let turn_control = Arc::new(
-            ActiveTurnControl::new(
-                turn_control_resolver,
-                TurnAddress::new(&self.state.session_id, &trace_turn_id),
-            )
-            .await?,
-        );
         let mut recorded_assembly = RecordedTurnAssembly::default();
         hold_terminal_sequence(
             &mut recorded_assembly,
@@ -1173,7 +978,6 @@ impl LashRuntime {
             scoped_effect_controller: &scoped_effect_controller,
             honoured_cancel: None,
             shift_fence,
-            turn_control: &turn_control,
             observer,
         }))
         .await

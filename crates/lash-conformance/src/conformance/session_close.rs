@@ -1,7 +1,6 @@
 //! L-D1 through L-D4: the recorded session close and its retained tombstone.
 
 use crate::ActorContext;
-use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -335,100 +334,6 @@ pub async fn session_delete_closes_active_and_parked_runs_as_session_deleted(
             RunTerminalCause::SessionDeleted { intent: intent.id }
         );
     }
-}
-
-/// Pin session `id` with a pending turn-cancel closure: a turn that
-/// authorized its closure and has not yet committed past it.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(super) async fn pin_a_turn_cancel_closure(store: &dyn crate::RuntimeStore, id: &SessionId) {
-    let lease = store
-        .seal_shift_epoch_for_test(
-            id,
-            &crate::LeaseOwnerIdentity::opaque("close-law", "close-law:incarnation"),
-            "close-law:executor",
-            60_000,
-        )
-        .await
-        .expect("claim closure lease")
-        .acquired()
-        .expect("closure lease is free");
-    let address = crate::TurnAddress::new(id, TurnId::from("pinned-turn"));
-    let scope = address.execution_scope();
-    let binding = crate::turn_control_binding_id_for_scope("s7c-close-law", &scope)
-        .expect("bind closure scope");
-    store
-        .validate_turn_cancellation_binding(id, &lease, &binding, &scope)
-        .await
-        .expect("validate closure binding");
-    let key = |suffix: &str, wait| crate::AwaitEventKey {
-        scope: scope.clone(),
-        wait,
-        key_id: format!("pinned-turn:{suffix}"),
-        signature: format!("close-law:{suffix}"),
-    };
-    let authorization = crate::TurnCancelClosureAuthorization::new(
-        address,
-        binding,
-        scope.clone(),
-        key("cancel", crate::AwaitEventWaitIdentity::TurnCancelGate),
-        key(
-            "escalation",
-            crate::AwaitEventWaitIdentity::TurnCancelEscalation,
-        ),
-        key("terminal", crate::AwaitEventWaitIdentity::TurnTerminal),
-        crate::TurnCancelClosureProposal::CompletionSealed,
-        crate::TurnCancelIntentSnapshot::Absent,
-        &lease,
-    )
-    .expect("construct closure authorization");
-    store
-        .authorize_turn_cancel_closure(&lease, &authorization)
-        .await
-        .expect("pin the session");
-}
-
-/// L-D2: a pending turn-cancel closure pins the session, so deletion refuses
-/// before the close transaction or scope owner runs.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_refused_deletion_closes_nothing(
-    prefix: &str,
-    host: ActorContext,
-    stores: Arc<dyn StoreSet>,
-    _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
-) {
-    let (id, store) = session(&stores, prefix, "refused-close").await;
-    pin_a_turn_cancel_closure(store.as_ref(), &id).await;
-    let factory = stores.session_store_factory();
-    let sink = CloseSink::new(Arc::clone(&factory), 0);
-    let admin = administration(host, &stores, sink.clone());
-    let context = admin.delete_context(id.as_str()).expect("delete context");
-    assert!(matches!(
-        lash_core::session_close::close_session(&context).await,
-        Err(lash_core::session_close::SessionCloseError::Store(
-            StoreError::TurnCancelClosureLifecyclePinned {
-                pending_count: 1,
-                ..
-            }
-        ))
-    ));
-    assert!(
-        factory
-            .list_control_intents(None, std::num::NonZeroUsize::new(10).expect("positive"))
-            .await
-            .expect("intent list")
-            .is_empty()
-    );
-    assert!(sink.calls().is_empty());
-    store
-        .bind_run_inputs(&id, &TurnId::from("still-open"), &[])
-        .await
-        .expect("refused close leaves the session writable");
 }
 
 /// L-D3: a retried deletion replays its recorded close and answers the same
@@ -896,57 +801,4 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
             RunTerminalCause::SessionDeleted { intent: open.id }
         );
     }
-}
-
-/// L-D10 (FIG-3873 S3): a turn that pinned its cancel closure after the
-/// deletion asked its refusals, and before its close committed, has its
-/// final commit cut short by the close. The deletion retried after that
-/// close replays its recorded step and asks no refusal: it answers the
-/// recorded close, and the pin is the physical delete's to retire (L-D11).
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_deletion_retried_after_its_close_is_not_refused_by_a_pin_the_close_superseded(
-    prefix: &str,
-    host: ActorContext,
-    stores: Arc<dyn StoreSet>,
-    runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
-) {
-    let (id, store) = session(&stores, prefix, "close-superseded-pin").await;
-    let factory = stores.session_store_factory();
-    pin_a_turn_cancel_closure(store.as_ref(), &id).await;
-    // The close committed with the pin in place.
-    let committed = factory
-        .begin_session_close(&id, stores.clock().timestamp_ms())
-        .await
-        .expect("commit the close's store half")
-        .expect("the session exists");
-    let admin = administration(host, &stores, CloseSink::new(Arc::clone(&factory), 0));
-    let retried = close(&admin, &id, runner.as_ref()).await;
-    assert_eq!(
-        retried.id, committed.id,
-        "the retried deletion answers the recorded close"
-    );
-    assert!(
-        matches!(
-            factory
-                .load_intent(committed.id)
-                .await
-                .expect("load the close")
-                .expect("the close is kept")
-                .state,
-            ControlIntentState::Acknowledged { .. }
-        ),
-        "the retried deletion delivered the close's engine half"
-    );
-    assert_eq!(
-        factory
-            .pending_turn_cancel_closure_pins(&id)
-            .await
-            .expect("read the pins")
-            .len(),
-        1,
-        "the superseded pin is left to the physical delete"
-    );
 }

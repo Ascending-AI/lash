@@ -3,7 +3,6 @@ use super::logical_turn::next_physical_turn_id;
 use super::logical_turn::{
     LogicalTurnAdmissions, LogicalTurnStart, PhysicalTurnExecution, PreparedLogicalTurn,
 };
-use super::turn_control::ActiveTurnControl;
 use super::*;
 use crate::ActorContext;
 use crate::SessionId;
@@ -190,12 +189,6 @@ impl TurnStopwatch {
 
 fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
     parent_turn_id.with_suffix(format_args!(":{phase}"))
-}
-
-async fn turn_control_binding(
-    scoped_effect_controller: &ActorContext,
-) -> Result<crate::TurnControlBinding<'_>, RuntimeError> {
-    scoped_effect_controller.turn_control_binding().await
 }
 
 /// The `ingress.admitted` trace of one admission (FIG-3927): the rows
@@ -526,23 +519,6 @@ pub(in crate::runtime) async fn publish_observation(
             }
             None => emit_turn_activity_to_sink(turn_events, activity).await,
         },
-    }
-}
-
-async fn publish_terminal_after_commit(
-    turn_control: &ActiveTurnControl,
-    resolver: &ActorContext,
-    terminal: &TurnTerminal,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-) {
-    if let Err(err) = turn_control.publish_terminal(resolver, terminal).await {
-        tracing::warn!(
-            error = %err,
-            session_id = session_id.as_str(),
-            turn_id = turn_id.as_str(),
-            "turn committed but terminal publication failed"
-        );
     }
 }
 

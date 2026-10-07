@@ -180,35 +180,6 @@ store_error_samples! {
         operation: "sampled",
     },
     HeadRevisionConflict { .. } => StoreError::HeadRevisionConflict { expected: 1, actual: 2 },
-    TurnCancelIntentChanged { .. } => StoreError::TurnCancelIntentChanged {
-        session_id: session(),
-        turn_id: turn(),
-    },
-    TurnCancelBindingMismatch { .. } => StoreError::TurnCancelBindingMismatch {
-        session_id: session(),
-        expected: "admitted".to_string(),
-        presented: "other".to_string(),
-    },
-    TurnCancelClosureConflict { .. } => StoreError::TurnCancelClosureConflict {
-        session_id: session(),
-        turn_id: turn(),
-    },
-    TurnCancelClosureAuthorizationMismatch { .. } => {
-        StoreError::TurnCancelClosureAuthorizationMismatch {
-            session_id: session(),
-            turn_id: turn(),
-        }
-    },
-    TurnCancelClosureLifecyclePinned { .. } => StoreError::TurnCancelClosureLifecyclePinned {
-        session_id: session(),
-        pending_count: 1,
-    },
-    TurnCancelClosureScopeRetired { .. } => StoreError::TurnCancelClosureScopeRetired {
-        scope_id: "sampled-scope".to_string(),
-    },
-    TurnCancelClosureOwnerReleased { .. } => StoreError::TurnCancelClosureOwnerReleased {
-        participant_id: "sampled-owner".to_string(),
-    },
     UnknownAttachment { .. } => StoreError::UnknownAttachment { digest: attachment() },
     IncompleteEnumeration { .. } => StoreError::IncompleteEnumeration {
         scope: "sampled",

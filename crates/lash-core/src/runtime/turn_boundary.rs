@@ -1,6 +1,5 @@
 use super::turn_graph_editor::ReadProjectionDiagnostic;
 use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft};
-use crate::ActorContext;
 use crate::TurnId;
 use crate::facade_support::AgentFrameReasonFacadeOps as _;
 use crate::facade_support::SessionGraphFacadeOps;
@@ -20,6 +19,7 @@ use execution_state::*;
 pub(in crate::runtime) use execution_state::{
     SeedCarries, committed_frame_transition, derive_seed_carries,
 };
+mod durable_commit;
 mod final_commit_input;
 use final_commit_input::FinalCommitInput;
 mod recorded_assembly;
@@ -27,6 +27,34 @@ pub use recorded_assembly::RecordedTurnAssembly;
 #[cfg(feature = "testing")]
 pub use recorded_assembly::classify_output_state;
 type FinalCommitResult = Result<(crate::TurnCancelInputOutcome, bool), StoreError>;
+
+/// Derive the stable ids of the nodes `graph` appends under `operation`, and
+/// rename them in `state`, its current frame among them.
+#[expect(
+    clippy::expect_used,
+    reason = "derived graph node identities are non-empty"
+)]
+fn derive_commit_node_ids(
+    state: &mut RuntimeSessionState,
+    graph: &mut GraphAppend,
+    operation: &crate::OperationId,
+) -> Result<Vec<(crate::NodeId, crate::NodeId)>, StoreError> {
+    let session_id = state.session_id.clone();
+    let node_id_mapping = graph.derive_node_ids(&session_id, operation)?;
+    state
+        .session_graph
+        .remap_node_ids(&session_id, &node_id_mapping);
+    if let Some(current) = state.current_frame_node_id.as_mut()
+        && let Some((_, derived)) = node_id_mapping
+            .iter()
+            .find(|(draft, _)| draft == current.as_str())
+    {
+        *current = crate::FrameNodeId::new(derived.clone())
+            .expect("derived graph node identities are non-empty");
+    }
+    state.agent_frames = state.session_graph.agent_frame_records(&session_id);
+    Ok(node_id_mapping)
+}
 
 fn execution_state_capture_error(err: crate::SessionError) -> StoreError {
     match err {
@@ -428,8 +456,7 @@ impl TurnBoundary {
         session: Option<&mut Session>,
         ingress_settlement: TurnIngressSettlement,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
-        interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
-        turn_control_resolver: Option<&ActorContext>,
+        cancellation: Option<crate::TurnCancellationEvidence>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     ) -> Result<bool, StoreError> {
         // Record the outcome before capturing execution state: a second author
@@ -513,8 +540,7 @@ impl TurnBoundary {
                 outcome: &returned_turn.outcome,
                 ingress_settlement,
                 pending_follow_on,
-                interrupted_turn,
-                turn_control_resolver,
+                cancellation,
                 recorded_attachment_intent_ids,
             })
             .await;
@@ -528,77 +554,6 @@ impl TurnBoundary {
         returned_turn.state = self.final_state_mut().to_snapshot();
         returned_turn.turn_cancel_input_outcome = turn_cancel_input_outcome;
         Ok(work_remaining)
-    }
-
-    pub(super) fn append_cancelled_opener_messages(&mut self, messages: &[crate::Message]) {
-        let clock = Arc::clone(&self.clock);
-        self.final_state_mut()
-            .append_active_conversation_messages_with_clock(messages, clock.as_ref());
-    }
-
-    /// A native intent CAS miss changes only terminal assembly. The issued
-    /// work and admission remain this turn's; neither is executed again.
-    pub(super) async fn refresh_cancelled_commit(
-        &mut self,
-        turn: &mut AssembledTurn,
-        interrupted: &mut crate::store::InterruptedTurnClosure,
-        store: &crate::store::SessionStore,
-    ) -> Result<(), StoreError> {
-        let authorization = interrupted.settlement.authorization();
-        let address = authorization.address();
-        let observed = store.turn_cancel_request_intent(&address).await?;
-        let refusal = || StoreError::TurnCancelIntentChanged {
-            session_id: address.session_id.clone(),
-            turn_id: address.turn_id.clone(),
-        };
-        if interrupted.admitted_intent.is_none() || observed == interrupted.observed_intent {
-            return Err(refusal());
-        }
-        let base = observed.request().ok_or_else(refusal)?.evidence();
-        let effective = interrupted
-            .settlement
-            .effective_cancellation()
-            .filter(|previous| {
-                previous.undelivered == base.undelivered
-                    && (previous.request_id == base.request_id
-                        || previous.mode.is_stronger_than(base.mode))
-            })
-            .cloned()
-            .unwrap_or_else(|| base.clone());
-        let shift = self.shift_commit.as_mut().ok_or_else(refusal)?;
-        let refreshed = crate::TurnCancelClosureAuthorization::new(
-            address.clone(),
-            authorization.binding_id(),
-            authorization.admitted_scope().clone(),
-            authorization.cancel_key().clone(),
-            authorization.escalation_key().clone(),
-            authorization.terminal_key().clone(),
-            crate::TurnCancelClosureProposal::CancelRequested(base.clone()),
-            observed.clone(),
-            &shift.fence,
-        )
-        .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
-            error: Box::new(error),
-        })?;
-        interrupted.observed_intent = observed;
-        interrupted.settlement =
-            crate::TurnCancelClosureSettlement::new(refreshed, Some(base), Some(effective.clone()));
-        let stop = crate::TurnStop::Cancelled {
-            evidence: effective,
-        };
-        shift.terminal = Some(crate::store::RunTerminalWrite {
-            run: shift.run.clone(),
-            commit: crate::store::TurnCommitId::of_physical_turn(&shift.run, &address.turn_id)
-                .ok_or_else(refusal)?,
-            turn: address.turn_id,
-            outcome: crate::store::RunCommittedOutcome::Stopped(stop.clone()),
-        });
-        // The failed commit materialized the graph but published none of it.
-        // Restore that candidate to the assembly before recapturing the
-        // terminated executor and clearing the successor intent.
-        turn.state = self.state().to_snapshot();
-        turn.outcome = TurnOutcome::Stopped(stop);
-        Ok(())
     }
 
     pub(super) fn into_final_state(self) -> RuntimeSessionState {
@@ -713,8 +668,7 @@ impl TurnBoundary {
             outcome,
             ingress_settlement,
             pending_follow_on,
-            interrupted_turn,
-            turn_control_resolver,
+            cancellation,
             recorded_attachment_intent_ids,
         } = input;
         // Every path into the final commit reconciles the same way. A turn
@@ -825,8 +779,7 @@ impl TurnBoundary {
                 crate::store::TurnCommitOutcome::from_terminal(outcome),
                 operation,
                 ingress_settlement,
-                interrupted_turn,
-                turn_control_resolver,
+                cancellation,
                 committed_attachment_ids,
                 adopted_intent_rows,
                 shift_commit,
@@ -861,8 +814,7 @@ impl TurnBoundary {
         outcome: crate::store::TurnCommitOutcome,
         operation: crate::OperationId,
         ingress_settlement: TurnIngressSettlement,
-        interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
-        _turn_control_resolver: Option<&ActorContext>,
+        cancellation: Option<crate::TurnCancellationEvidence>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
         shift_commit: Option<ShiftCommit>,
@@ -870,19 +822,7 @@ impl TurnBoundary {
         frame_switch: FrameSwitchCommit,
     ) -> FinalCommitResult {
         let session_id = state.session_id.clone();
-        let node_id_mapping = graph.derive_node_ids(&session_id, &operation)?;
-        state
-            .session_graph
-            .remap_node_ids(&session_id, &node_id_mapping);
-        if let Some(current) = state.current_frame_node_id.as_mut()
-            && let Some((_, derived)) = node_id_mapping
-                .iter()
-                .find(|(draft, _)| draft == current.as_str())
-        {
-            *current = crate::FrameNodeId::new(derived.clone())
-                .expect("derived graph node identities are non-empty");
-        }
-        state.agent_frames = state.session_graph.agent_frame_records(&session_id);
+        let node_id_mapping = derive_commit_node_ids(state, &mut graph, &operation)?;
         let FrameSwitchCommit {
             ended,
             carries,
@@ -938,13 +878,11 @@ impl TurnBoundary {
         commit.adopted_intent_rows = adopted_intent_rows;
         // A cancelled turn's undelivered input follows the cancellation's
         // disposition; every other handed-back row is deferred.
-        let disposition = interrupted_turn
+        let disposition = cancellation
             .as_ref()
-            .and_then(crate::store::InterruptedTurnClosure::cancellation)
             .map_or(crate::TurnCancelUndeliveredInputPolicy::Defer, |evidence| {
                 evidence.undelivered
             });
-        commit.interrupted_turn = interrupted_turn;
         // The rows a turn settles are its run's, settled under the run's
         // shift fence (FIG-3927): a turn that runs under no admitted run
         // admitted nothing and settles nothing.
@@ -966,36 +904,7 @@ impl TurnBoundary {
         super::frame_definition_carry::prepare(definition_engines, frame_transition.as_ref())
             .await?;
         commit.frame_transition = frame_transition;
-        // Cancellation-intent retries are progress-fenced: every refusal
-        // proves a newer durable intent revision. Refresh only that snapshot:
-        // the settlement and materialized cancellation evidence are already
-        // authenticated and may contain live execution enrichment (such as the
-        // iteration that honoured an AfterStep request) which a raw promise
-        // peek cannot reconstruct.
-        let result = loop {
-            match store
-                .commit_runtime_state_verified(commit.clone(), metrics)
-                .await
-            {
-                Ok(result) => break result,
-                Err(error @ crate::StoreError::TurnCancelIntentChanged { .. }) => {
-                    // Only a commit closing an interrupted turn carries the
-                    // predicate this refusal names.
-                    let Some(interrupted) = commit.interrupted_turn.as_mut() else {
-                        return Err(error);
-                    };
-                    if interrupted.admitted_intent.is_some() {
-                        // A newer intent needs turn reassembly before publication.
-                        // Redrive the recorded work rather than patching its terminal.
-                        return Err(error);
-                    }
-                    let address = crate::TurnAddress::new(&session_id, interrupted.turn_id());
-                    interrupted.observed_intent =
-                        store.turn_cancel_request_intent(&address).await?;
-                }
-                Err(err) => return Err(err),
-            }
-        };
+        let result = store.commit_runtime_state_verified(commit, metrics).await?;
         if !result.receipt_replayed
             && let (Some(trace), Some(receipt)) = (trace, result.trace.as_ref())
         {

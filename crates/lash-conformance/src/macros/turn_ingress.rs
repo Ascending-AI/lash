@@ -31,16 +31,3 @@ macro_rules! direct_turn_acceptance_tests {
         }
     };
 }
-
-/// Register one independently reported test per cancelled-turn withheld-work
-/// law (FIG-3531, FIG-3543). The fixture shape is the direct-turn one, so the catalogue
-/// arm is shared.
-#[macro_export]
-macro_rules! cancelled_turn_withheld_input_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::direct_turn_acceptance_tests!(@catalogue [$(#[$attr])*] $fixture; [
-            (immediate_cancel_defers_withheld_inject_now_input, "cancel-defers-withheld-input"),
-            (immediate_cancel_defers_withheld_process_wakes, "cancel-defers-withheld-wakes"),
-        ]);
-    };
-}

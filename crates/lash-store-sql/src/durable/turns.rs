@@ -12,8 +12,9 @@
 pub const TABLE: &str = "turn_phases";
 
 crate::statements! {
-    /// `turn_phases`, `session_runs`, `session_revisions`, `session_head` and
-    /// `turn_cancel_requests` statements both backends issue verbatim.
+    /// `turn_phases`, `session_runs` and `turn_cancel_requests` statements
+    /// both backends issue verbatim. The session head is written by the
+    /// session store's own commit, applied in the same transaction.
     pub struct TurnStatements @ "durable_turn" {
         /// Whether session `?1` has an unfinished admitted run.
         open_run = "SELECT run FROM session_runs
@@ -63,6 +64,12 @@ crate::statements! {
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL
                AND r.terminal_kind IS NULL";
 
+        /// How run `?2` of session `?1` ended: terminal, cause and head
+        /// revision. No row until it ended.
+        ended = "SELECT terminal_kind, terminal_cause_json, terminal_head_revision
+             FROM session_runs
+             WHERE session_id = ?1 AND run = ?2 AND terminal_kind IS NOT NULL";
+
         /// Whether run `?2` is session `?1`'s unfinished admitted run.
         open_named_run = "SELECT run FROM session_runs
              WHERE session_id = ?1 AND run = ?2
@@ -84,16 +91,5 @@ crate::statements! {
         escalate_cancel = "UPDATE turn_cancel_requests
              SET mode = ?3, intent_revision = intent_revision + 1
              WHERE session_id = ?1 AND turn_id = ?2";
-
-        /// Session `?1`'s head revision.
-        head = "SELECT head_revision FROM session_head WHERE session_id = ?1";
-
-        /// Publish revision `?2` of session `?1` with head document `?3`.
-        insert_revision = "INSERT INTO session_revisions (session_id, head_revision, head_json)
-             VALUES (?1, ?2, ?3)";
-
-        /// Move session `?1`'s head to revision `?2`.
-        move_head = "INSERT INTO session_head (session_id, head_revision) VALUES (?1, ?2)
-             ON CONFLICT (session_id) DO UPDATE SET head_revision = excluded.head_revision";
     }
 }

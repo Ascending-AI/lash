@@ -101,14 +101,6 @@ pub(crate) fn admit_run_conn(
     } else {
         super::shift_epoch::require_fence_conn(tx, session_id, &request.fence)?;
     }
-    if let Some(binding) = &request.turn_cancellation {
-        super::turn_input::check_turn_cancellation_conn(
-            tx,
-            session_id,
-            &binding.binding_id,
-            &binding.admitted_scope,
-        )?;
-    }
     let runs = crate::session_runs::session_runs_sql();
     let existing: Option<Option<String>> = tx
         .query_row(
@@ -129,16 +121,6 @@ pub(crate) fn admit_run_conn(
                 recorded: Box::new(admission.executor),
                 admitting: Box::new(request.executor.clone()),
             });
-        }
-        if prepared.is_some()
-            && let Some(binding) = &request.turn_cancellation
-        {
-            super::turn_input::bind_turn_cancellation_conn(
-                tx,
-                session_id,
-                &binding.binding_id,
-                &binding.admitted_scope,
-            )?;
         }
         return Ok(TxOutcome::Commit(Some(admission)));
     }
@@ -232,11 +214,6 @@ pub(crate) fn admit_run_conn(
         executor: request.executor.clone(),
         plugins: request.plugins.clone(),
         trace: Some(trace),
-        cancel_intent: Some(super::turn_cancel::load_turn_cancel_intent_snapshot_conn(
-            tx,
-            session_id,
-            &request.run,
-        )?),
         recorded_by_this_call: prepared.is_some(),
     };
     let Some(prepared) = prepared else {
@@ -252,16 +229,7 @@ pub(crate) fn admit_run_conn(
             run: request.run.clone(),
         });
     }
-    // Revalidate the exact trace proposal before binding either the
-    // cancellation authority or admitted rows.
-    if let Some(binding) = &request.turn_cancellation {
-        super::turn_input::bind_turn_cancellation_conn(
-            tx,
-            session_id,
-            &binding.binding_id,
-            &binding.admitted_scope,
-        )?;
-    }
+    // Revalidate the exact trace proposal before binding admitted rows.
     if let Some(inputs) = admission.inputs.as_deref() {
         bind_turn_inputs_conn(tx, now, &request.run, RUN_ADMISSION_STEP, inputs)?;
     }

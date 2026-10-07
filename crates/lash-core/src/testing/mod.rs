@@ -29,7 +29,6 @@ pub use lash_core_execution::testing::{
     TestProvider, TestProviderBuilder, ToolCallFixture, TriggerDeliveryPinReleaseLoss,
     UnavailableProcessExecutionEnvStore, UnavailableTurnPreludeStore, behavior_transcript,
     cancelled_code_execution_context, code_execution_context, code_execution_context_for_process,
-    code_execution_context_stopped, code_execution_context_stopped_on,
     code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
     code_execution_context_with_tool_catalog,
     code_execution_context_with_tool_provider_and_catalog,

@@ -73,6 +73,8 @@ L13 = FIG-5193.
 | `vm_effect` (V0, then L7) | `ExecCode` | admitted execution from the cell's snapshot, operations admitted at quiet points |
 | | `LanguageRuntimeValue` | run in place, recorded nowhere: a cell resumed from its snapshot never asks again for a value its heap holds |
 
+**L3 (FIG-5172):** `turn_effect` and `session_effect` run each command of their group in place and refuse every other. Nothing is journaled: a turn effect's result is durable only through the phase transaction that commits it, and a restore recomputes it from committed state; a session effect's runner makes its own idempotent store write.
+
 ## The fold (S1 rule 2)
 
 Each constant default was deleted and its call sites folded to the constant:
@@ -97,7 +99,7 @@ Code the fold made unreachable, or nearly, that an owning lane is about to rewri
 
 - **L4:** the journal guard and owner-step gate in `runtime/actor/journal.rs`. (L4 deleted the generation-cut plumbing and the Run transfer.)
 - **L6 and L7b:** the `with_turn_hand_over(false)` plumbing (4 sites) and segment handover as process state; the process run-context builder (`process_runners/mod.rs`) and the capability items only it read (`session_runtime_store`, `execution_owner`, `turn_phase_probe`), kept under `#[expect(dead_code)]` for the advance-driven engine drive; `ProcessEngineRunContext` without effect accessors, and the lashlang run path (`run_lashlang_process`, which takes the context it will run under).
-- **L3, L4 and L6:** the await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, `prepare_completion_key`, `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`, and `completion_host_key`), kept by L5 in `runtime/actor/await_event_legacy.rs`. Each reaches `port_pending`, whose arm names the lane by wait identity: turn control and session-command cancel L3, tool completion and custom L4, process signals L6. They are deleted with their callers' ports; no wait row serves a recomputable key.
+- **L3, L4 and L6:** the await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, `prepare_completion_key`, `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`, and `completion_host_key`), kept by L5 in `runtime/actor/await_event_legacy.rs`. Each reaches `port_pending`, whose arm names the lane by wait identity: the plugin task cancel signal L3 (turn control's waits are deleted: a turn cancel is session mail), tool completion and custom L4, process signals L6. They are deleted with their callers' ports; no wait row serves a recomputable key.
 - **V0:** `RunRecordObserver::bind`, kept for `record_run_record`.
 - At the L10a rebase I0 ported every file that still named the deleted seam, deleted `replay_read_gate.rs` (its subject was replay paths) and the pending list, and dropped Rule 7's Restate exclusion; L10a itself removed `RecordedJournal` and `read_recorded_journal`.
 
@@ -123,7 +125,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 
 Generated from the tree with `scripts/check-substrate-todos.py`'s scanner; each lane removes its rows as it fills them.
 
-Counts: L3 7, L3s 5, L4 14, L6 1, L6b 2 (29 in all).
+Counts: L3 1, L3s 5, L4 14, L6 1, L6b 2 (23 in all).
 
 ### V0 (FIG-5170)
 
@@ -133,16 +135,7 @@ None: V0 filled its stubs. It re-tagged the journal-era ones its path never reac
 
 | Where | Function | Stub |
 |---|---|---|
-| `crates/lash-core-execution/src/runtime/actor/turn.rs` | `register_turn_cancel_closure_participant` | delete with the turn-control binding tables once cancel is mail |
-| `crates/lash-core-execution/src/runtime/actor/turn.rs` | `release_turn_cancel_closure_participant` | delete with the turn-control binding tables once cancel is mail |
-| `crates/lash-core-execution/src/runtime/actor/turn.rs` | `session_effect` | run a session effect as a write under the session's epoch |
-| `crates/lash-core-execution/src/runtime/actor/turn.rs` | `turn_control_binding` | replace the turn-control binding by turn cancel mail |
-| `crates/lash-core-execution/src/runtime/actor/turn.rs` | `turn_control_binding_id` | replace the turn-control binding by turn cancel mail |
-| `crates/lash-core-execution/src/runtime/actor/turn.rs` | `turn_effect` | run a turn effect inside its phase transaction |
-| `crates/lash-core/src/runtime/durable/session.rs` | `request_turn_cancel` | request a turn cancel as session mail |
-| `crates/lash-postgres-store/src/postgres/durable/turns.rs` | `request_cancel` | record a turn cancel request and wake the session on PostgreSQL |
-| `crates/lash-sqlite-store/src/durable/turns.rs` | `request_cancel` | record a turn cancel request and wake the session on SQLite |
-| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the turn-control and session-command waits' port to cancel mail and L5's pin, race and resolve_host |
+| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the plugin task cancel signal's port to session mail |
 
 ### L3s (FIG-5196)
 

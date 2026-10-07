@@ -634,23 +634,6 @@ table lash_trigger_subscriptions
   column updated_at_ms bigint not-null
   unique (owner_scope, subscription_key)
   primary-key (subscription_id)
-table lash_turn_cancel_affected_inputs
-  column batch_id text nullable
-  column disposition text not-null
-  column input_id text not-null
-  column input_json text not-null
-  column item_kind text not-null
-  column ordinal bigint not-null
-  column session_id text not-null
-  column turn_id text not-null
-  unique (session_id, turn_id, item_kind, input_id)
-  primary-key (session_id, turn_id, ordinal)
-  foreign-key (session_id, turn_id) references lash_turn_cancel_requests (session_id, turn_id) on delete cascade
-table lash_turn_cancel_closure_authorizations
-  column authorization_json text not-null
-  column session_id text not-null
-  column turn_id text not-null
-  primary-key (session_id, turn_id)
 table lash_turn_cancel_requests
   column disposition text not-null
   column intent_revision bigint not-null
@@ -661,14 +644,6 @@ table lash_turn_cancel_requests
   column session_id text not-null
   column turn_id text not-null
   primary-key (session_id, turn_id)
-table lash_turn_cancel_retired_scopes
-  column scope_id text not-null
-  primary-key (scope_id)
-table lash_turn_cancellation_bindings
-  column admitted_scope_json text nullable
-  column binding_id text not-null
-  column session_id text not-null
-  primary-key (session_id)
 table lash_turn_change_clock
   column current_seq bigint not-null
   column retention_horizon bigint not-null

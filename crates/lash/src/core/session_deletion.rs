@@ -23,44 +23,6 @@ const MAX_POLL: Duration = Duration::from_secs(1);
 const PAGE: NonZeroUsize = NonZeroUsize::MIN.saturating_add(63);
 
 impl LashCore {
-    /// Await consumption of the session's persisted turn-cancel closure pins.
-    ///
-    /// After `TurnCancelClosureLifecyclePinned`, wait here before another
-    /// close attempt. Reads do not repeat deletion or change the session.
-    /// A new closure can race a later close; every close still checks its pins.
-    ///
-    /// # Errors
-    ///
-    /// The catalog's typed store error if it cannot read the pins or lifetime.
-    pub async fn await_turn_cancel_closures(&self, session_id: &SessionId) -> Result<()> {
-        let mut poll = POLL;
-        loop {
-            if !matches!(
-                self.store_factory.lookup_session(session_id).await?,
-                SessionLookup::Live(_)
-            ) {
-                return Ok(());
-            }
-            // An accepted close retires any pin its final commit overtook.
-            if self
-                .store_factory
-                .shift_epoch(session_id)
-                .await?
-                .closing
-                .is_some()
-                || self
-                    .store_factory
-                    .pending_turn_cancel_closure_pins(session_id)
-                    .await?
-                    .is_empty()
-            {
-                return Ok(());
-            }
-            tokio::time::sleep(poll).await;
-            poll = (poll * 2).min(MAX_POLL);
-        }
-    }
-
     /// Await the physical deletion owed by an accepted close (ADR 0109 §4).
     ///
     /// The permanent tombstone proves completion. An absent obligation alone

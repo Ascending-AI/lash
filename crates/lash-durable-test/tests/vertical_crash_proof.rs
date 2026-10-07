@@ -29,24 +29,30 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/dialect.rs"]
+mod dialect;
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core::facade_support::{EffectId, Response};
+use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, SessionActivation, TurnAdmission, TurnError, TurnServices, admit_mail,
+    AdmittedInputs, CodeCell, SessionActivation, TurnCommit, TurnDone, TurnDrive, TurnError,
+    TurnRow, TurnServices, admit_mail,
 };
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
 use lash_core::{
-    DriverAction, DriverContextView, ExecResponse, Message, MessageRole, Part, ProtocolTurnOptions,
-    TurnMachineConfig, facade_support::TurnFinish, facade_support::TurnOutcome,
-    facade_support::shared_parts,
+    DriverAction, DriverContextView, Effect, ExecResponse, Message, MessageRole, Part,
+    ProtocolTurnOptions, TurnMachine, TurnMachineConfig, facade_support::TurnFinish,
+    facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core_execution::runtime::actor::round::{
     self, BodyOutput, ExecutionDraft, PolicyView, Recovery,
 };
-use lash_core_execution::{ActorContext, Backend, StoreSet};
+use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
     AttemptOutcome, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
@@ -58,17 +64,17 @@ use lash_durable::{
     LeaseConfig, MailTx,
 };
 use lash_durable_test::{
-    Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, Verdict,
-    WriteKind,
+    Cut, Fault, Life, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored,
+    Tripwire, Verdict, WriteKind,
 };
-use lash_sansio::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure};
+use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{
-    ExecutionLimit, ExecutionPolicy, LlmCallError, SessionId, ToolCallId, ToolId, TurnId,
-};
+use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, ToolCallId, ToolId, TurnId};
 use lash_vm_broker::cell::{Cell, CellEnd, CellOperations, ResolvedOperation, run_cell};
 use lash_vm_broker::{Checkpoint, CodeCallIdentities};
 use lashlang::{ExecutionHostError, ResourceOperation, Value};
+
+use dialect::Dialect;
 
 const FORMATS: &str = "v0";
 const SESSION: &str = "v0-session";
@@ -298,10 +304,19 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
 /// The deployment's turn services in the scenario: the scripted protocol
 /// and model, and cells compiled from TypeScript and run from their
 /// snapshots.
+#[derive(Clone)]
 struct V0Services {
+    backend: Backend,
     world: Arc<ExternalWorld>,
     driver: Arc<ScriptedProtocol>,
     cells: Arc<Mutex<Vec<ExecKey>>>,
+}
+
+/// One turn's drive: its machine, answered by the scenario's services.
+struct V0Drive {
+    services: V0Services,
+    run: TurnId,
+    machine: TurnMachine,
 }
 
 fn host_environment() -> lashlang::LashlangHostEnvironment {
@@ -333,74 +348,133 @@ fn compile(code: &str) -> Result<Arc<lashlang::CompiledProgram>, String> {
         .map_err(|error| error.to_string())
 }
 
+fn machine_config(
+    session: &SessionId,
+    run: &TurnId,
+    driver: &Arc<ScriptedProtocol>,
+) -> TurnMachineConfig {
+    TurnMachineConfig {
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
+        protocol_driver: Arc::clone(driver) as _,
+        projector: Arc::new(ChatContextProjector),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("v0-model"),
+                lash_sansio::llm_profile::LlmProfileMetadata::new(
+                    "scripted".to_string(),
+                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                )
+                .with_capability(lash_core::LlmProfileCapability::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
+        turn_budget: lash_core::TurnBudget::bounded(8),
+        no_progress_budget: Default::default(),
+        attachment_acceptance: Default::default(),
+        generation: lash_core::GenerationOptions::default(),
+        autonomous: false,
+        session_id: session.clone(),
+        agent_frame_id: "v0-frame".to_string(),
+        turn_id: run.clone(),
+        emit_llm_trace: false,
+        writer_formats: lash_core::build_newest_writer_formats(),
+        termination: ProtocolTurnOptions::default(),
+    }
+}
+
 #[async_trait::async_trait]
 impl TurnServices for V0Services {
-    fn machine_config(&self, session: &SessionId, run: &TurnId) -> TurnMachineConfig {
-        TurnMachineConfig {
-            model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
-            protocol_driver: Arc::clone(&self.driver) as _,
-            projector: Arc::new(ChatContextProjector),
-            model: lash_sansio::llm_profile::LlmProfileConfig::new(
-                lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                    lash_sansio::llm_profile::LlmProfileKey::new("v0-model"),
-                    lash_sansio::llm_profile::LlmProfileMetadata::new(
-                        "scripted".to_string(),
-                        std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    )
-                    .with_capability(lash_core::LlmProfileCapability::default())
-                    .with_extra_body(Default::default())
-                    .with_request_defaults(Default::default()),
-                ),
-            )
-            .with_reasoning(Default::default()),
-            turn_budget: lash_core::TurnBudget::bounded(8),
-            no_progress_budget: Default::default(),
-            attachment_acceptance: Default::default(),
-            generation: lash_core::GenerationOptions::default(),
-            autonomous: false,
-            session_id: session.clone(),
-            agent_frame_id: "v0-frame".to_string(),
-            turn_id: run.clone(),
-            emit_llm_trace: false,
-            writer_formats: lash_core::build_newest_writer_formats(),
-            termination: ProtocolTurnOptions::default(),
-        }
-    }
-
-    async fn sync_environment(
-        &self,
-        _cx: &ActorContext,
-        _session: &SessionId,
-        _run: &TurnId,
-    ) -> Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure> {
-        Ok(ExecutionEnvironmentSync {
-            system_prompt: Arc::from("v0"),
-            tool_specs: Arc::new(Vec::new()),
-            projector_turn_inputs: Default::default(),
-        })
-    }
-
-    /// The scripted model: before the transcript holds a cell result it
-    /// answers with the cell; after, with a final answer that quotes it.
     fn execution_budgets(&self, _session: &SessionId) -> lash_core::ExecutionBudgets {
         lash_core::ExecutionBudgets::default()
     }
 
-    async fn restart_live_stream(
+    async fn machine_config(
         &self,
         _cx: &ActorContext,
-        _session: &SessionId,
-    ) -> Result<(), TurnError> {
+        row: &TurnRow,
+    ) -> Result<TurnMachineConfig, TurnError> {
+        Ok(machine_config(&row.session, &row.run, &self.driver))
+    }
+
+    async fn start(
+        &self,
+        _cx: &ActorContext,
+        row: &TurnRow,
+    ) -> Result<Box<dyn TurnDrive>, TurnError> {
+        // The scenario admits a turn with the messages it starts from.
+        let messages: Vec<Message> = serde_json::from_str(&row.admission_json)
+            .map_err(|error| TurnError::Exec(error.to_string()))?;
+        let machine = TurnMachine::new(
+            machine_config(&row.session, &row.run, &self.driver),
+            messages,
+            Default::default(),
+            0,
+        );
+        Ok(self.drive(row, machine))
+    }
+
+    async fn resume(
+        &self,
+        _cx: &ActorContext,
+        row: &TurnRow,
+        machine: TurnMachine,
+    ) -> Result<Box<dyn TurnDrive>, TurnError> {
+        Ok(self.drive(row, machine))
+    }
+}
+
+impl V0Services {
+    fn drive(&self, row: &TurnRow, machine: TurnMachine) -> Box<dyn TurnDrive> {
+        Box::new(V0Drive {
+            services: self.clone(),
+            run: row.run.clone(),
+            machine,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl TurnDrive for V0Drive {
+    fn machine(&mut self) -> &mut TurnMachine {
+        &mut self.machine
+    }
+
+    async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
+        match effect {
+            Effect::SyncExecutionEnvironment { id } => {
+                self.machine
+                    .handle_response(Response::ExecutionEnvironmentSynced {
+                        id,
+                        result: Ok(ExecutionEnvironmentSync {
+                            system_prompt: Arc::from("v0"),
+                            tool_specs: Arc::new(Vec::new()),
+                            projector_turn_inputs: Default::default(),
+                        }),
+                    });
+            }
+            Effect::Checkpoint { id, .. } => {
+                self.machine.handle_response(Response::Checkpoint {
+                    id,
+                    delivery: Default::default(),
+                });
+            }
+            _ => {}
+        }
         Ok(())
     }
 
-    async fn call_model(
-        &self,
+    /// The scripted model: before the transcript holds a cell result it
+    /// answers with the cell; after, with a final answer that quotes it.
+    async fn model_call(
+        &mut self,
         _cx: &ActorContext,
+        id: EffectId,
         request: Arc<LlmRequest>,
         _attempt: u32,
         _limit: ExecutionLimit,
-    ) -> Result<LlmResponse, LlmCallError> {
+    ) -> Result<(), TurnError> {
         let rendered = serde_json::to_string(&*request).expect("a request encodes");
         let text = match rendered.find(RESULT_PREFIX) {
             None => format!("{CELL_PREFIX}{CELL}"),
@@ -409,33 +483,42 @@ impl TurnServices for V0Services {
                 format!("final answer from {quoted}")
             }
         };
-        Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text,
-                response_meta: None,
-            }],
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        })
+        self.machine.handle_response(Response::LlmComplete {
+            id,
+            result: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text,
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+            text_streamed: false,
+        });
+        Ok(())
+    }
+
+    async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
+        Ok(())
     }
 
     async fn exec_cell(
-        &self,
+        &mut self,
         cx: &ActorContext,
+        id: EffectId,
         exec: ExecKey,
-        _language: &str,
-        code: &str,
+        cell: CodeCell,
         with: Vec<DomainWrite>,
-    ) -> Result<Result<ExecResponse, lash_core::ExecCodeFailure>, TurnError> {
+    ) -> Result<(), TurnError> {
         {
-            let mut cells = self.cells.lock_recover();
+            let mut cells = self.services.cells.lock_recover();
             if !cells.contains(&exec) {
                 cells.push(exec.clone());
             }
         }
-        let program = compile(code).map_err(TurnError::Exec)?;
+        let program = compile(&cell.code).map_err(TurnError::Exec)?;
         let operations = ExtWrite {
-            world: Arc::clone(&self.world),
+            world: Arc::clone(&self.services.world),
         };
         let identities =
             CodeCallIdentities::cell(EffectOpener::turn(session(), run()), exec.stored());
@@ -458,30 +541,40 @@ impl TurnServices for V0Services {
                 serde_json::Value::String(error),
             ),
         };
-        Ok(Ok(ExecResponse {
-            observations: vec![lash_core::Observation {
-                text,
-                value,
-                projection: Default::default(),
-            }],
-            output_archive: None,
-            calls: Vec::new(),
-            printed_images: Vec::new(),
-            error: None,
-            degraded_bindings: Vec::new(),
-            terminal_finish: None,
-            terminal_finish_retained: None,
-            suspended: false,
-        }))
+        self.machine.handle_response(Response::ExecResult {
+            id,
+            result: Ok(ExecResponse {
+                observations: vec![lash_core::Observation {
+                    text,
+                    value,
+                    projection: Default::default(),
+                }],
+                output_archive: None,
+                calls: Vec::new(),
+                printed_images: Vec::new(),
+                error: None,
+                degraded_bindings: Vec::new(),
+                terminal_finish: None,
+                terminal_finish_retained: None,
+                suspended: false,
+            }),
+        });
+        Ok(())
+    }
+
+    async fn finish(
+        &mut self,
+        _cx: &ActorContext,
+        done: TurnDone,
+    ) -> Result<TurnCommit, TurnError> {
+        SessionHead::load(&self.services.backend, &session(), commit_budget())
+            .await?
+            .commit(&self.run, done)
     }
 }
 
-/// Where a scenario's database lives.
-#[derive(Clone, Copy, Debug)]
-enum Dialect {
-    SqliteMemory,
-    SqliteFile,
-    Postgres,
+fn commit_budget() -> lash_core::facade_support::CommitBudget {
+    lash_core::facade_support::CommitBudget::bounded(1024 * 1024, 512)
 }
 
 /// The V0 scenario on one dialect, fresh for every matrix cell.
@@ -518,69 +611,16 @@ impl V0 {
     }
 }
 
-/// A fresh isolated PostgreSQL database, provisioned from the schema.
-///
-/// It is made on a thread and runtime of its own: its future is not `Send`
-/// for every lifetime, as a scenario's must be, and the simulation runs on
-/// one current-thread runtime whose quiescence it alone observes.
-fn isolated_database(url: String) -> lash_postgres_store::testing::IsolatedDatabase {
-    std::thread::spawn(move || {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("a setup runtime")
-            .block_on(lash_postgres_store::testing::IsolatedDatabase::create(&url))
-    })
-    .join()
-    .expect("the isolated database is created")
-}
-
-/// The store set and the durable store on `clock` over the database at
-/// `url`.
-async fn postgres(url: &str, clock: Arc<SimClock>) -> (Arc<dyn StoreSet>, Arc<dyn DurableStore>) {
-    let storage = lash_postgres_store::PostgresStorage::connect(url)
-        .await
-        .expect("the isolated database opens");
-    let database: Arc<dyn DurableStore> =
-        Arc::new(storage.durable_store().with_clock_for_testing(clock));
-    let stores = lash_postgres_store::PostgresStoreSet::new(
-        &storage,
-        Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
-    );
-    (Arc::new(stores), database)
-}
-
 #[async_trait::async_trait]
 impl Scenario for V0 {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
-        let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) = match self.dialect {
-            Dialect::SqliteMemory => {
-                let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-                    .await
-                    .expect("an in-memory store set opens");
-                let database = Arc::new(stores.durable_store());
-                (Arc::new(stores), database)
-            }
-            Dialect::SqliteFile => {
-                let dir = tempfile::tempdir().expect("a temporary directory");
-                let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(
-                    dir.path().join("lash.db"),
-                    clock,
-                )
-                .await
-                .expect("a file store set opens");
-                self.keep.lock_recover().push(Box::new(dir));
-                let database = Arc::new(stores.durable_store());
-                (Arc::new(stores), database)
-            }
-            Dialect::Postgres => {
-                let url = self.postgres_url.clone().expect("a PostgreSQL URL");
-                let isolated = isolated_database(url);
-                let (stores, database) = postgres(isolated.url(), clock).await;
-                self.keep.lock_recover().push(Box::new(isolated));
-                (stores, database)
-            }
-        };
+        let (stores, database) = dialect::open(
+            self.dialect,
+            self.postgres_url.as_deref(),
+            clock,
+            &self.keep,
+        )
+        .await;
         *self.backend.lock_recover() = Some(Backend::for_testing(stores));
         database
     }
@@ -600,8 +640,9 @@ impl Scenario for V0 {
             .clone()
             .expect("the database is built first");
         Arc::new(SessionActivation::new(
-            backend,
+            backend.clone(),
             Arc::new(V0Services {
+                backend: backend.clone(),
                 world: Arc::clone(&self.world),
                 driver: Arc::new(ScriptedProtocol),
                 cells: Arc::clone(&self.cells),
@@ -611,38 +652,7 @@ impl Scenario for V0 {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
-        let admission = TurnAdmission {
-            base_head: 0,
-            messages: vec![Message {
-                id: "v0-input".to_owned(),
-                role: MessageRole::User,
-                parts: shared_parts(vec![Part::text(
-                    "v0-input.p0".to_owned(),
-                    "write x, then tell me what was written".to_owned(),
-                    None,
-                )]),
-                origin: None,
-                reply_marker: None,
-            }],
-        };
-        let inputs = AdmittedInputs {
-            run: run(),
-            inputs: Vec::new(),
-            admission_json: serde_json::to_string(&admission).map_err(|e| e.to_string())?,
-        };
-        let mut seed = MailTx::new();
-        seed.create_actor(actor(), FormatSet::new(FORMATS)).append(
-            actor(),
-            admit_mail(),
-            inputs.mail_body(),
-        );
-        // The producer is outside the deployment under test: its mail is
-        // seeded straight into the database, uncut.
-        nodes
-            .database()
-            .commit_mail(seed, CommitLabel::MAIL_SESSION)
-            .await
-            .map_err(|error| error.to_string())?;
+        self.seed(nodes).await?;
         // A starts and claims first, B once A is settled: on a database that
         // runs the two claims concurrently, either could win a race, and
         // the matrix cuts the uncut run's writes by node.
@@ -664,6 +674,59 @@ impl Scenario for V0 {
     }
 
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
+        self.laws(nodes, cut).await
+    }
+}
+
+impl V0 {
+    /// Admit the session at its creation head and seed its turn's admission
+    /// mail, uncut: the producer is outside the deployment under test.
+    async fn seed(&self, nodes: &SimNodes) -> Result<(), String> {
+        // The session exists in the catalog at its creation head before
+        // its turn is admitted.
+        let backend = self
+            .backend
+            .lock_recover()
+            .clone()
+            .ok_or("the database is built first")?;
+        let catalog: Arc<dyn lash_core_store::store::RuntimeStore> =
+            backend.session_store_factory();
+        lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session())
+            .await;
+        let messages = vec![Message {
+            id: "v0-input".to_owned(),
+            role: MessageRole::User,
+            parts: shared_parts(vec![Part::text(
+                "v0-input.p0".to_owned(),
+                "write x, then tell me what was written".to_owned(),
+                None,
+            )]),
+            origin: None,
+            reply_marker: None,
+        }];
+        let inputs = AdmittedInputs {
+            run: run(),
+            inputs: Vec::new(),
+            admission_json: serde_json::to_string(&messages).map_err(|e| e.to_string())?,
+        };
+        let mut seed = MailTx::new();
+        seed.create_actor(actor(), FormatSet::new(FORMATS)).append(
+            actor(),
+            admit_mail(),
+            inputs.mail_body(),
+        );
+        // The producer is outside the deployment under test: its mail is
+        // seeded straight into the database, uncut.
+        nodes
+            .database()
+            .commit_mail(seed, CommitLabel::MAIL_SESSION)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// The scenario's laws after a run, cut at `cut`.
+    async fn laws(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
         let mut violations = Vec::new();
         let database = nodes.database();
         let trace = nodes.script().trace();
@@ -988,12 +1051,144 @@ async fn a_once_operation_killed_after_its_work_resumes_without_replay_on_sqlite
 /// V0 on PostgreSQL: every cell of the matrix holds P1 to P7.
 #[tokio::test]
 async fn a_once_operation_killed_after_its_work_resumes_without_replay_on_postgres() {
-    let Some(url) = std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .ok()
-        .filter(|url| !url.trim().is_empty())
-    else {
+    let Some(url) = dialect::postgres_url() else {
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
     prove(Dialect::Postgres, Some(url)).await;
+}
+
+/// Cold resume: the whole deployment dies right after the cell's end
+/// commits, and a fresh deployment over the same database, with services
+/// and an activation that hold nothing of the first one, takes the turn
+/// over. A restore loads state and re-runs no code: the turn is restored
+/// once, the cell's end is read from its snapshot without entering its
+/// program or its operation again, and the only writes left are the second
+/// model call's `model.start`, `turn.commit` and the release.
+async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
+    let first = V0::new(dialect, postgres_url.clone());
+    let clock = SimClock::new();
+    let database = first.database(Arc::clone(&clock)).await;
+    let script = Script::new();
+    script.cut_on("a", CommitLabel::CELL_SNAPSHOT, 1, Fault::CommitThenAbort);
+    let before = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        script,
+        first.config(),
+        first.activation(),
+    );
+    first.seed(&before).await.expect("the turn is seeded");
+    before.start("a");
+    before.quiesce().await;
+    while before.script().cuts().is_empty() {
+        assert!(
+            before.step().await.is_some(),
+            "the first deployment stalled before the cell's end committed:\n{}",
+            before.script().rendered_trace()
+        );
+    }
+    before.kill("a");
+    before.quiesce().await;
+    assert_eq!(before.life("a"), Life::Dead);
+    assert!(
+        !first.done(&before).await,
+        "the turn finished before the deployment died"
+    );
+
+    // A new process: the same database and the same outside world, nothing
+    // else of the first deployment.
+    let cold = V0 {
+        dialect,
+        postgres_url,
+        world: Arc::clone(&first.world),
+        tripwire: Arc::clone(&first.tripwire),
+        cells: Arc::default(),
+        backend: Mutex::new(first.backend.lock_recover().clone()),
+        keep: Mutex::default(),
+    };
+    let after = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        Script::new(),
+        cold.config(),
+        cold.activation(),
+    );
+    after.start("c");
+    let horizon = clock.logical_ms() + 600_000;
+    while !cold.done(&after).await {
+        assert!(
+            clock.logical_ms() < horizon,
+            "the cold deployment is not done after 600 s of virtual time:\n{}",
+            after.script().rendered_trace()
+        );
+        assert!(
+            after.step().await.is_some(),
+            "the cold deployment stalled:\n{}",
+            after.script().rendered_trace()
+        );
+    }
+    after.quiesce().await;
+
+    let mut violations = cold.laws(&after, None).await;
+    let counts = first.tripwire.counts();
+    let restores = counts
+        .restores
+        .get(&(session(), run()))
+        .copied()
+        .unwrap_or(0);
+    if restores != 1 {
+        violations.push(format!(
+            "the cold owner restored the turn {restores} times, not once"
+        ));
+    }
+    let programs: usize = counts.vm_programs.values().sum();
+    if programs != 1 {
+        violations.push(format!(
+            "the cell's program was entered {programs} times; only the first deployment enters it"
+        ));
+    }
+    let labels: Vec<CommitLabel> = after
+        .script()
+        .trace()
+        .iter()
+        .filter(|write| write.kind == WriteKind::Actor && write.committed())
+        .map(|write| write.point.label)
+        .collect();
+    if labels
+        != [
+            CommitLabel::MODEL_START,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::SESSION_RELEASE,
+        ]
+    {
+        violations.push(format!(
+            "the cold owner committed {labels:?}, not the second model call's start, the turn's commit and the release"
+        ));
+    }
+    assert!(
+        violations.is_empty(),
+        "cold resume on {dialect:?}:\n  {}\n{}",
+        violations.join("\n  "),
+        after.script().rendered_trace()
+    );
+}
+
+#[tokio::test]
+async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_sqlite_memory() {
+    cold_resume(Dialect::SqliteMemory, None).await;
+}
+
+#[tokio::test]
+async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_sqlite_file() {
+    cold_resume(Dialect::SqliteFile, None).await;
+}
+
+#[tokio::test]
+async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_postgres() {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    cold_resume(Dialect::Postgres, Some(url)).await;
 }

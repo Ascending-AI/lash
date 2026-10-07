@@ -289,7 +289,6 @@ impl AdmittedRun {
                     "fixture#0",
                 )),
                 plugins: Default::default(),
-                turn_cancellation: None,
                 trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
             })
             .await
@@ -744,7 +743,6 @@ pub async fn a_refused_run_ends_once_and_its_next_input_admits_a_new_run(
             "fixture#0",
         )),
         plugins: Default::default(),
-        turn_cancellation: None,
         trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
     };
     parts

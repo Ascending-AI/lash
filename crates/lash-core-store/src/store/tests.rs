@@ -1,49 +1,5 @@
 use super::*;
 
-/// The settled cancellation closure of `turn` in `session`, as its promise
-/// owner would return it with `cancellation` as the gate's evidence.
-pub(super) fn settled_closure_for_test(
-    session: &str,
-    turn: &str,
-    cancellation: Option<crate::TurnCancellationEvidence>,
-) -> crate::TurnCancelClosureSettlement {
-    let address = crate::TurnAddress::new(SessionId::fixture(session), TurnId::fixture(turn));
-    let key = |wait, suffix: &str| crate::AwaitEventKey {
-        scope: address.execution_scope(),
-        wait,
-        key_id: format!("{turn}:{suffix}"),
-        signature: format!("test:{suffix}"),
-    };
-    let fence = crate::store_backend_support::sealed_shift_fence(
-        SessionId::fixture(session),
-        1,
-        AdmissionId::new("admission"),
-    );
-    let authorization = crate::TurnCancelClosureAuthorization::new(
-        address.clone(),
-        "binding",
-        address.execution_scope(),
-        key(crate::AwaitEventWaitIdentity::TurnCancelGate, "cancel"),
-        key(
-            crate::AwaitEventWaitIdentity::TurnCancelEscalation,
-            "escalation",
-        ),
-        key(crate::AwaitEventWaitIdentity::TurnTerminal, "terminal"),
-        cancellation.clone().map_or(
-            crate::turn_control_vocabulary::TurnCancelClosureProposal::CompletionSealed,
-            crate::turn_control_vocabulary::TurnCancelClosureProposal::CancelRequested,
-        ),
-        crate::TurnCancelIntentSnapshot::Absent,
-        &fence,
-    )
-    .expect("authorize the test closure");
-    crate::TurnCancelClosureSettlement::settled_for_test(
-        authorization,
-        cancellation.clone(),
-        cancellation,
-    )
-}
-
 fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
     fn scrub(value: &mut serde_json::Value) {
         match value {
@@ -302,51 +258,6 @@ fn regenerate_intent_hash_golden_vector() {
         format!("{hash}\n"),
     )
     .expect("write intent golden");
-}
-
-#[test]
-fn cancellation_evidence_changes_intent_hash_from_current_shape() {
-    let legacy = intent_fixture();
-    assert_eq!(
-        legacy.turn_commit_hash().expect("legacy intent"),
-        include_str!("testdata/runtime_commit_intent.hex").trim(),
-        "absent cancellation evidence keeps the current plain-commit preimage"
-    );
-
-    let baseline = legacy.clone().closing_interrupted_turn(
-        settled_closure_for_test("golden-session", "turn-42", None),
-        crate::TurnCancelIntentSnapshot::Absent,
-    );
-    let baseline_hash = baseline
-        .turn_commit_hash()
-        .expect("interrupted intent without cancellation evidence");
-    assert_ne!(
-        baseline_hash,
-        legacy.turn_commit_hash().expect("legacy intent"),
-        "the interrupted turn is identity-relevant"
-    );
-    let cancelled = legacy.closing_interrupted_turn(
-        settled_closure_for_test(
-            "golden-session",
-            "turn-42",
-            Some(crate::TurnCancellationEvidence {
-                request_id: "cancel-turn-42".to_string(),
-                origin: Some("operator".to_string()),
-                reason: Some("stop".to_string()),
-                undelivered: crate::TurnCancelUndeliveredInputPolicy::Drop,
-                mode: crate::TurnCancelMode::Immediate,
-                honoured_after_step: None,
-            }),
-        ),
-        crate::TurnCancelIntentSnapshot::Absent,
-    );
-    assert_ne!(
-        cancelled
-            .turn_commit_hash()
-            .expect("cancellation-bearing intent"),
-        baseline_hash,
-        "accepted cancellation evidence is identity-relevant"
-    );
 }
 
 #[test]

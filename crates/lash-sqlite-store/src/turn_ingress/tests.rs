@@ -130,26 +130,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
             .admission_candidates_boundary
             .sql(),
         sql.cancel_requests.delete_by_session.sql(),
-        sql.cancel_requests.advance_intent_revision.sql(),
-        sql.cancel_requests_sqlite.insert_first.sql(),
         sql.cancel_requests.select_request.sql(),
-        sql.cancel_requests.select_request_with_revision.sql(),
-        sql.cancel_requests.upsert_record.sql(),
-        sql.cancel_affected_inputs.select_by_turn.sql(),
-        sql.cancel_affected_inputs.append_at_next_ordinal.sql(),
-        sql.bindings.select_by_session.sql(),
-        sql.bindings.delete_by_session.sql(),
-        sql.bindings_sqlite.insert_new.sql(),
-        sql.closures.insert_new.sql(),
-        sql.closures.list_by_session.sql(),
-        sql.closures.list_all.sql(),
-        sql.closures.count_by_session.sql(),
-        sql.closures.delete_by_turn.sql(),
-        sql.closures.delete_settled.sql(),
-        sql.closures.delete_by_session.sql(),
-        sql.closures_sqlite.select_by_turn.sql(),
-        sql.retired_scopes.exists_for_scope.sql(),
-        sql.retired_scopes_sqlite.insert_new.sql(),
     ] {
         conn.prepare(statement)
             .unwrap_or_else(|error| panic!("statement prepares: {error}\n{statement}"));

@@ -132,7 +132,6 @@ carries_session_field! {
     CheckpointAdmissionRequest => |request| request.fence.session();
     crate::TurnAddress => |request| &request.session_id;
     crate::TurnCancelRequest => |request| &request.address.session_id;
-    crate::TurnCancelClosureAuthorization => |request| request.session_id();
     crate::PendingTurnInputBatch => |request| request.session_id();
     crate::PendingTurnInputDraft => |request| &request.session_id;
     crate::QueuedWorkBatchDraft => |request| &request.session_id;

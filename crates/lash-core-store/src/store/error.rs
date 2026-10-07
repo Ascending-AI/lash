@@ -60,18 +60,6 @@ pub enum StoreRefusal {
         found: u32,
         current: u32,
     },
-    /// The deployment presented another cancellation authority than the one
-    /// the session durably admitted: it runs over these stores under an
-    /// authority they were not written under, and no retry changes that.
-    TurnCancelBindingMismatch {
-        session_id: SessionId,
-        expected: String,
-        presented: String,
-    },
-    /// The bound cancellation owner has ended. Rebind the catalog to a live host.
-    TurnCancelClosureOwnerReleased {
-        participant_id: String,
-    },
 }
 
 impl StoreRefusal {
@@ -107,20 +95,6 @@ impl StoreRefusal {
                     current: *current,
                 })
             }
-            StoreError::TurnCancelBindingMismatch {
-                session_id,
-                expected,
-                presented,
-            } => Some(Self::TurnCancelBindingMismatch {
-                session_id: session_id.clone(),
-                expected: expected.clone(),
-                presented: presented.clone(),
-            }),
-            StoreError::TurnCancelClosureOwnerReleased { participant_id } => {
-                Some(Self::TurnCancelClosureOwnerReleased {
-                    participant_id: participant_id.clone(),
-                })
-            }
             _ => None,
         }
     }
@@ -137,12 +111,6 @@ impl StoreRefusal {
             }
             Self::SessionStateVersionNewerThanRuntime { .. } => {
                 crate::RuntimeErrorCode::SessionStateVersionNewerThanRuntime
-            }
-            Self::TurnCancelBindingMismatch { .. } => {
-                crate::RuntimeErrorCode::TurnCancelBindingMismatch
-            }
-            Self::TurnCancelClosureOwnerReleased { .. } => {
-                crate::RuntimeErrorCode::TurnCancelClosureOwnerReleased
             }
         }
     }
@@ -165,18 +133,6 @@ impl StoreRefusal {
             }
             Self::SessionStateVersionNewerThanRuntime { found, current } => {
                 StoreError::SessionStateVersionNewerThanRuntime { found, current }
-            }
-            Self::TurnCancelBindingMismatch {
-                session_id,
-                expected,
-                presented,
-            } => StoreError::TurnCancelBindingMismatch {
-                session_id,
-                expected,
-                presented,
-            },
-            Self::TurnCancelClosureOwnerReleased { participant_id } => {
-                StoreError::TurnCancelClosureOwnerReleased { participant_id }
             }
         }
     }
@@ -508,62 +464,6 @@ pub enum StoreError {
     UnsupportedStoreOperation { operation: &'static str },
     #[error("store head revision conflict: expected {expected}, actual {actual}")]
     HeadRevisionConflict { expected: u64, actual: u64 },
-    /// Cancellation intent changed after the runtime observed it and before
-    /// the same transaction could publish cancellation-dependent effects.
-    #[error(
-        "turn cancellation intent changed for session `{session_id}` turn `{turn_id}`; refresh cancellation authority and retry"
-    )]
-    TurnCancelIntentChanged {
-        session_id: SessionId,
-        turn_id: crate::TurnId,
-    },
-    /// Session reopen selected a different cancellation authority than the one
-    /// durably admitted before work began.
-    #[error(
-        "turn cancellation authority mismatch for session `{session_id}`: expected `{expected}`, got `{presented}`"
-    )]
-    TurnCancelBindingMismatch {
-        session_id: SessionId,
-        expected: String,
-        presented: String,
-    },
-    /// The catalog outlived its physical cancellation owner. The old owner
-    /// cannot authorize or release a participant; rebind to a live host first.
-    #[error(
-        "turn cancellation closure owner for `{participant_id}` has been released; rebind the catalog to a live effect host"
-    )]
-    TurnCancelClosureOwnerReleased { participant_id: String },
-    /// A different exact closure operation already occupies this turn's
-    /// non-overwritable authorization slot.
-    #[error(
-        "turn cancellation closure authorization conflicts for turn `{turn_id}` in session `{session_id}`"
-    )]
-    TurnCancelClosureConflict {
-        session_id: SessionId,
-        turn_id: crate::TurnId,
-    },
-    /// A commit or repair attempted to consume an absent or different closure
-    /// authorization.
-    #[error(
-        "turn cancellation closure authorization is missing or changed for turn `{turn_id}` in session `{session_id}`"
-    )]
-    TurnCancelClosureAuthorizationMismatch {
-        session_id: SessionId,
-        turn_id: crate::TurnId,
-    },
-    /// Destructive lifecycle cleanup was attempted while exact closure work is
-    /// still pinned. An execution-lane activation must drain it first.
-    #[error(
-        "session `{session_id}` has {pending_count} pending turn cancellation closure pin(s); activate and drain the session before deletion or scope retirement"
-    )]
-    TurnCancelClosureLifecyclePinned {
-        session_id: SessionId,
-        pending_count: usize,
-    },
-    /// The non-session physical owner was retired before this closure could be
-    /// admitted. The retirement tombstone is permanent for that scope.
-    #[error("turn cancellation closure scope `{scope_id}` is retired")]
-    TurnCancelClosureScopeRetired { scope_id: String },
     /// Stored-reference adoption found no upload evidence for the digest: no
     /// manifest row anywhere in this store records a completed write of these
     /// bytes, or a physical delete of them is in flight. The boundary commit
@@ -1177,13 +1077,6 @@ impl StoreError {
             | Self::FollowOnHeadInvariant { .. }
             | Self::FollowOnNotPending { .. }
             | Self::HeadRevisionConflict { .. }
-            | Self::TurnCancelIntentChanged { .. }
-            | Self::TurnCancelBindingMismatch { .. }
-            | Self::TurnCancelClosureOwnerReleased { .. }
-            | Self::TurnCancelClosureConflict { .. }
-            | Self::TurnCancelClosureAuthorizationMismatch { .. }
-            | Self::TurnCancelClosureLifecyclePinned { .. }
-            | Self::TurnCancelClosureScopeRetired { .. }
             | Self::IncompleteEnumeration { .. }
             | Self::ReferrerKindRefused { .. }
             | Self::UnknownAttachment { .. }
@@ -1280,7 +1173,6 @@ impl StoreError {
             Self::UnfinishedRunConflict { .. } => Code::SessionRunPending,
 
             Self::HeadRevisionConflict { .. }
-            | Self::TurnCancelIntentChanged { .. }
             | Self::StaleShiftFence { .. }
             | Self::SessionCommandWithdrawn { .. }
             | Self::CheckpointRootMissing { .. }
@@ -1300,8 +1192,6 @@ impl StoreError {
             Self::SessionStateVersionNewerThanRuntime { .. } => {
                 Code::SessionStateVersionNewerThanRuntime
             }
-            Self::TurnCancelBindingMismatch { .. } => Code::TurnCancelBindingMismatch,
-            Self::TurnCancelClosureOwnerReleased { .. } => Code::TurnCancelClosureOwnerReleased,
             Self::ReferrerKindRefused { .. } => Code::ReferrerKindRefused,
             Self::StoredDataCorrupt { .. }
             | Self::MonotonicCounterOverflow { .. }
@@ -1342,10 +1232,6 @@ impl StoreError {
             | Self::InvalidSessionId { .. }
             | Self::BlankIdentity(_)
             | Self::UnsupportedStoreOperation { .. }
-            | Self::TurnCancelClosureConflict { .. }
-            | Self::TurnCancelClosureAuthorizationMismatch { .. }
-            | Self::TurnCancelClosureLifecyclePinned { .. }
-            | Self::TurnCancelClosureScopeRetired { .. }
             | Self::UnknownAttachment { .. }
             | Self::IncompleteEnumeration { .. }
             | Self::RuntimeTurnCommitConflict { .. }
@@ -1509,15 +1395,6 @@ impl StoreError {
             Self::FollowOnHeadInvariant { .. } => "FollowOnHeadInvariant",
             Self::FollowOnNotPending { .. } => "FollowOnNotPending",
             Self::HeadRevisionConflict { .. } => "HeadRevisionConflict",
-            Self::TurnCancelIntentChanged { .. } => "TurnCancelIntentChanged",
-            Self::TurnCancelBindingMismatch { .. } => "TurnCancelBindingMismatch",
-            Self::TurnCancelClosureOwnerReleased { .. } => "TurnCancelClosureOwnerReleased",
-            Self::TurnCancelClosureConflict { .. } => "TurnCancelClosureConflict",
-            Self::TurnCancelClosureAuthorizationMismatch { .. } => {
-                "TurnCancelClosureAuthorizationMismatch"
-            }
-            Self::TurnCancelClosureLifecyclePinned { .. } => "TurnCancelClosureLifecyclePinned",
-            Self::TurnCancelClosureScopeRetired { .. } => "TurnCancelClosureScopeRetired",
             Self::IncompleteEnumeration { .. } => "IncompleteEnumeration",
             Self::ReferrerKindRefused { .. } => "ReferrerKindRefused",
             Self::UnknownAttachment { .. } => "UnknownAttachment",

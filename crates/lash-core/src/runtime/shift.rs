@@ -121,7 +121,6 @@ pub(crate) struct RunExecution {
     terminal_written: bool,
     pub(crate) work_remaining: bool,
     trace_scope: Option<lash_trace::DurableTraceScope>,
-    pub(super) cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
 }
 
 impl RunExecution {
@@ -132,7 +131,6 @@ impl RunExecution {
             terminal_written: false,
             work_remaining: true,
             trace_scope: None,
-            cancel_intent: Some(admitted.root().cancel_intent.clone()),
         }
     }
 

@@ -50,14 +50,6 @@ DROP TABLE IF EXISTS lash_session_terminal_changes CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_cancel_requests CASCADE;
 
-DROP TABLE IF EXISTS lash_turn_cancel_affected_inputs CASCADE;
-
-DROP TABLE IF EXISTS lash_turn_cancellation_bindings CASCADE;
-
-DROP TABLE IF EXISTS lash_turn_cancel_closure_authorizations CASCADE;
-
-DROP TABLE IF EXISTS lash_turn_cancel_retired_scopes CASCADE;
-
 DROP TABLE IF EXISTS lash_turn_parks CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_park_clock CASCADE;

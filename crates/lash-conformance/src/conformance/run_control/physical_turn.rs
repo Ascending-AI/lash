@@ -116,36 +116,8 @@ pub async fn a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit(
         panic!("the resumed root owns its fence: {:?}", root.seal);
     };
     let turn = PhysicalTurn::derive_turn_id(&f.run, 1);
-    let address = lash_core::facade_support::TurnAddress::new(&f.parts.session_id, &turn);
-    let effect_host = &f.parts.host.control.effect_host;
-    let control =
-        lash_core::runtime::turn_control::ActiveTurnControl::new(effect_host, address.clone())
-            .await
-            .expect("the physical turn's cancellation authority");
-    let observed = f
-        .parts
-        .store
-        .turn_cancel_request_intent(&address)
-        .await
-        .expect("the physical turn's durable intent");
-    let authorization = control
-        .closure_authorization(
-            effect_host.turn_control_binding_id(),
-            address.execution_scope(),
-            fence,
-            observed.clone(),
-            None,
-            None,
-        )
-        .expect("the admitted final closure");
-    let settlement = control.settle_admitted_intent(authorization, None);
     let mut commit = run_final_commit(&f.parts.initial_state(), &f.run, &turn, 1);
     commit.shift_fence = Some(Box::new(fence.clone()));
-    commit.interrupted_turn = Some(InterruptedTurnClosure {
-        settlement,
-        observed_intent: observed,
-        admitted_intent: Some(root.cancel_intent.clone()),
-    });
     f.parts
         .store
         .commit_runtime_state(commit)

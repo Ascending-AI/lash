@@ -6,7 +6,6 @@ use super::{
     ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
 };
 use crate::SessionId;
-use crate::TurnId;
 
 /// A committed frame switch's artifact half (ADR 0113 §3.1).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,71 +50,6 @@ pub fn frames_left_by_commit(
         }))
         .filter(|frame| Some(frame) != new_head)
         .collect()
-}
-
-/// One interrupted turn's settled cancellation closure, as its final commit
-/// carries it. The turn and its cancellation evidence are the settlement's
-/// own, so a commit cannot name a turn or evidence its closure did not
-/// settle.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InterruptedTurnClosure {
-    /// Exact pending closure authorization, settled by its promise owner,
-    /// consumed atomically with a fresh cancellation-dependent commit.
-    /// Receipt replay is adjudicated first and may consume only the same
-    /// exact still-pending authorization.
-    pub settlement: crate::TurnCancelClosureSettlement,
-    /// Transient predicate observed before the turn gate was settled.
-    /// Backends compare it atomically before cancellation-dependent
-    /// publication.
-    pub observed_intent: crate::TurnCancelIntentSnapshot,
-    /// Admission authority retained by the run, independent of observer gates.
-    pub admitted_intent: Option<crate::TurnCancelIntentSnapshot>,
-}
-
-impl InterruptedTurnClosure {
-    /// The session the closure was authorized in.
-    #[must_use]
-    pub fn session_id(&self) -> &SessionId {
-        self.settlement.authorization().session_id()
-    }
-
-    /// The interrupted turn.
-    #[must_use]
-    pub fn turn_id(&self) -> &TurnId {
-        self.settlement.authorization().turn_id()
-    }
-
-    /// Cancellation evidence selected by the final intent read.
-    #[must_use]
-    pub fn cancellation(&self) -> Option<&crate::TurnCancellationEvidence> {
-        self.settlement.effective_cancellation()
-    }
-}
-
-/// The recorded content of a commit's interrupted turn: the two fields the
-/// serialized commit has always carried, read from the closure.
-fn serialize_interrupted_turn<S: serde::Serializer>(
-    interrupted: &Option<InterruptedTurnClosure>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    #[derive(serde::Serialize)]
-    struct Recorded<'a> {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        interrupted_turn_input_turn_id: Option<&'a TurnId>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        interrupted_turn_input_cancellation: Option<&'a crate::TurnCancellationEvidence>,
-    }
-    serde::Serialize::serialize(
-        &Recorded {
-            interrupted_turn_input_turn_id: interrupted
-                .as_ref()
-                .map(InterruptedTurnClosure::turn_id),
-            interrupted_turn_input_cancellation: interrupted
-                .as_ref()
-                .and_then(InterruptedTurnClosure::cancellation),
-        },
-        serializer,
-    )
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -199,7 +133,7 @@ pub struct RuntimeCommit {
     /// checkpoint to its cancellation here (FIG-3531, FIG-3543): withheld
     /// input is released or dropped by the undelivered disposition, withheld
     /// wakes are always released, and the backend records each row on the
-    /// cancellation's outcome beside [`Self::interrupted_turn`].
+    /// cancellation's outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ingress: Option<super::IngressSettlement>,
     /// The session-command batches this commit applied (design §2.7). The
@@ -220,18 +154,6 @@ pub struct RuntimeCommit {
     /// it, and every other commit carries the head's value unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_follow_on: Option<super::PendingFollowOn>,
-    /// The interrupted turn whose cancellation gate this commit closes:
-    /// present exactly on a turn's final commit, whose backend atomically
-    /// settles the turn's undelivered active-turn inputs. The serialized
-    /// form and the commit identity record its turn id and cancellation
-    /// evidence, the commit's content; the settlement and the observed
-    /// intent are store instructions, never serialized.
-    #[serde(
-        flatten,
-        skip_deserializing,
-        serialize_with = "serialize_interrupted_turn"
-    )]
-    pub interrupted_turn: Option<InterruptedTurnClosure>,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
     /// turn-owned write-ahead intents before store validation begins. Per ADR
@@ -797,61 +719,6 @@ impl RuntimeTurnCommitStamp {
 }
 
 impl RuntimeCommit {
-    /// Validate a final turn against the intent admission retained. The store
-    /// reads `admitted` in the same transaction as the head write.
-    pub fn validate_admitted_cancel_intent(
-        &self,
-        admitted: Option<&crate::TurnCancelIntentSnapshot>,
-    ) -> Result<bool, StoreError> {
-        if self.turn_commit.operation.key != "final" {
-            return Ok(false);
-        }
-        let admitted = admitted.ok_or_else(|| {
-            StoreError::Backend("final turn lacks its admitted cancellation snapshot".into())
-        })?;
-        let turn_id = self
-            .turn_commit
-            .operation
-            .turn_id()
-            .or_else(|| self.settled_park_run())
-            .ok_or_else(|| {
-                StoreError::Backend("cancellation admission without a committing turn".into())
-            })?;
-        let refused = || StoreError::TurnCancelIntentChanged {
-            session_id: self.session_id.clone(),
-            turn_id: turn_id.clone(),
-        };
-        let closure = self.interrupted_turn.as_ref().ok_or_else(refused)?;
-        if let crate::TurnCancelIntentSnapshot::Present { request, revision } = admitted {
-            let crate::TurnCancelIntentSnapshot::Present {
-                request: observed,
-                revision: observed_revision,
-            } = &closure.observed_intent
-            else {
-                return Err(refused());
-            };
-            if observed_revision < revision || observed != request {
-                return Err(refused());
-            }
-        }
-        if let Some(request) = closure.observed_intent.request() {
-            let expected = request.evidence();
-            if closure.settlement.base_cancellation() != Some(&expected) {
-                return Err(refused());
-            }
-            let Some(effective) = closure.cancellation() else {
-                return Err(refused());
-            };
-            if effective.undelivered != expected.undelivered
-                || (effective.mode != expected.mode
-                    && !effective.mode.is_stronger_than(expected.mode))
-            {
-                return Err(refused());
-            }
-        }
-        Ok(true)
-    }
-
     /// The run whose park this commit clears: [`Self::park_run`], else the
     /// run whose end it records, else the physical turn it commits (a turn
     /// that runs under no run parks under its own id).
@@ -1106,4 +973,61 @@ mod tests {
         }))
         .expect_err("a semantic-boundary identity without its hash must be refused");
     }
+}
+
+/// A session head commit as a turn's `turn.commit` carries it to the store
+/// (ADR 0132 §4): the store applies it inside the owner's fenced transaction,
+/// so the head moves with the turn's terminal or not at all.
+///
+/// It crosses the durable port as text and is decoded in the same
+/// transaction; it is never stored. The execution view rides beside the
+/// commit because the commit's own encoding leaves it out.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SessionCommitEnvelope {
+    commit: RuntimeCommit,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    execution_config: Option<Box<crate::PersistedSessionConfig>>,
+}
+
+/// Encode `commit` for a turn's `turn.commit`.
+///
+/// # Errors
+///
+/// [`StoreError::Backend`] when the commit carries a store instruction the
+/// durable path has no carrier for (a shift fence, a run terminal, a park, a
+/// frame transition), or does not encode.
+pub fn encode_session_commit(commit: &RuntimeCommit) -> Result<String, StoreError> {
+    let unsupported = [
+        ("shift fence", commit.shift_fence.is_some()),
+        ("run terminal", commit.run_terminal.is_some()),
+        ("turn park", commit.park_run.is_some()),
+        ("frame transition", commit.frame_transition.is_some()),
+    ];
+    if let Some((what, _)) = unsupported.iter().find(|(_, carried)| *carried) {
+        return Err(StoreError::Backend(format!(
+            "a turn's session commit cannot carry a {what}"
+        )));
+    }
+    serde_json::to_string(&SessionCommitEnvelope {
+        commit: commit.clone(),
+        execution_config: commit.execution_config.clone(),
+    })
+    .map_err(|error| StoreError::Backend(format!("the session commit does not encode: {error}")))
+}
+
+/// Decode a commit [`encode_session_commit`] encoded.
+///
+/// # Errors
+///
+/// [`StoreError::Backend`] when `encoded` is not one.
+pub fn decode_session_commit(encoded: &str) -> Result<RuntimeCommit, StoreError> {
+    let SessionCommitEnvelope {
+        mut commit,
+        execution_config,
+    } = serde_json::from_str(encoded).map_err(|error| {
+        StoreError::Backend(format!("the session commit does not decode: {error}"))
+    })?;
+    commit.execution_config = execution_config;
+    Ok(commit)
 }

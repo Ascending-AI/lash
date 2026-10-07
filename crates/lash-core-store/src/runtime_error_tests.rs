@@ -397,11 +397,6 @@ fn terminal_store_causes() -> Vec<crate::RuntimeErrorCause> {
             found: 2,
             current: 1,
         },
-        StoreRefusal::TurnCancelBindingMismatch {
-            session_id: SessionId::from("admission"),
-            expected: "admitted".into(),
-            presented: "other".into(),
-        },
     ];
     refusals
         .into_iter()

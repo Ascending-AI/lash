@@ -266,18 +266,15 @@ pub async fn no_row_stays_bound_after_a_runs_terminal_commit(store: Arc<dyn Runt
 /// write applies the run's disposition to that input. `Defer`, with no
 /// cancellation recorded, writes nothing: the row keeps its submitted
 /// delivery and is next-turn input by rule at its own position (ADR 0101
-/// §5.1), and the next run admits it; a recorded `Drop` withdraws the
-/// addressed host input and records it on the request's outcome.
+/// §5.1), and the next run admits it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn open_input_addressed_to_an_ended_run_is_next_turn_input(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("addressed-to-ended-run");
-    for (case, disposition) in [
-        ("defer", crate::TurnCancelUndeliveredInputPolicy::Defer),
-        ("drop", crate::TurnCancelUndeliveredInputPolicy::Drop),
-    ] {
+    {
+        let case = "defer";
         let run = format!("{case}-composing-run");
         let member_turn = TurnId::fixture(format!("{case}-member-turn"));
         let enqueue = |draft: crate::PendingTurnInputDraft| {
@@ -337,16 +334,6 @@ pub async fn open_input_addressed_to_an_ended_run_is_next_turn_input(store: Arc<
         let addressed_rows = [&addressed, &follow_on, &own];
         let swept = addressed_rows.map(|input| input.input_id.clone()).to_vec();
 
-        let address = crate::TurnAddress::new(session.clone(), TurnId::fixture(run.as_str()));
-        if disposition == crate::TurnCancelUndeliveredInputPolicy::Drop {
-            store
-                .record_turn_cancel_request(
-                    crate::TurnCancelRequest::new(address.clone(), format!("{case}-cancel"), None)
-                        .undelivered(disposition),
-                )
-                .await
-                .expect("record the run's cancellation");
-        }
         end_run(&store, &fence, completing_admission(&run, &admission)).await;
 
         let pending = store
@@ -363,68 +350,37 @@ pub async fn open_input_addressed_to_an_ended_run_is_next_turn_input(store: Arc<
             );
         }
 
-        match disposition {
-            crate::TurnCancelUndeliveredInputPolicy::Defer => {
-                for input in addressed_rows {
-                    let read = pending
-                        .iter()
-                        .find(|read| read.input.input_id == input.input_id)
-                        .expect("a deferred input is still pending");
-                    assert!(
-                        read.input.state == input.state
-                            && matches!(read.status, crate::PendingTurnInputReadStatus::Open),
-                        "defer: {} is open with its submitted delivery: {:?}",
-                        input.input_id,
-                        read.input.state
-                    );
-                }
-                let next = admitted_run(
-                    &store,
-                    &fence,
-                    "defer-next-run",
-                    AdmittedHead::Input(addressed.input_id.clone()),
-                )
-                .await;
-                assert_eq!(
-                    next.input_ids(),
-                    swept,
-                    "defer: the next run admits the deferred input at its own positions"
-                );
-                end_run(
-                    &store,
-                    &fence,
-                    completing_admission("defer-next-run", &next),
-                )
-                .await;
-            }
-            crate::TurnCancelUndeliveredInputPolicy::Drop => {
-                assert!(
-                    pending
-                        .iter()
-                        .all(|read| !swept.contains(&read.input.input_id)),
-                    "drop: the addressed host input is withdrawn"
-                );
-                let outcome = store
-                    .turn_cancel_request(&address)
-                    .await
-                    .expect("read the run's cancellation")
-                    .expect("the run's cancellation is recorded")
-                    .outcome
-                    .expect("the run's terminal wrote the cancellation's outcome");
-                assert_eq!(
-                    outcome
-                        .affected_inputs
-                        .iter()
-                        .map(|affected| (affected.input_id.clone(), affected.disposition))
-                        .collect::<Vec<_>>(),
-                    swept
-                        .iter()
-                        .map(|input| (input.clone(), crate::TurnCancelUndeliveredInputPolicy::Drop))
-                        .collect::<Vec<_>>(),
-                    "drop: the outcome names every withdrawn input"
-                );
-            }
+        for input in addressed_rows {
+            let read = pending
+                .iter()
+                .find(|read| read.input.input_id == input.input_id)
+                .expect("a deferred input is still pending");
+            assert!(
+                read.input.state == input.state
+                    && matches!(read.status, crate::PendingTurnInputReadStatus::Open),
+                "defer: {} is open with its submitted delivery: {:?}",
+                input.input_id,
+                read.input.state
+            );
         }
+        let next = admitted_run(
+            &store,
+            &fence,
+            "defer-next-run",
+            AdmittedHead::Input(addressed.input_id.clone()),
+        )
+        .await;
+        assert_eq!(
+            next.input_ids(),
+            swept,
+            "defer: the next run admits the deferred input at its own positions"
+        );
+        end_run(
+            &store,
+            &fence,
+            completing_admission("defer-next-run", &next),
+        )
+        .await;
     }
 }
 

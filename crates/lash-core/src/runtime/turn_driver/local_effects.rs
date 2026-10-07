@@ -68,14 +68,13 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // the engine runs it again, and it is never the call's
                 // recorded result.
                 let provider = runner.driver.policy.binding().bind_for_unjournaled_call()?;
-                // The recorded body races the model call against the turn's
-                // gate itself: this is the engine's cooperative cancel for a
-                // step it cannot select away, and what the body saw is its
-                // recorded outcome (ADR 0105 §3, FIG-3672 P9). A watch that
-                // gave up is a live fault the engine never records.
-                let control = Arc::clone(&runner.driver.turn_control);
-                let host = runner.driver.host.core.control.effect_host.clone();
-                let honoured = runner.driver.turn_cancel.is_some();
+                // The model call runs under the turn's host-local stop: an
+                // immediate request, or a cancellation the turn already
+                // honoured, stops it.
+                let stop = runner.driver.turn_control.immediate_token().child_token();
+                if runner.driver.turn_cancel.is_some() {
+                    stop.cancel();
+                }
                 let request = Arc::new((*request).into_request(None, None));
                 let invocation = envelope.invocation.into_runtime_invocation();
                 let protocol_iteration = runner.protocol_iteration;
@@ -86,19 +85,15 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     text_streamed,
                     call_record,
                     stream,
-                } = Box::pin(control.run_step_body(&host, honoured, |stop| async move {
-                    driver
-                        .run_llm_call(
-                            request,
-                            protocol_iteration,
-                            invocation,
-                            &event_tx,
-                            &stop,
-                            super::streaming::LlmCallDispatch { provider },
-                        )
-                        .await
-                }))
-                .await?;
+                } = Box::pin(driver.run_llm_call(
+                    request,
+                    protocol_iteration,
+                    invocation,
+                    &event_tx,
+                    &stop,
+                    super::streaming::LlmCallDispatch { provider },
+                ))
+                .await;
                 Ok(RuntimeEffectOutcome::LlmCall {
                     result: Box::new(result),
                     text_streamed,
@@ -269,7 +264,7 @@ pub(super) fn turn_effect_executor(
         shift_fence: driver.shift_fence.clone(),
         shift_run: driver.shift_run.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
-        turn_control: Arc::clone(&driver.turn_control),
+        turn_control: driver.turn_control.clone(),
         protocol_reply: Default::default(),
         opener_state: driver.opener_state.clone(),
         turn_cancel: driver.turn_cancel.clone(),

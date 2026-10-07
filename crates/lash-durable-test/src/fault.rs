@@ -369,6 +369,14 @@ impl DurableReads for FaultStore {
         self.read(self.inner.turn(session)).await
     }
 
+    async fn turn_end(
+        &self,
+        session: &SessionId,
+        run: &lash_sansio::TurnId,
+    ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
+        self.read(self.inner.turn_end(session, run)).await
+    }
+
     async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {
         self.read(self.inner.run_records(owner)).await
     }

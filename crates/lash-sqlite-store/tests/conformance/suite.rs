@@ -1071,43 +1071,4 @@ mod worker_recovery {
     });
 }
 
-#[tokio::test]
-async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical() {
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.store().await as Arc<dyn ConformanceDeployment>;
-    lash_conformance::a_stale_fence_receipt_replay_leaves_the_store_byte_identical(
-        factory,
-        || async {
-            let mut snapshot = Vec::new();
-            let connection = backend.raw();
-            let tables = connection
-                .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")
-                .expect("prepare complete table census")
-                .query_map([], |row| row.get::<_, String>(0))
-                .expect("read complete table census")
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .expect("collect complete table census");
-            for table in tables {
-                let mut statement = connection
-                    .prepare(&format!("SELECT * FROM \"{table}\""))
-                    .expect("prepare table snapshot");
-                let count = statement.column_count();
-                let mut rows = statement
-                    .query_map([], |row| {
-                        (0..count)
-                            .map(|index| row.get::<_, rusqlite::types::Value>(index))
-                            .collect::<rusqlite::Result<Vec<_>>>()
-                    })
-                    .expect("read table snapshot")
-                    .map(|row| format!("{:?}", row.expect("read snapshot row")))
-                    .collect::<Vec<_>>();
-                rows.sort();
-                snapshot.push((table, rows.join("\n")));
-            }
-            snapshot
-        },
-    )
-    .await;
-}
-
 mod session_commands {}

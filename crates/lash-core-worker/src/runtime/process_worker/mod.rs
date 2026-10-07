@@ -400,15 +400,14 @@ impl DurableProcessWorker {
     }
 
     /// Ask the child turn a `SessionTurn` process drives to stop now, as a
-    /// durable request on the turn's cancellation gate (FIG-3673).
+    /// cancel request mailed to its session (FIG-3673).
     ///
     /// A process cancel reaches its child turn through this request whether
-    /// or not the process is running anywhere: the turn honours it where it
-    /// honours any request, and a redrive of the turn observes it through its
-    /// recorded peeks. The request is idempotent under one id per process
-    /// incarnation. A process that is not a `SessionTurn`, or whose child
-    /// session id is not recorded, has no addressable turn and is left to its
-    /// recorded waits and peeks.
+    /// or not the process is running anywhere: the session's owner, or the
+    /// next one after a crash, ends the turn `Cancelled`. The request is
+    /// idempotent under one id per process incarnation. A process that is not
+    /// a `SessionTurn`, or whose child session id is not recorded, has no
+    /// addressable turn.
     pub async fn request_session_turn_child_stop(
         &self,
         record: &crate::ProcessRecord,
@@ -425,9 +424,13 @@ impl DurableProcessWorker {
             format!("process-cancel:{}", record.id),
             Some(request.requester.clone()),
         );
-        crate::TurnWorkDriver::for_catalog(
-            self.config.runtime_host.control.effect_host.clone(),
-            self.config.session_store_factory(),
+        crate::TurnWorkDriver::new(
+            self.config
+                .runtime_host
+                .control
+                .effect_host
+                .backend()
+                .clone(),
         )
         .request_cancel(turn_request)
         .await

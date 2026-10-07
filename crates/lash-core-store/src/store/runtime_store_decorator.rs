@@ -95,15 +95,6 @@ macro_rules! runtime_store_operations {
                 [session] fn load_failure_evidence_page(&self, session_id: &SessionId, after: Option<&FailureEvidenceCursor>, limit: NonZeroU32) -> Result<FailureEvidencePage, StoreError>;
             }
             TurnInputStore {
-                [carried address] fn turn_is_committed(&self, address: &crate::TurnAddress) -> Result<bool, StoreError>;
-                [carried address] fn reconcile_turn_cancel_winner(&self, address: &crate::TurnAddress, observed: &crate::TurnCancelIntentSnapshot, evidence: &crate::TurnCancellationEvidence) -> Result<bool, StoreError>;
-                [carried request] fn record_turn_cancel_request(&self, request: crate::TurnCancelRequest) -> Result<crate::TurnCancelRequestRecord, StoreError>;
-                [carried address] fn turn_cancel_request(&self, address: &crate::TurnAddress) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError>;
-                [carried address] fn turn_cancel_request_intent(&self, address: &crate::TurnAddress) -> Result<crate::TurnCancelIntentSnapshot, StoreError>;
-                [session fence] fn validate_turn_cancellation_binding(&self, session_id: &SessionId, fence: &ShiftFence, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<(), StoreError>;
-                [carried fence, authorization] fn authorize_turn_cancel_closure(&self, fence: &ShiftFence, authorization: &crate::TurnCancelClosureAuthorization) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
-                [session fence] fn pending_turn_cancel_closures(&self, session_id: &SessionId, fence: &ShiftFence, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
-                [session] fn pending_turn_cancel_closure_pins(&self, session_id: &SessionId) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
                 [carried batch] fn enqueue_pending_turn_inputs(&self, batch: crate::PendingTurnInputBatch) -> Result<Vec<crate::PendingTurnInput>, StoreError>;
                 [carried batch] fn admit_pending_turn_inputs(&self, batch: crate::PendingTurnInputBatch, ingress_claim_ttl_ms: u64) -> Result<TurnInputAdmission, StoreError>;
                 [session] fn load_run_spec(&self, session_id: &SessionId, hash: &crate::run_spec::RunSpecHash) -> Result<Option<crate::run_spec::RunSpec>, StoreError>;

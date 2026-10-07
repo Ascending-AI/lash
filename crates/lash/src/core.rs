@@ -543,10 +543,7 @@ impl LashCore {
     /// Session and turn ids are routing identity, not authorization; authorize
     /// requests in the host API before forwarding them to Lash.
     pub fn turn_work_driver(&self) -> facade_support::TurnWorkDriver {
-        facade_support::TurnWorkDriver::for_catalog(
-            self.effect_host(),
-            Arc::clone(&self.store_factory),
-        )
+        facade_support::TurnWorkDriver::new(self.effect_host().backend().clone())
     }
 
     /// Create `request.session_id` at the state `target` of `session` names,
@@ -678,9 +675,6 @@ impl LashCore {
     /// stalling it (surfaced in [`drain_status`](Self::drain_status) and
     /// [`stalled_obligations`](Self::stalled_obligations)) at the attempt
     /// ceiling. Await physical completion with [`await_session_deletion`](Self::await_session_deletion).
-    /// A pre-close `TurnCancelClosureLifecyclePinned` refusal can be followed
-    /// with [`await_turn_cancel_closures`](Self::await_turn_cancel_closures)
-    /// before a new close attempt.
     ///
     /// Deleting an id that never materialized a session is a no-op (ADR
     /// 0049), answered [`SessionDeletion::Absent`]: nothing is closed or

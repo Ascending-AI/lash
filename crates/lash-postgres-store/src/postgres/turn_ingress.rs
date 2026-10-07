@@ -8,10 +8,8 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
-    TurnIngressStatements, cancel_affected_inputs::CancelAffectedInputStatements,
-    cancel_requests::CancelRequestStatements, cancellation_bindings::CancellationBindingStatements,
-    closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
-    queued_batches::QueuedBatchStatements, retired_scopes::RetiredScopeStatements,
+    TurnIngressStatements, cancel_requests::CancelRequestStatements,
+    pending_inputs::PendingInputStatements, queued_batches::QueuedBatchStatements,
     run_specs::RunSpecStatements, tool_intent_submissions::ToolIntentSubmissionStatements,
     turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
 };
@@ -25,19 +23,15 @@ mod family;
 mod pending_inputs;
 #[path = "turn_ingress/queued_work.rs"]
 mod queued_work;
-#[path = "turn_ingress/turn_cancel.rs"]
-mod turn_cancel;
+#[path = "turn_ingress/tool_intents.rs"]
+mod tool_intents;
 #[path = "turn_ingress/turn_parks.rs"]
 mod turn_parks;
 
 pub(crate) use family::TurnIngressPostgresStatements;
 pub(crate) use pending_inputs::PendingInputPostgresStatements;
 pub(crate) use queued_work::QueuedBatchPostgresStatements;
-pub(crate) use turn_cancel::{
-    CancelRequestPostgresStatements, CancellationBindingPostgresStatements,
-    ClosureAuthorizationPostgresStatements, RetiredScopePostgresStatements,
-    ToolIntentSubmissionPostgresStatements,
-};
+pub(crate) use tool_intents::ToolIntentSubmissionPostgresStatements;
 pub(crate) use turn_parks::{TurnParkClockPostgresStatements, TurnParkPostgresStatements};
 
 /// The `pending_turn_inputs.state` partitions this family's statements name.
@@ -110,19 +104,6 @@ pub(crate) struct TurnIngressSql {
     pub(crate) queued_batches_postgres: QueuedBatchPostgresStatements,
     /// `turn_cancel_requests`, shared.
     pub(crate) cancel_requests: CancelRequestStatements,
-    /// `turn_cancel_requests`, PostgreSQL only.
-    pub(crate) cancel_requests_postgres: CancelRequestPostgresStatements,
-    /// Shared cancellation receipt snapshots.
-    pub(crate) cancel_affected_inputs: CancelAffectedInputStatements,
-    /// `turn_cancellation_bindings`, shared.
-    pub(crate) bindings: CancellationBindingStatements,
-    /// `turn_cancellation_bindings`, PostgreSQL only.
-    pub(crate) bindings_postgres: CancellationBindingPostgresStatements,
-    /// `turn_cancel_closure_authorizations`, shared.
-    pub(crate) closures: ClosureAuthorizationStatements,
-    /// `turn_cancel_closure_authorizations`, PostgreSQL only.
-    pub(crate) closures_postgres: ClosureAuthorizationPostgresStatements,
-    /// `turn_cancel_retired_scopes`, shared.
     /// `turn_parks`, shared.
     pub(crate) turn_parks: TurnParkStatements,
     /// `turn_parks`, PostgreSQL only.
@@ -131,9 +112,6 @@ pub(crate) struct TurnIngressSql {
     pub(crate) turn_park_clock: TurnParkClockPostgresStatements,
     /// `turn_park_events`, shared.
     pub(crate) turn_park_events: TurnParkEventStatements,
-    pub(crate) retired_scopes: RetiredScopeStatements,
-    /// `turn_cancel_retired_scopes`, PostgreSQL only.
-    pub(crate) retired_scopes_postgres: RetiredScopePostgresStatements,
     /// `tool_intent_submissions`, shared.
     pub(crate) tool_intents: ToolIntentSubmissionStatements,
     /// `tool_intent_submissions`, PostgreSQL only.
@@ -151,18 +129,10 @@ static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
         queued_batches: QueuedBatchStatements::render(dialect),
         queued_batches_postgres: QueuedBatchPostgresStatements::render(dialect),
         cancel_requests: CancelRequestStatements::render(dialect),
-        cancel_requests_postgres: CancelRequestPostgresStatements::render(dialect),
-        cancel_affected_inputs: CancelAffectedInputStatements::render(dialect),
-        bindings: CancellationBindingStatements::render(dialect),
-        bindings_postgres: CancellationBindingPostgresStatements::render(dialect),
-        closures: ClosureAuthorizationStatements::render(dialect),
-        closures_postgres: ClosureAuthorizationPostgresStatements::render(dialect),
         turn_parks: TurnParkStatements::render(dialect),
         turn_parks_postgres: TurnParkPostgresStatements::render(dialect),
         turn_park_clock: TurnParkClockPostgresStatements::render(dialect),
         turn_park_events: TurnParkEventStatements::render(dialect),
-        retired_scopes: RetiredScopeStatements::render(dialect),
-        retired_scopes_postgres: RetiredScopePostgresStatements::render(dialect),
         tool_intents: ToolIntentSubmissionStatements::render(dialect),
         tool_intents_postgres: ToolIntentSubmissionPostgresStatements::render(dialect),
     }

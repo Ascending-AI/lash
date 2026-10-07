@@ -18,18 +18,9 @@ pub enum AwaitEventWaitIdentity {
         signal_name: String,
         ordinal: u64,
     },
-    /// Reserved first-writer-wins cancellation-versus-completion gate for a
-    /// foreground turn.
-    TurnCancelGate,
-    /// Reserved terminal publication promise for a foreground turn.
-    TurnTerminal,
     Custom {
         key: String,
     },
-    /// Reserved first-writer-wins escalation promise for a foreground turn:
-    /// written only by an immediate request that found the cancellation gate
-    /// already holding an after-step request.
-    TurnCancelEscalation,
     /// Reserved cancel signal of a host plugin task a session command runs
     /// (FIG-4391), under the command's own session-operation scope. Only a host's
     /// cancel resolves it, cancelled; how the command ended is its
@@ -61,10 +52,7 @@ impl AwaitEventWaitIdentity {
                 ordinal,
                 ..
             } => signal_name.trim().is_empty() || *ordinal == 0,
-            Self::TurnCancelGate
-            | Self::TurnTerminal
-            | Self::TurnCancelEscalation
-            | Self::SessionCommandCancelSignal => false,
+            Self::SessionCommandCancelSignal => false,
             Self::Custom { key } => key.trim().is_empty(),
         };
         if invalid {
@@ -74,15 +62,6 @@ impl AwaitEventWaitIdentity {
             ));
         }
         Ok(())
-    }
-
-    /// Lets effect-host implementors distinguish the reserved turn-control wait from ordinary tool
-    /// and application waits.
-    pub fn is_turn_control(&self) -> bool {
-        matches!(
-            self,
-            Self::TurnCancelGate | Self::TurnTerminal | Self::TurnCancelEscalation
-        )
     }
 }
 #[derive(

@@ -192,7 +192,7 @@ pub(crate) async fn commit(
                 let committed = tx.query_row(session_sql().turn_commits.exists_for_turn.sql(), params![session.as_str(), key], |row| row.get(0)).map_err(sqlite_error)?;
                 Some(RunAdmissionAnswer::Admitted { head_verdict: inspect_shift_admitted_head(&admission.base, live.as_ref(), committed), admission: Box::new(admission) })
             } else { None };
-            let receipt = ShiftAdmissionReceipt { cancel_intent: super::turn_cancel::load_turn_cancel_intent_snapshot_conn(tx, session, &selection.run)?, selection, run_start: request.run_start.clone(), seal, run_admission };
+            let receipt = ShiftAdmissionReceipt { selection, run_start: request.run_start.clone(), seal, run_admission };
             tx.execute(crate::session_runs::session_runs_sql().runs.write_shift_admission.sql(), params![session.as_str(), request.admission.as_str(), encode_json(&receipt)?]).map_err(sqlite_error)?;
             Ok(receipt)
         })();

@@ -10,9 +10,8 @@ use super::*;
 
 type PgTx<'c> = sqlx::Transaction<'c, sqlx::Postgres>;
 
-/// Settle `commit`'s ingress and applied commands, and, for an interrupted
-/// turn, record or drop the open input addressed to it, at `now`. Returns
-/// the cancel outcome the commit's cancellation records.
+/// Settle `commit`'s ingress and applied commands at `now`. Returns the rows
+/// it released or dropped.
 pub(super) async fn settle_commit_ingress_tx(
     tx: &mut PgTx<'_>,
     commit: &RuntimeCommit,
@@ -23,26 +22,6 @@ pub(super) async fn settle_commit_ingress_tx(
         for batch_id in &commands.batch_ids {
             crate::queued_work::settle_open_command_tx(tx, commit, batch_id, now).await?;
         }
-    }
-    let closure = commit.interrupted_turn.as_ref();
-    let interrupted = closure.map(lash_core_execution::store::InterruptedTurnClosure::turn_id);
-    let cancellation =
-        closure.and_then(lash_core_execution::store::InterruptedTurnClosure::cancellation);
-    if let Some(closure) = closure
-        && let Some(evidence) = closure.settlement.base_cancellation()
-        && !reconcile_turn_cancel_winner_tx(
-            tx,
-            session_id,
-            closure.turn_id(),
-            &closure.observed_intent,
-            evidence,
-        )
-        .await?
-    {
-        return Err(StoreError::TurnCancelIntentChanged {
-            session_id: session_id.clone(),
-            turn_id: closure.turn_id().clone(),
-        });
     }
     let mut affected_inputs = Vec::new();
     let mut affected_wakes = Vec::new();
@@ -155,84 +134,16 @@ pub(super) async fn settle_commit_ingress_tx(
             }
         }
     }
-    let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
-    let Some(turn_id) = interrupted else {
-        return Ok(outcome);
-    };
-    // The open input addressed to the interrupted turn that no checkpoint
-    // admitted names a turn that is over: by rule it is next-turn input at
-    // its own position, its submitted delivery unchanged (ADR 0101 §5.1),
-    // unless the cancellation's disposition, which governs host-authored
-    // input only, drops it. Once the turn's run has terminal evidence its
-    // terminal write has already applied the disposition, and what it left
-    // open is next-turn input no teardown of that turn reaches.
-    let disposition = cancellation.map_or(
-        lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer,
-        |evidence| evidence.undelivered,
-    );
-    let sql = crate::turn_ingress::turn_ingress_sql();
-    let run = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
-    let run_ended: bool = sqlx::query_scalar(sql.family.run_ended.sql())
-        .bind(session_id.as_str())
-        .bind(run.as_str())
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    let rows = sqlx::query(sql.pending_inputs_postgres.select_pending_active.sql())
-        .bind(session_id.as_str())
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    let mut open = Vec::new();
-    for row in rows {
-        let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
-        // A row this commit released is back where it was submitted and is
-        // already recorded above.
-        let released = affected_inputs
-            .iter()
-            .any(|(_, affected)| affected.input_id == input.input_id);
-        if !run_ended && !released && input.state.active_turn_id() == Some(turn_id) {
-            open.push(input);
-        }
-    }
-    for input in open {
-        // Deferring writes nothing: the row stays where it was submitted.
-        // Dropping is the withdrawal this table already has.
-        if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
-            sqlx::query(sql.pending_inputs.cancel.sql())
-                .bind(session_id.as_str())
-                .bind(input.input_id.as_str())
-                .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
-                .bind(crate::support::clamp_epoch_ms(now))
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        }
-        affected_inputs.push((
-            input.enqueue_seq,
-            lash_core_execution::TurnCancelAffectedInput {
-                input_id: input.input_id,
-                payload: input.input,
-                disposition,
-            },
-        ));
-    }
-    // The outcome reports every row the teardown moved; only a cancellation
-    // has a request record to append them to.
+    // The outcome reports every row the commit released or dropped, in the
+    // order they were submitted.
     affected_inputs.sort_by_key(|(enqueue_seq, _)| *enqueue_seq);
-    for (_, affected) in affected_inputs {
-        if cancellation.is_some() {
-            append_turn_cancel_outcome_conn(tx, session_id, turn_id, affected.clone()).await?;
-        }
-        outcome.affected_inputs.push(affected);
-    }
-    for affected in affected_wakes {
-        if cancellation.is_some() {
-            append_turn_cancel_wake_tx(tx, session_id, turn_id, &affected).await?;
-        }
-        outcome.affected_wakes.push(affected);
-    }
-    Ok(outcome)
+    Ok(lash_core_execution::TurnCancelInputOutcome {
+        affected_inputs: affected_inputs
+            .into_iter()
+            .map(|(_, affected)| affected)
+            .collect(),
+        affected_wakes,
+    })
 }
 
 /// Input `input_id`, which run `run` must hold, locked for the commit.

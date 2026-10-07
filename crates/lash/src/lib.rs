@@ -227,9 +227,7 @@ pub use lash_core::async_trait;
 /// reports, and how this deployment competes for the recovery leader lease.
 pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};
 pub use lash_core::facade_support::{
-    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
+    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy,
 };
 /// A plugin hook's [`HookKey`](plugins::HookKey) for a string literal,
@@ -689,7 +687,7 @@ pub mod persistence {
         AdmitRunRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
         IngressRowId, IngressSettlement, RUN_ADMISSION_STEP, RunAdmission, RunAdmissionAnswer,
         RunAdmissionRefusal, RunExecutor, ShiftAdmissionPreparation, ShiftAdmissionReceipt,
-        ShiftAdmissionSelection, ShiftAdmissionWrite, TurnCancellationBinding, UnfinishedRun,
+        ShiftAdmissionSelection, ShiftAdmissionWrite, UnfinishedRun,
     };
     /// The multi-session store's catalog and bounded history segments, the
     /// one-session view runtime code holds, and the window loaders (ADR 0112).
@@ -703,16 +701,15 @@ pub mod persistence {
     };
     pub use lash_core::store::{
         AppendRequestIdentity, CheckpointComponentDescriptor, FollowOnWork, GraphAppend,
-        HydratedCheckpointComponent, HydratedSessionCheckpoint, InterruptedTurnClosure,
-        OperationId, ParkCancelCause, ParkEventColumns, ParkEventKind, ParkFeedCursor,
-        ParkFeedEvent, ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport,
-        PendingFollowOn, PhysicalTurn, RunContinuation, RunOpenerState, RuntimeCommit,
-        RuntimeCommitReceipt, RuntimeStoreDecorator, RuntimeTurnCommitStamp,
-        SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
-        SuspendedCell, TurnChange, TurnChangeCursor, TurnChangeKind, TurnChangePage,
-        TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery,
-        TurnParkTarget, TurnParkWrite, TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts,
-        commit_runtime_state_verified, validate_turn_commit_outcome_code,
+        HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId, ParkCancelCause,
+        ParkEventColumns, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId,
+        ParkReason, ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, RunContinuation,
+        RunOpenerState, RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator,
+        RuntimeTurnCommitStamp, SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta,
+        SessionHeadPayload, SuspendedCell, TurnChange, TurnChangeCursor, TurnChangeKind,
+        TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkOrigin,
+        TurnParkQuery, TurnParkTarget, TurnParkWrite, TurnProjectionWatermark, UnparkCause,
+        UnsettledTurnCounts, commit_runtime_state_verified, validate_turn_commit_outcome_code,
     };
     /// A logical run's durable terminal evidence and the store segment that
     /// answers and binds runs (FIG-3600 S7, FIG-3607 item 8), and the
@@ -1232,8 +1229,8 @@ pub mod durability {
         RunStepHandle, SelectKey,
     };
     pub use lash_core::{
-        TurnCancellationAuthority, facade_support::RuntimeEnvironment,
-        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
+        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
+        facade_support::TerminationPolicy,
     };
     pub use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig};
 }
@@ -1264,13 +1261,10 @@ pub mod runtime {
     pub use lash_core::tool_run::ExternalCancelPolicy;
     pub use lash_core::triggers::TriggerDeliveryAdmission;
 
+    pub use lash_core::ServedOnly;
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
-    pub use lash_core::{ServedOnly, TurnControlAttachment};
     pub use lash_core_store::runtime_error::EffectErrorJournalPolicy;
     pub use lash_core_store::store::FollowOnRecoveryAnswer;
-    pub use lash_core_store::turn_control_binding::{
-        TurnControlBindingId, TurnControlBindingIdError,
-    };
     pub use lash_core_store::turn_input_vocabulary::RunDefinitions;
     pub use lash_sansio::sansio::{
         ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
@@ -1312,8 +1306,8 @@ pub mod runtime {
         RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
         RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
         RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SessionWorkEngine, SleepSpec,
-        TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding, TurnPrelude,
-        TurnPreludeRef, WorkCadenceError, WorkCadencePolicy,
+        TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef,
+        WorkCadenceError, WorkCadencePolicy,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

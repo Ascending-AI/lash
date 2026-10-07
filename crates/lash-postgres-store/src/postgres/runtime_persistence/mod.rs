@@ -312,6 +312,7 @@ mod ingress_settlement;
 mod maintenance;
 mod queued_work;
 mod session_commit;
+pub(crate) use session_commit::apply_runtime_commit_tx;
 pub(crate) mod turn_cancel;
 mod turn_input;
 pub(crate) mod turn_park;

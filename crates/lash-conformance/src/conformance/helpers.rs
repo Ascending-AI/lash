@@ -131,7 +131,6 @@ pub struct ReopenableTriggerStore {
 /// durable head from outside any runtime.
 pub(crate) use lash_core::testing::store_fixtures::{
     admit_conformance_session, append_conformance_event_node, commit_conformance_state,
-    durable_turn_address,
 };
 
 /// `session_id`'s view of `store` (ADR 0112 §3): what a law's runtime is

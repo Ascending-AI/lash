@@ -16,10 +16,8 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
-    TurnIngressStatements, cancel_affected_inputs::CancelAffectedInputStatements,
-    cancel_requests::CancelRequestStatements, cancellation_bindings::CancellationBindingStatements,
-    closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
-    queued_batches::QueuedBatchStatements, retired_scopes::RetiredScopeStatements,
+    TurnIngressStatements, cancel_requests::CancelRequestStatements,
+    pending_inputs::PendingInputStatements, queued_batches::QueuedBatchStatements,
     run_specs::RunSpecStatements, tool_intent_submissions::ToolIntentSubmissionStatements,
     turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
 };
@@ -28,17 +26,13 @@ use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 mod family;
 mod pending_inputs;
 mod queued_work;
-mod turn_cancel;
+mod tool_intents;
 mod turn_parks;
 
 pub(crate) use family::TurnIngressSqliteStatements;
 pub(crate) use pending_inputs::PendingInputSqliteStatements;
 pub(crate) use queued_work::QueuedBatchSqliteStatements;
-pub(crate) use turn_cancel::{
-    CancelRequestSqliteStatements, CancellationBindingSqliteStatements,
-    ClosureAuthorizationSqliteStatements, RetiredScopeSqliteStatements,
-    ToolIntentSubmissionSqliteStatements,
-};
+pub(crate) use tool_intents::ToolIntentSubmissionSqliteStatements;
 pub(crate) use turn_parks::{
     TurnParkClockSqliteStatements, TurnParkSqliteStatements,
     count_retired_parks_by_executable_generation,
@@ -115,18 +109,6 @@ pub(crate) struct TurnIngressSql {
     pub(crate) queued_batches_sqlite: QueuedBatchSqliteStatements,
     /// `turn_cancel_requests`, shared.
     pub(crate) cancel_requests: CancelRequestStatements,
-    /// `turn_cancel_requests`, SQLite only.
-    pub(crate) cancel_requests_sqlite: CancelRequestSqliteStatements,
-    pub(crate) cancel_affected_inputs: CancelAffectedInputStatements,
-    /// `turn_cancellation_bindings`, shared.
-    pub(crate) bindings: CancellationBindingStatements,
-    /// `turn_cancellation_bindings`, SQLite only.
-    pub(crate) bindings_sqlite: CancellationBindingSqliteStatements,
-    /// `turn_cancel_closure_authorizations`, shared.
-    pub(crate) closures: ClosureAuthorizationStatements,
-    /// `turn_cancel_closure_authorizations`, SQLite only.
-    pub(crate) closures_sqlite: ClosureAuthorizationSqliteStatements,
-    /// `turn_cancel_retired_scopes`, shared.
     /// `turn_parks`, shared.
     pub(crate) turn_parks: TurnParkStatements,
     /// `turn_parks`, SQLite only.
@@ -135,9 +117,6 @@ pub(crate) struct TurnIngressSql {
     pub(crate) turn_park_clock: TurnParkClockSqliteStatements,
     /// `turn_park_events`, shared.
     pub(crate) turn_park_events: TurnParkEventStatements,
-    pub(crate) retired_scopes: RetiredScopeStatements,
-    /// `turn_cancel_retired_scopes`, SQLite only.
-    pub(crate) retired_scopes_sqlite: RetiredScopeSqliteStatements,
 }
 
 impl TurnIngressSql {
@@ -152,18 +131,10 @@ impl TurnIngressSql {
             queued_batches: QueuedBatchStatements::render(dialect),
             queued_batches_sqlite: QueuedBatchSqliteStatements::render(dialect),
             cancel_requests: CancelRequestStatements::render(dialect),
-            cancel_affected_inputs: CancelAffectedInputStatements::render(dialect),
-            cancel_requests_sqlite: CancelRequestSqliteStatements::render(dialect),
-            bindings: CancellationBindingStatements::render(dialect),
-            bindings_sqlite: CancellationBindingSqliteStatements::render(dialect),
-            closures: ClosureAuthorizationStatements::render(dialect),
-            closures_sqlite: ClosureAuthorizationSqliteStatements::render(dialect),
             turn_parks: TurnParkStatements::render(dialect),
             turn_parks_sqlite: TurnParkSqliteStatements::render(dialect),
             turn_park_clock: TurnParkClockSqliteStatements::render(dialect),
             turn_park_events: TurnParkEventStatements::render(dialect),
-            retired_scopes: RetiredScopeStatements::render(dialect),
-            retired_scopes_sqlite: RetiredScopeSqliteStatements::render(dialect),
         }
     }
 }

@@ -98,7 +98,9 @@ lash_rust_integration_test(
     manifest_dir = "crates/lash-durable-test",
     package_name = "lash-internal-durable-test",
     rustc_env = {},
-    tags = [],
+    tags = [
+        "hermetic-postgres",
+    ],
     version = "0.0.0-dev",
 )
 
@@ -131,7 +133,6 @@ lash_batch_test(
         ":lash-durable-test__unit_test",
         ":process_crash_proof__test",
         ":round_crash_matrix__test",
-        ":turn_phases__test",
     ],
 )
 

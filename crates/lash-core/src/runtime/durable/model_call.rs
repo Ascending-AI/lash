@@ -21,10 +21,10 @@ use std::time::Duration;
 
 use lash_durable::{DueSource, DurableInstant};
 
-use super::session::{ModelPin, TurnError, TurnServices};
+use super::session::{ModelPin, TurnDrive, TurnError};
 use crate::{
-    ActorContext, ExecutionBudgets, ExecutionLimit, FailureCode, LlmCallError, LlmRequest,
-    LlmResponse, LlmTerminalReason, ProviderFailureKind, SessionId, TurnFailureCode,
+    ActorContext, EffectId, ExecutionBudgets, ExecutionLimit, FailureCode, LlmCallError,
+    LlmRequest, LlmTerminalReason, ProviderFailureKind, TurnFailureCode,
 };
 
 /// version_surface = "coexist"
@@ -134,36 +134,47 @@ pub(super) fn start(
     }
 }
 
-/// Send one attempt of a pinned call, bounded live by its pinned deadline:
-/// `remaining` is `deadline - now` on the store's clock, counted down on the
-/// node's. A re-sent call restarts the session's live stream first.
+/// Send one attempt of a pinned call and answer the machine, bounded live by
+/// its pinned deadline: `remaining` is `deadline - now` on the store's clock,
+/// counted down on the node's. A re-sent call restarts the session's live
+/// stream first; an expired one settles timed out, unsent.
 ///
 /// # Errors
 ///
-/// [`TurnError`] when the live stream cannot restart.
+/// [`TurnError`] when the live stream cannot restart, or the call aborts
+/// the turn.
 pub(super) async fn send(
     cx: &ActorContext,
-    services: &dyn TurnServices,
-    session: &SessionId,
+    drive: &mut dyn TurnDrive,
+    id: EffectId,
     request: std::sync::Arc<LlmRequest>,
     start: &ModelStart,
-) -> Result<Result<LlmResponse, LlmCallError>, TurnError> {
+) -> Result<(), TurnError> {
     let (pin, limit, resent) = match start {
-        ModelStart::Expired { pin } => return Ok(Err(timed_out(pin))),
+        ModelStart::Expired { pin } => {
+            super::phases::settle_unsent(drive, id, timed_out(pin));
+            return Ok(());
+        }
         ModelStart::Send { pin, limit, resent } => (pin, *limit, *resent),
     };
     if resent {
-        services.restart_live_stream(cx, session).await?;
+        drive.restart_live_stream(cx).await?;
     }
     cx.note_due(DueSource::ModelDeadline, pin.deadline);
     let now = cx.durable_now().await?;
     let remaining = Duration::from_millis(millis(pin.deadline).saturating_sub(millis(now)));
-    let result = tokio::select! {
-        result = services.call_model(cx, request, pin.attempt, limit) => result,
-        () = cx.clock().sleep(remaining) => Err(timed_out(pin)),
+    let expired = tokio::select! {
+        answered = drive.model_call(cx, id, request, pin.attempt, limit) => {
+            answered?;
+            false
+        }
+        () = cx.clock().sleep(remaining) => true,
     };
     cx.clear_due(DueSource::ModelDeadline);
-    Ok(result)
+    if expired {
+        super::phases::settle_unsent(drive, id, timed_out(pin));
+    }
+    Ok(())
 }
 
 /// The settlement of a call whose pinned deadline passed:

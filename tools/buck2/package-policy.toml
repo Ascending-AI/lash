@@ -49,12 +49,13 @@ packages = ["lash-internal-postgres-store"]
 kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["hermetic-postgres"]
 
-# V0's vertical crash proof (FIG-5170) runs its matrix on SQLite memory,
-# SQLite file and PostgreSQL; its PostgreSQL leg gets a server of its own.
+# V0's vertical crash proof (FIG-5170) and L3's turn phases (FIG-5172) run
+# their matrices on SQLite memory, SQLite file and PostgreSQL; each
+# PostgreSQL leg gets a server of its own.
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
-targets = ["vertical_crash_proof"]
+targets = ["vertical_crash_proof", "turn_phases"]
 tags = ["hermetic-postgres"]
 
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary

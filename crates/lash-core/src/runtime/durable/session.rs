@@ -5,7 +5,7 @@
 //!
 //! - The durable entry is: load rows, [`restore_turn`] (exactly one
 //!   `restore_from_checkpoint`), re-deliver the pending effect, then
-//!   [`run_phases`]. The turn driver becomes this phase runner; it commits at
+//!   the phase runner (`phases::run_phases`). The turn driver becomes this phase runner; it commits at
 //!   the catalog's labels (`turn.admit`, `turn.prepare`, `model.start`,
 //!   `model.done`, `round.present+model.start`, `turn.commit`) and never
 //!   re-executes orchestration to reach a recorded outcome.
@@ -22,24 +22,20 @@
 
 use std::sync::Arc;
 
-use lash_durable::domain::{
-    CellId, ExecKey, MailAnswer, MailDomainWrite, RunSeq, SessionCommitWrite, TurnWrite,
-};
+use lash_durable::domain::{ExecKey, MailAnswer, MailDomainWrite, TurnWrite};
 use lash_durable::runner::{Activation, Owned};
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailKind,
     MailTx, Release,
 };
 use lash_sansio::SavedTurn;
-use lash_sansio::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use super::{model_call, turn_cancel};
+use super::{phases, turn_cancel};
 use crate::{
-    ActorContext, AdmittedScope, Backend, Effect, ExecCodeFailure, ExecResponse, HostTurnProtocol,
-    InputId, LlmCallError, LlmRequest, LlmResponse, Message, Response, SessionId,
-    SessionStreamEvent, TurnId, TurnMachine, TurnMachineConfig, TurnOutcome,
+    ActorContext, AdmittedScope, Backend, Effect, EffectId, HostTurnProtocol, InputId, LlmRequest,
+    SessionId, TurnId, TurnMachine, TurnMachineConfig, TurnOutcome,
 };
 
 pub use lash_durable::domain::{
@@ -54,52 +50,89 @@ pub fn admit_mail() -> MailKind {
     MailKind::new("session.admit")
 }
 
-/// What a turn is admitted with, as V0 encodes [`AdmittedInputs::admission_json`]:
-/// the session head the turn's commit replaces and the messages the turn
-/// starts from.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TurnAdmission {
-    /// The head revision the turn's commit replaces.
-    pub base_head: u64,
-    /// The messages the turn starts from: the session's prompt and the
-    /// admitted inputs.
-    pub messages: Vec<Message>,
-}
-
 /// What a session's turns run with: the deployment's protocol, model,
-/// environment and code cells. The phase runner calls each at its phase; none
-/// of them drives a turn.
+/// environment and code cells. It opens one [`TurnDrive`] per turn an owner
+/// runs; nothing it does drives a turn or commits.
 #[async_trait::async_trait]
 pub trait TurnServices: Send + Sync {
-    /// The configuration `session`'s turn `run` starts and restores under.
-    fn machine_config(&self, session: &SessionId, run: &TurnId) -> TurnMachineConfig;
-
-    /// The environment of the turn's next protocol iteration, recomputed
-    /// from committed state.
-    async fn sync_environment(
-        &self,
-        cx: &ActorContext,
-        session: &SessionId,
-        run: &TurnId,
-    ) -> Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>;
-
     /// The budgets `session`'s turns run under: a model call's
     /// `model_total` among them.
     fn execution_budgets(&self, session: &SessionId) -> crate::ExecutionBudgets;
 
-    /// One attempt of a pinned model call, bounded by `limit`: its deadline
-    /// is the pinned one, never refreshed. Deltas it streams go to the
-    /// session's live stream; only the completed response is durable.
-    async fn call_model(
+    /// The configuration `row`'s turn restores its checkpoint under: the one
+    /// its machine was built with.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the session's configuration cannot be loaded.
+    async fn machine_config(
         &self,
         cx: &ActorContext,
+        row: &TurnRow,
+    ) -> Result<TurnMachineConfig, TurnError>;
+
+    /// Start `row`'s turn from committed state alone: the session's head and
+    /// what its admission bound. Nothing it computes is durable until the
+    /// phase runner commits.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the turn cannot be prepared.
+    async fn start(
+        &self,
+        cx: &ActorContext,
+        row: &TurnRow,
+    ) -> Result<Box<dyn TurnDrive>, TurnError>;
+
+    /// Take over `row`'s turn, restored from its checkpoint as `machine`,
+    /// recomputing what the turn holds in memory from committed state.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the turn cannot be taken over.
+    async fn resume(
+        &self,
+        cx: &ActorContext,
+        row: &TurnRow,
+        machine: TurnMachine,
+    ) -> Result<Box<dyn TurnDrive>, TurnError>;
+}
+
+/// One turn an owner runs: its machine and the in-memory work around it. The
+/// phase runner polls the machine through it, commits at the turn's labels
+/// and hands each effect to the method that answers it; every method answers
+/// the machine itself.
+#[async_trait::async_trait]
+pub trait TurnDrive: Send {
+    /// The turn's machine.
+    fn machine(&mut self) -> &mut TurnMachine;
+
+    /// Answer an effect that commits nothing of its own: an emit, progress,
+    /// a log, a plugin checkpoint, an environment sync or a tool report.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the effect cannot be answered.
+    async fn local(&mut self, cx: &ActorContext, effect: Effect) -> Result<(), TurnError>;
+
+    /// Run attempt `attempt` of the pinned model call `id`, bounded by
+    /// `limit` (its deadline is the pinned one, never refreshed), and answer
+    /// the machine with its result. Deltas it streams go to the session's
+    /// live stream; only the completed response is durable.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the call aborts the turn rather than answering it.
+    async fn model_call(
+        &mut self,
+        cx: &ActorContext,
+        id: EffectId,
         request: Arc<LlmRequest>,
         attempt: u32,
         limit: crate::ExecutionLimit,
-    ) -> Result<LlmResponse, LlmCallError>;
+    ) -> Result<(), TurnError>;
 
-    /// Restart `session`'s live stream before a re-sent model call streams:
+    /// Restart the session's live stream before a re-sent model call streams:
     /// existing cursors gap and observers reload (the live replay store's
     /// `invalidate_session`), so no one sees an abandoned attempt's partial
     /// text joined to the new attempt's.
@@ -108,28 +141,84 @@ pub trait TurnServices: Send + Sync {
     ///
     /// [`TurnError`] when the live stream cannot restart; the call is not
     /// sent.
-    async fn restart_live_stream(
-        &self,
-        cx: &ActorContext,
-        session: &SessionId,
-    ) -> Result<(), TurnError>;
+    async fn restart_live_stream(&mut self, cx: &ActorContext) -> Result<(), TurnError>;
 
-    /// Run the code cell `exec` from its latest snapshot, or from the start,
-    /// to its end. `with` are the turn's rows that commit with the cell's
-    /// first commit.
+    /// Run the code cell `exec` of effect `id` from its latest snapshot, or
+    /// from the start, to its end, and answer the machine. `with` are the
+    /// turn's rows that commit with the cell's first commit.
     ///
     /// # Errors
     ///
     /// [`TurnError`] when the cell could not reach its end; ownership loss
     /// among them.
     async fn exec_cell(
-        &self,
+        &mut self,
         cx: &ActorContext,
+        id: EffectId,
         exec: ExecKey,
-        language: &str,
-        code: &str,
+        cell: CodeCell,
         with: Vec<DomainWrite>,
-    ) -> Result<Result<ExecResponse, ExecCodeFailure>, TurnError>;
+    ) -> Result<(), TurnError>;
+
+    /// The turn's commit to its session once its machine is done: the session
+    /// head's next revision, which `turn.commit` publishes with the turn's
+    /// terminal.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the commit cannot be built.
+    async fn finish(&mut self, cx: &ActorContext, done: TurnDone) -> Result<TurnCommit, TurnError>;
+}
+
+/// A code cell's source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodeCell {
+    /// Its language.
+    pub language: String,
+    /// Its code.
+    pub code: String,
+}
+
+/// A finished machine's last word: what its `Done` effect carried and the
+/// outcome it emitted before it.
+#[derive(Debug)]
+pub struct TurnDone {
+    /// The turn's messages.
+    pub messages: crate::MessageSequence,
+    /// History records the machine appended since its last progress.
+    pub event_delta: Vec<crate::SessionHistoryRecord>,
+    /// The protocol iteration it finished in.
+    pub protocol_iteration: usize,
+    /// The outcome it emitted, if it emitted one.
+    pub outcome: Option<TurnOutcome>,
+}
+
+impl TurnDone {
+    /// The terminal the outcome commits as.
+    #[must_use]
+    pub fn terminal(&self) -> TurnTerminal {
+        match &self.outcome {
+            Some(TurnOutcome::Finished(_)) => TurnTerminal::Answered,
+            Some(TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })) => {
+                TurnTerminal::Cancelled
+            }
+            _ => TurnTerminal::Failed,
+        }
+    }
+}
+
+/// What `turn.commit` writes for a finished turn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnCommit {
+    /// The head revision the commit replaces.
+    pub expected_head: u64,
+    /// The session head's commit, encoded by
+    /// [`encode_session_commit`](crate::store::encode_session_commit).
+    pub commit_json: String,
+    /// The turn's terminal.
+    pub terminal: TurnTerminal,
+    /// Its typed cause, if it has one.
+    pub cause_json: Option<String>,
 }
 
 /// The session actor's activation: claim, drain mail, admit and run phases,
@@ -211,12 +300,28 @@ impl SessionActivation {
             turn_cancel::finalize(cx, &row, &request).await?;
             return Ok(Pass::Again);
         }
-        let config = self.services.machine_config(session, &row.run);
         let turn = match row.checkpoint_ref {
-            Some(_) => restore_turn(cx, config, &row).await?,
-            None => start_turn(config, row)?,
+            Some(_) => {
+                let config = self.services.machine_config(cx, &row).await?;
+                let RestoredTurn {
+                    machine,
+                    pending,
+                    row,
+                } = restore_turn(cx, config, &row).await?;
+                let drive = self.services.resume(cx, &row, machine).await?;
+                OpenTurn {
+                    drive,
+                    pending,
+                    row,
+                }
+            }
+            None => OpenTurn {
+                drive: self.services.start(cx, &row).await?,
+                pending: None,
+                row,
+            },
         };
-        match run_phases(cx, self.services.as_ref(), turn).await? {
+        match phases::run_phases(cx, self.services.as_ref(), turn).await? {
             PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),
             PhaseExit::Lost => Ok(Pass::Lost),
             PhaseExit::Suspended { due } => {
@@ -336,6 +441,17 @@ pub struct AdmittedInputs {
 pub struct RestoredTurn {
     /// The machine, restored from the checkpoint.
     pub machine: TurnMachine,
+    /// The effect the checkpoint re-delivers, if it is waiting on one.
+    pub pending: Option<Effect>,
+    /// The turn's row.
+    pub row: TurnRow,
+}
+
+/// A turn an owner runs: its drive, the effect a restore re-delivers, and
+/// its row.
+pub struct OpenTurn {
+    /// The turn's drive, holding its machine.
+    pub drive: Box<dyn TurnDrive>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
     pub pending: Option<Effect>,
     /// The turn's row.
@@ -463,18 +579,6 @@ fn session_of(cx: &ActorContext) -> SessionId {
     SessionId::try_from(cx.actor().id().to_owned()).expect("a session actor names its session")
 }
 
-/// A turn that has committed no checkpoint yet starts afresh from its
-/// admission: nothing it did is durable, so nothing is restored.
-fn start_turn(config: TurnMachineConfig, row: TurnRow) -> Result<RestoredTurn, TurnError> {
-    let admission: TurnAdmission = serde_json::from_str(&row.admission_json)
-        .map_err(|error| TurnError::Exec(format!("turn admission does not decode: {error}")))?;
-    Ok(RestoredTurn {
-        machine: TurnMachine::new(config, admission.messages, Default::default(), 0),
-        pending: None,
-        row,
-    })
-}
-
 /// Restore `row`'s turn under `config`: exactly one
 /// `restore_from_checkpoint`, reported to the context's probe, and the
 /// effect it re-delivers.
@@ -514,177 +618,6 @@ fn next_work(machine: &mut TurnMachine) -> Option<Effect> {
         match machine.poll_effect()? {
             Effect::Emit(_) | Effect::Progress { .. } | Effect::Log { .. } => {}
             effect => return Some(effect),
-        }
-    }
-}
-
-fn encode_checkpoint(machine: &TurnMachine) -> Result<String, TurnError> {
-    serde_json::to_string(&machine.checkpoint())
-        .map_err(|error| TurnError::Exec(format!("the turn checkpoint does not encode: {error}")))
-}
-
-fn iteration(machine: &TurnMachine) -> u32 {
-    u32::try_from(machine.protocol_iteration()).unwrap_or(u32::MAX)
-}
-
-/// Run the turn's phases from `turn`, committing at each label, until it
-/// commits, suspends or loses ownership.
-///
-/// # Errors
-///
-/// [`TurnError`].
-pub async fn run_phases(
-    cx: &ActorContext,
-    services: &dyn TurnServices,
-    turn: RestoredTurn,
-) -> Result<PhaseExit, TurnError> {
-    let RestoredTurn {
-        mut machine,
-        mut pending,
-        row,
-    } = turn;
-    let session = row.session.clone();
-    let run = row.run.clone();
-    let admission: TurnAdmission = serde_json::from_str(&row.admission_json)
-        .map_err(|error| TurnError::Exec(format!("turn admission does not decode: {error}")))?;
-    // The model call in flight as the rows left it: a re-delivered call is
-    // its next attempt, under its recorded deadline.
-    let mut model = match row.phase {
-        TurnPhase::Model { .. } => row.model.clone().map(|pin| (row.iteration, pin)),
-        _ => None,
-    };
-    let mut outcome = None;
-    loop {
-        let effect = match pending.take() {
-            Some(effect) => effect,
-            None => match machine.poll_effect() {
-                Some(effect) => effect,
-                None => return Err(TurnError::Exec("the turn machine stalled".to_owned())),
-            },
-        };
-        match effect {
-            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome: ended }) => {
-                outcome = Some(ended);
-            }
-            Effect::Emit(_) | Effect::Progress { .. } | Effect::Log { .. } => {}
-            Effect::ReportToolCalls { .. } => {}
-            Effect::SyncExecutionEnvironment { id } => {
-                let result = services.sync_environment(cx, &session, &run).await;
-                machine.handle_response(Response::ExecutionEnvironmentSynced { id, result });
-            }
-            Effect::Checkpoint { id, .. } => {
-                // Plugin checkpoints and their deliveries are L3's: V0's
-                // turn has none to deliver.
-                machine.handle_response(Response::Checkpoint {
-                    id,
-                    delivery: Default::default(),
-                });
-            }
-            Effect::LlmCall { id, request } => {
-                if turn_cancel::requested(cx, &session).await?.is_some() {
-                    return Ok(PhaseExit::CancelRequested);
-                }
-                let current = iteration(&machine);
-                let pinned = match model.take() {
-                    Some((pinned, pin)) if pinned == current => Some(pin),
-                    _ => None,
-                };
-                let start = model_call::start(
-                    &services.execution_budgets(&session),
-                    cx.durable_now().await?,
-                    row.turn_deadline,
-                    pinned,
-                    &request,
-                )?;
-                if let model_call::ModelStart::Send { pin, .. } = &start {
-                    let mut tx = cx.begin().await?;
-                    tx.write(DomainWrite::Turn(TurnWrite::Advance {
-                        session: session.clone(),
-                        run: run.clone(),
-                        phase: TurnPhase::Model {
-                            attempt: pin.attempt,
-                        },
-                        iteration: current,
-                        checkpoint_ref: Some(encode_checkpoint(&machine)?),
-                        model: Some(pin.clone()),
-                    }));
-                    cx.commit(tx, CommitLabel::MODEL_START).await?;
-                }
-                // `model` is spent: only the first call after a restore
-                // re-delivers the pinned one, and a later call of the same
-                // iteration is a new call.
-                let sent = turn_cancel::unless_cancelled(
-                    cx,
-                    &session,
-                    model_call::send(cx, services, &session, request, &start),
-                )
-                .await?;
-                let Some(result) = sent else {
-                    return Ok(PhaseExit::CancelRequested);
-                };
-                let result = result?;
-                machine.handle_response(Response::LlmComplete {
-                    id,
-                    result,
-                    text_streamed: false,
-                });
-            }
-            Effect::ExecCode { id, language, code } => {
-                if turn_cancel::requested(cx, &session).await?.is_some() {
-                    return Ok(PhaseExit::CancelRequested);
-                }
-                model = None;
-                let exec = ExecKey::Cell(
-                    session.clone(),
-                    run.clone(),
-                    CellId::new(format!("e{}", id.0)),
-                );
-                let with = vec![DomainWrite::Turn(TurnWrite::Advance {
-                    session: session.clone(),
-                    run: run.clone(),
-                    phase: TurnPhase::Tools { run: RunSeq(id.0) },
-                    iteration: iteration(&machine),
-                    checkpoint_ref: Some(encode_checkpoint(&machine)?),
-                    model: None,
-                })];
-                let result = services.exec_cell(cx, exec, &language, &code, with).await?;
-                machine.handle_response(Response::ExecResult { id, result });
-            }
-            Effect::ToolCalls { .. } | Effect::AwaitToolResults { .. } => {
-                return Err(TurnError::Exec(
-                    "tool rounds are L4's (FIG-5174) on the durable path".to_owned(),
-                ));
-            }
-            Effect::Done { messages, .. } => {
-                let terminal = match outcome {
-                    Some(TurnOutcome::Finished(_)) => TurnTerminal::Answered,
-                    Some(TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })) => {
-                        TurnTerminal::Cancelled
-                    }
-                    _ => TurnTerminal::Failed,
-                };
-                let head = admission.base_head.saturating_add(1);
-                let commit_json = serde_json::to_string(&messages.iter().collect::<Vec<_>>())
-                    .map_err(|error| {
-                        TurnError::Exec(format!("the turn's messages do not encode: {error}"))
-                    })?;
-                let mut tx = cx.begin().await?;
-                tx.write(DomainWrite::SessionCommit(SessionCommitWrite {
-                    session: session.clone(),
-                    run: run.clone(),
-                    expected_head: admission.base_head,
-                    commit_json,
-                }));
-                tx.write(DomainWrite::Turn(TurnWrite::Terminal {
-                    session: session.clone(),
-                    run: run.clone(),
-                    terminal,
-                    cause_json: None,
-                    head_revision: Some(head),
-                }));
-                cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
-                return Ok(PhaseExit::Committed(terminal));
-            }
         }
     }
 }

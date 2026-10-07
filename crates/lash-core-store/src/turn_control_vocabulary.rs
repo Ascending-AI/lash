@@ -1,12 +1,11 @@
 //! Durable turn-cancellation vocabulary.
 //!
-//! The cancellation records a store persists and the closure authorization a
-//! commit settles against. The turn-control host, its cancellation tokens and
-//! the effect-executor gate stay in `lash-core`.
+//! A turn's address, a host's cancel request, and what a cancel did with the
+//! input the turn did not deliver.
 
 use crate::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, RuntimeError, SessionId, TurnCancelMode,
-    TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnId,
+    ExecutionScope, RuntimeError, SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
+    TurnCancellationEvidence, TurnId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -98,241 +97,6 @@ pub struct TurnCancelInputOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub affected_wakes: Vec<TurnCancelAffectedWake>,
 }
-/// A durable cancellation request header together with its monotonic intent
-/// revision. The revision changes only when the request header changes, so it
-/// fences delayed projections without coupling them to outcome retention.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TurnCancelIntentSnapshot {
-    Absent,
-    Present {
-        request: TurnCancelRequest,
-        revision: u64,
-    },
-}
-/// The exact terminal one authorized cancellation-closure operation proposes
-/// for the base gate. This is durable operation intent, never a second winner:
-/// the keyed promise still decides which terminal was accepted.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", content = "cancellation", rename_all = "snake_case")]
-pub enum TurnCancelClosureProposal {
-    CancelRequested(TurnCancellationEvidence),
-    CompletionSealed,
-}
-/// Durable authorization to close one turn's cancellation gate pair.
-///
-/// A successor may finish the exact promise operation after takeover.
-/// Final publication uses head CAS and durable cancellation facts, independent of advisory
-/// lease liveness or generation; activation's orphan repair retains its current execution
-/// fence.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TurnCancelClosureAuthorization {
-    session_id: SessionId,
-    turn_id: TurnId,
-    binding_id: String,
-    admitted_scope: ExecutionScope,
-    cancel_key: AwaitEventKey,
-    escalation_key: AwaitEventKey,
-    terminal_key: AwaitEventKey,
-    proposed_base: TurnCancelClosureProposal,
-    observed_intent: TurnCancelIntentSnapshot,
-    authorizing_fencing_token: u64,
-}
-/// Cancellation closure selected by durable admission and final intent, or by
-/// the promise owner for an admission without an intent snapshot.
-///
-/// Stores validate the admitted authority and durable intent in their final
-/// transaction. Admissions without a snapshot instead require the exact
-/// persisted promise-closure authorization. `base_cancellation` is the immutable first policy acceptor;
-/// `effective_cancellation` may carry a later same-policy timing escalation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TurnCancelClosureSettlement {
-    authorization: TurnCancelClosureAuthorization,
-    base_cancellation: Option<TurnCancellationEvidence>,
-    effective_cancellation: Option<TurnCancellationEvidence>,
-}
-impl TurnCancelClosureSettlement {
-    /// Assemble a settlement from the authorization and the evidence the
-    /// turn-control driver read back.
-    pub fn new(
-        authorization: TurnCancelClosureAuthorization,
-        base_cancellation: Option<TurnCancellationEvidence>,
-        effective_cancellation: Option<TurnCancellationEvidence>,
-    ) -> Self {
-        Self {
-            authorization,
-            base_cancellation,
-            effective_cancellation,
-        }
-    }
-
-    pub fn authorization(&self) -> &TurnCancelClosureAuthorization {
-        &self.authorization
-    }
-
-    pub fn base_cancellation(&self) -> Option<&TurnCancellationEvidence> {
-        self.base_cancellation.as_ref()
-    }
-
-    pub fn effective_cancellation(&self) -> Option<&TurnCancellationEvidence> {
-        self.effective_cancellation.as_ref()
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub fn settled_for_test(
-        authorization: TurnCancelClosureAuthorization,
-        base_cancellation: Option<TurnCancellationEvidence>,
-        effective_cancellation: Option<TurnCancellationEvidence>,
-    ) -> Self {
-        Self {
-            authorization,
-            base_cancellation,
-            effective_cancellation,
-        }
-    }
-}
-impl TurnCancelClosureAuthorization {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        address: TurnAddress,
-        binding_id: impl Into<String>,
-        admitted_scope: ExecutionScope,
-        cancel_key: AwaitEventKey,
-        escalation_key: AwaitEventKey,
-        terminal_key: AwaitEventKey,
-        proposed_base: TurnCancelClosureProposal,
-        observed_intent: TurnCancelIntentSnapshot,
-        fence: &crate::store::ShiftFence,
-    ) -> Result<Self, RuntimeError> {
-        address.validate()?;
-        admitted_scope.validate()?;
-        let binding_id = binding_id.into();
-        if binding_id.trim().is_empty() {
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                "turn cancellation closure requires a non-empty binding id",
-            ));
-        }
-        if *fence.session() != address.session_id {
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::SessionExecutionLeaseLost,
-                "turn cancellation closure fence belongs to another session",
-            ));
-        }
-        let expected_scope = address.execution_scope();
-        if admitted_scope.session_id().is_some() && admitted_scope != expected_scope {
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                "session-scoped turn cancellation closure admission must name its exact turn",
-            ));
-        }
-        if cancel_key.scope != expected_scope
-            || escalation_key.scope != expected_scope
-            || terminal_key.scope != expected_scope
-            || cancel_key.wait != AwaitEventWaitIdentity::TurnCancelGate
-            || escalation_key.wait != AwaitEventWaitIdentity::TurnCancelEscalation
-            || terminal_key.wait != AwaitEventWaitIdentity::TurnTerminal
-        {
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                "turn cancellation closure keys do not match the authorized turn",
-            ));
-        }
-        Ok(Self {
-            session_id: address.session_id,
-            turn_id: address.turn_id,
-            binding_id,
-            admitted_scope,
-            cancel_key,
-            escalation_key,
-            terminal_key,
-            proposed_base,
-            observed_intent,
-            authorizing_fencing_token: fence.epoch(),
-        })
-    }
-
-    pub fn address(&self) -> TurnAddress {
-        TurnAddress::new(&self.session_id, &self.turn_id)
-    }
-
-    /// Revalidate a decoded authorization before a backend or resolver trusts it.
-    pub fn validate(&self) -> Result<(), RuntimeError> {
-        self.address().validate()?;
-        self.admitted_scope.validate()?;
-        let expected_scope = self.address().execution_scope();
-        if self.binding_id.trim().is_empty()
-            || !crate::turn_control_binding::binding_id_admits_scope(
-                &self.binding_id,
-                &self.admitted_scope,
-            )
-            || (self.admitted_scope.session_id().is_some() && self.admitted_scope != expected_scope)
-            || self.cancel_key.scope != expected_scope
-            || self.escalation_key.scope != expected_scope
-            || self.terminal_key.scope != expected_scope
-            || self.cancel_key.wait != AwaitEventWaitIdentity::TurnCancelGate
-            || self.escalation_key.wait != AwaitEventWaitIdentity::TurnCancelEscalation
-            || self.terminal_key.wait != AwaitEventWaitIdentity::TurnTerminal
-        {
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                "turn cancellation closure authorization is structurally invalid",
-            ));
-        }
-        if let TurnCancelClosureProposal::CancelRequested(evidence) = &self.proposed_base
-            && evidence.request_id.trim().is_empty()
-        {
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                "turn cancellation closure evidence requires a non-empty request id",
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn session_id(&self) -> &SessionId {
-        &self.session_id
-    }
-    pub fn turn_id(&self) -> &TurnId {
-        &self.turn_id
-    }
-    pub fn binding_id(&self) -> &str {
-        &self.binding_id
-    }
-    pub fn admitted_scope(&self) -> &ExecutionScope {
-        &self.admitted_scope
-    }
-    pub fn cancel_key(&self) -> &AwaitEventKey {
-        &self.cancel_key
-    }
-    pub fn escalation_key(&self) -> &AwaitEventKey {
-        &self.escalation_key
-    }
-    pub fn terminal_key(&self) -> &AwaitEventKey {
-        &self.terminal_key
-    }
-    pub fn proposed_base(&self) -> &TurnCancelClosureProposal {
-        &self.proposed_base
-    }
-    pub fn observed_intent(&self) -> &TurnCancelIntentSnapshot {
-        &self.observed_intent
-    }
-    pub fn authorizing_fencing_token(&self) -> u64 {
-        self.authorizing_fencing_token
-    }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TurnCancelClosureAuthorizationOutcome {
-    Authorized,
-    AdoptedExact,
-}
-impl TurnCancelIntentSnapshot {
-    pub fn request(&self) -> Option<&TurnCancelRequest> {
-        match self {
-            Self::Absent => None,
-            Self::Present { request, .. } => Some(request),
-        }
-    }
-}
 impl TurnCancelInputOutcome {
     /// Reports whether the cancellation affected no item — no active-turn
     /// input and no held wake — so hosts can skip restore, re-enqueue, or
@@ -396,17 +160,6 @@ impl TurnCancelRequest {
         self
     }
 
-    /// Only a repeat that already agrees with the accepted undelivered-input
-    /// disposition can escalate. A repeat that disagrees is a policy conflict
-    /// the authoritative gate refuses, so it must not advance the durable
-    /// intent revision either: a refused request has no durable effect at all,
-    /// and a store that treated it as an escalation would invalidate the
-    /// live owner's closure CAS on behalf of a request that never won.
-    #[must_use]
-    pub fn escalates(&self, accepted: &Self) -> bool {
-        self.undelivered == accepted.undelivered && self.mode.is_stronger_than(accepted.mode)
-    }
-
     pub fn validate(&self) -> Result<(), RuntimeError> {
         self.address.validate()?;
         if self.request_id.trim().is_empty() {
@@ -441,11 +194,4 @@ impl TurnCancelRequest {
             honoured_after_step: None,
         }
     }
-}
-/// Durable request and the input outcome accumulated by repair paths.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TurnCancelRequestRecord {
-    pub request: TurnCancelRequest,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outcome: Option<TurnCancelInputOutcome>,
 }

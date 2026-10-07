@@ -408,8 +408,7 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             outcome: &cancelled_outcome(),
             ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
-            interrupted_turn: None,
-            turn_control_resolver: None,
+            cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
         })
         .await
@@ -475,8 +474,7 @@ async fn final_commit_refuses_a_settlement_without_a_shift_fence() {
                 retained_outputs: &[],
                 ingress_settlement: settlement,
                 pending_follow_on: None,
-                interrupted_turn: None,
-                turn_control_resolver: None,
+                cancellation: None,
                 recorded_attachment_intent_ids: Default::default(),
             })
             .await
@@ -524,8 +522,7 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph() {
             retained_outputs: &[],
             ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
-            interrupted_turn: None,
-            turn_control_resolver: None,
+            cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
         })
         .await

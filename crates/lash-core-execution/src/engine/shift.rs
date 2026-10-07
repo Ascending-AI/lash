@@ -471,7 +471,6 @@ mod tests {
                         receipt_admission.clone(),
                     ),
                 ),
-                cancel_intent: crate::TurnCancelIntentSnapshot::Absent,
                 run_admission: None,
             },
         )

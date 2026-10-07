@@ -87,7 +87,6 @@
       "src/runtime/process/model_filter_tests.rs",
       "src/runtime/process/tests.rs",
       "src/runtime/process/validation_tests.rs",
-      "src/runtime/turn_control/tests.rs",
       "src/runtime/work/awaiter/tests.rs",
       "src/session/execution_context/tests.rs",
       "src/tool_registry/admission_tests.rs",

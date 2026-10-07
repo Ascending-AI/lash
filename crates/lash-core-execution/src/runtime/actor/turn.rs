@@ -1,8 +1,10 @@
 //! The turn's half of the context (ADR 0132 §4). Owned by L3 (FIG-5172).
 //!
 //! The turn's phase runner lives in `lash-core`'s `runtime::durable::session`
-//! (V0, FIG-5170); the context methods the journal-era turn driver still
-//! calls live here until L3 folds that driver into the phase runner.
+//! (V0, FIG-5170). Nothing here is journaled: each effect runs in place, and
+//! what it computes is durable only through the store write its own runner
+//! makes or the phase transaction that commits it; a restore recomputes the
+//! rest from committed state.
 
 pub use lash_durable::domain::{ModelPin, TurnPhase, TurnRow, TurnTerminal};
 
@@ -16,77 +18,66 @@ impl ActorContext {
     /// `Checkpoint`, `ResolveTurnConfig`, `RecordCompactionBase`,
     /// `RenderCompactionPrompt`, `RecoverFollowOn` and `TraceBoundary`, each a
     /// write inside the turn's phase transactions or recomputed from committed
-    /// state. Any other command is refused.
+    /// state, so each runs in place. Any other command is refused.
     ///
     /// # Errors
     ///
     /// The effect's refusal.
     pub async fn turn_effect(
         &self,
-        _envelope: crate::RuntimeEffectEnvelope,
-        _local: crate::RuntimeEffectLocalExecutor<'_>,
+        envelope: crate::RuntimeEffectEnvelope,
+        local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        todo!("L3 (FIG-5172): run a turn effect inside its phase transaction")
+        match &envelope.command {
+            crate::RuntimeEffectCommand::BeforeLlmCall { .. }
+            | crate::RuntimeEffectCommand::LlmCall { .. }
+            | crate::RuntimeEffectCommand::AssistantResponseHooks { .. }
+            | crate::RuntimeEffectCommand::Direct { .. }
+            | crate::RuntimeEffectCommand::SyncExecutionEnvironment
+            | crate::RuntimeEffectCommand::Checkpoint { .. }
+            | crate::RuntimeEffectCommand::ResolveTurnConfig { .. }
+            | crate::RuntimeEffectCommand::RecordCompactionBase { .. }
+            | crate::RuntimeEffectCommand::RenderCompactionPrompt { .. }
+            | crate::RuntimeEffectCommand::RecoverFollowOn { .. }
+            | crate::RuntimeEffectCommand::TraceBoundary { .. } => {
+                local.run_in_place(envelope).await
+            }
+            other => Err(not_in_group(other, "turn")),
+        }
     }
 
     /// The session's own effects: `ResolveConfigTransaction`,
-    /// `ReadSessionCommandRun`, `CloseRunScope` and `BeginSessionClose`. Any
-    /// other command is refused.
+    /// `ReadSessionCommandRun`, `CloseRunScope` and `BeginSessionClose`, each
+    /// run in place: what it writes, its runner writes to the store as one
+    /// idempotent call. Any other command is refused.
     ///
     /// # Errors
     ///
     /// The effect's refusal.
     pub async fn session_effect(
         &self,
-        _envelope: crate::RuntimeEffectEnvelope,
-        _local: crate::RuntimeEffectLocalExecutor<'_>,
+        envelope: crate::RuntimeEffectEnvelope,
+        local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        todo!("L3 (FIG-5172): run a session effect as a write under the session's epoch")
+        match &envelope.command {
+            crate::RuntimeEffectCommand::ResolveConfigTransaction { .. }
+            | crate::RuntimeEffectCommand::ReadSessionCommandRun { .. }
+            | crate::RuntimeEffectCommand::CloseRunScope { .. }
+            | crate::RuntimeEffectCommand::BeginSessionClose { .. } => {
+                local.run_in_place(envelope).await
+            }
+            other => Err(not_in_group(other, "session")),
+        }
     }
+}
 
-    /// The identity of the authority that owns this scope's turn control:
-    /// its cancel is session mail now.
-    #[must_use]
-    pub fn turn_control_binding_id(&self) -> String {
-        todo!("L3 (FIG-5172): replace the turn-control binding by turn cancel mail")
-    }
-
-    /// Bind turn control for this scope.
-    ///
-    /// # Errors
-    ///
-    /// The binding's refusal.
-    pub async fn turn_control_binding(
-        &self,
-    ) -> Result<crate::TurnControlBinding<'_>, crate::RuntimeError> {
-        todo!("L3 (FIG-5172): replace the turn-control binding by turn cancel mail")
-    }
-
-    /// Register a session catalog as a turn-cancel closure participant of
-    /// `scope`.
-    ///
-    /// # Errors
-    ///
-    /// The participant's refusal.
-    pub async fn register_turn_cancel_closure_participant(
-        &self,
-        _participant_id: &str,
-        _scope: &crate::ExecutionScope,
-    ) -> Result<(), crate::RuntimeError> {
-        todo!("L3 (FIG-5172): delete with the turn-control binding tables once cancel is mail")
-    }
-
-    /// Release a session catalog's turn-cancel closure participant of
-    /// `scope`.
-    ///
-    /// # Errors
-    ///
-    /// The participant's refusal.
-    pub async fn release_turn_cancel_closure_participant(
-        &self,
-        _participant_id: &str,
-        _scope: &crate::ExecutionScope,
-    ) -> Result<(), crate::RuntimeError> {
-        todo!("L3 (FIG-5172): delete with the turn-control binding tables once cancel is mail")
-    }
+/// The refusal of a command `group`'s method does not run.
+fn not_in_group(
+    command: &crate::RuntimeEffectCommand,
+    group: &str,
+) -> crate::RuntimeEffectControllerError {
+    crate::RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+        format!("{:?} is not a {group} effect", command.kind()),
+    )
 }

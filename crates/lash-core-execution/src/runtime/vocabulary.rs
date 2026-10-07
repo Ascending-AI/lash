@@ -508,13 +508,6 @@ pub trait DeploymentStore:
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<crate::store::ControlIntent>, crate::StoreError>;
 
-    /// Atomically refuse retirement while any closure names `scope`, otherwise
-    /// persist the scope tombstone that every later authorization checks.
-    async fn retire_turn_cancel_closure_scope(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<(), crate::StoreError>;
-
     /// Reclaim deployment-wide evidence before an explicit host horizon
     /// (FIG-653).
     ///

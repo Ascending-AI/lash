@@ -1,0 +1,148 @@
+//! A session's committed head as a turn starts from it, and the head commit
+//! a finished turn's `turn.commit` writes over it (ADR 0132 §4). Owned by L3
+//! (FIG-5172).
+//!
+//! The head is read from the session store's current window, never from the
+//! history before it, so what a turn loads does not grow with the turns the
+//! session committed before its window.
+
+use std::sync::Arc;
+
+use super::session::{TurnCommit, TurnDone, TurnError};
+use crate::runtime::{RuntimeSessionState, TurnBoundary};
+use crate::store::SessionStore;
+use crate::{Backend, Clock, CommitBudget, Message, SessionId, TurnId, TurnOutcome};
+
+/// A session's committed head.
+#[derive(Clone)]
+pub struct SessionHead {
+    state: RuntimeSessionState,
+    fleet: crate::FleetFormat,
+    budget: CommitBudget,
+    clock: Arc<dyn Clock>,
+}
+
+impl std::fmt::Debug for SessionHead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionHead")
+            .field("session", &self.state.session_id)
+            .field("revision", &self.state.head_revision)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SessionHead {
+    /// `session`'s head in `backend`'s session store, whose commits a turn
+    /// writes under `budget`.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError::Exec`] when the session is not in the store or has no
+    /// head; the store's refusal.
+    pub async fn load(
+        backend: &Backend,
+        session: &SessionId,
+        budget: CommitBudget,
+    ) -> Result<Self, TurnError> {
+        let store = session_store(backend, session).await?;
+        let state = load_state(&store, session).await?;
+        Ok(Self {
+            state,
+            fleet: store.fleet_format(),
+            budget,
+            clock: backend.clock(),
+        })
+    }
+
+    /// The head's revision.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.state.head_revision
+    }
+
+    /// The conversation the head holds in its current window.
+    #[must_use]
+    pub fn messages(&self) -> Vec<Message> {
+        self.state.read_model().messages.as_slice().to_vec()
+    }
+
+    /// The head's state.
+    #[must_use]
+    pub fn state(&self) -> &RuntimeSessionState {
+        &self.state
+    }
+
+    /// The commit of `run` that publishes `done`'s messages and outcome as
+    /// the head's next revision.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError::Exec`] when the commit cannot be assembled.
+    pub fn commit(&self, run: &TurnId, done: TurnDone) -> Result<TurnCommit, TurnError> {
+        let terminal = done.terminal();
+        let outcome = done
+            .outcome
+            .unwrap_or(TurnOutcome::Stopped(crate::TurnStop::Incomplete));
+        let mut boundary = TurnBoundary::from_state_with_clock(
+            self.state.clone(),
+            Arc::clone(&self.clock),
+            crate::ExecutionScope::turn(self.state.session_id.clone(), run.clone()),
+            self.budget,
+        )
+        .with_fleet_format(self.fleet);
+        let commit = boundary
+            .durable_commit(done.messages, &outcome, &[], None)
+            .map_err(|error| TurnError::Exec(format!("the turn's head commit: {error}")))?;
+        Ok(TurnCommit {
+            expected_head: commit.expected_head_revision,
+            commit_json: crate::store::encode_session_commit(&commit)
+                .map_err(|error| TurnError::Exec(error.to_string()))?,
+            terminal,
+            cause_json: None,
+        })
+    }
+}
+
+/// `session`'s store in `backend`'s catalog.
+pub(crate) async fn session_store(
+    backend: &Backend,
+    session: &SessionId,
+) -> Result<SessionStore, TurnError> {
+    let catalog = backend.session_store_factory();
+    match catalog
+        .lookup_session(session)
+        .await
+        .map_err(|error| TurnError::Exec(error.to_string()))?
+    {
+        crate::store::SessionLookup::Live(_) => {
+            let runtime: Arc<dyn crate::store::RuntimeStore> = catalog;
+            SessionStore::new(runtime, session.clone())
+                .map_err(|error| TurnError::Exec(error.to_string()))
+        }
+        crate::store::SessionLookup::Deleted => {
+            Err(TurnError::Exec(format!("session {session} was deleted")))
+        }
+        crate::store::SessionLookup::Absent => {
+            Err(TurnError::Exec(format!("session {session} does not exist")))
+        }
+    }
+}
+
+/// The session's current window as runtime state.
+pub(crate) async fn load_state(
+    store: &SessionStore,
+    session: &SessionId,
+) -> Result<RuntimeSessionState, TurnError> {
+    let loaded =
+        crate::store::load_session_window_state(store, crate::store::WindowSelector::Current)
+            .await
+            .map_err(|error| TurnError::Exec(error.to_string()))?
+            .ok_or_else(|| TurnError::Exec(format!("session {session} has no head")))?;
+    if loaded.state.session_id != *session {
+        return Err(TurnError::Exec(format!(
+            "session {session}'s store holds session {}",
+            loaded.state.session_id
+        )));
+    }
+    Ok(loaded.state)
+}

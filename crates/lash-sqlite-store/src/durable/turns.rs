@@ -12,8 +12,8 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_undelivered_wire,
 };
 use lash_durable::domain::{
-    DomainRefusal, ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnPhase,
-    TurnRow, TurnWrite,
+    DomainRefusal, ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd,
+    TurnPhase, TurnRow, TurnTerminal, TurnWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -183,31 +183,60 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
 }
 
 pub(super) fn apply_session_commit(
-    tx: &Connection,
-    _commit: &Committing<'_>,
+    tx: &crate::conn::FencedTx<'_>,
+    commit: &Committing<'_>,
     write: &SessionCommitWrite,
 ) -> Answer<()> {
-    let session = write.session.as_str();
-    let found = tx
-        .prepare_cached(SQL.head.sql())?
-        .query_row([session], |row| row.get::<_, i64>(0))
-        .optional()?;
-    let current = found.map_or(0, |head| u64::try_from(head).unwrap_or(0));
-    if current != write.expected_head {
-        return refuse(DomainRefusal::HeadMoved {
+    use lash_core_execution::StoreError;
+    let refused = |reason: String| {
+        refuse(DomainRefusal::SessionCommitRefused {
             session: write.session.clone(),
-            expected: write.expected_head,
-            found: found.map(|head| u64::try_from(head).unwrap_or(0)),
-        });
+            reason,
+        })
+    };
+    let runtime_commit = match lash_core_execution::store::decode_session_commit(&write.commit_json)
+    {
+        Ok(runtime_commit) => runtime_commit,
+        Err(error) => return refused(error.to_string()),
+    };
+    if runtime_commit.session_id != write.session
+        || runtime_commit.expected_head_revision != write.expected_head
+    {
+        return refused(format!(
+            "the commit names session {} at head {}, not {} at {}",
+            runtime_commit.session_id,
+            runtime_commit.expected_head_revision,
+            write.session,
+            write.expected_head
+        ));
     }
-    let next = signed(write.expected_head.saturating_add(1));
-    cached_execute(
+    let planner =
+        match lash_core_execution::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
+        {
+            Ok(planner) => planner,
+            Err(error) => return refused(error.to_string()),
+        };
+    let now = u64::try_from(commit.now.0).unwrap_or(0);
+    match crate::persistence::session_commit::apply_runtime_commit_conn(
         tx,
-        SQL.insert_revision.sql(),
-        rusqlite::params![session, next, write.commit_json],
-    )?;
-    cached_execute(tx, SQL.move_head.sql(), rusqlite::params![session, next])?;
-    Ok(Ok(()))
+        &planner,
+        commit.blob_profile,
+        now,
+    ) {
+        Ok(_) => Ok(Ok(())),
+        Err(StoreError::HeadRevisionConflict { expected, actual }) => {
+            refuse(DomainRefusal::HeadMoved {
+                session: write.session.clone(),
+                expected,
+                found: Some(actual),
+            })
+        }
+        Err(StoreError::Contended) => Ok(Err(DurableError::Store(lash_durable::StoreFailure {
+            kind: lash_durable::StoreFailureKind::Contended,
+            message: "the session head commit contended".to_owned(),
+        }))),
+        Err(error) => refused(error.to_string()),
+    }
 }
 
 pub(super) fn request_cancel(
@@ -306,6 +335,34 @@ fn cancel_of(
         reason,
         undelivered,
         mode,
+    })))
+}
+
+pub(super) fn turn_end(
+    tx: &Connection,
+    session: &SessionId,
+    run: &TurnId,
+) -> Answer<Option<TurnEnd>> {
+    let stored = tx
+        .prepare_cached(SQL.ended.sql())?
+        .query_row([session.as_str(), run.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
+        })
+        .optional()?;
+    let Some((terminal, cause_json, head_revision)) = stored else {
+        return Ok(Ok(None));
+    };
+    let Some(terminal) = TurnTerminal::parse(&terminal) else {
+        return Ok(Err(corrupt("turn terminal", &terminal)));
+    };
+    Ok(Ok(Some(TurnEnd {
+        terminal,
+        cause_json: cause_json.filter(|cause| cause != "null"),
+        head_revision: head_revision.and_then(|revision| u64::try_from(revision).ok()),
     })))
 }
 

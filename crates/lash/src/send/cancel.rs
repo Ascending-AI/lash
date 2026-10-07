@@ -145,11 +145,7 @@ async fn cancel_run(
             request,
         });
     }
-    let driver = TurnWorkDriver::for_session(
-        parts.effect_host.clone(),
-        parts.session_id.to_string(),
-        std::sync::Arc::clone(parts.store.store()),
-    );
+    let driver = TurnWorkDriver::new(parts.effect_host.backend().clone());
     // The cancel addresses the run's running physical turn.
     let turn = driver
         .running_turn(&TurnAddress::new(parts.session_id.clone(), run.clone()))

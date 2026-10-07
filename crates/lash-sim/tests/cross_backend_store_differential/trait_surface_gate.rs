@@ -101,43 +101,6 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
         "claimability predicate; owned by the queued_work conformance suite",
     ),
     (
-        "validate_turn_cancellation_binding",
-        "turn-cancellation surface: this fixture wires no TurnCancellationAuthority, so the \
-         binding is never valid on any backend; owned by the turn_control conformance suite",
-    ),
-    (
-        "authorize_turn_cancel_closure",
-        "turn-cancellation surface; owned by the turn_control conformance suite",
-    ),
-    (
-        "pending_turn_cancel_closures",
-        "turn-cancellation surface; owned by the turn_control conformance suite",
-    ),
-    (
-        "pending_turn_cancel_closure_pins",
-        "turn-cancellation surface; owned by the turn_control conformance suite",
-    ),
-    (
-        "turn_is_committed",
-        "turn-cancellation surface; owned by the turn_control conformance suite",
-    ),
-    (
-        "record_turn_cancel_request",
-        "turn-cancellation surface; owned by the turn_control conformance suite",
-    ),
-    (
-        "turn_cancel_request",
-        "turn-cancellation surface; owned by the turn_control conformance suite",
-    ),
-    (
-        "turn_cancel_request_intent",
-        "turn-cancellation surface; owned by the turn_control conformance suite",
-    ),
-    (
-        "reconcile_turn_cancel_winner",
-        "turn-cancellation surface; owned by the turn_control conformance suite",
-    ),
-    (
         "gc_unreachable",
         "store-wide blob reclamation across every session the factory owns. This differential \
          runs all of its cases against one shared PostgreSQL database, so a sweep launched \

@@ -284,19 +284,6 @@ async fn release_run_rows_conn(
                 .await
                 .map_err(store_sqlx_error)?;
         }
-        if request.is_some() {
-            crate::runtime_persistence::turn_cancel::append_turn_cancel_outcome_conn(
-                conn,
-                session_id,
-                run,
-                lash_core_execution::TurnCancelAffectedInput {
-                    input_id: input.input_id,
-                    payload: input.input,
-                    disposition,
-                },
-            )
-            .await?;
-        }
     }
     Ok(())
 }

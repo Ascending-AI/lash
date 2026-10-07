@@ -302,66 +302,6 @@ impl SessionHistoryStore for Integrator {
 
 #[lash::async_trait]
 impl TurnInputStore for Integrator {
-    async fn validate_turn_cancellation_binding(
-        &self,
-        session_id: &SessionId,
-        fence: &ShiftFence,
-        binding_id: &str,
-        admitted_scope: &ExecutionScope,
-    ) -> Result<(), StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn authorize_turn_cancel_closure(
-        &self,
-        fence: &ShiftFence,
-        authorization: &TurnCancelClosureAuthorization,
-    ) -> Result<TurnCancelClosureAuthorizationOutcome, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn pending_turn_cancel_closures(
-        &self,
-        session_id: &SessionId,
-        fence: &ShiftFence,
-        binding_id: &str,
-        admitted_scope: &ExecutionScope,
-    ) -> Result<Vec<TurnCancelClosureAuthorization>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn pending_turn_cancel_closure_pins(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<TurnCancelClosureAuthorization>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn turn_is_committed(&self, address: &TurnAddress) -> Result<bool, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn record_turn_cancel_request(
-        &self,
-        request: TurnCancelRequest,
-    ) -> Result<TurnCancelRequestRecord, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn turn_cancel_request(
-        &self,
-        address: &TurnAddress,
-    ) -> Result<Option<TurnCancelRequestRecord>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn turn_cancel_request_intent(
-        &self,
-        address: &TurnAddress,
-    ) -> Result<TurnCancelIntentSnapshot, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn reconcile_turn_cancel_winner(
-        &self,
-        address: &TurnAddress,
-        observed: &TurnCancelIntentSnapshot,
-        evidence: &TurnCancellationEvidence,
-    ) -> Result<bool, StoreError> {
-        unreachable!("external signature witness")
-    }
     async fn enqueue_pending_turn_inputs(
         &self,
         batch: PendingTurnInputBatch,
@@ -754,12 +694,6 @@ impl DeploymentStore for Integrator {
         after: Option<ControlIntentId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<ControlIntent>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn retire_turn_cancel_closure_scope(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
     async fn reclaim_retained_evidence(

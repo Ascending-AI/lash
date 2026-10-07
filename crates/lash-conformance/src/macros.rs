@@ -1307,14 +1307,6 @@ macro_rules! session_store_factory_tests {
             (a_command_runs_end_unparks_it, "command-run-end-unparks"),
             (concurrent_session_admissions_preserve_one_relation, "concurrent-session-relation"),
             (ingress_follow_on_fork_and_command_run_matrix, "ingress-follow-on-fork-commands"),
-            (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),
-            (turn_cancel_scope_retirement_serializes_with_authorization, "turn-cancel-scope-retirement"),
-            (turn_cancel_request_escalation_advances_intent_without_replacing_base, "turn-cancel-escalation"),
-            (turn_cancel_repair_preserves_base_across_escalation_and_reopen, "turn-cancel-repair-reopen"),
-            (turn_cancel_repair_orders_intent_and_ordinary_redefer, "turn-cancel-repair-redefer"),
-            (turn_cancel_final_commit_intent_cas_is_atomic, "turn-cancel-final-commit-cas"),
-            (turn_cancel_conflicting_repeat_leaves_no_durable_trace, "turn-cancel-conflicting-repeat"),
-            (turn_cancel_concurrent_opposing_requests_converge, "turn-cancel-concurrent-opposing"),
             (a_pin_written_before_during_or_after_its_turn_keeps_that_turn_through_collection, "pin-timing"),
             (a_pin_racing_its_turns_commit_and_the_next_admission_keeps_the_turn, "pin-race"),
             (a_merged_or_deferred_input_resolves_to_the_run_that_applied_it, "pin-merge-defer"),
@@ -1325,7 +1317,6 @@ macro_rules! session_store_factory_tests {
             (pending_and_unavailable_targets_refuse_typed_and_never_fork_the_head, "fork-refusals"),
         ]);
         $crate::session_store_factory_tests!(@turn_cancel_hosted $fixture; [
-            (turn_cancel_wrong_binding_is_refused_at_every_phase, "turn-cancel-wrong-binding"),
             (fork_inherits_history_without_execution_queues_waits_or_journals, "fork-execution-isolation"),
         ]);
     };
@@ -1598,26 +1589,6 @@ macro_rules! session_graph_append_tests {
                 let (_guard, factory) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory).await;
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! turn_work_driver_tests {
-    ($fixture:block) => {
-        $crate::turn_work_driver_tests!(@catalogue $fixture; [
-            (turn_work_driver, "turn-work-driver"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, host, stores, registration_barrier) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(host, stores, registration_barrier)
-                    .await;
             }
         )*
     };

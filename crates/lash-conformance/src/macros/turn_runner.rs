@@ -184,8 +184,6 @@ macro_rules! shift_admission_tests {
     (a_refused_follow_on_shift_keeps_the_intents_obligation_due, "s8c-4"),
             (one_unfinished_run_per_session, "run-one-unfinished"),
             (admission_delivers_every_row_it_binds, "run-admission-delivers"),
-    (run_admission_binds_cancellation_authority_with_its_rows, "run-admission-cancel-binding"),
-    (preparing_or_refusing_admission_leaves_cancellation_authority_unbound, "run-admission-unbound-proposal"),
             (a_run_admission_is_idempotent_across_new_rows_and_fences, "run-admission-idempotent"),
             (one_shift_admits_many_items, "shift-many-items"),
             (replay_cannot_mint_ownership, "shift-replay-ownership"),
@@ -270,7 +268,6 @@ macro_rules! session_close_tests {
     ($fixture:block) => {
         $crate::session_close_tests!(@laws $fixture; [
             (session_delete_closes_active_and_parked_runs_as_session_deleted, "session-close-runs"),
-            (a_refused_deletion_closes_nothing, "session-close-refused"),
             (the_close_intent_is_idempotent_retained_on_failure_and_survives_deletion, "session-close-retained"),
             (a_run_commit_racing_a_close_is_refused_stale_fence, "session-close-fence"),
             (session_delete_writes_exactly_one_close_row_via_its_intent, "session-close-one-row"),
@@ -278,8 +275,6 @@ macro_rules! session_close_tests {
             (a_close_acknowledgement_arms_the_session_delete_obligation, "session-delete-arm"),
             (session_delete_counts_only_the_sessions_undelivered_cleanup, "session-delete-cleanup"),
             (the_physical_delete_waits_for_cleanup_then_deletes_the_session, "session-delete-finalizer"),
-            (a_deletion_retried_after_its_close_is_not_refused_by_a_pin_the_close_superseded, "session-close-superseded-pin"),
-            (the_physical_delete_retires_the_closure_pins_its_close_superseded, "session-delete-superseded-pin"),
             (a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_settled, "session-delete-frame-cleanup-lapse"),
         ]);
     };

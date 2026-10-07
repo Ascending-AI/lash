@@ -80,6 +80,27 @@ impl TurnTerminal {
             Self::Cancelled => "cancelled",
         }
     }
+
+    /// The terminal its stored spelling names.
+    #[must_use]
+    pub fn parse(stored: &str) -> Option<Self> {
+        [Self::Answered, Self::Failed, Self::Cancelled]
+            .into_iter()
+            .find(|terminal| terminal.as_str() == stored)
+    }
+}
+
+/// How a turn ended (L3): its terminal, its typed cause, and the head
+/// revision its commit published.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnEnd {
+    /// The terminal.
+    pub terminal: TurnTerminal,
+    /// Its typed cause, encoded by its owner.
+    pub cause_json: Option<String>,
+    /// The head revision its commit published; `None` when it published
+    /// none (a cancelled turn).
+    pub head_revision: Option<u64>,
 }
 
 /// How a turn ended.
@@ -184,14 +205,14 @@ pub enum TurnWrite {
     },
 }
 
-/// The turn's commit to its session (V0, then L3): the head
-/// compare-and-set in the `turn.commit` transaction. It publishes revision
-/// `expected_head + 1` with `commit_json` as its head document and moves the
-/// session head to it; a session with no head is at revision 0. The head
-/// compare-and-set makes a repeated commit refuse rather than publish twice.
-/// The turn's phase row is dropped by its [`TurnWrite::Terminal`] in the same
-/// transaction; `lash_runtime_turn_commits` and run-record retention are
-/// L3's.
+/// The turn's commit to its session (V0, then L3): the session store's own
+/// head commit, applied inside the `turn.commit` transaction after the
+/// fence. It publishes revision `expected_head + 1` and moves the session
+/// head to it, with everything the session store writes beside a head (the
+/// turn's history nodes, checkpoint, receipt); a session with no head is at
+/// revision 0. The head compare-and-set makes a repeated commit refuse
+/// rather than publish twice, and the turn's phase row is dropped by its
+/// [`TurnWrite::Terminal`] in the same transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionCommitWrite {
     /// The session.
@@ -202,8 +223,10 @@ pub struct SessionCommitWrite {
     /// [`DomainRefusal::HeadMoved`](super::DomainRefusal::HeadMoved) when
     /// the head is elsewhere.
     pub expected_head: u64,
-    /// The commit plan (history, checkpoint components), encoded by its
-    /// owner.
+    /// The session store's commit, encoded by its owner (lash-core-store's
+    /// `encode_session_commit`). Refused with
+    /// [`DomainRefusal::SessionCommitRefused`](super::DomainRefusal::SessionCommitRefused)
+    /// when the session store refuses it.
     pub commit_json: String,
 }
 

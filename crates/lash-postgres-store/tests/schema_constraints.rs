@@ -38,37 +38,6 @@ async fn assert_check_rejects(connection: &mut PgConnection, statement: &str, co
         .expect("release illegal-vocabulary savepoint");
 }
 
-async fn assert_integrity_rejects(
-    connection: &mut PgConnection,
-    statement: &str,
-    kind: impl Fn(&dyn sqlx::error::DatabaseError) -> bool,
-    what: &str,
-) {
-    sqlx::query("SAVEPOINT integrity_violation")
-        .execute(&mut *connection)
-        .await
-        .expect("create integrity-violation savepoint");
-    let error = sqlx::query(statement)
-        .execute(&mut *connection)
-        .await
-        .expect_err("an impossible durable shape must violate the schema");
-    let database_error = error
-        .as_database_error()
-        .unwrap_or_else(|| panic!("{what}: expected a database error, got {error}"));
-    assert!(
-        kind(database_error),
-        "{what}: Postgres reported the wrong violation: {database_error}"
-    );
-    sqlx::query("ROLLBACK TO SAVEPOINT integrity_violation")
-        .execute(&mut *connection)
-        .await
-        .expect("recover from expected integrity violation");
-    sqlx::query("RELEASE SAVEPOINT integrity_violation")
-        .execute(&mut *connection)
-        .await
-        .expect("release integrity-violation savepoint");
-}
-
 #[tokio::test]
 async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when_configured() {
     let Some(url) = database_url() else {
@@ -455,69 +424,6 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     )
     .await;
 
-    // The cancellation receipt's affected-input evidence is structural: the
-    // states the parallel-array shape made representable are all rejected.
-    sqlx::query(
-        "INSERT INTO lash_turn_cancel_requests (session_id, turn_id, request_id, disposition, mode, intent_revision)
-         VALUES ('session', 'turn', 'request', 'defer', 'immediate', 1)",
-    )
-    .execute(&mut connection)
-    .await
-    .expect("insert cancel request parent row");
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind
-         ) VALUES ('session', 'turn', 0, 'input', 'retry', '{}', 'input')",
-        "ck_turn_cancel_affected_inputs_disposition",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind
-         ) VALUES ('session', 'turn', 0, 'wake', 'defer', '{}', 'process_wake')",
-        "ck_turn_cancel_affected_inputs_item_kind",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind,
-             batch_id
-         ) VALUES ('session', 'turn', 0, 'input', 'defer', '{}', 'input', 'batch')",
-        "ck_turn_cancel_affected_inputs_item_kind",
-    )
-    .await;
-    assert_integrity_rejects(
-        &mut connection,
-        "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind
-         ) VALUES ('session', 'turn', 0, 'input', 'defer', '{}', 'input'),
-                  ('session', 'turn', 1, 'input', 'drop', '{}', 'input')",
-        |error| error.kind() == sqlx::error::ErrorKind::UniqueViolation,
-        "duplicate affected input id",
-    )
-    .await;
-    assert_integrity_rejects(
-        &mut connection,
-        "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind
-         ) VALUES ('no-request', 'turn', 0, 'input', 'defer', '{}', 'input')",
-        |error| error.kind() == sqlx::error::ErrorKind::ForeignKeyViolation,
-        "affected evidence without a request",
-    )
-    .await;
-    assert_integrity_rejects(
-        &mut connection,
-        "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, item_kind
-         ) VALUES ('session', 'turn', 0, 'input', 'defer', 'input')",
-        |error| error.kind() == sqlx::error::ErrorKind::NotNullViolation,
-        "affected evidence without the payload snapshot",
-    )
-    .await;
-
     sqlx::query("ROLLBACK")
         .execute(&mut connection)
         .await
@@ -758,36 +664,6 @@ async fn turn_cancellation_shape_is_guarded() {
         .await;
     }
 
-    for (ordinal, kind, batch, constraint) in [
-        (
-            -1,
-            "input",
-            "NULL",
-            "ck_turn_cancel_affected_inputs_ordinal",
-        ),
-        (
-            0,
-            "unknown",
-            "NULL",
-            "ck_turn_cancel_affected_inputs_item_kind",
-        ),
-        (
-            0,
-            "process_wake",
-            "NULL",
-            "ck_turn_cancel_affected_inputs_item_kind",
-        ),
-        (
-            0,
-            "input",
-            "'batch'",
-            "ck_turn_cancel_affected_inputs_item_kind",
-        ),
-    ] {
-        assert_check_rejects(&mut conn, &format!("INSERT INTO lash_turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('session', 'turn', {ordinal}, 'item', 'defer', '{{}}', '{kind}', {batch})"), constraint).await;
-    }
-    assert_integrity_rejects(&mut conn, "INSERT INTO lash_turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('session', 'turn', 0, 'item', 'defer', '{}', 'input', NULL), ('session', 'turn', 1, 'item', 'defer', '{}', 'input', NULL)", |error| error.kind() == sqlx::error::ErrorKind::UniqueViolation, "duplicate receipt").await;
-    assert_integrity_rejects(&mut conn, "INSERT INTO lash_turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('missing', 'turn', 0, 'item', 'defer', '{}', 'input', NULL)", |error| error.kind() == sqlx::error::ErrorKind::ForeignKeyViolation, "orphan receipt").await;
     sqlx::query("ROLLBACK")
         .execute(&mut *conn)
         .await

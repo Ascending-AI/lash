@@ -25,23 +25,28 @@
 //!   at the next phase boundary, before its next model call.
 
 // Test code.
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
+
+#[path = "support/dialect.rs"]
+mod dialect;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core::facade_support::{EffectId, Response};
+use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, SessionActivation, TurnAdmission, TurnCancelRequest, TurnError, TurnServices,
-    admit_mail, request_turn_cancel,
+    AdmittedInputs, CodeCell, SessionActivation, TurnCancelRequest, TurnCommit, TurnDone,
+    TurnDrive, TurnError, TurnRow, TurnServices, admit_mail, request_turn_cancel,
 };
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
 use lash_core::{
-    DriverAction, DriverContextView, ExecResponse, Message, MessageRole, Part, ProtocolTurnOptions,
-    TurnMachineConfig, facade_support::TurnFinish, facade_support::TurnOutcome,
-    facade_support::shared_parts,
+    DriverAction, DriverContextView, Effect, ExecResponse, Message, MessageRole, Part,
+    ProtocolTurnOptions, TurnMachine, TurnMachineConfig, facade_support::TurnFinish,
+    facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
-use lash_core_execution::{ActorContext, Backend, StoreSet};
+use lash_core_execution::{ActorContext, Backend};
 use lash_durable::domain::ExecKey;
 use lash_durable::runner::Activation;
 use lash_durable::{
@@ -51,12 +56,14 @@ use lash_durable::{
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
-use lash_sansio::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure};
+use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
-    ExecutionBudgets, ExecutionBudgetsConfig, ExecutionLimit, LlmCallError, ProviderAttemptLimits,
-    SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
+    ExecutionBudgets, ExecutionBudgetsConfig, ExecutionLimit, ProviderAttemptLimits, SessionId,
+    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
 };
+
+use dialect::Dialect;
 
 const FORMATS: &str = "l3";
 const SESSION: &str = "l3-session";
@@ -194,46 +201,47 @@ struct Seen {
     answered_after_request: usize,
 }
 
+#[derive(Clone)]
 struct L3Services {
     mode: Mode,
     seen: Arc<Mutex<Seen>>,
     backend: Arc<Mutex<Option<Backend>>>,
 }
 
+fn machine_config(session: &SessionId, run: &TurnId) -> TurnMachineConfig {
+    TurnMachineConfig {
+        model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
+        protocol_driver: Arc::new(ScriptedProtocol),
+        projector: Arc::new(ChatContextProjector),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("l3-model"),
+                lash_sansio::llm_profile::LlmProfileMetadata::new(
+                    "scripted".to_string(),
+                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                )
+                .with_capability(lash_core::LlmProfileCapability::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
+        turn_budget: lash_core::TurnBudget::bounded(8),
+        no_progress_budget: Default::default(),
+        attachment_acceptance: Default::default(),
+        generation: lash_core::GenerationOptions::default(),
+        autonomous: false,
+        session_id: session.clone(),
+        agent_frame_id: "l3-frame".to_string(),
+        turn_id: run.clone(),
+        emit_llm_trace: false,
+        writer_formats: lash_core::build_newest_writer_formats(),
+        termination: ProtocolTurnOptions::default(),
+    }
+}
+
 #[async_trait::async_trait]
 impl TurnServices for L3Services {
-    fn machine_config(&self, session: &SessionId, run: &TurnId) -> TurnMachineConfig {
-        TurnMachineConfig {
-            model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
-            protocol_driver: Arc::new(ScriptedProtocol),
-            projector: Arc::new(ChatContextProjector),
-            model: lash_sansio::llm_profile::LlmProfileConfig::new(
-                lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                    lash_sansio::llm_profile::LlmProfileKey::new("l3-model"),
-                    lash_sansio::llm_profile::LlmProfileMetadata::new(
-                        "scripted".to_string(),
-                        std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    )
-                    .with_capability(lash_core::LlmProfileCapability::default())
-                    .with_extra_body(Default::default())
-                    .with_request_defaults(Default::default()),
-                ),
-            )
-            .with_reasoning(Default::default()),
-            turn_budget: lash_core::TurnBudget::bounded(8),
-            no_progress_budget: Default::default(),
-            attachment_acceptance: Default::default(),
-            generation: lash_core::GenerationOptions::default(),
-            autonomous: false,
-            session_id: session.clone(),
-            agent_frame_id: "l3-frame".to_string(),
-            turn_id: run.clone(),
-            emit_llm_trace: false,
-            writer_formats: lash_core::build_newest_writer_formats(),
-            termination: ProtocolTurnOptions::default(),
-        }
-    }
-
     fn execution_budgets(&self, _session: &SessionId) -> ExecutionBudgets {
         match self.mode {
             Mode::ShortDeadline => {
@@ -252,30 +260,107 @@ impl TurnServices for L3Services {
         }
     }
 
-    async fn sync_environment(
+    async fn machine_config(
         &self,
         _cx: &ActorContext,
-        _session: &SessionId,
-        _run: &TurnId,
-    ) -> Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure> {
-        Ok(ExecutionEnvironmentSync {
-            system_prompt: Arc::from("l3"),
-            tool_specs: Arc::new(Vec::new()),
-            projector_turn_inputs: Default::default(),
+        row: &TurnRow,
+    ) -> Result<TurnMachineConfig, TurnError> {
+        Ok(machine_config(&row.session, &row.run))
+    }
+
+    async fn start(
+        &self,
+        _cx: &ActorContext,
+        row: &TurnRow,
+    ) -> Result<Box<dyn TurnDrive>, TurnError> {
+        // The scenario admits a turn with the messages it starts from.
+        let messages: Vec<Message> = serde_json::from_str(&row.admission_json)
+            .map_err(|error| TurnError::Exec(error.to_string()))?;
+        let machine = TurnMachine::new(
+            machine_config(&row.session, &row.run),
+            messages,
+            Default::default(),
+            0,
+        );
+        Ok(self.drive(row, machine))
+    }
+
+    async fn resume(
+        &self,
+        _cx: &ActorContext,
+        row: &TurnRow,
+        machine: TurnMachine,
+    ) -> Result<Box<dyn TurnDrive>, TurnError> {
+        Ok(self.drive(row, machine))
+    }
+}
+
+impl L3Services {
+    fn drive(&self, row: &TurnRow, machine: TurnMachine) -> Box<dyn TurnDrive> {
+        Box::new(L3Drive {
+            services: self.clone(),
+            run: row.run.clone(),
+            machine,
         })
     }
 
-    async fn call_model(
-        &self,
+    fn backend(&self) -> Backend {
+        self.backend
+            .lock_recover()
+            .clone()
+            .expect("the backend is built")
+    }
+}
+
+/// One turn of the scenario: the scripted model and environment.
+struct L3Drive {
+    services: L3Services,
+    run: TurnId,
+    machine: TurnMachine,
+}
+
+#[async_trait::async_trait]
+impl TurnDrive for L3Drive {
+    fn machine(&mut self) -> &mut TurnMachine {
+        &mut self.machine
+    }
+
+    async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
+        match effect {
+            Effect::SyncExecutionEnvironment { id } => {
+                self.machine
+                    .handle_response(Response::ExecutionEnvironmentSynced {
+                        id,
+                        result: Ok(ExecutionEnvironmentSync {
+                            system_prompt: Arc::from("l3"),
+                            tool_specs: Arc::new(Vec::new()),
+                            projector_turn_inputs: Default::default(),
+                        }),
+                    });
+            }
+            Effect::Checkpoint { id, .. } => {
+                self.machine.handle_response(Response::Checkpoint {
+                    id,
+                    delivery: Default::default(),
+                });
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn model_call(
+        &mut self,
         _cx: &ActorContext,
+        id: EffectId,
         request: Arc<LlmRequest>,
         attempt: u32,
         _limit: ExecutionLimit,
-    ) -> Result<LlmResponse, LlmCallError> {
+    ) -> Result<(), TurnError> {
         let rendered = serde_json::to_string(&*request).expect("a request encodes");
         let second = rendered.contains(AGAIN_MARKER);
         let first_streaming_call = {
-            let mut seen = self.seen.lock_recover();
+            let mut seen = self.services.seen.lock_recover();
             let after_cancel = seen.cancel_requested;
             seen.calls.push(Call {
                 second,
@@ -284,23 +369,18 @@ impl TurnServices for L3Services {
                 after_cancel,
             });
             let cancels = matches!(
-                self.mode,
+                self.services.mode,
                 Mode::CancelWhileStreaming | Mode::AfterStepWhileStreaming
             );
             cancels && !after_cancel
         };
         if first_streaming_call {
-            let mode = match self.mode {
+            let mode = match self.services.mode {
                 Mode::AfterStepWhileStreaming => TurnCancelMode::AfterStep,
                 _ => TurnCancelMode::Immediate,
             };
-            let backend = self
-                .backend
-                .lock_recover()
-                .clone()
-                .expect("the backend is built");
             let answer = request_turn_cancel(
-                &backend,
+                &self.services.backend(),
                 TurnCancelRequest {
                     session: session(),
                     run: run(),
@@ -313,7 +393,7 @@ impl TurnServices for L3Services {
             )
             .await;
             if answer.is_ok() {
-                let mut seen = self.seen.lock_recover();
+                let mut seen = self.services.seen.lock_recover();
                 seen.cancel_requested = true;
                 seen.cancel_requests += 1;
             }
@@ -324,69 +404,84 @@ impl TurnServices for L3Services {
             // Outlive at least one wake of the owner's cancel watch before
             // answering: an after-step request must not stop the call.
             tokio::time::sleep(Duration::from_millis(50)).await;
-            self.seen.lock_recover().answered_after_request += 1;
-            return Ok(LlmResponse {
+            self.services.seen.lock_recover().answered_after_request += 1;
+        }
+        let text = if second { "done" } else { AGAIN };
+        self.machine.handle_response(Response::LlmComplete {
+            id,
+            result: Ok(LlmResponse {
                 parts: vec![LlmOutputPart::Text {
-                    text: AGAIN.to_owned(),
+                    text: text.to_owned(),
                     response_meta: None,
                 }],
                 response_metadata: Default::default(),
                 ..LlmResponse::default()
-            });
-        }
-        let text = if second { "done" } else { AGAIN };
-        Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: text.to_owned(),
-                response_meta: None,
-            }],
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        })
+            }),
+            text_streamed: false,
+        });
+        Ok(())
     }
 
-    async fn restart_live_stream(
-        &self,
-        _cx: &ActorContext,
-        _session: &SessionId,
-    ) -> Result<(), TurnError> {
-        let next = self
-            .seen
-            .lock_recover()
-            .calls
-            .last()
-            .map_or(0, |call| call.attempt);
-        self.seen.lock_recover().restarts.push(next);
+    async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
+        let mut seen = self.services.seen.lock_recover();
+        let next = seen.calls.last().map_or(0, |call| call.attempt);
+        seen.restarts.push(next);
         Ok(())
     }
 
     async fn exec_cell(
-        &self,
+        &mut self,
         _cx: &ActorContext,
+        _id: EffectId,
         _exec: ExecKey,
-        _language: &str,
-        _code: &str,
+        _cell: CodeCell,
         _with: Vec<DomainWrite>,
-    ) -> Result<Result<ExecResponse, lash_core::ExecCodeFailure>, TurnError> {
+    ) -> Result<(), TurnError> {
         Err(TurnError::Exec("the L3 scenario runs no cell".to_owned()))
+    }
+
+    async fn finish(
+        &mut self,
+        _cx: &ActorContext,
+        done: TurnDone,
+    ) -> Result<TurnCommit, TurnError> {
+        SessionHead::load(&self.services.backend(), &session(), commit_budget())
+            .await?
+            .commit(&self.run, done)
     }
 }
 
-/// The L3 scenario on SQLite in memory, fresh for every matrix cell.
+fn commit_budget() -> lash_core::facade_support::CommitBudget {
+    lash_core::facade_support::CommitBudget::bounded(1024 * 1024, 512)
+}
+
+/// Admit the scenario's session to the catalog, at its creation head.
+async fn create_session(backend: &Backend) {
+    let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
+    lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session()).await;
+}
+
+/// The L3 scenario on one dialect, fresh for every matrix cell.
 struct L3 {
     mode: Mode,
+    dialect: Dialect,
+    postgres_url: Option<String>,
     seen: Arc<Mutex<Seen>>,
     tripwire: Arc<Tripwire>,
     backend: Arc<Mutex<Option<Backend>>>,
+    keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
 impl L3 {
-    fn new(mode: Mode) -> Self {
+    fn new(mode: Mode, dialect: Dialect, postgres_url: Option<String>) -> Self {
         Self {
             mode,
+            dialect,
+            postgres_url,
             seen: Arc::default(),
             tripwire: Arc::default(),
             backend: Arc::default(),
+            keep: Mutex::default(),
         }
     }
 }
@@ -394,11 +489,13 @@ impl L3 {
 #[async_trait::async_trait]
 impl Scenario for L3 {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
-        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-            .await
-            .expect("an in-memory store set opens");
-        let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
-        let stores: Arc<dyn StoreSet> = Arc::new(stores);
+        let (stores, database) = dialect::open(
+            self.dialect,
+            self.postgres_url.as_deref(),
+            clock,
+            &self.keep,
+        )
+        .await;
         *self.backend.lock_recover() = Some(Backend::for_testing(stores));
         database
     }
@@ -429,20 +526,23 @@ impl Scenario for L3 {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
-        let admission = TurnAdmission {
-            base_head: 0,
-            messages: vec![Message {
-                id: "l3-input".to_owned(),
-                role: MessageRole::User,
-                parts: shared_parts(vec![Part::text(
-                    "l3-input.p0".to_owned(),
-                    "think twice".to_owned(),
-                    None,
-                )]),
-                origin: None,
-                reply_marker: None,
-            }],
-        };
+        let backend = self
+            .backend
+            .lock_recover()
+            .clone()
+            .expect("the database is built first");
+        create_session(&backend).await;
+        let admission = vec![Message {
+            id: "l3-input".to_owned(),
+            role: MessageRole::User,
+            parts: shared_parts(vec![Part::text(
+                "l3-input.p0".to_owned(),
+                "think twice".to_owned(),
+                None,
+            )]),
+            origin: None,
+            reply_marker: None,
+        }];
         let inputs = AdmittedInputs {
             run: run(),
             inputs: Vec::new(),
@@ -664,10 +764,22 @@ fn matrix() -> Matrix {
         .horizon(Duration::from_secs(600))
 }
 
-async fn prove(mode: Mode, labels: &[CommitLabel]) {
-    let report = matrix().run(|| L3::new(mode)).await;
+async fn prove(mode: Mode, labels: &[CommitLabel], dialect: Dialect) {
+    let postgres_url = match dialect {
+        Dialect::Postgres => match dialect::postgres_url() {
+            Some(url) => Some(url),
+            None => {
+                eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+                return;
+            }
+        },
+        Dialect::SqliteMemory | Dialect::SqliteFile => None,
+    };
+    let report = matrix()
+        .run(|| L3::new(mode, dialect, postgres_url.clone()))
+        .await;
     eprintln!(
-        "L3 {mode:?}: {} cells over labels {:?}",
+        "L3 {mode:?} on {dialect:?}: {} cells over labels {:?}",
         report.cells.len(),
         report
             .labels()
@@ -684,37 +796,64 @@ async fn prove(mode: Mode, labels: &[CommitLabel]) {
     }
 }
 
+const PLAIN: &[CommitLabel] = &[
+    CommitLabel::TURN_ADMIT,
+    CommitLabel::MODEL_START,
+    CommitLabel::TURN_COMMIT,
+];
+const SHORT_DEADLINE: &[CommitLabel] = &[CommitLabel::MODEL_START];
+const CANCEL: &[CommitLabel] = &[CommitLabel::MODEL_START, CommitLabel::TURN_CANCEL];
+
 /// A turn of two model calls holds the re-send, atomic-progress, F1 and
 /// NR-4 laws at every commit label.
 #[tokio::test]
 async fn a_turn_of_two_model_calls_resumes_at_every_label_without_replay() {
-    prove(
-        Mode::Plain,
-        &[
-            CommitLabel::TURN_ADMIT,
-            CommitLabel::MODEL_START,
-            CommitLabel::TURN_COMMIT,
-        ],
-    )
-    .await;
+    prove(Mode::Plain, PLAIN, Dialect::SqliteMemory).await;
+}
+
+#[tokio::test]
+async fn a_turn_of_two_model_calls_resumes_at_every_label_without_replay_on_sqlite_file() {
+    prove(Mode::Plain, PLAIN, Dialect::SqliteFile).await;
+}
+
+#[tokio::test]
+async fn a_turn_of_two_model_calls_resumes_at_every_label_without_replay_on_postgres() {
+    prove(Mode::Plain, PLAIN, Dialect::Postgres).await;
 }
 
 /// L-C1: a call whose node died after pinning it is not sent again once its
 /// deadline passed; the deadline is not refreshed on resume.
 #[tokio::test]
 async fn a_model_call_whose_pinned_deadline_passed_is_never_sent_again() {
-    prove(Mode::ShortDeadline, &[CommitLabel::MODEL_START]).await;
+    prove(Mode::ShortDeadline, SHORT_DEADLINE, Dialect::SqliteMemory).await;
+}
+
+#[tokio::test]
+async fn a_model_call_whose_pinned_deadline_passed_is_never_sent_again_on_sqlite_file() {
+    prove(Mode::ShortDeadline, SHORT_DEADLINE, Dialect::SqliteFile).await;
+}
+
+#[tokio::test]
+async fn a_model_call_whose_pinned_deadline_passed_is_never_sent_again_on_postgres() {
+    prove(Mode::ShortDeadline, SHORT_DEADLINE, Dialect::Postgres).await;
 }
 
 /// A cancel requested while the model streams ends the turn `Cancelled`, at
 /// every cut, with no model call after the request.
 #[tokio::test]
 async fn a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it() {
-    prove(
-        Mode::CancelWhileStreaming,
-        &[CommitLabel::MODEL_START, CommitLabel::TURN_CANCEL],
-    )
-    .await;
+    prove(Mode::CancelWhileStreaming, CANCEL, Dialect::SqliteMemory).await;
+}
+
+#[tokio::test]
+async fn a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it_on_sqlite_file()
+{
+    prove(Mode::CancelWhileStreaming, CANCEL, Dialect::SqliteFile).await;
+}
+
+#[tokio::test]
+async fn a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it_on_postgres() {
+    prove(Mode::CancelWhileStreaming, CANCEL, Dialect::Postgres).await;
 }
 
 /// An `AfterStep` cancel requested from outside the actor while the model
@@ -722,9 +861,17 @@ async fn a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes
 /// phase boundary, before its next model call, at every cut.
 #[tokio::test]
 async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary() {
-    prove(
-        Mode::AfterStepWhileStreaming,
-        &[CommitLabel::MODEL_START, CommitLabel::TURN_CANCEL],
-    )
-    .await;
+    prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::SqliteMemory).await;
+}
+
+#[tokio::test]
+async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary_on_sqlite_file()
+ {
+    prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::SqliteFile).await;
+}
+
+#[tokio::test]
+async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary_on_postgres()
+ {
+    prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::Postgres).await;
 }

@@ -78,15 +78,6 @@ pub(crate) async fn admit_run_tx(
     } else {
         require_shift_fence_tx(tx, &request.fence).await?;
     }
-    if let Some(binding) = &request.turn_cancellation {
-        super::turn_input::check_turn_cancellation_tx(
-            tx,
-            session_id,
-            &binding.binding_id,
-            &binding.admitted_scope,
-        )
-        .await?;
-    }
     let runs = crate::session_runs::session_runs_sql();
     let existing: Option<Option<String>> = sqlx::query_scalar(runs.runs.select_admission.sql())
         .bind(session_id.as_str())
@@ -104,17 +95,6 @@ pub(crate) async fn admit_run_tx(
                 recorded: Box::new(admission.executor),
                 admitting: Box::new(request.executor.clone()),
             });
-        }
-        if prepared.is_some()
-            && let Some(binding) = &request.turn_cancellation
-        {
-            super::turn_input::bind_turn_cancellation_tx(
-                tx,
-                session_id,
-                &binding.binding_id,
-                &binding.admitted_scope,
-            )
-            .await?;
         }
         return Ok(Some(admission));
     }
@@ -206,10 +186,6 @@ pub(crate) async fn admit_run_tx(
         executor: request.executor.clone(),
         plugins: request.plugins.clone(),
         trace: Some(trace),
-        cancel_intent: Some(
-            super::turn_cancel::load_turn_cancel_intent_snapshot_tx(tx, session_id, &request.run)
-                .await?,
-        ),
         recorded_by_this_call: prepared.is_some(),
     };
     let Some(prepared) = prepared else {
@@ -225,17 +201,7 @@ pub(crate) async fn admit_run_tx(
             run: request.run.clone(),
         });
     }
-    // Revalidate the exact trace proposal before binding either the
-    // cancellation authority or admitted rows.
-    if let Some(binding) = &request.turn_cancellation {
-        super::turn_input::bind_turn_cancellation_tx(
-            tx,
-            session_id,
-            &binding.binding_id,
-            &binding.admitted_scope,
-        )
-        .await?;
-    }
+    // Revalidate the exact trace proposal before binding admitted rows.
     if let Some(inputs) = admission.inputs.as_deref() {
         bind_turn_inputs_tx(tx, now, &request.run, RUN_ADMISSION_STEP, inputs).await?;
     }

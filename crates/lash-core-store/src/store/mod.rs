@@ -181,19 +181,19 @@ pub use run::{
     CheckpointAdmissionRequest, InMemoryRunLedger, PreparedRunAdmission, RunAdmission,
     RunAdmissionAnswer, RunAdmissionRefusal, RunCommittedOutcome, RunEndOutcome, RunExecutor,
     RunStore, RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite,
-    RunTerminalWriteDecision, RunTurns, StoredRunTerminal, TurnCancellationBinding, TurnCommitId,
-    UnfinishedRun, admit_run_with_trace, decide_run_terminal_write, refused_execution_owns_run,
+    RunTerminalWriteDecision, RunTurns, StoredRunTerminal, TurnCommitId, UnfinishedRun,
+    admit_run_with_trace, decide_run_terminal_write, refused_execution_owns_run,
     run_binding_conflict,
 };
 pub use runtime_commit::{
-    AppendRequestIdentity, FrameTransition, InterruptedTurnClosure,
-    RUNTIME_COMMIT_RECEIPT_RECORD_KIND, RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit,
-    RuntimeCommitReceipt, RuntimeTurnCommitStamp, SemanticBoundaryOperation, TurnChange,
-    TurnChangeCursor, TurnChangeKind, TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome,
+    AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+    RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
+    RuntimeTurnCommitStamp, SemanticBoundaryOperation, TurnChange, TurnChangeCursor,
+    TurnChangeKind, TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome,
     TurnProjectionWatermark, TurnTraceReceipt, decode_runtime_commit_receipt,
-    decode_runtime_commit_receipt_for_fleet, ensure_supported_receipt_version,
-    ensure_supported_receipt_version_for_fleet, frames_left_by_commit,
-    validate_turn_commit_outcome_code,
+    decode_runtime_commit_receipt_for_fleet, decode_session_commit, encode_session_commit,
+    ensure_supported_receipt_version, ensure_supported_receipt_version_for_fleet,
+    frames_left_by_commit, validate_turn_commit_outcome_code,
 };
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
@@ -372,7 +372,6 @@ impl RuntimeCommit {
             command_outcomes,
             // Carried unchanged from the head; the store refuses a change.
             pending_follow_on: _,
-            interrupted_turn,
             adopted_intent_rows,
             committed_attachment_ids,
         } = self;
@@ -380,7 +379,6 @@ impl RuntimeCommit {
             ingress.is_none()
                 && applied_commands.is_none()
                 && command_outcomes.is_empty()
-                && interrupted_turn.is_none()
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
                 && outcome.is_none()
@@ -539,7 +537,6 @@ impl RuntimeCommit {
             applied_commands: None,
             command_outcomes: Default::default(),
             pending_follow_on: state.pending_follow_on.as_deref().cloned(),
-            interrupted_turn: None,
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
         })
@@ -574,24 +571,6 @@ impl RuntimeCommit {
     /// with the runtime commit.
     pub fn applying_commands(mut self, commands: crate::QueuedWorkCompletion) -> Self {
         self.applied_commands = Some(commands);
-        self
-    }
-
-    /// Closes one interrupted turn's cancellation gate with this commit, so
-    /// store implementors atomically settle the turn's undelivered
-    /// active-turn inputs. The turn and its cancellation evidence are the
-    /// settlement's; `observed_intent` is the cancel-intent snapshot the
-    /// backend compares before it publishes.
-    pub fn closing_interrupted_turn(
-        mut self,
-        settlement: crate::TurnCancelClosureSettlement,
-        observed_intent: crate::TurnCancelIntentSnapshot,
-    ) -> Self {
-        self.interrupted_turn = Some(InterruptedTurnClosure {
-            settlement,
-            observed_intent,
-            admitted_intent: None,
-        });
         self
     }
 
@@ -969,101 +948,6 @@ pub enum TurnInputAdmission {
 /// not be represented as generic queued work ([`QueuedWorkStore`]).
 #[async_trait::async_trait]
 pub trait TurnInputStore: Send + Sync {
-    /// Persist or validate the one cancellation authority selected for this
-    /// session and, for a Process or runtime-operation controller, its physical
-    /// journal scope. Session-bound turns keep their exact canonical address in
-    /// each closure authorization, so distinct turns may share this authority.
-    /// The check occurs under the current shift fence before any session work
-    /// and never replaces the original selection.
-    async fn validate_turn_cancellation_binding(
-        &self,
-        session_id: &SessionId,
-        fence: &ShiftFence,
-        binding_id: &str,
-        admitted_scope: &crate::ExecutionScope,
-    ) -> Result<(), StoreError>;
-
-    /// Authorize exact closure of one cancellation gate pair for the admitted
-    /// session and binding. The shift fence authenticates the proposal, but
-    /// its epoch does not fence final settlement.
-    /// A vacant slot accepts this value, an identical retry adopts it, and a
-    /// different occupied value or retired physical scope returns a typed refusal.
-    /// Final publication additionally requires the session-head CAS.
-    async fn authorize_turn_cancel_closure(
-        &self,
-        fence: &ShiftFence,
-        authorization: &crate::TurnCancelClosureAuthorization,
-    ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
-
-    /// Load every unconsumed closure obligation for the bound session after
-    /// validating the current shift fence, selected binding, and any
-    /// original non-session physical scope.
-    async fn pending_turn_cancel_closures(
-        &self,
-        session_id: &SessionId,
-        fence: &ShiftFence,
-        binding_id: &str,
-        admitted_scope: &crate::ExecutionScope,
-    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
-
-    /// Read `session_id`'s unconsumed closure pins for lifecycle
-    /// coordination without presenting a shift fence. This grants no right to
-    /// settle or consume them; deletion and scope-retirement owners use it
-    /// only to refuse destructive cleanup until an activation holder has
-    /// drained the pins. A store that cannot answer fails closed: callers
-    /// never infer an empty set.
-    async fn pending_turn_cancel_closure_pins(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
-
-    /// Whether this turn's final runtime commit receipt is already durable.
-    /// This closes the store-commit-to-terminal-publication window for late
-    /// cancellation requests.
-    async fn turn_is_committed(&self, address: &crate::TurnAddress) -> Result<bool, StoreError>;
-
-    /// Persist cancellation intent for one turn.
-    ///
-    /// Repeating the address returns the original request unless the incoming
-    /// one is a timing escalation of it
-    /// ([`TurnCancelRequest::escalates`](crate::TurnCancelRequest::escalates)):
-    /// same undelivered-input disposition, stronger mode. A repeat that
-    /// disagrees about the disposition is a conflict the authoritative gate
-    /// refuses, and leaves both the row and its intent revision untouched.
-    /// This row is provisional evidence until
-    /// [`Self::reconcile_turn_cancel_winner`] projects the keyed-gate winner.
-    /// If the turn's final receipt is already durable, implementations perform
-    /// no write and may return the incoming request with no outcome rather than
-    /// decode retained historical outcome payloads.
-    async fn record_turn_cancel_request(
-        &self,
-        request: crate::TurnCancelRequest,
-    ) -> Result<crate::TurnCancelRequestRecord, StoreError>;
-
-    /// Read the durable cancellation request and any accumulated repair
-    /// outcome for one turn.
-    async fn turn_cancel_request(
-        &self,
-        address: &crate::TurnAddress,
-    ) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError>;
-
-    /// Read only durable cancellation intent, without reconstructing affected
-    /// input payloads. Recovery uses this after vacuum may have reclaimed
-    /// payload tombstones belonging to an earlier repair of the same turn id.
-    async fn turn_cancel_request_intent(
-        &self,
-        address: &crate::TurnAddress,
-    ) -> Result<crate::TurnCancelIntentSnapshot, StoreError>;
-
-    /// Project the authoritative keyed-gate winner into durable request
-    /// evidence without changing arbitration authority.
-    async fn reconcile_turn_cancel_winner(
-        &self,
-        address: &crate::TurnAddress,
-        observed: &crate::TurnCancelIntentSnapshot,
-        evidence: &crate::TurnCancellationEvidence,
-    ) -> Result<bool, StoreError>;
-
     /// Persist model-visible user input into the pending turn-input
     /// lifecycle: every draft of `batch`, in one transaction, answered in
     /// request order (FIG-3842).

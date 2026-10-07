@@ -43623,7 +43623,9 @@
           "clippy_label": "//crates/lash-durable-test:turn_phases__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:turn_phases__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:vertical_crash_proof__test",
@@ -43642,8 +43644,7 @@
         "members": [
           "//crates/lash-durable-test:lash-durable-test__unit_test",
           "//crates/lash-durable-test:process_crash_proof__test",
-          "//crates/lash-durable-test:round_crash_matrix__test",
-          "//crates/lash-durable-test:turn_phases__test"
+          "//crates/lash-durable-test:round_crash_matrix__test"
         ]
       }
     },
@@ -48373,6 +48374,7 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
     "//crates/lash-durable-test:test_batch",
+    "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable:lash-durable__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
@@ -48466,6 +48468,7 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
     "//crates/lash-durable-test:test_batch",
+    "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable:lash-durable__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
@@ -48816,8 +48819,7 @@
     "//crates/lash-durable-test:test_batch": [
       "//crates/lash-durable-test:lash-durable-test__unit_test",
       "//crates/lash-durable-test:process_crash_proof__test",
-      "//crates/lash-durable-test:round_crash_matrix__test",
-      "//crates/lash-durable-test:turn_phases__test"
+      "//crates/lash-durable-test:round_crash_matrix__test"
     ],
     "//crates/lash-llm-transport:test_batch": [
       "//crates/lash-llm-transport:lash-llm-transport__unit_test",
@@ -48889,6 +48891,7 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
     "//crates/lash-durable-test:test_batch",
+    "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:vertical_crash_proof__test",
     "//crates/lash-durable:lash-durable__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
