@@ -37,6 +37,12 @@ lash_conformance::process_start_staging_tests!({
     (backend, registry, ports)
 });
 
+lash_conformance::start_operation_staging_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let law = backend.as_backend();
+    (backend, law)
+});
+
 lash_conformance::process_definition_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;

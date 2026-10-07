@@ -31,6 +31,7 @@ pub use super::session_graph_append::*;
 pub use super::session_graph_state_machine::*;
 pub use super::session_ingress::*;
 pub use super::session_store_factory::*;
+pub use super::start_operation_staging::*;
 pub use super::store_contract_state_machine::*;
 pub use super::store_maintenance_outcome::*;
 pub use super::store_recovery::*;

@@ -139,7 +139,7 @@ pub use process::{
 pub use process::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,
     ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StartStaging,
-    register_process_start, stage_process_start,
+    is_start_operation, register_process_start, stage_process_start, start_operation_journal,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{

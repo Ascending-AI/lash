@@ -72,6 +72,7 @@ mod session_graph_state_machine;
 mod session_history;
 mod session_ingress;
 mod session_mail;
+mod start_operation_staging;
 mod trace_provenance;
 pub use session_mail::{
     WakeCut, a_producer_commits_its_row_and_its_wake_together,

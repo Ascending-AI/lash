@@ -46,17 +46,24 @@ fn process_start_starter(
     registration: &crate::ProcessStartRegistration,
     execution_context: &crate::ProcessExecutionContext,
 ) -> Result<lash_sansio::EffectJournalIdentity, RuntimeEffectControllerError> {
-    let scope = match execution_context
-        .causal_invocation
-        .as_ref()
-        .map(|invocation| &invocation.subject)
-    {
-        Some(crate::RuntimeSubject::Effect { address, .. }) => address.execution_scope.clone(),
-        _ => crate::ExecutionScope::runtime_operation(ProcessCommand::start_effect_id(
-            registration.start_key.as_ref(),
-        )),
+    let journal = match (
+        execution_context
+            .causal_invocation
+            .as_ref()
+            .map(|invocation| &invocation.subject),
+        registration.start_key.as_ref(),
+    ) {
+        (Some(crate::RuntimeSubject::Effect { address, .. }), _) => {
+            address.execution_scope.journal_identity()
+        }
+        (_, Some(start_key)) => crate::runtime::start_operation_journal(start_key),
+        // Refused before staging: a start with no key stages nothing.
+        (_, None) => {
+            crate::ExecutionScope::runtime_operation(ProcessCommand::start_effect_id(None))
+                .journal_identity()
+        }
     };
-    Ok(scope.journal_identity()?)
+    Ok(journal?)
 }
 
 /// Acquire what `output` delivers into `receiver` before the receiver records

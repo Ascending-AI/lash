@@ -922,6 +922,29 @@ macro_rules! process_start_staging_tests {
     };
 }
 
+/// Register the laws of a start that is its own runtime operation (FIG-5231):
+/// its staging is held until it registers and reclaimed once it is
+/// abandoned. The fixture yields `(guard, backend)`.
+#[macro_export]
+macro_rules! start_operation_staging_tests {
+    ($fixture:block) => {
+        $crate::start_operation_staging_tests!(@catalogue $fixture; [
+            (a_trigger_start_keeps_its_staging_until_it_registers, "start-operation-keeps-staging"),
+            (an_abandoned_trigger_start_has_its_staging_reclaimed, "start-operation-abandoned"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, backend) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(backend).await;
+            }
+        )*
+    };
+}
+
 /// Register the immutable process-definition laws (ADR 0113 §3.6): no
 /// reclamation while a referrer holds a definition, eventual reclamation after
 /// the last, and exact start-by-id replay at every crash boundary. The fixture

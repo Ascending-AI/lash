@@ -58,6 +58,22 @@ lash_conformance::process_start_staging_tests!({
     (database, registry, ports)
 });
 
+lash_conformance::start_operation_staging_tests!({
+    let Some((database, storage)) = storage().await else {
+        eprintln!("skipping Postgres start-operation staging laws: database URL is not set");
+        return;
+    };
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+    ));
+    (
+        (database, attachments),
+        lash_conformance::backend_over(stores),
+    )
+});
+
 lash_conformance::process_definition_tests!({
     let Some((database, storage)) = storage().await else {
         eprintln!("skipping Postgres process-definition laws: database URL is not set");

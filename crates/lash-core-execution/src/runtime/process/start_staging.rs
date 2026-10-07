@@ -7,7 +7,9 @@
 //! here severs or moves an edge. The cleanup executor resolves the guard:
 //! onto the key's retained record once one is registered, or to nothing once
 //! the starter's journal is settled with no record. A terminal refusal before
-//! any process holds the key ends `Start(key)` at once.
+//! any process holds the key ends `Start(key)` at once. A start that is its
+//! own operation ([`start_operation_journal`]) has no journal to settle:
+//! only its registration or its abandonment decides its staging.
 //!
 //! Input attachments acquire `StartInput(key, starter)` before registration.
 //! Its guard also awaits the retained start or the starter's settled journal;
@@ -573,8 +575,44 @@ async fn abandon_start(
     {
         return Ok(());
     }
-    ports.end(ArtifactReferrer::Start(start_key)).await?;
+    ports
+        .end(ArtifactReferrer::Start(start_key.clone()))
+        .await?;
+    // A start that is its own operation has no other end for its input
+    // staging: no execution behind its starter ever settles.
+    if is_start_operation(stores.starter, &start_key) {
+        ports.end(start_input_referrer(stores, &start_key)).await?;
+    }
     Ok(())
+}
+
+/// The journal of a start that runs as its own runtime operation: a trigger
+/// delivery's start, or a local start with no causal effect (ADR 0113 §3.3).
+///
+/// No execution journals under it, so it never settles on its own: the
+/// start's staging claims are its lifecycle. Its registration carries them
+/// onto its record, and its abandonment ends them.
+///
+/// # Errors
+///
+/// The key renders no admissible operation id.
+pub fn start_operation_journal(
+    start_key: &StartKey,
+) -> Result<lash_sansio::EffectJournalIdentity, lash_sansio::EffectIdentityError> {
+    crate::ExecutionScope::runtime_operation(crate::ProcessCommand::start_effect_id(Some(
+        start_key,
+    )))
+    .journal_identity()
+}
+
+/// Whether `starter` is `start_key`'s own operation
+/// ([`start_operation_journal`]).
+#[must_use]
+pub fn is_start_operation(
+    starter: &lash_sansio::EffectJournalIdentity,
+    start_key: &StartKey,
+) -> bool {
+    start_operation_journal(start_key).is_ok_and(|journal| journal == *starter)
 }
 
 async fn stage<'a>(

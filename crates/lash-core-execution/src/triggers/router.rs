@@ -786,11 +786,8 @@ impl DeliveryStart {
         subscription: &TriggerSubscriptionRecord,
     ) -> Result<Self, PluginError> {
         let start_key = delivery_start_key(occurrence, subscription);
-        let starter = crate::ExecutionScope::runtime_operation(
-            crate::ProcessCommand::start_effect_id(Some(&start_key)),
-        )
-        .journal_identity()
-        .map_err(|error| PluginError::Session(error.to_string()))?;
+        let starter = crate::runtime::start_operation_journal(&start_key)
+            .map_err(|error| PluginError::Session(error.to_string()))?;
         Ok(Self {
             subscription: subscription.clone(),
             registration: delivery_registration(occurrence, subscription, start_key),

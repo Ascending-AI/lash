@@ -227,6 +227,7 @@ that the execution cannot resume, record or read again:
 - A process needs terminal evidence; a pruned process is settled.
 - A runtime operation needs its wait rows revoked after its commit.
 - Session deletion runs no publication and is settled.
+- A journal key this build cannot read is never settled.
 
 Wait revocation alone does not settle a turn or process execution.
 
@@ -349,6 +350,12 @@ independent durable lifetimes.
 
 A terminal refusal with no registered record arms an empty-carry `Ended`
 plan. An absent start is also ended when its starter's execution settles.
+A start that is its own runtime operation (a trigger delivery's start, or a
+local start with no causal effect) has no execution to settle: its staging
+claims wait until its registration carries them or its abandonment ends
+both `Start(key)` and its `StartInput`
+(`crates/lash-core-execution/src/runtime/process/start_staging.rs`
+`start_operation_journal`, FIG-5231).
 Because keys are global, resolving an `Ended` start reads the key again
 *after the fence* and acquires any retained record's content under that
 record before severing the start. This protects a registration racing the

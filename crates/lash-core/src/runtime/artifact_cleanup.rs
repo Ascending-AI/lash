@@ -83,7 +83,8 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
     /// No backend journals effects (ADR 0132): an execution's journal is
     /// settled once the execution ends. Until then its owner may still
     /// publish under it: a turn while its run is the session's unfinished
-    /// one, a process until its record is terminal.
+    /// one, a process until its record is terminal. A journal key this
+    /// build cannot read names an execution it cannot prove ended.
     async fn journal_replay(
         &self,
         journal: &lash_sansio::EffectJournalIdentity,
@@ -102,7 +103,12 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
                 .await
                 .map_err(|error| error.to_string())?
                 .is_some_and(|record| !record.is_terminal()),
-            _ => false,
+            Some(
+                crate::ExecutionScope::SessionOperation { .. }
+                | crate::ExecutionScope::SessionDelete { .. }
+                | crate::ExecutionScope::RuntimeOperation { .. },
+            ) => false,
+            None => true,
         };
         Ok(if running {
             JournalReplay::MayReplay
@@ -313,14 +319,14 @@ impl ArtifactCleanupRelay {
                         Some(retained) => {
                             Ok(Resolution::Carry(self.start_carries(&retained).await?))
                         }
-                        None => Ok(settled_or_not_yet(self.journal_settled(starter).await?)),
+                        None => self.unregistered_start(start_key, starter).await,
                     }
                 }
                 ReferrerGuard::StartInput { start_key, starter } => {
                     if self.hold_start_input(start_key).await? {
                         Ok(Resolution::Carry(Vec::new()))
                     } else {
-                        Ok(settled_or_not_yet(self.journal_settled(starter).await?))
+                        self.unregistered_start(start_key, starter).await
                     }
                 }
                 ReferrerGuard::SubscriptionRevision { revision, creator } => {
@@ -355,6 +361,21 @@ impl ArtifactCleanupRelay {
                 }
             },
         }
+    }
+
+    /// A start staging under `start_key` with no record yet ends when its
+    /// starter settles. A start that is its own operation has no execution
+    /// to settle: only its registration or its abandonment's `Ended`, which
+    /// replaces this guard, decides its staging (ADR 0113 §3.3).
+    async fn unregistered_start(
+        &self,
+        start_key: &StartKey,
+        starter: &lash_sansio::EffectJournalIdentity,
+    ) -> Result<Resolution, DeliveryFailure> {
+        if super::is_start_operation(starter, start_key) || !self.journal_settled(starter).await? {
+            return Ok(Resolution::NotYet);
+        }
+        Ok(Resolution::Carry(Vec::new()))
     }
 
     /// Where `session` stands for its upload and session guards.

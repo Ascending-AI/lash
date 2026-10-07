@@ -130,7 +130,7 @@ pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProces
 pub use start_staging::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,
     ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StartStaging,
-    register_process_start, stage_process_start,
+    is_start_operation, register_process_start, stage_process_start, start_operation_journal,
 };
 pub use steps::{ProcessSteps, StepAdmission, StepRefusal};
 #[cfg(any(test, feature = "testing"))]

@@ -333,7 +333,8 @@ pub use process::{ConsumerHold, SessionTurnOutcome};
 pub use process::{DeclaredStartPhase, StartCancelDecision};
 pub use process::{
     HostStartAdmission, PreparedProcessStart, ProcessStartStores, RegisteredProcessStart,
-    SessionTurnAdmission, StartStaging, register_process_start, stage_process_start,
+    SessionTurnAdmission, StartStaging, is_start_operation, register_process_start,
+    stage_process_start, start_operation_journal,
 };
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{
