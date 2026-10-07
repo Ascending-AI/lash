@@ -422,6 +422,7 @@ impl TurnServices for SimServices {
         &self,
         _cx: &ActorContext,
         row: &TurnRow,
+        _head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
         // A turn is admitted with the messages it starts from.
         let messages: Vec<Message> = serde_json::from_str(&row.admission_json)
@@ -630,11 +631,9 @@ impl TurnDrive for SimDrive {
         &mut self,
         _cx: &ActorContext,
         done: TurnDone,
+        head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
-        let backend = self.services.world.backend().map_err(TurnError::Exec)?;
-        SessionHead::load(&backend, &self.session, commit_budget())
-            .await?
-            .commit(&self.run, done)
+        head.commit(&self.run, done, commit_budget())
     }
 }
 

@@ -399,6 +399,25 @@ impl<M: TurnProtocol> TurnCheckpoint<M> {
         self.window.as_ref().map(|window| &window.pin)
     }
 
+    /// The model request the checkpoint waits on, as it names it: the
+    /// content digest of the request after its leading messages, and how
+    /// many of those are the render of the window it pins. `None` when it
+    /// waits on no model call.
+    pub fn pending_request(&self) -> Option<(&CheckpointContentRef, usize)> {
+        match &self.state {
+            CheckpointState::Waiting {
+                work:
+                    CheckpointWork::Llm {
+                        request,
+                        rendered_from_window,
+                        ..
+                    },
+                ..
+            } => Some((request, *rendered_from_window)),
+            _ => None,
+        }
+    }
+
     /// Decode a JSON checkpoint and refuse every non-current durable shape.
     pub fn from_json_slice(bytes: &[u8]) -> Result<Self, TurnCheckpointRestoreError>
     where

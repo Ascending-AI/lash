@@ -10,15 +10,22 @@
 //! its checkpoint names the window by that pin instead of holding it, and a
 //! restore reads the window again at the pinned head, however far the live
 //! head has moved since.
+//!
+//! The session actor keeps the head it loaded in its owner cache
+//! ([`HeadCache`], FIG-5207), so a turn reads its session's window from the
+//! store at most once: the start or the restore loads it, and the turn's
+//! head commit is built over the same head, never read again.
 
 use std::sync::Arc;
 
 use lash_sansio::TurnWindowPin;
 
+use lash_durable::{ActorKey, Epoch};
+
 use super::session::{TurnCommit, TurnDone, TurnError};
 use crate::runtime::{RuntimeSessionState, TurnBoundary};
 use crate::store::{SessionHeadRef, SessionStore, WindowSelector};
-use crate::{Backend, Clock, CommitBudget, SessionId, TurnId, TurnOutcome};
+use crate::{ActorContext, Backend, Clock, CommitBudget, SessionId, TurnId, TurnOutcome};
 
 /// The committed window a session's turn starts from.
 pub type TurnWindow = lash_sansio::TurnWindow<crate::ProtocolEvent>;
@@ -28,7 +35,6 @@ pub type TurnWindow = lash_sansio::TurnWindow<crate::ProtocolEvent>;
 pub struct SessionHead {
     state: RuntimeSessionState,
     fleet: crate::FleetFormat,
-    budget: CommitBudget,
     clock: Arc<dyn Clock>,
 }
 
@@ -42,24 +48,18 @@ impl std::fmt::Debug for SessionHead {
 }
 
 impl SessionHead {
-    /// `session`'s head in `backend`'s session store, whose commits a turn
-    /// writes under `budget`.
+    /// `session`'s head in `backend`'s session store.
     ///
     /// # Errors
     ///
     /// [`TurnError::Exec`] when the session is not in the store or has no
     /// head; the store's refusal.
-    pub async fn load(
-        backend: &Backend,
-        session: &SessionId,
-        budget: CommitBudget,
-    ) -> Result<Self, TurnError> {
+    pub async fn load(backend: &Backend, session: &SessionId) -> Result<Self, TurnError> {
         let store = session_store(backend, session).await?;
         let state = load_state(&store, session, WindowSelector::Current).await?;
         Ok(Self {
             state,
             fleet: store.fleet_format(),
-            budget,
             clock: backend.clock(),
         })
     }
@@ -76,13 +76,12 @@ impl SessionHead {
         &self.state
     }
 
-    /// The head's window, pinned by this head: what a turn that starts here
-    /// starts from ([`TurnMachine::in_window`](crate::TurnMachine::in_window)).
+    /// The pin of this head's window: the head itself.
     ///
     /// # Errors
     ///
     /// [`TurnError::Exec`] when the pin does not encode.
-    pub fn window(&self) -> Result<TurnWindow, TurnError> {
+    pub fn pin(&self) -> Result<TurnWindowPin, TurnError> {
         let head = SessionHeadRef {
             generation: 0,
             revision: self.state.head_revision,
@@ -92,16 +91,33 @@ impl SessionHead {
         let pin = serde_json::to_string(&head).map_err(|error| {
             TurnError::Exec(format!("the window's pin does not encode: {error}"))
         })?;
-        Ok(window_of(&self.state, TurnWindowPin::new(pin)))
+        Ok(TurnWindowPin::new(pin))
+    }
+
+    /// The head's window, pinned by this head: what a turn that starts here
+    /// starts from ([`TurnMachine::in_window`](crate::TurnMachine::in_window)).
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError::Exec`] when the pin does not encode.
+    pub fn window(&self) -> Result<TurnWindow, TurnError> {
+        Ok(window_of(&self.state, self.pin()?))
     }
 
     /// The commit of `run` that publishes `done`'s messages and outcome as
-    /// the head's next revision.
+    /// the head's next revision, written under `budget`. It replaces this
+    /// head: the store refuses it with `HeadMoved` once the head is
+    /// elsewhere.
     ///
     /// # Errors
     ///
     /// [`TurnError::Exec`] when the commit cannot be assembled.
-    pub fn commit(&self, run: &TurnId, done: TurnDone) -> Result<TurnCommit, TurnError> {
+    pub fn commit(
+        &self,
+        run: &TurnId,
+        done: TurnDone,
+        budget: CommitBudget,
+    ) -> Result<TurnCommit, TurnError> {
         let terminal = done.terminal();
         let outcome = done
             .outcome
@@ -110,7 +126,7 @@ impl SessionHead {
             self.state.clone(),
             Arc::clone(&self.clock),
             crate::ExecutionScope::turn(self.state.session_id.clone(), run.clone()),
-            self.budget,
+            budget,
         )
         .with_fleet_format(self.fleet);
         let commit = boundary
@@ -123,6 +139,85 @@ impl SessionHead {
             terminal,
             cause_json: None,
         })
+    }
+}
+
+/// The session actor's owner cache of its committed head (ADR 0132 §3),
+/// keyed by `(actor, epoch)`: the head the owner loaded for the turn it runs,
+/// which the turn's start or restore reads its window from and its head
+/// commit is built over.
+///
+/// It is never a grant. Every write still commits in a fenced transaction,
+/// and the head commit is the store's compare-and-set against this head's
+/// revision. Only the owner moves the head through its own `turn.commit`,
+/// after which the head is evicted; a pass that fails for any reason, a
+/// failed fence or a refused compare-and-set among them, evicts it too, and
+/// the next pass reloads it from rows. It is never patched.
+#[derive(Default)]
+pub struct HeadCache {
+    held: Option<CachedHead>,
+}
+
+struct CachedHead {
+    actor: ActorKey,
+    epoch: Epoch,
+    head: SessionHead,
+}
+
+impl std::fmt::Debug for HeadCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeadCache")
+            .field("head", &self.held.as_ref().map(|held| &held.head))
+            .finish()
+    }
+}
+
+impl HeadCache {
+    /// `session`'s head as `cx`'s owner loaded it, loading it when nothing
+    /// is held under `cx`'s actor and epoch.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionHead::load`]'s.
+    pub async fn head(
+        &mut self,
+        cx: &ActorContext,
+        session: &SessionId,
+    ) -> Result<&SessionHead, TurnError> {
+        let held = match self.held.take() {
+            Some(held) if held.actor == *cx.actor() && held.epoch == cx.epoch() => held,
+            _ => CachedHead {
+                actor: cx.actor().clone(),
+                epoch: cx.epoch(),
+                head: SessionHead::load(cx.backend(), session).await?,
+            },
+        };
+        Ok(&self.held.insert(held).head)
+    }
+
+    /// The committed window `pin` names in `session`: the held head's when
+    /// `pin` is the head ([`Self::head`]), else read at the pin
+    /// ([`load_window`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Self::head`]'s and [`load_window`]'s.
+    pub async fn window_at(
+        &mut self,
+        cx: &ActorContext,
+        session: &SessionId,
+        pin: &TurnWindowPin,
+    ) -> Result<TurnWindow, TurnError> {
+        let head = self.head(cx, session).await?;
+        if head.pin()? == *pin {
+            return head.window();
+        }
+        load_window(cx.backend(), session, pin).await
+    }
+
+    /// Drop the held head: the next [`Self::head`] reloads it.
+    pub fn evict(&mut self) {
+        self.held = None;
     }
 }
 

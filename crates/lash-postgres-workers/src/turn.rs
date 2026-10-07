@@ -344,18 +344,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
 /// compiled from TypeScript and run from their snapshots.
 #[derive(Clone)]
 pub struct WorkerServices {
-    backend: Backend,
     witness: Witness,
     hold: Hold,
     driver: Arc<ScriptedProtocol>,
 }
 
 impl WorkerServices {
-    /// Services over `backend` that write to `witness` and hold at `hold`.
+    /// Services that write to `witness` and hold at `hold`.
     #[must_use]
-    pub fn new(backend: Backend, witness: Witness, hold: Hold) -> Self {
+    pub fn new(witness: Witness, hold: Hold) -> Self {
         Self {
-            backend,
             witness,
             hold,
             driver: Arc::new(ScriptedProtocol),
@@ -464,6 +462,7 @@ impl TurnServices for WorkerServices {
         &self,
         _cx: &ActorContext,
         row: &TurnRow,
+        _head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
         // The turn is admitted with the messages it starts from.
         let messages: Vec<Message> = serde_json::from_str(&row.admission_json)
@@ -639,10 +638,9 @@ impl TurnDrive for WorkerDrive {
         &mut self,
         _cx: &ActorContext,
         done: TurnDone,
+        head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
-        SessionHead::load(&self.services.backend, &session(), commit_budget())
-            .await?
-            .commit(&self.run, done)
+        head.commit(&self.run, done, commit_budget())
     }
 }
 

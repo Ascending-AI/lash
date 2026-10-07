@@ -23,6 +23,10 @@
 //! - **After-step cancel:** an `AfterStep` cancel requested from outside the
 //!   actor while the model streams lets that call finish, and the turn stops
 //!   at the next phase boundary, before its next model call.
+//! - **Owner-cached head (FIG-5207):** when another writer moves the session
+//!   head while the turn runs, the head commit over the head the owner
+//!   cached is refused once, the cache is evicted, and the turn commits over
+//!   the moved head.
 
 // Test code.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -34,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::facade_support::{EffectId, Response};
-use lash_core::runtime::durable::head::SessionHead;
+use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
     AdmittedInputs, CodeCell, SessionActivation, TurnCancelRequest, TurnCommit, TurnDone,
     TurnDrive, TurnError, TurnRow, TurnServices, admit_mail, request_turn_cancel, restore_turn,
@@ -55,8 +59,8 @@ use lash_core_store::tool_run::AttemptOutcome;
 use lash_durable::domain::ExecKey;
 use lash_durable::runner::Activation;
 use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DomainWrite, DurableError, DurableStore, FormatSet,
-    LeaseConfig, MailTx,
+    ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite, DurableError, DurableStore,
+    FormatSet, LeaseConfig, MailTx,
 };
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
@@ -101,6 +105,9 @@ enum Mode {
     /// The first model call requests an `AfterStep` cancel of the turn, then
     /// answers "again", which would call the model a second time.
     AfterStepWhileStreaming,
+    /// Another writer moves the session head while the second model call
+    /// streams its first attempt.
+    HeadMovesUnderTheTurn,
 }
 
 /// The scripted protocol: an "again" answer closes the iteration and calls
@@ -204,6 +211,8 @@ struct Seen {
     /// Calls that requested the cancel, and how many of them answered.
     cancel_requests: usize,
     answered_after_request: usize,
+    /// The head revisions another writer moved the head from and to.
+    moved: Option<(u64, u64)>,
 }
 
 #[derive(Clone)]
@@ -259,9 +268,10 @@ impl TurnServices for L3Services {
                 })
                 .expect("budgets")
             }
-            Mode::Plain | Mode::CancelWhileStreaming | Mode::AfterStepWhileStreaming => {
-                ExecutionBudgets::default()
-            }
+            Mode::Plain
+            | Mode::CancelWhileStreaming
+            | Mode::AfterStepWhileStreaming
+            | Mode::HeadMovesUnderTheTurn => ExecutionBudgets::default(),
         }
     }
 
@@ -277,12 +287,11 @@ impl TurnServices for L3Services {
         &self,
         _cx: &ActorContext,
         row: &TurnRow,
+        head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
         // The turn starts from the session head's window, with the messages
         // it was admitted with.
-        let window = SessionHead::load(&self.backend(), &row.session, commit_budget())
-            .await?
-            .window()?;
+        let window = head.window()?;
         let admitted: Vec<Message> = serde_json::from_str(&row.admission_json)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
         let messages = window.then(admitted);
@@ -371,6 +380,24 @@ impl TurnDrive for L3Drive {
     ) -> Result<(), TurnError> {
         let rendered = serde_json::to_string(&*request).expect("a request encodes");
         let second = rendered.contains(AGAIN_MARKER);
+        if self.services.mode == Mode::HeadMovesUnderTheTurn && second && attempt == 1 {
+            let backend = self.services.backend();
+            let from = SessionHead::load(&backend, &session())
+                .await
+                .expect("the head loads")
+                .revision();
+            let to = move_head(
+                &backend,
+                "l3-other-writer",
+                vec![session_message(
+                    "l3-other-note",
+                    MessageRole::User,
+                    "a note another writer committed while the turn ran",
+                )],
+            )
+            .await;
+            self.services.seen.lock_recover().moved = Some((from, to));
+        }
         let first_streaming_call = {
             let mut seen = self.services.seen.lock_recover();
             let after_cancel = seen.cancel_requested;
@@ -460,10 +487,9 @@ impl TurnDrive for L3Drive {
         &mut self,
         _cx: &ActorContext,
         done: TurnDone,
+        head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
-        SessionHead::load(&self.services.backend(), &session(), commit_budget())
-            .await?
-            .commit(&self.run, done)
+        head.commit(&self.run, done, commit_budget())
     }
 }
 
@@ -696,7 +722,7 @@ impl Scenario for L3 {
         }
 
         match self.mode {
-            Mode::Plain | Mode::ShortDeadline => {
+            Mode::Plain | Mode::ShortDeadline | Mode::HeadMovesUnderTheTurn => {
                 // Atomic turn progress: one head advance, with its terminal.
                 let commits = committed(CommitLabel::TURN_COMMIT);
                 if commits != 1 {
@@ -735,6 +761,11 @@ impl Scenario for L3 {
                     ));
                 }
             }
+        }
+
+        if self.mode == Mode::HeadMovesUnderTheTurn {
+            let backend = self.backend.lock_recover().clone().expect("the backend");
+            violations.extend(head_moved_laws(&backend, &trace, &seen).await);
         }
 
         if let Some(cut) = cut {
@@ -776,7 +807,55 @@ fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
                 ));
             }
         }
-        Mode::CancelWhileStreaming | Mode::AfterStepWhileStreaming => {}
+        Mode::CancelWhileStreaming
+        | Mode::AfterStepWhileStreaming
+        | Mode::HeadMovesUnderTheTurn => {}
+    }
+    violations
+}
+
+/// FIG-5207: the turn's head commit over the head its owner cached is
+/// refused once the head moved; the owner evicts the head, reloads it, and
+/// the turn commits over the moved head. No commit over the stale head
+/// lands.
+async fn head_moved_laws(
+    backend: &Backend,
+    trace: &[lash_durable_test::Write],
+    seen: &Seen,
+) -> Vec<String> {
+    let Some((from, to)) = seen.moved else {
+        return vec!["owner cache: the head never moved under the turn".to_owned()];
+    };
+    let mut violations = Vec::new();
+    let refused: Vec<&lash_durable_test::Write> = trace
+        .iter()
+        .filter(|write| write.point.label == CommitLabel::TURN_COMMIT && !write.committed())
+        .collect();
+    let stale = refused
+        .iter()
+        .filter(|write| {
+            matches!(
+                &write.stored,
+                Stored::Refused(DurableError::Domain(DomainRefusal::HeadMoved { expected, .. }))
+                    if *expected == from
+            )
+        })
+        .count();
+    if stale != 1 || refused.len() != 1 {
+        violations.push(format!(
+            "owner cache: the head commit over the cached head {from} was refused {stale} times \
+             among {} refused head commits: {refused:?}",
+            refused.len()
+        ));
+    }
+    let head = SessionHead::load(backend, &session())
+        .await
+        .expect("the head loads")
+        .revision();
+    if head != to + 1 {
+        violations.push(format!(
+            "owner cache: the head is at {head}, not one past the moved head {to}"
+        ));
     }
     violations
 }
@@ -818,6 +897,10 @@ fn matrix() -> Matrix {
 }
 
 async fn prove(mode: Mode, labels: &[CommitLabel], dialect: Dialect) {
+    prove_on(matrix(), mode, labels, dialect).await;
+}
+
+async fn prove_on(matrix: Matrix, mode: Mode, labels: &[CommitLabel], dialect: Dialect) {
     let postgres_url = match dialect {
         Dialect::Postgres => match dialect::postgres_url() {
             Some(url) => Some(url),
@@ -828,7 +911,7 @@ async fn prove(mode: Mode, labels: &[CommitLabel], dialect: Dialect) {
         },
         Dialect::SqliteMemory | Dialect::SqliteFile => None,
     };
-    let report = matrix()
+    let report = matrix
         .run(|| L3::new(mode, dialect, postgres_url.clone()))
         .await;
     eprintln!(
@@ -941,9 +1024,9 @@ fn session_message(id: &str, role: MessageRole, text: &str) -> Message {
 }
 
 /// Commit `messages` over the session head, as run `run` answering
-/// would: the head moves to its next revision.
-async fn move_head(backend: &Backend, run: &str, messages: Vec<Message>) {
-    let commit = SessionHead::load(backend, &session(), commit_budget())
+/// would: the head moves to its next revision, which it answers.
+async fn move_head(backend: &Backend, run: &str, messages: Vec<Message>) -> u64 {
+    let commit = SessionHead::load(backend, &session())
         .await
         .expect("the head loads")
         .commit(
@@ -956,6 +1039,7 @@ async fn move_head(backend: &Backend, run: &str, messages: Vec<Message>) {
                     text: format!("{run} answered"),
                 })),
             },
+            commit_budget(),
         )
         .expect("the head commit builds");
     let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
@@ -966,6 +1050,7 @@ async fn move_head(backend: &Backend, run: &str, messages: Vec<Message>) {
         )
         .await
         .expect("the head commit applies");
+    commit.expected_head + 1
 }
 
 /// FIG-5206: a turn's checkpoint pins the committed window the turn started
@@ -990,7 +1075,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     move_head(&backend, "l3-earlier", earlier.clone()).await;
 
     // The turn starts from the head's window and waits on its model call.
-    let head = SessionHead::load(&backend, &session(), commit_budget())
+    let head = SessionHead::load(&backend, &session())
         .await
         .expect("the head loads");
     let window = head.window().expect("the head's window");
@@ -1031,7 +1116,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         "a note committed after the turn started",
     ));
     move_head(&backend, "l3-later", later).await;
-    let moved = SessionHead::load(&backend, &session(), commit_budget())
+    let moved = SessionHead::load(&backend, &session())
         .await
         .expect("the head loads");
     assert!(
@@ -1056,6 +1141,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         &ActorContext::detached(backend.clone()),
         machine_config(&session(), &run()),
         &row,
+        &mut HeadCache::default(),
     )
     .await
     .expect("the turn restores over its pinned window");
@@ -1096,4 +1182,43 @@ async fn a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_fro
         return;
     };
     restore_after_the_head_moved(Dialect::Postgres, Some(url)).await;
+}
+
+/// FIG-5207: a head commit refused because another writer moved the head
+/// under the turn evicts the owner's cached head, and the turn reloads it
+/// and commits over the moved head, never over the stale one.
+#[tokio::test]
+async fn a_head_commit_refused_on_a_moved_head_evicts_the_cached_head_and_the_turn_commits_over_the_moved_one()
+ {
+    prove_on(
+        Matrix::new().faults(&[]),
+        Mode::HeadMovesUnderTheTurn,
+        &[],
+        Dialect::SqliteMemory,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_head_commit_refused_on_a_moved_head_evicts_the_cached_head_and_the_turn_commits_over_the_moved_one_on_sqlite_file()
+ {
+    prove_on(
+        Matrix::new().faults(&[]),
+        Mode::HeadMovesUnderTheTurn,
+        &[],
+        Dialect::SqliteFile,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_head_commit_refused_on_a_moved_head_evicts_the_cached_head_and_the_turn_commits_over_the_moved_one_on_postgres()
+ {
+    prove_on(
+        Matrix::new().faults(&[]),
+        Mode::HeadMovesUnderTheTurn,
+        &[],
+        Dialect::Postgres,
+    )
+    .await;
 }

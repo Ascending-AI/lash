@@ -1,6 +1,6 @@
 # Durable substrate against the Restate baseline, 2026-10-07
 
-**H1 passes at engine level, and H5 passes for the specified RLM cell. H2 passes as restated by FIG-5206: a cold resume costs a fresh turn plus O(current turn), and its checkpoint no longer grows with prior turns.** H5 also fails outside its scenario, once a cell keeps about 16 KiB per tool result.
+**H1 passes at engine level, and H5 passes for the specified RLM cell. H2 passes as restated by FIG-5206: a cold resume costs a fresh turn plus O(current turn), and its checkpoint no longer grows with prior turns. Since FIG-5207 a turn reads its session window from the store once, not twice.** H5 also fails outside its scenario, once a cell keeps about 16 KiB per tool result.
 
 FIG-5188 / substrate L12b. Every number here comes from a run recorded below,
 on the same machine and the same default developer build profile as L12a's
@@ -69,9 +69,19 @@ pass the gate.
   O(prompt) request (4–8 ms). A fresh turn pays the same: its start reads the
   head window (47–61 ms) and its `finish` reads it again. The model call needs
   the window, so a cold resume reads it once, as a fresh turn does; "flat in
-  prior turns" was the wrong bar for a bench that never compacts. The second
-  window read in `finish` and the repeated request hash are waste every turn
-  pays, tracked as FIG-5207.
+  prior turns" was the wrong bar for a bench that never compacts.
+  FIG-5207 removes the second window read and the repeated request hash. The
+  session actor keeps the head it loaded in its owner cache, keyed by actor
+  and epoch. The turn's start or restore reads its window from that head,
+  and its head commit is the store's compare-and-set against that head, with
+  no re-read. The model-call pin reuses the request digest the checkpoint
+  already computed. Re-run A/B on one host against main `a6cbd94a65`, claim
+  to `turn.commit` p50 at 0 / 10 / 100 / 300 prior turns drops by 8.1 / 17.4 /
+  38.6 / 72.6 ms on PostgreSQL (39.9 / 48.9 / 94.8 / 164.0 to 31.8 / 31.5 /
+  56.2 / 91.4) and by 1.9 / 4.4 / 20.1 / 54.3 ms on SQLite (8.9 / 13.3 / 43.4 /
+  115.6 to 7.0 / 8.8 / 23.3 / 61.3). At 300 prior turns on SQLite that is the
+  instrumented `finish` read (47–69 ms) plus the hash (4–8 ms). The remaining
+  slope is the one inherent window read.
 - **H7 (failover): as designed.** With the liveness lock, a turn killed with
   `kill -9` mid-model-call is detected in 259 ms and its model call is re-sent
   290 ms after the kill. Without the lock (lease only) detection takes
@@ -285,19 +295,19 @@ window, so the first / last sizes grow with the case's prior turns (0–9).
 
 ### Cold resume after prior turns (H2)
 
-Re-run by FIG-5206 on its change (see Commands); L12b's rows are quoted in
-the H2 verdict.
+Re-run by FIG-5207 on its change (see Commands); L12b's and FIG-5206's rows
+are quoted in the H2 verdict.
 
 | Store | Case | Rounds before hold | Prior turns | Samples | Checkpoint KiB (first / last) | Claim to commit p50 / max ms | Fresh boot to commit p50 / max ms | Resumed `turn.commit` p50 ms |
 |---|---|---:|---|---:|---:|---:|---:|---:|
-| PostgreSQL x1 | prior-0 | 1 | 0–4 | 5 | 3.1 / 3.2 | 41.6 / 44.2 | 87.7 / 90.0 | 12.8 |
-| PostgreSQL x1 | prior-10 | 1 | 10–14 | 5 | 3.2 / 3.2 | 46.6 / 52.6 | 91.0 / 102.9 | 13.3 |
-| PostgreSQL x1 | prior-100 | 1 | 100–104 | 5 | 3.2 / 3.2 | 92.2 / 116.9 | 138.6 / 163.3 | 15.1 |
-| PostgreSQL x1 | prior-300 | 1 | 300–304 | 5 | 3.2 / 3.2 | 161.4 / 181.7 | 206.7 / 227.2 | 12.8 |
-| SQLite file | prior-0 | 1 | 0–4 | 5 | 3.1 / 3.2 | 9.1 / 10.2 | 25.3 / 26.0 | 3.0 |
-| SQLite file | prior-10 | 1 | 10–14 | 5 | 3.2 / 3.2 | 13.6 / 17.9 | 28.7 / 33.7 | 3.4 |
-| SQLite file | prior-100 | 1 | 100–104 | 5 | 3.2 / 3.2 | 43.5 / 48.9 | 60.6 / 64.4 | 3.5 |
-| SQLite file | prior-300 | 1 | 300–304 | 5 | 3.2 / 3.2 | 117.7 / 125.2 | 133.0 / 142.2 | 4.8 |
+| PostgreSQL x1 | prior-0 | 1 | 0–4 | 5 | 3.1 / 3.2 | 31.8 / 34.3 | 75.4 / 78.0 | 12.5 |
+| PostgreSQL x1 | prior-10 | 1 | 10–14 | 5 | 3.2 / 3.2 | 31.5 / 33.1 | 74.3 / 76.6 | 11.3 |
+| PostgreSQL x1 | prior-100 | 1 | 100–104 | 5 | 3.2 / 3.2 | 56.2 / 68.6 | 98.7 / 111.6 | 15.6 |
+| PostgreSQL x1 | prior-300 | 1 | 300–304 | 5 | 3.2 / 3.2 | 91.4 / 104.3 | 134.1 / 145.8 | 12.6 |
+| SQLite file | prior-0 | 1 | 0–4 | 5 | 3.1 / 3.2 | 7.0 / 7.6 | 21.8 / 22.4 | 2.3 |
+| SQLite file | prior-10 | 1 | 10–14 | 5 | 3.2 / 3.2 | 8.8 / 9.7 | 23.0 / 23.5 | 2.6 |
+| SQLite file | prior-100 | 1 | 100–104 | 5 | 3.2 / 3.2 | 23.3 / 26.2 | 37.1 / 40.1 | 2.8 |
+| SQLite file | prior-300 | 1 | 300–304 | 5 | 3.2 / 3.2 | 61.3 / 63.2 | 75.4 / 76.9 | 4.6 |
 
 ### Processes
 
@@ -477,6 +487,35 @@ $B --store sqlite --sqlite-dir "$PWD/.kiln/FIG-5206/h2/sqlite/db-c" --case prior
 kiln gate lash fig-5206 -- python3 crates/lash-perf/src/bin/durable_substrate/bench.py --binary "$B" \
   --evidence-dir .kiln/FIG-5206/h2/pg --nodes 1 --case prior-0 --case prior-10 --case prior-100 \
   --case prior-300 -- --samples 5
+```
+
+### H2 re-run (FIG-5207)
+
+From `/workspace/kiln/lash/forks/fig-5207` after `. ./env.sh`, on the same
+host and profile, as an A/B: `B0` is origin/main `a6cbd94a65` (bench binary
+SHA-256 `d941cca1e8efd8b19c07b3a5f244e79f374de2ed2b41727d39af03e838bbe19f`)
+and `B` is FIG-5207's change on it (SHA-256
+`7d7b73109068b8c4c42fc90f8f465d8bbf1a291d190dd7cb92195f43a6ebb905`). Each
+dialect ran `B0` and then `B` back to back; the one-minute load was 1.4–1.8
+around SQLite and 1.4–3.3 around PostgreSQL. The ledger's `prior-*` records
+(resume, summary and run) were replaced by `B`'s. Evidence, `B0`'s runs
+included, is in that fork's `.kiln/FIG-5207/h2/`.
+
+```sh
+kiln build //crates/lash-perf:durable-substrate__bin --materializations final \
+  --build-report .kiln/FIG-5207/build-report.json
+cp "$(python3 tools/buck2/outputs.py --report .kiln/FIG-5207/build-report.json \
+  --label //crates/lash-perf:durable-substrate__bin --single)" "$B"
+# B0 is the same build on a checkout of a6cbd94a65; D=$PWD/.kiln/FIG-5207/h2
+"$B0" --store sqlite --sqlite-dir "$D/sqlite-base/db-c" --case prior-0 --case prior-10 \
+  --case prior-100 --case prior-300 --samples 5 --out "$D/sqlite-base/sqlite.jsonl"
+"$B" --store sqlite --sqlite-dir "$D/sqlite/db-c" --case prior-0 --case prior-10 \
+  --case prior-100 --case prior-300 --samples 5 --out "$D/sqlite/sqlite.jsonl"
+G="kiln gate lash fig-5207 -- python3 crates/lash-perf/src/bin/durable_substrate/bench.py"
+$G --binary "$B0" --evidence-dir .kiln/FIG-5207/h2/pg-base --nodes 1 --case prior-0 \
+  --case prior-10 --case prior-100 --case prior-300 -- --samples 5
+$G --binary "$B" --evidence-dir .kiln/FIG-5207/h2/pg --nodes 1 --case prior-0 \
+  --case prior-10 --case prior-100 --case prior-300 -- --samples 5
 ```
 
 ## Not measured, and why

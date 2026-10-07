@@ -134,11 +134,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         .map_err(|error| format!("connect the witness ledger: {error}"))?;
     let sessions = SessionActivation::new(
         backend.clone(),
-        Arc::new(WorkerServices::new(
-            backend.clone(),
-            witness.clone(),
-            config.hold,
-        )),
+        Arc::new(WorkerServices::new(witness.clone(), config.hold)),
         Arc::new(NoProbe),
     );
     let processes = ProcessActivation::new(

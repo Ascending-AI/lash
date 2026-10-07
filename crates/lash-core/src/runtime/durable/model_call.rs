@@ -7,8 +7,10 @@
 //!
 //! - **Re-send.** A turn restored in its `Model` phase re-delivers the same
 //!   call. It is sent again as the next attempt only when its request has the
-//!   pinned digest: the checkpoint the pin committed with re-yields it byte
-//!   for byte, and anything else is a broken pin, never a new call.
+//!   pinned reference: the checkpoint the pin committed with re-yields it, and
+//!   anything else is a broken pin, never a new call. The reference is the
+//!   request as the checkpoint names it (FIG-5207), so pinning and checking
+//!   it reuse the digest the checkpoint computed once.
 //! - **The deadline is never refreshed.** A re-send runs under the pinned
 //!   deadline, and one found expired settles `TimedOut { ExecutionTotal }` at
 //!   once, without sending.
@@ -23,9 +25,10 @@ use lash_durable::{DueSource, DurableInstant};
 
 use super::session::{ModelPin, TurnDrive, TurnError};
 use crate::{
-    ActorContext, EffectId, ExecutionBudgets, ExecutionLimit, FailureCode, LlmCallError,
-    LlmRequest, LlmTerminalReason, ProviderFailureKind, TurnFailureCode,
+    ActorContext, EffectId, ExecutionBudgets, ExecutionLimit, FailureCode, HostTurnProtocol,
+    LlmCallError, LlmRequest, LlmTerminalReason, ProviderFailureKind, TurnFailureCode,
 };
+use lash_sansio::TurnCheckpoint;
 
 /// version_surface = "coexist"
 /// version_guard(items(MODEL_REQUEST_PIN_DOMAIN, request_ref))
@@ -51,21 +54,32 @@ pub(super) enum ModelStart {
     },
 }
 
-/// The pinned reference of `request`: the digest of its encoding.
+/// The pinned reference of the model request `checkpoint` waits on: the
+/// digest of how the checkpoint names it, which is the window it pins, how
+/// many of the request's leading messages are that window's render, and the
+/// content digest of the rest. The window at a pin is immutable and the
+/// checkpoint already hashed the rest, so the reference costs no pass over
+/// the prompt.
 ///
 /// # Errors
 ///
-/// [`TurnError::Exec`] when the request does not encode.
-pub(super) fn request_ref(request: &LlmRequest) -> Result<String, TurnError> {
-    let bytes = serde_json::to_vec(request)
+/// [`TurnError::Exec`] when the checkpoint waits on no model call.
+pub(super) fn request_ref(
+    checkpoint: &TurnCheckpoint<HostTurnProtocol>,
+) -> Result<String, TurnError> {
+    let (request, rendered_from_window) = checkpoint.pending_request().ok_or_else(|| {
+        TurnError::Exec("the turn's checkpoint waits on no model call".to_owned())
+    })?;
+    let named = serde_json::to_vec(&(checkpoint.window_pin(), rendered_from_window, request))
         .map_err(|error| TurnError::Exec(format!("the model request does not encode: {error}")))?;
     Ok(format!(
         "b3:{}",
-        lash_core_ids::stable_hash::blake3_hex(MODEL_REQUEST_PIN_DOMAIN, &bytes)
+        lash_core_ids::stable_hash::blake3_hex(MODEL_REQUEST_PIN_DOMAIN, &named)
     ))
 }
 
-/// Decide how the call for `request` starts at the store's `now`.
+/// Decide how the call whose request has `reference` ([`request_ref`])
+/// starts at the store's `now`.
 ///
 /// `pinned` is the turn row's pin when it names this call; `turn_deadline`
 /// is the turn's own deadline, which a fresh call's deadline never outlives.
@@ -73,15 +87,14 @@ pub(super) fn request_ref(request: &LlmRequest) -> Result<String, TurnError> {
 /// # Errors
 ///
 /// [`TurnError::ModelPinBroken`] when a pinned call re-delivers a request
-/// with another digest.
+/// with another reference.
 pub(super) fn start(
     budgets: &ExecutionBudgets,
     now: DurableInstant,
     turn_deadline: Option<DurableInstant>,
     pinned: Option<ModelPin>,
-    request: &LlmRequest,
+    reference: String,
 ) -> Result<ModelStart, TurnError> {
-    let reference = request_ref(request)?;
     let now_ms = millis(now);
     match pinned {
         Some(pin) => {
@@ -204,34 +217,9 @@ fn millis(instant: DurableInstant) -> u64 {
 mod tests {
     use super::*;
 
-    fn request(text: &str) -> LlmRequest {
-        use lash_sansio::llm::types::{LlmMessage, LlmRequestScope, LlmRole, LlmToolChoice};
-        use lash_sansio::llm_profile::{
-            LlmProfileConfig, LlmProfileKey, LlmProfileMetadata, RecordedLlmProfile,
-        };
-        LlmRequest {
-            instructions: None,
-            model: LlmProfileConfig::new(RecordedLlmProfile::mint(
-                LlmProfileKey::new("model-call-fixture"),
-                LlmProfileMetadata::builder("model-a".to_string())
-                    .context_window_tokens(128_000)
-                    .capability(Default::default())
-                    .extra_body(Default::default())
-                    .request_defaults(Default::default())
-                    .build()
-                    .expect("valid profile"),
-            )),
-            messages: vec![LlmMessage::text(LlmRole::User, text)],
-            resolved_stored: Default::default(),
-            tools: std::sync::Arc::new(Vec::new()),
-            tool_choice: LlmToolChoice::Auto,
-            attachment_acceptance: Default::default(),
-            generation: Default::default(),
-            scope: LlmRequestScope::new("session", "frame", "request"),
-            output_spec: None,
-            stream_events: None,
-            provider_trace: None,
-        }
+    /// A request's reference, as [`request_ref`] names one.
+    fn reference(text: &str) -> String {
+        format!("b3:{text}")
     }
 
     fn budgets() -> ExecutionBudgets {
@@ -242,19 +230,19 @@ mod tests {
     fn a_fresh_call_pins_its_digest_and_a_deadline_clipped_to_the_turn() {
         let now = DurableInstant(10_000);
         let ModelStart::Send { pin, resent, .. } =
-            start(&budgets(), now, None, None, &request("hi")).expect("starts")
+            start(&budgets(), now, None, None, reference("hi")).expect("starts")
         else {
             panic!("a fresh call is sent");
         };
         let total = i64::try_from(budgets().model_total().as_millis()).expect("millis");
         assert_eq!(pin.attempt, 1);
         assert_eq!(pin.deadline, DurableInstant(10_000 + total));
-        assert_eq!(pin.request_ref, request_ref(&request("hi")).expect("ref"));
+        assert_eq!(pin.request_ref, reference("hi"));
         assert!(!resent);
 
         let turn_ends = DurableInstant(10_500);
         let ModelStart::Send { pin, limit, .. } =
-            start(&budgets(), now, Some(turn_ends), None, &request("hi")).expect("starts")
+            start(&budgets(), now, Some(turn_ends), None, reference("hi")).expect("starts")
         else {
             panic!("a fresh call inside its turn is sent");
         };
@@ -268,7 +256,7 @@ mod tests {
     fn a_resumed_call_keeps_its_deadline_and_an_expired_one_settles_unsent() {
         let pinned = ModelPin {
             attempt: 1,
-            request_ref: request_ref(&request("hi")).expect("ref"),
+            request_ref: reference("hi"),
             deadline: DurableInstant(20_000),
         };
         let ModelStart::Send { pin, limit, resent } = start(
@@ -276,7 +264,7 @@ mod tests {
             DurableInstant(15_000),
             None,
             Some(pinned.clone()),
-            &request("hi"),
+            reference("hi"),
         )
         .expect("starts") else {
             panic!("a pinned call inside its deadline is re-sent");
@@ -294,7 +282,7 @@ mod tests {
             DurableInstant(20_000),
             None,
             Some(pinned.clone()),
-            &request("hi"),
+            reference("hi"),
         )
         .expect("starts");
         assert_eq!(expired, ModelStart::Expired { pin: pinned });
@@ -304,7 +292,7 @@ mod tests {
     fn a_pinned_call_that_redelivers_another_request_is_a_broken_pin() {
         let pinned = ModelPin {
             attempt: 1,
-            request_ref: request_ref(&request("hi")).expect("ref"),
+            request_ref: reference("hi"),
             deadline: DurableInstant(20_000),
         };
         assert!(matches!(
@@ -313,7 +301,7 @@ mod tests {
                 DurableInstant(15_000),
                 None,
                 Some(pinned),
-                &request("something else"),
+                reference("something else"),
             ),
             Err(TurnError::ModelPinBroken { .. })
         ));

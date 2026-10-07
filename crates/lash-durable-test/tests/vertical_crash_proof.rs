@@ -307,7 +307,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
 /// snapshots.
 #[derive(Clone)]
 struct V0Services {
-    backend: Backend,
     world: Arc<ExternalWorld>,
     driver: Arc<ScriptedProtocol>,
     cells: Arc<Mutex<Vec<ExecKey>>>,
@@ -403,12 +402,11 @@ impl TurnServices for V0Services {
         &self,
         _cx: &ActorContext,
         row: &TurnRow,
+        head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
         // The turn starts from the session head's window, with the messages
         // it was admitted with.
-        let window = SessionHead::load(&self.backend, &row.session, commit_budget())
-            .await?
-            .window()?;
+        let window = head.window()?;
         let admitted: Vec<Message> = serde_json::from_str(&row.admission_json)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
         let messages = window.then(admitted);
@@ -578,10 +576,9 @@ impl TurnDrive for V0Drive {
         &mut self,
         _cx: &ActorContext,
         done: TurnDone,
+        head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
-        SessionHead::load(&self.services.backend, &session(), commit_budget())
-            .await?
-            .commit(&self.run, done)
+        head.commit(&self.run, done, commit_budget())
     }
 }
 
@@ -652,9 +649,8 @@ impl Scenario for V0 {
             .clone()
             .expect("the database is built first");
         Arc::new(SessionActivation::new(
-            backend.clone(),
+            backend,
             Arc::new(V0Services {
-                backend: backend.clone(),
                 world: Arc::clone(&self.world),
                 driver: Arc::new(ScriptedProtocol),
                 cells: Arc::clone(&self.cells),

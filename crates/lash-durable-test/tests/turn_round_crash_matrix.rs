@@ -397,12 +397,11 @@ impl TurnServices for L4Services {
         &self,
         _cx: &ActorContext,
         row: &TurnRow,
+        head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
         // The turn starts from the session head's window, with the messages
         // it was admitted with.
-        let window = SessionHead::load(&self.backend(), &row.session, commit_budget())
-            .await?
-            .window()?;
+        let window = head.window()?;
         let admitted: Vec<Message> = serde_json::from_str(&row.admission_json)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
         let messages = window.then(admitted);
@@ -554,10 +553,9 @@ impl TurnDrive for L4Drive {
         &mut self,
         _cx: &ActorContext,
         done: TurnDone,
+        head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
-        SessionHead::load(&self.services.backend(), &session(), commit_budget())
-            .await?
-            .commit(&self.run, done)
+        head.commit(&self.run, done, commit_budget())
     }
 }
 

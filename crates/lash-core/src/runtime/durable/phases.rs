@@ -4,8 +4,9 @@
 //! The runner polls the turn's machine through its [`TurnDrive`] and commits
 //! at the catalog's labels: `model.start` pins a model call before its first
 //! byte, the cell's own commits carry the turn's rows, and `turn.commit`
-//! publishes the session head's next revision with the turn's terminal in
-//! one fenced transaction. Everything between commits is in memory and is
+//! publishes the next revision of the head the owner cached with the turn's
+//! terminal in one fenced transaction, the store's compare-and-set against
+//! that head. Everything between commits is in memory and is
 //! recomputed from committed state after a crash; nothing re-executes
 //! orchestration to reach a recorded outcome.
 
@@ -13,16 +14,22 @@ use lash_durable::CommitLabel;
 use lash_durable::DomainWrite;
 use lash_durable::domain::{CellId, ExecKey, RunSeq, SessionCommitWrite, TurnWrite};
 
+use super::head::HeadCache;
 use super::session::{
     CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnPhase, TurnServices,
 };
 use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel};
-use crate::{ActorContext, Effect, SessionStreamEvent, TurnMachine};
+use crate::{ActorContext, Effect, HostTurnProtocol, SessionStreamEvent, TurnMachine};
+use lash_sansio::SavedTurn;
 
 fn encode_checkpoint(machine: &TurnMachine) -> Result<String, TurnError> {
-    serde_json::to_string(&machine.checkpoint())
+    encode_saved(&machine.checkpoint())
+}
+
+fn encode_saved(saved: &SavedTurn<HostTurnProtocol>) -> Result<String, TurnError> {
+    serde_json::to_string(saved)
         .map_err(|error| TurnError::Exec(format!("the turn checkpoint does not encode: {error}")))
 }
 
@@ -31,7 +38,8 @@ fn iteration(machine: &TurnMachine) -> u32 {
 }
 
 /// Run the turn's phases from `turn`, committing at each label, until it
-/// commits, suspends or loses ownership.
+/// commits over the head `heads` holds, suspends or loses ownership. Once
+/// `turn.commit` moved the head, `heads` no longer holds it.
 ///
 /// # Errors
 ///
@@ -40,6 +48,7 @@ pub async fn run_phases(
     cx: &ActorContext,
     services: &dyn TurnServices,
     turn: OpenTurn,
+    heads: &mut HeadCache,
 ) -> Result<PhaseExit, TurnError> {
     let OpenTurn {
         mut drive,
@@ -75,12 +84,15 @@ pub async fn run_phases(
                     Some((pinned, pin)) if pinned == current => Some(pin),
                     _ => None,
                 };
+                // The checkpoint `model.start` commits names the request by
+                // content digest; its pin reuses that digest.
+                let saved = drive.machine().checkpoint();
                 let start = model_call::start(
                     &services.execution_budgets(&session),
                     cx.durable_now().await?,
                     row.turn_deadline,
                     pinned,
-                    &request,
+                    model_call::request_ref(&saved.checkpoint)?,
                 )?;
                 if let model_call::ModelStart::Send { pin, .. } = &start {
                     let label = tool_round::model_start_label(&carry);
@@ -95,7 +107,7 @@ pub async fn run_phases(
                             attempt: pin.attempt,
                         },
                         iteration: current,
-                        checkpoint_ref: Some(encode_checkpoint(drive.machine())?),
+                        checkpoint_ref: Some(encode_saved(&saved)?),
                         model: Some(pin.clone()),
                     }));
                     cx.commit(tx, label).await?;
@@ -167,6 +179,7 @@ pub async fn run_phases(
                             protocol_iteration,
                             outcome: outcome.take(),
                         },
+                        heads.head(cx, &session).await?,
                     )
                     .await?;
                 let terminal = commit.terminal;
@@ -192,6 +205,8 @@ pub async fn run_phases(
                 // next pass marks the rest.
                 end_turn_scope(cx, &mut tx, &session, &run).await?;
                 cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
+                // The commit moved the head: the next turn loads it again.
+                heads.evict();
                 return Ok(PhaseExit::Committed(terminal));
             }
             local => {

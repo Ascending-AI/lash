@@ -365,17 +365,15 @@ fn commit_budget() -> CommitBudget {
 /// One node's turn services.
 #[derive(Clone)]
 pub struct BenchServices {
-    backend: Backend,
     recorder: Arc<Recorder>,
     scripts: Arc<Scripts>,
     driver: Arc<Protocol>,
 }
 
 impl BenchServices {
-    /// Services over `backend`, reporting to `recorder`, running `scripts`.
-    pub fn new(backend: Backend, recorder: Arc<Recorder>, scripts: Arc<Scripts>) -> Self {
+    /// Services reporting to `recorder`, running `scripts`.
+    pub fn new(recorder: Arc<Recorder>, scripts: Arc<Scripts>) -> Self {
         Self {
-            backend,
             recorder,
             scripts,
             driver: Arc::new(Protocol),
@@ -411,10 +409,9 @@ impl TurnServices for BenchServices {
         &self,
         _cx: &ActorContext,
         row: &TurnRow,
+        head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        let window = SessionHead::load(&self.backend, &row.session, commit_budget())
-            .await?
-            .window()?;
+        let window = head.window()?;
         let admitted: Vec<Message> = serde_json::from_str(&row.admission_json)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
         let messages = window.then(admitted);
@@ -611,10 +608,9 @@ impl TurnDrive for BenchDrive {
         &mut self,
         _cx: &ActorContext,
         done: TurnDone,
+        head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
-        SessionHead::load(&self.services.backend, &self.session, commit_budget())
-            .await?
-            .commit(&self.run, done)
+        head.commit(&self.run, done, commit_budget())
     }
 }
 

@@ -44,6 +44,7 @@ use lash_sansio::SavedTurn;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+use super::head::{HeadCache, SessionHead};
 use super::{phases, turn_cancel};
 use crate::{
     ActorContext, AdmittedScope, Backend, Effect, EffectId, HostTurnProtocol, InputId, LlmRequest,
@@ -88,9 +89,9 @@ pub trait TurnServices: Send + Sync {
         row: &TurnRow,
     ) -> Result<TurnMachineConfig, TurnError>;
 
-    /// Start `row`'s turn from committed state alone: the session's head and
-    /// what its admission bound. Nothing it computes is durable until the
-    /// phase runner commits.
+    /// Start `row`'s turn from committed state alone: the session's `head`,
+    /// as the owner loaded it, and what its admission bound. Nothing it
+    /// computes is durable until the phase runner commits.
     ///
     /// # Errors
     ///
@@ -99,6 +100,7 @@ pub trait TurnServices: Send + Sync {
         &self,
         cx: &ActorContext,
         row: &TurnRow,
+        head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError>;
 
     /// Take over `row`'s turn, restored from its checkpoint as `machine`,
@@ -181,14 +183,20 @@ pub trait TurnDrive: Send {
         with: Vec<DomainWrite>,
     ) -> Result<(), TurnError>;
 
-    /// The turn's commit to its session once its machine is done: the session
-    /// head's next revision, which `turn.commit` publishes with the turn's
-    /// terminal.
+    /// The turn's commit to its session once its machine is done: the next
+    /// revision of `head`, the session's head as the owner loaded it, which
+    /// `turn.commit` publishes with the turn's terminal. The store refuses
+    /// it once the head is elsewhere.
     ///
     /// # Errors
     ///
     /// [`TurnError`] when the commit cannot be built.
-    async fn finish(&mut self, cx: &ActorContext, done: TurnDone) -> Result<TurnCommit, TurnError>;
+    async fn finish(
+        &mut self,
+        cx: &ActorContext,
+        done: TurnDone,
+        head: &SessionHead,
+    ) -> Result<TurnCommit, TurnError>;
 }
 
 /// A code cell's source.
@@ -280,13 +288,15 @@ impl SessionActivation {
     }
 
     /// One pass over the session's rows: admit a turn from its mail, run an
-    /// unfinished turn to its commit, or, with nothing to do, stay hot
-    /// ([`Pass::Idle`]) or release the actor when `release`.
+    /// unfinished turn to its commit over the head `heads` holds, or, with
+    /// nothing to do, stay hot ([`Pass::Idle`]) or release the actor when
+    /// `release`.
     async fn pass(
         &self,
         cx: &ActorContext,
         session: &SessionId,
         release: bool,
+        heads: &mut HeadCache,
     ) -> Result<Pass, TurnError> {
         // A turn's scope whose cascade a crash cut short is marked to its end
         // before anything else (L6b).
@@ -388,7 +398,7 @@ impl SessionActivation {
                     machine,
                     pending,
                     row,
-                } = restore_turn(cx, config, &row).await?;
+                } = restore_turn(cx, config, &row, heads).await?;
                 let drive = self.services.resume(cx, &row, machine).await?;
                 OpenTurn {
                     drive,
@@ -396,13 +406,16 @@ impl SessionActivation {
                     row,
                 }
             }
-            None => OpenTurn {
-                drive: self.services.start(cx, &row).await?,
-                pending: None,
-                row,
-            },
+            None => {
+                let head = heads.head(cx, session).await?;
+                OpenTurn {
+                    drive: self.services.start(cx, &row, head).await?,
+                    pending: None,
+                    row,
+                }
+            }
         };
-        match phases::run_phases(cx, self.services.as_ref(), turn).await? {
+        match phases::run_phases(cx, self.services.as_ref(), turn, heads).await? {
             PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),
             PhaseExit::Lost => Ok(Pass::Lost),
             PhaseExit::Suspended { due } => {
@@ -481,11 +494,13 @@ impl Activation for SessionActivation {
         // reading its mailbox at every hint or poll, then releases it.
         let idle_evict = self.backend.config().settings().idle_evict;
         let mut idle_since = None;
+        // The owner cache of the session's head, for this claim's epoch.
+        let mut heads = HeadCache::default();
         loop {
             let release = idle_since.is_some_and(|since: std::time::Instant| {
                 owned.clock().now().saturating_duration_since(since) >= idle_evict
             });
-            match self.pass(&cx, &session, release).await {
+            match self.pass(&cx, &session, release, &mut heads).await {
                 Ok(Pass::Again) => idle_since = None,
                 Ok(Pass::Idle) => {
                     idle_since.get_or_insert_with(|| owned.clock().now());
@@ -494,9 +509,11 @@ impl Activation for SessionActivation {
                 Ok(Pass::Released | Pass::Lost)
                 | Err(TurnError::Durable(DurableError::OwnershipLost(_))) => return,
                 // Anything else did not commit, or committed with its answer
-                // lost: the next pass reloads the rows and carries on from
-                // them. A lost epoch shows at its fenced read.
+                // lost: the next pass reloads the rows, the head among them,
+                // and carries on from them. A lost epoch shows at its fenced
+                // read.
                 Err(error) => {
+                    heads.evict();
                     tracing::debug!(%error, "session activation pass failed; reloading");
                     owned.wait_for_mail().await;
                 }
@@ -676,9 +693,11 @@ fn session_of(cx: &ActorContext) -> SessionId {
 }
 
 /// Restore `row`'s turn under `config`: exactly one
-/// `restore_from_checkpoint`, over the committed window its checkpoint pins
-/// read back from the session store, reported to the context's probe, and
-/// the effect it re-delivers.
+/// `restore_from_checkpoint`, over the committed window its checkpoint pins,
+/// reported to the context's probe, and the effect it re-delivers. The
+/// window is the head `heads` holds when the checkpoint pins that head, and
+/// is read back from the session store at the pin only when the head has
+/// moved past it.
 ///
 /// # Errors
 ///
@@ -687,6 +706,7 @@ pub async fn restore_turn(
     cx: &ActorContext,
     config: TurnMachineConfig,
     row: &TurnRow,
+    heads: &mut HeadCache,
 ) -> Result<RestoredTurn, TurnRestoreError> {
     let stored = row
         .checkpoint_ref
@@ -699,7 +719,8 @@ pub async fn restore_turn(
         })?;
     let window = match saved.checkpoint.window_pin() {
         Some(pin) => Some(
-            super::head::load_window(cx.backend(), &row.session, pin)
+            heads
+                .window_at(cx, &row.session, pin)
                 .await
                 .map_err(|source| TurnRestoreError::Window {
                     run: row.run.clone(),
