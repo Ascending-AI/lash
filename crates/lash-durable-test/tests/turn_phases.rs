@@ -45,9 +45,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CodeCell, OpenTurn, SessionActivation, SessionParkReason, TurnCancelRequest,
-    TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
-    UnfinishedPhase, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, OpenTurn, SessionActivation, SessionParkReason,
+    TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow,
+    TurnServices, UnfinishedPhase, request_turn_cancel,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -490,7 +490,7 @@ impl TurnDrive for L3Drive {
         _cx: &ActorContext,
         _id: EffectId,
         _cell: CodeCell,
-    ) -> Result<(), TurnError> {
+    ) -> Result<CellExit, TurnError> {
         Err(TurnError::Exec("the L3 scenario runs no cell".to_owned()))
     }
 

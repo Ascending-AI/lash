@@ -16,8 +16,8 @@ use lash_core::facade_support::{CommitBudget, EffectId, Response};
 use lash_core::llm::types::LlmContentBlock;
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CodeCell, OpenTurn, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
-    TurnRow, TurnServices,
+    AdmittedInputs, CellExit, CodeCell, OpenTurn, TurnCommit, TurnDone, TurnDrive, TurnError,
+    TurnRestore, TurnRow, TurnServices,
 };
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
@@ -565,7 +565,7 @@ impl TurnDrive for BenchDrive {
         _cx: &ActorContext,
         _id: EffectId,
         _cell: CodeCell,
-    ) -> Result<(), TurnError> {
+    ) -> Result<CellExit, TurnError> {
         // The scripted protocol starts no cell: a cell session runs behind
         // the facade.
         Err(TurnError::Exec(format!(

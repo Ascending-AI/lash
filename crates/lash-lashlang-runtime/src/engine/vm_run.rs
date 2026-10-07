@@ -375,7 +375,7 @@ impl lash_vm_broker::SnapshotStore for HeldQuietPoints {
         &self,
         point: lash_vm_broker::QuietPoint,
     ) -> Result<lash_vm_broker::Committed, lash_vm_broker::QuietPointRefusal> {
-        if point.admit.is_some() || !point.waits.is_empty() || !point.with.is_empty() {
+        if !point.members.is_empty() || !point.waits.is_empty() || !point.with.is_empty() {
             return Err(lash_vm_broker::QuietPointRefusal(
                 "a vm_run's quiet point admits nothing".to_owned(),
             ));
@@ -387,20 +387,10 @@ impl lash_vm_broker::SnapshotStore for HeldQuietPoints {
         })
     }
 
-    async fn settle(
-        &self,
-        operation: lash_vm_broker::OperationId,
-        _performed: &lash_vm_broker::Performed,
-    ) -> Result<(), lash_vm_broker::QuietPointRefusal> {
-        Err(lash_vm_broker::QuietPointRefusal(format!(
-            "a vm_run admitted no operation {operation:?} to settle"
-        )))
-    }
-
     async fn recover(
         &self,
         _pending: &lash_vm_broker::PendingOperation,
-    ) -> Result<lash_vm_broker::Recovered, lash_vm_broker::QuietPointRefusal> {
+    ) -> Result<Vec<lash_vm_broker::WaitRef>, lash_vm_broker::QuietPointRefusal> {
         Err(lash_vm_broker::QuietPointRefusal(
             "a vm_run resumes from its engine state, never from a broker checkpoint".to_owned(),
         ))
@@ -431,7 +421,7 @@ struct NoAdmissions;
 impl crate::OperationAdmissions for NoAdmissions {
     async fn admission(
         &self,
-        _call: &lash_sansio::ToolCallId,
+        _ordinal: u64,
         _request: &lash_vm_broker::OperationRequest,
     ) -> Result<lash_vm_broker::Admission, String> {
         Ok(lash_vm_broker::Admission::default())

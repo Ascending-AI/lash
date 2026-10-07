@@ -8,8 +8,8 @@
 //! The cell's quiet points are committed to `lash_exec_snapshots` and
 //! `lash_run_records` on SQLite in memory, so the activation that runs it
 //! again resumes from the last one: compute before any operation runs again
-//! from the start, and the outcome lost in delivery is fed back by identity,
-//! never dispatched a second time.
+//! from the start, and the outcome lost in delivery is answered again from
+//! the call's committed outcome, never dispatched a second time.
 
 use super::*;
 use lash_core_execution::{
@@ -56,27 +56,80 @@ impl Phase {
     }
 }
 
-/// The parent: `tools.echo` is a `Once` tool whose body answers a fixed
-/// value and counts itself.
+/// The member bodies: `tools.echo` answers a fixed value and counts itself.
+struct EchoBodies {
+    dispatches: Arc<Mutex<Vec<ToolCallId>>>,
+}
+
+impl lash_core_execution::runtime::actor::round::lifecycle::MemberBodies for EchoBodies {
+    fn body(
+        &self,
+        execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> lash_core_execution::runtime::actor::round::lifecycle::MemberBody {
+        use lash_core_execution::tool_run::{MaterialOwner, MaterialRole};
+        let dispatches = Arc::clone(&self.dispatches);
+        let call = execution.call().clone();
+        Box::new(move |_| {
+            Box::pin(async move {
+                dispatches.lock().expect("dispatches").push(call);
+                let text = serde_json::json!({"value": 7, "dispatch": 1}).to_string();
+                lash_core_execution::runtime::actor::round::SettledOutput::Completed(
+                    lash_core_execution::runtime::actor::round::Material::journal_local(
+                        MaterialOwner::Run {
+                            opener: EffectOpener::turn(SESSION, TURN),
+                        },
+                        MaterialRole::AttemptOutput,
+                        text,
+                    ),
+                )
+                .into()
+            })
+        })
+    }
+
+    fn resolved(
+        &self,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _parked: &lash_core_execution::runtime::actor::round::Material<
+            lash_core_execution::tool_run::CompletionSource,
+        >,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
+        unreachable!("echo never parks")
+    }
+}
+
+/// The parent: `tools.echo` is one `Once` member, answered from its
+/// committed outcome alone.
 struct Parent {
     context: AdmittedContext,
-    dispatches: Mutex<Vec<ToolCallId>>,
+    store: Arc<DurableSnapshotStore>,
+    dispatches: Arc<Mutex<Vec<ToolCallId>>>,
     checkpoints: Mutex<Vec<u64>>,
 }
 
 #[async_trait::async_trait]
 impl ParentEffects for Parent {
     async fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
+        let now = self
+            .store
+            .context()
+            .durable_now()
+            .await
+            .map_err(|error| ParentFault(error.to_string()))?;
         Ok(Admission {
-            draft: matches!(operation.kind, AdmittedKind::Invoke(_)).then(|| {
-                lash_vm_broker::testing::operation_draft(
-                    &self.context,
-                    operation,
-                    "echo",
-                    lash_sansio::ExecutionPolicy::Once,
-                    0,
-                )
-            }),
+            members: matches!(operation.kind, AdmittedKind::Invoke(_))
+                .then(|| {
+                    lash_vm_broker::testing::member_draft(
+                        &self.context,
+                        operation,
+                        "echo",
+                        lash_sansio::ExecutionPolicy::Once,
+                        u64::try_from(now.0).expect("a time after the epoch"),
+                    )
+                })
+                .into_iter()
+                .collect(),
             waits: Vec::new(),
         })
     }
@@ -87,12 +140,21 @@ impl ParentEffects for Parent {
         _waits: &[(WaitRef, Option<PinnedKey>)],
     ) -> Result<Performed, ParentFault> {
         let value = match &operation.kind {
-            AdmittedKind::Invoke(call) => {
-                self.dispatches
-                    .lock()
-                    .expect("dispatches")
-                    .push(call.call_id.clone());
-                lashlang::from_json(serde_json::json!({"value": 7, "dispatch": 1}))
+            AdmittedKind::Invoke(_) => {
+                let driven = self
+                    .store
+                    .drive(operation.run, &CancellationToken::new(), &mut |ends, _| {
+                        ends.first()
+                            .and_then(|end| end.settled.clone())
+                            .map_or(Decide::Wait { until: None }, Decide::Answer)
+                    })
+                    .await
+                    .map_err(|refusal| ParentFault(refusal.0))?;
+                let Driven::Answered(settled) = driven else {
+                    return Err(ParentFault("echo waits on nothing".into()));
+                };
+                let text = settled.output.payload().expect("echo answers a value");
+                lashlang::from_json(serde_json::from_str(text).expect("echo's value"))
             }
             AdmittedKind::Control { payload, .. } => {
                 let OperationRequest::Finish(value) =
@@ -109,10 +171,6 @@ impl ParentEffects for Parent {
         ))))
     }
 
-    fn interrupted(&self, operation: &AdmittedOperation) -> EffectOutcome {
-        panic!("no operation is interrupted: {operation:?}")
-    }
-
     async fn observe_cancellation(&self, checkpoint: u64) -> Result<bool, ParentFault> {
         assert!(checkpoint > 0, "guest instructions have executed");
         self.checkpoints
@@ -123,7 +181,6 @@ impl ParentEffects for Parent {
     }
 }
 
-/// The cell's session actor, claimed on a SQLite memory store set.
 async fn claimed_session() -> ActorContext {
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
@@ -193,7 +250,19 @@ async fn law(phase: Phase) {
     first.release().expect("initial reset");
 
     let cx = claimed_session().await;
-    let store = DurableSnapshotStore::new(&cx, exec());
+    let store = Arc::new(DurableSnapshotStore::new(&cx, exec()));
+    let dispatches = Arc::new(Mutex::new(Vec::new()));
+    store
+        .bind_members(
+            Arc::new(EchoBodies {
+                dispatches: Arc::clone(&dispatches),
+            }),
+            lash_core_execution::runtime::actor::round::PolicyView::new([(
+                lash_sansio::ToolId::new("echo"),
+                lash_sansio::ExecutionPolicy::Once,
+            )]),
+        )
+        .await;
     let context = AdmittedContext {
         owner: VmOwner::new("native-oom"),
         owner_epoch: OwnerEpoch(1),
@@ -212,7 +281,8 @@ async fn law(phase: Phase) {
     };
     let parent = Parent {
         context: context.clone(),
-        dispatches: Mutex::default(),
+        store: Arc::clone(&store),
+        dispatches,
         checkpoints: Mutex::default(),
     };
     let budget = ExecutionBudget::default();
@@ -237,7 +307,7 @@ async fn law(phase: Phase) {
         Broker {
             context: &context,
             effects: &parent,
-            checkpoints: &store,
+            checkpoints: &*store,
             slots: &slots,
             codec: FrameCodec::new(pool.config().protocol.decode),
             contract: lashlang::vm_contract_reads(),
@@ -325,7 +395,7 @@ async fn law(phase: Phase) {
     assert_eq!(
         *parent.dispatches.lock().expect("dispatches"),
         dispatched,
-        "the outcome lost in delivery is fed back by identity, never dispatched again"
+        "the outcome lost in delivery is answered again from its committed outcome, never dispatched again"
     );
     let stats = pool.stats();
     assert_eq!(

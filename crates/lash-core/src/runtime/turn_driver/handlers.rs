@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::durable::session::CellExit;
 use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 
 impl RuntimeTurnDriver<'_> {
@@ -205,12 +206,6 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
         let protocol_iteration = machine.protocol_iteration();
-        if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
-            // The opener's end precedes the turn's terminal checkpoint, so
-            // the facts its losers' settlements carry are delivered and
-            // committed with the turn (ADR 0099 §7 step 2).
-            Box::pin(self.finish_tool_run_before_completion()).await?;
-        }
         let result = self
             .invoke_turn_checkpoint_effect(machine, id, checkpoint, event_tx)
             .await;
@@ -349,7 +344,7 @@ impl RuntimeTurnDriver<'_> {
         language: String,
         code: String,
         event_tx: &TurnObserver,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<CellExit, RuntimeError> {
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
         let iteration = machine.protocol_iteration();
         if self.trace.is_observed() {
@@ -392,7 +387,7 @@ impl RuntimeTurnDriver<'_> {
                     },
                 );
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
-                return Ok(());
+                return Ok(CellExit::Answered);
             }
         };
         let graph_key = Some(foreground_effect_graph_key(&invocation));
@@ -463,16 +458,27 @@ impl RuntimeTurnDriver<'_> {
                     return Err(err.into_runtime_error());
                 }
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
-                return Ok(());
+                return Ok(CellExit::Answered);
             }
         };
-        // A turn on the session actor takes no segment boundary: a cell that
-        // stopped at one inside itself has no successor to hand its wait to.
+        // A cell whose calls wait only on rows (a parked call, a retry's due
+        // time, a timer) stopped on its committed snapshot: it has no answer
+        // yet, and the turn suspends until the earliest due. Its in-memory
+        // run is discarded; the activation that resumes the turn resumes the
+        // cell from that snapshot.
         if result.as_ref().is_ok_and(|output| output.suspended) {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::ExecutionStateCaptureFailed,
-                "a code cell stopped at a segment boundary in a turn that takes none",
-            ));
+            if let Some(code_executor) = self.session.plugins().code_executor() {
+                code_executor
+                    .settle_code_execution(crate::plugin::CodeExecutionOutcome::Discarded)
+                    .await
+                    .map_err(|error| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::ExecutionStateCaptureFailed,
+                            error.to_string(),
+                        )
+                    })?;
+            }
+            return Ok(CellExit::Suspended);
         }
         let cell_duration_ms = self
             .host
@@ -607,7 +613,7 @@ impl RuntimeTurnDriver<'_> {
                 })?;
         }
         self.handle_machine_response(machine, Response::ExecResult { id, result })?;
-        Ok(())
+        Ok(CellExit::Answered)
     }
 }
 

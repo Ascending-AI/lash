@@ -1,14 +1,12 @@
 //! An in-memory snapshot store that counts what it commits.
 
-use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use lash_vm_protocol::FrameEpoch;
 
-use crate::effects::Performed;
 use crate::ledger::{Checkpoint, QuietPointRefusal};
 use crate::snapshot::{
-    Committed, OperationId, PendingOperation, QuietPoint, Recovered, SnapshotStore,
+    Committed, OpenMember, OperationId, PendingOperation, QuietPoint, SnapshotStore,
 };
 use lash_durable::domain::SnapshotRev;
 
@@ -16,13 +14,13 @@ struct Held {
     latest: Option<Checkpoint>,
     frame_epoch: FrameEpoch,
     commits: Vec<QuietPoint>,
-    settled: BTreeMap<OperationId, Performed>,
 }
 
 /// One execution's snapshots, in memory. It refuses a checkpoint of a frame
 /// other than the one it was opened to, as a durable store's fenced write
-/// does. An admitted operation takes ordinal 1 of its run; a restore feeds
-/// back its settled outcome, and reruns one that never settled.
+/// does. An admitted operation's members take ordinals 1, 2, ... of its run,
+/// as a durable admission's first starts do; a restore performs the
+/// operation again, with no waits pinned.
 pub struct MemoryCheckpoints {
     held: Mutex<Held>,
 }
@@ -34,7 +32,6 @@ impl Default for MemoryCheckpoints {
                 latest: None,
                 frame_epoch: FrameEpoch(0),
                 commits: Vec::new(),
-                settled: BTreeMap::new(),
             }),
         }
     }
@@ -51,11 +48,6 @@ impl MemoryCheckpoints {
     pub fn commits(&self) -> Vec<QuietPoint> {
         self.held().commits.clone()
     }
-
-    /// Every outcome settled, by identity.
-    pub fn settled(&self) -> BTreeMap<OperationId, Performed> {
-        self.held().settled.clone()
-    }
 }
 
 #[async_trait::async_trait]
@@ -70,17 +62,25 @@ impl SnapshotStore for MemoryCheckpoints {
                 held.frame_epoch
             )));
         }
-        if let Some(draft) = &point.admit {
+        if !point.members.is_empty() {
             let ledger = &mut point.checkpoint.ledger;
             let pending = ledger.pending.as_mut().ok_or_else(|| {
                 QuietPointRefusal("an admission needs the operation the VM stands on".into())
             })?;
-            let operation = OperationId {
-                run: pending.run(),
-                ordinal: 1,
-            };
-            pending.admission = crate::snapshot::OperationAdmission::Execution(operation);
-            ledger.operations.insert(operation, draft.call().clone());
+            for (ordinal, member) in (1_u64..).zip(&point.members) {
+                let operation = OperationId {
+                    run: pending.run,
+                    ordinal,
+                };
+                pending.members.push(operation);
+                ledger.operations.insert(
+                    operation,
+                    OpenMember {
+                        call: member.draft.call().clone(),
+                        request: member.request.clone(),
+                    },
+                );
+            }
         }
         held.latest = Some(point.checkpoint.clone());
         held.commits.push(point.clone());
@@ -91,32 +91,11 @@ impl SnapshotStore for MemoryCheckpoints {
         })
     }
 
-    async fn settle(
+    async fn recover(
         &self,
-        operation: OperationId,
-        performed: &Performed,
-    ) -> Result<(), QuietPointRefusal> {
-        let mut held = self.held();
-        if held.settled.contains_key(&operation) {
-            return Err(QuietPointRefusal(format!(
-                "operation {operation:?} already has an outcome"
-            )));
-        }
-        held.settled.insert(operation, performed.clone());
-        Ok(())
-    }
-
-    async fn recover(&self, pending: &PendingOperation) -> Result<Recovered, QuietPointRefusal> {
-        let held = self.held();
-        Ok(
-            match pending
-                .operation()
-                .and_then(|operation| held.settled.get(&operation))
-            {
-                Some(performed) => Recovered::Settled(performed.clone()),
-                None => Recovered::Rerun { waits: Vec::new() },
-            },
-        )
+        _pending: &PendingOperation,
+    ) -> Result<Vec<crate::WaitRef>, QuietPointRefusal> {
+        Ok(Vec::new())
     }
 
     async fn latest(&self) -> Result<Option<(SnapshotRev, Checkpoint)>, QuietPointRefusal> {

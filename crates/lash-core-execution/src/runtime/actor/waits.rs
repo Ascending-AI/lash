@@ -411,6 +411,25 @@ pub async fn poll(
     }
 }
 
+/// When `wait` is due: a timer's deadline, or the deadline any other wait
+/// times out at; `None` for a wait with none.
+///
+/// # Errors
+///
+/// A store failure, or a wait that is not stored.
+pub async fn deadline(
+    cx: &ActorContext,
+    wait: &WaitRef,
+) -> Result<Option<DurableInstant>, DurableError> {
+    let row = cx
+        .backend()
+        .durable()
+        .wait(&wait.id())
+        .await?
+        .ok_or_else(|| corrupt(&format!("wait {} is not stored", wait.id())))?;
+    Ok(row.purpose.deadline())
+}
+
 /// What one look at a race's waits found.
 enum Look {
     /// The race is decided.

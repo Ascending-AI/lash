@@ -192,6 +192,9 @@ pub struct Lifecycle {
     policies: PolicyView,
     bodies: Arc<dyn MemberBodies>,
     outcome_label: CommitLabel,
+    /// The label the outcomes it settles without a body (an interrupted
+    /// start, a cancel, a timeout) commit under.
+    settlement_label: CommitLabel,
     /// Members of runs before this one are cancelled.
     cancelled_before: RunSeq,
     /// Each run's member cancel, handed to its running bodies.
@@ -225,6 +228,7 @@ impl Lifecycle {
             policies,
             bodies,
             outcome_label,
+            settlement_label: outcome_label,
             cancelled_before: RunSeq(0),
             tokens: BTreeMap::new(),
             fresh: BTreeSet::new(),
@@ -234,6 +238,14 @@ impl Lifecycle {
             batch_opened: None,
             checked: HashSet::new(),
         }
+    }
+
+    /// This lifecycle committing the outcomes it settles without a body
+    /// under `label`: a cell's are injected into it (`cell.inject`).
+    #[must_use]
+    pub fn with_settlement_label(mut self, label: CommitLabel) -> Self {
+        self.settlement_label = label;
+        self
     }
 
     /// `members` were admitted by this activation's own commit, which
@@ -463,7 +475,7 @@ impl Lifecycle {
             for (execution, outcome) in settlements {
                 settle(&mut tx, &execution, outcome, Vec::new())?;
             }
-            return Ok(Some(self.commit(tx, self.outcome_label).await?));
+            return Ok(Some(self.commit(tx, self.settlement_label).await?));
         }
         if !due_starts.is_empty() {
             let mut tx = self.cx.begin().await?;

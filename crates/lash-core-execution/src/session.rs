@@ -20,7 +20,6 @@ mod process_handles;
 mod settlement_incorporation;
 mod tool_attempt;
 pub(crate) mod tool_execution;
-pub(crate) mod tool_run;
 
 pub use execution_context::RuntimeExecutionContext;
 pub use execution_context::resolve_trigger_owner_scope;
@@ -30,14 +29,10 @@ pub(crate) use execution_context::{
     attach_process_invocation_correlation, attach_process_lineage,
     clear_process_invocation_correlation, execution_claim_of, process_lineage_of,
 };
-pub use opener_run::{OpenerRunRegistry, OpenerState};
+pub use opener_run::OpenerState;
 pub use settlement_incorporation::{Incorporated, IncorporationLedger, SettlementSource};
 /// Runtime tool invocation requests and their collected replies.
-pub use tool_execution::{
-    CompletedProtocolToolCall, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
-    ToolAggregateOutcome, ToolAggregateRequest, ToolBatchReplies, ToolInvocation,
-    ToolInvocationReply, ToolRunAggregateCursor, ToolRunAggregatePoll,
-};
+pub use tool_execution::{CompletedProtocolToolCall, ToolInvocation, ToolInvocationReply};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ToolCatalogCacheKey {

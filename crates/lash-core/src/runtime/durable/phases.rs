@@ -28,7 +28,7 @@ use lash_durable::domain::{RunSeq, SessionCommitWrite, TurnWrite};
 
 use super::head::HeadCache;
 use super::session::{
-    CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices,
+    CellExit, CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices,
     UnfinishedPhase,
 };
 use super::session_mail::follow_on_mail;
@@ -172,7 +172,11 @@ pub async fn run_phases(
                 }
                 let cell = drive.exec_cell(cx, id, CodeCell { language, code });
                 match turn_cancel::unless_cancelled(cx, &session, cell).await? {
-                    Some(ran) => ran?,
+                    Some(ran) => {
+                        if ran? == CellExit::Suspended {
+                            return Ok(PhaseExit::Suspended { due: None });
+                        }
+                    }
                     None => {
                         drive.stop_cell();
                         return Ok(PhaseExit::CancelRequested);

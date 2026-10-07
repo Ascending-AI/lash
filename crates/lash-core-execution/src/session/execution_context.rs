@@ -54,7 +54,6 @@ impl RecordedTurnCancel {
 pub struct RuntimeExecutionContext<'run> {
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
     tool_material_store: Option<Arc<dyn crate::store::ToolMaterialStore>>,
-    pub(super) tool_run: Option<super::tool_run::ToolRunChannel>,
 
     /// The catalog the live registry resolves to, when the dispatch catalog
     /// is a turn's recorded surface: what a code cell's journaled binding set
@@ -92,9 +91,6 @@ pub struct RuntimeExecutionContext<'run> {
     /// Set when a transferable wait this context issued was handed over,
     /// shared with every context derived from this one.
     wait_handed_over: Arc<std::sync::atomic::AtomicBool>,
-    /// Set when a process's logical Run cancelled a call this context
-    /// issued, shared with every context derived from this one.
-    run_cancelled_call: Arc<std::sync::atomic::AtomicBool>,
     /// Durable cancellation authority for waits issued by this execution.
     /// A follow-on physical turn keeps its admitted effect scope but observes
     /// the cancellation gate addressed to its own turn identity.
@@ -144,7 +140,6 @@ pub struct RuntimeExecutionContext<'run> {
     /// before exhaustion (ADR 0099 §7). Shared with the ledger through
     /// [`OpenerState`](crate::session::OpenerState): the opener's owner hands
     /// one state to every phase context it builds.
-    pub(crate) opener_run: Arc<std::sync::Mutex<crate::session::OpenerRunRegistry>>,
     /// The trace scope each call this execution traced the start of opened,
     /// for its completion.
     pub(crate) tool_requests: Arc<
@@ -417,7 +412,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         Some(RuntimeExecutionContext {
             dispatch: Arc::new(self.dispatch.to_static()?),
             tool_material_store: self.tool_material_store.clone(),
-            tool_run: self.tool_run.clone(),
 
             live_tool_catalog: self.live_tool_catalog.clone(),
             process_env_store: Arc::clone(&self.process_env_store),
@@ -436,7 +430,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_cancel: self.turn_cancel.clone(),
             observe_turn_cancel: self.observe_turn_cancel,
             wait_handed_over: Arc::clone(&self.wait_handed_over),
-            run_cancelled_call: Arc::clone(&self.run_cancelled_call),
             turn_cancel_scope: self.turn_cancel_scope.clone(),
             tracing: self.tracing.clone(),
             live_step: self.live_step.clone(),
@@ -450,7 +443,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
-            opener_run: Arc::clone(&self.opener_run),
             tool_requests: Arc::clone(&self.tool_requests),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
         })
@@ -561,7 +553,9 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The session's recorded tool-call limit, as this execution runs under
     /// it: a run's snapshot for a turn, the recorded environment for a
     /// process.
-    pub(crate) fn max_tool_calls(&self) -> crate::MaxToolCalls {
+    /// The `max_tool_calls` the execution runs under.
+    #[must_use]
+    pub fn max_tool_calls(&self) -> crate::MaxToolCalls {
         self.execution_env_spec.policy.max_tool_calls
     }
 
@@ -611,6 +605,13 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
     ) -> Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>> {
         self.turn_phase_probe.clone()
+    }
+
+    /// The stop this execution observes: what cancels the work it runs on
+    /// its turn's behalf. A context with none never stops.
+    #[must_use]
+    pub fn cancellation(&self) -> CancellationToken {
+        self.cancellation_token.clone().unwrap_or_default()
     }
 
     pub fn with_cancellation_token(mut self, cancellation_token: CancellationToken) -> Self {
@@ -748,21 +749,6 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// segment since the last call; the answer is taken.
     pub fn take_wait_handed_over(&self) -> bool {
         self.wait_handed_over
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// Records that this process's logical Run cancelled a call this
-    /// context issued: the recorded answer to the process's accepted cancel.
-    pub(crate) fn record_run_cancelled_call(&self) {
-        self.run_cancelled_call
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    /// Whether this process's logical Run cancelled a call this context
-    /// issued since the last call; the answer is taken. The process body
-    /// ends cancelled on it, as on a sleep its cancel won.
-    pub fn take_run_cancelled_call(&self) -> bool {
-        self.run_cancelled_call
             .swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 

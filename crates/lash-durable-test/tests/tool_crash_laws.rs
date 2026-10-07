@@ -1,6 +1,7 @@
 //! The tool-semantics laws a node kill must not break, cut at every commit
-//! label (FIG-4546; ported by FIG-5210 from the deleted lash-conformance
-//! `tool_batch_parallelism/limit.rs` crash law).
+//! label (FIG-4546, FIG-4079; ported by FIG-5210 from the deleted
+//! lash-conformance `tool_batch_parallelism/limit.rs` and
+//! `tool_call_identity/replay.rs` crash laws).
 //!
 //! A host creates a session on a core and sends it an input; the core
 //! serves no node of its own here, the simulated nodes A and B run its
@@ -9,12 +10,13 @@
 //! fail-before, ack-hidden, zombie, abort and commit-then-abort, recovers
 //! on the other node, and checks the laws:
 //!
-//! - **Limit:** a turn whose first step's group fills `max_tool_calls` and
-//!   whose next step's group asks past it refuses the same calls however it
-//!   was cut: no refused call ever runs, and the model is shown the refusal
-//!   counting the first group once, whichever executions formed it.
-//! - **Identity:** every body entry of one call sees one call id, and two
-//!   calls are two ids.
+//! - **Limit:** a turn whose first group fills `max_tool_calls` and whose
+//!   next group asks past it refuses the same calls however it was cut: no
+//!   refused call ever runs, and the model is shown the refusal counting
+//!   the first group once, whichever executions formed it. A step of
+//!   native calls counts its own group; a cell counts its total.
+//! - **Identity:** an RLM turn of two cells, three probe calls: every body
+//!   entry of one call sees one call id, and the three calls are three ids.
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -68,10 +70,19 @@ fn actor() -> ActorKey {
 enum Turn {
     /// Two steps of native calls: `LIMIT`, then `LIMIT + 1`.
     LimitStep,
+    /// One cell of two aggregates: `LIMIT` calls, then one more.
+    LimitCell,
+    /// Two cells: one probe call, then two.
+    CellIdentity,
 }
 
 impl Turn {
+    fn code(self) -> bool {
+        matches!(self, Self::LimitCell | Self::CellIdentity)
+    }
+
     fn script(self) -> Vec<LlmResponse> {
+        let call = |label: &str| format!("tools.{PROBE}({{ label: \"{label}\" }})");
         let leaves = |range: std::ops::Range<usize>| {
             range.map(|leaf| format!("leaf-{leaf}")).collect::<Vec<_>>()
         };
@@ -92,6 +103,31 @@ impl Turn {
                     )
                 })
                 .collect(),
+            Self::LimitCell => {
+                let aggregate = |labels: Vec<String>| {
+                    format!(
+                        "await Promise.all([{}])",
+                        labels
+                            .iter()
+                            .map(|label| call(label))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                vec![served::cell(&format!(
+                    "const first = {};\nconst rest = {};\nfinish([first, rest]);",
+                    aggregate(leaves(0..LIMIT)),
+                    aggregate(leaves(LIMIT..LIMIT + 1)),
+                ))]
+            }
+            Self::CellIdentity => vec![
+                served::cell(&format!("await {};", call("cell-one"))),
+                served::cell(&format!(
+                    "await {};\nfinish(await {});",
+                    call("cell-two-a"),
+                    call("cell-two-b")
+                )),
+            ],
         }
     }
 
@@ -102,6 +138,15 @@ impl Turn {
         };
         match self {
             Self::LimitStep => (leaves(0..LIMIT), leaves(LIMIT..2 * LIMIT + 1)),
+            Self::LimitCell => (leaves(0..LIMIT), leaves(LIMIT..LIMIT + 1)),
+            Self::CellIdentity => (
+                vec![
+                    "cell-one".to_owned(),
+                    "cell-two-a".to_owned(),
+                    "cell-two-b".to_owned(),
+                ],
+                Vec::new(),
+            ),
         }
     }
 
@@ -110,6 +155,8 @@ impl Turn {
     fn refusal(self) -> Option<String> {
         let (counted, requested) = match self {
             Self::LimitStep => (0, LIMIT + 1),
+            Self::LimitCell => (LIMIT, 1),
+            Self::CellIdentity => return None,
         };
         let exceeded = lash::ToolCallLimitExceeded {
             scope: lash::ToolCallLimitScope::Cell,
@@ -122,7 +169,8 @@ impl Turn {
 
     fn max_tool_calls(self) -> usize {
         match self {
-            Self::LimitStep => LIMIT,
+            Self::LimitStep | Self::LimitCell => LIMIT,
+            Self::CellIdentity => 64,
         }
     }
 }
@@ -239,7 +287,12 @@ impl Crash {
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
-                lash::LashCore::standard_builder(backend.clone())
+                let builder = if self.turn.code() {
+                    lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, None))
+                } else {
+                    lash::LashCore::standard_builder(backend.clone())
+                };
+                builder
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -476,7 +529,23 @@ async fn tool_call_limit_refuses_the_same_call_across_a_crash(tier: Tier) {
     prove(Turn::LimitStep, tier).await;
 }
 
+/// The same law in a cell, which counts its total: after a cut anywhere the
+/// cell's next call past the limit is refused with the first aggregate's
+/// calls counted once.
+async fn tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell(tier: Tier) {
+    prove(Turn::LimitCell, tier).await;
+}
+
+/// Code cells cut anywhere keep each call's identity, and a fresh call is
+/// a different call: every body entry of one call sees one call id, and the
+/// turn's three calls are three ids.
+async fn code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill(tier: Tier) {
+    prove(Turn::CellIdentity, tier).await;
+}
+
 tiered_laws!(
     current_thread:
     tool_call_limit_refuses_the_same_call_across_a_crash,
+    tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell,
+    code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill,
 );

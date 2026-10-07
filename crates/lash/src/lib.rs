@@ -443,8 +443,6 @@ pub mod tools {
     pub use lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID;
     /// The pending model call passed to a tool's preparation hook.
     pub use lash_core::sansio::PendingToolCall;
-    /// Collected replies returned by a runtime tool batch.
-    pub use lash_core::session::ToolBatchReplies;
     pub use lash_core::tool_dispatch::ToolTriggerEffectOutcome;
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
@@ -759,8 +757,6 @@ pub mod plugins {
     };
     pub use lash_core::session::{
         CompletedProtocolToolCall, Incorporated, IncorporationLedger, SettlementSource,
-        ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome,
-        ToolAggregateRequest, ToolRunAggregateCursor, ToolRunAggregatePoll,
     };
     pub use lash_core::tool_dispatch::{
         LaunchReceipt, ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
@@ -893,17 +889,16 @@ pub mod plugins {
     /// Engine registry and narrowed execution contexts used to host custom process engines.
     pub use lash_core::runtime::ProcessEngineRegistry;
     /// Engine-extension contracts for a tool call's admission, attempts,
-    /// decision and presentation, and for a Run's aggregates. A call runs in
-    /// memory inside the admitted execution that makes it durable; hosts
-    /// submit work through session handles.
+    /// decision and presentation. A call runs in memory inside the admitted
+    /// execution that makes it durable; hosts submit work through session
+    /// handles.
     pub use lash_core::tool_dispatch::{
-        AdmittedToolCall, Answer as ToolRunAnswer, AttemptEnd, BeforeCheckReply, CallEnd,
-        Consumer as ToolRunConsumer, DeclaredStartObligation, DeclaredStartObligationRefusal,
-        IntentRealizationContext, IsolatedBinding, IsolatedProcessDescriptor, IsolatedStartRefusal,
-        IsolatedToolStart, Leaf as ToolRunLeaf, Realization, RealizationReceipt, RunCutRefusal,
-        SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest,
-        SingletonPresentationError, SingletonRunError, SingletonToolCall, SingletonToolHandlers,
-        StartLaunch, ToolRun, run_call,
+        AdmittedToolCall, AttemptEnd, BeforeCheckReply, CallEnd, DeclaredStartObligation,
+        DeclaredStartObligationRefusal, IntentRealizationContext, IsolatedBinding,
+        IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart, Realization,
+        RealizationReceipt, RunCutRefusal, SingletonAttempt, SingletonBodyOutcome,
+        SingletonCapture, SingletonPreparedRequest, SingletonPresentationError, SingletonRunError,
+        SingletonToolCall, SingletonToolHandlers, StartLaunch,
     };
     /// One recorded Run attempt's outcome, distinct from the provider's
     /// [`crate::provider::AttemptOutcome`].

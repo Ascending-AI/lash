@@ -28,15 +28,24 @@ A call has one durable home: the admitted execution that runs it.
   (`round.present+model.start` or `turn.commit`) and answers the members
   in declared order. A member that parks records an `x_wait` before its
   `x_outcome`; see Pending calls.
-- **A code cell or a lashlang process** (`tool_dispatch::call_run::ToolRun`).
-  The cell's program forms aggregates over the calls it issues. Every call
-  runs to its own end beside the program, and the cell's snapshot holds
-  what its heap took from them. A cell resumed from its snapshot never asks
-  again for a value its heap holds.
+- **A code cell** (`tool_dispatch::CellMembers`, `lash_vm_broker::members`).
+  Every call a cell makes is its own admitted execution: the quiet point of
+  the operation that issues it admits it in `cell.snapshot+admit`, under the
+  policy and limit its tool declares and, for a tool that may defer, a
+  pinned `tool_completion` wait. Its body runs through the same member
+  lifecycle as a round's, so a started `Once` is `Interrupted` (injected as
+  `cell.inject`), a `Repeatable` reruns at its ordinal, and a parked call
+  waits on its row; a cell whose calls wait only on rows suspends its turn.
+  The cell is answered from the members' committed outcomes alone, so a
+  restore onto the operation answers it the same way. A member its cell
+  answered before it settled (a race's loser) stays in the snapshot's ledger
+  and settles on its own. A cell resumed from its snapshot never asks again
+  for a value its heap holds.
+- **A lashlang process**: its steps are admitted executions of the same
+  lifecycle (`runtime/actor/process`).
 
 `RuntimeExecutionContext::round_tools` gives a turn's drive its
-`RoundTools`; `drive_tool_run` gives a cell or a process its in-memory
-`ToolRun`.
+`RoundTools`; `CellMembers::new` gives a cell the bodies of its calls.
 
 ## Seams
 
@@ -60,9 +69,9 @@ one prepared request. `attempt` runs the body once and captures it under the
 admitted declaration, then decides it: the Run's cancel, then every
 after-check. A final realizes its declared intents in place, launches and
 discharges its declared start, and is presented; a withheld call emits its
-stream and is observed. `run_call` loops attempts under the sealed policy,
-backing off between them on the Run's clock; a cancel during the backoff
-ends the call `Cancelled` and starts no next attempt.
+stream and is observed. A failure its policy repeats ends the attempt, and
+the member lifecycle records the retry's due as a row; a cancel during the
+backoff ends the call `Cancelled` and starts no next attempt.
 
 The declared intents of a final realize in place
 (`SingletonToolHandlers::realize`, `execute_final_tool_intents`) before it is
@@ -70,20 +79,18 @@ presented. There is no separate realization invocation.
 
 ## Aggregates
 
-`ToolRun::form` forms an aggregate over the calls the Run started, its timers
-and the leaves the caller settled itself. A consumer (`race`, `any`, `all`,
-`allSettled`, the list batch) answers from the order leaves settled: leaves
-settled when the aggregate formed (a refused call, a plain operand) come
-first, in source order; dispatched settlements follow in the order they
-ended. `all` reports the first rejection; `any` the first fulfilment, or
-every rejection. A call the Run's cancel or a check's AbortRun ended is host
-control, raised on the caller's host channel and never an operand's
-rejection. A loser keeps running; `close` cancels the Run, discharges every
-unfinished call's external work and drives each to its end.
+A cell's aggregate is one operation: its calls are admitted together, and
+its timers are pinned with them. A consumer (`race`, `any`, `all`,
+`allSettled`, the list batch) answers from the order leaves settled
+(`lash_lashlang_runtime::aggregate_answer`): leaves settled when the
+aggregate formed (a refused call, a plain operand) come first, in source
+order; members follow in the order their outcomes committed, then timers
+that came due. `all` reports the first rejection; `any` the first
+fulfilment, or every rejection. A loser keeps running as its own member.
 
-A process holds a round's calls whole until every member ended; a cell
-counts every call it ever made. Past `max_tool_calls` the whole round is
-refused before any member starts.
+A cell counts every tool call its quiet points admitted, in its snapshot
+envelope. Past `max_tool_calls` the operation's calls are refused whole
+before any is admitted.
 
 ## Binding rulings
 
@@ -133,9 +140,8 @@ reduce by AbortRun > Deny/Cancel > CachedSuccess > Allow, ties broken by
 ascending UTF-8 plugin id and then callback key. A cached success is data
 only and still passes the result transforms and after-checks. After-checks
 return only Allow, Deny, Cancel or AbortRun and never replace a result.
-A check's cancel is `CallDecision::CheckCancelled`: it rejects only its
-operand. `CallDecision::Cancelled` is the Run's own cancel. AbortRun fails
-the call and stops the Run: it starts no call and forms no aggregate after.
+A check's cancel ends only its call. AbortRun fails the call, and its
+output carries the `ToolControl` that ends the cell or round that took it.
 
 **Attempt stream.** The bounded stream a body emits belongs to its attempt's
 capture (`AttemptStreamRecorder`, capped by `ATTEMPT_STREAM_BYTE_BUDGET`
@@ -168,9 +174,11 @@ Before that outcome is recorded, the park is discharged: a call that ends
 cancelled under `CancelExternalWork` cancels the child its declared start
 launched, and the call's hold on that child is released. Both are
 idempotent, so a crash before the outcome repeats them harmlessly. A forged
-or altered key verifies nothing and resolves nothing. A code
-cell or a process pins no completion wait, so a Pending body there is
-refused typed (`pending_tool_missing_completion_key`).
+or altered key verifies nothing and resolves nothing. A code cell's
+admission pins the same wait for each of its calls that may defer, and the
+cell races it through the same member lifecycle. A process pins no
+completion wait, so a Pending body there is refused typed
+(`pending_tool_missing_completion_key`).
 
 ## Identity preimages
 
@@ -197,6 +205,7 @@ A change that moves one of these is an identity change, never a shape change.
 | Members present in declared order whatever order their outcomes commit in | `round_crash_matrix.rs::outcomes_committed_out_of_order_present_in_declared_order` |
 | A cancel during a retry backoff starts no next attempt | `round_crash_matrix.rs::a_cancel_during_a_retry_backoff_starts_no_next_attempt` |
 | A stored `Once` is never upgraded and a current `Once` vetoes a stored repeat | `runtime/actor/round/fold_tests.rs` |
-| A check's cancel is its operand's rejection; an AbortRun is Run control | `tool_dispatch/call_run/tests.rs` |
-| An aborted Run admits nothing more | `tool_dispatch/call_run/tests.rs` |
-| A process holds a round's capacity whole until every member ended | `tool_dispatch/call_run/tests.rs` |
+| A cell's `Repeatable` call reruns at its ordinal across a cut | `lash-durable-test/tests/cell_restore_laws.rs` |
+| A cell's `processes.await` parks, its session releases, and it resumes with the process's outcome | `cell_restore_laws.rs` |
+| A cell's race loser is admitted and settles on its own | `cell_restore_laws.rs` |
+| A cell past `max_tool_calls` refuses the same call at every cut, and no refused call runs | `tool_crash_laws.rs` |

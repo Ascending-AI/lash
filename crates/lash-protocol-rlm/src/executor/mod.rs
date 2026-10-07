@@ -1,6 +1,3 @@
-mod tool_run;
-pub(crate) use tool_run::execute_code_with_channel_and_bounds_with_trigger_resolver;
-
 mod globals;
 use globals::{apply_global_defaults, process_handle_names};
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
@@ -57,7 +54,7 @@ fn set_execution_bound_exhaustion_loud(loud: bool) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn execute_owned_code(
+pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     dialect: &dyn crate::dialect::Dialect,
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
@@ -355,7 +352,7 @@ async fn execute_code_inner(
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
     prints: Arc<std::sync::Mutex<Vec<lashlang::Value>>>,
-    snapshots: &lash_vm_broker::DurableSnapshotStore,
+    snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
     resumed: Option<Box<cell_segment::ResumedCell>>,
 ) -> ExecResponse {
     if let Err(error) = hold_global_definitions(state, &ctx).await {
@@ -402,7 +399,7 @@ async fn execute_code_in_worker_scope(
     channel: crate::plugin::RlmChannel,
     prints: Arc<std::sync::Mutex<Vec<lashlang::Value>>>,
     workers: lash_vm_client::service::Service,
-    snapshots: &lash_vm_broker::DurableSnapshotStore,
+    snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
     resumed: Option<Box<cell_segment::ResumedCell>>,
 ) -> ExecResponse {
     state.mark_execution_started();
@@ -768,6 +765,59 @@ async fn execute_code_in_worker_scope(
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_started(trace, &linked_module.artifact);
     }
+    let identities = match cell.as_ref() {
+        Ok(cell) => cell.identities().code().clone(),
+        Err(_) => match lash_core::EffectOpener::for_scope(&ctx.admitted_scope()) {
+            Ok(opener) => lash_vm_broker::CodeCallIdentities::cell(opener, "pure-cell"),
+            Err(error) => {
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    error.to_string(),
+                );
+            }
+        },
+    };
+    // Every call the cell makes is its own admitted execution, run from
+    // these bodies (ADR 0132 §5): a resumed cell knows each call its
+    // snapshot holds open, so a call still running settles on this owner.
+    let members = match lash_core::tool_dispatch::CellMembers::new(
+        &ctx,
+        identities.opener().clone(),
+        Arc::new(host_bridge::CellTriggers {
+            workers: workers.clone(),
+            artifact_store: artifact_store.clone(),
+        }),
+    ) {
+        Ok(members) => Arc::new(members),
+        Err(error) => {
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailureKind::Host,
+                error.to_string(),
+            );
+        }
+    };
+    if let Some(resumed) = &resumed {
+        for open in resumed.from.ledger.operations.values() {
+            match lash_core::tool_dispatch::CellMember::decode(&open.request.0) {
+                Ok(member) => members.register(member),
+                Err(error) => {
+                    return exec_setup_failure_or_stop(
+                        state,
+                        &ctx,
+                        lash_core::CellFailureKind::Host,
+                        format!("the cell's open call {} cannot be read: {error}", open.call),
+                    );
+                }
+            }
+        }
+    }
+    snapshots
+        .bind_members(Arc::clone(&members) as _, members.policies())
+        .await;
     let host = HostBridge::new(HostBridgeConfig {
         ctx: ctx.clone(),
         cell: Arc::clone(&cell),
@@ -776,12 +826,12 @@ async fn execute_code_in_worker_scope(
         host_environment,
         deferred_execution_grants: deferred_execution_grants.clone(),
         cell_bindings,
-        artifact_store: artifact_store.clone(),
-        workers: workers.clone(),
         ledgers: resumed
             .as_ref()
             .map(|resumed| resumed.envelope.host.clone())
             .unwrap_or_default(),
+        members,
+        snapshots: Arc::clone(snapshots),
     });
     let scope = match ctx.session_scope() {
         Ok(scope) => scope,
@@ -843,53 +893,9 @@ async fn execute_code_in_worker_scope(
         .encode()
         .map(|bytes| Some(lash_vm_protocol::EncodedPayload(bytes)))
     };
-    let identities = match cell.as_ref() {
-        Ok(cell) => cell.identities().code().clone(),
-        Err(_) => match lash_core::EffectOpener::for_scope(&ctx.admitted_scope()) {
-            Ok(opener) => lash_vm_broker::CodeCallIdentities::cell(opener, "pure-cell"),
-            Err(error) => {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
-                );
-            }
-        },
-    };
-    // Until a cell's operation runs as its tool's own admitted execution
-    // (L4, FIG-5174), its admission takes `Once`: a crash inside it is
-    // `Interrupted`, never a second run.
-    let limit = match lash_lashlang_runtime::run_operation_limit(ctx.actor_context()).await {
-        Ok(limit) => limit,
-        Err(error) => {
-            let fault = match &error {
-                lash_core::durable_port::DurableError::Store(failure)
-                    if failure.kind == lash_core::durable_port::StoreFailureKind::Contended =>
-                {
-                    lash_core::store::StoreFault::Contended
-                }
-                _ => lash_core::store::StoreFault::Backend {
-                    message: error.to_string(),
-                },
-            };
-            ctx.record_nested_effect_error(
-                lash_core::RuntimeEffectControllerError::from(lash_core::PluginError::from(fault))
-                    .retryable_uncommitted_derivation(),
-            );
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailureKind::Host,
-                error.to_string(),
-            );
-        }
-    };
     let admissions = lash_lashlang_runtime::RunAdmissions {
         cx: ctx.actor_context(),
-        opener: identities.opener().clone(),
-        limit,
-        policy: &|_, _| None,
+        members: &host,
         host_state: &envelope,
     };
     let run = lash_lashlang_runtime::WorkerRun {
@@ -913,7 +919,7 @@ async fn execute_code_in_worker_scope(
         bounds: execution_bounds,
         state: start_state,
         from,
-        snapshots,
+        snapshots: snapshots.as_ref(),
         admissions: &admissions,
         boundary: &|| false,
         performing: Some(host.performing_gate()),

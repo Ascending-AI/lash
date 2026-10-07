@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use super::super::{OpenerState, tool_run::ToolRunOwner};
+use super::super::OpenerState;
 use super::{
     ProcessId, RecordedTurnCancel, RuntimeExecutionContext, RuntimeExecutionProcessEventContext,
     RuntimeExecutionTracing, RuntimeProcessExecution, ToolDispatchContext,
@@ -42,12 +42,6 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     /// The tool-execution context this run lends its tool calls.
     ///
     fn dispatch(&self) -> &Arc<ToolDispatchContext<'run>>;
-
-    /// The logical Run request channel shared by the turn's phase contexts.
-    fn tool_run_owner(&self) -> Option<ToolRunOwner>;
-
-    #[must_use]
-    fn with_tool_run_owner(self, owner: &ToolRunOwner) -> Self;
 
     #[must_use]
     fn with_tracing(self, tracing: Option<RuntimeExecutionTracing>) -> Self;
@@ -90,7 +84,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         Self {
             dispatch,
             tool_material_store: None,
-            tool_run: None,
             process_env_store,
             attachment_store,
             chronological_projection,
@@ -107,7 +100,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
             incorporation_ledger: Arc::default(),
-            opener_run: Arc::default(),
             tool_requests: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
             parent_invocation: None,
@@ -117,7 +109,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             turn_cancel: RecordedTurnCancel::default(),
             observe_turn_cancel: true,
             wait_handed_over: Arc::default(),
-            run_cancelled_call: Arc::default(),
             turn_cancel_scope: None,
             tracing: None,
             live_step: None,
@@ -131,14 +122,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
     }
     fn dispatch(&self) -> &Arc<ToolDispatchContext<'run>> {
         &self.dispatch
-    }
-
-    fn tool_run_owner(&self) -> Option<ToolRunOwner> {
-        RuntimeExecutionContext::tool_run_owner(self)
-    }
-
-    fn with_tool_run_owner(self, owner: &ToolRunOwner) -> Self {
-        RuntimeExecutionContext::with_tool_run_owner(self, owner)
     }
 
     fn with_tracing(mut self, tracing: Option<RuntimeExecutionTracing>) -> Self {
@@ -185,12 +168,10 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
     fn opener_state(&self) -> OpenerState {
         OpenerState {
             ledger: Arc::clone(&self.incorporation_ledger),
-            run_state: Arc::clone(&self.opener_run),
         }
     }
     fn with_opener_state(mut self, state: OpenerState) -> Self {
         self.incorporation_ledger = state.ledger;
-        self.opener_run = state.run_state;
         self
     }
 }

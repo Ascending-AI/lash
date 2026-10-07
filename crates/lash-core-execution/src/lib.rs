@@ -846,8 +846,8 @@ pub use runtime::{
 };
 pub use session::{
     ExecRequest, ExecutionEnvironmentSyncError, RuntimeExecutionContext, SessionError,
-    ToolDispatchSurface, ToolRunAggregateCursor, ToolRunAggregatePoll, ToolSurfaceDrift,
-    ToolSurfaceDriftKind, resolve_trigger_owner_scope, tool_dispatch_surface,
+    ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind, resolve_trigger_owner_scope,
+    tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
@@ -919,7 +919,6 @@ pub mod core_internal {
     pub use crate::runtime::effect::executor::{RuntimeEffectLocalRunner, owned_runner_executor};
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
     pub use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps;
-    pub use crate::session::tool_run::ToolRunOwner;
     pub use lash_core_store::process_identity::StartKeyDerivation;
     pub fn attach_process_invocation_correlation(
         turn_context: &mut crate::TurnContext,

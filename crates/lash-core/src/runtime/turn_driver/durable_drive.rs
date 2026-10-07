@@ -10,7 +10,8 @@ use lash_core_execution::runtime::actor::round::RoundTools;
 use super::*;
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
-    CodeCell, OpenTurn, RestoredTurn, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
+    CellExit, CodeCell, OpenTurn, RestoredTurn, TurnCommit, TurnDone, TurnDrive, TurnError,
+    TurnRestore,
 };
 use crate::runtime::turn_loop::DurableTurn;
 
@@ -259,7 +260,7 @@ impl TurnDrive for RuntimeDrive {
         _cx: &ActorContext,
         id: crate::EffectId,
         cell: CodeCell,
-    ) -> Result<(), TurnError> {
+    ) -> Result<CellExit, TurnError> {
         self.driver.recorded_assembly.note_code_execution();
         Box::pin(self.driver.handle_exec_code_effect(
             &mut self.machine,

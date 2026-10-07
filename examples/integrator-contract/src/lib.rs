@@ -898,25 +898,3 @@ impl FleetFormatStore for Integrator {
         FleetFormat::current()
     }
 }
-
-/// A host's generic aggregate runs in memory, in its admitted execution.
-pub async fn generic_aggregate_witness(
-    scoped: &ActorContext,
-) -> Result<(), lash::plugins::SingletonRunError> {
-    let mut run = lash::plugins::ToolRun::new(
-        scoped.execution_scope().clone(),
-        std::sync::Arc::new(lash::runtime::SystemClock),
-    );
-    run.form(
-        "integrator-timers".to_owned(),
-        vec![lash::plugins::ToolRunLeaf::Timer { duration_ms: 1 }],
-        vec![0],
-    )?;
-    run.consume(
-        "integrator-timers",
-        lash::plugins::ToolRunConsumer::Race,
-        true,
-    )
-    .await?;
-    run.close().await
-}

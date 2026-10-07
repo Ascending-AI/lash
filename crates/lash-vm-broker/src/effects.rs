@@ -40,14 +40,93 @@ impl Performed {
 /// issued it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Admission {
-    /// The execution its body is: its call, tool, request, policy and
-    /// limit. `None` for an operation whose body only reads committed state
-    /// (a wait on pinned rows), which a restore performs again.
-    pub draft: Option<ExecutionDraft>,
-    /// The waits it pins, in the same transaction: a sleep's timer, with
-    /// the absolute deadline it was admitted with. A restore races these
-    /// same rows; it never mints them again.
+    /// The executions its effects are (ADR 0132 §5, §8): every tool call it
+    /// makes, each under the policy, limit and completion wait its tool
+    /// declares. Empty for an operation whose body only reads committed
+    /// state (a wait on pinned rows), which a restore performs again.
+    pub members: Vec<MemberDraft>,
+    /// The waits it pins, in the same transaction: a sleep's timer, an
+    /// aggregate's timer leaves, each with the absolute deadline it was
+    /// admitted with. A restore races these same rows; it never mints them
+    /// again.
     pub waits: Vec<WaitSpec>,
+}
+
+/// One member execution of an operation: its draft, and the request its
+/// body is built from again on any owner, which the ledger keeps for as
+/// long as the member is open.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MemberDraft {
+    /// The execution: its call, tool, request digest, policy, limit and
+    /// completion wait.
+    pub draft: ExecutionDraft,
+    /// The request, as the host encodes it.
+    pub request: EncodedPayload,
+}
+
+impl MemberDraft {
+    /// The member `call` over `request`, owned by `opener`'s run, admitted
+    /// as `pin` declares it: its tool, policy, limit and completion wait.
+    ///
+    /// # Errors
+    ///
+    /// [`ParentFault`] when the digest is refused.
+    pub fn pinned(
+        call: lash_sansio::ToolCallId,
+        request: EncodedPayload,
+        opener: &lash_core_store::effect_opener::EffectOpener,
+        pin: lash_core_execution::runtime::actor::round::MemberPin,
+    ) -> Result<Self, ParentFault> {
+        Self::new(
+            call,
+            pin.tool,
+            request,
+            opener,
+            (pin.policy, pin.limit),
+            pin.wait,
+        )
+    }
+
+    /// The member `call` of `tool` over `request`, owned by `opener`'s run,
+    /// under `policy` and `limit`, and parking until at most `wait` when it
+    /// may defer. Its request material is the digest of `request`.
+    ///
+    /// # Errors
+    ///
+    /// [`ParentFault`] when the digest is refused.
+    pub fn new(
+        call: lash_sansio::ToolCallId,
+        tool: lash_sansio::ToolId,
+        request: EncodedPayload,
+        opener: &lash_core_store::effect_opener::EffectOpener,
+        pin: (lash_sansio::ExecutionPolicy, lash_sansio::ExecutionLimit),
+        wait: Option<lash_core_execution::runtime::actor::waits::WaitDeadline>,
+    ) -> Result<Self, ParentFault> {
+        use lash_core_store::tool_run::{
+            MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
+        };
+        let digest = MaterialDigest::parse(blake3::hash(&request.0).to_hex().as_str())
+            .map_err(|error| ParentFault(error.to_string()))?;
+        let (policy, limit) = pin;
+        Ok(Self {
+            draft: ExecutionDraft::new(
+                call,
+                tool,
+                MaterialRef {
+                    owner: MaterialOwner::Run {
+                        opener: opener.clone(),
+                    },
+                    role: MaterialRole::PreparedRequest,
+                    location: MaterialLocation::JournalLocal,
+                    digest,
+                },
+                policy,
+                limit,
+                wait,
+            ),
+            request,
+        })
+    }
 }
 
 /// A fault of the parent's own store or host: nothing about the worker or
@@ -103,58 +182,24 @@ pub trait ParentEffects: Send + Sync {
     }
 
     /// Performs `operation`, whose admission committed, over the waits its
-    /// quiet point pinned: its body runs, naming its calls by `operation`'s
-    /// admission (`operation.run`), the execution's one ordinal authority.
-    /// Called once per admission, and again on restore only for a
-    /// `Repeatable` body that never answered or an operation admitted as no
-    /// execution, over the same pinned waits.
+    /// quiet point pinned: its calls are named by `operation`'s admission
+    /// (`operation.run`), the execution's one ordinal authority, and its
+    /// admitted members (`operation.members`) run through their own
+    /// lifecycle. Called once per admission, and again on every restore
+    /// onto it, over the same pinned waits: a member that settled answers
+    /// from its committed outcome, and none is entered again but as its
+    /// recovery says (ADR 0132 §5). Answers
+    /// [`EffectOutcome::HandedOver`] when the operation stays open beyond
+    /// this activation: the run suspends on its committed quiet point.
     async fn perform(
         &self,
         operation: &AdmittedOperation,
         waits: &[(WaitRef, Option<PinnedKey>)],
     ) -> Result<Performed, ParentFault>;
 
-    /// What the VM is answered with for `operation`, a `Once` whose body
-    /// started and never answered: it was interrupted, and is never entered
-    /// again (ADR 0132 §5).
-    fn interrupted(&self, operation: &AdmittedOperation) -> EffectOutcome;
-
     /// Whether the run is cancelled at instruction checkpoint `checkpoint`
     /// (ADR 0039): read from the parent's committed state.
     async fn observe_cancellation(&self, checkpoint: u64) -> Result<bool, ParentFault>;
-}
-
-/// The execution a VM operation is admitted as: `call` of `tool` under
-/// `policy` and `limit`, its request material the digest of the request the
-/// VM sent, owned by `opener`'s run.
-pub fn operation_draft(
-    call: lash_sansio::ToolCallId,
-    tool: lash_sansio::ToolId,
-    request: &EncodedPayload,
-    opener: &lash_core_store::effect_opener::EffectOpener,
-    policy: lash_sansio::ExecutionPolicy,
-    limit: lash_sansio::ExecutionLimit,
-) -> Result<ExecutionDraft, ParentFault> {
-    use lash_core_store::tool_run::{
-        MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
-    };
-    let digest = MaterialDigest::parse(blake3::hash(&request.0).to_hex().as_str())
-        .map_err(|error| ParentFault(error.to_string()))?;
-    Ok(ExecutionDraft::new(
-        call,
-        tool,
-        MaterialRef {
-            owner: MaterialOwner::Run {
-                opener: opener.clone(),
-            },
-            role: MaterialRole::PreparedRequest,
-            location: MaterialLocation::JournalLocal,
-            digest,
-        },
-        policy,
-        limit,
-        None,
-    ))
 }
 
 /// Whether a VM operation only waits on committed state (an await, a sleep,

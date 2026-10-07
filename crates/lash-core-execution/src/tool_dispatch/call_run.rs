@@ -2,12 +2,12 @@
 //! its decision (D), its declarations and its presentation (V).
 //!
 //! Nothing here records anything. A call's durability is the admitted
-//! execution that runs it (ADR 0132 §5): a turn's round member, whose
-//! `x_start` commits before this runs and whose `x_outcome` commits what it
-//! answers, or a code cell's VM operation (§8). A crash between those
-//! commits re-runs nothing for a `Once` execution, which is `Interrupted`,
-//! and reruns a `Repeatable` one from its admission at the same ordinal.
-//! No code here is ever run again against a recorded history.
+//! execution that runs it (ADR 0132 §5): a turn's round member, or a code
+//! cell's call (§8), whose `x_start` commits before this runs and whose
+//! `x_outcome` commits what it answers. A crash between those commits
+//! re-runs nothing for a `Once` execution, which is `Interrupted`, and
+//! reruns a `Repeatable` one from its admission at the same ordinal. No
+//! code here is ever run again against a recorded history.
 
 use std::sync::Arc;
 
@@ -31,10 +31,6 @@ use crate::tool_run::{
 };
 use crate::{ConsumerHold, ProcessId, ProcessStartRegistration, ScopeId, ToolCallId};
 use lash_sansio::ToolIntentKind;
-
-mod run;
-pub(crate) use run::run_control;
-pub use run::{Answer, Consumer, Leaf, ToolRun};
 
 #[cfg(test)]
 #[path = "call_run/tests.rs"]
@@ -467,21 +463,6 @@ impl<'a> AdmittedToolCall<'a> {
         }))
     }
 
-    /// End a call whose body parked where no completion wait is pinned for
-    /// it: refused as an unarmed source, then decided.
-    async fn unarmed(&self, cancel: &CancellationToken) -> Result<CallEnd, SingletonRunError> {
-        self.decide(
-            ResultSource::Attempt {
-                attempt: AttemptOrdinal::FIRST,
-            },
-            SingletonCapture::Refused {
-                refusal: DeclarationRefusal::UnarmedSource,
-            },
-            cancel,
-        )
-        .await
-    }
-
     /// Decide the call (D) on `capture`: the Run's cancel, then every
     /// after-check, with the result's state commands proposed and published
     /// with a final. A final then realizes its declarations and is presented.
@@ -700,66 +681,5 @@ impl<'a> AdmittedToolCall<'a> {
             .cancel_call(&self.call.call_id)
             .await
             .map_err(fault)
-    }
-}
-
-/// Run `call` to its end in memory: admitted, attempted under its sealed
-/// policy with each repeatable failure backed off on `clock`, decided,
-/// realized and presented. No round records its outcome, so the store-local
-/// effects of a final commit at once, in their own fenced transaction.
-///
-/// # Errors
-///
-/// The call's admission refusal or a handler fault.
-pub async fn run_call<'a>(
-    handlers: Arc<dyn SingletonToolHandlers + 'a>,
-    call: SingletonToolCall,
-    scope: &crate::ExecutionScope,
-    clock: &dyn crate::Clock,
-    cancel: &CancellationToken,
-) -> Result<CallEnd, SingletonRunError> {
-    let admitted = AdmittedToolCall::admit(handlers, call, scope).await?;
-    let policy = admitted.policy();
-    let mut ordinal = AttemptOrdinal::FIRST;
-    loop {
-        let last = ordinal.get() >= policy.max_attempts();
-        match admitted.attempt(ordinal, !last, cancel).await? {
-            // No round records this call's outcome: its effects commit at
-            // once, before its end is answered.
-            AttemptEnd::Ended(CallEnd::Final {
-                capture,
-                presentation,
-                launched,
-                store_local,
-            }) => {
-                if !store_local.is_empty() {
-                    admitted.handlers.commit_store_local(store_local).await?;
-                }
-                return Ok(CallEnd::Final {
-                    capture,
-                    presentation,
-                    launched,
-                    store_local: Vec::new(),
-                });
-            }
-            AttemptEnd::Ended(end) => return Ok(end),
-            // Only a round member parks: its round pins the wait.
-            AttemptEnd::Parked { .. } => return admitted.unarmed(cancel).await,
-            AttemptEnd::Retry {
-                suggested_delay_ms, ..
-            } => {
-                let delay = policy.delay_ms_for_retry(ordinal.get() - 1, suggested_delay_ms);
-                tokio::select! {
-                    () = clock.sleep(std::time::Duration::from_millis(delay)) => {}
-                    () = cancel.cancelled() => {}
-                }
-                if cancel.is_cancelled() {
-                    return admitted.withheld(CallDecision::Cancelled, None, None);
-                }
-                ordinal = ordinal
-                    .next()
-                    .ok_or_else(|| fault("the attempt ordinal overflowed"))?;
-            }
-        }
     }
 }

@@ -16,7 +16,7 @@ use crate::tool_run::{
 };
 
 /// How one attempt of a round member ended.
-enum MemberEnd {
+pub(super) enum MemberEnd {
     /// The call ended with this answer.
     Final(CompletedCall),
     /// The attempt reported a failure its policy repeats.
@@ -34,7 +34,7 @@ enum MemberEnd {
 /// completion, and the launch receipt of the start it declared to resolve
 /// it. What its resolution is answered from.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct ParkedCall {
+pub(super) struct ParkedCall {
     completion: crate::PendingCompletion,
     launch: Option<super::super::LaunchReceipt>,
 }
@@ -53,7 +53,10 @@ impl ParkedCall {
     }
 }
 
-fn answered(call: &crate::sansio::PendingToolCall, output: ToolCallOutput) -> CompletedCall {
+pub(super) fn answered(
+    call: &crate::sansio::PendingToolCall,
+    output: ToolCallOutput,
+) -> CompletedCall {
     CompletedCall {
         call_id: call.call_id.clone(),
         provider_call_id: call.provider_call_id.clone(),
@@ -121,7 +124,7 @@ fn parked_output(
 
 /// A member's answer as its attempt's output: a final completes, a
 /// repeatable failure is a known failure, a cancel is `Cancelled`.
-fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> SettledOutput {
+pub(super) fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> SettledOutput {
     let (completed, failure) = match end {
         MemberEnd::Cancelled => {
             return SettledOutput::Cancelled {
@@ -150,19 +153,18 @@ fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> SettledOutput {
 }
 
 impl ProductionToolHandlers<'_> {
-    /// Run attempt `attempt` of the round member `call`, pinned to `tool`,
+    /// Run attempt `attempt` of the member `call`, invoked as `invocation`,
     /// to its end or to a failure its policy repeats when `may_retry`, with
     /// the store-local effects its final or its park staged.
-    async fn round_member(
+    async fn member_attempt(
         self: &Arc<Self>,
         owner: &crate::EffectOpener,
         call: &crate::sansio::PendingToolCall,
-        tool: crate::ToolId,
+        invocation: ToolInvocation,
         attempt: AttemptOrdinal,
         may_retry: bool,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(MemberEnd, Vec<StoreLocalEffect>), SingletonRunError> {
-        let invocation = ToolInvocation::from_pending(call.clone(), tool);
         let Some(definition) = self.leaf_definition(&invocation) else {
             return Ok((MemberEnd::Final(answered(call, unavailable())), Vec::new()));
         };
@@ -284,6 +286,217 @@ fn retry_failure(
     answered(call, output)
 }
 
+/// The body of `execution`, an attempt of the member `call` invoked as
+/// `invocation`, over `context`'s catalog and owned by `owner`'s run: the
+/// call's admission checks, its attempt and its decision, run in memory
+/// between its `x_start` and its `x_outcome`. `policies` are the current
+/// declarations a repeat is vetoed against.
+pub(super) fn member_body(
+    context: &RuntimeExecutionContext<'static>,
+    owner: &crate::EffectOpener,
+    call: crate::sansio::PendingToolCall,
+    invocation: ToolInvocation,
+    execution: &AdmittedExecution,
+    policies: &PolicyView,
+) -> MemberBody {
+    let context = context.clone();
+    let owner = owner.clone();
+    let tool = execution.draft().tool().clone();
+    let pinned = execution.policy();
+    let ordinal = AttemptOrdinal::new(execution.attempt());
+    let may_retry =
+        execution.attempt() < pinned.max_attempts() && policies.permits_repeat(&tool, pinned);
+    let execution = execution.clone();
+    let key = execution
+        .draft()
+        .pinned_wait()
+        .and_then(|wait| waits::host_key(&wait.wait()));
+    Box::new(move |token| {
+        Box::pin(async move {
+            let Some(ordinal) = ordinal else {
+                return SettledOutput::Interrupted.into();
+            };
+            // Each attempt owns its handlers: an inline body stops on the
+            // member's cancel, which its owner fires on a turn cancel.
+            let handlers = Arc::new(
+                ProductionToolHandlers::new(context.with_cancellation_token(token.clone()), None)
+                    .with_completion_key(key),
+            );
+            let (end, store_local) = handlers
+                .member_attempt(&owner, &call, invocation, ordinal, may_retry, &token)
+                .await
+                .unwrap_or_else(|error| {
+                    (
+                        MemberEnd::Final(answered(
+                            &call,
+                            ToolCallOutput::failure(crate::ToolFailure::runtime(
+                                crate::ToolFailureClass::Internal,
+                                "tool_run_fault",
+                                error.to_string(),
+                            )),
+                        )),
+                        Vec::new(),
+                    )
+                });
+            let mut result = match end {
+                MemberEnd::Parked(parked) => parked_output(&call, &owner, &execution, &parked),
+                end => member_output(&owner, end).into(),
+            };
+            // The effects commit with the completion or the park that
+            // staged them; any other answer leaves them unwritten.
+            if matches!(
+                result.output,
+                SettledOutput::Completed(_) | SettledOutput::Waiting(_)
+            ) {
+                result.store_local = store_local;
+            }
+            result
+        })
+    })
+}
+
+/// The final answer of the member `call`, parked as `parked`, once one of
+/// its waits ended with `resolution`: a pure function of the resolution and
+/// the parked call its `Waiting` outcome recorded. Runs no body.
+pub(super) fn resolved_member(
+    owner: &crate::EffectOpener,
+    call: &crate::sansio::PendingToolCall,
+    parked: &Material<CompletionSource>,
+    resolution: Resolution,
+) -> SettledOutput {
+    let parked = serde_json::from_str::<ParkedCall>(parked.payload()).ok();
+    let output = crate::tool_result::tool_output_from_completion_resolution(
+        resolution,
+        parked
+            .as_ref()
+            .and_then(|parked| parked.completion.resolved_by.as_ref()),
+    );
+    let mut completed = answered(call, output);
+    // The launch receipt is the call's host-facing intent outcome; the
+    // model sees the child's value only.
+    completed.intent_outcomes = parked
+        .and_then(|parked| parked.launch)
+        .map(|launch| vec![launch.outcome])
+        .unwrap_or_default();
+    member_output(owner, MemberEnd::Final(completed))
+}
+
+/// Discharges the child a parked call's declared start launched (ADR 0116
+/// §3.6): a call that ends cancelled under
+/// [`CancelHint::CancelExternalWork`](crate::CancelHint) cancels it, and the
+/// call's hold on it is released, so a later redrive finds the launch
+/// receipt its park recorded and the row may be pruned. Both are idempotent
+/// registry writes; a failure is logged and leaves the hold to the owning
+/// scope's close.
+pub(super) async fn discharge_member(
+    context: &RuntimeExecutionContext<'static>,
+    call_id: &crate::ToolCallId,
+    parked: &Material<CompletionSource>,
+    cancelled: bool,
+) {
+    let Ok(parked) = serde_json::from_str::<ParkedCall>(parked.payload()) else {
+        return;
+    };
+    let Some(process_id) = parked
+        .launch
+        .as_ref()
+        .and_then(|launch| launch.process_id.as_ref())
+    else {
+        return;
+    };
+    let processes = &context.dispatch().processes;
+    if cancelled
+        && parked.completion.on_cancel == crate::CancelHint::CancelExternalWork
+        && let Err(error) = processes
+            .cancel_bound(process_id, context.process_scope(None))
+            .await
+    {
+        tracing::warn!(
+            process_id = %process_id,
+            error = %error,
+            "a cancelled parked call could not cancel the child it launched"
+        );
+        return;
+    }
+    if let Err(error) = processes
+        .release_consumer_hold(process_id, &super::super::call_run::start_hold_key(call_id))
+        .await
+    {
+        tracing::warn!(
+            process_id = %process_id,
+            error = %error,
+            "a parked call could not release its hold on the child it launched"
+        );
+    }
+}
+
+/// The answer the member `call` settled with as `output`.
+pub(super) fn completed_answer(
+    call: &crate::sansio::PendingToolCall,
+    output: &SettledOutput,
+) -> CompletedCall {
+    if let Some(answer) = output.stopped_answer() {
+        return answered(call, answer);
+    }
+    output
+        .payload()
+        .and_then(decode_completed)
+        .unwrap_or_else(|| {
+            answered(
+                call,
+                ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "tool_outcome_unreadable",
+                    "the call's committed output is not a tool answer",
+                )),
+            )
+        })
+}
+
+/// The catalog's pin of the tool `manifest` declares (or none), read at
+/// `now_ms` over `context`'s budgets: its policy, a limit starting now, and
+/// for a deferring tool the deadline of the completion wait its admission
+/// pins, which is the limit's.
+pub(super) fn member_pin(
+    context: &RuntimeExecutionContext<'_>,
+    manifest: Option<&crate::ToolManifest>,
+    tool: crate::ToolId,
+    now_ms: u64,
+) -> MemberPin {
+    let budgets = context.dispatch().plugins.execution_budgets();
+    let total = manifest
+        .and_then(|manifest| budgets.admit_tool(manifest).ok())
+        .unwrap_or_else(|| budgets.tool_default());
+    let limit = lash_sansio::ExecutionLimit::starting_at(now_ms, total, total);
+    // One limit spans a deferring call's body and its park: its wait's
+    // deadline is the limit's, written once with the admission.
+    let wait = manifest
+        .filter(|manifest| manifest.declaration.may_defer)
+        .map(|_| {
+            WaitDeadline::at_instant(lash_durable::DurableInstant(
+                i64::try_from(limit.expires_at).unwrap_or(i64::MAX),
+            ))
+        });
+    MemberPin {
+        tool,
+        policy: manifest.map_or(ExecutionPolicy::Once, |manifest| manifest.execution_policy),
+        limit,
+        wait,
+    }
+}
+
+/// The policies `context`'s catalog declares now: what a resumed member
+/// vetoes a stored repeat against.
+pub(super) fn catalog_policies(context: &RuntimeExecutionContext<'_>) -> PolicyView {
+    PolicyView::new(
+        context
+            .tool_catalog()
+            .tools
+            .iter()
+            .map(|tool| (tool.manifest.id.clone(), tool.manifest.execution_policy)),
+    )
+}
+
 /// The tools a turn's rounds run, over one execution context's catalog.
 struct ProductionRoundTools {
     context: RuntimeExecutionContext<'static>,
@@ -292,7 +505,6 @@ struct ProductionRoundTools {
 
 impl RoundTools for ProductionRoundTools {
     fn pin(&self, call: &crate::sansio::PendingToolCall, now_ms: u64) -> MemberPin {
-        let budgets = self.context.dispatch().plugins.execution_budgets();
         let manifest = self
             .context
             .tool_catalog()
@@ -300,40 +512,15 @@ impl RoundTools for ProductionRoundTools {
             .iter()
             .find(|tool| tool.manifest.name == call.tool_name)
             .map(|tool| tool.manifest.clone());
-        let total = manifest
-            .as_ref()
-            .and_then(|manifest| budgets.admit_tool(manifest).ok())
-            .unwrap_or_else(|| budgets.tool_default());
-        let limit = lash_sansio::ExecutionLimit::starting_at(now_ms, total, total);
-        // One limit spans a deferring call's body and its park: its wait's
-        // deadline is the limit's, written once with the admission.
-        let wait = manifest
-            .as_ref()
-            .filter(|manifest| manifest.declaration.may_defer)
-            .map(|_| {
-                WaitDeadline::at_instant(lash_durable::DurableInstant(
-                    i64::try_from(limit.expires_at).unwrap_or(i64::MAX),
-                ))
-            });
-        MemberPin {
-            tool: manifest.as_ref().map_or_else(
-                || crate::ToolId::new(call.tool_name.clone()),
-                |manifest| manifest.id.clone(),
-            ),
-            policy: manifest.map_or(ExecutionPolicy::Once, |manifest| manifest.execution_policy),
-            limit,
-            wait,
-        }
+        let tool = manifest.as_ref().map_or_else(
+            || crate::ToolId::new(call.tool_name.clone()),
+            |manifest| manifest.id.clone(),
+        );
+        member_pin(&self.context, manifest.as_ref(), tool, now_ms)
     }
 
     fn policies(&self) -> PolicyView {
-        PolicyView::new(
-            self.context
-                .tool_catalog()
-                .tools
-                .iter()
-                .map(|tool| (tool.manifest.id.clone(), tool.manifest.execution_policy)),
-        )
+        catalog_policies(&self.context)
     }
 
     fn refusal(&self, calls: &[crate::sansio::PendingToolCall]) -> Option<Vec<CompletedCall>> {
@@ -430,64 +617,16 @@ impl RoundTools for ProductionRoundTools {
         call: &crate::sansio::PendingToolCall,
         execution: &AdmittedExecution,
     ) -> MemberBody {
-        let context = self.context.clone();
-        let owner = self.owner.clone();
-        let call = call.clone();
-        let tool = execution.draft().tool().clone();
-        let pinned = execution.policy();
-        let ordinal = AttemptOrdinal::new(execution.attempt());
-        let may_retry = execution.attempt() < pinned.max_attempts()
-            && self.policies().permits_repeat(&tool, pinned);
-        let execution = execution.clone();
-        let key = execution
-            .draft()
-            .pinned_wait()
-            .and_then(|wait| waits::host_key(&wait.wait()));
-        Box::new(move |token| {
-            Box::pin(async move {
-                let Some(ordinal) = ordinal else {
-                    return SettledOutput::Interrupted.into();
-                };
-                // Each attempt owns its handlers: an inline body stops on the
-                // member's cancel, which the round fires on a turn cancel.
-                let handlers = Arc::new(
-                    ProductionToolHandlers::new(
-                        context.with_cancellation_token(token.clone()),
-                        None,
-                    )
-                    .with_completion_key(key),
-                );
-                let (end, store_local) = handlers
-                    .round_member(&owner, &call, tool, ordinal, may_retry, &token)
-                    .await
-                    .unwrap_or_else(|error| {
-                        (
-                            MemberEnd::Final(answered(
-                                &call,
-                                ToolCallOutput::failure(crate::ToolFailure::runtime(
-                                    crate::ToolFailureClass::Internal,
-                                    "tool_run_fault",
-                                    error.to_string(),
-                                )),
-                            )),
-                            Vec::new(),
-                        )
-                    });
-                let mut result = match end {
-                    MemberEnd::Parked(parked) => parked_output(&call, &owner, &execution, &parked),
-                    end => member_output(&owner, end).into(),
-                };
-                // The effects commit with the completion or the park that
-                // staged them; any other answer leaves them unwritten.
-                if matches!(
-                    result.output,
-                    SettledOutput::Completed(_) | SettledOutput::Waiting(_)
-                ) {
-                    result.store_local = store_local;
-                }
-                result
-            })
-        })
+        let invocation =
+            ToolInvocation::from_pending(call.clone(), execution.draft().tool().clone());
+        member_body(
+            &self.context,
+            &self.owner,
+            call.clone(),
+            invocation,
+            execution,
+            &self.policies(),
+        )
     }
 
     fn resolved(
@@ -497,30 +636,9 @@ impl RoundTools for ProductionRoundTools {
         parked: &Material<CompletionSource>,
         resolution: Resolution,
     ) -> SettledOutput {
-        let parked = serde_json::from_str::<ParkedCall>(parked.payload()).ok();
-        let output = crate::tool_result::tool_output_from_completion_resolution(
-            resolution,
-            parked
-                .as_ref()
-                .and_then(|parked| parked.completion.resolved_by.as_ref()),
-        );
-        let mut completed = answered(call, output);
-        // The launch receipt is the call's host-facing intent outcome; the
-        // model sees the child's value only.
-        completed.intent_outcomes = parked
-            .and_then(|parked| parked.launch)
-            .map(|launch| vec![launch.outcome])
-            .unwrap_or_default();
-        member_output(&self.owner, MemberEnd::Final(completed))
+        resolved_member(&self.owner, call, parked, resolution)
     }
 
-    /// Discharges the child a parked call's declared start launched (ADR
-    /// 0116 §3.6): a call that ends cancelled under
-    /// [`CancelHint::CancelExternalWork`](crate::CancelHint) cancels it, and
-    /// the call's hold on it is released, so a later redrive finds the
-    /// launch receipt its park recorded and the row may be pruned. Both are
-    /// idempotent registry writes; a failure is logged and leaves the hold
-    /// to the owning scope's close.
     fn discharge<'a>(
         &'a self,
         call: &'a crate::sansio::PendingToolCall,
@@ -528,45 +646,12 @@ impl RoundTools for ProductionRoundTools {
         parked: &'a Material<CompletionSource>,
         cancelled: bool,
     ) -> Discharge<'a> {
-        Box::pin(async move {
-            let Ok(parked) = serde_json::from_str::<ParkedCall>(parked.payload()) else {
-                return;
-            };
-            let Some(process_id) = parked
-                .launch
-                .as_ref()
-                .and_then(|launch| launch.process_id.as_ref())
-            else {
-                return;
-            };
-            let processes = &self.context.dispatch().processes;
-            if cancelled
-                && parked.completion.on_cancel == crate::CancelHint::CancelExternalWork
-                && let Err(error) = processes
-                    .cancel_bound(process_id, self.context.process_scope(None))
-                    .await
-            {
-                tracing::warn!(
-                    process_id = %process_id,
-                    error = %error,
-                    "a cancelled parked call could not cancel the child it launched"
-                );
-                return;
-            }
-            if let Err(error) = processes
-                .release_consumer_hold(
-                    process_id,
-                    &super::super::call_run::start_hold_key(&call.call_id),
-                )
-                .await
-            {
-                tracing::warn!(
-                    process_id = %process_id,
-                    error = %error,
-                    "a parked call could not release its hold on the child it launched"
-                );
-            }
-        })
+        Box::pin(discharge_member(
+            &self.context,
+            &call.call_id,
+            parked,
+            cancelled,
+        ))
     }
 
     fn completed(
@@ -574,22 +659,7 @@ impl RoundTools for ProductionRoundTools {
         call: &crate::sansio::PendingToolCall,
         output: &SettledOutput,
     ) -> CompletedCall {
-        if let Some(answer) = output.stopped_answer() {
-            return answered(call, answer);
-        }
-        output
-            .payload()
-            .and_then(decode_completed)
-            .unwrap_or_else(|| {
-                answered(
-                    call,
-                    ToolCallOutput::failure(crate::ToolFailure::runtime(
-                        crate::ToolFailureClass::Internal,
-                        "tool_outcome_unreadable",
-                        "the call's committed output is not a tool answer",
-                    )),
-                )
-            })
+        completed_answer(call, output)
     }
 }
 

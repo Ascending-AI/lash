@@ -2,7 +2,6 @@
 //! in their owning records; live maps carry invocation attribution and body stops.
 use super::*;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
-use crate::session::tool_execution::{ToolAggregateOutcome, ToolAggregateRequest};
 use crate::tool_run::*;
 use crate::{
     PreparedToolCall, RuntimeEffectControllerError, RuntimeExecutionContext, ToolCallOutput,
@@ -13,11 +12,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-mod aggregate;
+mod cell;
 mod hooks;
+mod leaf;
 mod observations;
 mod round;
 mod settlement;
+
+pub use cell::{CellCall, CellHostCalls, CellMember, CellMembers, HostCall};
 
 pub(crate) struct ProductionToolHandlers<'run> {
     context: RuntimeExecutionContext<'run>,
@@ -29,8 +31,6 @@ pub(crate) struct ProductionToolHandlers<'run> {
     declarations: Mutex<BTreeMap<crate::ToolCallId, Vec<crate::ToolIntentExecutionOutcome>>>,
     /// The process each admitted isolated call's provider bound it to.
     isolated: Mutex<BTreeMap<crate::ToolCallId, IsolatedToolStart>>,
-    /// Each aggregate's operands refused before it formed, by operand.
-    refused: Mutex<BTreeMap<String, BTreeMap<usize, aggregate::RefusedInput>>>,
     /// The key of the completion wait a round member's round pinned for it.
     completion_key: Option<crate::PinnedKey>,
 }
@@ -141,7 +141,6 @@ impl<'run> ProductionToolHandlers<'run> {
             declarations: Mutex::default(),
             isolated: Mutex::default(),
             completion_key: None,
-            refused: Mutex::default(),
         }
     }
     /// Ask an isolated call's executable provider which registered engine

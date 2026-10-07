@@ -1365,16 +1365,6 @@ fn drain_area_witnesses() {
     let _ = lash::tools::ToolInvocation::with_child_execution_trace_hook;
     // W0457: lash::tools::ToolInvocation::with_execution_grant [function]
     let _ = lash::tools::ToolInvocation::with_execution_grant;
-    // W0458: lash::tools::ToolBatchReplies [struct]
-    type_witness::<lash::tools::ToolBatchReplies>();
-    // W0459: lash::tools::ToolBatchReplies::replies [field]
-    field_witness(|value: &lash::tools::ToolBatchReplies| {
-        let _ = &value.replies;
-    });
-    // W0460: lash::tools::ToolBatchReplies::settlement_order [field]
-    field_witness(|value: &lash::tools::ToolBatchReplies| {
-        let _ = &value.settlement_order;
-    });
     // W0461: lash::tools::ToolInvocationReply [struct]
     type_witness::<lash::tools::ToolInvocationReply>();
     // W0462: lash::tools::ToolInvocationReply::cancelled [function]

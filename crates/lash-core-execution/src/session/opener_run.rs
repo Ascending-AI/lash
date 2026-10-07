@@ -1,27 +1,18 @@
-//! Logical Run ownership and per-cell admission shared across execution phases.
-
-pub(crate) mod run;
+//! What an opener shares across the phase contexts it builds.
 
 use std::sync::Arc;
 
 use lash_sansio::sync::MutexExt;
 
 use super::execution_context::RuntimeExecutionContext;
-use crate::runtime::effect::executor::RuntimeEffectControllerError;
-
-#[derive(Debug, Default)]
-pub struct OpenerRunRegistry {
-    active_run: bool,
-}
 
 /// What an opener shares across the phase contexts it builds: the once-only
-/// incorporation ledger and whether its tool Run is open.
+/// incorporation ledger.
 ///
-/// Cloning shares them; [`OpenerState::default`] starts a fresh opener.
+/// Cloning shares it; [`OpenerState::default`] starts a fresh opener.
 #[derive(Clone, Debug, Default)]
 pub struct OpenerState {
     pub(crate) ledger: Arc<std::sync::Mutex<super::IncorporationLedger>>,
-    pub(crate) run_state: Arc<std::sync::Mutex<OpenerRunRegistry>>,
 }
 
 impl OpenerState {
@@ -38,19 +29,7 @@ impl OpenerState {
     }
 }
 
-impl<'run> RuntimeExecutionContext<'run> {
-    /// The prefix every group key this opener forms carries: `{scope}:group:`.
-    pub(crate) fn own_group_key_prefix(&self) -> String {
-        format!("{}:group:", self.execution_scope_id())
-    }
-
-    /// The key of the group a language command forms (FIG-3586): the opener's
-    /// group prefix, then its positional key. The prefix is a frozen logical
-    /// identity of aggregate admission.
-    pub(crate) fn command_group_key(&self, command: &crate::CommandReplayKey) -> String {
-        format!("{}{command}", self.own_group_key_prefix())
-    }
-
+impl RuntimeExecutionContext<'_> {
     /// The latest `max_tool_calls` refusal this execution met, typed. A
     /// language runtime whose run failed on the refusal reads it here to
     /// report the failure with its typed cause.
@@ -59,12 +38,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         *self.tool_call_limit_refusal.lock_recover()
     }
 
-    /// Close the logical Run, drain its accepted finals and incorporate them
-    /// into this opener's ledger before the owner finishes.
-    pub async fn close_tool_run(&self) -> Result<(), RuntimeEffectControllerError> {
-        if let Some(run) = &self.tool_run {
-            run.close().await?;
-        }
-        Ok(())
+    /// Record `exceeded`, the `max_tool_calls` refusal this execution met.
+    pub fn record_tool_call_limit_refusal(&self, exceeded: crate::ToolCallLimitExceeded) {
+        *self.tool_call_limit_refusal.lock_recover() = Some(exceeded);
     }
 }

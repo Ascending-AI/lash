@@ -45,15 +45,16 @@ pub struct WorkerRun<'a, H> {
 /// that performs it, which knows its tool and policy.
 #[async_trait::async_trait]
 pub trait OperationAdmissions: Send + Sync {
-    /// The admission of `call`, the command `request` takes: its execution
-    /// (none for a wait the host performs again on restore) and its waits.
+    /// The admission of operation `ordinal`, the command `request` takes:
+    /// its member executions (none for a wait the host performs again on
+    /// restore) and its waits.
     ///
     /// # Errors
     ///
     /// Why the operation cannot be admitted; the run stops.
     async fn admission(
         &self,
-        call: &lash_sansio::ToolCallId,
+        ordinal: u64,
         request: &OperationRequest,
     ) -> Result<Admission, String>;
 
@@ -78,9 +79,11 @@ pub struct Performing {
     /// The operation's admission: the issue ordinal its calls' ids derive
     /// from.
     pub ordinal: u64,
-    /// The waits its quiet point pinned (a sleep's timer), the same rows on
-    /// every restore.
+    /// The waits its quiet point pinned (a sleep's timer, an aggregate's
+    /// timer leaves), the same rows on every restore.
     pub waits: Vec<WaitRef>,
+    /// Its admitted member executions, by identity: the tool calls it makes.
+    pub members: Vec<OperationId>,
 }
 
 /// Where the broker's parent tells a run's host which admitted operation it
@@ -114,7 +117,6 @@ impl PerformingGate {
 struct Effects<'a, H> {
     host: &'a H,
     projections: lash_vm_client::Projections,
-    context: &'a AdmittedContext,
     admissions: &'a dyn OperationAdmissions,
     boundary: &'a (dyn Fn() -> bool + Send + Sync),
     performing: Option<&'a PerformingGate>,
@@ -154,11 +156,15 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
         })
     }
     async fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
+        // Admitted as performed: a call's request carries the values its
+        // projections materialize to.
+        let request = self
+            .projections
+            .materialize_operation(self.request(operation)?)
+            .await
+            .map_err(ParentFault)?;
         self.admissions
-            .admission(
-                &operation.command_id(self.context),
-                &self.request(operation)?,
-            )
+            .admission(operation.run, &request)
             .await
             .map_err(ParentFault)
     }
@@ -179,6 +185,7 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
             gate.set(Some(Performing {
                 ordinal: operation.run,
                 waits: waits.iter().map(|(wait, _)| *wait).collect(),
+                members: operation.members.clone(),
             }));
         }
         let result = self.host.perform(request).await;
@@ -199,19 +206,6 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
             }
         };
         Ok(Performed::outcome(outcome))
-    }
-    fn interrupted(&self, operation: &AdmittedOperation) -> EffectOutcome {
-        let call = operation.command_id(self.context);
-        let failure = lash_sansio::ToolFailure::tool(
-            lash_sansio::ToolFailureClass::Unavailable,
-            "lash_operation_interrupted",
-            "the operation started and never answered; it is not run again",
-        );
-        let error = lashlang::ExecutionHostError::from_tool_failure(&failure, call.to_string());
-        match rmp_serde::to_vec_named(&error) {
-            Ok(bytes) => EffectOutcome::Failed(EncodedPayload(bytes)),
-            Err(_) => EffectOutcome::Cancelled,
-        }
     }
     async fn observe_cancellation(&self, checkpoint: u64) -> Result<bool, ParentFault> {
         self.host.cancel_checkpoint(checkpoint).await;
@@ -296,7 +290,6 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
         let effects = Effects {
             host: self.host,
             projections: lash_vm_client::Projections::new(self.providers),
-            context: &context,
             admissions: self.admissions,
             boundary: self.boundary,
             performing: self.performing,

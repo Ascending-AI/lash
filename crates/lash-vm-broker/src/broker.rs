@@ -9,15 +9,17 @@
 //!   guest may catch and dispatches nothing.
 //! - **Identities.** The parent's [`ParentLedger`] gives each issued request
 //!   the execution's next admission and derives its calls' `ToolCallId`s
-//!   (ADR 0117). The admission's [`OperationId`](crate::OperationId) is
-//!   minted when it commits and is stored in the snapshot.
+//!   (ADR 0117). Each member execution of the admission (a tool call the
+//!   operation makes) takes an [`OperationId`](crate::OperationId) minted
+//!   when it commits, stored in the snapshot.
 //! - **Quiet points.** A request the VM blocks on (a resource operation, a
 //!   batch, an await, a sleep, a signal wait) parks the worker first: the
 //!   parent takes the VM's continuation and commits it, with the ledger that
-//!   matches it, the operation's admission and its waits, in one
-//!   transaction ([`SnapshotStore::commit_quiet_point`]). Only then does the
-//!   operation's body run, and its outcome commits before the VM is answered
-//!   ([`SnapshotStore::settle`]). A request answered in place (a print, a
+//!   matches it, the admission of the operation's member executions and its
+//!   waits, in one transaction ([`SnapshotStore::commit_quiet_point`]). Only
+//!   then does the parent perform it: each member runs through the
+//!   admitted-execution lifecycle and its outcome commits before the VM is
+//!   answered from it. A request answered in place (a print, a
 //!   projection read, a cancel checkpoint) is recomputed after a crash and
 //!   recorded nowhere.
 //! - **Fencing.** Every worker frame is admitted through a
@@ -33,12 +35,14 @@
 //!
 //! A run starts from its latest committed checkpoint
 //! ([`RunStart::from`]). A checkpoint that records an end answers it without
-//! starting the VM. A VM that stands on an admitted operation is fed that
-//! operation's saved outcome by identity ([`SnapshotStore::recover`]):
-//! settled, `Interrupted` for a started `Once`, or the body run again for a
-//! started `Repeatable` or an operation admitted as no execution. The VM then
-//! issues the operation again from its continuation and is answered with
-//! that outcome. Nothing earlier runs again, and nothing is re-dispatched.
+//! starting the VM. A VM that stands on an admitted operation has it
+//! performed again over the waits its quiet point pinned
+//! ([`SnapshotStore::recover`]): the parent answers it from its members'
+//! committed outcomes, a started `Once` member without one records
+//! `Interrupted` and a started `Repeatable` one reruns at its ordinal. The VM
+//! then issues the operation again from its continuation and is answered
+//! with that outcome. Nothing earlier runs again, and no settled member is
+//! entered again.
 //!
 //! # Worker loss
 //!
@@ -95,7 +99,7 @@ use crate::effects::{Admission, ParentEffects, ParentFault, Performed};
 use crate::ledger::{
     AdmittedKind, AdmittedOperation, Checkpoint, ParentLedger, QuietPointRefusal, RecordedEnd,
 };
-use crate::snapshot::{QuietPoint, Recovered, SnapshotStore};
+use crate::snapshot::{QuietPoint, SnapshotStore};
 use crate::transport::{CheckoutRefusal, WorkerCheckout, WorkerRead, WorkerSlots};
 
 /// The bounds a broker holds a run to, beyond the protocol's own.
@@ -427,7 +431,7 @@ impl Broker<'_> {
                                 host: self.host_state()?,
                                 end: None,
                             },
-                            admit: admission.draft,
+                            members: admission.members,
                             waits: admission.waits,
                             with: Vec::new(),
                         })
@@ -435,15 +439,17 @@ impl Broker<'_> {
                         .map_err(|refusal| BrokerFailure::Checkpoint { refusal })?;
                     snapshotted = true;
                     ledger = ParentLedger::restore(committed.checkpoint.ledger.clone());
-                    operation.operation = ledger.pending().and_then(|pending| pending.operation());
+                    operation.members = ledger
+                        .pending()
+                        .map(|pending| pending.members.clone())
+                        .unwrap_or_default();
                     let performed = self
                         .effects
                         .perform(&operation, &committed.waits)
                         .await
                         .map_err(|fault| BrokerFailure::Parent { fault })?;
-                    let Some(outcome) = self
-                        .settled(&mut ledger, &operation, performed, frame_epoch)
-                        .await?
+                    let Some(outcome) =
+                        self.settled(&mut ledger, &operation, performed, frame_epoch)?
                     else {
                         // The parent left the operation open beyond this
                         // activation: the committed quiet point resumes it.
@@ -461,9 +467,10 @@ impl Broker<'_> {
         }
     }
 
-    /// Feeds a restored VM the outcome of the operation it stands on, by its
-    /// identity. The operation is resolved again from the request the ledger
-    /// kept, and must resolve to what was admitted.
+    /// Performs again the operation a restored VM stands on, over the waits
+    /// its quiet point pinned: the parent answers it from its members'
+    /// committed outcomes. The operation is resolved again from the request
+    /// the ledger kept, and must resolve to what was admitted.
     async fn restore(
         &self,
         ledger: &mut ParentLedger,
@@ -475,7 +482,7 @@ impl Broker<'_> {
         let parent = |fault: String| BrokerFailure::Parent {
             fault: ParentFault(fault),
         };
-        let recovered = self
+        let waits = self
             .checkpoints
             .recover(&pending)
             .await
@@ -495,28 +502,16 @@ impl Broker<'_> {
                 "the restored operation resolves to other content than was admitted".into(),
             ));
         }
-        let outcome = match recovered {
-            Recovered::Settled(performed) => {
-                Some(self.deliverable(ledger, &operation, performed, frame_epoch)?)
-            }
-            Recovered::Interrupted => {
-                ledger.answered();
-                Some(self.effects.interrupted(&operation))
-            }
-            Recovered::Rerun { waits } => {
-                let waits = waits
-                    .into_iter()
-                    .map(|wait| (wait, None))
-                    .collect::<Vec<_>>();
-                let performed = self
-                    .effects
-                    .perform(&operation, &waits)
-                    .await
-                    .map_err(|fault| BrokerFailure::Parent { fault })?;
-                self.settled(ledger, &operation, performed, frame_epoch)
-                    .await?
-            }
-        };
+        let waits = waits
+            .into_iter()
+            .map(|wait| (wait, None))
+            .collect::<Vec<_>>();
+        let performed = self
+            .effects
+            .perform(&operation, &waits)
+            .await
+            .map_err(|fault| BrokerFailure::Parent { fault })?;
+        let outcome = self.settled(ledger, &operation, performed, frame_epoch)?;
         Ok(match outcome {
             Some(outcome) => Restored::Held(HeldOperation {
                 fingerprint: pending.fingerprint,
@@ -526,10 +521,10 @@ impl Broker<'_> {
         })
     }
 
-    /// Records what `operation`'s body performed and answers the outcome the
-    /// VM is answered with; `None` when the parent handed the operation
-    /// over, leaving it open beyond this activation.
-    async fn settled(
+    /// The outcome the VM is answered with for what `operation` performed;
+    /// `None` when the parent handed the operation over, leaving it open
+    /// beyond this activation.
+    fn settled(
         &self,
         ledger: &mut ParentLedger,
         operation: &AdmittedOperation,
@@ -537,20 +532,7 @@ impl Broker<'_> {
         frame_epoch: FrameEpoch,
     ) -> Result<Option<EffectOutcome>, BrokerFailure> {
         if performed.outcome == EffectOutcome::HandedOver {
-            if operation.operation.is_some() {
-                return Err(BrokerFailure::Parent {
-                    fault: ParentFault(
-                        "an operation admitted as an execution cannot be handed over".into(),
-                    ),
-                });
-            }
             return Ok(None);
-        }
-        if let Some(id) = operation.operation {
-            self.checkpoints
-                .settle(id, &performed)
-                .await
-                .map_err(|refusal| BrokerFailure::Checkpoint { refusal })?;
         }
         self.deliverable(ledger, operation, performed, frame_epoch)
             .map(Some)

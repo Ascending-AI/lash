@@ -4,9 +4,11 @@
 //! The parent issues every operation: a request it admits takes the
 //! execution's next admission, and every identity the request's calls take
 //! derives from it (ADR 0117). A worker cannot choose, skip or repeat one.
-//! The operation's [`OperationId`] is minted when its admission commits, and
-//! is stored in the snapshot that commits with it (ADR 0132 §8). It is never
-//! a journal position. The ledger also holds the handles the parent granted.
+//! Each member execution of the operation (a tool call it makes) takes an
+//! [`OperationId`] minted when its admission commits, stored in the
+//! snapshot that commits with it (ADR 0132 §8); it is never a journal
+//! position. The ledger keeps every member until it settles, and the
+//! handles the parent granted.
 //!
 //! A [`Checkpoint`] is the unit of durability: VM bytes, the ledger that
 //! matches them and the host's own state for the execution, committed
@@ -62,9 +64,10 @@ pub struct AdmittedOperation {
     pub fingerprint: RequestFingerprint,
     pub kind: AdmittedKind,
     pub request: Option<lash_vm_protocol::EncodedPayload>,
-    /// Its identity, minted when its admission committed; `None` for an
-    /// operation the host admits as no execution (a wait it performs again).
-    pub operation: Option<OperationId>,
+    /// Its member executions, minted when its admission committed; none
+    /// for an operation the host admits as no execution (a wait it performs
+    /// again).
+    pub members: Vec<OperationId>,
 }
 
 impl AdmittedOperation {
@@ -136,9 +139,10 @@ impl ParentLedger {
     ) -> AdmittedOperation {
         let run = self.state.next_admission;
         self.state.next_admission += 1;
-        let operation = admitted(context, run, resolved, None);
+        let operation = admitted(context, run, resolved, Vec::new());
         self.state.pending = Some(PendingOperation {
-            admission: crate::snapshot::OperationAdmission::NoExecution { run },
+            run,
+            members: Vec::new(),
             kind: request.kind,
             request: request.payload.clone(),
             fingerprint: operation.fingerprint,
@@ -160,19 +164,14 @@ impl ParentLedger {
     ) -> AdmittedOperation {
         AdmittedOperation {
             request: Some(pending.request.clone()),
-            ..admitted(context, pending.run(), resolved, pending.operation())
+            ..admitted(context, pending.run, resolved, pending.members.clone())
         }
     }
 
-    /// The VM was answered: it no longer stands on an operation, and an
-    /// identity no grant names is no longer reachable from any snapshot.
+    /// The VM was answered: it no longer stands on an operation. Its
+    /// members still open stay in the ledger until they settle.
     pub fn answered(&mut self) {
         self.state.pending = None;
-        let granted: std::collections::BTreeSet<u64> =
-            self.state.grants.values().map(|grant| grant.run).collect();
-        self.state
-            .operations
-            .retain(|operation, _| granted.contains(&operation.run));
     }
 
     /// Records a handle an admitted call's outcome granted, scoped to the
@@ -200,7 +199,7 @@ fn admitted(
     context: &AdmittedContext,
     run: u64,
     resolved: ResolvedRequest,
-    operation: Option<OperationId>,
+    members: Vec<OperationId>,
 ) -> AdmittedOperation {
     let fingerprint = RequestFingerprint::of(&resolved);
     let kind = match resolved {
@@ -227,7 +226,7 @@ fn admitted(
         fingerprint,
         kind,
         request: None,
-        operation,
+        members,
     }
 }
 
@@ -272,31 +271,29 @@ impl TryFrom<DecodedCheckpoint> for Checkpoint {
     fn try_from(decoded: DecodedCheckpoint) -> Result<Self, Self::Error> {
         let ledger = &decoded.ledger;
         if let Some(pending) = &ledger.pending {
-            if pending.run() >= ledger.next_admission {
+            if pending.run >= ledger.next_admission {
                 return Err(QuietPointRefusal(
                     "pending operation names an unissued admission".into(),
                 ));
             }
-            match pending.admission {
-                crate::snapshot::OperationAdmission::Execution(operation) => {
-                    if operation.ordinal == 0 || !ledger.operations.contains_key(&operation) {
-                        return Err(QuietPointRefusal(
-                            "pending execution is absent from the broker ledger".into(),
-                        ));
-                    }
-                }
-                crate::snapshot::OperationAdmission::NoExecution { run } => {
-                    if ledger
-                        .operations
-                        .keys()
-                        .any(|operation| operation.run == run)
-                    {
-                        return Err(QuietPointRefusal(
-                            "no-execution admission names a recorded execution".into(),
-                        ));
-                    }
-                }
+            if pending
+                .members
+                .iter()
+                .any(|member| member.run != pending.run)
+            {
+                return Err(QuietPointRefusal(
+                    "pending operation names a member of another admission".into(),
+                ));
             }
+        }
+        if ledger
+            .operations
+            .keys()
+            .any(|member| member.run >= ledger.next_admission)
+        {
+            return Err(QuietPointRefusal(
+                "an open member names an unissued admission".into(),
+            ));
         }
         Ok(Self {
             vm: decoded.vm,

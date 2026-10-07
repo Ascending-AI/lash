@@ -193,15 +193,21 @@ async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried
         &cx,
         lash_vm_broker::ExecKey::Process(process_id.clone()),
     );
+    // A run that makes no tool call admits no member.
+    struct NoMembers;
+    #[async_trait::async_trait]
+    impl crate::MemberAdmissions for NoMembers {
+        async fn members(
+            &self,
+            _ordinal: u64,
+            _request: &lash_vm_broker::OperationRequest,
+        ) -> Result<Vec<lash_vm_broker::MemberDraft>, String> {
+            Ok(Vec::new())
+        }
+    }
     let admissions = crate::RunAdmissions {
         cx: &cx,
-        opener: lash_core::EffectOpener::process(process_id.clone()),
-        limit: lash_sansio::ExecutionLimit::starting_at(
-            0,
-            std::time::Duration::from_secs(60),
-            std::time::Duration::from_secs(60),
-        ),
-        policy: &|_, _| None,
+        members: &NoMembers,
         host_state: &|| Ok(None),
     };
     let failure = crate::WorkerRun {

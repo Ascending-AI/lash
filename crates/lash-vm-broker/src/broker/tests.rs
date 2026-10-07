@@ -20,18 +20,21 @@ use crate::authority::{
 use crate::identity::CodeCallIdentities;
 use crate::snapshot::{OperationId, SnapshotStore};
 use crate::testing::{
-    FAKE_VM_CONTRACT, FakeWorkerPool, Fault, MemoryCheckpoints, ScriptedProgram, Step,
-    operation_draft,
+    FAKE_VM_CONTRACT, FakeWorkerPool, Fault, MemoryCheckpoints, ScriptedProgram, Step, member_draft,
 };
 
-/// The parent: it admits every operation as a `Once` execution but the
-/// waits, and records each body it runs with how many quiet points had
-/// committed when it ran.
+/// The parent: it admits every operation but the waits as one `Once`
+/// member, and records each body it runs with how many quiet points had
+/// committed when it ran. It answers an operation whose member already has
+/// an outcome from that outcome, as a host answers from its members'
+/// committed outcomes, without running the body again.
 struct Host {
     context: AdmittedContext,
     checkpoints: Arc<MemoryCheckpoints>,
     /// Every body run, by command id, with the quiet points committed then.
     dispatches: Mutex<Vec<(String, usize)>>,
+    /// Each member's outcome, by its operation's admission.
+    outcomes: Mutex<std::collections::BTreeMap<u64, Performed>>,
     cancelled: AtomicBool,
     /// Operations whose body leaves them open beyond the activation.
     hand_over: Mutex<BTreeSet<String>>,
@@ -110,15 +113,18 @@ impl ParentEffects for Host {
         let name = operation_name(operation);
         let wait = matches!(name.as_str(), "await" | "sleep" | "control");
         Ok(Admission {
-            draft: (!wait).then(|| {
-                operation_draft(
-                    &self.context,
-                    operation,
-                    &format!("tool:{name}"),
-                    lash_sansio::ExecutionPolicy::Once,
-                    0,
-                )
-            }),
+            members: (!wait)
+                .then(|| {
+                    member_draft(
+                        &self.context,
+                        operation,
+                        &format!("tool:{name}"),
+                        lash_sansio::ExecutionPolicy::Once,
+                        0,
+                    )
+                })
+                .into_iter()
+                .collect(),
             waits: Vec::new(),
         })
     }
@@ -140,6 +146,14 @@ impl ParentEffects for Host {
         {
             return Ok(Performed::outcome(EffectOutcome::HandedOver));
         }
+        if let Some(performed) = self
+            .outcomes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&operation.run)
+        {
+            return Ok(performed.clone());
+        }
         self.dispatches
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -149,20 +163,21 @@ impl ParentEffects for Host {
             ));
         // A spawn grants the handle its value names.
         let granted = (name == "spawn").then(|| format!("handle-{}", operation.run));
-        Ok(Performed {
+        let performed = Performed {
             outcome: EffectOutcome::Value(encode_value(&serde_json::json!({
                 "run": operation.run,
                 "calls": operation.call_ids().iter().map(ToString::to_string).collect::<Vec<_>>(),
                 "handle": granted,
             }))),
             granted,
-        })
-    }
-
-    fn interrupted(&self, operation: &AdmittedOperation) -> EffectOutcome {
-        EffectOutcome::Failed(encode_value(
-            &serde_json::json!({ "interrupted": operation.run }),
-        ))
+        };
+        if !operation.members.is_empty() {
+            self.outcomes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(operation.run, performed.clone());
+        }
+        Ok(performed)
     }
 
     async fn observe_cancellation(&self, _checkpoint: u64) -> Result<bool, ParentFault> {
@@ -247,6 +262,7 @@ impl Fixture {
                 context: context(),
                 checkpoints: Arc::clone(&checkpoints),
                 dispatches: Mutex::default(),
+                outcomes: Mutex::default(),
                 cancelled: AtomicBool::new(false),
                 hand_over: Mutex::default(),
                 envelopes,
@@ -334,20 +350,19 @@ async fn every_operation_commits_its_admission_with_a_snapshot_before_its_body_r
             .as_ref()
             .expect("the VM stands on its operation");
         assert_eq!(
-            pending.admission,
-            crate::OperationAdmission::Execution(OperationId {
+            pending.members,
+            vec![OperationId {
                 run: run as u64,
                 ordinal: 1
-            }),
+            }],
             "the snapshot carries the identity its admission minted"
         );
-        assert!(point.admit.is_some(), "the admission commits with it");
+        assert_eq!(point.members.len(), 1, "the admission commits with it");
     }
     assert!(matches!(
         commits[2].checkpoint.end,
         Some(RecordedEnd::Complete { .. })
     ));
-    assert_eq!(fixture.checkpoints.settled().len(), 2);
     let stats = fixture.pool.stats();
     assert_eq!(stats.entries, 1, "the program was entered once");
     assert_eq!(stats.checkouts, 3, "each operation released its slot");
@@ -454,8 +469,8 @@ async fn an_operation_handed_over_suspends_on_its_quiet_point_and_runs_again_on_
         .pending
         .expect("the VM stands on the sleep");
     assert_eq!(
-        pending.admission,
-        crate::OperationAdmission::NoExecution { run: 0 },
+        (pending.run, pending.members.len()),
+        (0, 0),
         "a wait is admitted as no execution"
     );
     fixture
@@ -718,9 +733,6 @@ async fn an_oversized_effect_result_stays_recorded_and_is_a_typed_run_limit() {
             ) -> Result<Performed, ParentFault> {
                 Ok(Performed::outcome(self.outcome.clone()))
             }
-            fn interrupted(&self, operation: &AdmittedOperation) -> EffectOutcome {
-                self.host.interrupted(operation)
-            }
             async fn observe_cancellation(&self, _checkpoint: u64) -> Result<bool, ParentFault> {
                 Ok(false)
             }
@@ -748,11 +760,6 @@ async fn an_oversized_effect_result_stays_recorded_and_is_a_typed_run_limit() {
             serde_json::json!({
                 "worker_limit_exceeded": { "limit": { "effect_value": { "size": size, "bound": 512 } } }
             })
-        );
-        assert_eq!(
-            fixture.checkpoints.settled().len(),
-            1,
-            "the outcome stays recorded"
         );
     }
 }
@@ -789,10 +796,12 @@ async fn a_checkpoint_refuses_a_pending_admission_outside_its_ledger() {
         serde_json::from_str::<Checkpoint>(&stored).is_ok(),
         "valid execution admission decodes"
     );
-    checkpoint.ledger.operations.clear();
+    if let Some(pending) = checkpoint.ledger.pending.as_mut() {
+        pending.members[0].run += 1;
+    }
     let stored = serde_json::to_string(&checkpoint).unwrap();
     assert!(
         serde_json::from_str::<Checkpoint>(&stored).is_err(),
-        "decoded an execution absent from the ledger"
+        "decoded a member of another admission"
     );
 }

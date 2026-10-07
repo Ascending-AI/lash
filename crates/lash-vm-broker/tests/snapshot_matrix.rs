@@ -11,8 +11,9 @@
 //! - **V2, no completed operation re-runs:** a `Once` body runs at most
 //!   once; a `Repeatable` body runs again only at its same identity.
 //! - **V3, by identity:** the cell's result for each operation is the value
-//!   one of that operation's bodies answered, or its interruption; a saved
-//!   outcome is fed back, never re-dispatched.
+//!   one of that operation's bodies answered, or its interruption; the
+//!   parent answers from the member's committed outcome, never running a
+//!   settled body again.
 //! - **NR, no program re-entry:** the VM's program is entered only by an
 //!   activation that found no snapshot; every other resume continues one.
 //! - **V4, ledger and VM agree:** the cell's last snapshot records its end,
@@ -26,7 +27,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core_execution::runtime::actor::round::lifecycle::{MemberBodies, MemberBody};
+use lash_core_execution::runtime::actor::round::{
+    AdmittedExecution, Material, PolicyView, SettledOutput,
+};
+use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::{ActorContext, AdmittedScope, Backend};
+use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
 use lash_durable::domain::{CellId, ExecKey};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
@@ -34,14 +41,15 @@ use lash_durable::{
     Release,
 };
 use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
+use lash_sansio::ToolId;
 use lash_sansio::{SessionId, TurnId};
 use lash_vm_broker::authority::{decode_value, encode_value};
 use lash_vm_broker::testing::{FAKE_VM_CONTRACT, FakeWorkerPool, ScriptedProgram, Step};
 use lash_vm_broker::{
     Admission, AdmittedContext, AdmittedKind, AdmittedOperation, ArgumentContract, BoundOperation,
-    Broker, BrokerBounds, BrokeredEnd, Checkpoint, CodeCallIdentities, DurableSnapshotStore,
-    FrameFence, FrozenBindings, Invocation, OperationId, ParentEffects, ParentFault, Performed,
-    PinnedKey, RunStart, SnapshotStore, ToolRoute, WaitRef,
+    Broker, BrokerBounds, BrokeredEnd, Checkpoint, CodeCallIdentities, Decide, Driven,
+    DurableSnapshotStore, FrameFence, FrozenBindings, Invocation, OperationId, ParentEffects,
+    ParentFault, Performed, PinnedKey, RunStart, SnapshotStore, ToolRoute, WaitRef,
 };
 use lash_vm_protocol::{
     DecodeLimits, EffectOutcome, FrameCodec, FrameEpoch, OwnerEpoch, StartState, VmLimits, VmOwner,
@@ -312,12 +320,23 @@ impl Activation for CellActivation {
             CancellationToken::new(),
             Arc::new(lash_durable::NoProbe),
         );
-        let store = DurableSnapshotStore::new(&cx, exec());
+        let store = Arc::new(DurableSnapshotStore::new(&cx, exec()));
+        store
+            .bind_members(
+                Arc::new(LawBodies {
+                    shared: Arc::clone(&self.shared),
+                    database: Arc::clone(owned.store()),
+                }),
+                PolicyView::new(
+                    ["write", "read"]
+                        .map(|tool| (ToolId::new(format!("tool:{tool}")), policy(tool))),
+                ),
+            )
+            .await;
         let context = context();
         let host = LawHost {
-            shared: Arc::clone(&self.shared),
             context: context.clone(),
-            database: Arc::clone(owned.store()),
+            store: Arc::clone(&store),
         };
         let pool = self.shared.pool();
         for _ in 0..8 {
@@ -337,7 +356,7 @@ impl Activation for CellActivation {
             let broker = Broker {
                 context: &context,
                 effects: &host,
-                checkpoints: &store,
+                checkpoints: &*store,
                 slots: &*pool,
                 codec: FrameCodec::new(DecodeLimits::standard()),
                 contract: FAKE_VM_CONTRACT.exact_reads(),
@@ -385,13 +404,86 @@ impl Activation for CellActivation {
     }
 }
 
-/// The parent: `write` is a `Once` tool, `read` a `Repeatable` one. Each
-/// body answers a fresh token, and records whether its admission was
-/// durable when it ran.
-struct LawHost {
+/// Cuts, across the matrix's cells, that left a started `Once` for the
+/// next owner to interrupt.
+static INTERRUPTED: AtomicUsize = AtomicUsize::new(0);
+
+fn policy(tool: &str) -> lash_sansio::ExecutionPolicy {
+    if tool == "read" {
+        lash_sansio::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(3).expect("non-zero"),
+            0,
+            0,
+        )
+    } else {
+        lash_sansio::ExecutionPolicy::Once
+    }
+}
+
+/// The member bodies: each answers a fresh token, and records whether its
+/// admission was durable when it ran.
+struct LawBodies {
     shared: Arc<Shared>,
-    context: AdmittedContext,
     database: Arc<dyn DurableStore>,
+}
+
+impl MemberBodies for LawBodies {
+    fn body(&self, execution: &AdmittedExecution) -> MemberBody {
+        let shared = Arc::clone(&self.shared);
+        let database = Arc::clone(&self.database);
+        let operation = OperationId::of(execution.id());
+        let tool = execution
+            .draft()
+            .tool()
+            .as_str()
+            .trim_start_matches("tool:")
+            .to_owned();
+        Box::new(move |_| {
+            Box::pin(async move {
+                // The snapshot and the admission commit in one transaction,
+                // so a stored ledger past the operation's run means its
+                // admission stood.
+                let admitted_first = match database.snapshot(&exec()).await {
+                    Ok(Some(row)) => serde_json::from_str::<Checkpoint>(&row.snapshot_ref)
+                        .is_ok_and(|checkpoint| checkpoint.ledger.next_admission > operation.run),
+                    _ => false,
+                };
+                let token = shared.tokens.fetch_add(1, Ordering::SeqCst) as u64;
+                shared.bodies.lock().expect("bodies").push(Body {
+                    operation: Some(operation),
+                    tool,
+                    token,
+                    admitted_first,
+                });
+                let text = serde_json::json!({ "token": token }).to_string();
+                SettledOutput::Completed(Material::journal_local(
+                    MaterialOwner::Run {
+                        opener: context().identities.opener().clone(),
+                    },
+                    MaterialRole::AttemptOutput,
+                    text,
+                ))
+                .into()
+            })
+        })
+    }
+
+    fn resolved(
+        &self,
+        _execution: &AdmittedExecution,
+        _parked: &Material<CompletionSource>,
+        _resolution: Resolution,
+    ) -> SettledOutput {
+        unreachable!("no law tool parks")
+    }
+}
+
+/// The parent: `write` is a `Once` tool, `read` a `Repeatable` one. Each
+/// operation is one admitted member, and the parent answers it from that
+/// member's committed outcome alone: a token, or its interruption.
+struct LawHost {
+    context: AdmittedContext,
+    store: Arc<DurableSnapshotStore>,
 }
 
 fn tool(operation: &AdmittedOperation) -> String {
@@ -405,23 +497,20 @@ fn tool(operation: &AdmittedOperation) -> String {
 impl ParentEffects for LawHost {
     async fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
         let tool = tool(operation);
-        let policy = if tool == "read" {
-            lash_sansio::ExecutionPolicy::repeatable(
-                std::num::NonZeroU32::new(3).expect("non-zero"),
-                0,
-                0,
-            )
-        } else {
-            lash_sansio::ExecutionPolicy::Once
-        };
+        let now = self
+            .store
+            .context()
+            .durable_now()
+            .await
+            .map_err(|error| ParentFault(error.to_string()))?;
         Ok(Admission {
-            draft: Some(lash_vm_broker::testing::operation_draft(
+            members: vec![lash_vm_broker::testing::member_draft(
                 &self.context,
                 operation,
                 &format!("tool:{tool}"),
-                policy,
-                0,
-            )),
+                policy(&tool),
+                u64::try_from(now.0).expect("a time after the epoch"),
+            )],
             waits: Vec::new(),
         })
     }
@@ -431,29 +520,30 @@ impl ParentEffects for LawHost {
         operation: &AdmittedOperation,
         _waits: &[(WaitRef, Option<PinnedKey>)],
     ) -> Result<Performed, ParentFault> {
-        // The snapshot and the admission commit in one transaction, so a
-        // stored ledger past the operation's run means its admission stood.
-        let admitted_first = match (operation.operation, self.database.snapshot(&exec()).await) {
-            (Some(id), Ok(Some(row))) => serde_json::from_str::<Checkpoint>(&row.snapshot_ref)
-                .is_ok_and(|checkpoint| checkpoint.ledger.next_admission > id.run),
-            _ => false,
+        let driven = self
+            .store
+            .drive(operation.run, &CancellationToken::new(), &mut |ends, _| {
+                ends.first()
+                    .and_then(|end| end.settled.clone())
+                    .map_or(Decide::Wait { until: None }, Decide::Answer)
+            })
+            .await
+            .map_err(|refusal| ParentFault(refusal.0))?;
+        let Driven::Answered(settled) = driven else {
+            return Err(ParentFault("a law member waits on nothing".into()));
         };
-        let token = self.shared.tokens.fetch_add(1, Ordering::SeqCst) as u64;
-        self.shared.bodies.lock().expect("bodies").push(Body {
-            operation: operation.operation,
-            tool: tool(operation),
-            token,
-            admitted_first,
-        });
-        Ok(Performed::outcome(EffectOutcome::Value(encode_value(
-            &serde_json::json!({ "token": token }),
-        ))))
-    }
-
-    fn interrupted(&self, operation: &AdmittedOperation) -> EffectOutcome {
-        EffectOutcome::Failed(encode_value(
-            &serde_json::json!({ "interrupted": operation.run }),
-        ))
+        let outcome = match &settled.output {
+            SettledOutput::Completed(material) => EffectOutcome::Value(encode_value(
+                &serde_json::from_str::<serde_json::Value>(material.payload()).expect("a token"),
+            )),
+            _ => {
+                INTERRUPTED.fetch_add(1, Ordering::SeqCst);
+                EffectOutcome::Failed(encode_value(
+                    &serde_json::json!({ "interrupted": operation.run }),
+                ))
+            }
+        };
+        Ok(Performed::outcome(outcome))
     }
 
     async fn observe_cancellation(&self, _checkpoint: u64) -> Result<bool, ParentFault> {
@@ -489,5 +579,9 @@ async fn a_cell_resumes_from_its_quiet_points_at_every_cut_on_sqlite_memory() {
             .iter()
             .any(|cell| cell.trace.contains(CommitLabel::CELL_INJECT.as_str())),
         "some cut left a started Once to be interrupted on restore"
+    );
+    assert!(
+        INTERRUPTED.load(Ordering::SeqCst) > 0,
+        "an interrupted Once answered its cell"
     );
 }

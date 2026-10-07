@@ -179,7 +179,7 @@ pub trait TurnDrive: Send {
         cx: &ActorContext,
         id: EffectId,
         cell: CodeCell,
-    ) -> Result<(), TurnError>;
+    ) -> Result<CellExit, TurnError>;
 
     /// The turn accepted an `Immediate` cancel while its cell ran, and the
     /// phase runner dropped the cell: stop what the cell started that its
@@ -216,6 +216,18 @@ pub struct CodeCell {
     pub language: String,
     /// Its code.
     pub code: String,
+}
+
+/// How a code cell's run ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellExit {
+    /// The cell answered the machine.
+    Answered,
+    /// The cell stopped on calls that wait only on rows (a parked call, a
+    /// retry's due time, a timer): its committed snapshot holds it, it has
+    /// no answer yet, and the turn suspends until the earliest due, which
+    /// the cell noted on the actor's context.
+    Suspended,
 }
 
 /// A finished machine's last word: what its `Done` effect carried and the

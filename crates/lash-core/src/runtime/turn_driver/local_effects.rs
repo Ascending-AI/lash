@@ -218,7 +218,6 @@ pub(super) fn turn_effect_executor(
     );
     let owned_driver = RuntimeTurnDriver {
         run: std::marker::PhantomData,
-        tool_run_owner: driver.tool_run_owner.clone(),
         // An effect body takes no boundary of its own, but a cell it runs
         // asks whether its turn may end at one inside it (FIG-4739).
         session: driver.session.clone_for_effect(),

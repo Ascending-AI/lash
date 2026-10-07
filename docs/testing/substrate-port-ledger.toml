@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1569 rows over 851 files, 3921 laws.
-# By class: mechanical 163, semantic 111, delete 846, replace 449.
-# By lane: L1b 12, L3 19, L3s 57, L4 20, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
-# By status: todo 408, ported 87, deleted 1074.
+# 1575 rows over 853 files, 3929 laws.
+# By class: mechanical 163, semantic 111, delete 852, replace 449.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
+# By status: todo 408, ported 87, deleted 1080.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -2967,11 +2967,7 @@ laws = [
   "ambient_effects_remain_unavailable_after_restore",
   "runtime_schema_validation_uses_declared_contract_after_inference_widens",
   "l21_scalar_and_aggregate_record_attempts_in_the_opener",
-  "l05_middle_preparation_failure_keeps_survivor_source_pairing",
-  "l05_unavailable_member_keeps_native_completion_and_source_slots",
-  "l06_race_loser_stays_owned_across_cells_until_logical_closing",
   "l12_reused_call_identity_refuses_argument_drift_before_execution",
-  "cell_limit_counts_an_owned_promise_once",
 ]
 disposition = "port"
 status = "ported"
@@ -20277,9 +20273,9 @@ lane = "L4"
 laws = [
   "l05_check_cancellation_cannot_be_recorded_as_run_control",
 ]
-disposition = "covered-by:crates/lash-core-execution/src/tool_dispatch/call_run/tests.rs::a_check_cancel_rejects_its_operand_and_an_abort_is_run_control"
+disposition = "subject-deleted"
 status = "deleted"
-note = "L4 (FIG-5174) deleted the Run journal; the in-memory Run answers a check's cancel as its operand's rejection and only the Run's cancel or an AbortRun as control"
+note = "L4 (FIG-5174) deleted the Run journal and FIG-5225 the in-memory Run: every call is its own admitted execution, and a check's cancel or AbortRun is that call's own final (an AbortRun rides its output's ToolControl); no Run records or answers control"
 
 [[row]]
 path = "crates/lash-core-store/src/tool_run/tests.rs"
@@ -20347,9 +20343,9 @@ lane = "L4"
 laws = [
   "check_decisions_follow_their_records_and_abort_run_stops_admission",
 ]
-disposition = "covered-by:crates/lash-core-execution/src/tool_dispatch/call_run/tests.rs::an_aborted_run_admits_nothing_more"
+disposition = "subject-deleted"
 status = "deleted"
-note = "L4 (FIG-5174) deleted the Run journal; the in-memory Run refuses every start and aggregate after a check's AbortRun"
+note = "L4 (FIG-5174) deleted the Run journal and FIG-5225 the in-memory Run that refused admission after an AbortRun: an AbortRun is its call's final output's ToolControl, which ends the cell or round that took it"
 
 [[row]]
 path = "crates/lash-core-store/src/tool_run/tests.rs"
@@ -20375,9 +20371,9 @@ lane = "L4"
 laws = [
   "capacity_holds_a_round_whole_until_every_member_is_presented",
 ]
-disposition = "covered-by:crates/lash-core-execution/src/tool_dispatch/call_run/tests.rs::capacity_holds_a_round_whole_until_every_member_is_presented"
+disposition = "covered-by:crates/lash-durable-test/tests/tool_crash_laws.rs::tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell"
 status = "deleted"
-note = "L4 (FIG-5174) deleted RunLedger's capacity count; the in-memory Run holds a process round whole until every member ended"
+note = "L4 (FIG-5174) deleted RunLedger's capacity count and FIG-5225 the in-memory Run's: a cell counts the tool calls its quiet points admitted in its snapshot envelope, a round in its admission"
 
 [[row]]
 path = "crates/lash-sim/tests/cross_backend_store_differential/surface_sweep.rs"
@@ -25102,3 +25098,93 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "FIG-5223 deleted the signal sequence projection these laws pinned: a tool's signal is a store-local effect staged by its realization and appended by the round.outcome commit that records the call, so no attempt reads a sequence before its outcome commits and a realized signal answers the signal it sent. That the signal is delivered exactly when its outcome commits is crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome; only these laws of the file are listed, the rest stay"
+
+[[row]]
+path = "crates/lash-protocol-rlm/src/executor/tests/typescript_cells.rs"
+test = "l05_middle_preparation_failure_keeps_survivor_source_pairing"
+area = "code-cells"
+needs = ["cell", "round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "l05_middle_preparation_failure_keeps_survivor_source_pairing",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/tool_crash_laws.rs::code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill"
+status = "deleted"
+note = "deleted by FIG-5225: it performed a bridge's operations inside the in-memory Run (drive_tool_run), which is gone; a cell's call is minted by its operation's admission and leaf index, and its identity law runs through the turn at every cut"
+
+[[row]]
+path = "crates/lash-protocol-rlm/src/executor/tests/typescript_cells.rs"
+test = "l05_unavailable_member_keeps_native_completion_and_source_slots"
+area = "code-cells"
+needs = ["cell", "round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "l05_unavailable_member_keeps_native_completion_and_source_slots",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5225 with the Run aggregate API it called (call_tool_aggregate): each call of a cell's aggregate is its own admitted member, and an unavailable one is answered tool_unavailable by its own body"
+
+[[row]]
+path = "crates/lash-protocol-rlm/src/executor/tests/typescript_cells.rs"
+test = "l06_race_loser_stays_owned_across_cells_until_logical_closing"
+area = "code-cells"
+needs = ["cell", "round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "l06_race_loser_stays_owned_across_cells_until_logical_closing",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/cell_restore_laws.rs::a_race_loser_in_a_cell_is_admitted_and_settles_on_sqlite_memory"
+status = "deleted"
+note = "deleted by FIG-5225 with the Run's logical closing: a race loser is an admitted member its cell's ledger keeps until it settles on its own"
+
+[[row]]
+path = "crates/lash-protocol-rlm/src/executor/tests/typescript_cells.rs"
+test = "cell_limit_counts_an_owned_promise_once"
+area = "code-cells"
+needs = ["cell", "round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "cell_limit_counts_an_owned_promise_once",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/tool_crash_laws.rs::tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell"
+status = "deleted"
+note = "deleted by FIG-5225 with the Run-owned promise aliasing it read: a cell counts each call its quiet points admit once, in its snapshot envelope"
+
+[[row]]
+path = "crates/lash-core-execution/src/tool_dispatch/call_run/tests.rs"
+test = "*"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "capacity_holds_a_round_whole_until_every_member_is_presented",
+  "a_check_cancel_rejects_its_operand_and_an_abort_is_run_control",
+  "an_aborted_run_admits_nothing_more",
+  "a_duplicate_start_keeps_the_ended_call",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5225 with the in-memory ToolRun they drove: a cell's calls are admitted executions run through the shared member lifecycle, which counts them in the cell's envelope (tool_crash_laws.rs LimitCell) and never starts one call twice; slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process stays, on one admitted attempt"
+
+[[row]]
+path = "crates/lash-core-execution/src/session/tool_execution.rs"
+test = "*"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "deterministic_batch_identity_is_stable_and_content_addressed",
+  "issuing_node_id_does_not_change_tool_batch_identity",
+  "granted_batch_identity_pins_present_grant_routing_grammar",
+  "a_malformed_settlement_order_is_refused_not_repaired",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5225 with call_tool_batch, its content-addressed batch identity and its settlement order: no host batch runs outside an admitted round or cell"

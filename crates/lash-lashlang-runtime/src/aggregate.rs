@@ -1,142 +1,122 @@
-//! The one mapping from a Lashlang aggregate to the logical Run
-//! and back (ADR 0099 §10, §11; FIG-3397), shared by both bridges.
+//! The answer of a Lashlang aggregate (ADR 0099 §10, §11; FIG-3397), a
+//! pure function of where its leaves stand.
 //!
-//! A bridge resolves each of its leaves in its own way — a language runtime
-//! value journaled in place, a trigger operation, a leaf refused before
-//! dispatch, a tool call, a timer — and hands the result here as a
-//! [`BridgeAggregateLeaf`]. This module forms one
-//! [`ToolAggregateRequest`](lash_core::session::ToolAggregateRequest), runs it
-//! under the VM's consumer mode, and turns the answer into the VM's reply
-//! algebra. A bridge's already-resolved leaves are the immediate prefix
-//! (§10 L5); host-control failures come back as `Err`, never as a leaf
+//! A bridge resolves each of its leaves in its own way — a value it
+//! settled before the aggregate formed, an admitted tool call, a timer —
+//! and says where each stands now as a [`LeafStanding`]. Leaves settled
+//! when the aggregate formed, and the caller's first plain operand, form a
+//! source-ordered prefix ahead of every later settlement (§10 L5); later
+//! settlements follow in the order the bridge reports. Host control (a call
+//! the Run cancelled, or a check that aborted it) is never a leaf's
 //! rejection (L3).
 
-use lashlang::{
-    ExecutionHostError, ResourceOperationBatchOutcome, ResourceOperationOutcome, Value,
-};
+use lashlang::ExecutionHostError;
 
-/// One unique leaf of an aggregate, as a bridge resolved it.
-pub enum BridgeAggregateLeaf {
-    /// Settled by the bridge before the aggregate formed.
-    Settled(Result<Value, ExecutionHostError>),
-    /// A tool call to admit in the logical Run.
-    Tool(lash_core::session::ToolInvocation),
-    /// A timer from an unawaited `sleep(ms)`.
-    Timer { duration_ms: u64 },
+/// How a consumer takes an aggregate's answer.
+pub use lashlang::AggregateConsumer;
+
+/// Where one leaf of an aggregate stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeafStanding {
+    /// Not settled yet.
+    Open,
+    /// Settled when the aggregate formed: in the immediate prefix, in
+    /// source order.
+    Immediate {
+        /// Whether it was fulfilled.
+        fulfilled: bool,
+    },
+    /// Settled since, at `order` among the aggregate's later settlements.
+    Settled {
+        /// Whether it was fulfilled.
+        fulfilled: bool,
+        /// Its place among the later settlements: lower settled first.
+        order: (u64, u64),
+    },
+    /// Ended by host control: never an operand's rejection.
+    HostControl,
 }
 
-/// Runs one aggregate through `ctx` and answers the VM.
-///
-/// `tool_value` turns one settled tool reply into its Lashlang value, with
-/// whatever bookkeeping the bridge keeps per reply; it is called once for
-/// every reply the answer carries, in leaf order, and never for a loser.
-pub async fn settle_bridge_aggregate(
-    ctx: &lash_core::RuntimeExecutionContext<'_>,
-    command: &lash_core::CommandReplayKey,
-    consumer: lashlang::AggregateConsumer,
+/// What an aggregate answers its consumer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AggregateAnswer {
+    /// The leaf that decided it.
+    Leaf(usize),
+    /// The caller's plain operand decided a `race` or an `any`.
+    SettledValue,
+    /// Every leaf settled: `all`, `allSettled`.
+    All,
+    /// Every leaf rejected: `any`.
+    Exhausted,
+    /// A leaf ended by host control: the consumer raises it on its host
+    /// channel.
+    HostControl(usize),
+}
+
+/// The answer `consumer` takes from an aggregate whose leaves stand as
+/// `leaves`, with the caller's plain operand after `settled_value_after` of
+/// them; `None` until it has one.
+#[must_use]
+pub fn aggregate_answer(
+    consumer: AggregateConsumer,
     settled_value_after: Option<usize>,
-    leaves: Vec<BridgeAggregateLeaf>,
-    mut tool_value: impl FnMut(
-        usize,
-        lash_core::session::ToolInvocationReply,
-    ) -> Result<Value, ExecutionHostError>,
-) -> Result<ResourceOperationBatchOutcome, ExecutionHostError> {
-    let mut settled = Vec::with_capacity(leaves.len());
-    let mut request_leaves = Vec::with_capacity(leaves.len());
-    for leaf in leaves {
-        match leaf {
-            BridgeAggregateLeaf::Settled(result) => {
-                request_leaves.push(lash_core::session::ToolAggregateLeaf::Settled {
-                    fulfilled: result.is_ok(),
-                });
-                settled.push(Some(result));
-            }
-            BridgeAggregateLeaf::Tool(call) => {
-                request_leaves.push(lash_core::session::ToolAggregateLeaf::Tool(call));
-                settled.push(None);
-            }
-            BridgeAggregateLeaf::Timer { duration_ms } => {
-                request_leaves.push(lash_core::session::ToolAggregateLeaf::Timer { duration_ms });
-                settled.push(None);
-            }
-        }
+    leaves: &[LeafStanding],
+) -> Option<AggregateAnswer> {
+    if let Some(leaf) = leaves
+        .iter()
+        .position(|standing| *standing == LeafStanding::HostControl)
+    {
+        return Some(AggregateAnswer::HostControl(leaf));
     }
-    let outcome = ctx
-        .call_tool_aggregate(lash_core::session::ToolAggregateRequest {
-            leaves: request_leaves,
-            consumer: match consumer {
-                lashlang::AggregateConsumer::AllSettled => {
-                    lash_core::session::ToolAggregateConsumer::AllSettled
-                }
-                lashlang::AggregateConsumer::All => lash_core::session::ToolAggregateConsumer::All,
-                lashlang::AggregateConsumer::Race => {
-                    lash_core::session::ToolAggregateConsumer::Race
-                }
-                lashlang::AggregateConsumer::Any => lash_core::session::ToolAggregateConsumer::Any,
-            },
-            settled_value_after,
-            command: command.clone(),
-        })
-        .await;
-    let mut result_of = |leaf: usize,
-                         reply: Option<lash_core::session::ToolAggregateLeafReply>|
-     -> Result<Result<Value, ExecutionHostError>, ExecutionHostError> {
-        if let Some(result) = settled.get_mut(leaf).and_then(Option::take) {
-            return Ok(result);
-        }
-        match reply {
-            Some(lash_core::session::ToolAggregateLeafReply::Tool(reply)) => {
-                Ok(tool_value(leaf, *reply))
-            }
-            Some(lash_core::session::ToolAggregateLeafReply::Timer) => Ok(Ok(Value::Undefined)),
-            None => Err(ExecutionHostError::new(format!(
-                "aggregate leaf {leaf} was answered without a settlement"
-            ))),
-        }
+    // Every operand in source order: the leaves, with the plain operand at
+    // its place.
+    let mut operands: Vec<(Option<usize>, LeafStanding)> = leaves
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(leaf, standing)| (Some(leaf), standing))
+        .collect();
+    if let Some(after) = settled_value_after {
+        operands.insert(
+            after.min(operands.len()),
+            (None, LeafStanding::Immediate { fulfilled: true }),
+        );
+    }
+    let decides = |fulfilled: bool| match consumer {
+        AggregateConsumer::Race => true,
+        AggregateConsumer::Any => fulfilled,
+        AggregateConsumer::All => !fulfilled,
+        AggregateConsumer::AllSettled => false,
     };
-    match outcome {
-        lash_core::session::ToolAggregateOutcome::AllResults(replies) => {
-            let mut results = Vec::with_capacity(replies.len());
-            for (leaf, reply) in replies.into_iter().enumerate() {
-                results.push(ResourceOperationOutcome::from_result(result_of(
-                    leaf, reply,
-                )?));
-            }
-            Ok(ResourceOperationBatchOutcome::AllResults(results))
-        }
-        lash_core::session::ToolAggregateOutcome::Selected { leaf, reply } => {
-            Ok(ResourceOperationBatchOutcome::Selected {
-                leaf,
-                result: ResourceOperationOutcome::from_result(result_of(leaf, reply)?),
-            })
-        }
-        lash_core::session::ToolAggregateOutcome::SettledValue => {
-            Ok(ResourceOperationBatchOutcome::SettledValue)
-        }
-        lash_core::session::ToolAggregateOutcome::ExhaustedRejections(replies) => {
-            let mut errors = Vec::with_capacity(replies.len());
-            for (leaf, reply) in replies.into_iter().enumerate() {
-                match result_of(leaf, reply)? {
-                    Err(error) => errors.push(error),
-                    Ok(_) => {
-                        return Err(ExecutionHostError::new(format!(
-                            "aggregate leaf {leaf} fulfilled, yet the aggregate reported every \
-                             leaf rejected"
-                        )));
-                    }
+    let selected = operands
+        .iter()
+        .enumerate()
+        .filter_map(|(position, (leaf, standing))| {
+            let order = match *standing {
+                LeafStanding::Immediate { fulfilled } if decides(fulfilled) => {
+                    (false, position as u64, 0)
                 }
-            }
-            Ok(ResourceOperationBatchOutcome::ExhaustedRejections(errors))
-        }
-        lash_core::session::ToolAggregateOutcome::HostControl(message) => {
-            Err(ExecutionHostError::new(message))
-        }
-        lash_core::session::ToolAggregateOutcome::ToolCallLimitExceeded(exceeded) => {
-            Err(ExecutionHostError::from_tool_failure(
-                &tool_call_limit_failure(exceeded),
-                command.to_string(),
-            ))
-        }
+                LeafStanding::Settled { fulfilled, order } if decides(fulfilled) => {
+                    (true, order.0, order.1)
+                }
+                _ => return None,
+            };
+            Some((order, *leaf))
+        })
+        .min();
+    if let Some((_, leaf)) = selected {
+        return Some(leaf.map_or(AggregateAnswer::SettledValue, AggregateAnswer::Leaf));
+    }
+    let all_settled = operands
+        .iter()
+        .all(|(_, standing)| *standing != LeafStanding::Open);
+    if operands.is_empty() || !all_settled {
+        return None;
+    }
+    match consumer {
+        AggregateConsumer::Race => None,
+        AggregateConsumer::Any => Some(AggregateAnswer::Exhausted),
+        AggregateConsumer::All | AggregateConsumer::AllSettled => Some(AggregateAnswer::All),
     }
 }
 

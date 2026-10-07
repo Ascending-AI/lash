@@ -24,6 +24,8 @@ use crate::projection::flow_to_json_value;
 
 mod resource_operations;
 
+pub(super) use resource_operations::CellTriggers;
+
 pub(super) struct HostBridge<'run> {
     ctx: RuntimeExecutionContext<'run>,
     /// The cell's replay run — the identities it mints and its command
@@ -39,8 +41,6 @@ pub(super) struct HostBridge<'run> {
     deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     /// The cell's journaled binding set, against the live registry (FIG-3587).
     cell_bindings: lash_lashlang_runtime::CellToolBindings,
-    artifact_store: lashlang::LashlangArtifacts,
-    workers: lash_vm_client::service::Service,
     /// This cell's own cancellation scope, beside the turn's. A cancelled tool
     /// call ends the cell here, so `is_cancelled` refuses its next effect
     /// instead of the guest catching the cancellation as a rejected call. A
@@ -50,6 +50,12 @@ pub(super) struct HostBridge<'run> {
     /// its commands are named by, the cell's one ordinal authority, and the
     /// waits its quiet point pinned.
     performing: lash_lashlang_runtime::PerformingGate,
+    /// The cell's admitted calls, by call: what their bodies run.
+    members: Arc<lash_core::tool_dispatch::CellMembers>,
+    /// The cell's snapshots, which drive its admitted calls.
+    snapshots: Arc<lash_vm_broker::DurableSnapshotStore>,
+    /// The tool calls the cell admitted, counted against `max_tool_calls`.
+    tool_calls: Mutex<usize>,
 }
 
 /// The host-side ledgers of a cell that a segment boundary inside it hands
@@ -60,6 +66,9 @@ pub(super) struct CellHostLedgers {
     pub printed_images: Vec<AttachmentRef>,
     pub calls: Vec<(usize, lash_core::ExecutedCall)>,
     pub next_tool_index: usize,
+    /// The tool calls the cell's quiet points admitted: what it counts
+    /// against `max_tool_calls`.
+    pub tool_calls: usize,
 }
 
 pub(super) struct HostBridgeConfig<'run> {
@@ -70,10 +79,12 @@ pub(super) struct HostBridgeConfig<'run> {
     pub host_environment: lashlang::LashlangHostEnvironment,
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     pub cell_bindings: lash_lashlang_runtime::CellToolBindings,
-    pub artifact_store: lashlang::LashlangArtifacts,
-    pub workers: lash_vm_client::service::Service,
     /// The ledgers a predecessor segment handed over, for a resumed cell.
     pub ledgers: CellHostLedgers,
+    /// The cell's admitted calls.
+    pub members: Arc<lash_core::tool_dispatch::CellMembers>,
+    /// The cell's snapshots.
+    pub snapshots: Arc<lash_vm_broker::DurableSnapshotStore>,
 }
 
 type HostAbilityFuture<'a> =
@@ -88,12 +99,13 @@ impl<'run> HostBridge<'run> {
             printed_images: Mutex::new(config.ledgers.printed_images),
             calls: Mutex::new(config.ledgers.calls),
             next_tool_index: Mutex::new(config.ledgers.next_tool_index),
+            tool_calls: Mutex::new(config.ledgers.tool_calls),
+            members: config.members,
+            snapshots: config.snapshots,
             lashlang_execution_trace: config.lashlang_execution_trace,
             host_environment: config.host_environment,
             deferred_execution_grants: config.deferred_execution_grants,
             cell_bindings: config.cell_bindings,
-            artifact_store: config.artifact_store,
-            workers: config.workers,
             cancellation: ExecutionCancellation::new(),
             performing: lash_lashlang_runtime::PerformingGate::new(),
         }
@@ -117,6 +129,7 @@ impl<'run> HostBridge<'run> {
             printed_images: self.printed_images.lock_recover().clone(),
             calls: self.calls.lock_recover().clone(),
             next_tool_index: *self.next_tool_index.lock_recover(),
+            tool_calls: *self.tool_calls.lock_recover(),
         }
     }
 
@@ -218,27 +231,15 @@ impl<'run> HostBridge<'run> {
     fn resource_tool_call_id(
         &self,
         ordinal: u64,
-        call_site: &lashlang::LashlangExecutionCallSite,
         leaf_index: Option<usize>,
     ) -> Result<lash_core::ToolCallId, ExecutionHostError> {
         // The id is the issue ordinal under the cell's scope (FIG-3586); the
         // call site only correlates it with the node on the trace.
         let identities = self.cell()?.identities();
-        let call_id = match leaf_index {
+        Ok(match leaf_index {
             Some(leaf_index) => identities.child_call_id(ordinal, leaf_index),
             None => identities.call_id(ordinal),
-        };
-        if let Some(trace) = &self.lashlang_execution_trace {
-            trace.record_resource_call(call_site, &call_id);
-            self.ctx.record_language_call_attribution(
-                call_id.clone(),
-                trace.language,
-                trace.identity().clone(),
-                call_site.site.node_id.clone(),
-                call_site.occurrence,
-            );
-        }
-        Ok(call_id)
+        })
     }
 
     /// The call site a leaf must carry, or the refusal both bridges give.
@@ -304,6 +305,17 @@ impl<'run> HostBridge<'run> {
             invocation = invocation.with_execution_grant(grant);
         }
         invocation
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_lashlang_runtime::MemberAdmissions for HostBridge<'_> {
+    async fn members(
+        &self,
+        ordinal: u64,
+        request: &lash_vm_broker::OperationRequest,
+    ) -> Result<Vec<lash_vm_broker::MemberDraft>, String> {
+        self.admit_members(ordinal, request).await
     }
 }
 

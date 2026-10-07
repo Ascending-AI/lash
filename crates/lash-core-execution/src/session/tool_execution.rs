@@ -7,29 +7,6 @@ use crate::{
     ToolFailure, ToolFailureClass, TurnActivityId, TurnEvent,
 };
 
-/// v3 (FIG-3586) retires the opener occurrence ordinal v2 folded into the
-/// batch identity.
-///
-/// v1 hashed the calls and nothing else, so two textually identical
-/// aggregates raised by one opener shared one identity; v2 folded the VM's
-/// per-instruction occurrence in to separate them (ADR 0065). That ordinal was
-/// compiler output — an instruction pointer's reach count — and moved with
-/// lowering. A lashlang aggregate is now addressed by the issue ordinal its
-/// runtime mints ([`CommandReplayKey`](crate::CommandReplayKey)), so a batch
-/// identity is the batch's content again, and on the aggregate path it names
-/// nothing durable: it is a digest the group head checks, never a key.
-///
-/// The host-code batch path (`call_tool_batch` outside a lashlang aggregate)
-/// keeps content identity. Two structurally identical batches raised from one
-/// such caller still share an identity; that caller is ordinary host code with
-/// no deterministic count of its own.
-///
-/// version_guard(
-///     items(tool_invocation_batch_preimage),
-/// )
-/// version_surface = "coexist"
-const TOOL_BATCH_FAMILY_VERSION: u8 = 3;
-
 #[derive(Clone)]
 pub struct ToolInvocation {
     /// The call's lash-minted identity: its idempotency key and the root of
@@ -115,119 +92,6 @@ impl std::fmt::Debug for ToolInvocation {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn invocation(id: &str, value: i64) -> ToolInvocation {
-        ToolInvocation::new(
-            crate::ToolCallId::fixture(id),
-            crate::ToolId::from("tool:test"),
-            serde_json::json!({"value": value}),
-        )
-    }
-
-    #[test]
-    fn deterministic_batch_identity_is_stable_and_content_addressed() {
-        let calls = vec![invocation("a", 1), invocation("b", 2)];
-        let first = deterministic_tool_invocation_batch_id(&calls);
-        let retry = deterministic_tool_invocation_batch_id(&calls);
-        assert_eq!(first, retry);
-        assert_eq!(
-            first,
-            "tool-batch:v3:blake3:b2d94b9d004eec029754ce86f2e8314d0c068283a5dd31ea31f7201ab344a573"
-        );
-        assert_eq!(
-            hex(&tool_invocation_batch_preimage(&calls)),
-            "6c6173682d737461626c652d6964656e746974790203000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d62617463680000000000000002000000000000004374635f623937633230306463653665393537386635383463613566323234356433643131323261333231313036366462386332643739666364663036346634306234620000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a317d00000000000000004374635f336339393433336562303636666134613066343132653131316565333632643964316436663035616537626665626337313833346233663339373837623436660000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a327d00"
-        );
-
-        let changed_args = vec![invocation("a", 1), invocation("b", 3)];
-        let reordered = vec![invocation("b", 2), invocation("a", 1)];
-        assert_ne!(first, deterministic_tool_invocation_batch_id(&changed_args));
-        assert_ne!(first, deterministic_tool_invocation_batch_id(&reordered));
-    }
-
-    #[test]
-    fn issuing_node_id_does_not_change_tool_batch_identity() {
-        let plain = vec![invocation("a", 1)];
-        let attributed = vec![invocation("a", 1).with_issuing_language_node_id("node:issuer")];
-
-        assert_eq!(
-            tool_invocation_batch_preimage(&plain),
-            tool_invocation_batch_preimage(&attributed),
-            "trace attribution must not enter the durable tool-batch preimage"
-        );
-        assert_eq!(
-            deterministic_tool_invocation_batch_id(&plain),
-            deterministic_tool_invocation_batch_id(&attributed),
-        );
-    }
-
-    #[test]
-    fn granted_batch_identity_pins_present_grant_routing_grammar() {
-        let grant = crate::ToolExecutionGrant::from_definition(
-            crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
-            crate::ToolDefinition::raw(
-                "tool:granted",
-                "granted",
-                "golden",
-                serde_json::json!({"type": "object"}),
-                serde_json::json!({"type": "string"}),
-            )
-            .expect("valid declared tool schemas"),
-        )
-        .with_source_id("plugin\0route")
-        .with_execution_binding(serde_json::json!({"route": ["λ", -0.0]}));
-        let calls = vec![
-            ToolInvocation::new(
-                crate::ToolCallId::fixture("grant\0call"),
-                crate::ToolId::from("tool:granted"),
-                serde_json::json!({"value": true}),
-            )
-            .with_execution_grant(grant),
-        ];
-        assert_eq!(
-            hex(&tool_invocation_batch_preimage(&calls)),
-            "6c6173682d737461626c652d6964656e746974790203000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d62617463680000000000000001000000000000004374635f65323738373230356261356666643964303535323439653030353632356537363731623635383662363634383665313934363739323630636564383939646435000000000000000c746f6f6c3a6772616e746564000000000000000e7b2276616c7565223a747275657d01000000000000000c746f6f6c3a6772616e74656401000000000000000c706c7567696e00726f75746500000000000000147b22726f757465223a5b22cebb222c302e305d7d"
-        );
-        assert_eq!(
-            deterministic_tool_invocation_batch_id(&calls),
-            "tool-batch:v3:blake3:a23081705b7fb825a1e6f93180c85b108c73193eb2d42f2c8a01d0ec45784cd9"
-        );
-
-        let without_source = crate::ToolExecutionGrant::from_definition(
-            crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
-            crate::ToolDefinition::raw(
-                "tool:granted",
-                "granted",
-                "golden",
-                serde_json::json!({"type": "object"}),
-                serde_json::json!({"type": "string"}),
-            )
-            .expect("valid declared tool schemas"),
-        )
-        .with_execution_binding(serde_json::json!({"route": ["λ", -0.0]}));
-        let without_source = vec![
-            ToolInvocation::new(
-                crate::ToolCallId::fixture("grant\0call"),
-                crate::ToolId::from("tool:granted"),
-                serde_json::json!({"value": true}),
-            )
-            .with_execution_grant(without_source),
-        ];
-        assert_ne!(
-            deterministic_tool_invocation_batch_id(&calls),
-            deterministic_tool_invocation_batch_id(&without_source),
-            "grant source presence must occupy a distinct option arm"
-        );
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct ToolInvocationReply {
     pub output: ToolCallOutput,
@@ -284,140 +148,20 @@ pub struct CompletedProtocolToolCall {
     pub record: ToolCallRecord,
 }
 
-/// Permanent tag registry for tool-batch identities.
-///
-/// Grant presence uses the universal option tags 0/1. Grant manifest and
-/// contract fields outside the explicit execution-address allowlist are
-/// exhaustively ignored below. Retired tags remain burned.
-fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
-    let mut identity = crate::stable_identity::IdentityEncoder::new(
-        "lash.tool-invocation-batch",
-        TOOL_BATCH_FAMILY_VERSION,
-    );
-    identity.sequence(calls, |identity, call| {
-        let ToolInvocation {
-            id,
-            tool_id,
-            args,
-            pending: _,
-            execution_grant,
-            recorded_binding: _,
-            child_execution_trace_hook: _,
-            issuing_language_node_id: _,
-        } = call;
-        identity.string(id.as_str());
-        identity.string(tool_id.as_str());
-        identity.bytes(&crate::identity_json::payload_leaf(args));
-        identity.optional(execution_grant.as_deref(), |identity, grant| {
-            // This exhaustive destructure is the guard: adding a grant field must fail
-            // compilation here until its batch-identity inclusion is ruled in or out.
-            let crate::ToolExecutionGrant {
-                // The executable owner is retained by admission; a redrive keeps the logical call identity.
-                owner: _,
-                manifest,
-                contract: _,
-                source_id,
-                execution_binding,
-            } = grant;
-            let crate::ToolManifest {
-                inline: _,
-                id,
-                name: _,
-                description: _,
-                module: _,
-                compact_contract: _,
-                bindings: _,
-                argument_projection: _,
-                execution_policy: _,
-                expected_execution: _,
-                // The declaration is admission policy, like the retry policy:
-                // it never names the logical call.
-                declaration: _,
-            } = manifest;
-            identity.string(id.as_str());
-            identity.optional(source_id.as_deref(), |identity, source_id| {
-                identity.string(source_id);
-            });
-            identity.bytes(&crate::identity_json::payload_leaf(execution_binding));
-        });
-    });
-    identity.finish()
-}
-
-pub(crate) fn deterministic_tool_invocation_batch_id(calls: &[ToolInvocation]) -> crate::BatchId {
-    crate::BatchId::prefixed(
-        "tool-batch",
-        crate::stable_identity::rendered_hash_tail(
-            TOOL_BATCH_FAMILY_VERSION,
-            &tool_invocation_batch_preimage(calls),
-        ),
-    )
-}
-
-/// Whether a reported settlement order is an ordering of the batch's own
-/// launches: one position per launch, each in range, none repeated.
-///
-/// A malformed order is refused rather than trimmed. Trimming produces a
-/// well-formed permutation that no later validator can tell from a real one.
-fn validate_batch_settlement_order(order: &[usize], launches: usize) -> Result<(), String> {
-    if order.len() != launches {
-        return Err(format!(
-            "tool batch reported {} settled positions for {launches} launches",
-            order.len()
-        ));
-    }
-    let mut seen = vec![false; launches];
-    for position in order {
-        let Some(slot) = seen.get_mut(*position) else {
-            return Err(format!(
-                "tool batch reported settled position {position} for {launches} launches"
-            ));
-        };
-        if *slot {
-            return Err(format!(
-                "tool batch reported settled position {position} more than once"
-            ));
-        }
-        *slot = true;
-    }
-    Ok(())
-}
-
-/// The replies to a tool batch, in input order, with the order they settled.
-#[derive(Debug, Default)]
-pub struct ToolBatchReplies {
-    /// One reply per invocation, in input order.
-    pub replies: Vec<ToolInvocationReply>,
-    /// Input indices in the order the invocations settled.
-    pub settlement_order: Vec<usize>,
-}
-
 pub(crate) fn tool_activity_id(call_id: &crate::ToolCallId) -> TurnActivityId {
     TurnActivityId::new(format!("tool:{call_id}"))
 }
 
-impl ToolBatchReplies {
-    /// Replies whose invocations settled in the order they were issued.
-    pub fn settled_in_input_order(replies: Vec<ToolInvocationReply>) -> Self {
-        let settlement_order = (0..replies.len()).collect();
-        Self {
-            replies,
-            settlement_order,
-        }
-    }
+/// The tool failure a call refused by the session's `max_tool_calls` settles
+/// with: typed by its code, never retried, and worded by the refusal so the
+/// limit is named wherever the failure is shown (FIG-4546).
+pub(crate) fn tool_call_limit_failure(exceeded: crate::ToolCallLimitExceeded) -> ToolFailure {
+    ToolFailure::runtime(
+        ToolFailureClass::ResourceLimit,
+        crate::ToolCallLimitExceeded::CODE,
+        exceeded.to_string(),
+    )
 }
-
-mod aggregate;
-#[path = "tool_execution/batch.rs"]
-mod batch;
-mod group;
-
-pub use aggregate::{
-    ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome, ToolAggregateRequest,
-    ToolRunAggregateCursor, ToolRunAggregatePoll,
-};
-pub use group::ToolAggregateConsumer;
-pub(crate) use group::tool_call_limit_failure;
 
 impl RuntimeExecutionContext<'_> {
     pub fn tool_execution_owner(
@@ -904,46 +648,6 @@ impl RuntimeExecutionContext<'_> {
             .await
     }
 
-    /// Executes one tool call a replayed language program issued as a command
-    /// (FIG-3586), for code-executor implementors.
-    ///
-    /// `command` is the command's replay key: every attempt, retry sleep and
-    /// deferred-completion await of the call is journaled under it, and
-    /// nothing about the call itself — its id, tool name, or the site that
-    /// issued it — is key material. The invocation's grant, when it carries
-    /// one, authorizes a call outside Tool Catalog membership; its trace hook,
-    /// when present, reports nested child execution.
-    pub async fn call_command_tool(
-        &self,
-        command: &crate::CommandReplayKey,
-        invocation: ToolInvocation,
-    ) -> ToolInvocationReply {
-        let call_id = invocation.id.clone();
-        let outcome = self
-            .call_tool_aggregate(ToolAggregateRequest {
-                leaves: vec![ToolAggregateLeaf::Tool(invocation)],
-                consumer: ToolAggregateConsumer::AllSettled,
-                settled_value_after: None,
-                command: command.clone(),
-            })
-            .await;
-        match outcome {
-            ToolAggregateOutcome::AllResults(mut replies) => match replies.pop().flatten() {
-                Some(ToolAggregateLeafReply::Tool(reply)) => *reply,
-                _ => ToolInvocationReply::error(serde_json::json!("a scalar tool has no terminal")),
-            },
-            ToolAggregateOutcome::HostControl(message) => {
-                ToolInvocationReply::error(serde_json::Value::String(message))
-            }
-            ToolAggregateOutcome::ToolCallLimitExceeded(exceeded) => {
-                ToolInvocationReply::error(serde_json::json!(exceeded.to_string()))
-            }
-            _ => ToolInvocationReply::error(serde_json::json!(format!(
-                "scalar call {call_id} returned an aggregate selection"
-            ))),
-        }
-    }
-
     /// Delivers cancellation to a deferred tool handle for code-executor implementors.
     pub async fn cancel_tool_handle(
         &self,
@@ -1017,39 +721,5 @@ mod attachment_materialization_tests {
                         && text.contains("workspace_badge.bin")
             )
         }));
-    }
-}
-
-#[cfg(test)]
-mod settlement_order_boundary_tests {
-    use super::validate_batch_settlement_order as validate;
-
-    /// The reviewer's probe table. Every malformed order must be refused at the
-    /// boundary; repairing one into an input-order permutation is what silently
-    /// restored the original rejection-selection bug.
-    #[test]
-    fn a_malformed_settlement_order_is_refused_not_repaired() {
-        assert!(
-            validate(&[1, 0], 2).is_ok(),
-            "a genuine out-of-order settle"
-        );
-        assert!(
-            validate(&[0, 1], 2).is_ok(),
-            "input order is still an order"
-        );
-        let out_of_range =
-            validate(&[usize::MAX, 0], 2).expect_err("an out-of-range position must be refused");
-        assert!(
-            out_of_range.contains("settled position"),
-            "the refusal names the position: {out_of_range}"
-        );
-        let empty = validate(&[], 2).expect_err("an empty order must be refused");
-        assert!(empty.contains("0 settled positions"), "{empty}");
-        let duplicate = validate(&[0, 0], 2).expect_err("a duplicated position must be refused");
-        assert!(duplicate.contains("more than once"), "{duplicate}");
-        assert!(
-            validate(&[0, 1, 0], 2).is_err(),
-            "an over-long order must be refused"
-        );
     }
 }
