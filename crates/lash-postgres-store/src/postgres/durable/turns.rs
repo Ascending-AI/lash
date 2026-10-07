@@ -265,7 +265,7 @@ pub(super) async fn request_cancel(
 }
 
 /// A stored cancel request: request id, origin, reason, disposition, mode.
-type StoredCancel = (String, Option<String>, Option<String>, String, String);
+pub(super) type StoredCancel = (String, Option<String>, Option<String>, String, String);
 
 /// The cancel request run `run` of `session` accepted.
 async fn cancel_of(
@@ -279,9 +279,18 @@ async fn cancel_of(
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let Some((request_id, origin, reason, disposition, mode)) = stored else {
-        return Ok(None);
-    };
+    stored
+        .map(|stored| decode_cancel(session, run, stored))
+        .transpose()
+}
+
+/// Run `run` of session `session`'s accepted cancel request, as
+/// `turn_cancel_requests` stores it.
+pub(super) fn decode_cancel(
+    session: &SessionId,
+    run: &TurnId,
+    (request_id, origin, reason, disposition, mode): StoredCancel,
+) -> Result<TurnCancelRequest, DurableError> {
     let (Ok(undelivered), Ok(mode)) = (
         turn_cancel_undelivered_from_wire(&disposition),
         turn_cancel_mode_from_wire(&mode),
@@ -291,7 +300,7 @@ async fn cancel_of(
             &format!("{disposition}/{mode}"),
         ));
     };
-    Ok(Some(TurnCancelRequest {
+    Ok(TurnCancelRequest {
         session: session.clone(),
         run: run.clone(),
         request_id,
@@ -299,7 +308,7 @@ async fn cancel_of(
         reason,
         undelivered,
         mode,
-    }))
+    })
 }
 
 pub(super) async fn turn_end(

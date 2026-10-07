@@ -35,6 +35,31 @@ tokio::task_local! {
     pub(crate) static RECEIPTS: RefCell<Vec<(String, &'static str, DurableCommitCost)>>;
 }
 
+#[cfg(test)]
+tokio::task_local! {
+    /// The round trips a law's task made to the server: every statement it
+    /// sent through the observed executor, and every checkout, which pings.
+    pub(crate) static ROUND_TRIPS: std::cell::Cell<u64>;
+}
+
+#[cfg(test)]
+fn round_trip() {
+    let _ = ROUND_TRIPS.try_with(|trips| trips.set(trips.get() + 1));
+}
+
+/// Check a connection out of `pool`: the pool pings it first, a round trip
+/// of its own.
+pub(crate) async fn checkout(
+    pool: &sqlx::PgPool,
+) -> Result<sqlx::pool::PoolConnection<Postgres>, sqlx::Error> {
+    #[cfg(test)]
+    round_trip();
+    let started = Instant::now();
+    let connection = pool.acquire().await;
+    acquired(started.elapsed());
+    connection
+}
+
 struct Observation<'a> {
     state: Shared,
     observer: &'a StoreObserver,
@@ -116,6 +141,8 @@ struct Statement {
 
 impl Statement {
     fn new(sql: &str) -> Option<Self> {
+        #[cfg(test)]
+        round_trip();
         let state = CURRENT.try_with(Arc::clone).ok()?;
         let sql = sql.to_ascii_uppercase();
         let locking = [

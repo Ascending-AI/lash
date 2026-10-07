@@ -254,7 +254,7 @@ pub async fn read_stored_cells_for_testing(
 }
 
 /// The `AfterFence` seam (ADR 0115 §6): pauses a guarded transaction right
-/// after its writer fence, while it holds the fleet-format row `FOR SHARE`.
+/// after its writer fence, while it holds the fence lock shared.
 ///
 /// Install it on a storage with
 /// [`PostgresStorage::with_after_fence_for_testing`](crate::PostgresStorage::with_after_fence_for_testing);
@@ -371,6 +371,65 @@ impl FencePause {
 
 impl Drop for FencePause {
     fn drop(&mut self) {
+        self.gate.open_all();
+    }
+}
+
+/// The `AfterReceipt` seam: pauses a runtime commit right after it recorded
+/// its turn receipt, with the rest of its transaction still to run.
+///
+/// Install it on a storage with
+/// [`PostgresStorage::with_after_receipt_for_testing`](crate::PostgresStorage::with_after_receipt_for_testing).
+/// Each [`Self::pause_next`] arms one pause, taken by the next commit that
+/// records a receipt, in arming order; a commit that finds none armed passes.
+#[derive(Clone, Debug, Default)]
+pub struct AfterReceipt {
+    armed: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<ReceiptPause>>>,
+}
+
+/// One armed [`AfterReceipt`] pause: the commit that takes it waits until
+/// [`Self::release`], or until this handle is dropped.
+#[derive(Clone, Debug)]
+pub struct ReceiptPause {
+    gate: std::sync::Arc<lash_core_execution::testing::Gate>,
+}
+
+impl AfterReceipt {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pause the next commit that records a receipt.
+    pub fn pause_next(&self) -> ReceiptPause {
+        use lash_sansio::sync::MutexExt;
+        let pause = ReceiptPause {
+            gate: std::sync::Arc::new(lash_core_execution::testing::Gate::new(
+                "postgres turn receipt",
+            )),
+        };
+        self.armed.lock_recover().push_back(pause.clone());
+        pause
+    }
+
+    /// Called by a commit that recorded its receipt: takes the next armed
+    /// pause, if any, and waits for its release.
+    pub(crate) async fn pass(&self) {
+        use lash_sansio::sync::MutexExt;
+        let armed = self.armed.lock_recover().pop_front();
+        if let Some(armed) = armed {
+            armed.gate.pass().await;
+        }
+    }
+}
+
+impl ReceiptPause {
+    /// Wait until a commit has taken this pause.
+    pub async fn reached(&self) {
+        self.gate.reached(1).await;
+    }
+
+    /// Let the paused commit continue.
+    pub fn release(&self) {
         self.gate.open_all();
     }
 }

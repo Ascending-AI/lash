@@ -3,20 +3,24 @@
 //!
 //! Every mutating transaction this store runs begins here, and nowhere else
 //! (`scripts/check-guarded-transactions.py` holds the entry total). The fence
-//! is the transaction's first statement, ahead of the session advisory lock
-//! and every row lock:
+//! is the writer fence's lock, taken shared ahead of the session advisory
+//! lock and every row lock, and then a plain read of the recorded epoch:
 //!
 //! ```sql
-//! SELECT format_version FROM lash_fleet_format WHERE singleton FOR SHARE;
+//! SELECT pg_advisory_xact_lock_shared(715425, 0);
+//! SELECT format_version FROM lash_fleet_format WHERE singleton;
 //! ```
 //!
-//! Finalize reads the same row `FOR UPDATE` and then moves it, in one
-//! transaction that takes no other row lock. So a writer holding the share
-//! lock makes finalize wait and commits under the old `F`, and a writer whose
-//! share lock waits behind finalize re-reads the row once finalize commits and
-//! is fenced before it writes anything. The two never deadlock: a writer holds
-//! no other lock while it waits on `F`, and finalize takes no lock a writer
-//! holds.
+//! Finalize takes the same lock exclusive and then moves the row, in one
+//! transaction that takes no other lock first. So a writer holding the lock
+//! shared makes finalize wait and commits under the old `F`, and a writer
+//! whose lock waits behind finalize reads the row once finalize commits and
+//! is fenced before it writes anything: under read committed the read takes
+//! its snapshot after the lock is held. The two never deadlock: a writer
+//! holds no other lock while it waits on the fence, and finalize takes no
+//! lock a writer holds. An advisory lock writes nothing: the fence dirties no
+//! page, logs no WAL and grows no MultiXact on the fleet row, which every
+//! writer of the fleet would otherwise share (FIG-5275).
 //!
 //! The fence answers one of four ways (§2.4):
 //!
@@ -31,10 +35,16 @@
 //! A refused transaction wrote nothing: the fence ran first, and dropping the
 //! transaction rolls back the rest.
 //!
-//! The fence is the first *data* statement, not the first statement: the
-//! transaction's guard profile ([`TransactionPrelude`]) is sent with its
-//! `BEGIN` in the same simple query, so the fence's own share-lock wait is
-//! already bounded by the profile's `lock_timeout` (FIG-5240).
+//! The lock rides the transaction's `BEGIN`: the guard profile
+//! ([`TransactionPrelude`]), the lock and `BEGIN` are one simple query, so
+//! the lock's wait is bounded by the profile's `lock_timeout` (FIG-5240) and
+//! costs no round trip of its own. A durable commit reads the epoch in its
+//! first statement, with the clock and its other envelope reads
+//! ([`Locked`]); every other writer reads it as its first data statement.
+//!
+//! A transaction also sequences the change feeds it writes at its tail
+//! ([`crate::change_feed`]): a clock is bumped only by the last statements
+//! before `COMMIT`.
 
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
@@ -49,6 +59,7 @@ use lash_core_execution::store::plugin_writers::{
 use lash_core_execution::{FleetFormat, StoreError};
 use sqlx::{Acquire, PgConnection, PgPool, Postgres, Transaction};
 
+use crate::change_feed::{ChangeFeeds, TurnChange};
 use crate::host::{RetryPolicies, RetryPolicy, TransactionPrelude};
 use crate::replayable::{Attempt, Settle, Uncommitted, XactId, commit_reconciled};
 use crate::session_sql::session_sql;
@@ -82,6 +93,8 @@ struct FenceState {
     retry: RetryPolicy,
     #[cfg(any(test, feature = "testing"))]
     after_fence: std::sync::Mutex<Option<crate::testing::AfterFence>>,
+    #[cfg(any(test, feature = "testing"))]
+    after_receipt: std::sync::Mutex<Option<crate::testing::AfterReceipt>>,
 }
 
 impl WriterFence {
@@ -113,6 +126,8 @@ impl WriterFence {
                 retry,
                 #[cfg(any(test, feature = "testing"))]
                 after_fence: std::sync::Mutex::new(None),
+                #[cfg(any(test, feature = "testing"))]
+                after_receipt: std::sync::Mutex::new(None),
             }),
         }
     }
@@ -181,38 +196,52 @@ impl WriterFence {
         self.state.after_fence.lock_recover().clone()
     }
 
-    /// Run the fence as `tx`'s first statement and admit the epoch it reads.
-    async fn admit(&self, tx: &mut Transaction<'_, Postgres>) -> Result<FleetFormat, StoreError> {
-        match self.read(tx).await? {
-            Some(recorded) => self.accept(recorded).await,
-            None => Err(missing_fence_row("the fleet-format row is absent")),
-        }
+    /// Install the `AfterReceipt` seam every runtime commit of this storage
+    /// passes once it recorded its turn receipt.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn install_after_receipt(&self, seam: crate::testing::AfterReceipt) {
+        use lash_sansio::sync::MutexExt;
+        *self.state.after_receipt.lock_recover() = Some(seam);
     }
 
-    /// The fence statement: the recorded epoch under a share lock, `None`
-    /// when the row is absent.
-    async fn read(&self, tx: &mut Transaction<'_, Postgres>) -> Result<Option<u32>, StoreError> {
-        let read = sqlx::query_scalar::<_, i32>(session_sql().fleet_format.select_for_fence.sql())
-            .fetch_optional(crate::observed_sql::executor(&mut **tx))
-            .await;
-        match read {
-            Ok(Some(recorded)) => u32::try_from(recorded).map(Some).map_err(|_| {
-                missing_fence_row(&format!(
-                    "lash_fleet_format.format_version is not an epoch: {recorded}"
-                ))
-            }),
-            Ok(None) => Ok(None),
-            Err(error) => {
-                let error = store_sqlx_error(error);
-                #[cfg(any(test, feature = "testing"))]
-                if matches!(error, StoreError::Contended)
-                    && let Some(seam) = self.after_fence()
-                {
-                    seam.record_contended();
-                }
-                Err(error)
-            }
+    #[cfg(any(test, feature = "testing"))]
+    fn after_receipt(&self) -> Option<crate::testing::AfterReceipt> {
+        use lash_sansio::sync::MutexExt;
+        self.state.after_receipt.lock_recover().clone()
+    }
+
+    /// The fence's read, its transaction holding the fence lock: the
+    /// recorded epoch, `None` when the row is absent.
+    async fn read(&self, connection: &mut PgConnection) -> Result<Option<i32>, StoreError> {
+        sqlx::query_scalar::<_, i32>(session_sql().fleet_format.select_fleet_format.sql())
+            .fetch_optional(crate::observed_sql::executor(connection))
+            .await
+            .map_err(|error| self.refused(store_sqlx_error(error)))
+    }
+
+    /// `error`, refusing a fence: contention is counted for a test's seam.
+    fn refused(&self, error: StoreError) -> StoreError {
+        #[cfg(any(test, feature = "testing"))]
+        if matches!(error, StoreError::Contended)
+            && let Some(seam) = self.after_fence()
+        {
+            seam.record_contended();
         }
+        error
+    }
+
+    /// Admit the epoch a fence read, `recorded`: absent or not an epoch
+    /// fails closed.
+    async fn admit(&self, recorded: Option<i32>) -> Result<FleetFormat, StoreError> {
+        let Some(recorded) = recorded else {
+            return Err(missing_fence_row("the fleet-format row is absent"));
+        };
+        let recorded = u32::try_from(recorded).map_err(|_| {
+            missing_fence_row(&format!(
+                "lash_fleet_format.format_version is not an epoch: {recorded}"
+            ))
+        })?;
+        self.accept(recorded).await
     }
 
     /// Admit the epoch the fence read against the writable range, and record
@@ -254,6 +283,10 @@ pub(crate) struct GuardedTx<'c> {
     /// The transaction's id, once read: what a lost `COMMIT` is reconciled
     /// by.
     xact: Option<XactId>,
+    /// The feed changes it writes at its tail, right before `COMMIT`.
+    feeds: ChangeFeeds,
+    #[cfg(any(test, feature = "testing"))]
+    after_receipt: Option<crate::testing::AfterReceipt>,
 }
 
 /// A plugin writer range the fleet record does not admit, as the store's
@@ -307,6 +340,21 @@ pub(crate) struct FleetMoved {
     pub(crate) current: FleetFormat,
 }
 
+impl<'c> GuardedTx<'c> {
+    /// `tx`, whose fence admitted `fleet`.
+    fn admitted(tx: Transaction<'c, Postgres>, fleet: FleetFormat, fence: &WriterFence) -> Self {
+        Self {
+            tx,
+            fleet,
+            finalized: fleet.version() == fence.state.writable.max(),
+            xact: None,
+            feeds: ChangeFeeds::default(),
+            #[cfg(any(test, feature = "testing"))]
+            after_receipt: fence.after_receipt(),
+        }
+    }
+}
+
 impl GuardedTx<'_> {
     /// The epoch this transaction runs under.
     pub(crate) fn fleet(&self) -> FleetFormat {
@@ -329,9 +377,9 @@ impl GuardedTx<'_> {
     /// fleet record's writer ranges (FIG-4746), before the transaction writes
     /// any of them.
     ///
-    /// The share lock the fence took on the fleet-format row is what makes
-    /// the read hold: finalize moves a range only under that row's update
-    /// lock, so no recorded range changes until this transaction ends. A
+    /// The fence lock this transaction holds shared is what makes the read
+    /// hold: finalize moves a range only under that lock held exclusive, so
+    /// no recorded range changes until this transaction ends. A
     /// plugin the record does not name is provisioned here when it publishes
     /// its first format; two transactions that provision it at once agree on
     /// the row the first one committed. A refusal is typed, and dropping the
@@ -405,7 +453,28 @@ impl GuardedTx<'_> {
         read_plugin_writers(&mut self.tx).await
     }
 
-    pub(crate) async fn commit(self) -> Result<(), sqlx::Error> {
+    /// Pass the `AfterReceipt` seam: a runtime commit recorded its receipt.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) async fn pass_after_receipt(&self) {
+        if let Some(seam) = &self.after_receipt {
+            seam.pass().await;
+        }
+    }
+
+    /// Record a change of the turn feed, sequenced at the tail.
+    pub(crate) fn record_turn_change(&mut self, change: TurnChange) {
+        self.feeds.record_turn(change);
+    }
+
+    /// Record a save of `process_id`, sequenced on the process feed at the
+    /// tail.
+    pub(crate) fn record_process_change(&mut self, process_id: &str) {
+        self.feeds.record_process(process_id);
+    }
+
+    /// Sequence the recorded feed changes, then `COMMIT`.
+    pub(crate) async fn commit(mut self) -> Result<(), sqlx::Error> {
+        self.feeds.flush(&mut self.tx).await?;
         crate::observed_sql::control("COMMIT", self.tx.commit()).await
     }
 
@@ -417,7 +486,8 @@ impl GuardedTx<'_> {
 
     /// `COMMIT`, reconciling a lost answer from the transaction's recorded
     /// outcome ([`commit_reconciled`]). The transaction's id is read first
-    /// when it is not yet known.
+    /// when it is not yet known, and the recorded feed changes are
+    /// sequenced last.
     pub(crate) async fn commit_reconciled(
         mut self,
         settle: &Settle<'_>,
@@ -428,6 +498,10 @@ impl GuardedTx<'_> {
                 .await
                 .map_err(Uncommitted::RolledBack)?,
         };
+        self.feeds
+            .flush(&mut self.tx)
+            .await
+            .map_err(Uncommitted::RolledBack)?;
         commit_reconciled(self.tx, &xact, settle).await
     }
 
@@ -472,7 +546,7 @@ impl<'c> From<&'c mut PgConnection> for GuardedEntry<'c, 'c> {
 }
 
 impl<'c> GuardedEntry<'c, '_> {
-    /// Begin with `statement`, the prelude's `BEGIN` and its guards.
+    /// Begin with `statement`, the prelude's fenced `BEGIN`.
     async fn begin_with(self, statement: String) -> Result<Transaction<'c, Postgres>, sqlx::Error> {
         match self {
             Self::Pool(pool) => pool.begin_with(statement).await,
@@ -483,58 +557,66 @@ impl<'c> GuardedEntry<'c, '_> {
     }
 }
 
-/// `BEGIN` with the fence's guard profile, then the fence as the
-/// transaction's first data statement.
+/// A writer's transaction past its fenced `BEGIN`: it holds the fence lock
+/// shared, and the epoch the fence admits is the one its next statement
+/// reads. A durable commit reads it with its envelope's other reads, in one
+/// statement ([`Self::admit`]).
+pub(crate) struct Locked<'c> {
+    tx: Transaction<'c, Postgres>,
+}
+
+impl<'c> Locked<'c> {
+    /// The connection the epoch is read on.
+    pub(crate) fn connection(&mut self) -> &mut PgConnection {
+        &mut self.tx
+    }
+
+    /// Admit `recorded`, the epoch this transaction read, under `fence`.
+    pub(crate) async fn admit(
+        self,
+        fence: &WriterFence,
+        recorded: Option<i32>,
+    ) -> Result<GuardedTx<'c>, StoreError> {
+        let fleet = fence.admit(recorded).await?;
+        Ok(GuardedTx::admitted(self.tx, fleet, fence))
+    }
+}
+
+/// `BEGIN` with the fence's guard profile and its lock, then the fence's
+/// read as the transaction's first data statement.
 pub(crate) async fn begin_guarded<'c, 'p>(
     entry: impl Into<GuardedEntry<'c, 'p>>,
     fence: &WriterFence,
 ) -> Result<GuardedTx<'c>, StoreError> {
-    begin_guarded_with(entry, fence, &fence.state.prelude).await
-}
-
-/// [`begin_guarded`] under `prelude`'s guard profile instead of the fence's.
-pub(crate) async fn begin_guarded_with<'c, 'p>(
-    entry: impl Into<GuardedEntry<'c, 'p>>,
-    fence: &WriterFence,
-    prelude: &TransactionPrelude,
-) -> Result<GuardedTx<'c>, StoreError> {
-    let mut tx = entry
+    let tx = entry
         .into()
-        .begin_with(prelude.statement().to_owned())
+        .begin_with(fence.state.prelude.fenced().to_owned())
         .await
-        .map_err(store_sqlx_error)?;
-    let fleet = fence.admit(&mut tx).await?;
-    Ok(GuardedTx {
-        tx,
-        fleet,
-        finalized: fleet.version() == fence.state.writable.max(),
-        xact: None,
-    })
+        .map_err(|error| fence.refused(store_sqlx_error(error)))?;
+    let mut locked = Locked { tx };
+    let recorded = fence.read(locked.connection()).await?;
+    locked.admit(fence, recorded).await
 }
 
 /// Durable entry with checkout observed separately from the transaction:
-/// `BEGIN` with `prelude`'s guards, then the fence.
+/// `BEGIN` with `prelude`'s guards and the fence lock. The caller reads the
+/// epoch ([`Locked::admit`]).
 pub(crate) async fn begin_durable(
     pool: &PgPool,
     fence: &WriterFence,
     prelude: &TransactionPrelude,
-) -> Result<GuardedTx<'static>, StoreError> {
-    let started = std::time::Instant::now();
-    let connection = pool.acquire().await;
-    crate::observed_sql::acquired(started.elapsed());
-    let connection = connection.map_err(store_sqlx_error)?;
-    crate::observed_sql::transaction_started();
-    let begin = Transaction::begin(connection, Some(prelude.statement().to_owned().into()));
-    let mut tx = crate::observed_sql::control("BEGIN", begin)
+) -> Result<Locked<'static>, StoreError> {
+    let connection = crate::observed_sql::checkout(pool)
         .await
         .map_err(store_sqlx_error)?;
-    let fleet = fence.admit(&mut tx).await?;
-    Ok(GuardedTx {
-        tx,
-        fleet,
-        finalized: fleet.version() == fence.state.writable.max(),
-        xact: None,
-    })
+    crate::observed_sql::transaction_started();
+    let begin = Transaction::begin(connection, Some(prelude.fenced().to_owned().into()));
+    // Observed under its own text: the fence lock's wait counts as a lock
+    // wait.
+    let tx = crate::observed_sql::control(prelude.fenced(), begin)
+        .await
+        .map_err(|error| fence.refused(store_sqlx_error(error)))?;
+    Ok(Locked { tx })
 }
 
 /// A schema migration's transaction entry: `BEGIN`, then the fence, on the
@@ -555,31 +637,32 @@ pub(crate) async fn begin_migration<'c>(
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
-    let recorded = if recordable {
-        fence.read(&mut tx).await?
+    let fleet = if recordable {
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_fleet_fence_shared
+                .sql(),
+        )
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(|error| fence.refused(store_sqlx_error(error)))?;
+        let recorded = fence.read(&mut tx).await?;
+        fence.admit(recorded).await?
     } else {
-        None
+        FleetFormat::current()
     };
-    let fleet = match recorded {
-        Some(recorded) => fence.accept(recorded).await?,
-        None => FleetFormat::current(),
-    };
-    Ok(GuardedTx {
-        tx,
-        fleet,
-        finalized: fleet.version() == fence.state.writable.max(),
-        xact: None,
-    })
+    Ok(GuardedTx::admitted(tx, fleet, fence))
 }
 
-/// The fleet-format row locked for an update: a move of `F`'s side of the
-/// fence (§2.2), which tests stand up for a newer fleet.
+/// The fleet-format row under the fence lock held exclusive: a move of
+/// `F`'s side of the fence (§2.2), which tests stand up for a newer fleet.
 ///
-/// `BEGIN`, then the row read `FOR UPDATE` as the transaction's only lock.
-/// It waits behind every writer holding the row `FOR SHARE`, and every
-/// writer that fences after it waits until it commits and then reads what it
-/// wrote. The recorded epoch is admitted against the fence's writable range
-/// like any writer's: a build that a newer release fenced out cannot move it.
+/// `BEGIN`, then the fence lock exclusive as the transaction's only lock,
+/// then the row read. It waits behind every writer holding the lock shared,
+/// and every writer that fences after it waits until it commits and then
+/// reads what it wrote. The recorded epoch is admitted against the fence's
+/// writable range like any writer's: a build that a newer release fenced out
+/// cannot move it.
 #[cfg(any(test, feature = "testing"))]
 pub(crate) struct FleetRowTx {
     tx: Transaction<'static, Postgres>,
@@ -607,7 +690,15 @@ pub(crate) async fn begin_fleet_row(
     fence: &WriterFence,
 ) -> Result<FleetRowTx, StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
-    let row: Option<i32> = sqlx::query_scalar(session_sql().fleet_format.select_for_update.sql())
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_fleet_fence
+            .sql(),
+    )
+    .execute(crate::observed_sql::executor(&mut *tx))
+    .await
+    .map_err(store_sqlx_error)?;
+    let row: Option<i32> = sqlx::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;

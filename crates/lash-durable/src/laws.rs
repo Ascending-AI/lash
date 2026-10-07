@@ -589,7 +589,7 @@ pub async fn no_write_through_a_stale_epoch(
 /// request holds the undelivered-input policy; a request with that policy
 /// and a stronger mode escalates it; any other repeat writes nothing; a turn
 /// that is not unfinished answers `AlreadyEnded`. The owner reads the
-/// accepted request on the turn's row.
+/// accepted request on the turn's row, and with its open.
 ///
 /// # Errors
 ///
@@ -732,6 +732,11 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
     let claimed = store.claim(&owner, 1).await?;
     ensure!(claimed.len() == 1, "the woken session was not claimed");
     let mut tx = store.begin(&actor, claimed[0].epoch).await?;
+    ensure!(
+        tx.turn_cancel() == Some(&escalated),
+        "the owner's open read the turn's cancel as {:?}",
+        tx.turn_cancel()
+    );
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {
         session: id.clone(),
         run: run.clone(),

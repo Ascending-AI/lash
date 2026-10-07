@@ -693,6 +693,14 @@ impl PostgresStorage {
         self
     }
 
+    /// Pass every runtime commit of this storage, through any handle it
+    /// hands out, through `seam` once it recorded its turn receipt.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_after_receipt_for_testing(self, seam: testing::AfterReceipt) -> Self {
+        self.fence.install_after_receipt(seam);
+        self
+    }
+
     /// One multi-session store over this catalog.
     pub fn store(&self) -> PostgresStore {
         PostgresStore {
@@ -825,6 +833,8 @@ mod attachments;
 mod backend;
 #[path = "postgres/blobs.rs"]
 mod blobs;
+#[path = "postgres/change_feed.rs"]
+mod change_feed;
 #[path = "postgres/connection_sql.rs"]
 mod connection_sql;
 #[path = "postgres/durable/mod.rs"]

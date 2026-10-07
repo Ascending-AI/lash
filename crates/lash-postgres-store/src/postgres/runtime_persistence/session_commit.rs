@@ -752,31 +752,33 @@ pub(crate) async fn apply_runtime_commit_tx(
     let mut result = plan.result(checkpoint_ref, manifest, now, work_remaining);
     result.turn_cancel_input_outcome = turn_cancel_input_outcome;
     {
+        // The receipt takes the turn feed's next sequence at the
+        // transaction's tail, so the feed's clock is held from there to
+        // `COMMIT` only (FIG-5275).
         let receipt = plan.receipt_write(&result);
-        let columns = append_identity_columns(receipt.append_request_identity)?;
-        let result_json = encode_json(receipt.result)?;
-        sqlx::query(session_sql().turn_commits.insert.sql())
-            .bind(receipt.session_id.as_str())
-            .bind(receipt.operation_key)
-            .bind(receipt.turn_commit_hash)
-            .bind(&result_json)
-            .bind(
-                receipt
+        let (request_identity_hash, requested_node_count, identity_encoding_version) =
+            append_identity_columns(receipt.append_request_identity)?;
+        tx.record_turn_change(crate::change_feed::TurnChange::Receipt(
+            crate::change_feed::TurnReceipt {
+                session_id: receipt.session_id.as_str().to_owned(),
+                turn_id: receipt.operation_key.to_owned(),
+                turn_commit_hash: receipt.turn_commit_hash.to_owned(),
+                result_json: encode_json(receipt.result)?,
+                outcome_code: receipt
                     .result
                     .outcome
                     .as_ref()
-                    .map(|outcome| outcome.as_str()),
-            )
-            .bind(now as i64)
-            .bind(columns.0)
-            .bind(columns.1)
-            .bind(columns.2)
-            .bind(!receipt.result.failure_evidence.is_empty())
-            .bind(crate::session_factory::next_turn_change_sequence(&mut *tx).await?)
-            .execute(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(store_sqlx_error)?;
+                    .map(|outcome| outcome.as_str().to_owned()),
+                committed_at_ms: now as i64,
+                request_identity_hash: request_identity_hash.map(str::to_owned),
+                requested_node_count,
+                identity_encoding_version,
+                failure_evidence: !receipt.result.failure_evidence.is_empty(),
+            },
+        ));
     }
+    #[cfg(any(test, feature = "testing"))]
+    tx.pass_after_receipt().await;
     // A plain-commit receipt writes three NULL append-identity columns.
     Ok(result)
 }

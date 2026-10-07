@@ -354,8 +354,8 @@ def check_sqlite() -> list[Site]:
 # --- PostgreSQL (lane L2) -----------------------------------------------------
 #
 # The guarded entry is `crates/lash-postgres-store/src/postgres/guarded_tx.rs`:
-# `begin_guarded` (BEGIN, then the fence `SELECT format_version FROM
-# lash_fleet_format WHERE singleton FOR SHARE` as the first statement),
+# `begin_guarded` (BEGIN with the fence's shared advisory lock, then the
+# fence's read of `lash_fleet_format` as the first data statement),
 # `guarded` (the same, retried on contention) and `begin_migration` (a
 # migration step's entry, fenced once the catalog can record `F`). Findings
 # under `crates/lash-postgres-store/src/`, outside that file:

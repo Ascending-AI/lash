@@ -13,7 +13,8 @@ use lash_durable::{
 };
 
 use super::{
-    PostgresDurableStore, Tx, apply_mail, apply_owner, group_members, sqlx_failure, store_failure,
+    PostgresDurableStore, SQL, Tx, apply_mail, apply_owner, group_members, sqlx_failure,
+    store_failure,
 };
 use crate::guarded_tx::begin_durable;
 use crate::replayable::{Attempt, Settle, Uncommitted, XactId};
@@ -54,9 +55,15 @@ impl PostgresDurableStore {
                 }
                 let tx = &tx;
                 self.replay(label, deadline, || async move {
-                    let (mut guarded, now) = self.open_replayable(label).await?;
-                    let outcome =
-                        Box::pin(apply_owner(&mut guarded, tx, now, self.fence.fleet())).await;
+                    let (mut guarded, now, fence) = self.open_replayable(label, Some(tx)).await?;
+                    let outcome = Box::pin(apply_owner(
+                        &mut guarded,
+                        tx,
+                        fence,
+                        now,
+                        self.fence.fleet(),
+                    ))
+                    .await;
                     self.settle(label, guarded, outcome, deadline).await
                 })
                 .await
@@ -78,7 +85,7 @@ impl PostgresDurableStore {
             crate::observed_sql::measure(&self.observer, label, 0, async {
                 let tx = &tx;
                 self.replay(label, deadline, || async move {
-                    let (mut guarded, now) = self.open_replayable(label).await?;
+                    let (mut guarded, now, _) = self.open_replayable(label, None).await?;
                     let outcome =
                         Box::pin(apply_mail(&mut guarded, tx, now, self.fence.fleet())).await;
                     self.settle(label, guarded, outcome, deadline).await
@@ -123,42 +130,43 @@ impl PostgresDurableStore {
             .map_err(Attempt::into_error)
     }
 
-    /// [`open`](Self::open) for a replayable commit: the clock read also
-    /// reads the transaction's id, by which a lost `COMMIT` is reconciled.
+    /// [`open`](Self::open) for a replayable commit: its first statement
+    /// also reads the transaction's id, by which a lost `COMMIT` is
+    /// reconciled, and for an owner's commit `owner` runs the ownership
+    /// fence, answering the state revision it bumped (`None`: fenced out).
     async fn open_replayable(
         &self,
         label: CommitLabel,
-    ) -> Result<(Tx, DurableInstant), Attempt<DurableError>> {
+        owner: Option<&ActorTx>,
+    ) -> Result<(Tx, DurableInstant, Option<i64>), Attempt<DurableError>> {
         tracing::trace!(label = label.as_str(), "durable postgres commit");
         let route = self.route(label.capacity());
-        let mut tx: Tx = begin_durable(route.pool, &self.fence, route.prelude)
+        let mut locked = begin_durable(route.pool, &self.fence, route.prelude)
             .await
             .map_err(|error| attempt(store_failure(error)))?;
-        let (now, xact) = match self
-            .injected_instant()
-            .transpose()
-            .map_err(Attempt::Failed)?
-        {
-            Some(now) => (
-                now,
-                XactId::of(&mut tx)
-                    .await
-                    .map_err(|error| attempt(sqlx_failure(error)))?,
-            ),
-            None => {
-                let (now, xact): (i64, String) = sqlx::query_as(
-                    crate::connection_sql::connection_sql()
-                        .select_statement_epoch_ms_and_xact_id
-                        .sql(),
-                )
-                .fetch_one(crate::observed_sql::executor(&mut **tx))
+        let (recorded, now, xact, fence): (Option<i32>, i64, String, Option<i64>) = match owner {
+            Some(owner) => sqlx::query_as(SQL.postgres.owner_envelope.sql())
+                .bind(owner.actor().as_str())
+                .bind(owner.epoch().0)
+                .fetch_one(crate::observed_sql::executor(locked.connection()))
                 .await
-                .map_err(|error| attempt(sqlx_failure(error)))?;
-                (DurableInstant(now), XactId::new(xact))
+                .map_err(|error| attempt(sqlx_failure(error)))?,
+            None => {
+                let (recorded, now, xact): (Option<i32>, i64, String) =
+                    sqlx::query_as(SQL.postgres.fence_clock_and_xact.sql())
+                        .fetch_one(crate::observed_sql::executor(locked.connection()))
+                        .await
+                        .map_err(|error| attempt(sqlx_failure(error)))?;
+                (recorded, now, xact, None)
             }
         };
-        tx.note_xact(xact);
-        Ok((tx, now))
+        let mut tx = locked
+            .admit(&self.fence, recorded)
+            .await
+            .map_err(|error| attempt(store_failure(error)))?;
+        tx.note_xact(XactId::new(xact));
+        let now = self.instant_or(now).map_err(Attempt::Failed)?;
+        Ok((tx, now, fence))
     }
 
     /// End a replayable commit's attempt: roll a refusal back, and commit a

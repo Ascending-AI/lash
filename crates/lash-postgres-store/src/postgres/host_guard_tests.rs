@@ -35,7 +35,7 @@ fn short_locks() -> PostgresHostConfig {
     config
 }
 
-/// A connection holding the fleet-format row `FOR UPDATE`: every writer's
+/// A connection holding the writer fence's lock exclusive: every writer's
 /// fence waits on it, as it does behind a finalize.
 async fn hold_fence(url: &str) -> sqlx::PgConnection {
     let mut holder = sqlx::PgConnection::connect(url)
@@ -46,14 +46,13 @@ async fn hold_fence(url: &str) -> sqlx::PgConnection {
         .await
         .expect("begin the hold");
     sqlx::query(
-        crate::session_sql::session_sql()
-            .fleet_format
-            .select_for_update
+        crate::connection_sql::connection_sql()
+            .lock_xact_fleet_fence
             .sql(),
     )
-    .fetch_one(&mut holder)
+    .execute(&mut holder)
     .await
-    .expect("lock the fleet-format row");
+    .expect("take the fence lock");
     holder
 }
 

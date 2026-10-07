@@ -130,19 +130,21 @@ pub(super) async fn run(
             RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
         }
         None => {
-            // An `AfterStep` request lets the step's round run; the turn
-            // honours it before its next model call.
-            if turn_cancel::immediate(cx, &session).await? {
+            // The admission's open is its one read: the turn's accepted
+            // cancel and the store's clock come with it. An `AfterStep`
+            // request lets the step's round run; the turn honours it
+            // before its next model call.
+            let mut tx = cx.begin().await?;
+            if turn_cancel::immediate_in(&tx) {
                 return Ok(RoundExit::CancelRequested);
             }
-            let now_ms = u64::try_from(cx.durable_now().await?.0).unwrap_or(0);
+            let now_ms = u64::try_from(tx.opened_at().0).unwrap_or(0);
             let members = calls
                 .iter()
                 .map(|call| round::call_draft(&opener, call, tools.pin(call, now_ms)))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(exec)?;
             let refused = tools.refusal(&calls);
-            let mut tx = cx.begin().await?;
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session.clone(),
                 run: row.run.clone(),

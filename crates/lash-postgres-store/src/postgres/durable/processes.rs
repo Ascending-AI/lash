@@ -9,6 +9,7 @@
 //! terminal and the cancel request are the registry's own writes on this
 //! commit's connection, so the registry and the actor never disagree.
 
+use crate::guarded_tx::GuardedTx;
 use lash_core_execution::runtime::actor::process::{scope_id, scope_index, subtree_roots};
 use lash_durable::domain::{
     CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessStartRows,
@@ -137,7 +138,7 @@ pub(crate) async fn signal_mail_within(
 /// a cascade batch write. A terminal process is answered `AlreadyEnded`
 /// and written nothing.
 pub(crate) async fn cancel_within(
-    tx: &mut PgConnection,
+    tx: &mut GuardedTx<'_>,
     process: &ProcessId,
     origin: CancelOrigin,
     requester: &str,
@@ -173,7 +174,7 @@ pub(crate) async fn cancel_within(
 /// the registrar refuses, or whose key another process holds, refuses the
 /// commit.
 async fn register_within(
-    tx: &mut PgConnection,
+    tx: &mut GuardedTx<'_>,
     commit: &Committing<'_>,
     rows: &ProcessStartRows,
 ) -> Result<(), DurableError> {
@@ -226,7 +227,7 @@ async fn register_within(
 /// exactly once under its identity, with its mail and its target's wake. A
 /// target that is unknown or already terminal takes nothing.
 async fn signal_within(
-    tx: &mut PgConnection,
+    tx: &mut GuardedTx<'_>,
     commit: &Committing<'_>,
     process: &ProcessId,
     signal_json: &str,
@@ -256,7 +257,7 @@ async fn signal_within(
 }
 
 pub(super) async fn apply(
-    tx: &mut PgConnection,
+    tx: &mut GuardedTx<'_>,
     commit: &Committing<'_>,
     write: &ProcessWrite,
 ) -> Result<(), DurableError> {
@@ -276,7 +277,7 @@ pub(super) async fn apply(
                 .bind(integer::<i64>(*expected_rev)?)
                 .bind(driver_json)
                 .bind(commit.epoch.0)
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .fetch_optional(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
             if moved.is_some() {
@@ -398,7 +399,7 @@ async fn set_cursor(
 }
 
 pub(super) async fn request_cancel(
-    tx: &mut PgConnection,
+    tx: &mut GuardedTx<'_>,
     request: &CancelRequest,
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,

@@ -281,8 +281,10 @@ pub trait DurableStore: DurableReads {
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError>;
 
     /// Open the owner's transaction over `actor` at `epoch`: a fenced read
-    /// that returns the pending mail. Refused with
-    /// [`DurableError::OwnershipLost`] when `epoch` is not current.
+    /// that returns the pending mail, the store's clock and, for a session
+    /// actor, its unfinished turn's accepted cancel request, in one read.
+    /// Refused with [`DurableError::OwnershipLost`] when `epoch` is not
+    /// current.
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError>;
 
     /// Apply `tx` atomically. The transaction's first statement re-checks

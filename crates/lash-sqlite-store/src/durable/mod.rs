@@ -974,6 +974,14 @@ impl DurableStore for SqliteDurableStore {
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
         let actor = actor.clone();
+        let at = self.instant()?;
+        let session = match actor.kind() {
+            lash_durable::ActorKind::Session => Some(
+                lash_sansio::SessionId::try_from(actor.id().to_owned())
+                    .map_err(|_| corrupt("session id", actor.id()))?,
+            ),
+            lash_durable::ActorKind::Process => None,
+        };
         self.read(move |tx| {
             let mut statement = tx.prepare_cached(SQL.actor.open.sql())?;
             let mut rows = statement.query([actor.as_str()])?;
@@ -998,6 +1006,8 @@ impl DurableStore for SqliteDurableStore {
                             acked: MailSeq(row.get(3)?),
                             seen: MailSeq(row.get(4)?),
                             mail: Vec::new(),
+                            at,
+                            turn_cancel: None,
                         })
                     }
                 };
@@ -1011,6 +1021,16 @@ impl DurableStore for SqliteDurableStore {
                         appended_at: DurableInstant(row.get(8)?),
                     });
                 }
+            }
+            drop(rows);
+            drop(statement);
+            // A session's unfinished turn's accepted cancel, under the same
+            // read.
+            if let (Some(opened), Some(session)) = (&mut opened, &session) {
+                opened.turn_cancel = match turns::turn(tx, session)? {
+                    Ok(row) => row.and_then(|row| row.cancel),
+                    Err(error) => return Ok(Err(error)),
+                };
             }
             Ok(match opened {
                 Some(opened) => Ok(ActorTx::opened(opened)),

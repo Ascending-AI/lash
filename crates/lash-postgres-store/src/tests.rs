@@ -984,11 +984,12 @@ fn postgres_statement_name(query: &str) -> &'static str {
         // so they ride its round trip (FIG-5240).
         q if q.starts_with("SET LOCAL ") => "begin-guards",
         "COMMIT" => "commit",
-        q if q.starts_with("SELECT format_version FROM lash_fleet_format")
-            && q.ends_with("FOR SHARE") =>
-        {
-            "writer-fence"
-        }
+        // The writer fence (FIG-5275): its read committed isolation and its
+        // shared lock ride the `BEGIN` round trip; its read of the epoch is
+        // the transaction's first data statement.
+        q if q.starts_with("SET TRANSACTION ISOLATION LEVEL READ COMMITTED") => "begin-isolation",
+        q if q.starts_with("SELECT pg_advisory_xact_lock_shared(") => "writer-fence-lock",
+        q if q.starts_with("SELECT format_version FROM lash_fleet_format") => "writer-fence",
         // pg_stat_statements may report the literal text or the parameterised
         // form (`current_setting($1,$2)`); match on the function shape instead.
         q if q.starts_with("SELECT NULLIF(current_setting(") => "testing-lease-epoch-probe",
@@ -1067,14 +1068,17 @@ fn postgres_statement_name(query: &str) -> &'static str {
 /// set's size: the revision release in its own fenced transaction
 /// (FIG-4731), then fence, table lock, run read, one manifest read per live
 /// run, the edge sever, the single sweep, commit. Each `BEGIN` carries the
-/// ordinary profile's three limits in its own round trip. A per-dead-body deletion loop
+/// ordinary profile's three limits, its isolation and the fence lock in its
+/// own round trip. A per-dead-body deletion loop
 /// would grow `blob-sweep` past 1, and the all-hashes scan would land as a
 /// `blob-lock` row the pin does not expect.
 fn expected_gc_statements(rooted: bool) -> std::collections::BTreeMap<&'static str, i64> {
     let mut expected = std::collections::BTreeMap::from([
         ("begin", 2),
         ("begin-guards", 6),
+        ("begin-isolation", 2),
         ("commit", 2),
+        ("writer-fence-lock", 2),
         ("writer-fence", 2),
         ("revision-release", 1),
         ("blob-table-lock", 1),
@@ -1381,7 +1385,11 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
                     assert!(cost.lock_statement_elapsed > Duration::ZERO);
                     assert!(cost.returned_bytes > 0);
                     assert_eq!(cost.group_commit_members, [2, 0][index]);
-                    assert_eq!(cost.sql_statements, [10, 6][index]);
+                    // The envelope is three statements (FIG-5275): the
+                    // fenced `BEGIN`, one statement reading the fence, the
+                    // clock, the transaction id and the epoch fence, and
+                    // `COMMIT`.
+                    assert_eq!(cost.sql_statements, [8, 4][index]);
                     eprintln!("{label}: {cost:?}");
                 }
             });

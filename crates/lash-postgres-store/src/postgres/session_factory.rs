@@ -212,13 +212,18 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             .await
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
         let mut report = lash_core_execution::SessionBlobReclaimReport::default();
-        if let Err(error) =
-            delete_session_tx(&mut tx, session_id, &mut report, self.fence.fleet()).await
-        {
-            report.deleted_blob_count = 0;
-            return Err(lash_core_execution::MaintenanceFailure::failed(
-                error, report,
-            ));
+        match delete_session_tx(&mut tx, session_id, &mut report, self.fence.fleet()).await {
+            Ok(terminal) => {
+                if let Some(terminal) = terminal {
+                    tx.record_turn_change(terminal);
+                }
+            }
+            Err(error) => {
+                report.deleted_blob_count = 0;
+                return Err(lash_core_execution::MaintenanceFailure::failed(
+                    error, report,
+                ));
+            }
         }
         if let Err(error) = tx.commit().await {
             report.deleted_blob_count = 0;
@@ -923,12 +928,15 @@ async fn fence_deleted_session_frames_tx(
     Ok(())
 }
 
+/// Delete `session_id`'s rows in `tx`: the deleted session's terminal
+/// record, when it was materialized, is the caller's to sequence at the
+/// transaction's tail.
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     report: &mut lash_core_execution::SessionBlobReclaimReport,
     fleet_format: lash_core_execution::FleetFormat,
-) -> Result<(), StoreError> {
+) -> Result<Option<crate::change_feed::TurnChange>, StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
     let materialized =
         sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
@@ -1074,15 +1082,20 @@ pub(crate) async fn delete_session_tx(
     crate::durable::release_prompt_snapshots(tx, session_id, None)
         .await
         .map_err(store_sqlx_error)?;
-    if materialized {
-        // Take the shared feed clock after the deletion's resource locks.
-        let at_ms = crate::support::postgres_transaction_epoch_ms(tx).await?;
-        record_session_terminal(tx, session_id, None, crate::support::clamp_epoch_ms(at_ms))
-            .await?;
+    if !materialized {
+        return Ok(None);
     }
-    Ok(())
+    let at_ms = crate::support::postgres_transaction_epoch_ms(tx).await?;
+    Ok(Some(session_terminal(
+        session_id,
+        None,
+        crate::support::clamp_epoch_ms(at_ms),
+    )))
 }
 
+/// The turn feed's next sequence, taken on `conn`: a test's hand-written
+/// receipt takes it the way a commit's tail does.
+#[cfg(test)]
 pub(crate) async fn next_turn_change_sequence(
     conn: &mut sqlx::PgConnection,
 ) -> Result<i64, StoreError> {
@@ -1096,20 +1109,20 @@ pub(crate) async fn next_turn_change_sequence(
         })
 }
 
-pub(crate) async fn record_session_terminal(
-    conn: &mut sqlx::PgConnection,
+/// Session `session_id`'s terminal record on the turn feed, with its fault
+/// when it faulted: sequenced at its transaction's tail.
+pub(crate) fn session_terminal(
     session_id: &SessionId,
-    fault_json: Option<&str>,
+    fault_json: Option<String>,
     at_ms: i64,
-) -> Result<(), StoreError> {
-    let sequence = next_turn_change_sequence(conn).await?;
-    sqlx::query(session_sql().turn_commits.insert_session_terminal.sql())
-        .bind(sequence)
-        .bind(session_id.as_str())
-        .bind(fault_json)
-        .bind(at_ms)
-        .execute(conn)
-        .await
-        .map_err(store_sqlx_error)?;
-    Ok(())
+) -> crate::change_feed::TurnChange {
+    crate::change_feed::TurnChange::SessionTerminal {
+        session_id: session_id.as_str().to_owned(),
+        fault_json,
+        recorded_at_ms: at_ms,
+    }
 }
+
+#[cfg(test)]
+#[path = "turn_feed_tests.rs"]
+mod turn_feed_tests;

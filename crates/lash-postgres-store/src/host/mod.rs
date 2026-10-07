@@ -281,6 +281,9 @@ fn guard_settings(guards: &TransactionGuards) -> Vec<(&'static str, String)> {
 #[derive(Clone, Debug)]
 pub struct TransactionPrelude {
     begin: Arc<str>,
+    /// The guards, the writer fence's shared lock and then `BEGIN`, in one
+    /// simple query: what a guarded writer begins with.
+    fenced: Arc<str>,
     deadline: Option<Duration>,
 }
 
@@ -293,15 +296,22 @@ impl TransactionPrelude {
     /// The prelude installing `guards` after `begin`, a `BEGIN` with its
     /// isolation options (`BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`).
     pub fn with_begin(begin: &str, guards: &TransactionGuards) -> Self {
-        let mut statement = begin.to_owned();
+        let mut settings = String::new();
         for (name, value) in guard_settings(guards) {
-            statement.push_str("; SET LOCAL ");
-            statement.push_str(name);
-            statement.push_str(" = ");
-            statement.push_str(&value);
+            settings.push_str("SET LOCAL ");
+            settings.push_str(name);
+            settings.push_str(" = ");
+            settings.push_str(&value);
+            settings.push_str("; ");
         }
+        let statement = if settings.is_empty() {
+            begin.to_owned()
+        } else {
+            format!("{begin}; {}", settings.trim_end_matches("; "))
+        };
         Self {
             begin: statement.into(),
+            fenced: fenced_begin(&settings).into(),
             deadline: guards.operation_deadline,
         }
     }
@@ -311,6 +321,7 @@ impl TransactionPrelude {
     pub(crate) fn inherit() -> Self {
         Self {
             begin: "BEGIN".into(),
+            fenced: fenced_begin("").into(),
             deadline: None,
         }
     }
@@ -318,6 +329,13 @@ impl TransactionPrelude {
     /// The `BEGIN` statement, guards included.
     pub fn statement(&self) -> &str {
         &self.begin
+    }
+
+    /// A guarded writer's `BEGIN`: the guards, then the writer fence's
+    /// shared lock, then `BEGIN`, in one simple query
+    /// ([`crate::guarded_tx`]).
+    pub(crate) fn fenced(&self) -> &str {
+        &self.fenced
     }
 
     /// The whole-operation deadline of the profile.
@@ -362,6 +380,23 @@ impl TransactionPrelude {
             None => Ok(operation.await),
         }
     }
+}
+
+/// A guarded writer's `BEGIN` after `settings` (`SET LOCAL ...; ` each).
+///
+/// The statements before `BEGIN` run as the simple query's implicit
+/// transaction block, which `BEGIN` then turns into the transaction itself,
+/// lock and settings kept. So a lock wait the guards refuse rolls that block
+/// back whole and leaves the connection outside any transaction, and the
+/// fence's read, the transaction's next statement, takes its snapshot only
+/// once the lock is held: read committed, whatever the deployment's default.
+fn fenced_begin(settings: &str) -> String {
+    format!(
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; {settings}{}; BEGIN",
+        crate::connection_sql::connection_sql()
+            .lock_xact_fleet_fence_shared
+            .sql()
+    )
 }
 
 /// Makes every connection lash opens, by role.

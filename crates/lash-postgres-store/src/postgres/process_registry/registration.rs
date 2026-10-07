@@ -4,6 +4,12 @@
 
 use super::*;
 
+use crate::guarded_tx::GuardedTx;
+
+/// The change sequence a registered row holds until its transaction's tail
+/// sequences it on the process feed.
+const UNSEQUENCED: i64 = 0;
+
 /// What applying one prepared registration did.
 pub(crate) enum AppliedRegistration {
     /// The row this registration inserted, with its observers and its
@@ -30,7 +36,7 @@ pub(crate) enum AppliedRegistration {
 /// A stale preparation, a refused start (a closed scope, an abandoned
 /// consumer hold) and any store failure.
 pub(crate) async fn apply_registration_tx(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     registration: ProcessRegistration,
     observers: Vec<SessionId>,
     process_id: ProcessId,
@@ -106,7 +112,7 @@ pub(crate) async fn apply_registration_tx(
         parent_end::lock_consumer_hold_tx(tx, &hold.key).await?;
         let abandoned: bool = sqlx::query_scalar(process_sql().abandoned_hold.exists.sql())
             .bind(hold.key.as_str())
-            .fetch_one(crate::observed_sql::executor(&mut *tx))
+            .fetch_one(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(plugin_sqlx_error)?;
         if abandoned {
@@ -116,9 +122,6 @@ pub(crate) async fn apply_registration_tx(
             ));
         }
     }
-    // Minted only once the start is admitted, so no refusal names an id
-    // that was never registered.
-    let change_seq = next_process_change_seq_tx(tx).await?;
     let mut record = ProcessRecord::from_prepared_registration(registration, process_id, now);
     let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
     let result = sqlx::query(process_sql().process_postgres.insert_registration.sql())
@@ -136,7 +139,7 @@ pub(crate) async fn apply_registration_tx(
         .bind(record.created_at_ms as i64)
         .bind(record.updated_at_ms as i64)
         .bind(record.last_event_sequence as i64)
-        .bind(change_seq as i64)
+        .bind(UNSEQUENCED)
         .bind(process_status_label(&record))
         .bind(
             record
@@ -157,18 +160,17 @@ pub(crate) async fn apply_registration_tx(
         .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
         .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
         .bind(consumer_hold.as_ref().map(|hold| hold.cancels))
-        .execute(crate::observed_sql::executor(&mut *tx))
+        .execute(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(plugin_sqlx_error)?;
     // On this tier alone the read that found no retained process for the
     // key and the insert that acts on it are two statements in one
     // `READ COMMITTED` transaction, so each takes its own snapshot: two
-    // callers presenting one key can both read "no row". The change clock
-    // above orders the pair: the first holds that row lock from its bump
-    // until it commits, so by the time the second reaches this insert the
-    // winner's row is committed and `ON CONFLICT DO NOTHING` reports zero
-    // rows instead of raising the start-key unique index. Re-read the
-    // winner under this statement's own snapshot.
+    // callers presenting one key can both read "no row". The insert orders
+    // the pair: the second waits on the first's uncommitted start-key entry
+    // until it commits, and `ON CONFLICT DO NOTHING` then reports zero rows
+    // instead of raising the start-key unique index. Re-read the winner
+    // under the next statement's own snapshot.
     if result.rows_affected() == 0 {
         let winner = match start_key.as_ref() {
             Some(start_key) => load_process_by_start_key_tx(tx, start_key).await?,
@@ -183,6 +185,7 @@ pub(crate) async fn apply_registration_tx(
         let wake = wake_session_id_tx(tx, &winner.id).await?;
         return Ok(AppliedRegistration::LostRace { winner, wake });
     }
+    tx.record_process_change(record.id.as_str());
     // The process's actor commits with its row, ready: the start is a wake
     // of the actor, never a relayed obligation (ADR 0132 §12).
     crate::durable::processes::create_actor_within(
@@ -198,7 +201,7 @@ pub(crate) async fn apply_registration_tx(
         sqlx::query(process_sql().observer.insert.sql())
             .bind(session_id.as_str())
             .bind(process_id.as_str())
-            .execute(crate::observed_sql::executor(&mut *tx))
+            .execute(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(plugin_sqlx_error)?;
         append_process_event_tx(

@@ -57,6 +57,14 @@ pub(super) async fn immediate(cx: &ActorContext, session: &SessionId) -> Result<
         .is_some_and(|request| request.mode == TurnCancelMode::Immediate))
 }
 
+/// Whether the cancel request `tx`'s open read on the turn is `Immediate`:
+/// the boundary check a phase commit's own open answers, with no read of
+/// its own.
+pub(super) fn immediate_in(tx: &lash_durable::ActorTx) -> bool {
+    tx.turn_cancel()
+        .is_some_and(|request| request.mode == TurnCancelMode::Immediate)
+}
+
 /// Run `work` until it finishes or the turn accepts an `Immediate` cancel
 /// request: `None` when the request won, and `work` was dropped.
 ///

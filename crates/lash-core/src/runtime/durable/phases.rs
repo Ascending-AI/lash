@@ -112,7 +112,10 @@ pub async fn run_phases(
         };
         match effect {
             Effect::LlmCall { id, request } => {
-                if turn_cancel::requested(cx, &session).await?.is_some() {
+                // `model.start`'s open is the call's one read: the turn's
+                // accepted cancel and the store's clock come with it.
+                let mut tx = cx.begin().await?;
+                if tx.turn_cancel().is_some() {
                     return Ok(PhaseExit::CancelRequested);
                 }
                 if cx.draining() {
@@ -151,7 +154,7 @@ pub async fn run_phases(
                 let saved = drive.machine().checkpoint();
                 let start = model_call::start(
                     &services.execution_budgets(&session),
-                    cx.durable_now().await?,
+                    tx.opened_at(),
                     row.turn_deadline,
                     pinned,
                     calls.saturating_add(1),
@@ -165,7 +168,6 @@ pub async fn run_phases(
                     // composition records, in one transaction. A resend
                     // commits its next attempt and records nothing.
                     let label = tool_round::model_start_label(&carry);
-                    let mut tx = cx.begin().await?;
                     if let Some(present) = carry.take() {
                         tx.write(present);
                     }
@@ -198,7 +200,8 @@ pub async fn run_phases(
                 }
             }
             Effect::ExecCode { id, language, code } => {
-                if turn_cancel::immediate(cx, &session).await? {
+                let mut tx = cx.begin().await?;
+                if turn_cancel::immediate_in(&tx) {
                     return Ok(PhaseExit::CancelRequested);
                 }
                 if cx.draining() {
@@ -213,7 +216,6 @@ pub async fn run_phases(
                 let cell = RunSeq(id.0);
                 let named = matches!(row.phase, UnfinishedPhase::Tools { run, .. } if run == cell);
                 if !named || carry.is_some() {
-                    let mut tx = cx.begin().await?;
                     if let Some(present) = carry.take() {
                         tx.write(present);
                     }
@@ -266,7 +268,8 @@ pub async fn run_phases(
             } => {
                 // An `Immediate` request the turn accepted after its last
                 // step still wins over the commit: the turn backtracks.
-                if turn_cancel::immediate(cx, &session).await? {
+                let mut tx = cx.begin().await?;
+                if turn_cancel::immediate_in(&tx) {
                     return Ok(PhaseExit::CancelRequested);
                 }
                 let done = TurnDone {
@@ -285,7 +288,6 @@ pub async fn run_phases(
                 let commit = drive
                     .finish(cx, done, heads.head(cx, &session).await?)
                     .await?;
-                let mut tx = cx.begin().await?;
                 if let Some(present) = carry.take() {
                     tx.write(present);
                 }

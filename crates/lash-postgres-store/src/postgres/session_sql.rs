@@ -388,6 +388,31 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `runtime_turn_commits` statements only PostgreSQL issues.
     pub(crate) struct TurnCommitPostgresStatements @ "turn_commit" {
+        /// Record a receipt under the turn clock's next sequence: the clock
+        /// is bumped by this statement, the last before `COMMIT`, so it is
+        /// held for that statement and the `COMMIT` only (FIG-5275).
+        insert_sequenced = "WITH clock AS (
+                 UPDATE turn_change_clock SET current_seq = current_seq + 1
+                 WHERE singleton = 1
+                 RETURNING current_seq
+             )
+             INSERT INTO runtime_turn_commits (
+                session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
+                request_identity_hash, requested_node_count, identity_encoding_version,
+                failure_evidence, change_seq
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, clock.current_seq FROM clock";
+
+        /// Record session `?1`'s terminal, with fault `?2` at `?3`, under the
+        /// turn clock's next sequence, as [`Self::insert_sequenced`] does.
+        insert_session_terminal_sequenced = "WITH clock AS (
+                 UPDATE turn_change_clock SET current_seq = current_seq + 1
+                 WHERE singleton = 1
+                 RETURNING current_seq
+             )
+             INSERT INTO session_terminal_changes (change_seq, session_id, fault_json, recorded_at_ms)
+             SELECT clock.current_seq, ?1, ?2, ?3 FROM clock";
+
         /// Drop every receipt of a deleted session older than `?1`.
         delete_retained = "DELETE FROM runtime_turn_commits AS receipt
              WHERE receipt.committed_at_ms < ?1 AND receipt.change_seq <= ?2
@@ -538,26 +563,13 @@ lash_store_sql::statements! {
     /// `fleet_format` statements. The installer seeds the row, and every
     /// open reads the recorded generation (ADR 0106 §1, ADR 0115 §2.1).
     pub(crate) struct FleetFormatStatements @ "fleet_format" {
-        /// The recorded fleet format.
+        /// The recorded fleet format: the writer fence's read, once its
+        /// transaction holds the fence lock (ADR 0115 §2.2).
         select_fleet_format = "SELECT format_version FROM fleet_format WHERE singleton = TRUE";
 
-        /// A move of `F`'s side of the fence: the row locked for update,
-        /// waiting behind every writer that holds it `FOR SHARE`.
-        select_for_update = "SELECT format_version
-             FROM fleet_format
-             WHERE singleton = TRUE
-             FOR UPDATE";
-
-        /// A move of `F`, under the row lock `select_for_update` took.
+        /// A move of `F`, under the fence lock held exclusive.
         update_format_version = "UPDATE fleet_format SET format_version = ?1
              WHERE singleton = TRUE";
-
-        /// The writer fence: the first statement of every mutating
-        /// transaction (ADR 0115 §2.2). The share lock is what orders a
-        /// writer against a move of `F`, which reads the row `FOR UPDATE`.
-        select_for_fence = "SELECT format_version FROM fleet_format
-             WHERE singleton = TRUE
-             FOR SHARE";
 
         /// Whether the row's relation exists at all: a migration fences only
         /// a catalog that can record `F`.
@@ -574,8 +586,8 @@ lash_store_sql::statements! {
 
 lash_store_sql::statements! {
     /// `fleet_plugin_writers` statements: the fleet record's per-plugin
-    /// writer ranges (FIG-4746). Every one runs under the `fleet_format`
-    /// row's lock, a writer's share lock or finalize's update lock.
+    /// writer ranges (FIG-4746). Every one runs under the writer fence's
+    /// lock, held shared by a writer or exclusive by finalize.
     pub(crate) struct FleetPluginWriterStatements @ "fleet_plugin_writers" {
         /// Every recorded range.
         select_all = "SELECT plugin_id, min_format, max_format FROM fleet_plugin_writers";
@@ -592,7 +604,7 @@ lash_store_sql::statements! {
              VALUES (?1, ?2, ?3)
              ON CONFLICT (plugin_id) DO NOTHING";
 
-        /// Finalize's move of a range, under the row lock that moves `F`.
+        /// Finalize's move of a range, under the lock that moves `F`.
         upsert = "INSERT INTO fleet_plugin_writers (plugin_id, min_format, max_format)
              VALUES (?1, ?2, ?3)
              ON CONFLICT (plugin_id) DO UPDATE SET

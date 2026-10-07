@@ -154,6 +154,77 @@ lash_store_sql::statements! {
         /// for an earlier session of the same boot to end.
         hold_liveness = "SELECT pg_advisory_lock(1818325864, hashtext(?1))";
 
+        /// The owner's open of actor `?1`: its row, its pending mail oldest
+        /// first, the database clock and, when `?2` names its session, that
+        /// session's unfinished turn's accepted cancel request, in one read.
+        open = "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
+                    m.seq, m.kind, m.body, m.appended_at_ms,
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+                    c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode
+             FROM actors a
+             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
+             LEFT JOIN session_runs r ON r.session_id = ?2 AND r.admission_json IS NOT NULL
+                 AND r.terminal_kind IS NULL
+             LEFT JOIN turn_phases p ON p.session_id = r.session_id AND p.run = r.run
+             LEFT JOIN turn_cancel_requests c ON c.session_id = p.session_id AND c.turn_id = p.run
+             WHERE a.actor_key = ?1
+             ORDER BY m.seq";
+
+        /// A transaction's first statement after its fenced `BEGIN`: the
+        /// epoch the writer fence admits (no row when the fleet record is
+        /// absent) and the database clock.
+        fence_and_clock = "SELECT (SELECT format_version FROM fleet_format WHERE singleton = TRUE),
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT";
+
+        /// [`Self::fence_and_clock`] and the transaction's id, by which a
+        /// lost `COMMIT` is reconciled: a mailbox commit's first statement.
+        fence_clock_and_xact = "SELECT (SELECT format_version FROM fleet_format WHERE singleton = TRUE),
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+                    pg_current_xact_id()::text";
+
+        /// An owner commit's first statement: [`Self::fence_clock_and_xact`]
+        /// and actor `?1`'s ownership fence at epoch `?2`, its state revision
+        /// bumped, or no revision when the epoch is not current.
+        owner_envelope = "WITH fenced AS (
+                 UPDATE actors SET state_revision = state_revision + 1
+                 WHERE actor_key = ?1 AND epoch = ?2 AND state = 'owned'
+                 RETURNING state_revision
+             )
+             SELECT (SELECT format_version FROM fleet_format WHERE singleton = TRUE),
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+                    pg_current_xact_id()::text,
+                    (SELECT state_revision FROM fenced)";
+
+        /// Acknowledge actor `?1`'s mail through `?2` and delete it, in one
+        /// statement.
+        ack_through = "WITH acked AS (
+                 UPDATE actors SET acked_seq = ?2 WHERE actor_key = ?1 AND acked_seq < ?2
+             )
+             DELETE FROM actor_mail WHERE actor_key = ?1 AND seq <= ?2";
+
+        /// Park actor `?1`, its epoch bumped, unless mail of kind `?3` (a
+        /// cancel) is pending: then it is released `ready` at `?2` instead,
+        /// its park kept, as a release to `idle` with mail would be. Returns
+        /// the state it took.
+        park_unless_pending = "WITH pending AS (
+                 SELECT EXISTS (
+                     SELECT 1 FROM actor_mail m, actors p
+                     WHERE p.actor_key = ?1 AND m.actor_key = ?1 AND m.seq > p.acked_seq
+                       AND m.kind = ?3
+                 ) AS mail
+             )
+             UPDATE actors AS a
+             SET state = CASE WHEN NOT pending.mail THEN 'parked'
+                              WHEN a.mail_seq > a.acked_seq THEN 'ready'
+                              ELSE 'idle' END,
+                 ready_at_ms = CASE WHEN pending.mail AND a.mail_seq > a.acked_seq
+                                    THEN CAST(?2 AS BIGINT) ELSE NULL END,
+                 next_due_ms = NULL,
+                 epoch = a.epoch + 1, owner_node = NULL, owner_boot = NULL
+             FROM pending
+             WHERE a.actor_key = ?1
+             RETURNING a.state";
+
         /// Send notification payload `?2[i]` on channel `?1[i]`, for each
         /// `i`, outside any writing transaction.
         notify = "SELECT pg_notify(t.channel, t.payload)
@@ -434,16 +505,34 @@ impl PostgresDurableStore {
     }
 
     /// A guarded, bounded transaction on `label`'s capacity and the instant
-    /// it runs at: the role's guards with `BEGIN`, the writer fence, then
-    /// the database clock. Called inside [`within`](Self::within).
+    /// it runs at: the role's guards and the fence lock with `BEGIN`, then
+    /// the fence's read and the database clock in one statement. Called
+    /// inside [`within`](Self::within).
     async fn open(&self, label: CommitLabel) -> Result<(Tx, DurableInstant), DurableError> {
         tracing::trace!(label = label.as_str(), "durable postgres commit");
         let route = self.route(label.capacity());
-        let mut tx: Tx = begin_durable(route.pool, &self.fence, route.prelude)
+        let mut locked = begin_durable(route.pool, &self.fence, route.prelude)
             .await
             .map_err(store_failure)?;
-        let now = self.instant_on(&mut tx).await?;
-        Ok((tx, now))
+        let (recorded, now): (Option<i32>, i64) =
+            sqlx::query_as(SQL.postgres.fence_and_clock.sql())
+                .fetch_one(crate::observed_sql::executor(locked.connection()))
+                .await
+                .map_err(sqlx_failure)?;
+        let tx = locked
+            .admit(&self.fence, recorded)
+            .await
+            .map_err(store_failure)?;
+        Ok((tx, self.instant_or(now)?))
+    }
+
+    /// The instant a transaction runs at: the clock a test stands in, or
+    /// `now`, the database's, read with the transaction's first statement.
+    fn instant_or(&self, now: i64) -> Result<DurableInstant, DurableError> {
+        Ok(self
+            .injected_instant()
+            .transpose()?
+            .unwrap_or(DurableInstant(now)))
     }
 
     /// Every registered boot's liveness lock, read on the scheduler pool.
@@ -593,19 +682,18 @@ fn group_members(tx: &ActorTx) -> u64 {
         .count() as u64
 }
 
+/// Apply the owner's `write` after its ownership fence, which the commit's
+/// first statement ran ([`PostgresDurableStatements::owner_envelope`]):
+/// `fence` is the state revision it bumped, `None` when the epoch was not
+/// current.
 async fn apply_owner(
     tx: &mut Tx,
     write: &ActorTx,
+    fence: Option<i64>,
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
-    let fence: Option<i64> = sqlx::query_scalar(SQL.actor.fence.sql())
-        .bind(actor)
-        .bind(write.epoch().0)
-        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-        .await
-        .map_err(sqlx_failure)?;
     let Some(revision) = fence else {
         return Err(fenced(tx, write.actor(), write.epoch()).await?);
     };
@@ -627,14 +715,12 @@ async fn apply_owner(
             .map_err(sqlx_failure)?;
     }
     if let Some(through) = write.ack() {
-        for statement in [&SQL.actor.ack, &SQL.mail.delete_through] {
-            sqlx::query(statement.sql())
-                .bind(actor)
-                .bind(through.0)
-                .execute(crate::observed_sql::executor(&mut ***tx))
-                .await
-                .map_err(sqlx_failure)?;
-        }
+        sqlx::query(SQL.postgres.ack_through.sql())
+            .bind(actor)
+            .bind(through.0)
+            .execute(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(sqlx_failure)?;
     }
     let state = match write.release() {
         None => ActorState::Owned,
@@ -642,29 +728,13 @@ async fn apply_owner(
             // A cancel that arrived since the owner's read is not lost to the
             // park: the actor goes ready instead, its park kept, and its
             // claimer ends it engine-free.
-            let cancel_pending = sqlx::query(SQL.park.pending_mail_of_kind.sql())
+            let stored: String = sqlx::query_scalar(SQL.postgres.park_unless_pending.sql())
                 .bind(actor)
+                .bind(now.0)
                 .bind(lash_durable::domain::CANCEL_MAIL)
-                .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+                .fetch_one(crate::observed_sql::executor(&mut ***tx))
                 .await
-                .map_err(sqlx_failure)?
-                .is_some();
-            let stored: String = if cancel_pending {
-                sqlx::query_scalar(SQL.actor.release.sql())
-                    .bind(actor)
-                    .bind("idle")
-                    .bind(Option::<i64>::None)
-                    .bind(now.0)
-                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
-                    .await
-                    .map_err(sqlx_failure)?
-            } else {
-                sqlx::query_scalar(SQL.park.park.sql())
-                    .bind(actor)
-                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
-                    .await
-                    .map_err(sqlx_failure)?
-            };
+                .map_err(sqlx_failure)?;
             actor_state(&stored)?
         }
         Some(Release::Terminal) => {
@@ -822,7 +892,7 @@ async fn apply_domain(
 /// Apply one mailbox domain write by its domain's module, with its answer
 /// and the actors it woke.
 async fn apply_mail_domain(
-    tx: &mut PgConnection,
+    tx: &mut GuardedTx<'_>,
     write: &MailDomainWrite,
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
@@ -905,7 +975,7 @@ async fn lock_mail_targets(tx: &mut PgConnection, writes: &MailTx) -> Result<(),
 }
 
 async fn apply_mail(
-    tx: &mut PgConnection,
+    tx: &mut GuardedTx<'_>,
     writes: &MailTx,
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
@@ -920,7 +990,7 @@ async fn apply_mail(
                     .bind(actor.kind().as_str())
                     .bind(formats.as_str())
                     .bind(now.0)
-                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
                     .await
                     .map_err(sqlx_failure)?;
                 if created.is_none() {
@@ -946,7 +1016,7 @@ async fn apply_mail(
                         .bind(kind.as_str())
                         .bind(body)
                         .bind(now.0)
-                        .execute(crate::observed_sql::executor(&mut *tx))
+                        .execute(crate::observed_sql::executor(&mut ***tx))
                         .await
                         .map_err(sqlx_failure)?;
                     receipt.appended.push((actor.clone(), seq));
@@ -969,7 +1039,7 @@ async fn apply_mail(
 impl DurableStore for PostgresDurableStore {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
+            let mut connection = self.reader().await?;
             self.instant_on(&mut connection).await
         })
         .await
@@ -1234,9 +1304,14 @@ impl DurableStore for PostgresDurableStore {
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
         self.within(CommitCapacity::Work, async {
-            let rows = sqlx::query(SQL.actor.open.sql())
+            let session = match actor.kind() {
+                lash_durable::ActorKind::Session => Some(actor.id()),
+                lash_durable::ActorKind::Process => None,
+            };
+            let rows = sqlx::query(SQL.postgres.open.sql())
                 .bind(actor.as_str())
-                .fetch_all(&self.pools.work)
+                .bind(session)
+                .fetch_all(crate::observed_sql::executor(&mut *self.reader().await?))
                 .await
                 .map_err(sqlx_failure)?;
             let Some(first) = rows.first() else {
@@ -1254,6 +1329,24 @@ impl DurableStore for PostgresDurableStore {
                     current: Some(current),
                 }));
             }
+            let turn_cancel = match (session, get::<Option<String>>(first, 10)?) {
+                (Some(session), Some(run)) => {
+                    let session = lash_sansio::SessionId::try_from(session.to_owned())
+                        .map_err(|_| corrupt("session id", session))?;
+                    let run = lash_sansio::TurnId::try_from(run.clone())
+                        .map_err(|_| corrupt("turn id", &run))?;
+                    let stored = (
+                        get(first, 11)?,
+                        get(first, 12)?,
+                        get(first, 13)?,
+                        get(first, 14)?,
+                        get(first, 15)?,
+                    );
+                    Some(turns::decode_cancel(&session, &run, stored)?)
+                }
+                _ => None,
+            };
+            let at = self.instant_or(get(first, 9)?)?;
             let mut opened = OpenedActor {
                 actor: actor.clone(),
                 epoch,
@@ -1261,6 +1354,8 @@ impl DurableStore for PostgresDurableStore {
                 acked: MailSeq(get(first, 3)?),
                 seen: MailSeq(get(first, 4)?),
                 mail: Vec::new(),
+                at,
+                turn_cancel,
             };
             for row in &rows {
                 if let Some(seq) = get::<Option<i64>>(row, 5)? {
@@ -1323,7 +1418,9 @@ impl DurableStore for PostgresDurableStore {
 impl PostgresDurableStore {
     /// A pooled connection for one unfenced domain read.
     async fn reader(&self) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, DurableError> {
-        self.pools.work.acquire().await.map_err(sqlx_failure)
+        crate::observed_sql::checkout(&self.pools.work)
+            .await
+            .map_err(sqlx_failure)
     }
 }
 
@@ -1569,3 +1666,7 @@ mod constraint_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../durable_round_trip_tests.rs"]
+mod round_trip_tests;

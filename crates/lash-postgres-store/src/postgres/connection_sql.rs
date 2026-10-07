@@ -117,6 +117,17 @@ lash_store_sql::statements! {
         /// fence that sweep installed (FIG-1509).
         lock_xact_evidence_retention_shared = "SELECT pg_advisory_xact_lock_shared(715423, 0)";
 
+        /// The writer fence's lock (ADR 0115 §2.2), shared: every guarded
+        /// transaction takes it before it reads the fleet epoch `F`, so a
+        /// move of `F` waits for every writer that read the old one. A
+        /// literal key: there is one fleet record to order writers against.
+        lock_xact_fleet_fence_shared = "SELECT pg_advisory_xact_lock_shared(715425, 0)";
+
+        /// The writer fence's lock, exclusive: a move of `F` takes it in its
+        /// own transaction, waiting for every writer that holds it shared,
+        /// and every writer that fences after it waits until it commits.
+        lock_xact_fleet_fence = "SELECT pg_advisory_xact_lock(715425, 0)";
+
         /// Try the session-scoped **exclusive** advisory lock in class `?1`
         /// keyed on text `?2`, answering whether this connection took it.
         ///

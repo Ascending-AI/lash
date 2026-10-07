@@ -62,6 +62,13 @@ lash_store_sql::statements! {
              WHERE process_id = ?1
              FOR UPDATE";
 
+        /// Save process `?1`'s mutable columns, its change sequence left to
+        /// the transaction's tail (`process_change_clock.sequence_changes`).
+        update_mutable_columns_unsequenced = "UPDATE processes
+             SET updated_at_ms = ?2, status = ?3, last_event_sequence = ?4,
+                 cancel_requested_at_ms = ?5, record_json = ?6
+             WHERE process_id = ?1";
+
         /// Register a fresh process row, reporting no row when a concurrent
         /// start under the same key won.
         ///
@@ -372,11 +379,24 @@ lash_store_sql::statements! {
     /// `INTEGER 1` on SQLite, and the bump reports its new value through
     /// `RETURNING` where SQLite issues a second read.
     pub(crate) struct ChangeClockPostgresStatements @ "process_change_clock" {
-        /// Advance the change sequence by one and report it.
-        bump_returning = "UPDATE process_change_clock
-         SET current_seq = current_seq + 1
-         WHERE singleton = TRUE
-         RETURNING current_seq";
+        /// Sequence the processes `?1` names, one save each in order: the
+        /// clock moves once per save and each process takes the sequence of
+        /// its last. The clock is bumped by this statement, a transaction's
+        /// last before `COMMIT` (FIG-5275).
+        sequence_changes = "WITH saves AS (
+             SELECT process_id, MAX(ord) AS last
+             FROM unnest(CAST(?1 AS TEXT[])) WITH ORDINALITY AS save(process_id, ord)
+             GROUP BY process_id
+         ), clock AS (
+             UPDATE process_change_clock
+             SET current_seq = current_seq + cardinality(CAST(?1 AS TEXT[]))
+             WHERE singleton = TRUE
+             RETURNING current_seq
+         )
+         UPDATE processes AS p
+         SET change_seq = clock.current_seq - cardinality(CAST(?1 AS TEXT[])) + saves.last
+         FROM saves, clock
+         WHERE p.process_id = saves.process_id";
 
         /// The current change sequence, under the row's write lock: the lock
         /// that orders two concurrent registrations of one content-addressed

@@ -148,20 +148,22 @@ assigns (`crates/lash-core-execution/src/runtime/process/effect_summary.rs`).
 
 #### 2.2 The guarded transaction entry
 
-Ordinary PostgreSQL mutations begin through `begin_guarded`. Its first
-statement reads the fleet row `FOR SHARE`, before session and row locks.
-Finalize locks the same row `FOR UPDATE`. A writer already holding the shared
-lock finishes before finalize; a later writer reads the moved epoch and
-refuses before mutation if it cannot write it
+Ordinary PostgreSQL mutations begin through `begin_guarded`. Its `BEGIN`
+takes the fence's advisory lock shared, before session and row locks, and
+its first data statement reads the fleet row. Finalize takes the same lock
+exclusive before it moves the row. A writer already holding the shared lock
+finishes before finalize; a later writer reads the moved epoch and refuses
+before mutation if it cannot write it
 (`crates/lash-postgres-store/src/postgres/guarded_tx.rs`,
-`crates/lash-postgres-store/src/postgres/finalize.rs`).
+`crates/lash-postgres-store/src/postgres/finalize.rs`). The lock is
+transaction-scoped and writes nothing, so the fleet row takes no tuple lock
+from the fleet's writers (FIG-5275).
 
 Schema provisioning, migration and fleet-row control have explicit transaction
 entries for their own lock order. The guarded-transactions check recognizes
 these entries and the documented read-only exceptions
 (`scripts/check-guarded-transactions.py`,
 `crates/lash-postgres-store/src/postgres/migrate.rs`).
-The fence's PostgreSQL row lock needs `UPDATE` privilege on the fleet row.
 
 SQLite's `write` and `write_flow` run the component stamp and epoch fence
 as the first statement after `BEGIN IMMEDIATE`. Its reserved writer lock

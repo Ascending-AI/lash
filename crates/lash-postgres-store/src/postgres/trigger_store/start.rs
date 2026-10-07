@@ -3,6 +3,7 @@
 //! the one `trigger.start` mailbox transaction.
 
 use super::*;
+use crate::guarded_tx::GuardedTx;
 use lash_durable::domain::{DomainRefusal, TriggerStart, TriggerStartAnswer};
 use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
 
@@ -12,7 +13,7 @@ use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
 /// actor ready, and record each delivery bound to it. Answers the processes in
 /// delivery order.
 pub(crate) async fn start_within(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     start: &TriggerStart,
     now: lash_durable::DurableInstant,
     fleet: lash_core_execution::FleetFormat,
@@ -47,7 +48,7 @@ impl From<PluginError> for Applied {
 }
 
 async fn apply(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     occurrence_id: &str,
     rows: lash_core_execution::facade_support::TriggerStartRows,
     now_ms: u64,
@@ -64,7 +65,7 @@ async fn apply(
             .sql(),
     )
     .bind(&occurrence.idempotency_key)
-    .execute(crate::observed_sql::executor(&mut *tx))
+    .execute(crate::observed_sql::executor(&mut ***tx))
     .await
     .map_err(plugin_sqlx_error)?;
     let held: Option<String> = sqlx::query_scalar(
@@ -73,7 +74,7 @@ async fn apply(
             .sql(),
     )
     .bind(&occurrence.idempotency_key)
-    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
     .await
     .map_err(plugin_sqlx_error)?;
     if held.is_some() {
@@ -103,7 +104,7 @@ async fn apply(
         .bind(lash_core_execution::facade_support::encode_trigger_row(
             occurrence,
         )?)
-        .execute(crate::observed_sql::executor(&mut *tx))
+        .execute(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(plugin_sqlx_error)?;
     let fired = occurrence.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired;
@@ -118,7 +119,7 @@ async fn apply(
         sqlx::query(sql.occurrence.arm_reclaimable.sql())
             .bind(&occurrence.occurrence_id)
             .bind(i64::try_from(occurrence.occurred_at_ms).unwrap_or(i64::MAX))
-            .execute(crate::observed_sql::executor(&mut *tx))
+            .execute(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(plugin_sqlx_error)?;
     }
@@ -202,7 +203,7 @@ async fn apply(
             )
             .bind(status)
             .bind(refusal_json)
-            .execute(crate::observed_sql::executor(&mut *tx))
+            .execute(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(plugin_sqlx_error)?;
         if let Some(process_id) = process_id {

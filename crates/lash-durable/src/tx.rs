@@ -5,7 +5,7 @@
 //! one in a single transaction when it is committed, so a transaction is
 //! never held open across an `.await` in the caller's code.
 
-use crate::domain::{DomainWrite, MailDomainWrite};
+use crate::domain::{DomainWrite, MailDomainWrite, TurnCancelRequest};
 use crate::formats::FormatSet;
 use crate::ids::{ActorKey, DurableInstant, Epoch, MailKind, MailSeq, StateRevision};
 
@@ -62,6 +62,8 @@ pub struct ActorTx {
     acked: MailSeq,
     seen: MailSeq,
     mail: Vec<Mail>,
+    opened_at: DurableInstant,
+    turn_cancel: Option<TurnCancelRequest>,
     domain: Vec<DomainWrite>,
     ack: Option<MailSeq>,
     release: Option<Release>,
@@ -83,6 +85,12 @@ pub struct OpenedActor {
     pub seen: MailSeq,
     /// The pending mail, oldest first.
     pub mail: Vec<Mail>,
+    /// The store's clock at the read: the instant a row the owner records
+    /// before its work starts takes, such as a model call's deadline.
+    pub at: DurableInstant,
+    /// For a session actor, the cancel request its unfinished turn
+    /// accepted, read with the actor; `None` for any other actor.
+    pub turn_cancel: Option<TurnCancelRequest>,
 }
 
 impl ActorTx {
@@ -98,6 +106,8 @@ impl ActorTx {
             acked: read.acked,
             seen: read.seen,
             mail: read.mail,
+            opened_at: read.at,
+            turn_cancel: read.turn_cancel,
             domain: Vec::new(),
             ack: None,
             release: None,
@@ -141,6 +151,20 @@ impl ActorTx {
     #[must_use]
     pub fn mail(&self) -> &[Mail] {
         &self.mail
+    }
+
+    /// The store's clock at the fenced read: what an owner records as the
+    /// start of work it pins before it begins, with no read of its own.
+    #[must_use]
+    pub fn opened_at(&self) -> DurableInstant {
+        self.opened_at
+    }
+
+    /// For a session actor, the cancel request its unfinished turn accepted
+    /// as of the fenced read; `None` for any other actor.
+    #[must_use]
+    pub fn turn_cancel(&self) -> Option<&TurnCancelRequest> {
+        self.turn_cancel.as_ref()
     }
 
     /// The domain rows this transaction writes, in order.

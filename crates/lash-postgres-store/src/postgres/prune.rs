@@ -7,6 +7,39 @@ pub(super) async fn prune_process_rows_tx(
     process_ids: &[ProcessId],
     pruned_at_ms: i64,
 ) -> Result<ProcessPruneReport, PluginError> {
+    // Each pruned process record is fenced and its cleanup armed first: the
+    // prune statement below advances the process feed's clock, so it is the
+    // transaction's last, and the clock is held from it to `COMMIT` only
+    // (FIG-5275).
+    let cleanup_due_at_ms = u64::try_from(pruned_at_ms)
+        .map_err(|_| PluginError::Session("process prune time cannot be negative".into()))?;
+
+    for process_id in process_ids {
+        let referrer = ArtifactReferrer::ProcessRecord(process_id.clone());
+        crate::artifact_store::lock_referrer_tx(tx, &referrer)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        sqlx::query(
+            crate::artifact_store::artifact_sql()
+                .fences
+                .insert_fence
+                .sql(),
+        )
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .bind(pruned_at_ms)
+        .execute(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        crate::obligation_ledger::arm_cleanup_tx(
+            tx,
+            &ArtifactCleanup::ended(referrer, Vec::new(), None),
+            cleanup_due_at_ms,
+        )
+        .await
+        .map_err(PluginError::from)?;
+    }
+
     // Candidate process rows remain locked from selection through this
     // statement. No status or child-row writer can race the batch, and any
     // tombstone conflict still rolls the entire transaction back as before.
@@ -35,35 +68,6 @@ pub(super) async fn prune_process_rows_tx(
             "process prune candidate/tombstone divergence: expected {}, deleted {pruned_processes}",
             process_ids.len()
         )));
-    }
-
-    let cleanup_due_at_ms = u64::try_from(pruned_at_ms)
-        .map_err(|_| PluginError::Session("process prune time cannot be negative".into()))?;
-
-    for process_id in process_ids {
-        let referrer = ArtifactReferrer::ProcessRecord(process_id.clone());
-        crate::artifact_store::lock_referrer_tx(tx, &referrer)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        sqlx::query(
-            crate::artifact_store::artifact_sql()
-                .fences
-                .insert_fence
-                .sql(),
-        )
-        .bind(referrer.kind().as_str())
-        .bind(referrer.canonical_id())
-        .bind(pruned_at_ms)
-        .execute(&mut **tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        crate::obligation_ledger::arm_cleanup_tx(
-            tx,
-            &ArtifactCleanup::ended(referrer, Vec::new(), None),
-            cleanup_due_at_ms,
-        )
-        .await
-        .map_err(PluginError::from)?;
     }
 
     Ok(ProcessPruneReport {

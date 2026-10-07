@@ -1,3 +1,4 @@
+use crate::guarded_tx::GuardedTx;
 use crate::*;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -141,33 +142,29 @@ pub(crate) async fn wake_session_id_tx(
         .map_err(PluginError::from)
 }
 
+/// Save `record`'s mutable columns. Its change sequence is taken at the
+/// transaction's tail, where the process feed's clock is bumped (FIG-5275).
 pub(crate) async fn save_process_tx(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     record: &ProcessRecord,
 ) -> Result<(), PluginError> {
-    let change_seq = next_process_change_seq_tx(tx).await?;
-    sqlx::query(process_sql().process.update_mutable_columns.sql())
-        .bind(record.id.as_str())
-        .bind(record.updated_at_ms as i64)
-        .bind(change_seq as i64)
-        .bind(process_status_label(record))
-        .bind(record.last_event_sequence as i64)
-        .bind(cancel_requested_at_ms(record))
-        .bind(serde_json::to_string(record).map_err(process_decode_error)?)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(plugin_sqlx_error)?;
+    sqlx::query(
+        process_sql()
+            .process_postgres
+            .update_mutable_columns_unsequenced
+            .sql(),
+    )
+    .bind(record.id.as_str())
+    .bind(record.updated_at_ms as i64)
+    .bind(process_status_label(record))
+    .bind(record.last_event_sequence as i64)
+    .bind(cancel_requested_at_ms(record))
+    .bind(serde_json::to_string(record).map_err(process_decode_error)?)
+    .execute(crate::observed_sql::executor(&mut ***tx))
+    .await
+    .map_err(plugin_sqlx_error)?;
+    tx.record_process_change(record.id.as_str());
     Ok(())
-}
-
-pub(crate) async fn next_process_change_seq_tx(
-    tx: &mut sqlx::PgConnection,
-) -> Result<u64, PluginError> {
-    let seq: i64 = sqlx::query_scalar(process_sql().clock_postgres.bump_returning.sql())
-        .fetch_one(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(plugin_sqlx_error)?;
-    plugin_u64_from_sql("ProcessChangeClock", "current_seq", seq)
 }
 
 /// The event `request`'s replay key already recorded, if any. A released
@@ -279,7 +276,7 @@ impl ProcessEventBatch {
     /// Save the process once if any staged append moved its projection.
     pub(crate) async fn commit(
         self,
-        tx: &mut sqlx::PgConnection,
+        tx: &mut GuardedTx<'_>,
         record: &ProcessRecord,
     ) -> Result<(), PluginError> {
         if self.record_changed {
@@ -294,7 +291,7 @@ impl ProcessEventBatch {
 /// once, advancing the change clock once, when any of them moved it. The
 /// caller owns the transaction, so a refusal of any request commits none.
 pub(crate) async fn append_process_event_batch_tx(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     record: &mut ProcessRecord,
     requests: Vec<ProcessEventAppendRequest>,
     occurred_at_ms: u64,
@@ -313,7 +310,7 @@ pub(crate) async fn append_process_event_batch_tx(
 /// ([`stage_process_event_append_tx`]) followed by the process save when the
 /// append moved the projection.
 pub(crate) async fn apply_process_event_append_tx(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
@@ -465,7 +462,7 @@ async fn stage_process_event_append_tx(
 }
 
 pub(crate) async fn append_process_event_tx(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
@@ -558,7 +555,7 @@ pub(crate) enum CancelRecorded {
 /// recorded, on a durable commit's connection: the first request wins and
 /// keeps its timestamp (L6, FIG-5175).
 pub(crate) async fn record_cancel_tx(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     process_id: &ProcessId,
     origin: lash_core_execution::CancelOrigin,
     requester: &str,
@@ -590,7 +587,7 @@ pub(crate) async fn record_cancel_tx(
 /// commit's connection. A process already terminal keeps its first
 /// terminal; answers whether this call ended it (L6, FIG-5175).
 pub(crate) async fn record_terminal_tx(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     process_id: &ProcessId,
     output: &ProcessAwaitOutput,
     epoch: u64,
@@ -623,7 +620,7 @@ pub(crate) async fn record_terminal_tx(
 /// a durable commit's connection: a repeat under the same key is a no-op
 /// (L6, FIG-5175).
 pub(crate) async fn record_event_tx(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut GuardedTx<'_>,
     process_id: &ProcessId,
     event_type: &str,
     payload: serde_json::Value,
