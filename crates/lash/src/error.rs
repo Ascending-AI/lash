@@ -231,13 +231,15 @@ impl EmbedError {
     /// The acceptance of the direct turn this error aborted (FIG-3575).
     ///
     /// A direct turn that aborts after its input was durably accepted names
-    /// the input here, so the host can withdraw it by this receipt with
-    /// [`DurableSession::cancel_pending_turn_input`](crate::DurableSession::cancel_pending_turn_input).
+    /// the input here, so the host can stop it through
+    /// [`DurableSession::attach`](crate::DurableSession::attach) and
+    /// [`SendHandle::cancel`](crate::SendHandle::cancel).
     ///
     /// The receipt also comes back when the admitted turn already committed
     /// and a later turn of the same run aborted (an agent-frame follow-on
-    /// turn). The input is then settled, and a cancel by the receipt returns
-    /// [`AlreadyCompleted`](lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted).
+    /// turn). Cancellation follows the input's bound run and answers
+    /// [`CancelReceipt::UnknownOrRevoked`](crate::CancelReceipt::UnknownOrRevoked)
+    /// once that run has ended.
     pub fn turn_input_acceptance(&self) -> Option<&lash_core::runtime::TurnInputAcceptanceReceipt> {
         match self {
             Self::Runtime(err) => err.turn_input_acceptance.as_deref(),

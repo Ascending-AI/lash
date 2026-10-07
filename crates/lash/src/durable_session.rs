@@ -61,8 +61,8 @@ use lash_core::ActorContext;
 use lash_core::LiveReplayStore;
 use lash_core::facade_support::DurableSessionOps;
 use lash_core::runtime::{
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputRead,
+    PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
 };
 use lash_sansio::SessionId;
 use tokio::sync::OnceCell;
@@ -365,15 +365,6 @@ impl DurableSession {
         Ok(self.ops.queued_work(store).await?)
     }
 
-    /// Cancels pending turn input.
-    pub async fn cancel_pending_turn_input(
-        &self,
-        input_id: &lash_core::InputId,
-    ) -> Result<PendingTurnInputCancelOutcome> {
-        let store = self.store().await?;
-        Ok(self.ops.cancel_pending_turn_input(store, input_id).await?)
-    }
-
     /// Atomically cancel a set of pending user inputs by runtime input id or
     /// app source key.
     ///
@@ -395,7 +386,7 @@ impl DurableSession {
     /// Apps that let users edit previously submitted product messages should
     /// map the edited message to the stored pending-input `input_id` or
     /// `source_key`, call this method, and only restore/edit drafts that return
-    /// [`PendingTurnInputCancelOutcome::Cancelled`]. Claimed or completed
+    /// [`crate::PendingTurnInputCancelOutcome::Cancelled`]. Claimed or completed
     /// inputs have already crossed the runtime boundary and should be treated
     /// as reconciliation state, not local editable drafts.
     pub async fn cancel_pending_turn_input_suffix(

@@ -3,6 +3,68 @@
 
 use super::*;
 
+/// FIG-5264: the run handle exposes a queued withdrawal directly, so a host
+/// can distinguish work that never ran from an interrupted run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_a_queued_input_answers_withdrawn_and_it_never_runs() {
+    let accounts = AccountCore::new().await;
+    let session = accounts
+        .core
+        .session(crate::SessionId::from("facade-queued-cancel"))
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    let held = session
+        .send(crate::TurnInput::text("hold"))
+        .await
+        .expect("accepted");
+    accounts
+        .entered
+        .acquire()
+        .await
+        .expect("model entered")
+        .forget();
+    let run = crate::TurnId::from("facade-withdrawn");
+    let queued = session
+        .send(crate::TurnInput::text("withdraw me"))
+        .id(run.clone())
+        .await
+        .expect("queued");
+    let receipt = session
+        .cancel(crate::CancelTarget::Run(run))
+        .await
+        .expect("cancel");
+    assert!(
+        matches!(receipt, crate::CancelReceipt::Withdrawn { input: Some(ref input), .. } if input == queued.input_id()),
+        "{receipt:?}"
+    );
+    let second = session
+        .send(crate::TurnInput::text("withdraw by cold input id"))
+        .await
+        .expect("queued second input");
+    let receipt = session
+        .attach(second.input_id().clone())
+        .cancel()
+        .await
+        .expect("cold input cancel");
+    assert!(
+        matches!(receipt, crate::CancelReceipt::Withdrawn { input: Some(ref input), .. } if input == second.input_id()),
+        "{receipt:?}"
+    );
+    assert!(matches!(
+        queued.outcome().await.expect("withdrawn outcome"),
+        crate::SendOutcome::Withdrawn { .. }
+    ));
+    accounts.release.add_permits(1);
+    held.output().await.expect("held turn answers");
+    assert_eq!(
+        accounts.offered.lock_recover().len(),
+        1,
+        "only the held input ran"
+    );
+    accounts.core.shutdown().await.expect("shutdown");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_sent_input_runs_on_the_cores_node_and_answers_its_reply() {
     let core = standard_core_over(sqlite_memory_store_backend().await);
@@ -619,4 +681,261 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
         warnings.is_empty(),
         "normal durable turns warned: {warnings:?}"
     );
+}
+
+/// FIG-5264: an accepted running cancel retains its request evidence and the
+/// run eventually records the cancellation in its terminal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_a_running_input_answers_cancelled_with_accepted_detail() {
+    let accounts = AccountCore::new().await;
+    let session = accounts
+        .core
+        .session(crate::SessionId::from("facade-running-cancel"))
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    let held = session
+        .send(crate::TurnInput::text("hold"))
+        .await
+        .expect("accepted");
+    accounts
+        .entered
+        .acquire()
+        .await
+        .expect("model entered")
+        .forget();
+    let request = held
+        .cancel()
+        .request_id("facade-stop")
+        .origin("operator")
+        .reason("stop");
+    let cancelled = request.await.expect("cancel");
+    let crate::CancelReceipt::Cancelled { run, receipt } = cancelled else {
+        panic!("running cancellation: {cancelled:?}");
+    };
+    assert_eq!(held.run().await.expect("bound run"), Some(run));
+    let crate::TurnCancelOutcome::Requested(evidence) = receipt.outcome else {
+        panic!("accepted request: {receipt:?}");
+    };
+    assert_eq!(evidence.request_id, "facade-stop");
+    assert_eq!(evidence.origin.as_deref(), Some("operator"));
+    assert_eq!(evidence.reason.as_deref(), Some("stop"));
+    assert_eq!(
+        held.output().await.expect("terminal").status(),
+        crate::TurnStatus::Cancelled
+    );
+    accounts.core.shutdown().await.expect("shutdown");
+}
+
+/// FIG-5264: absent and completed ids accept no cancellation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_an_unknown_or_completed_run_answers_unknown_or_revoked() {
+    let core = standard_core_over(sqlite_memory_store_backend().await);
+    let session = core
+        .session(crate::SessionId::from("facade-unknown-cancel"))
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    assert!(matches!(
+        session
+            .run(crate::TurnId::from("absent").into())
+            .cancel()
+            .await
+            .expect("unknown"),
+        crate::CancelReceipt::UnknownOrRevoked
+    ));
+    let answered = session
+        .send(crate::TurnInput::text("answer"))
+        .await
+        .expect("accepted");
+    let cancel = answered.cancel();
+    answered.output().await.expect("answered");
+    assert!(matches!(
+        cancel.await.expect("completed"),
+        crate::CancelReceipt::UnknownOrRevoked
+    ));
+    core.shutdown().await.expect("shutdown");
+}
+
+/// FIG-5264: an operation's atomic batch withdrawal uses the same receipt,
+/// without inventing input identity or cancellation evidence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_a_queued_operation_answers_withdrawn_and_repeats_are_unknown() {
+    let accounts = AccountCore::new().await;
+    let session_id = crate::SessionId::from("facade-operation-withdraw");
+    let session = accounts
+        .core
+        .session(session_id.clone())
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    let held = session
+        .send(crate::TurnInput::text("hold"))
+        .await
+        .expect("accepted");
+    accounts
+        .entered
+        .acquire()
+        .await
+        .expect("model entered")
+        .forget();
+    let parts = session.send_parts().await.expect("session parts");
+    let batch = parts
+        .store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id.clone(),
+                lash_core::DeliveryPolicy::AfterCurrentTurnCommit,
+                crate::persistence::QueuedWorkPayload::SessionCommand {
+                    command: Box::new(lash_core::facade_support::SessionCommand::RunPluginTask {
+                        name: "never invoked".to_owned(),
+                        args: serde_json::json!({}),
+                    }),
+                },
+            )
+            .with_source_key("command:facade-operation-withdraw"),
+        )
+        .await
+        .expect("queued task");
+    let operation = lash_core::tool_run::OperationRun {
+        session_id,
+        operation_id: batch.batch_id.to_string(),
+    };
+    let handle = session.run(operation.run_id().into());
+    let receipt = handle.cancel().await.expect("withdraw task");
+    assert!(
+        matches!(receipt, crate::CancelReceipt::Withdrawn { ref run, input: None } if *run == operation.run_id()),
+        "{receipt:?}"
+    );
+    assert!(
+        !session
+            .queued_work()
+            .await
+            .expect("queue")
+            .iter()
+            .any(|open| open.batch_id == batch.batch_id)
+    );
+    assert!(matches!(
+        handle.cancel().await.expect("repeat"),
+        crate::CancelReceipt::UnknownOrRevoked
+    ));
+    let missing = lash_core::tool_run::OperationRun {
+        session_id: session.session_id().clone(),
+        operation_id: "missing-operation".to_owned(),
+    };
+    assert!(matches!(
+        session
+            .run(missing.run_id().into())
+            .cancel()
+            .await
+            .expect("missing task"),
+        crate::CancelReceipt::UnknownOrRevoked
+    ));
+    accounts.release.add_permits(1);
+    held.output().await.expect("held turn answers");
+    accounts.core.shutdown().await.expect("shutdown");
+}
+
+/// FIG-5264: a terminal operation cannot be withdrawn or acquire a new cancel.
+#[tokio::test]
+async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
+    use lash_core::durable_port::domain::{DomainWrite, SessionMailWrite, TurnWrite};
+    use lash_core::durable_port::{ActorKey, CommitLabel, NodeId, NodeSpec};
+    let backend = sqlite_memory_store_backend().await;
+    let core = standard_core_over(backend.clone());
+    let session_id = crate::SessionId::from("facade-operation-settled");
+    let session = core
+        .session(session_id.clone())
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    // Seed terminal evidence without a live owner competing with the fixture.
+    core.shutdown().await.expect("shutdown");
+    let parts = session.send_parts().await.expect("session parts");
+    let batch = parts
+        .store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id.clone(),
+                lash_core::DeliveryPolicy::AfterCurrentTurnCommit,
+                crate::persistence::QueuedWorkPayload::SessionCommand {
+                    command: Box::new(lash_core::facade_support::SessionCommand::RunPluginTask {
+                        name: "settled task".to_owned(),
+                        args: serde_json::json!({}),
+                    }),
+                },
+            )
+            .with_source_key("command:facade-operation-settled"),
+        )
+        .await
+        .expect("queued task");
+    let operation = lash_core::tool_run::OperationRun {
+        session_id: session_id.clone(),
+        operation_id: batch.batch_id.to_string(),
+    };
+    let database = backend.durable();
+    let actor = ActorKey::session(session_id.as_str()).expect("actor");
+    let snapshot = database
+        .actor(&actor)
+        .await
+        .expect("actor read")
+        .expect("woken actor");
+    let lease = database
+        .register_node(&NodeSpec {
+            node: NodeId::new("settled-operation-fixture"),
+            decodes: vec![snapshot.formats],
+            ttl_millis: 15_000,
+        })
+        .await
+        .expect("fixture lease");
+    let claimed = database.claim(&lease, 1).await.expect("claim");
+    assert_eq!(claimed.len(), 1);
+    let mut tx = database
+        .begin(&actor, claimed[0].epoch)
+        .await
+        .expect("transaction");
+    tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
+        session: session_id.clone(),
+        run: operation.run_id(),
+        inputs: Vec::new(),
+        batches: vec![batch.batch_id.clone()],
+    }));
+    tx.write(DomainWrite::Turn(TurnWrite::Admit {
+        session: session_id.clone(),
+        run: operation.run_id(),
+        admission: lash_core::store::RunAdmissionRecord::Operation {
+            batch: batch.batch_id,
+        },
+        turn_deadline: None,
+    }));
+    database
+        .commit(tx, CommitLabel::TURN_ADMIT)
+        .await
+        .expect("admitted");
+    let mut tx = database
+        .begin(&actor, claimed[0].epoch)
+        .await
+        .expect("terminal transaction");
+    tx.write(DomainWrite::Turn(TurnWrite::Terminal {
+        session: session_id,
+        run: operation.run_id(),
+        cause: Box::new(lash_core::store::RunTerminalCause::Refused {
+            code: lash_core::RuntimeErrorCode::EngineRunSubstrateLost,
+            message: "operation refused before execution".to_owned(),
+            refusal_cause: None,
+        }),
+        head_revision: None,
+    }));
+    database
+        .commit(tx, CommitLabel::TURN_COMMIT)
+        .await
+        .expect("terminal");
+    assert!(matches!(
+        session
+            .run(operation.run_id().into())
+            .cancel()
+            .await
+            .expect("settled task cancel"),
+        crate::CancelReceipt::UnknownOrRevoked
+    ));
 }

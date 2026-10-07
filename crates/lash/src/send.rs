@@ -40,7 +40,6 @@ use lash_core::{GenerationOptions, LlmProfileKey, ReasoningSelection, RunSpec};
 use lash_core::facade_support::{
     TurnCancelMode, TurnCancelReceipt, TurnCancelUndeliveredInputPolicy,
 };
-use lash_core::runtime::PendingTurnInputCancelReceipt;
 use lash_core::store::{ParkId, ParkReason, StallReason};
 
 pub use batch::{BatchInput, SendBatchBuilder};
@@ -1000,10 +999,7 @@ impl SendHandle {
     /// Withdraw the input if it is still queued, or cooperatively cancel its
     /// running run.
     pub fn cancel(&self) -> CancelBuilder {
-        CancelBuilder::new(
-            self.target.clone(),
-            CancelTarget::Input(self.receipt.input_id.clone()),
-        )
+        CancelBuilder::for_input(self.target.clone(), self.receipt.clone())
     }
 
     /// Pin this input: the state the run that applies it commits is
@@ -1298,10 +1294,8 @@ impl Stream for TurnEvents {
 /// What a [`cancel`](crate::LashSession::cancel) addresses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CancelTarget {
-    /// An accepted input: withdrawn while queued, or its run cancelled once
-    /// running.
-    Input(InputId),
-    /// A logical run.
+    /// A logical run, including the run a queued input will open. The same
+    /// atomic request withdraws that input or cancels its admitted run.
     Run(TurnId),
 }
 
@@ -1309,20 +1303,29 @@ pub enum CancelTarget {
 #[must_use = "a CancelBuilder does nothing until awaited"]
 pub struct CancelBuilder {
     target: SendTarget,
-    cancel: CancelTarget,
+    subject: Subject,
     request: cancel::CancelRequestSpec,
 }
 
 impl CancelBuilder {
     pub(crate) fn new(target: SendTarget, cancel: CancelTarget) -> Self {
+        let CancelTarget::Run(run) = cancel;
         Self {
             target,
-            cancel,
+            subject: Subject::Run(run),
             request: cancel::CancelRequestSpec::default(),
         }
     }
 
-    /// The cancel request's id; defaults to `cancel:{input|run}:{id}`.
+    fn for_input(target: SendTarget, receipt: TurnInputAcceptanceReceipt) -> Self {
+        Self {
+            target,
+            subject: Subject::Input(receipt),
+            request: cancel::CancelRequestSpec::default(),
+        }
+    }
+
+    /// The cancel request's id; defaults to `cancel:run:{id}`.
     pub fn request_id(mut self, id: impl Into<String>) -> Self {
         self.request.request_id = Some(id.into());
         self
@@ -1351,7 +1354,7 @@ impl CancelBuilder {
 
     async fn apply(self) -> Result<CancelReceipt> {
         let context = self.target.context().await?;
-        cancel::apply(&context.parts, &self.cancel, self.request).await
+        cancel::apply(&context.parts, &self.subject, self.request).await
     }
 }
 
@@ -1368,26 +1371,23 @@ impl std::future::IntoFuture for CancelBuilder {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum CancelReceipt {
-    /// A host operation was withdrawn before its commit settled it: a task
-    /// still running stops, and nothing of it is applied.
-    OperationWithdrawn {
+    /// The atomic request withdrew queued work before a run applied it.
+    /// An input's send handle answers [`SendOutcome::Withdrawn`]. An operation
+    /// task's command is withdrawn through its own atomic queue transaction.
+    Withdrawn {
         run: TurnId,
+        /// The withdrawn input, or `None` for an operation task command.
+        input: Option<InputId>,
     },
-    /// The input was still queued: its row is cancelled and no turn applied
-    /// it. Its handle answers Cancelled with no output.
-    Withdrawn(Box<PendingTurnInputCancelReceipt>),
-    /// A durable cancel request addressed the run. Its receipt says what it
-    /// did: placed on the running run's cancellation gate, or, for a run its
-    /// queued input had not opened yet, withdrew that input
-    /// ([`TurnCancelOutcome::Withdrawn`](crate::TurnCancelOutcome::Withdrawn)).
-    Requested {
+    /// The request addressed an open run's cancellation gate. The detail
+    /// preserves the accepted request, repeats, timing escalations and policy
+    /// conflicts. This records cancellation intent, not proof execution has
+    /// stopped; await the run's outcome for its terminal.
+    Cancelled {
         run: TurnId,
         receipt: Box<TurnCancelReceipt>,
     },
-    /// The run already has a terminal (or the input was already applied and
-    /// settled).
-    AlreadySettled {
-        run: TurnId,
-    },
-    NotFound,
+    /// No queued input or open run accepts this request: the id is unknown,
+    /// revoked, already withdrawn, or its completion won the race.
+    UnknownOrRevoked,
 }

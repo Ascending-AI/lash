@@ -224,6 +224,17 @@ fn model_errors_are_nameable(
 fn cancellation_token_is_at_root(token: lash::CancellationToken, session: &lash::LashSession) {
     token.cancel();
     let _: lash::CancelBuilder = session.cancel(lash::CancelTarget::Run("turn".into()));
+    let _ = lash::CancelReceipt::Withdrawn {
+        run: "turn".into(),
+        input: Some("input".into()),
+    };
+    let _ = lash::CancelReceipt::Cancelled {
+        run: "turn".into(),
+        receipt: Box::new(lash::TurnCancelReceipt {
+            outcome: lash::TurnCancelOutcome::UnknownOrRevoked,
+        }),
+    };
+    let _ = lash::CancelReceipt::UnknownOrRevoked;
 }
 
 fn turn_input_ingress_types_are_nameable(

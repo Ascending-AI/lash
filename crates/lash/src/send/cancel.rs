@@ -2,17 +2,15 @@
 //! withdrawn; an input whose run executes has the run cancelled cooperatively
 //! through its cancellation gate (ADR 0039).
 
+use lash_core::TurnId;
 use lash_core::facade_support::{
-    QueueWithdrawalObservation, TurnAddress, TurnCancelMode, TurnCancelRequest,
+    QueueWithdrawalObservation, TurnAddress, TurnCancelMode, TurnCancelOutcome, TurnCancelRequest,
     TurnCancelUndeliveredInputPolicy, TurnWorkDriver,
 };
-use lash_core::runtime::{
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-};
-use lash_core::{InputId, TurnId};
 
+use super::follow::Subject;
 use super::resolve::{self, Resolution};
-use super::{CancelReceipt, CancelTarget, SendParts};
+use super::{CancelReceipt, SendParts};
 use crate::error::{EmbedError, Result};
 
 /// The request fields a cancel carries.
@@ -27,110 +25,89 @@ pub(crate) struct CancelRequestSpec {
 
 pub(super) async fn apply(
     parts: &SendParts,
-    target: &CancelTarget,
+    subject: &Subject,
     request: CancelRequestSpec,
 ) -> Result<CancelReceipt> {
-    match target {
-        CancelTarget::Input(input) => cancel_input(parts, input, request).await,
-        CancelTarget::Run(run) => {
-            let request_id = request
-                .request_id
-                .clone()
-                .unwrap_or_else(|| format!("cancel:run:{run}"));
-            cancel_run(parts, run, request_id, request).await
+    let run = match subject {
+        Subject::Run(run) => run.clone(),
+        Subject::Input(input) => {
+            if let Some(run) = parts.store.run_of_input(&input.input_id).await? {
+                run
+            } else {
+                // A cold attach by input id lacks the source key in its
+                // synthetic receipt. Read the accepted row's naming data.
+                let row = parts.store.pending_turn_input(&input.input_id).await?;
+                lash_core::durable_port::domain::queued_input_run(
+                    &input.input_id,
+                    row.as_ref()
+                        .and_then(|row| row.input.source_key.as_deref())
+                        .or(input.source_key.as_deref()),
+                )
+                .ok_or_else(|| {
+                    EmbedError::from(crate::SendError::Unresolved {
+                        input_id: input.input_id.clone(),
+                    })
+                })?
+            }
         }
+    };
+    let receipt = cancel_run(parts, &run, request.clone()).await?;
+    // A checkpoint or composing admission may bind the input to another
+    // run after the point read above. Resolve that binding once more when
+    // its original queued address found nothing; both requests use the same
+    // atomic cancel path, and only the consuming run can accept the second.
+    if matches!(receipt, CancelReceipt::UnknownOrRevoked)
+        && let Subject::Input(input) = subject
+        && let Some(bound) = parts.store.run_of_input(&input.input_id).await?
+        && bound != run
+    {
+        return cancel_run(parts, &bound, request).await;
     }
-}
-
-async fn cancel_input(
-    parts: &SendParts,
-    input: &InputId,
-    request: CancelRequestSpec,
-) -> Result<CancelReceipt> {
-    let outcome = parts
-        .ops
-        .cancel_pending_turn_input(&parts.store, input.as_str())
-        .await?;
-    let request_id = request
-        .request_id
-        .clone()
-        .unwrap_or_else(|| format!("cancel:input:{input}"));
-    match outcome {
-        outcome @ (PendingTurnInputCancelOutcome::Cancelled(_)
-        | PendingTurnInputCancelOutcome::AlreadyCancelled(_)) => Ok(CancelReceipt::Withdrawn(
-            Box::new(PendingTurnInputCancelReceipt {
-                target: PendingTurnInputCancelTarget::input_id(input.to_string()),
-                outcome,
-            }),
-        )),
-        PendingTurnInputCancelOutcome::NotFound => Ok(CancelReceipt::NotFound),
-        PendingTurnInputCancelOutcome::AlreadyAdmitted { run, .. } => {
-            cancel_run(parts, &run, request_id, request).await
-        }
-        // A completed input was applied by a committed turn, which is not
-        // the run's end: a run that switched frames runs on in its
-        // follow-on turns, so its run answers whether it settled.
-        PendingTurnInputCancelOutcome::AlreadyCompleted(_) => {
-            let run = run_of_input(parts, input).await?;
-            cancel_run(parts, &run, request_id, request).await
-        }
-    }
-}
-
-/// The run that took `input`, from its durable binding: the admission binds
-/// it before any turn commits, and the commit that applied a checkpoint
-/// delivery binds it, so a cancel reaches the consuming run by one point
-/// read.
-async fn run_of_input(parts: &SendParts, input: &InputId) -> Result<TurnId> {
-    parts.store.run_of_input(input).await?.ok_or_else(|| {
-        EmbedError::from(crate::SendError::Unresolved {
-            input_id: input.clone(),
-        })
-    })
+    Ok(receipt)
 }
 
 async fn cancel_run(
     parts: &SendParts,
     run: &TurnId,
-    request_id: String,
     request: CancelRequestSpec,
 ) -> Result<CancelReceipt> {
-    if matches!(
-        resolve::resolve_run(parts, run).await?,
-        Resolution::Settled { .. } | Resolution::OperationSettled { .. }
-    ) {
-        return Ok(CancelReceipt::AlreadySettled { run: run.clone() });
-    }
     if let Some(operation) =
         lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), run)
     {
-        // A task's command binds nothing until the commit that applies it
-        // settles it: withdrawing it reaches the task wherever it is.
-        let open = parts.store.list_queued_work().await?.into_iter().any(|batch| {
+        // Operation commands own their atomic withdrawal. Keep this dispatch
+        // internal to the same facade entry and receipt as turn cancellation.
+        if matches!(
+            resolve::resolve_run(parts, run).await?,
+            Resolution::OperationSettled { .. }
+        ) {
+            return Ok(CancelReceipt::UnknownOrRevoked);
+        }
+        let task = parts.store.list_queued_work().await?.into_iter().any(|batch| {
             batch.batch_id.as_str() == operation.operation_id
                 && matches!(&batch.payload, crate::persistence::QueuedWorkPayload::SessionCommand { command }
                     if matches!(command.as_ref(), lash_core::facade_support::SessionCommand::RunPluginTask { .. }))
         });
-        if open
-            && parts
-                .ops
-                .cancel_queued_work_batch(&parts.store, &operation.operation_id)
-                .await?
-                .is_some()
-        {
-            return Ok(CancelReceipt::OperationWithdrawn { run: run.clone() });
-        }
         return Ok(
-            if matches!(
-                resolve::resolve_run(parts, run).await?,
-                Resolution::OperationSettled { .. }
-            ) {
-                CancelReceipt::AlreadySettled { run: run.clone() }
+            if task
+                && parts
+                    .ops
+                    .cancel_queued_work_batch(&parts.store, &operation.operation_id)
+                    .await?
+                    .is_some()
+            {
+                CancelReceipt::Withdrawn {
+                    run: run.clone(),
+                    input: None,
+                }
             } else {
-                CancelReceipt::NotFound
+                CancelReceipt::UnknownOrRevoked
             },
         );
     }
+    let request_id = request
+        .request_id
+        .clone()
+        .unwrap_or_else(|| format!("cancel:run:{run}"));
     let backend = parts.effect_host.backend().clone();
     let withdrawals = QueueWithdrawalObservation::new(
         backend.session_store_factory(),
@@ -151,8 +128,20 @@ async fn cancel_run(
         .request_cancel(cancel)
         .await
         .map_err(EmbedError::Runtime)?;
-    Ok(CancelReceipt::Requested {
-        run: run.clone(),
-        receipt: Box::new(receipt),
+    Ok(match receipt.outcome {
+        TurnCancelOutcome::Withdrawn { input } => CancelReceipt::Withdrawn {
+            run: run.clone(),
+            input: Some(input),
+        },
+        TurnCancelOutcome::UnknownOrRevoked | TurnCancelOutcome::CompletionWonRace => {
+            CancelReceipt::UnknownOrRevoked
+        }
+        TurnCancelOutcome::Requested(_)
+        | TurnCancelOutcome::AlreadyRequested(_)
+        | TurnCancelOutcome::Escalated(_)
+        | TurnCancelOutcome::PolicyConflict { .. } => CancelReceipt::Cancelled {
+            run: run.clone(),
+            receipt: Box::new(receipt),
+        },
     })
 }

@@ -259,7 +259,10 @@ for approve, deny, and parked-restart checks.
 
 The **stop turn** button (or **Esc**) cooperatively cancels the exact running
 turn: `POST /api/turn/cancel` sends its stable session and turn address through
-`TurnWorkDriver::request_cancel`. The request lives on Lash's durable
+`DurableSession::cancel(CancelTarget::Run(id))`, which uses the atomic
+`TurnWorkDriver::request_cancel` path. A queued input returns `Withdrawn`;
+an open run returns `Cancelled` with its accepted request detail; an ended or
+unknown run returns `UnknownOrRevoked`. The request lives on Lash's durable
 keyed-promise seam, so it survives a workbench web-process restart and is
 observed by the current or recovered owner. The authoritative terminal
 result is `TurnStop::Cancelled` with the original request id, opaque

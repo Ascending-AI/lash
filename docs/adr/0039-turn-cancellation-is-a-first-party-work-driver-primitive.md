@@ -98,6 +98,28 @@ queued input and no turn, or one that already ended, still answers
 withdrawal's `QueueChanged { Cancelled }` once it committed, best-effort, as
 the queue's own withdrawal does.
 
+## Facade cancellation
+
+`SendHandle::cancel`, `RunHandle::cancel`, and a session's
+`cancel(CancelTarget::Run(id))` share one entry and one receipt (FIG-5264).
+An input handle resolves its consuming run from its recorded binding, or uses
+`queued_input_run` while it is unbound. Queued inputs and session runs go
+through `TurnWorkDriver::request_cancel`, so admission and withdrawal arbitrate
+in the same mailbox transaction. An operation task dispatches internally to
+its command's atomic batch withdrawal; it does not gain an input identity.
+
+`CancelReceipt::Withdrawn { run, input }` identifies work withdrawn before it
+was applied, with `Some(input)` for input and `None` for an operation command.
+`Cancelled { run, receipt }` preserves the turn cancellation's accepted detail:
+requested, already requested, escalated, or policy conflict. It records intent,
+so the host still awaits the run's terminal to know execution stopped.
+`UnknownOrRevoked` means no queued work or open run accepted the request,
+including a run whose completion already won. Dropping any handle stops nothing.
+
+The facade has no single-input queue-withdrawal convenience method. Its batch
+and suffix withdrawal operations remain draft reconciliation: they refuse an
+admitted input and never fall through to cancellation of the consuming run.
+
 ## Terminal product-event ownership
 
 The turn execution publisher owns the observer-facing terminal event. A stop

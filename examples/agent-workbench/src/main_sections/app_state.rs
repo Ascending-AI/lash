@@ -222,25 +222,22 @@ impl AppState {
             // The claim names the logical Run; a Run that went on past a
             // segment boundary (a generation drain's hand-over) runs in a
             // later physical turn with a cancellation gate of its own.
-            let address = driver
-                .running_turn(&run)
-                .await
-                // Audited: the running-turn read fails only on a store fault, an untyped control error here.
-                .map_err(|err| AppError::internal(err.to_string()))?;
+            let address = run.clone();
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
-            let cancel = driver
-                .request_cancel(
-                    lash::TurnCancelRequest::new(
-                        address.clone(),
-                        request_id.clone(),
-                        Some("user".to_string()),
-                    )
-                    .with_reason(mode.reason())
-                    .mode(mode.lash_mode()),
-                )
+            let session = self
+                .core
+                .session(session_id.clone())
+                .durable()
                 .await
-                // Audited: revoked turn-cancel gates become an UnknownOrRevoked outcome; remaining failures are untyped control errors.
-                .map_err(|err| AppError::internal(err.to_string()))?;
+                .map_err(AppError::runtime)?;
+            let cancel = session
+                .cancel(lash::CancelTarget::Run(address.turn_id.clone()))
+                .request_id(request_id.clone())
+                .origin("user")
+                .reason(mode.reason())
+                .mode(mode.lash_mode())
+                .await
+                .map_err(AppError::runtime)?;
             let attach_terminal = |cancellation| {
                 attach_recorded_cancel_terminal(
                     driver,
@@ -249,36 +246,49 @@ impl AppState {
                     terminal_attach_timeout,
                 )
             };
-            let receipt = match cancel.outcome {
-                lash::TurnCancelOutcome::Requested(evidence) => {
-                    attach_terminal(RecordedTurnCancellation::Requested(evidence)).await?
-                }
-                lash::TurnCancelOutcome::AlreadyRequested(evidence) => {
-                    attach_terminal(RecordedTurnCancellation::AlreadyRequested(evidence)).await?
-                }
-                lash::TurnCancelOutcome::Escalated(evidence) => {
-                    attach_terminal(RecordedTurnCancellation::Escalated(evidence)).await?
-                }
-                lash::TurnCancelOutcome::PolicyConflict {
-                    requested,
-                    accepted,
-                } => TurnCancelReceipt::PolicyConflict {
-                    address: address.clone(),
-                    requested,
-                    accepted,
-                },
-                lash::TurnCancelOutcome::CompletionWonRace => {
-                    TurnCancelReceipt::CompletionWonRace {
-                        address: address.clone(),
-                    }
-                }
-                lash::TurnCancelOutcome::UnknownOrRevoked => TurnCancelReceipt::UnknownOrRevoked {
-                    address: address.clone(),
-                },
-                lash::TurnCancelOutcome::Withdrawn { input } => TurnCancelReceipt::Withdrawn {
+            let receipt = match cancel {
+                lash::CancelReceipt::Withdrawn {
+                    input: Some(input), ..
+                } => TurnCancelReceipt::Withdrawn {
                     address: address.clone(),
                     input,
                 },
+                lash::CancelReceipt::UnknownOrRevoked => TurnCancelReceipt::UnknownOrRevoked {
+                    address: address.clone(),
+                },
+                lash::CancelReceipt::Cancelled { receipt, .. } => match receipt.outcome {
+                    lash::TurnCancelOutcome::Requested(evidence) => {
+                        attach_terminal(RecordedTurnCancellation::Requested(evidence)).await?
+                    }
+                    lash::TurnCancelOutcome::AlreadyRequested(evidence) => {
+                        attach_terminal(RecordedTurnCancellation::AlreadyRequested(evidence))
+                            .await?
+                    }
+                    lash::TurnCancelOutcome::Escalated(evidence) => {
+                        attach_terminal(RecordedTurnCancellation::Escalated(evidence)).await?
+                    }
+                    lash::TurnCancelOutcome::PolicyConflict {
+                        requested,
+                        accepted,
+                    } => TurnCancelReceipt::PolicyConflict {
+                        address: address.clone(),
+                        requested,
+                        accepted,
+                    },
+                    lash::TurnCancelOutcome::CompletionWonRace
+                    | lash::TurnCancelOutcome::UnknownOrRevoked => {
+                        TurnCancelReceipt::UnknownOrRevoked {
+                            address: address.clone(),
+                        }
+                    }
+                    lash::TurnCancelOutcome::Withdrawn { input } => TurnCancelReceipt::Withdrawn {
+                        address: address.clone(),
+                        input,
+                    },
+                },
+                // A foreground route always names input work, never an
+                // operation command or an unknown future receipt kind.
+                _ => return Err(AppError::internal("unexpected foreground cancel receipt")),
             };
             // A pending terminal keeps the claim: the run's follower releases
             // it once the run settles.
@@ -293,8 +303,7 @@ impl AppState {
                 | TurnCancelReceipt::CancellationRecordedTerminalPending { cancellation, .. } => {
                     cancellation.evidence().request_id.as_str()
                 }
-                TurnCancelReceipt::CompletionWonRace { .. }
-                | TurnCancelReceipt::UnknownOrRevoked { .. }
+                TurnCancelReceipt::UnknownOrRevoked { .. }
                 | TurnCancelReceipt::Withdrawn { .. }
                 | TurnCancelReceipt::PolicyConflict { .. } => request_id.as_str(),
             };

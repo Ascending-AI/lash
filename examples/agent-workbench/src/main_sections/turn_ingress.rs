@@ -168,9 +168,16 @@ pub(crate) async fn reject_if_active_turn_settled(
         .map_err(AppError::runtime)?;
     let outcome = session
         .durable()
-        .cancel_pending_turn_input(&acceptance.input_id)
+        .cancel_pending_turn_inputs([lash::PendingTurnInputCancelTarget::input_id(
+            acceptance.input_id.to_string(),
+        )])
         .await
         .map_err(AppError::runtime)?;
+    let outcome = outcome
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::internal("input withdrawal returned no receipt"))?
+        .outcome;
     match outcome {
         lash::PendingTurnInputCancelOutcome::Cancelled(_)
         | lash::PendingTurnInputCancelOutcome::AlreadyCancelled(_) => Err(AppError::conflict(

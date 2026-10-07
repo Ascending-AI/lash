@@ -69,9 +69,6 @@ pub(crate) enum TurnCancelReceipt {
         address: lash::TurnAddress,
         cancellation: RecordedTurnCancellation,
     },
-    CompletionWonRace {
-        address: lash::TurnAddress,
-    },
     UnknownOrRevoked {
         address: lash::TurnAddress,
     },
@@ -98,7 +95,6 @@ impl TurnCancelReceipt {
         match self {
             Self::TerminalAttached { address, .. }
             | Self::CancellationRecordedTerminalPending { address, .. }
-            | Self::CompletionWonRace { address }
             | Self::UnknownOrRevoked { address }
             | Self::Withdrawn { address, .. }
             | Self::PolicyConflict { address, .. } => address,
@@ -115,9 +111,7 @@ impl TurnCancelReceipt {
             Self::TerminalAttached { .. }
             | Self::CancellationRecordedTerminalPending { .. }
             | Self::PolicyConflict { .. } => true,
-            Self::CompletionWonRace { .. }
-            | Self::UnknownOrRevoked { .. }
-            | Self::Withdrawn { .. } => false,
+            Self::UnknownOrRevoked { .. } | Self::Withdrawn { .. } => false,
         }
     }
 }
