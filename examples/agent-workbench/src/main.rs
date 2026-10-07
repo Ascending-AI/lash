@@ -25,6 +25,7 @@ mod mcp_host;
 mod mcp_policy;
 #[path = "../../shared/shutdown_marker.rs"]
 mod shutdown_marker;
+mod ttt;
 mod turns;
 mod ui;
 #[cfg(feature = "provider-wire-fixtures")]

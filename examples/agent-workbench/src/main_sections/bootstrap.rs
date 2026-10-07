@@ -159,6 +159,7 @@ const WORKBENCH_SEARCH_MCP_URL: &str = "https://search.parallel.ai/mcp";
 pub(crate) fn configure_workbench_plugins(
     plugins: &mut lash::PluginStack,
     mail_world: mail::MailWorld,
+    ttt: Option<ttt::TttWorld>,
     subagent_registry: Arc<lash::subagents::CapabilityRegistry>,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
     approvals: approvals::WorkbenchApprovals,
@@ -167,6 +168,7 @@ pub(crate) fn configure_workbench_plugins(
     plugins.push(Arc::new(
         WorkbenchPluginFactory::new()
             .with_mail_world(mail_world)
+            .with_ttt(ttt)
             .with_deferred_tools(deferred_tools)
             .with_approvals(approvals),
     ));
@@ -236,6 +238,7 @@ struct WorkbenchCorePlugins {
     rlm_workers: Option<lash::rlm::WorkerService>,
     tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
     mail_world: mail::MailWorld,
+    ttt: Option<ttt::TttWorld>,
     subagent_registry: Arc<lash::subagents::CapabilityRegistry>,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
     approvals: approvals::WorkbenchApprovals,
@@ -262,6 +265,7 @@ async fn workbench_core_builder(
         rlm_workers,
         tool_provider,
         mail_world,
+        ttt,
         subagent_registry,
         deferred_tools,
         approvals,
@@ -314,6 +318,7 @@ async fn workbench_core_builder(
         configure_workbench_plugins(
             plugins,
             mail_world,
+            ttt,
             subagent_registry,
             deferred_tools,
             approvals,
@@ -447,6 +452,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let trigger_store = stores.stores.trigger_store();
     let subagent_registry = Arc::new(lash::subagents::default_registry(&BTreeMap::new()));
     let mail_world = mail::MailWorld::new();
+    let ttt = ttt::TttConfig::from_env(|name| std::env::var(name))?.map(ttt::TttWorld::new);
     let sessions = WorkbenchSessions::persistent(data_dir.join("session-id"))?;
     // The boot session joins the roster so the selector lists it. A roster row
     // that already exists wins.
@@ -558,6 +564,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         rlm_workers,
         tool_provider,
         mail_world: mail_world.clone(),
+        ttt: ttt.clone(),
         subagent_registry,
         deferred_tools,
         approvals: approvals.clone(),
@@ -689,6 +696,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             lashlang_execution,
             event_tx,
             mail_world,
+            ttt: ttt.clone(),
             active_turns,
             authorization: WorkbenchAuthorization::allow_all(),
             approvals,
@@ -792,6 +800,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/lashlang-graph/{graph_key}", get(lashlang_graph))
         .with_state(state.clone())
         .merge(crate::mcp_host::router(Arc::clone(&mcp_search)));
+        let app = match &ttt {
+            Some(world) => app.merge(crate::ttt::router(world.clone())),
+            None => app,
+        };
         #[cfg(feature = "e2e-tools")]
         let app = if let Some(fixture) = &tool_fixture {
             let (receiver, _retained_path, _event_type) = fixture.receiver_binding();

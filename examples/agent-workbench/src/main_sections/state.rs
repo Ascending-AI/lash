@@ -36,6 +36,8 @@ pub(crate) struct AppState {
     pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
     pub(crate) event_tx: SessionEventRegistry,
     pub(crate) mail_world: mail::MailWorld,
+    /// The tic-tac-toe world, when `AGENT_WORKBENCH_TTT=on`.
+    pub(crate) ttt: Option<ttt::TttWorld>,
     pub(crate) active_turns: ActiveTurns,
     /// The turns this process pruned without ever seeing a terminal.
     pub(crate) unknown_turn_terminals: UnknownTurnTerminals,

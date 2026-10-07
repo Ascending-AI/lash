@@ -147,6 +147,107 @@ In the same session: "Read my work inbox and tell me what time the team lunch
 is and when the badges expire." Expected: one or more `work` rows, then one
 `answer` row whose text is the reply row in `/api/state.transcript`.
 
+## Tic-tac-toe memory
+
+**Purpose.** Measure what each policy keeps of results it produced in earlier
+turns. The agent plays N games of tic-tac-toe, one user turn each, and a final
+turn asks who won the first K. Relay keeps only what the agent passes to
+`next`; chronological RLM keeps its history; standard keeps the transcript.
+
+**Automated check.** The world's laws:
+`kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=ttt::`
+(win, draw and illegal-move detection, the perfect opponent never loses, the
+random opponent and the mixed schedule replay for a seed, the log records each
+result, and the scorer, including a malformed answer and K < N).
+
+**The world.** `AGENT_WORKBENCH_TTT=on` adds two tools, taught in the system
+prompt from a session's creation on (the world is fixed at boot, so nothing is
+added mid-session):
+
+- `ttt.view_board({})` (standard: `ttt__view_board`) returns `game`, `board`
+  (9 cells row by row, `"X"`, `"O"` or `""`), `picture` (empty cells shown by
+  number), `empty_cells`, `to_move` and `status`, for the current game only;
+- `ttt.make_move({ cell })` (standard: `ttt__make_move`) places X on cell
+  0–8 (row by row: 0 1 2 / 3 4 5 / 6 7 8); the opponent (O) moves inside the
+  same call. It returns the board, `your_move`, `opponent_move` and `status`:
+  `ongoing`, `you won`, `opponent won` or `draw`. An illegal move (a taken
+  cell, a cell outside 0–8, no game, or a game that is over) is an error and
+  changes nothing.
+
+`POST /api/ttt/games` starts the next game (an unfinished game stays in the
+log as `unfinished`), `GET /api/ttt` returns the settings and the game log,
+and `POST /api/ttt/score` with `{"answer", "ask"}` scores a memory answer
+against the log.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AGENT_WORKBENCH_TTT` | `off` | `on` adds the world, its tools and its routes |
+| `AGENT_WORKBENCH_TTT_SEED` | `1` | the seed of every opponent draw |
+| `AGENT_WORKBENCH_TTT_SCHEDULE` | `mixed` | `mixed` (each game draws `perfect` or `random` from the seed), `perfect`, `random`, or a comma list such as `perfect,random,random`, repeated when the games outnumber it |
+| `AGENT_WORKBENCH_TTT_FIRST` | `agent` | who moves first in every game: `agent` or `opponent`; the agent is always X |
+
+`perfect` is minimax; a tie between equally good cells is broken by the
+game's seeded stream. `random` is uniform over the legal cells. Both draw from
+a stream keyed by the seed and the game number, so a seed replays the same
+games for the same agent moves.
+
+**The driver.** `runbooks/relay/ttt_live.py` launches a fresh workbench (its
+own data directory, so a fresh session), plays the games and the final turn,
+scores the answer and stops the workbench. Game g is the user turn
+`Game g: you are X. Play it to the end.`; with `--told`, game 1's turn adds
+`After the games I will ask you who won each of the first K games.` The final
+turn is `List who won each of the first K games, in order, as a JSON array
+whose items are "you", "me" or "draw" ("you" = you, the agent; "me" = me, your
+opponent).`
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--out DIR` | required | the run directory |
+| `--games N` | `10` | games played |
+| `--ask K` | `5` | games asked about; `1 <= K < N`, and the driver refuses otherwise |
+| `--told` | off | warn the agent in game 1 |
+| `--seed S`, `--schedule`, `--first` | `1`, `mixed`, `agent` | passed to the world's variables |
+| `--policy` | `relay` | `relay` (`AGENT_WORKBENCH_RLM_POLICY=relay`, native channel), `rlm` (chronological RLM, the workbench's default cell channel) or `standard` (`AGENT_WORKBENCH_PROTOCOL=standard`) |
+| `--model`, `--upstream` | `z-ai/glm-5.3-flash`, `z-ai` | `OPENROUTER_MODEL` and `AGENT_WORKBENCH_OPENROUTER_PROVIDER` |
+| `--port`, `--env-file`, `--budget` | `4491`, none, `0.5` | the port; a `KEY=VALUE` file with `OPENROUTER_API_KEY`; stop after the game whose spend passes this many dollars |
+
+It writes `results.json` (per game the result, misplays, refused moves, the
+turn's requests, work steps, tokens, cache reads and cost; the final turn; the
+totals; the score), `log.json` (the world's log), `game-<g>/` and `final/`
+(`extract_live.py`'s per-request files and `usage.md`), and the workbench's
+`wb-data/` and `wb-run/`.
+
+All six variants (three policies, each told and not told), in a Kiln fork with
+`env.sh` sourced:
+
+```sh
+for policy in relay rlm standard; do
+  python3 runbooks/relay/ttt_live.py --out .kiln/<ticket>/ttt/$policy-told-no \
+    --policy $policy --env-file /path/to/.env
+  python3 runbooks/relay/ttt_live.py --out .kiln/<ticket>/ttt/$policy-told-yes \
+    --policy $policy --told --env-file /path/to/.env
+done
+```
+
+## Answer key: tic-tac-toe memory
+
+State this before observing.
+
+- The answer key is the world's log (`log.json`, `GET /api/ttt`), never the
+  schedule: game g's key is `you` when the agent won, `me` when the opponent
+  won, `draw`, or `unfinished` when the turn ended before the game did (no
+  answer matches that).
+- The score reads the first well-formed JSON array in the final reply. Its
+  items are trimmed and lowercased; `per_game` compares item i with game i's
+  key, and `exact` needs exactly K items, all right. A reply with no array
+  scores 0 of K.
+- The perfect opponent never loses: a `you` against a `perfect` game is a
+  **finding and FAIL**. `misplays` lists the agent's moves (1-based) that
+  lowered its minimax outcome; a loss always has one.
+- Every game turn ends with its game finished; a game left `unfinished` or a
+  turn listed under `totals.failed_turns` is reported, not retried.
+- Spend is the sum of the provider-reported costs in the `usage.md` tables.
+
 ## Teardown
 
 ```sh
