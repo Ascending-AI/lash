@@ -1098,17 +1098,17 @@ fn decode_journal_identity(key: &str) -> Result<EffectJournalIdentity, String> {
 }
 
 /// Serde for a journal identity as its key text.
-mod journal_identity {
+pub(crate) mod journal_identity {
     use super::*;
 
-    pub(super) fn serialize<S: Serializer>(
+    pub(crate) fn serialize<S: Serializer>(
         journal: &EffectJournalIdentity,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(journal.key())
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<EffectJournalIdentity, D::Error> {
         let key = String::deserialize(deserializer)?;

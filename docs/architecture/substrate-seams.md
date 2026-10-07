@@ -79,7 +79,7 @@ L13 = FIG-5193, L3t = FIG-5208, L9t = FIG-5210.
 | `vm_effect` (V0, then L7) | `ExecCode` | admitted execution from the cell's snapshot, operations admitted at quiet points |
 | | `LanguageRuntimeValue` | run in place, recorded nowhere: a cell resumed from its snapshot never asks again for a value its heap holds |
 
-**L3 (FIG-5172):** `turn_effect` and `session_effect` run each command of their group in place and refuse every other. Nothing is journaled: a turn effect's result is durable only through the phase transaction that commits it, and a restore recomputes it from committed state; a session effect's runner makes its own idempotent store write.
+**L3 (FIG-5172):** `turn_effect` and `session_effect` run each command of their group in place and refuse every other. Nothing is journaled: a turn effect's result is durable only through the phase transaction that commits it, and a restore recomputes it from committed state; a session effect's runner makes its own idempotent store write. A session command's head commit is the session actor's own: its handler builds the `RuntimeCommit`, and `runtime/durable/session_command.rs` writes it as `DomainWrite::SessionCommit` on the actor's fenced transaction under `session.command`, so a stale owner commits nothing (FIG-5230).
 
 ## The fold (S1 rule 2)
 

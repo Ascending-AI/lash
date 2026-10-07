@@ -766,31 +766,6 @@ impl LashRuntime {
         .await
     }
 
-    pub async fn drain_next_session_command(
-        &mut self,
-    ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
-        if self
-            .session
-            .as_ref()
-            .and_then(Session::history_store)
-            .is_none()
-        {
-            self.reload_invalidated_resident_session_state().await?;
-            return Ok(None);
-        }
-        let host = self.effect_host();
-        // The command commit keeps its batch's existing operation identity.
-        let controller = host.scoped(crate::AdmittedScope::session_operation(
-            &self.state.session_id,
-            "session-command",
-        ))?;
-        self.drain_next_session_command_with_cancellation(
-            tokio_util::sync::CancellationToken::new(),
-            &controller,
-        )
-        .await
-    }
-
     pub async fn drain_next_session_command_with_cancellation(
         &mut self,
         cancellation: tokio_util::sync::CancellationToken,
@@ -992,9 +967,11 @@ impl LashRuntime {
         }
         match commands.as_slice() {
             [crate::SessionCommand::AppendSessionNodes { request }] => {
-                return Box::pin(
-                    self.apply_append_session_nodes_command(request.as_ref().clone(), completion),
-                )
+                return Box::pin(self.apply_append_session_nodes_command(
+                    request.as_ref().clone(),
+                    completion,
+                    effect_controller,
+                ))
                 .await;
             }
             [crate::SessionCommand::RunPluginCommand { name, args }] => {
@@ -1018,15 +995,19 @@ impl LashRuntime {
                 .await;
             }
             [crate::SessionCommand::ChangeToolState { change }] => {
-                return Box::pin(
-                    self.apply_tool_state_command(change.as_ref().clone(), completion),
-                )
+                return Box::pin(self.apply_tool_state_command(
+                    change.as_ref().clone(),
+                    completion,
+                    effect_controller,
+                ))
                 .await;
             }
             [crate::SessionCommand::OpenAgentFrame { request }] => {
-                return Box::pin(
-                    self.apply_open_agent_frame_command(request.as_ref().clone(), completion),
-                )
+                return Box::pin(self.apply_open_agent_frame_command(
+                    request.as_ref().clone(),
+                    completion,
+                    effect_controller,
+                ))
                 .await;
             }
             _ => {}
@@ -1034,7 +1015,10 @@ impl LashRuntime {
         let has_durable_store = self.services.store.is_some();
         if !has_durable_store {
             return self
-                .apply_session_command_after_admission(commands, Some(completion))
+                .apply_session_command_after_admission(
+                    commands,
+                    Some((completion, effect_controller)),
+                )
                 .await;
         }
         let session_id = self.state.session_id.clone();
@@ -1059,19 +1043,24 @@ impl LashRuntime {
                         self.turn_phase_probe.clone(),
                         "commit_admission.product_attempt",
                     );
-                    self.apply_session_command_after_admission(commands, Some(completion))
-                        .await
-                        .map_err(RuntimeCommitAdmissionError)
+                    self.apply_session_command_after_admission(
+                        commands,
+                        Some((completion, effect_controller)),
+                    )
+                    .await
+                    .map_err(RuntimeCommitAdmissionError)
                 },
             )
             .await;
         result.map_err(|error| error.0)
     }
 
+    /// Apply `commands`; a persisted run's `applied` names its rows and the
+    /// session actor's context that commits it.
     async fn apply_session_command_after_admission(
         &mut self,
         commands: Vec<crate::SessionCommand>,
-        applied: Option<crate::QueuedWorkCompletion>,
+        applied: Option<(crate::QueuedWorkCompletion, &crate::ActorContext)>,
     ) -> Result<bool, RuntimeError> {
         self.refresh_session_graph_from_store()
             .await
@@ -1114,10 +1103,10 @@ impl LashRuntime {
                 }
             }
         }
-        let Some(store) = self.services.store.clone() else {
+        if self.services.store.is_none() {
             return Ok(true);
-        };
-        let Some(completion) = applied else {
+        }
+        let Some((completion, owner)) = applied else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
                 "persisted session commands are applied by the session's command lane",
@@ -1143,7 +1132,7 @@ impl LashRuntime {
         if let Some(session) = self.session.as_ref() {
             commit_state.capture_plugin_states(session.plugins(), fleet_format)?;
         }
-        let (mut commit, persisted_node_ids) =
+        let (mut commit, _persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 commit_state,
                 operation,
@@ -1152,18 +1141,25 @@ impl LashRuntime {
             )
             .map_err(super::runtime_error_from_store_commit)?;
         commit.applied_commands = Some(completion);
-        let result = match store
-            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
-            .await
-        {
+        let committed = super::durable::session_command::commit(
+            owner,
+            commit,
+            self.host.core.tracing.metrics(),
+        )
+        .await;
+        // The resident session gives way to the durable head, which a landed
+        // commit moved.
+        self.invalidate_resident_session_state();
+        match committed {
+            Ok(()) => {}
             // A host withdrew a command since the lane was read: the commit
             // applied nothing, and the lane is read again (FIG-3927 §2.7).
-            Err(crate::StoreError::SessionCommandWithdrawn { .. }) => return Ok(false),
-            result => result,
+            Err(super::durable::session_command::CommandCommitError::Store(
+                crate::StoreError::SessionCommandWithdrawn { .. },
+            )) => return Ok(false),
+            Err(error) => return Err(error.into_runtime_error()),
         }
-        .map_err(super::runtime_error_from_store_commit)?;
-        commit_state.apply_persisted_commit_result(result);
-        commit_state.mark_node_ids_persisted(persisted_node_ids);
+        self.reload_invalidated_resident_session_state().await?;
         Ok(true)
     }
 }

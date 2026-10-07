@@ -10,6 +10,7 @@
 pub mod cancel;
 pub mod cell;
 pub mod close;
+pub mod command;
 pub mod drain;
 pub mod process;
 pub mod round;

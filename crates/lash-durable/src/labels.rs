@@ -26,6 +26,9 @@ impl CommitLabel {
     /// `session.release`: The session activation gives its actor up with
     /// nothing left to run.
     pub const SESSION_RELEASE: Self = Self::new("session.release");
+    /// `session.command`: A session command applied: the head commit that
+    /// settles it, on the session actor's fenced transaction (FIG-5230).
+    pub const SESSION_COMMAND: Self = Self::new("session.command");
 
     // Tool rounds (V0, then L4).
     /// `round.outcome`: A batch of finished members' outcomes and their store-local effects (C5).
@@ -123,7 +126,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 44] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -139,6 +142,7 @@ impl CommitLabel {
         Self::TURN_COMMIT,
         Self::TURN_CANCEL,
         Self::SESSION_RELEASE,
+        Self::SESSION_COMMAND,
         Self::ROUND_OUTCOME,
         Self::ROUND_RETRY,
         Self::ROUND_START,

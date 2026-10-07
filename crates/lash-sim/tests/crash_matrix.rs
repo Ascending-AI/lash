@@ -38,6 +38,7 @@ crash_matrix! {
     a_process_cut_at_every_label_resolves_waits_and_cascades_once => Process;
     a_process_signalled_and_cancelled_cut_at_every_label_ends_once => Signal;
     a_session_close_cut_at_every_label_ends_at_its_tombstone => Close;
+    a_session_command_cut_at_every_label_settles_once => Command;
     a_trigger_occurrence_cut_at_every_label_starts_each_delivery_once => Trigger;
     a_drained_node_cut_at_every_label_releases_its_actors_to_the_next_once => Drain;
 }
@@ -115,6 +116,28 @@ async fn a_stale_epoch_cut_at_a_round_admission_runs_no_member_body_on_the_old_o
 #[tokio::test]
 async fn a_stale_epoch_cut_at_a_step_admission_runs_no_step_body_on_the_old_owner() {
     assert_stale_epoch_holds(Case::Process, CommitLabel::PROCESS_ADVANCE).await;
+}
+
+/// A stale-epoch session command commits nothing (FIG-5230): the session
+/// actor writes each command's head commit on its fenced transaction under
+/// `session.command`, so a zombie owner whose write reaches the store only
+/// after the session moved has it refused with `OwnershipLost`, a stale
+/// owner commits nothing after its cut (F1), and the new owner applies each
+/// command exactly once.
+#[tokio::test]
+async fn a_stale_epoch_session_command_commits_nothing() {
+    for seed in 0..4 {
+        let report = Matrix::new()
+            .faults(&[Fault::StaleEpoch, Fault::Zombie])
+            .labels(&[CommitLabel::SESSION_COMMAND])
+            .run(|| Deployment::new(Case::Command, seed, Dialect::SqliteMemory))
+            .await;
+        assert!(
+            report.cells.iter().any(|cell| cell.fault == Fault::Zombie),
+            "seed {seed}: no session command was cut under a zombie owner"
+        );
+        report.assert_held();
+    }
 }
 
 /// Every label the runtime emits is committed by some case's uncut run, so

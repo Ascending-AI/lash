@@ -959,41 +959,96 @@ mod tests {
     }
 }
 
-/// A session head commit as a turn's `turn.commit` carries it to the store
-/// (ADR 0132 §4): the store applies it inside the owner's fenced transaction,
-/// so the head moves with the turn's terminal or not at all.
+/// A session head commit as the session actor carries it to the store (ADR
+/// 0132 §4): a turn's under `turn.commit`, a session command's under
+/// `session.command` (FIG-5230). The store applies it inside the owner's
+/// fenced transaction, so the head moves with the turn's terminal or the
+/// command's settlement, or not at all.
 ///
 /// It crosses the durable port as text and is decoded in the same
-/// transaction; it is never stored. The execution view rides beside the
-/// commit because the commit's own encoding leaves it out.
+/// transaction; it is never stored. The execution view and a frame switch
+/// ride beside the commit because the commit's own encoding leaves them out.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SessionCommitEnvelope {
     commit: RuntimeCommit,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     execution_config: Option<Box<crate::PersistedSessionConfig>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    frame_transition: Option<FrameTransitionWire>,
 }
 
-/// Encode `commit` for a turn's `turn.commit`.
+/// A [`FrameTransition`] as the envelope carries it.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrameTransitionWire {
+    ended: FrameEnvironmentWire,
+    successor: FrameEnvironmentWire,
+    carries: Vec<crate::artifact_referrer::ArtifactName>,
+    #[serde(with = "crate::artifact_referrer::journal_identity")]
+    gate: lash_sansio::EffectJournalIdentity,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrameEnvironmentWire {
+    session_id: SessionId,
+    frame_node_id: crate::FrameNodeId,
+}
+
+impl From<&crate::artifact_referrer::FrameEnvironmentId> for FrameEnvironmentWire {
+    fn from(frame: &crate::artifact_referrer::FrameEnvironmentId) -> Self {
+        Self {
+            session_id: frame.session_id().clone(),
+            frame_node_id: frame.frame_node_id().clone(),
+        }
+    }
+}
+
+impl From<FrameEnvironmentWire> for crate::artifact_referrer::FrameEnvironmentId {
+    fn from(wire: FrameEnvironmentWire) -> Self {
+        Self::new(wire.session_id, wire.frame_node_id)
+    }
+}
+
+impl From<&FrameTransition> for FrameTransitionWire {
+    fn from(transition: &FrameTransition) -> Self {
+        Self {
+            ended: (&transition.ended).into(),
+            successor: (&transition.successor).into(),
+            carries: transition.carries.clone(),
+            gate: transition.gate.clone(),
+        }
+    }
+}
+
+impl From<FrameTransitionWire> for FrameTransition {
+    fn from(wire: FrameTransitionWire) -> Self {
+        Self {
+            ended: wire.ended.into(),
+            successor: wire.successor.into(),
+            carries: wire.carries,
+            gate: wire.gate,
+        }
+    }
+}
+
+/// Encode `commit` for the session actor's fenced head commit.
 ///
 /// # Errors
 ///
-/// [`StoreError::Backend`] when the commit carries a store instruction the
-/// durable path has no carrier for (a run terminal or a frame transition),
-/// or does not encode.
+/// [`StoreError::Backend`] when the commit carries a run terminal, which
+/// the durable path records on the turn's own row, or does not encode.
 pub fn encode_session_commit(commit: &RuntimeCommit) -> Result<String, StoreError> {
-    let unsupported = [
-        ("run terminal", commit.run_terminal.is_some()),
-        ("frame transition", commit.frame_transition.is_some()),
-    ];
-    if let Some((what, _)) = unsupported.iter().find(|(_, carried)| *carried) {
-        return Err(StoreError::Backend(format!(
-            "a turn's session commit cannot carry a {what}"
-        )));
+    if commit.run_terminal.is_some() {
+        return Err(StoreError::Backend(
+            "a session actor's head commit cannot carry a run terminal".to_owned(),
+        ));
     }
     serde_json::to_string(&SessionCommitEnvelope {
         commit: commit.clone(),
         execution_config: commit.execution_config.clone(),
+        frame_transition: commit.frame_transition.as_ref().map(Into::into),
     })
     .map_err(|error| StoreError::Backend(format!("the session commit does not encode: {error}")))
 }
@@ -1007,9 +1062,11 @@ pub fn decode_session_commit(encoded: &str) -> Result<RuntimeCommit, StoreError>
     let SessionCommitEnvelope {
         mut commit,
         execution_config,
+        frame_transition,
     } = serde_json::from_str(encoded).map_err(|error| {
         StoreError::Backend(format!("the session commit does not decode: {error}"))
     })?;
     commit.execution_config = execution_config;
+    commit.frame_transition = frame_transition.map(Into::into);
     Ok(commit)
 }

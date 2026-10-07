@@ -61,7 +61,7 @@ pub use waits::{
 
 use crate::error::DurableError;
 use crate::ids::ActorKey;
-use lash_sansio::{ProcessId, SessionId, ToolCallId, TurnId};
+use lash_sansio::{BatchId, ProcessId, SessionId, ToolCallId, TurnId};
 
 /// One owner-state write inside a fenced [`ActorTx`](crate::ActorTx) commit.
 ///
@@ -255,10 +255,28 @@ pub enum DomainRefusal {
         /// The head revision stored.
         found: Option<u64>,
     },
-    /// The session store refused the turn's head commit for a reason other
-    /// than a moved head: the session is gone, or the commit breaks one of
-    /// the store's own rules.
-    #[error("session {session} refused the turn's head commit: {reason}")]
+    /// A session command the head commit settles is no longer open: a host
+    /// withdrew it, or another commit settled it.
+    #[error("session {session} command {batch} is no longer open")]
+    SessionCommandWithdrawn {
+        /// The session.
+        session: SessionId,
+        /// The command's batch.
+        batch: BatchId,
+    },
+    /// The ancestor a session command's append requires has left the
+    /// session's active path.
+    #[error("session {session} append requires {required}, which left the active path")]
+    AppendAncestorNotActive {
+        /// The session.
+        session: SessionId,
+        /// The history node the append requires.
+        required: lash_sansio::NodeId,
+    },
+    /// The session store refused a head commit for a reason other than a
+    /// moved head, a settled command or a stale append: the session is gone,
+    /// or the commit breaks one of the store's own rules.
+    #[error("session {session} refused the head commit: {reason}")]
     SessionCommitRefused {
         /// The session.
         session: SessionId,

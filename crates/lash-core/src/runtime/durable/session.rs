@@ -34,7 +34,7 @@
 
 use std::sync::Arc;
 
-use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnWrite};
+use lash_durable::domain::{MailAnswer, MailDomainWrite, ParkEventWrite, TurnWrite};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailTx, Release,
@@ -537,6 +537,11 @@ impl Activation for SessionActivation {
         let mut idle_since = None;
         // The owner cache of the session's head, for this claim's epoch.
         let mut heads = HeadCache::default();
+        // The passes in a row that failed with an error that does not pass
+        // by itself: at the activation-loop budget the session parks
+        // (FIG-5230), so a poison session holds no slot.
+        let budget = self.backend.config().settings().activation_loop_budget;
+        let mut failed_passes = 0_u32;
         loop {
             let release = idle_since.is_some_and(|since: std::time::Instant| {
                 owned.clock().now().saturating_duration_since(since) >= idle_evict
@@ -548,6 +553,9 @@ impl Activation for SessionActivation {
             } else {
                 self.pass(&cx, &session, release, &mut heads).await
             };
+            if pass.is_ok() {
+                failed_passes = 0;
+            }
             match pass {
                 Ok(Pass::Again) => idle_since = None,
                 Ok(Pass::Idle) => {
@@ -562,12 +570,90 @@ impl Activation for SessionActivation {
                 // read.
                 Err(error) => {
                     heads.evict();
+                    if !passes_by_itself(&error) {
+                        failed_passes = failed_passes.saturating_add(1);
+                    }
+                    if failed_passes >= budget {
+                        let reason = SessionParkReason::PassLoop {
+                            failed_passes,
+                            error: error.to_string(),
+                        };
+                        match park(&cx, &reason).await {
+                            Ok(()) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
+                            Err(park_error) => tracing::warn!(
+                                %session,
+                                %error,
+                                %park_error,
+                                "the session's park failed; retrying"
+                            ),
+                        }
+                    }
                     tracing::debug!(%error, "session activation pass failed; reloading");
                     owned.wait_for_mail().await;
                 }
             }
         }
     }
+}
+
+/// Whether `error` may pass by itself, so the next pass can succeed with
+/// nothing changed: contention, an unreachable store or a lost
+/// acknowledgement. Such a failure does not count toward the session's
+/// park.
+fn passes_by_itself(error: &TurnError) -> bool {
+    matches!(
+        error,
+        TurnError::Durable(
+            DurableError::AckLost { .. }
+                | DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Contended
+                        | lash_durable::StoreFailureKind::Unavailable,
+                    ..
+                })
+        )
+    )
+}
+
+/// Why a session actor parked: the park feed's typed reason. A parked
+/// session runs nothing until an operator redrives it or a control wake (a
+/// turn cancel) readies it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SessionParkReason {
+    /// Its passes failed `failed_passes` times in a row within one claim,
+    /// each with an error a retry does not clear (an undecodable checkpoint
+    /// among them): the activation-loop budget (FIG-5230).
+    PassLoop {
+        /// The passes in a row that failed.
+        failed_passes: u32,
+        /// The last pass's error.
+        error: String,
+    },
+}
+
+impl SessionParkReason {
+    /// The park feed's encoding.
+    #[expect(
+        clippy::expect_used,
+        reason = "a park reason is plain data whose encoding cannot fail"
+    )]
+    #[must_use]
+    pub fn encode(&self) -> String {
+        serde_json::to_string(self).expect("a park reason encodes")
+    }
+}
+
+/// Park the session with `reason`: its park-feed entry and its release as
+/// `parked`, one commit. Its unread mail stays for the claim that follows a
+/// redrive.
+async fn park(cx: &ActorContext, reason: &SessionParkReason) -> Result<(), DurableError> {
+    tracing::warn!(actor = %cx.actor(), reason = %reason.encode(), "session parked");
+    let mut tx = cx.begin().await?;
+    tx.write(DomainWrite::ParkEvent(ParkEventWrite::Park {
+        reason_json: reason.encode(),
+    }));
+    tx.give_up(Release::Parked);
+    cx.commit(tx, CommitLabel::SESSION_RELEASE).await.map(drop)
 }
 
 /// The inputs a drain hands the activation to admit as one turn.

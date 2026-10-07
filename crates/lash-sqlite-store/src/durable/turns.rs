@@ -232,6 +232,18 @@ pub(super) fn apply_session_commit(
                 found: Some(actual),
             })
         }
+        Err(StoreError::SessionCommandWithdrawn { batch_id, .. }) => {
+            refuse(DomainRefusal::SessionCommandWithdrawn {
+                session: write.session.clone(),
+                batch: batch_id,
+            })
+        }
+        Err(StoreError::AppendAncestorNotActive { required_node_id }) => {
+            refuse(DomainRefusal::AppendAncestorNotActive {
+                session: write.session.clone(),
+                required: required_node_id,
+            })
+        }
         Err(StoreError::Contended) => Ok(Err(DurableError::Store(lash_durable::StoreFailure {
             kind: lash_durable::StoreFailureKind::Contended,
             message: "the session head commit contended".to_owned(),

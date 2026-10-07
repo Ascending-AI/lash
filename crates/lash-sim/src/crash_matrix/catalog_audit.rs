@@ -31,7 +31,7 @@ pub enum Coverage {
 }
 
 /// Every catalog label and how the matrix covers it.
-pub const COVERAGE: [(CommitLabel, Coverage); 43] = [
+pub const COVERAGE: [(CommitLabel, Coverage); 44] = [
     (CommitLabel::CLAIM, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::HEARTBEAT, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::REAP, Coverage::Cases(&[Case::CellKilled])),
@@ -63,6 +63,10 @@ pub const COVERAGE: [(CommitLabel, Coverage); 43] = [
     (CommitLabel::TURN_COMMIT, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::TURN_CANCEL, Coverage::Cases(&[Case::Cancel])),
     (CommitLabel::SESSION_RELEASE, Coverage::Cases(&[Case::Turn])),
+    (
+        CommitLabel::SESSION_COMMAND,
+        Coverage::Cases(&[Case::Command]),
+    ),
     (
         CommitLabel::ROUND_OUTCOME,
         Coverage::Cases(&[Case::Round, Case::Cell]),

@@ -4,8 +4,8 @@
 //! A cell is {case} × {commit label and occurrence} × {mode} × {seed}. A case
 //! ([`Case`]) is one seam of the runtime: a turn, a tool round, a turn
 //! cancel, a code cell, a code cell killed inside its body, a process with
-//! its waits and cascade, a process's mail, a session close, a trigger
-//! occurrence and a node's drain by release. Each runs
+//! its waits and cascade, a process's mail, a session close, a session's
+//! commands, a trigger occurrence and a node's drain by release. Each runs
 //! as a [`deployment::Deployment`]: the production session and process
 //! activations behind one dispatch on simulated nodes `a` and `b` over one
 //! SQLite memory database, the host acting from outside through its own
@@ -70,6 +70,9 @@ pub enum Case {
     /// A session closed by the host after its turn, over its `Until`
     /// process.
     Close,
+    /// A session's host appends, applied by its actor as session commands:
+    /// one appends, one settles `StaleBranch`.
+    Command,
     /// A trigger occurrence emitted by the host, starting a process per
     /// matching subscription.
     Trigger,
@@ -80,7 +83,7 @@ pub enum Case {
 
 impl Case {
     /// Every case, in registry order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Turn,
         Self::Round,
         Self::Cancel,
@@ -89,6 +92,7 @@ impl Case {
         Self::Process,
         Self::Signal,
         Self::Close,
+        Self::Command,
         Self::Trigger,
         Self::Drain,
     ];
@@ -105,6 +109,7 @@ impl Case {
             Self::Process => "process",
             Self::Signal => "signal",
             Self::Close => "close",
+            Self::Command => "command",
             Self::Trigger => "trigger",
             Self::Drain => "drain",
         }
@@ -129,6 +134,7 @@ impl Case {
             Self::Process => Box::<cases::process::ProcessCase>::default(),
             Self::Signal => Box::<cases::signal::SignalCase>::default(),
             Self::Close => Box::new(cases::close::CloseCase::tagged(tag)),
+            Self::Command => Box::new(cases::command::CommandCase::tagged(tag)),
             Self::Trigger => Box::new(cases::trigger::TriggerCase::tagged(tag)),
             Self::Drain => Box::<cases::drain::DrainCase>::default(),
         }

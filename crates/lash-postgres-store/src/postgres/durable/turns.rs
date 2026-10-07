@@ -184,6 +184,18 @@ pub(super) async fn apply_session_commit(
                 found: Some(actual),
             }))
         }
+        Err(StoreError::SessionCommandWithdrawn { batch_id, .. }) => Err(DurableError::Domain(
+            DomainRefusal::SessionCommandWithdrawn {
+                session: write.session.clone(),
+                batch: batch_id,
+            },
+        )),
+        Err(StoreError::AppendAncestorNotActive { required_node_id }) => Err(DurableError::Domain(
+            DomainRefusal::AppendAncestorNotActive {
+                session: write.session.clone(),
+                required: required_node_id,
+            },
+        )),
         Err(error @ StoreError::Contended) => Err(super::store_failure(error)),
         Err(error) => Err(refused(error.to_string())),
     }

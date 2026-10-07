@@ -23,6 +23,9 @@
 //! - **After-step cancel:** an `AfterStep` cancel requested from outside the
 //!   actor while the model streams lets that call finish, and the turn stops
 //!   at the next phase boundary, before its next model call.
+//! - **Poison (FIG-5230):** a turn whose checkpoint does not decode fails
+//!   every pass of its claim; the session parks at the activation-loop
+//!   budget instead of looping.
 //! - **Owner-cached head (FIG-5207):** when another writer moves the session
 //!   head while the turn runs, the head commit over the head the owner
 //!   cached is refused once, the cache is evicted, and the turn commits over
@@ -42,8 +45,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CodeCell, OpenTurn, SessionActivation, TurnCancelRequest, TurnCommit, TurnDone,
-    TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices, request_turn_cancel,
+    AdmittedInputs, CodeCell, OpenTurn, SessionActivation, SessionParkReason, TurnCancelRequest,
+    TurnCommit, TurnDone, TurnDrive, TurnError, TurnPhase, TurnRestore, TurnRow, TurnServices,
+    request_turn_cancel,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -58,9 +62,11 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::tool_run::AttemptOutcome;
+use lash_durable::domain::TurnWrite;
 use lash_durable::runner::Activation;
 use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DomainRefusal, DurableError, DurableStore, LeaseConfig,
+    ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite, DurableError, DurableStore,
+    LeaseConfig,
 };
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
@@ -1000,6 +1006,194 @@ async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_ne
 async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary_on_postgres()
  {
     prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::Postgres).await;
+}
+
+/// C1 (FIG-5230): a session whose unfinished turn names a checkpoint no
+/// build decodes. Its first claim leaves that row, as a defect would; from
+/// then on every pass of the production activation fails restoring it.
+struct Poisoned {
+    dialect: Dialect,
+    postgres_url: Option<String>,
+    tripwire: Arc<Tripwire>,
+    backend: Arc<Mutex<Option<Backend>>>,
+    keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
+}
+
+impl Poisoned {
+    fn new(dialect: Dialect, postgres_url: Option<String>) -> Self {
+        Self {
+            dialect,
+            postgres_url,
+            tripwire: Arc::default(),
+            backend: Arc::default(),
+            keep: Mutex::default(),
+        }
+    }
+
+    fn backend(&self) -> Backend {
+        self.backend
+            .lock_recover()
+            .clone()
+            .expect("the database is built first")
+    }
+}
+
+/// The session activation, after the first claim writes the poisoned row.
+struct PoisonFirst {
+    poisoned: std::sync::atomic::AtomicBool,
+    session: SessionActivation,
+}
+
+#[async_trait::async_trait]
+impl Activation for PoisonFirst {
+    async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
+        if !self
+            .poisoned
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let mut tx = owned
+                .begin()
+                .await
+                .expect("the first claim reads its actor");
+            tx.write(DomainWrite::Turn(TurnWrite::Admit {
+                session: session(),
+                run: run(),
+                admission_json: "{}".to_owned(),
+                turn_deadline: None,
+            }));
+            tx.write(DomainWrite::Turn(TurnWrite::Advance {
+                session: session(),
+                run: run(),
+                phase: TurnPhase::Admitted,
+                iteration: 0,
+                checkpoint_ref: Some("not a turn checkpoint".to_owned()),
+                model: None,
+            }));
+            owned
+                .commit(tx, CommitLabel::TURN_ADMIT)
+                .await
+                .expect("the poisoned row commits");
+        }
+        self.session.activate(owned).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Scenario for Poisoned {
+    async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        let (stores, database) = dialect::open(
+            self.dialect,
+            self.postgres_url.as_deref(),
+            clock,
+            &self.keep,
+        )
+        .await;
+        *self.backend.lock_recover() = Some(Backend::for_testing(stores));
+        database
+    }
+
+    fn config(&self) -> SimNodesConfig {
+        SimNodesConfig {
+            lease: LeaseConfig::default(),
+            decodes: self.backend().formats().decodes(),
+            max_active: 4,
+        }
+    }
+
+    fn activation(&self) -> Arc<dyn Activation> {
+        Arc::new(PoisonFirst {
+            poisoned: std::sync::atomic::AtomicBool::new(false),
+            session: SessionActivation::new(
+                self.backend(),
+                Arc::new(L3Services {
+                    mode: Mode::Plain,
+                    seen: Arc::default(),
+                    backend: Arc::clone(&self.backend),
+                }),
+                Arc::clone(&self.tripwire) as _,
+            ),
+        })
+    }
+
+    async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        seed::send_turn(&self.backend(), &session(), &run(), "never runs").await?;
+        nodes.start("a");
+        Ok(())
+    }
+
+    fn actors(&self) -> Vec<ActorKey> {
+        vec![actor()]
+    }
+
+    async fn done(&self, nodes: &SimNodes) -> bool {
+        matches!(
+            nodes.database().actor(&actor()).await,
+            Ok(Some(snapshot)) if snapshot.state == ActorState::Parked
+        )
+    }
+
+    async fn check(&self, nodes: &SimNodes, _cut: Option<&Cut>) -> Vec<String> {
+        let budget = self.backend().config().settings().activation_loop_budget;
+        let snapshot = match nodes.database().actor(&actor()).await {
+            Ok(Some(snapshot)) => snapshot,
+            other => return vec![format!("the session's actor is gone: {other:?}")],
+        };
+        let mut violations = Vec::new();
+        if snapshot.state != ActorState::Parked {
+            violations.push(format!("the session is {:?}, not parked", snapshot.state));
+        }
+        let reason = snapshot
+            .park
+            .as_deref()
+            .map(serde_json::from_str::<SessionParkReason>);
+        match reason {
+            Some(Ok(SessionParkReason::PassLoop {
+                failed_passes,
+                error,
+            })) if failed_passes == budget && error.contains("does not decode") => {}
+            other => violations.push(format!(
+                "the session parked for {other:?}, not after {budget} undecodable restores"
+            )),
+        }
+        violations
+    }
+}
+
+/// C1 (FIG-5230): a session whose checkpoint does not decode fails every
+/// pass, and parks at the activation-loop budget instead of looping on its
+/// claim.
+async fn prove_poisoned(dialect: Dialect) {
+    let postgres_url = match dialect {
+        Dialect::Postgres => match dialect::postgres_url() {
+            Some(url) => Some(url),
+            None => {
+                eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+                return;
+            }
+        },
+        Dialect::SqliteMemory | Dialect::SqliteFile => None,
+    };
+    let report = Matrix::new()
+        .faults(&[])
+        .horizon(Duration::from_secs(600))
+        .run(|| Poisoned::new(dialect, postgres_url.clone()))
+        .await;
+    report.assert_held();
+}
+
+#[tokio::test]
+async fn an_undecodable_checkpoint_parks_the_session_after_the_budget() {
+    prove_poisoned(Dialect::SqliteMemory).await;
+}
+
+#[tokio::test]
+async fn an_undecodable_checkpoint_parks_the_session_after_the_budget_on_sqlite_file() {
+    prove_poisoned(Dialect::SqliteFile).await;
+}
+
+#[tokio::test]
+async fn an_undecodable_checkpoint_parks_the_session_after_the_budget_on_postgres() {
+    prove_poisoned(Dialect::Postgres).await;
 }
 
 /// A message of the scenario's session.

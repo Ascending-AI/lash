@@ -148,7 +148,7 @@ impl LashRuntime {
             ),
         )?;
         let run = Box::pin(self.run_compaction(instructions, &controller)).await?;
-        Box::pin(self.commit_compact_context_command(run, completion)).await
+        Box::pin(self.commit_compact_context_command(run, completion, run_controller)).await
     }
 
     /// Summarize the frame current at the compaction's recorded base and
@@ -274,17 +274,14 @@ impl LashRuntime {
         &mut self,
         run: CompactionRun,
         completion: crate::QueuedWorkCompletion,
+        owner: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .ok_or_else(|| {
-                RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    "a commanded compaction commits through the session's store",
-                )
-            })?;
+        let store = self.services.store.clone().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "a commanded compaction settles in the session's store",
+            )
+        })?;
         let batch_id = completion.batch_ids.first().cloned().ok_or_else(|| {
             RuntimeError::new(
                 RuntimeErrorCode::SessionCommandRun,
@@ -357,13 +354,18 @@ impl LashRuntime {
                     },
                 );
             }
-            let error = match store
-                .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
-                .await
-            {
-                Ok(result) => {
-                    self.state.apply_persisted_commit_result(result);
-                    self.state.mark_node_ids_persisted(persisted_node_ids);
+            let committed = super::durable::session_command::commit(
+                owner,
+                commit,
+                self.host.core.tracing.metrics(),
+            )
+            .await;
+            // Resident state gives way to the durable head, which a landed
+            // commit moved; nothing of a commit that did not land is durable.
+            self.invalidate_resident_session_state();
+            let error = match committed {
+                Ok(()) => {
+                    self.reload_invalidated_resident_session_state().await?;
                     if switch.is_some() {
                         // Every accepted open restarts the live interpreter
                         // from the new frame's seed, on the shift's own
@@ -376,11 +378,9 @@ impl LashRuntime {
                     ));
                     return Ok(true);
                 }
-                Err(error) => error,
+                Err(super::durable::session_command::CommandCommitError::Store(error)) => error,
+                Err(error) => return Err(error.into_runtime_error()),
             };
-            // Nothing of the commit is durable: resident state gives way to
-            // the durable head before anything else reads it.
-            self.invalidate_resident_session_state();
             match error {
                 crate::StoreError::HeadRevisionConflict { .. } => {
                     self.reload_invalidated_resident_session_state().await?;

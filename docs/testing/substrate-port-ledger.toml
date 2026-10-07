@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1564 rows over 849 files, 3911 laws.
-# By class: mechanical 163, semantic 111, delete 841, replace 449.
-# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 8, L9t 30, I0 49.
-# By status: todo 408, ported 87, deleted 1069.
+# 1565 rows over 850 files, 3913 laws.
+# By class: mechanical 163, semantic 111, delete 842, replace 449.
+# By lane: L1b 12, L3 19, L3s 57, L4 19, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 8, L9t 30, I0 49.
+# By status: todo 408, ported 87, deleted 1070.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -25025,3 +25025,18 @@ laws = ["delivery_rows_decode_through_one_rule"]
 disposition = "covered-by:crates/lash-durable-test/tests/trigger_start_proof.rs::held_emissions_preserve_refusals_on_sqlite_memory"
 status = "deleted"
 note = "FIG-5236 replaces the always-bound decoder API with a typed disposition; production store laws now prove receipt decoding through emission and held reads."
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_graph_append.rs"
+test = "*"
+area = "commands"
+needs = ["turn"]
+class = "delete"
+lane = "L3"
+laws = [
+  "session_graph_append_tolerates_an_advanced_head",
+  "session_graph_append_rejects_an_abandoned_branch",
+]
+disposition = "covered-by:crates/lash-sim/tests/crash_matrix.rs::a_session_command_cut_at_every_label_settles_once"
+status = "deleted"
+note = "deleted by FIG-5230: both applied a host append's session command off the session actor, which no longer happens (a command commits on the actor's fenced session.command). The crash matrix's command case applies one append and settles a stale one StaleBranch through the actor; session_graph_service_append_tolerates_an_advanced_head and session_graph_service_append_rejects_an_abandoned_branch keep the branch rule"

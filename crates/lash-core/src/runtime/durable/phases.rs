@@ -221,7 +221,6 @@ pub async fn run_phases(
                 }
                 tx.write(DomainWrite::SessionCommit(SessionCommitWrite {
                     session: session.clone(),
-                    run: run.clone(),
                     expected_head: commit.expected_head,
                     commit_json: commit.commit_json,
                 }));

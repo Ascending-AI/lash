@@ -25,10 +25,7 @@ pub async fn commit_runtime_state_verified(
             ),
         });
     }
-    let permit = lash_trace::EmissionPermit::live_execution(lash_trace::TraceAttemptId::new(
-        uuid::Uuid::new_v4().to_string(),
-    ));
-    commit.validate_budget_and_record_size(metrics, Some(&permit))?;
+    admit_runtime_commit_budget(&commit, metrics)?;
     let expected_revision = commit.expected_head_revision;
     let receipt = store.commit_runtime_state(commit).await?;
     assert!(
@@ -36,6 +33,23 @@ pub async fn commit_runtime_state_verified(
         "committed head revision must advance"
     );
     Ok(receipt)
+}
+
+/// Admit `commit` against its commit budget and record its budgeted size:
+/// the check every head commit passes before it is sent, here or on the
+/// session actor's fenced transaction.
+///
+/// # Errors
+///
+/// The budget's refusal.
+pub fn admit_runtime_commit_budget(
+    commit: &RuntimeCommit,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
+) -> Result<(), StoreError> {
+    let permit = lash_trace::EmissionPermit::live_execution(lash_trace::TraceAttemptId::new(
+        uuid::Uuid::new_v4().to_string(),
+    ));
+    commit.validate_budget_and_record_size(metrics, Some(&permit))
 }
 
 #[cfg(test)]

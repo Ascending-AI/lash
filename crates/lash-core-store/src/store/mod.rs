@@ -162,7 +162,7 @@ pub use queued_work::{
     AdmissionRefusal, PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass,
     TurnWorkPrefix, TurnWorkSelection,
 };
-pub use realization::commit_runtime_state_verified;
+pub use realization::{admit_runtime_commit_budget, commit_runtime_state_verified};
 pub use recovery_leader::*;
 pub use retention::{RetentionBound, RetentionReport};
 pub use run::{

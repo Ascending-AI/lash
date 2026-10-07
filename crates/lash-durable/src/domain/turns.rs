@@ -205,20 +205,20 @@ pub enum TurnWrite {
     },
 }
 
-/// The turn's commit to its session (V0, then L3): the session store's own
-/// head commit, applied inside the `turn.commit` transaction after the
-/// fence. It publishes revision `expected_head + 1` and moves the session
-/// head to it, with everything the session store writes beside a head (the
-/// turn's history nodes, checkpoint, receipt); a session with no head is at
-/// revision 0. The head compare-and-set makes a repeated commit refuse
-/// rather than publish twice, and the turn's phase row is dropped by its
-/// [`TurnWrite::Terminal`] in the same transaction.
+/// A session's head commit from its own actor (V0, then L3; FIG-5230): the
+/// session store's own head commit, applied inside the owner's fenced
+/// transaction after the fence. A turn's commits under `turn.commit`, with
+/// the turn's [`TurnWrite::Terminal`], which drops its phase row; a session
+/// command's under `session.command`, settling the command's rows. It
+/// publishes revision `expected_head + 1` and moves the session head to it,
+/// with everything the session store writes beside a head (history nodes,
+/// checkpoint, receipt, settlements); a session with no head is at revision
+/// 0. The head compare-and-set makes a repeated commit refuse rather than
+/// publish twice.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionCommitWrite {
     /// The session.
     pub session: SessionId,
-    /// The run.
-    pub run: TurnId,
     /// The head revision the commit replaces. Refused with
     /// [`DomainRefusal::HeadMoved`](super::DomainRefusal::HeadMoved) when
     /// the head is elsewhere.

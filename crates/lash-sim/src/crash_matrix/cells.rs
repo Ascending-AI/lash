@@ -84,12 +84,15 @@ pub fn services(core: &lash::LashCore) -> Arc<dyn TurnServices> {
     lash::testing::session_turn_services(core)
 }
 
-/// Create `session` through `core` and send it the input `run` takes.
+/// Create `session` through `core`.
 ///
 /// # Errors
 ///
 /// The facade refused.
-pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> Result<(), String> {
+pub async fn create(
+    core: &lash::LashCore,
+    session: &SessionId,
+) -> Result<lash::DurableSession, String> {
     core.session(session.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             MODEL,
@@ -97,7 +100,17 @@ pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> R
             lash::MaxToolCalls::new(8),
         )))
         .await
-        .map_err(|error| format!("create the cell session: {error}"))?
+        .map_err(|error| format!("create the cell session: {error}"))
+}
+
+/// Create `session` through `core` and send it the input `run` takes.
+///
+/// # Errors
+///
+/// The facade refused.
+pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> Result<(), String> {
+    create(core, session)
+        .await?
         .send(lash::TurnInput::text(format!("go {session}")))
         .id(run.clone())
         .await

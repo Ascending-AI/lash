@@ -228,16 +228,12 @@ impl LashRuntime {
                 ),
             ));
         };
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .ok_or_else(|| {
-                RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    "a commanded config transaction commits through the session's store",
-                )
-            })?;
+        let store = self.services.store.clone().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "a commanded config transaction settles in the session's store",
+            )
+        })?;
         drop(RuntimeNamedPhase::begin(
             self.turn_phase_probe.clone(),
             super::host_commands::SESSION_COMMAND_APPLYING_PHASE,
@@ -276,10 +272,13 @@ impl LashRuntime {
         if applied {
             self.publish_resident_authority()?;
         }
-        let committed = Box::pin(self.commit_host_command(&completion, None, None, |_, _| {
-            crate::runtime::SessionCommandOutcome::ConfigTransaction { outcome }
-        }))
-        .await?;
+        let committed =
+            Box::pin(
+                self.commit_host_command(run_controller, &completion, None, None, |_, _| {
+                    crate::runtime::SessionCommandOutcome::ConfigTransaction { outcome }
+                }),
+            )
+            .await?;
         if applied && matches!(committed, super::host_commands::CommandCommit::Landed) {
             self.notify_session_config_changed(previous).await;
         }
@@ -312,10 +311,7 @@ impl LashRuntime {
                 .session
                 .as_ref()
                 .map(|session| session.plugins().host().clone()),
-            store: self
-                .session
-                .as_ref()
-                .and_then(|session| session.history_store()),
+            store: self.services.store.clone(),
             base: crate::store::persisted_session_config_from_state(&self.state),
             transaction: transaction.clone(),
             models: Arc::clone(&self.host.core.providers.models),

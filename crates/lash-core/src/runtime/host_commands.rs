@@ -35,6 +35,7 @@
 
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
+use crate::runtime::durable::session_command::CommandCommitError;
 use crate::runtime::turn_boundary::SeedCarries;
 
 mod task_cancel;
@@ -103,6 +104,7 @@ impl LashRuntime {
         &mut self,
         request: crate::AppendSessionNodesRequest,
         completion: crate::QueuedWorkCompletion,
+        owner: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
@@ -141,19 +143,23 @@ impl LashRuntime {
                 // over the durable head, with nothing appended.
                 self.invalidate_resident_session_state();
                 self.reload_invalidated_resident_session_state().await?;
-                let committed =
-                    Box::pin(self.commit_host_command(&completion, None, None, |_, _| {
-                        crate::runtime::SessionCommandOutcome::Failed {
-                            code: RuntimeErrorCode::SessionCommandRun,
-                            message: format!("the protocol refused the appended nodes: {error}"),
-                        }
-                    }))
-                    .await?;
+                let committed = Box::pin(self.commit_host_command(
+                    owner,
+                    &completion,
+                    None,
+                    None,
+                    |_, _| crate::runtime::SessionCommandOutcome::Failed {
+                        code: RuntimeErrorCode::SessionCommandRun,
+                        message: format!("the protocol refused the appended nodes: {error}"),
+                    },
+                ))
+                .await?;
                 return Ok(!matches!(committed, CommandCommit::Withdrawn));
             }
         }
         self.stamp_live_plugin_state()?;
         let committed = Box::pin(self.commit_host_command(
+            owner,
             &completion,
             Some(append_stamp),
             None,
@@ -173,13 +179,15 @@ impl LashRuntime {
             CommandCommit::AncestorNotActive { required_node_id } => {
                 self.reload_invalidated_resident_session_state().await?;
                 let settled =
-                    Box::pin(self.commit_host_command(&completion, None, None, |_, _| {
-                        crate::runtime::SessionCommandOutcome::AppendSessionNodes {
-                            outcome: crate::AppendSessionNodesOutcome::StaleBranch {
-                                required_node_id: required_node_id.clone(),
-                            },
-                        }
-                    }))
+                    Box::pin(
+                        self.commit_host_command(owner, &completion, None, None, |_, _| {
+                            crate::runtime::SessionCommandOutcome::AppendSessionNodes {
+                                outcome: crate::AppendSessionNodesOutcome::StaleBranch {
+                                    required_node_id: required_node_id.clone(),
+                                },
+                            }
+                        }),
+                    )
                     .await?;
                 Ok(!matches!(settled, CommandCommit::Withdrawn))
             }
@@ -248,10 +256,13 @@ impl LashRuntime {
                 }
             }
         };
-        let committed = Box::pin(self.commit_host_command(&completion, None, None, |_, _| {
-            crate::runtime::SessionCommandOutcome::PluginOperation { outcome }
-        }))
-        .await?;
+        let committed =
+            Box::pin(
+                self.commit_host_command(run_controller, &completion, None, None, |_, _| {
+                    crate::runtime::SessionCommandOutcome::PluginOperation { outcome }
+                }),
+            )
+            .await?;
         Ok(!matches!(committed, CommandCommit::Withdrawn))
     }
 
@@ -465,6 +476,7 @@ impl LashRuntime {
         &mut self,
         request: crate::OpenAgentFrameRequest,
         completion: crate::QueuedWorkCompletion,
+        owner: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
@@ -498,29 +510,32 @@ impl LashRuntime {
             }
         };
         let opens = switch.is_some();
-        let committed =
-            Box::pin(
-                self.commit_host_command(&completion, None, switch, |state, persisted| {
-                    // The frame's committed node id replaces the draft id the
-                    // resident open answered with.
-                    let outcome = match outcome {
-                        crate::runtime::OpenAgentFrameCommandOutcome::Opened { mut outcome }
-                            if opens =>
-                        {
-                            if let Some(current) = state.current_frame_node_id.as_ref() {
-                                outcome.frame_node_id = current.to_string();
-                            }
-                            let seeds = outcome.initial_node_ids.len();
-                            outcome.initial_node_ids =
-                                persisted[persisted.len().saturating_sub(seeds)..].to_vec();
-                            crate::runtime::OpenAgentFrameCommandOutcome::Opened { outcome }
+        let committed = Box::pin(self.commit_host_command(
+            owner,
+            &completion,
+            None,
+            switch,
+            |state, persisted| {
+                // The frame's committed node id replaces the draft id the
+                // resident open answered with.
+                let outcome = match outcome {
+                    crate::runtime::OpenAgentFrameCommandOutcome::Opened { mut outcome }
+                        if opens =>
+                    {
+                        if let Some(current) = state.current_frame_node_id.as_ref() {
+                            outcome.frame_node_id = current.to_string();
                         }
-                        outcome => outcome,
-                    };
-                    crate::runtime::SessionCommandOutcome::OpenAgentFrame { outcome }
-                }),
-            )
-            .await?;
+                        let seeds = outcome.initial_node_ids.len();
+                        outcome.initial_node_ids =
+                            persisted[persisted.len().saturating_sub(seeds)..].to_vec();
+                        crate::runtime::OpenAgentFrameCommandOutcome::Opened { outcome }
+                    }
+                    outcome => outcome,
+                };
+                crate::runtime::SessionCommandOutcome::OpenAgentFrame { outcome }
+            },
+        ))
+        .await?;
         if matches!(committed, CommandCommit::Landed) && opens {
             // Every accepted open restarts the live interpreter from the new
             // frame's seed, on the shift's own resident runtime (F5).
@@ -540,11 +555,12 @@ impl LashRuntime {
 
     /// Commit the resident state as the command's one commit (F2): whatever
     /// the command put in resident state and the command's settlement with the outcome `outcome` derives from
-    /// the committed state and its persisted node ids, under the command
-    /// run's fence.
+    /// the committed state and its persisted node ids, on the session
+    /// actor's fenced transaction `owner` holds, under `session.command`
+    /// (FIG-5230).
     ///
-    /// Nothing of a commit that did not land stays resident: resident state
-    /// gives way to the durable head. A newer admission that sealed since
+    /// Resident state gives way to the durable head afterwards, whether the
+    /// commit landed or not. A newer admission that sealed since
     /// the command run's seal refuses the commit as superseded, with nothing
     /// of it durable: that admission's shift applies the command.
     ///
@@ -558,6 +574,7 @@ impl LashRuntime {
     /// the host raises the budget again.
     pub(super) async fn commit_host_command(
         &mut self,
+        owner: &crate::ActorContext,
         completion: &crate::QueuedWorkCompletion,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
         switch: Option<CommandFrameSwitch>,
@@ -567,6 +584,7 @@ impl LashRuntime {
         ) -> crate::runtime::SessionCommandOutcome,
     ) -> Result<CommandCommit, RuntimeError> {
         let over_budget = match Box::pin(self.commit_host_command_once(
+            owner,
             completion,
             append_stamp,
             switch,
@@ -577,16 +595,16 @@ impl LashRuntime {
             Ok(committed) => return Ok(committed),
             Err(over_budget) => over_budget,
         };
-        self.reload_invalidated_resident_session_state().await?;
-        let settled = Box::pin(
-            self.commit_host_command_once(completion, None, None, |_, _| {
-                crate::runtime::SessionCommandOutcome::Failed {
-                    code: over_budget.code.clone(),
-                    message: over_budget.message.clone(),
-                }
-            }),
-        )
-        .await?;
+        let settled =
+            Box::pin(
+                self.commit_host_command_once(owner, completion, None, None, |_, _| {
+                    crate::runtime::SessionCommandOutcome::Failed {
+                        code: over_budget.code.clone(),
+                        message: over_budget.message.clone(),
+                    }
+                }),
+            )
+            .await?;
         match settled {
             Ok(CommandCommit::Landed) => Ok(CommandCommit::OverBudget),
             Ok(committed) => Ok(committed),
@@ -598,9 +616,11 @@ impl LashRuntime {
     }
 
     /// One attempt at the command's commit: `Err` carries a commit-budget
-    /// refusal, after which nothing of the commit is resident.
+    /// refusal. Nothing of the commit stays resident either way: the resident
+    /// session reloads the durable head, which a landed commit moved.
     async fn commit_host_command_once(
         &mut self,
+        owner: &crate::ActorContext,
         completion: &crate::QueuedWorkCompletion,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
         switch: Option<CommandFrameSwitch>,
@@ -609,16 +629,6 @@ impl LashRuntime {
             &[crate::NodeId],
         ) -> crate::runtime::SessionCommandOutcome,
     ) -> Result<Result<CommandCommit, RuntimeError>, RuntimeError> {
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .ok_or_else(|| {
-                RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    "a host command commits through the session's store",
-                )
-            })?;
         let batch_id = Self::sole_command_batch(completion)?;
         // An append commits under the append's own operation, which owns its
         // receipt identity; every other command under the command's.
@@ -663,44 +673,40 @@ impl LashRuntime {
             self.turn_phase_probe.clone(),
             SESSION_COMMAND_STAGED_PHASE,
         ));
-        match store
-            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
-            .await
-        {
-            Ok(result) => {
-                let receipt_replayed = result.receipt_replayed;
-                self.state.apply_persisted_commit_result(result);
-                self.state.mark_node_ids_persisted(persisted_node_ids);
-                if receipt_replayed {
-                    // The durable head is the replayed commit's.
-                    self.invalidate_resident_session_state();
-                    self.reload_invalidated_resident_session_state().await?;
-                }
+        let committed = super::durable::session_command::commit(
+            owner,
+            commit,
+            self.host.core.tracing.metrics(),
+        )
+        .await;
+        self.invalidate_resident_session_state();
+        match committed {
+            Ok(()) => {
+                self.reload_invalidated_resident_session_state().await?;
                 drop(RuntimeNamedPhase::begin(
                     self.turn_phase_probe.clone(),
                     SESSION_COMMAND_COMMITTED_PHASE,
                 ));
                 Ok(Ok(CommandCommit::Landed))
             }
-            Err(error) => {
-                self.invalidate_resident_session_state();
-                match error {
-                    crate::StoreError::SessionCommandWithdrawn { .. } => {
-                        Ok(Ok(CommandCommit::Withdrawn))
-                    }
-                    error @ (crate::StoreError::CommitByteBudgetExceeded { .. }
-                    | crate::StoreError::CommitNodeBudgetExceeded { .. }) => {
-                        Ok(Err(super::runtime_error_from_store_commit(error)))
-                    }
-                    crate::StoreError::AppendAncestorNotActive { required_node_id } => {
-                        Ok(Ok(CommandCommit::AncestorNotActive { required_node_id }))
-                    }
-                    // A later admission that sealed after the command run's
-                    // is a superseded commit: that admission's shift applies
-                    // the command.
-                    error => Err(super::runtime_error_from_store_commit(error)),
+            Err(CommandCommitError::Store(error)) => match error {
+                crate::StoreError::SessionCommandWithdrawn { .. } => {
+                    Ok(Ok(CommandCommit::Withdrawn))
                 }
-            }
+                error @ (crate::StoreError::CommitByteBudgetExceeded { .. }
+                | crate::StoreError::CommitNodeBudgetExceeded { .. }) => {
+                    self.reload_invalidated_resident_session_state().await?;
+                    Ok(Err(super::runtime_error_from_store_commit(error)))
+                }
+                crate::StoreError::AppendAncestorNotActive { required_node_id } => {
+                    Ok(Ok(CommandCommit::AncestorNotActive { required_node_id }))
+                }
+                // A later admission that sealed after the command run's
+                // is a superseded commit: that admission's shift applies
+                // the command.
+                error => Err(super::runtime_error_from_store_commit(error)),
+            },
+            Err(error) => Err(error.into_runtime_error()),
         }
     }
 }

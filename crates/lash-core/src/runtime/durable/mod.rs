@@ -9,6 +9,8 @@
 //!   and applied under the epoch on every claim (L3s).
 //! - [`session_close`]: the session's closing state, one fenced step at a
 //!   time (L6b).
+//! - `session_command`: a session command's head commit, on the session's
+//!   fenced transaction under `session.command` (FIG-5230).
 //! - [`turn_scope`]: a turn's scope ending with its commit or cancel, the
 //!   cascade's cursor work and the bounded wait for its children (L6b).
 
@@ -19,6 +21,7 @@ pub mod phases;
 pub mod services;
 pub mod session;
 pub mod session_close;
+pub(crate) mod session_command;
 pub mod session_mail;
 mod tool_round;
 mod turn_cancel;
