@@ -137,7 +137,15 @@ fn read_commit(
     settings: RelaySettings,
 ) -> Result<RelayNext, Option<String>> {
     match outcome {
-        CellOutcome::Failed(_) => return Err(None),
+        CellOutcome::Failed(failure) => {
+            let bound = match failure.worker_limit {
+                Some(lash_vm_protocol::WorkerLimit::Fuel) => Some("instructions"),
+                Some(lash_vm_protocol::WorkerLimit::Heap) => Some("memory"),
+                Some(lash_vm_protocol::WorkerLimit::Depth) => Some("frame depth"),
+                _ => None,
+            };
+            return Err(bound.map(|bound| format!("execution bound exhausted ({bound})")));
+        }
         CellOutcome::Finished(_) => {
             return Err(Some(
                 "finish() does not end a relay step; to answer, reply in plain text with no tool call".to_string(),

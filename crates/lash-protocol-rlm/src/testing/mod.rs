@@ -132,6 +132,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
             execution_bounds,
             channel,
             code_renderer,
+            crate::plugin::RlmExecutionPolicy::Chronological,
         ),
     )
     .await

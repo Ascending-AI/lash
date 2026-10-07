@@ -70,6 +70,7 @@ async fn execute_owned_code(
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
     code_renderer: crate::render::CodeRendererSlot,
+    execution_policy: crate::plugin::RlmExecutionPolicy,
 ) -> ExecResponse {
     let clean_code = clean_model_code(&request.code);
     // The cell's run (FIG-3586): every command it issues is keyed by the
@@ -149,6 +150,7 @@ async fn execute_owned_code(
         session_projected_bindings,
         execution_bounds,
         channel,
+        execution_policy,
         Arc::clone(&prints),
         &snapshots,
         resumed.map(Box::new),
@@ -300,6 +302,7 @@ impl RlmCheckpointPerfFixture {
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
             crate::render::CodeRendererSlot::default(),
+            crate::plugin::RlmExecutionPolicy::Chronological,
         )
         .await;
         if let Some(error) = response.error {
@@ -354,6 +357,7 @@ async fn execute_code_inner(
     session_projected_bindings: RlmProjectedBindings,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
+    execution_policy: crate::plugin::RlmExecutionPolicy,
     prints: Arc<std::sync::Mutex<Vec<lashlang::Value>>>,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     resumed: Option<Box<cell_segment::ResumedCell>>,
@@ -376,6 +380,7 @@ async fn execute_code_inner(
         session_projected_bindings,
         execution_bounds,
         channel,
+        execution_policy,
         prints,
         workers,
         snapshots,
@@ -400,6 +405,7 @@ async fn execute_code_in_worker_scope(
     session_projected_bindings: RlmProjectedBindings,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
+    execution_policy: crate::plugin::RlmExecutionPolicy,
     prints: Arc<std::sync::Mutex<Vec<lashlang::Value>>>,
     workers: lash_vm_client::service::Service,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
@@ -1037,9 +1043,12 @@ async fn execute_code_in_worker_scope(
                     }
                     limit => limit.to_string(),
                 };
+                // Relay treats exhausted guest bounds as failed steps, including
+                // confidence runs. Chronological confidence runs still fail loudly.
                 #[cfg(any(test, feature = "testing"))]
                 assert!(
-                    !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst),
+                    execution_policy == crate::plugin::RlmExecutionPolicy::Relay
+                        || !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst),
                     "confidence execution exhausted a required Lashlang bound: {message}"
                 );
                 return exec_response_from(
@@ -1107,11 +1116,19 @@ async fn execute_code_in_worker_scope(
         Err(error) => {
             #[cfg(any(test, feature = "testing"))]
             assert!(
-                !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst)
+                execution_policy == crate::plugin::RlmExecutionPolicy::Relay
+                    || !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst)
                     || !error.is_execution_bound_exhausted(),
                 "confidence execution exhausted a required Lashlang bound: {error}"
             );
-            let kind = lashlang_runtime_feedback_kind(&error, host.cancellation_observed());
+            let kind = if execution_policy == crate::plugin::RlmExecutionPolicy::Relay
+                && error.is_execution_bound_exhausted()
+                && !host.cancellation_observed()
+            {
+                lash_core::CellFailureKind::Program
+            } else {
+                lashlang_runtime_feedback_kind(&error, host.cancellation_observed())
+            };
             let failure = runtime_failure.unwrap_or(lashlang::RuntimeFailure { error, span: None });
             if host.cancellation_observed()
                 || matches!(&failure.error, lashlang::RuntimeError::HostCancelled)
@@ -1136,6 +1153,21 @@ async fn execute_code_in_worker_scope(
                 None => crate::feedback::render_runtime_failure(code, &failure),
             };
             let mut cell_failure = lash_core::CellFailure::new(kind, message);
+            if execution_policy == crate::plugin::RlmExecutionPolicy::Relay {
+                cell_failure.worker_limit = match &failure.error {
+                    lashlang::RuntimeError::InstructionBudgetExceeded { .. }
+                    | lashlang::RuntimeError::RegExpBudgetExceeded { .. } => {
+                        Some(lash_vm_protocol::WorkerLimit::Fuel)
+                    }
+                    lashlang::RuntimeError::MemoryLimitExceeded { .. } => {
+                        Some(lash_vm_protocol::WorkerLimit::Heap)
+                    }
+                    lashlang::RuntimeError::FrameDepthExceeded { .. } => {
+                        Some(lash_vm_protocol::WorkerLimit::Depth)
+                    }
+                    _ => None,
+                };
+            }
             if tool_call_limit.is_some() {
                 cell_failure.tool_call_limit = ctx.tool_call_limit_refusal();
             }

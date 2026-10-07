@@ -174,8 +174,8 @@ added mid-session):
   cell, a cell outside 0–8, no game, or a game that is over) is an error and
   changes nothing.
 
-`POST /api/ttt/games` starts the next game (an unfinished game stays in the
-log as `unfinished`), `GET /api/ttt` returns the settings and the game log,
+`POST /api/ttt/games` starts the next game (a game in progress has a null
+result in the log), `GET /api/ttt` returns the settings and the game log,
 and `POST /api/ttt/score` with `{"answer", "ask"}` scores a memory answer
 against the log.
 
@@ -195,10 +195,13 @@ games for the same agent moves.
 own data directory, so a fresh session), plays the games and the final turn,
 scores the answer and stops the workbench. Game g is the user turn
 `Game g: you are X. Play it to the end.`; with `--told`, game 1's turn adds
-`After the games I will ask you who won each of the first K games.` The final
-turn is `List who won each of the first K games, in order, as a JSON array
-whose items are "you", "me" or "draw" ("you" = you, the agent; "me" = me, your
-opponent).`
+`After the games I will ask you who won each of the first K games.`
+If a turn answers, fails or stops before the game finishes, the driver sends
+`Game g is not finished. Continue playing it to the end.` up to five times.
+A game still ongoing after that makes the run invalid; the driver records
+why and never scores it. The final turn asks for exactly a JSON array whose
+items are `"ASSISTANT"`, `"USER"` or `"DRAW"` (`"ASSISTANT"` = the agent won,
+`"USER"` = we, the opponent, won).
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -207,13 +210,14 @@ opponent).`
 | `--ask K` | `5` | games asked about; `1 <= K < N`, and the driver refuses otherwise |
 | `--told` | off | warn the agent in game 1 |
 | `--seed S`, `--schedule`, `--first` | `1`, `mixed`, `agent` | passed to the world's variables |
-| `--policy` | `relay` | `relay` (`AGENT_WORKBENCH_RLM_POLICY=relay`, native channel), `rlm` (chronological RLM, the workbench's default cell channel) or `standard` (`AGENT_WORKBENCH_PROTOCOL=standard`) |
+| `--policy` | `relay` | `relay` (`AGENT_WORKBENCH_RLM_POLICY=relay`, native channel), `rlm` (chronological RLM) or `standard` (`AGENT_WORKBENCH_PROTOCOL=standard`) |
+| `--channel` | `native` | RLM channel, `native` or `cell`; relay requires native; standard has no channel |
 | `--model`, `--upstream` | `z-ai/glm-5.3-flash`, `z-ai` | `OPENROUTER_MODEL` and `AGENT_WORKBENCH_OPENROUTER_PROVIDER` |
 | `--port`, `--env-file`, `--budget` | `4491`, none, `0.5` | the port; a `KEY=VALUE` file with `OPENROUTER_API_KEY`; stop after the game whose spend passes this many dollars |
 
 It writes `results.json` (per game the result, misplays, refused moves, the
-turn's requests, work steps, tokens, cache reads and cost; the final turn; the
-totals; the score), `log.json` (the world's log), `game-<g>/` and `final/`
+turns and continuation count, requests, work steps, tokens, cache reads and cost;
+the final turn; the totals; the score), `log.json` (the world's log), `game-<g>/` and `final/`
 (`extract_live.py`'s per-request files and `usage.md`), and the workbench's
 `wb-data/` and `wb-run/`.
 
@@ -234,18 +238,25 @@ done
 State this before observing.
 
 - The answer key is the world's log (`log.json`, `GET /api/ttt`), never the
-  schedule: game g's key is `you` when the agent won, `me` when the opponent
-  won, `draw`, or `unfinished` when the turn ended before the game did (no
-  answer matches that).
-- The score reads the first well-formed JSON array in the final reply. Its
-  items are trimmed and lowercased; `per_game` compares item i with game i's
-  key, and `exact` needs exactly K items, all right. A reply with no array
-  scores 0 of K.
-- The perfect opponent never loses: a `you` against a `perfect` game is a
+  schedule: each finished game's `result` is the typed value `ASSISTANT`,
+  `USER` or `DRAW`. An ongoing game has no result and cannot be scored.
+- The score reads the first well-formed JSON array in the final reply. String
+  items are trimmed and uppercased, then parsed as those three enum values;
+  any other item scores wrong. A wrong-length array scores all items wrong.
+  `per_game` compares item i with game i's key; `exact` needs K correct items.
+  A reply with no array scores 0 of K.
+- The perfect opponent never loses: `ASSISTANT` against a `perfect` game is a
   **finding and FAIL**. `misplays` lists the agent's moves (1-based) that
   lowered its minimax outcome; a loss always has one.
-- Every game turn ends with its game finished; a game left `unfinished` or a
-  turn listed under `totals.failed_turns` is reported, not retried.
+- Every game must finish before the next starts. `continuation_turns` records
+  how many additional turns each game needed (0–5). The run is invalid if the
+  cap is reached with the game ongoing. Every failed turn, including an
+  initial turn repaired by a continuation, remains in `totals.failed_turns`
+  and must be explained.
+- Relay execution-bound exhaustion is a failed step: it commits no baton,
+  preserves effect receipts, and the next step's status says
+  `not committed: execution bound exhausted (instructions)` (or `memory`).
+  The existing no-progress and iteration budgets still bound the turn.
 - Spend is the sum of the provider-reported costs in the `usage.md` tables.
 
 ## Teardown

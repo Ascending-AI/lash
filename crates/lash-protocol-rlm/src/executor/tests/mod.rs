@@ -115,6 +115,7 @@ async fn execute_code_with_trigger_test_render(
         execution_bounds,
         channel,
         code_renderer,
+        crate::plugin::RlmExecutionPolicy::Chronological,
     )
     .await
 }

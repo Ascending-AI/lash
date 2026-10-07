@@ -131,15 +131,32 @@ impl Status {
         }
     }
 
-    /// The memory answer's word for this game: `you` (the agent), `me` (the
-    /// opponent), `draw`, or `unfinished` for a game nobody played out, which
-    /// no answer can match.
-    pub(crate) fn answer_label(self) -> &'static str {
+    fn result(self) -> Option<GameResult> {
         match self {
-            Self::Ongoing => "unfinished",
-            Self::AgentWon => "you",
-            Self::OpponentWon => "me",
-            Self::Draw => "draw",
+            Self::Ongoing => None,
+            Self::AgentWon => Some(GameResult::Assistant),
+            Self::OpponentWon => Some(GameResult::User),
+            Self::Draw => Some(GameResult::Draw),
+        }
+    }
+}
+
+/// The same typed result is used by the world's log and the memory scorer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum GameResult {
+    Assistant,
+    User,
+    Draw,
+}
+
+impl GameResult {
+    fn from_answer(item: &Value) -> Option<Self> {
+        match item.as_str()?.trim().to_uppercase().as_str() {
+            "ASSISTANT" => Some(Self::Assistant),
+            "USER" => Some(Self::User),
+            "DRAW" => Some(Self::Draw),
+            _ => None,
         }
     }
 }
@@ -389,7 +406,7 @@ pub(crate) struct GameRecord {
     /// `ongoing` for a game a later start abandoned.
     pub(crate) status: Status,
     /// The answer key's word for this game.
-    pub(crate) result: &'static str,
+    pub(crate) result: Option<GameResult>,
     /// Calls to `make_move` that were refused, and changed nothing.
     pub(crate) illegal_moves: u32,
     /// The agent's moves (1-based ordinals) that lowered its minimax outcome:
@@ -538,7 +555,7 @@ impl Game {
             first: self.first,
             moves: self.moves.clone(),
             status,
-            result: status.answer_label(),
+            result: status.result(),
             illegal_moves: self.illegal_moves,
             misplays: self.misplays.clone(),
             picture: self.picture(),
@@ -644,10 +661,10 @@ fn make_move_in(state: &mut WorldState, args: &Value) -> Result<Value, String> {
 pub(crate) struct Score {
     pub(crate) ask: usize,
     /// The log's answer key for the first `ask` games.
-    pub(crate) expected: Vec<String>,
+    pub(crate) expected: Vec<GameResult>,
     /// The first JSON array in the answer, its items normalized; `None` when
     /// the answer holds none.
-    pub(crate) answer: Option<Vec<String>>,
+    pub(crate) answer: Option<Vec<Option<GameResult>>>,
     pub(crate) per_game: Vec<bool>,
     pub(crate) correct: usize,
     pub(crate) accuracy: f64,
@@ -664,27 +681,26 @@ pub(crate) fn score(answer: &str, log: &[GameRecord], ask: usize) -> Result<Scor
             log.len()
         ));
     }
-    let expected: Vec<String> = log[..ask]
+    if log.iter().any(|record| record.result.is_none()) {
+        return Err("a run with an ongoing game is invalid and cannot be scored".to_string());
+    }
+    let expected: Vec<GameResult> = log[..ask]
         .iter()
-        .map(|record| record.result.to_string())
+        .filter_map(|record| record.result)
         .collect();
     let answer = first_json_array(answer).map(|items| {
         items
             .iter()
-            .map(|item| match item {
-                Value::String(text) => text.trim().to_lowercase(),
-                other => other.to_string(),
-            })
+            .map(GameResult::from_answer)
             .collect::<Vec<_>>()
     });
     let per_game: Vec<bool> = expected
         .iter()
         .enumerate()
         .map(|(index, expected)| {
-            answer
-                .as_ref()
-                .and_then(|items| items.get(index))
-                .is_some_and(|item| item == expected)
+            answer.as_ref().is_some_and(|items| {
+                items.len() == ask && items.get(index) == Some(&Some(*expected))
+            })
         })
         .collect();
     let correct = per_game.iter().filter(|right| **right).count();
@@ -927,9 +943,9 @@ mod tests {
             Some(X),
         ];
         assert_eq!(Status::of(&board), Status::Draw);
-        assert_eq!(Status::Draw.answer_label(), "draw");
-        assert_eq!(Status::AgentWon.answer_label(), "you");
-        assert_eq!(Status::OpponentWon.answer_label(), "me");
+        assert_eq!(Status::Draw.result(), Some(GameResult::Draw));
+        assert_eq!(Status::AgentWon.result(), Some(GameResult::Assistant));
+        assert_eq!(Status::OpponentWon.result(), Some(GameResult::User));
     }
 
     #[test]
@@ -1095,7 +1111,11 @@ mod tests {
             assert_eq!(Status::of(&board), record.status, "game {}", record.game);
         }
         assert_eq!(log[4].status, Status::Ongoing);
-        assert_eq!(log[4].result, "unfinished");
+        assert_eq!(log[4].result, None);
+        assert!(score(r#"["ASSISTANT"]"#, &log, 1).is_err());
+        for record in &log[..4] {
+            assert_eq!(record.result, record.status.result());
+        }
         assert_eq!(
             log.iter().map(|record| record.game).collect::<Vec<_>>(),
             vec![1, 2, 3, 4, 5]
@@ -1109,7 +1129,7 @@ mod tests {
             first: First::Agent,
             moves: Vec::new(),
             status,
-            result: status.answer_label(),
+            result: status.result(),
             illegal_moves: 0,
             misplays: Vec::new(),
             picture: String::new(),
@@ -1125,34 +1145,48 @@ mod tests {
             record(4, Status::Draw),
         ];
 
+        use GameResult::{Assistant, Draw, User};
         let exact = score(
-            "Here you go: [maybe] ```json\n[\"You\", \"draw\", \"me\"]\n```",
+            "Here you go: [maybe] ```json\n[\" assistant \", \"Draw\", \"user\"]\n```",
             &log,
             3,
         )
         .expect("scored");
-        assert_eq!(exact.expected, ["you", "draw", "me"]);
+        assert_eq!(exact.expected, [Assistant, Draw, User]);
         assert_eq!(
-            exact.answer.as_deref(),
-            Some(&["you", "draw", "me"].map(String::from)[..])
+            exact.answer,
+            Some(vec![Some(Assistant), Some(Draw), Some(User)])
         );
         assert!(exact.exact);
         assert_eq!(exact.correct, 3);
+        assert_eq!(
+            serde_json::to_value(&exact.expected).expect("typed key"),
+            json!(["ASSISTANT", "DRAW", "USER"])
+        );
 
-        let partial = score(r#"["you", "me", "me"]"#, &log, 3).expect("scored");
+        let partial = score(r#"["ASSISTANT", "USER", "USER"]"#, &log, 3).expect("scored");
         assert_eq!(partial.per_game, [true, false, true]);
         assert!(!partial.exact);
         assert!((partial.accuracy - 2.0 / 3.0).abs() < 1e-9);
 
-        let short = score(r#"["you", "draw"]"#, &log, 3).expect("scored");
-        assert_eq!(short.per_game, [true, true, false]);
-        assert!(!short.exact);
+        for invalid in [
+            r#"["you", "DRAW", "me"]"#,
+            r#"[null, "DRAW", 1]"#,
+            r#"["unknown", "DRAW", "?"]"#,
+        ] {
+            let scored = score(invalid, &log, 3).expect("invalid items score wrong");
+            assert_eq!(scored.per_game, [false, true, false]);
+        }
+        for wrong_length in [
+            r#"["ASSISTANT", "DRAW"]"#,
+            r#"["ASSISTANT", "DRAW", "USER", "DRAW"]"#,
+        ] {
+            let scored = score(wrong_length, &log, 3).expect("scored");
+            assert_eq!(scored.correct, 0, "the array must have exactly K items");
+            assert!(!scored.exact);
+        }
 
-        let long = score(r#"["you", "draw", "me", "draw"]"#, &log, 3).expect("scored");
-        assert_eq!(long.correct, 3);
-        assert!(!long.exact, "an answer must list exactly K games");
-
-        let malformed = score("I won the first, then we drew: [you, draw", &log, 3)
+        let malformed = score("I won the first, then we drew: [ASSISTANT, DRAW", &log, 3)
             .expect("a malformed answer still scores");
         assert_eq!(malformed.answer, None);
         assert_eq!(malformed.correct, 0);

@@ -487,6 +487,7 @@ mod tests {
                 deferred_trigger_resolver: None,
 
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                execution_policy: crate::plugin::RlmExecutionPolicy::Chronological,
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },
@@ -604,6 +605,7 @@ mod tests {
                 deferred_trigger_resolver: None,
 
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                execution_policy: crate::plugin::RlmExecutionPolicy::Chronological,
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },
@@ -698,6 +700,7 @@ mod tests {
                 deferred_trigger_resolver: None,
 
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                execution_policy: crate::plugin::RlmExecutionPolicy::Chronological,
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },

@@ -2,14 +2,15 @@
 
 usage: ttt_live.py --out DIR [--games N] [--ask K] [--told] [--seed S]
                    [--schedule mixed|perfect|random|perfect,random,...]
-                   [--first agent|opponent] [--policy relay|rlm|standard]
+                   [--first agent|opponent] [--policy relay|rlm|standard] [--channel native|cell]
                    [--model M] [--upstream SLUGS] [--port P] [--env-file F]
                    [--budget USD]
 
 Run it in a Kiln fork with env.sh sourced and OPENROUTER_API_KEY exported (or
 named in --env-file). It launches a fresh workbench (its own data directory
 under DIR, so a fresh session) with the tic-tac-toe world on, plays N games,
-one user turn each, asks one final memory question about the first K games,
+with at most five continuation turns per game, asks one final memory question
+about the first K games,
 scores the answer against the world's game log, and stops the workbench.
 
 It writes under DIR:
@@ -43,6 +44,7 @@ def settings():
     p.add_argument("--schedule", default="mixed")
     p.add_argument("--first", choices=("agent", "opponent"), default="agent")
     p.add_argument("--policy", choices=sorted(POLICIES), default="relay")
+    p.add_argument("--channel", choices=("native", "cell"), default="native")
     p.add_argument("--model", default="z-ai/glm-5.3-flash")
     p.add_argument("--upstream", default="z-ai", help="OpenRouter upstream pin; empty for none")
     p.add_argument("--port", type=int, default=4491)
@@ -51,6 +53,8 @@ def settings():
     args = p.parse_args()
     if not 1 <= args.ask < args.games:
         p.error(f"--ask K must satisfy 1 <= K < N (--games); got K={args.ask}, N={args.games}")
+    if args.policy == "relay" and args.channel != "native":
+        p.error("relay requires --channel native")
     return args
 
 
@@ -62,8 +66,9 @@ def game_prompt(args, game):
 
 
 def final_prompt(args):
-    return (f"List who won each of the first {args.ask} games, in order, as a JSON array whose items are "
-            '"you", "me" or "draw" ("you" = you, the agent; "me" = me, your opponent).')
+    return (f"List who won each of the first {args.ask} games, in order. Reply with exactly a JSON array "
+            'whose items are "ASSISTANT", "USER" or "DRAW" '
+            '("ASSISTANT" = you, the agent, won; "USER" = we, your opponent, won).')
 
 
 def environment(args):
@@ -75,7 +80,10 @@ def environment(args):
                 key, value = line.split("=", 1)
                 env[key.removeprefix("export ").strip()] = value.strip().strip('"').strip("'")
     env.pop("LASH_RLM_CHANNEL", None)
+    env.pop("AGENT_WORKBENCH_RLM_POLICY", None)
     env.update(POLICIES[args.policy])
+    if args.policy != "standard":
+        env["LASH_RLM_CHANNEL"] = args.channel
     env.update({
         "AGENT_WORKBENCH_TTT": "on",
         "AGENT_WORKBENCH_TTT_SEED": str(args.seed),
@@ -158,16 +166,24 @@ def main():
         spent = 0.0
         for game in range(1, args.games + 1):
             started = wb.call("/api/ttt/games", {})
-            played = wb.turn(game_prompt(args, game))
+            turns = [wb.turn(game_prompt(args, game))]
             record = wb.call("/api/ttt")["games"][game - 1]
-            turn_usage = usage(extract(trace, args.out / f"game-{game}", [played["turn_id"]]))
+            while record["status"] == "ongoing" and len(turns) <= 5:
+                turns.append(wb.turn(f"Game {game} is not finished. Continue playing it to the end."))
+                record = wb.call("/api/ttt")["games"][game - 1]
+            played = turns[-1]
+            turn_usage = usage(extract(trace, args.out / f"game-{game}", [turn["turn_id"] for turn in turns]))
             games.append({"game": game, "opponent": record["opponent"], "result": record["result"],
                           "moves": len(record["moves"]), "misplays": record["misplays"],
                           "illegal_moves": record["illegal_moves"], "picture": record["picture"],
-                          "started": started, **played, **turn_usage})
+                          "started": started, "turns": turns, "continuation_turns": len(turns) - 1,
+                          **played, **turn_usage})
             spent += turn_usage["cost"]
             print(f"game {game}: {record['result']} vs {record['opponent']}; {turn_usage['requests']} requests, "
                   f"${turn_usage['cost']:.5f}; reply: {(played['reply'] or '')[:120]!r}", flush=True)
+            if record["status"] == "ongoing":
+                stopped = f"invalid run: game {game} is ongoing after 5 continuation turns"
+                break
             if spent > args.budget:
                 stopped = f"spend ${spent:.4f} passed the ${args.budget} budget after game {game}"
                 break
@@ -183,10 +199,13 @@ def main():
     totals = {key: sum(turn[key] for turn in turns)
               for key in ("requests", "steps", "input_uncached", "cache_read", "cache_write", "output")}
     totals["cost"] = round(sum(turn["cost"] for turn in turns), 6)
-    totals["failed_turns"] = [turn["turn_id"] for turn in turns if turn["failed"]]
+    all_turns = [turn for game in games for turn in game["turns"]] + ([final] if final else [])
+    totals["failed_turns"] = [turn["turn_id"] for turn in all_turns if turn["failed"]]
+    totals["continuation_turns"] = sum(game["continuation_turns"] for game in games)
     results = {
         "settings": {key: (str(value) if isinstance(value, pathlib.Path) else value)
-                     for key, value in vars(args).items() if key != "env_file"},
+                     for key, value in vars(args).items() if key not in ("env_file", "channel")},
+        "channel": args.channel if args.policy != "standard" else None,
         "prompts": {"game_1": game_prompt(args, 1), "game_n": game_prompt(args, 2), "final": final_prompt(args)},
         "games": games,
         "final": final,

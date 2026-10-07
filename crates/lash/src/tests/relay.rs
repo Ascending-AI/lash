@@ -376,6 +376,60 @@ throw new Error("boom");"#,
     Ok(())
 }
 
+/// An exhausted relay step preserves its effect receipts but commits no baton;
+/// the next step runs with the last committed globals and the typed cause.
+#[tokio::test]
+async fn an_instruction_bound_exhausted_step_commits_nothing_and_the_turn_continues() -> Result<()>
+{
+    let served = Served::default();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (_core, session) = relay_session(
+        sqlite_memory_store_backend().await,
+        "relay-instruction-bound",
+        &served,
+        script(|request| match request.step {
+            1 => {
+                work(r#"await control.next({ context: ["kept"], vars: { count: { value: 1 } } });"#)
+            }
+            2 => work(
+                r#"count.value = 99;
+context.push("uncommitted");
+await tools.bump({});
+while (true) { count.value = count.value + 1; }"#,
+            ),
+            3 => work(r#"await control.next({ context: [...context, `count=${count.value}`] });"#),
+            _ => answer("recovered"),
+        }),
+        Arc::new(BumpTools {
+            calls: Arc::clone(&calls),
+        }),
+        None,
+    )
+    .await?;
+
+    let output = session
+        .send(TurnInput::text("recover the step"))
+        .output()
+        .await?;
+    assert_eq!(output.assistant_message(), Some("recovered"));
+    let requests = requests(&served);
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[2].context, ["kept"]);
+    assert!(
+        requests[2].message.contains(
+            "<last_step status=\"not committed: execution bound exhausted (instructions)\">"
+        ),
+        "{}",
+        requests[2].message
+    );
+    assert!(requests[2].message.contains("while (true)"));
+    assert!(requests[2].message.contains("<receipts>"));
+    assert!(requests[2].message.contains("tools.bump"));
+    assert_eq!(requests[3].context, ["kept", "count=1"]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
 /// A step that never calls `next` commits nothing, and the next step message
 /// says why.
 #[tokio::test]

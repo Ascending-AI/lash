@@ -15,6 +15,7 @@ pub(crate) fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
     code_renderer: crate::render::CodeRendererSlot,
+    execution_policy: crate::plugin::RlmExecutionPolicy,
 ) -> impl std::future::Future<Output = ExecResponse> {
     Box::pin(async move {
         if ctx.has_tool_run_owner() {
@@ -31,6 +32,7 @@ pub(crate) fn execute_code_with_channel_and_bounds_with_trigger_resolver(
                 execution_bounds,
                 channel,
                 code_renderer,
+                execution_policy,
             ))
             .await;
         }
@@ -51,6 +53,7 @@ pub(crate) fn execute_code_with_channel_and_bounds_with_trigger_resolver(
                     execution_bounds,
                     channel,
                     code_renderer,
+                    execution_policy,
                 ))
                 .await;
                 if !response.suspended

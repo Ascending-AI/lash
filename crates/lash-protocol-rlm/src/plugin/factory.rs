@@ -403,6 +403,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
             deferred_trigger_resolver: self.deferred_trigger_resolver.clone(),
             execution_bounds: config.execution_bounds(),
+            execution_policy: config.execution_policy,
             channel: config.channel,
         };
         let dialect = Arc::new(SessionDialect::new(

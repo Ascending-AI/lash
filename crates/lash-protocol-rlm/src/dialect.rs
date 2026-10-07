@@ -210,6 +210,7 @@ pub(crate) struct RlmDialectServices {
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     pub(crate) deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     pub(crate) execution_bounds: crate::plugin::ExecutionBounds,
+    pub(crate) execution_policy: crate::plugin::RlmExecutionPolicy,
     /// The session-pinned transport programs arrive on. Carried with the
     /// services because the executor needs it to decide whether cell-delimiter
     /// advice is true of the source the model actually wrote (FIG-2769).
@@ -276,6 +277,7 @@ impl SessionDialect {
                 deferred_trigger_resolver: None,
 
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                execution_policy: crate::plugin::RlmExecutionPolicy::Chronological,
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },
@@ -745,6 +747,7 @@ impl DialectSession {
             self.services.execution_bounds.into_engine(),
             self.services.channel,
             self.services.code_renderer.clone(),
+            self.services.execution_policy,
         )
         .await;
         self.state.mark_code_execution_response_returned();
@@ -1149,6 +1152,7 @@ pub(crate) fn test_dialect_services() -> RlmDialectServices {
         deferred_trigger_resolver: None,
 
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+        execution_policy: crate::plugin::RlmExecutionPolicy::Chronological,
         code_renderer: Default::default(),
         channel: crate::plugin::RlmChannel::Cell,
     }
