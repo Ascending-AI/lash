@@ -769,8 +769,9 @@ run against a service are never cached. Driver controls are
 Untrusted jobs keep their Cargo commands and receive no pool credentials.
 Local runs list service-shaped contracts they did not exercise, with recipes.
 
-PostgreSQL 18 is the one supported and tested major; there is no compatibility
-lane. Use `kiln gate lash <fork> -- <cmd>` for other live gates, with
+PostgreSQL 17 and 18 are supported; 18 is primary and the one development and
+CI major. 17 runs only in the release gate (`with-service.sh pg17 -- bash
+scripts/ci/store-tests.sh pg-release`). Use `kiln gate lash <fork> -- <cmd>` for other live gates, with
 identities and ports derived from `KILN_GATE_ID`.
 
 The ordinary partition retains ignored-test selection and exclusions. The five

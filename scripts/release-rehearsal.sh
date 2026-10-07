@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Rehearse the 1.0 baseline reset on this tree: apply the reset, build the
-# reset tree, and check it against the release baseline. Nothing compiles the
-# reset tree until this runs, so run it on origin/main on a schedule and burn
-# each red down on main by turning the literal it found into its owner's
-# constant or its generator.
+# reset tree, check it against the release baseline, and run the PostgreSQL
+# release legs on both supported majors, 18 and 17 (FIG-5209). Nothing
+# compiles the reset tree until this runs, so run it on origin/main on a
+# schedule and burn each red down on main by turning the literal it found into
+# its owner's constant or its generator.
 #
 # Run it in a disposable Kiln fork cut from origin/main, through that fork's
 # private PostgreSQL gate. It rewrites the working tree and never commits;
@@ -29,4 +30,5 @@ if [ "$#" -eq 0 ]; then
 fi
 kiln build "$@"
 python3 scripts/release_baseline.py check
-echo "release rehearsal: the reset tree of $(git rev-parse HEAD) builds and is at the release baseline" >&2
+bash scripts/ci/with-service.sh pg pg17 -- bash scripts/ci/store-tests.sh pg-release
+echo "release rehearsal: the reset tree of $(git rev-parse HEAD) builds, is at the release baseline and passes the PostgreSQL release legs on 18 and 17" >&2

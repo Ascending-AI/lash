@@ -1406,8 +1406,8 @@ jobs:
       (github.event_name == 'pull_request' && needs.plan.outputs.pr_pg_store == 'true')
       || (github.event_name != 'pull_request' && needs.plan.outputs.stores == 'true')
 
-    # PostgreSQL 18 is the one supported major for lash 1.0, so there is one
-    # PostgreSQL lane. Every event runs the package-wide store suites on it;
+    # PostgreSQL 18 is lash 1.0's primary major and CI's only one, so there is
+    # one PostgreSQL lane; 17 runs in the release gate alone. Every event runs the package-wide store suites on it;
     # full-profile runs add the pool-wait, simulator and cross-backend
     # coverage.
     steps:

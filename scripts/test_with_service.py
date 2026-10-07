@@ -4,8 +4,8 @@
 Two kinds of check live here.
 
 The contract half holds the wrapper to the CI jobs it runs inside: every suite
-the workflow dispatches goes through the wrapper, the PostgreSQL matrix majors
-are all declared services, the images the wrapper names are the images CI used
+the workflow dispatches goes through the wrapper, PostgreSQL 18 is CI's one
+major and 17 runs in the release gate alone, the images the wrapper names are the images CI used
 to start by hand, and `store-tests.sh` keeps service execution local and fresh
 while compilation uses the shared Buck2 pool.
 
@@ -32,8 +32,11 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WRAPPER = ROOT / "scripts" / "ci" / "with-service.sh"
 STORE_TESTS = ROOT / "scripts" / "ci" / "store-tests.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE = ROOT / ".github" / "workflows" / "release.yml"
+REHEARSAL = ROOT / "scripts" / "release-rehearsal.sh"
 
-SERVICES = ("pg", "s3")
+SERVICES = ("pg", "pg17", "s3")
+PINNED_POSTGRES = re.compile(r"postgres:(\d+)-alpine@(sha256:[0-9a-f]{64})")
 
 
 def workflow_text() -> str:
@@ -73,10 +76,61 @@ class WithServiceContract(unittest.TestCase):
                 else:
                     self.assertEqual("s3", service)
 
-    def test_postgresql_18_is_the_one_postgres_service(self) -> None:
-        """PostgreSQL 18 is the one supported major for lash 1.0."""
+    def test_postgresql_18_and_17_are_the_postgres_services(self) -> None:
+        """Lash 1.0 supports 17 and 18: `pg` runs 18 and `pg17` runs 17.
+
+        Each image is pinned by index digest, and no other PostgreSQL image
+        is named.
+        """
         table = wrapper_text()
-        self.assertEqual(["postgres:18-alpine"], re.findall(r"postgres:[0-9a-z.-]+", table))
+        self.assertEqual(
+            ["18", "17"], [major for major, _ in PINNED_POSTGRES.findall(table)]
+        )
+        self.assertEqual(2, len(re.findall(r"postgres:[0-9a-z.-]+", table)))
+        listing = subprocess.run(
+            ["bash", str(WRAPPER), "--list"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
+        images = dict(line.split("\t")[:2] for line in listing.splitlines() if "\t" in line)
+        self.assertRegex(images["pg"], r"^postgres:18-alpine@sha256:")
+        self.assertRegex(images["pg17"], r"^postgres:17-alpine@sha256:")
+
+    def test_the_release_pins_the_wrappers_18(self) -> None:
+        """release.yml's own PostgreSQL service is the 18 the wrapper runs."""
+        pinned = dict(PINNED_POSTGRES.findall(wrapper_text()))
+        release = RELEASE.read_text(encoding="utf-8")
+        self.assertEqual(
+            [f"postgres@{pinned['18']} # postgres:18-alpine"],
+            re.findall(r"postgres@sha256:[0-9a-f]{64} # postgres:[0-9a-z-]+", release),
+        )
+
+    def test_17_runs_in_the_release_gate_alone(self) -> None:
+        """CI never starts 17; the release runs every PostgreSQL leg on both.
+
+        The release workflow's `release-postgres` job runs `pg-release` under
+        `pg` and `pg17`, and publishing waits for it; the cut rehearsal runs
+        the same suite on both majors.
+        """
+        self.assertNotIn("pg17", workflow_text())
+        import yaml
+
+        release = yaml.safe_load(RELEASE.read_text(encoding="utf-8"))
+        job = release["jobs"]["release-postgres"]
+        self.assertEqual(
+            ["pg", "pg17"], [row["service"] for row in job["strategy"]["matrix"]["include"]]
+        )
+        runs = "\n".join(step.get("run", "") for step in job["steps"])
+        self.assertIn("scripts/ci/store-build.sh pg-release", runs)
+        self.assertIn('with-service.sh "${SERVICE}" -- \\\n', runs)
+        self.assertIn("bash scripts/ci/store-tests.sh pg-release", runs)
+        self.assertIn("release-postgres", release["jobs"]["publish-crates"]["needs"])
+        self.assertIn(
+            "bash scripts/ci/with-service.sh pg pg17 -- bash scripts/ci/store-tests.sh pg-release",
+            REHEARSAL.read_text(encoding="utf-8"),
+        )
 
     def test_images_are_declared_once_and_only_in_the_wrapper(self) -> None:
         """CI starts nothing itself, so it names no image."""
@@ -234,16 +288,48 @@ class WithServiceBehaviour(unittest.TestCase):
         timeout: int = 120,
     ) -> tuple[subprocess.CompletedProcess[str], FakeDocker]:
         docker = FakeDocker(directory, ready=ready)
+        env = docker.env()
+        env["XDG_CACHE_HOME"] = str(self.cached_postgres_17_tree(directory))
         result = subprocess.run(
             ["bash", str(WRAPPER), *args],
             cwd=ROOT,
-            env=docker.env(),
+            env=env,
             text=True,
             capture_output=True,
             check=False,
             timeout=timeout,
         )
         return result, docker
+
+    @staticmethod
+    def cached_postgres_17_tree(directory: pathlib.Path) -> pathlib.Path:
+        """A cache holding a current PostgreSQL 17 tree, so `pg17` fetches nothing."""
+        text = wrapper_text()
+        version = re.search(r'PG17_TREE_VERSION="([0-9.]+)"', text).group(1)
+        digest = re.search(r'PG17_TREE_SHA256="([0-9a-f]{64})"', text).group(1)
+        cache = directory / "cache"
+        tree = cache / "lash" / f"postgres-{version}"
+        tree.mkdir(parents=True, exist_ok=True)
+        (tree / ".lash-postgres-tree").write_text(digest, encoding="utf-8")
+        return cache
+
+    def test_pg17_hands_its_server_tree_to_the_command(self) -> None:
+        """A leg that owns its server runs the major its service names.
+
+        `pg17` exports the pinned 17 tree as LASH_WORKERS_POSTGRES; `pg`
+        exports nothing, so such a leg keeps its target's 18.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            command = ["--", "bash", "-c", 'echo "${LASH_WORKERS_POSTGRES:-unset}"']
+            result, _ = self.run_wrapper(directory, ["pg17", *command])
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertRegex(
+                result.stdout.strip(), rf"^{re.escape(raw)}/cache/lash/postgres-17\.[0-9.]+$"
+            )
+            result, _ = self.run_wrapper(directory, ["pg", *command])
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("unset", result.stdout.strip())
 
     def test_the_chosen_port_reaches_the_command(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -269,22 +355,23 @@ class WithServiceBehaviour(unittest.TestCase):
             self.assertIn(f"--publish 127.0.0.1:{port}:5432", published[0])
 
     def test_pg_trades_durability_for_speed(self) -> None:
-        """pg's container runs without fsync/synchronous_commit/full_page_writes.
+        """Both PostgreSQL containers run without fsync/synchronous_commit/full_page_writes.
 
-        Its database is throwaway, and its crash tests kill lash processes or
-        the engine, never the host OS, so the page cache is all the
-        durability it needs.
+        Their databases are throwaway, and their crash tests kill lash
+        processes or the engine, never the host OS, so the page cache is all
+        the durability they need.
         """
-        with tempfile.TemporaryDirectory() as raw:
-            result, docker = self.run_wrapper(pathlib.Path(raw), ["pg", "--", "true"])
-            self.assertEqual(0, result.returncode, result.stderr)
-            published = [
-                call for call in docker.logged() if call.startswith("run --detach")
-            ]
-            self.assertEqual(1, len(published))
-            for flag in ("fsync", "synchronous_commit", "full_page_writes"):
-                with self.subTest(flag=flag):
-                    self.assertIn(f"-c {flag}=off", published[0])
+        for service in ("pg", "pg17"):
+            with self.subTest(service=service), tempfile.TemporaryDirectory() as raw:
+                result, docker = self.run_wrapper(pathlib.Path(raw), [service, "--", "true"])
+                self.assertEqual(0, result.returncode, result.stderr)
+                published = [
+                    call for call in docker.logged() if call.startswith("run --detach")
+                ]
+                self.assertEqual(1, len(published))
+                for flag in ("fsync", "synchronous_commit", "full_page_writes"):
+                    with self.subTest(service=service, flag=flag):
+                        self.assertIn(f"-c {flag}=off", published[0])
 
     def test_the_container_is_removed_after_a_passing_command(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

@@ -335,6 +335,73 @@ jobs:
           path: target/functional-e2e-artifacts/latency-gate
           if-no-files-found: warn
 
+  # Lash 1.0 supports PostgreSQL 17 and 18 (FIG-5209). CI runs 18 alone, so
+  # the release runs the PostgreSQL legs on both majors: the store's unit,
+  # conformance, schema-shape and version-stamp suites, the durable crash
+  # proofs, the crash matrix, the failover cases and the cross-backend
+  # differential (`scripts/ci/store-tests.sh pg-release`). Each leg runs
+  # against the job's server, so `with-service.sh` owns both images, each
+  # pinned by index digest: `pg` is the 18 the perf guard above pins, `pg17`
+  # is 17.11. Every leg runs and the step names each red one.
+  release-postgres:
+    name: PostgreSQL ${{ matrix.major }} release legs
+    needs: prepare-release
+    environment: build-cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: pg
+            major: "18"
+          - service: pg17
+            major: "17"
+    env:
+      BUCK2_TRUSTED: "true"
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          persist-credentials: false
+
+      - name: Configure shared build cache
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      # One remote build of every binary the legs run, before the server's
+      # slots open (scripts/ci/store-build.sh).
+      - name: Build the release legs' test binaries
+        run: bash scripts/ci/store-build.sh pg-release
+
+      - name: Run the PostgreSQL release legs
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          bash scripts/ci/with-service.sh "${SERVICE}" -- \
+            bash scripts/ci/store-tests.sh pg-release
+
+      - name: Upload PostgreSQL Buck2 reports and event logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-postgres-${{ matrix.major }}-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/store-test-results/
+          if-no-files-found: ignore
+          include-hidden-files: true
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
   package-crates:
     name: Dry-run package publishable crates
     runs-on: ubuntu-24.04
@@ -402,7 +469,7 @@ jobs:
     runs-on: ubuntu-latest
     # Per-layer crates.io index-visibility waits are externally paced.
     timeout-minutes: 20
-    needs: [prepare-release, validate-release-preconditions, validate-release-ref, package-crates, latency-gate]
+    needs: [prepare-release, validate-release-preconditions, validate-release-ref, release-postgres, package-crates, latency-gate]
     # CARGO_REGISTRY_TOKEN lives in the `main` GitHub Environment; a job must
     # declare the environment to read its secrets.
     environment: main

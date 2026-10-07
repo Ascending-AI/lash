@@ -721,7 +721,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         dispatch_needs["workspace-tests"]["result"] = "skipped"
         dispatch_needs["check"]["result"] = "skipped"
         self.assertEqual(evaluate(dispatch_needs, "workflow_dispatch"), [])
-        # PostgreSQL 18 is the one supported major: the job names no major
+        # CI runs PostgreSQL 18 alone: the job names no major
         # of its own, and every step runs on the one `pg` service. The
         # focused contract tests in test_ci_plan.py evaluate step selection.
         postgres = workflow_job_block(workflow, "postgres-store")
@@ -1714,7 +1714,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             release_assets["files"].splitlines(),
         )
         self.assertIn(
-            "needs: [prepare-release, validate-release-preconditions, validate-release-ref, package-crates, latency-gate]",
+            "needs: [prepare-release, validate-release-preconditions, validate-release-ref, release-postgres, package-crates, latency-gate]",
             publish_crates,
         )
         self.assertIn("runs-on: ubuntu-24.04", validate_release)
@@ -2344,12 +2344,15 @@ derive_mutation_jobs() {{
         three arms and "both halves non-empty" for the rest.
 
         Every workflow suite participates, including newly registered suites.
-        Three keep explicit arms because their shape varies (`pg-store`,
+        Four keep explicit arms because their shape varies (`pg-store`,
         `pg-store-synthetic-next` and `s3-store` take generated inventory
-        labels rather than one label).
+        labels rather than one label, and the release gate's `pg-release`
+        runs several selections and labels).
         """
         script = STORE_TESTS.read_text(encoding="utf-8")
-        workflow = WORKFLOW.read_text(encoding="utf-8")
+        workflow = WORKFLOW.read_text(encoding="utf-8") + RELEASE_WORKFLOW.read_text(
+            encoding="utf-8"
+        )
 
         table_body = script.split("declare -A uniform_store_suites=(\n", 1)[1]
         table_body = table_body.split("\n)\n", 1)[0]
@@ -2365,6 +2368,7 @@ derive_mutation_jobs() {{
         self.assertTrue(uniform)
         self.assertEqual(
             {
+                "pg-release",
                 "pg-store",
                 "pg-store-synthetic-next",
                 "s3-store",
@@ -3000,7 +3004,7 @@ class ReleaseDryRunTests(unittest.TestCase):
                           "type": "boolean", "default": False}, inputs["dry_run"])
         jobs = workflow["jobs"]
         validators = {"validate-release-preconditions", "validate-release-ref",
-                      "latency-gate", "package-crates", "worker-artifacts"}
+                      "release-postgres", "latency-gate", "package-crates", "worker-artifacts"}
         self.assertEqual(validators | {"prepare-release", "publish-crates", "publish"}, set(jobs))
         for name in validators:
             with self.subTest(job=name):

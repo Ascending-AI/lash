@@ -26,6 +26,7 @@
 #
 # Example:
 #   scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-store
+#   scripts/ci/with-service.sh pg pg17 -- bash scripts/ci/store-tests.sh pg-release
 set -euo pipefail
 
 readonly PROGRAM="scripts/ci/with-service.sh"
@@ -43,8 +44,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/s3-service.sh"
 # final server, never its socket-only temporary init server.
 # shellcheck source=scripts/ci/pg-service.sh
 source "$(dirname "${BASH_SOURCE[0]}")/pg-service.sh"
-readonly SERVICES=(pg s3)
-# The services `all` expands to: the store containers.
+readonly SERVICES=(pg pg17 s3)
+# The services `all` expands to: the store containers. `pg17` is the release
+# gate's alone, so `all` leaves it out.
 readonly ALL_SERVICES=(pg s3)
 # Databases a PostgreSQL service carries beside the default `lash`, one per
 # test that `scripts/ci/store-tests.sh pg-store` runs at once. Each is named
@@ -52,23 +54,41 @@ readonly ALL_SERVICES=(pg s3)
 # test action so the sharded suites never share tables (FIG-3572).
 readonly POSTGRES_SLOT_COUNT=4
 
+# Lash 1.0 supports PostgreSQL 17 and 18. 18 is the primary major: every CI
+# lane and the hermetic test server (`native//:postgres`, zonky 18.6.0) run
+# it. 17 runs only in the release gate (`store-tests.sh pg-release` under
+# `pg17`). Each image is pinned by its index digest to the same patch release
+# as the server tree of that major, and release.yml pins the same 18.
+readonly PG18_IMAGE="postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
+readonly PG17_IMAGE="postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
+# The legs that own a server so they can stop and restart it
+# (//crates/lash-postgres-workers:failover__test) take a server tree, not a
+# container. On `pg` the target's own `native//:postgres` is that tree; on
+# `pg17` it is this one, the zonky build of the same 17.11 the image runs,
+# handed to them as LASH_WORKERS_POSTGRES.
+readonly PG17_TREE_VERSION="17.11.0"
+readonly PG17_TREE_URL="https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/${PG17_TREE_VERSION}/embedded-postgres-binaries-linux-amd64-${PG17_TREE_VERSION}.jar"
+readonly PG17_TREE_SHA256="0dd7b72b6f335b8ecfb355fa24c5781e8a93edd09880bb77eb52ebbf29b3e96d"
+
 service_description() {
   case "$1" in
-    pg) echo "PostgreSQL 18, the one supported major (conformance, pool-wait, agent scenario, cross-backend)" ;;
+    pg) echo "PostgreSQL 18, the primary major (conformance, pool-wait, agent scenario, cross-backend)" ;;
+    pg17) echo "PostgreSQL 17, the second supported major; the release gate runs it" ;;
     s3) echo "Garage S3 object store (S3 conformance + attachment blob-store differential)" ;;
   esac
 }
 
 service_image() {
   case "$1" in
-    pg) echo "postgres:18-alpine" ;;
+    pg) echo "$PG18_IMAGE" ;;
+    pg17) echo "$PG17_IMAGE" ;;
     s3) echo "$LASH_S3_IMAGE" ;;
   esac
 }
 
 service_container_port() {
   case "$1" in
-    pg) echo 5432 ;;
+    pg | pg17) echo 5432 ;;
     s3) echo "$LASH_S3_CONTAINER_PORT" ;;
   esac
 }
@@ -77,7 +97,7 @@ service_container_port() {
 # Sets RUN_ARGS and RUN_COMMAND.
 service_run_spec() {
   case "$1" in
-    pg)
+    pg | pg17)
       # A linguistic default collation, so the suites that compare key order
       # against the database's own locale have one to compare against: the
       # alpine images' libc locale sorts bytewise even when named en_US.utf8
@@ -120,11 +140,14 @@ service_run_spec() {
 service_test_env() {
   local name="$1" port="$2"
   case "$name" in
-    pg)
+    pg | pg17)
       TEST_ENV=(
         "LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:${port}/lash"
         "LASH_POSTGRES_SLOT_COUNT=${POSTGRES_SLOT_COUNT}"
       )
+      if [ "$name" = pg17 ]; then
+        TEST_ENV+=("LASH_WORKERS_POSTGRES=$(postgres_tree_dir)")
+      fi
       ;;
     s3)
       mapfile -t TEST_ENV < <(lash_s3_test_env "$port")
@@ -135,14 +158,14 @@ service_test_env() {
 # The readiness budget: 30 x 2s for PostgreSQL, 60 x 1s for the S3 service.
 service_ready_attempts() {
   case "$1" in
-    pg) echo 30 ;;
+    pg | pg17) echo 30 ;;
     s3) echo 60 ;;
   esac
 }
 
 service_ready_interval() {
   case "$1" in
-    pg) echo 2 ;;
+    pg | pg17) echo 2 ;;
     s3) echo 1 ;;
   esac
 }
@@ -154,7 +177,7 @@ service_ready_interval() {
 service_ready_probe() {
   local name="$1" container="$2" port="$3"
   case "$name" in
-    pg)
+    pg | pg17)
       lash_pg_ready docker exec "$container"
       ;;
     s3)
@@ -168,7 +191,7 @@ service_setup() {
   local name="$1" container="$2" port="$3"
   local index
   case "$name" in
-    pg)
+    pg | pg17)
       for ((index = 0; index < POSTGRES_SLOT_COUNT; index++)); do
         docker exec "$container" psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
           -c "CREATE DATABASE lash_slot_${index}" >/dev/null
@@ -180,9 +203,62 @@ service_setup() {
         docker exec -i "$container" psql -U lash -d "$database" -v ON_ERROR_STOP=1 -q \
           < crates/lash-postgres-store/schema.sql >/dev/null
       done
+      if [ "$name" = pg17 ]; then
+        fetch_postgres_tree
+      fi
       ;;
     *) : ;;
   esac
+}
+
+# Where the PostgreSQL 17 server tree lives: a per-user cache keyed by the
+# pinned build, so a second run reuses it.
+postgres_tree_dir() {
+  echo "${XDG_CACHE_HOME:-$HOME/.cache}/lash/postgres-${PG17_TREE_VERSION}"
+}
+
+# Download the pinned PostgreSQL 17 tree once, check its digest, and unpack
+# it the way tools/buck2/bootstrap_native_tools.py unpacks the 18 tree: the
+# jar's inner txz is the tree. A tree is current when its receipt names the
+# pinned digest; anything else is replaced.
+fetch_postgres_tree() {
+  local tree receipt
+  tree="$(postgres_tree_dir)"
+  receipt="${tree}/.lash-postgres-tree"
+  if [ -f "$receipt" ] && [ "$(cat "$receipt")" = "$PG17_TREE_SHA256" ]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$tree")"
+  python3 - "$PG17_TREE_URL" "$PG17_TREE_SHA256" "$tree" <<'PY'
+import hashlib
+import io
+import pathlib
+import shutil
+import sys
+import tarfile
+import tempfile
+import urllib.request
+import zipfile
+
+url, digest, tree = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3])
+with urllib.request.urlopen(url, timeout=120) as response:
+    jar = response.read()
+actual = hashlib.sha256(jar).hexdigest()
+if actual != digest:
+    raise SystemExit(f"{url}: sha256 {actual}, pinned {digest}")
+with zipfile.ZipFile(io.BytesIO(jar)) as archive:
+    inner = archive.read("postgres-linux-x86_64.txz")
+stage = pathlib.Path(tempfile.mkdtemp(prefix=tree.name + ".", dir=tree.parent))
+with tarfile.open(fileobj=io.BytesIO(inner), mode="r:xz") as members:
+    members.extractall(stage, filter="tar")
+for required in ("bin/initdb", "bin/postgres", "bin/pg_ctl"):
+    if not (stage / required).is_file():
+        raise SystemExit(f"{url}: the tree has no {required}")
+(stage / ".lash-postgres-tree").write_text(digest, encoding="utf-8")
+shutil.rmtree(tree, ignore_errors=True)
+stage.rename(tree)
+PY
+  note "pg17: server tree ${PG17_TREE_VERSION} at ${tree}"
 }
 
 # The closing report: service-shaped work this wrapper does NOT cover, and the

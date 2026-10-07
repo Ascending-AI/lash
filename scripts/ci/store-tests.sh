@@ -91,7 +91,8 @@ buck2_test() {
   for name in \
     LASH_POSTGRES_DATABASE_URL \
     LASH_REQUIRE_S3 LASH_S3_ENDPOINT LASH_S3_REGION LASH_S3_BUCKET \
-    LASH_S3_ACCESS_KEY LASH_S3_SECRET_KEY LASH_CROSS_BACKEND_CASES; do
+    LASH_S3_ACCESS_KEY LASH_S3_SECRET_KEY LASH_CROSS_BACKEND_CASES \
+    LASH_WORKERS_POSTGRES; do
     if [[ -v "$name" ]]; then
       test_env+=(--test_env "$name")
     fi
@@ -297,6 +298,26 @@ run_uniform_store_suite() {
   fi
 }
 
+# The release gate's PostgreSQL legs (FIG-5209), one row each:
+#
+#   name|server|libtest arguments|Buck2 labels|Cargo package and targets
+#
+# Lash 1.0 supports PostgreSQL 17 and 18, and the hermetic server is 18 alone,
+# so `pg-release` runs every leg against the major `with-service.sh` started.
+# A `shared` leg uses the job's server, a slot database per Buck2 test action.
+# An `owned` leg starts its own server so it can stop and restart it: the
+# target's `native//:postgres` (18), or the tree `with-service.sh pg17` hands
+# over as LASH_WORKERS_POSTGRES (the Cargo half always needs that variable).
+# The store row covers the schema apply, the committed shape artifact and the
+# version stamp. The cross-backend differential runs as its own uniform suite
+# after these.
+release_legs() {
+  echo "store|shared||$(labels postgres default)|-p lash-internal-postgres-store"
+  echo "durable-crash-proof|shared|on_postgres|//crates/lash-durable-test:vertical_crash_proof__test //crates/lash-durable-test:turn_phases__test|-p lash-internal-durable-test --test vertical_crash_proof --test turn_phases"
+  echo "crash-matrix|shared|the_crash_matrix_holds_on_postgres --include-ignored|//crates/lash-sim:crash_matrix__test|-p lash-sim --test crash_matrix"
+  echo "failover|owned||//crates/lash-postgres-workers:failover__test|-p lash-internal-postgres-workers --test failover"
+}
+
 # Every label a suite executes, for the build that precedes the service.
 suite_labels() {
   if [ -n "${uniform_store_suites[$1]+set}" ]; then
@@ -305,6 +326,13 @@ suite_labels() {
   fi
   local listed
   case "$1" in
+    pg-release)
+      local name server arguments listed cargo
+      while IFS='|' read -r name server arguments listed cargo; do
+        tr ' ' '\n' <<<"$listed"
+      done < <(release_legs)
+      suite_labels pg-cross-backend
+      ;;
     pg-store) labels postgres default ;;
     pg-store-synthetic-next) labels postgres synthetic-next ;;
     s3-store) labels s3 ;;
@@ -353,6 +381,51 @@ case "${suite}" in
       cargo_test cargo test -p lash-internal-postgres-store --locked --no-default-features \
         --features synthetic-next
     fi
+    ;;
+
+  # Every leg runs, and the suite fails at the end naming each red one, so a
+  # release candidate reports all of its reds at once.
+  pg-release)
+    export LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_CASES:-4}"
+    failed_legs=()
+    run_release_leg() {
+      local name="$1"
+      shift
+      echo "pg-release: ${name}" >&2
+      set +e
+      (
+        set -e
+        "$@"
+      )
+      local code=$?
+      set -e
+      if ((code != 0)); then
+        failed_legs+=("$name")
+      fi
+    }
+    mapfile -t rows < <(release_legs)
+    for row in "${rows[@]}"; do
+      IFS='|' read -r name server arguments listed cargo <<<"$row"
+      read -r -a libtest <<<"$arguments"
+      if [ "${trusted}" = true ]; then
+        read -r -a listed_labels <<<"$listed"
+        runner=postgres_slot_test
+        [ "$server" = owned ] && runner=buck2_test
+        run_release_leg "$name" "$runner" \
+          "${libtest[@]/#/--test_arg=}" "${listed_labels[@]}"
+      else
+        read -r -a targets <<<"$cargo"
+        ((${#libtest[@]} > 0)) && libtest=(-- "${libtest[@]}")
+        run_release_leg "$name" cargo_test cargo test "${targets[@]}" --locked \
+          "${libtest[@]}"
+      fi
+    done
+    run_release_leg cross-backend run_uniform_store_suite pg-cross-backend
+    if ((${#failed_legs[@]} > 0)); then
+      echo "pg-release: failed legs: ${failed_legs[*]}" >&2
+      exit 1
+    fi
+    echo "pg-release: every leg passed" >&2
     ;;
 
   s3-store)

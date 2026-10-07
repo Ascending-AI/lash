@@ -64,8 +64,9 @@ kiln gate lash cut-rehearsal -- env BAZEL_TRUSTED=true \
 kiln rm lash cut-rehearsal
 ```
 
-It applies the reset, builds the workspace and runs `release_baseline.py
-check`. Fix each red on main by replacing the literal it found with its
+It applies the reset, builds the workspace, runs `release_baseline.py check`,
+and then runs the PostgreSQL release legs (`store-tests.sh pg-release`) on
+both supported majors, 18 and 17. Fix each red on main by replacing the literal it found with its
 owner's constant or a generated table; never patch the reset tree by hand.
 
 The production catalog and fresh-ledger laws run today; synthetic-next keeps

@@ -528,6 +528,12 @@ class WorkflowTests(unittest.TestCase):
             ],
             suites,
         )
+        # The release gate runs one suite of its own on both supported
+        # PostgreSQL majors; it always takes the trusted path.
+        release = workflow("release.yml")["jobs"]["release-postgres"]
+        self.assertEqual("true", release["env"]["BUCK2_TRUSTED"])
+        self.assertEqual(["pg-release"], store_suites(release))
+        suites += store_suites(release)
         script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
         shaped = set(re.findall(r"^  ([a-z0-9-]+)\)$", script, re.MULTILINE))
         table = script.split("declare -A uniform_store_suites=(\n", 1)[1].split("\n)\n", 1)[0]

@@ -1934,7 +1934,7 @@ class PostgresJobTests(unittest.TestCase):
     }
 
     def test_every_postgres_step_runs_on_the_one_service(self) -> None:
-        """PostgreSQL 18 is the one supported major: one job, one service, no matrix."""
+        """CI runs PostgreSQL 18 alone: one job, one service, no matrix."""
         postgres = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
             "postgres-store"
         ]

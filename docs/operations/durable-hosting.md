@@ -191,8 +191,9 @@ the `Drain` its `NodeServe` holds, and `serve` returns `Stopped::Drained`.
 
 ## 2. PostgreSQL topology
 
-PostgreSQL 18 is the one supported version for lash 1.0; lash tests no other
-major.
+PostgreSQL 17 and 18 are supported for lash 1.0; 18 is primary. Lash's CI
+runs 18, and every release also passes its PostgreSQL suites on 17. Nothing
+older than 17 is supported.
 
 ### Connections
 

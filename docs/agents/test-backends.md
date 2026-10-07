@@ -23,10 +23,16 @@ reachable without claiming a backend law ran.
 | SQLite memory | `crates/lash-sqlite-store/tests/conformance_memory.rs` loads the same `conformance/suite.rs`; `//crates/lash-sqlite-store:conformance_memory__test` | `kiln test //crates/lash-sqlite-store:conformance_memory__test`. The cacheable CI workspace partition includes it. This is a named SQLite memdb store set, with SQL transactions and constraints. |
 | PostgreSQL | `crates/lash-postgres-store/tests/conformance.rs`; `//crates/lash-postgres-store:conformance__test` and its service shards | CI's `postgres-store` job runs `scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-store`. It executes the package's service binaries, including integration, schema and atomicity suites, with an explicit PostgreSQL URL and ignored-test selection. Locally run `kiln gate lash <fork> -- env BAZEL_TRUSTED=true bash scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-store`. |
 
-PostgreSQL 18 is the one supported version for lash 1.0, and the only one
-lash tests: the hermetic server (`native//:postgres`), the `pg` service of
-`with-service.sh` and every workflow pin name 18. There is no compatibility
-lane and no older minimum. The commands and test selection live in
+PostgreSQL 17 and 18 are supported for lash 1.0; 18 is primary. Development
+and CI run 18 alone: the hermetic server (`native//:postgres`), the `pg`
+service of `with-service.sh` and every CI pin name it. The release gate also
+runs on 17: the release workflow's `release-postgres` job and
+`scripts/release-rehearsal.sh` run `store-tests.sh pg-release` (the store's
+unit, conformance, schema-shape and version-stamp suites, the durable crash
+proofs, the crash matrix, the failover cases and the cross-backend
+differential) under both `with-service.sh pg` and `with-service.sh pg17`.
+`schema-shape.txt` is rendered on 18, and 17 must match it. Nothing older than
+17 is supported. The commands and test selection live in
 [store-tests.sh](../../scripts/ci/store-tests.sh) and the
 [CI workflow](../../.github/workflows/ci.yml). Service tests need their require
 flags and a live service; a skipped service test is not law execution evidence.
