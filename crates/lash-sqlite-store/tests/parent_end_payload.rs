@@ -82,7 +82,7 @@ async fn a_parent_scope_row_is_refused_as_malformed() {
 
     let scope = turn_scope("v2-session", "v2-turn");
     let payload = serde_json::json!({
-        "version": 2,
+        "version": lash_core_execution::SCOPE_STORAGE_PAYLOAD_VERSION,
         "scope": {"kind": "turn", "session_id": "v2-session", "turn_id": "v2-turn"},
     })
     .to_string();

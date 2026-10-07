@@ -33,7 +33,7 @@ pub const TIMER_STEP: &str = "timer";
 /// )
 /// version_surface = "drain"
 /// format_manifest = "LashlangSegmentHandover"
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 23;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 1;
 
 /// A lashlang process's engine state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

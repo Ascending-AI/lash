@@ -79,7 +79,7 @@ use thiserror::Error;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "RlmSnapshotEnvelope"
-pub const RLM_SNAPSHOT_VERSION: u32 = 26;
+pub const RLM_SNAPSHOT_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 26's shape; its `Lift::Decoder` row admits N's
@@ -87,7 +87,7 @@ pub const RLM_SNAPSHOT_VERSION: u32 = 26;
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "RlmSnapshotEnvelope"
-pub const RLM_SNAPSHOT_VERSION: u32 = 27;
+pub const RLM_SNAPSHOT_VERSION: u32 = 2;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

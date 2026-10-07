@@ -24,7 +24,7 @@ impl ExecutionHost for SleepHost {
 #[cfg(feature = "synthetic-next")]
 #[tokio::test]
 async fn n_parked_state_resumes_on_synthetic_next() {
-    assert_eq!(VM_CONTINUATION_FORMAT_VERSION, 30);
+    assert_eq!(VM_CONTINUATION_FORMAT_VERSION, 2);
     let program = crate::testing::harness::try_compile_program(&b::program(vec![
         b::sleep_for(b::num(1.0)),
         b::finish(b::num(7.0)),
@@ -42,10 +42,10 @@ async fn n_parked_state_resumes_on_synthetic_next() {
     let mut wire = serde_json::to_value(vm.suspend().expect("park N's process"))
         .expect("serialize the continuation");
     // The synthetic predecessor and successor have the same payload shape;
-    wire["format_version"] = serde_json::json!(29);
+    wire["format_version"] = serde_json::json!(1);
     let mut predecessor = vm_contract_versions();
-    predecessor.continuation = 29;
-    predecessor.snapshot = 14;
+    predecessor.continuation = 1;
+    predecessor.snapshot = 1;
     let owner = VmOwner::new("process:upgrade-witness");
     let parked = OpaqueVmState::seal(
         VmStateKind::Continuation,
@@ -118,8 +118,8 @@ fn rollback_admits_only_versions_inside_n_ranges() {
     let owner = VmOwner::new("process:rollback-witness");
     let next = vm_contract_versions();
     let mut predecessor = next;
-    predecessor.continuation = 29;
-    predecessor.snapshot = 14;
+    predecessor.continuation = 1;
+    predecessor.snapshot = 1;
     let reads = predecessor.exact_reads();
     for (kind, format, component, range) in [
         (
@@ -173,11 +173,11 @@ fn rollback_admits_only_versions_inside_n_ranges() {
 fn n_snapshot_reaches_the_guarded_decoder_on_synthetic_next() {
     let snapshot = Snapshot::new(Record::new());
     let bytes = snapshot
-        .to_canonical_bytes_stamped(crate::runtime::SnapshotStamps { snapshot: 14 })
+        .to_canonical_bytes_stamped(crate::runtime::SnapshotStamps { snapshot: 1 })
         .expect("encode N's snapshot");
     let mut contract = vm_contract_versions();
-    contract.continuation = 29;
-    contract.snapshot = 14;
+    contract.continuation = 1;
+    contract.snapshot = 1;
     let owner = VmOwner::new("session:upgrade-witness");
     let parked = OpaqueVmState::seal(VmStateKind::Snapshot, owner.clone(), contract, bytes);
     assert_eq!(

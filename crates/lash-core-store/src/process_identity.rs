@@ -711,14 +711,14 @@ impl fmt::Display for RetiredProcessStatus {
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "ProcessWakeDelivery"
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 4;
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 4's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "ProcessWakeDelivery"
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 5;
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 2;
 
 /// version_guard(
 ///     items(process_wake_identity_preimage),

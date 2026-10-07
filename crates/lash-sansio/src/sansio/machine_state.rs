@@ -53,10 +53,12 @@ use super::*;
 /// )
 /// version_surface = "drain"
 /// format_manifest = "TurnCheckpoint"
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 11;
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 1;
 
+/// The version an unstamped checkpoint reads as: older than every version
+/// this build reads, so it is refused.
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
-    1
+    0
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

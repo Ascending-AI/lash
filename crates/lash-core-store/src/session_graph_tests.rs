@@ -451,14 +451,14 @@ fn stored_bodies_below_the_supported_generation_are_refused() {
 #[cfg(feature = "synthetic-next")]
 #[test]
 fn supported_older_stored_bodies_remain_readable_after_finalize() {
-    let older = r#"{"schema_version":22,"timestamp":"2026-08-18T00:00:00.000000000Z","kind":"plugin","plugin_type":"older-history","body":{"value":7}}"#;
+    let older = r#"{"schema_version":1,"timestamp":"2026-08-18T00:00:00.000000000Z","kind":"plugin","plugin_type":"older-history","body":{"value":7}}"#;
 
     for epoch in [1, 2] {
         let fleet = crate::store::FleetFormat::from_version(epoch);
         let window = fleet.read_window(crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION));
-        assert_eq!(window.oldest(), 22);
-        assert_eq!(window.newest(), 23);
-        assert!(window.admits(22));
+        assert_eq!(window.oldest(), 1);
+        assert_eq!(window.newest(), 2);
+        assert!(window.admits(1));
         let decoded = SessionNodeRecord::decode_storage_body_for_fleet(
             "node-1".to_string(),
             Some("parent-1".to_string()),

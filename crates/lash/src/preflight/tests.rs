@@ -26,7 +26,9 @@ use lash_core::{
 };
 
 use super::*;
-use crate::formats::{RLM_SNAPSHOT_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION};
+use crate::formats::{
+    CHECKPOINT_COMPONENT_ENCODING_VERSION, RLM_SNAPSHOT_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION,
+};
 
 /// A handle whose surfaces are exactly what a test declares.
 #[derive(Default)]
@@ -251,7 +253,11 @@ fn healthy_store() -> FakeStore {
         .with_database("durable core", 37, StoreSchemaVerdict::Matches)
         .with_items(
             DurableSurface::SessionCheckpoint,
-            vec![checkpoint_item("s-1", SESSION_CHECKPOINT_SCHEMA_VERSION, 2)],
+            vec![checkpoint_item(
+                "s-1",
+                SESSION_CHECKPOINT_SCHEMA_VERSION,
+                CHECKPOINT_COMPONENT_ENCODING_VERSION,
+            )],
         )
         .with_items(
             DurableSurface::SessionExecutionState,

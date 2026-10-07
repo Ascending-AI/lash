@@ -202,7 +202,7 @@ fn turn_checkpoint_restore_refuses_every_non_current_version() {
     );
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
 
-    for actual in [1, 2, 5, 99, u32::MAX] {
+    for actual in [0, 2, 5, 99, u32::MAX] {
         let mut incompatible = encoded.clone();
         incompatible["checkpoint"]["schema_version"] = serde_json::json!(actual);
         let checkpoint: SavedTurn =
