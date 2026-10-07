@@ -454,9 +454,6 @@ fn colliding_host_catalog() -> lash_core::ToolCatalog {
     ])
 }
 
-/// Pauses after the first journaled cell checkpoint has observed no stop.
-/// The VM reaches this effect only after running 2^20 instructions in the
-
 async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
     let mut state = RlmExecutionState::new();
     let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
@@ -732,14 +729,6 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
     });
 }
 
-/// A typo is not a policy refusal.
-///
-/// Classifying every compile failure as Policy produced the one thing
-/// the typed distinction exists to prevent: `unknown name \`task\`` arrived under "the
-/// runtime refused this cell; sending it again unchanged will be refused
-/// again. Rewrite it in the form named above" — with no form named above,
-/// because a misspelled identifier has no accepted alternative form. The
-
 pub(super) fn hydrate_snapshot_against(
     snapshot: lash_core::plugin::ExecutionStateCapture,
     prior: &lash_core::plugin::HydratedExecutionState,
@@ -836,7 +825,6 @@ pub(super) async fn execute_continue_as_with_trace_sink(
 }
 
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 pub(super) fn resource_call_identity_is_trace_sink_independent() {
     block_on(async {
         let without_trace = Box::pin(execute_continue_as_with_trace_sink(None)).await;

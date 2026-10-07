@@ -157,7 +157,6 @@ impl lash_core::ToolProvider for PolicyDeniedToolProvider {
 }
 
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
     block_on(async {
         let definition = approval_request_definition();
@@ -238,7 +237,6 @@ impl lash_core::facade_support::TraceSink for FailureTraceSink {
 }
 
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
     block_on(async {
         for code in [
@@ -531,7 +529,6 @@ fn fig_4545_obvious_unawaited_shapes_issue_no_effects() {
 }
 
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn fig_4545_awaiting_shapes_execute_each_tool_once() {
     block_on(async {
         for (code, count) in [
@@ -624,7 +621,6 @@ impl lash_core::ToolProvider for EchoToolProvider {
 }
 
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn code_mode_receives_the_structured_tool_value_and_ignores_its_view() {
     block_on(async {
         let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
@@ -670,7 +666,6 @@ fn code_mode_receives_the_structured_tool_value_and_ignores_its_view() {
 /// This is the defect FIG-3394 closes; it is red on the parent commit, where
 /// the four calls mint two distinct identities instead of four.
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
     block_on(async {
         let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
@@ -841,7 +836,6 @@ impl lash_core::ToolProvider for WidenedContractProvider {
 }
 
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
     block_on(async {
         let catalog =
@@ -920,7 +914,6 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
 /// L21/F02: scalar and aggregate calls run in the cell that issued them, one
 /// body per logical call: an aggregate's duplicate alias runs no second body.
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn l21_scalar_and_aggregate_record_attempts_in_the_opener() {
     block_on(async {
         let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
@@ -992,7 +985,6 @@ fn resource_pairing_site() -> lashlang::LashlangExecutionCallSite {
 
 /// L05/F02: a refused middle operand cannot renumber the surviving calls.
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn l05_middle_preparation_failure_keeps_survivor_source_pairing() {
     block_on(async {
         let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
@@ -1146,7 +1138,6 @@ fn l05_middle_preparation_failure_keeps_survivor_source_pairing() {
 
 /// L05: an unavailable source is one recorded refusal beside valid siblings.
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn l05_unavailable_member_keeps_native_completion_and_source_slots() {
     block_on(async {
         use lash_core::facade_support::ToolInvocation;
@@ -1251,7 +1242,6 @@ impl lash_core::ToolProvider for GatedEchoToolProvider {
 
 /// L06: a race loser stays live while a later cell performs its own effect.
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn l06_race_loser_stays_owned_across_cells_until_logical_closing() {
     block_on(async {
         let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
@@ -1287,7 +1277,6 @@ fn l06_race_loser_stays_owned_across_cells_until_logical_closing() {
 /// only its new calls, so it fits at the limit, and the cell's next call is
 /// refused with every earlier call counted once.
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 fn cell_limit_counts_an_owned_promise_once() {
     block_on(async {
         use lash_core::facade_support::ToolInvocation;

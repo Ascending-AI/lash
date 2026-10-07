@@ -92,7 +92,7 @@ fn assert_not_inherited(outcome: &CellOutcome, context: &str) {
 /// the model's; the cell either succeeded or failed typed; the terminal value
 /// is exactly the one the model says it is, present only where a finish cell
 /// put it; and no outcome — succeeding or failing — carries a diagnostic about
-/// an earlier cell's program. A scenario therefore never has to restate the
+/// an earlier cell's program. A scenario therefore never has to repeat the
 /// cross-cell laws it is not about, and a sequence written for one axis catches
 /// a violation of another.
 fn shift(mode: HarnessMode, cells: &[Cell]) -> (Session, SessionModel) {

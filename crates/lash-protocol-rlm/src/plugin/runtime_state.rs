@@ -572,8 +572,6 @@ mod tests {
             });
     }
 
-    const SEED: u64 = 0x5_2c08;
-
     /// Runs `request` on `state` as one cell, under a durable host of its
     /// own.
     async fn execute_cell(
@@ -581,12 +579,11 @@ mod tests {
         request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, SessionError> {
         let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-        let result = Box::pin(state.execute_code(
+        Box::pin(state.execute_code(
             lash_core::testing::code_execution_context(handler.ports()),
             request,
         ))
-        .await;
-        result
+        .await
     }
 
     /// The scope [`admitted_context`] claims.
@@ -712,16 +709,6 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
     }
-
-    /// The regression test for the defect FIG-1729 fixes.
-    ///
-    /// The old code moved the execution state out of its holder for the
-    /// duration of the cell, so a future dropped mid-cell dropped the state
-    /// with it and left `None` behind for good: every later call on that
-    /// session failed with the busy protocol error, permanently. The state is
-    /// now only borrowed, so a cancelled cell leaves it exactly where it was
-    /// and the next cell runs.
-    ///
 
     /// A restore view for `frame` whose active history carries one RLM seed
     /// event per label, each binding `projected_<label>`.
@@ -972,6 +959,14 @@ mod tests {
         );
     }
 
+    /// The regression test for the defect FIG-1729 fixes.
+    ///
+    /// The old code moved the execution state out of its holder for the
+    /// duration of the cell, so a future dropped mid-cell dropped the state
+    /// with it and left `None` behind for good: every later call on that
+    /// session failed with the busy protocol error, permanently. The state is
+    /// now only borrowed, so a cancelled cell leaves it exactly where it was
+    /// and the next cell runs.
     #[test]
     fn a_cancelled_cell_leaves_the_session_usable() {
         tokio::runtime::Builder::new_current_thread()

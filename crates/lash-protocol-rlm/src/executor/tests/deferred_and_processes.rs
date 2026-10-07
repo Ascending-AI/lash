@@ -362,7 +362,6 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
 }
 
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
     block_on(async {
         let resolver_calls = Arc::new(AtomicUsize::new(0));
@@ -462,7 +461,6 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
 /// journal.
 
 #[test]
-#[ignore = "blocked: L4 (FIG-5174): a cell's tool call fails, `the final has no hydrated admission` (ProductionToolHandlers::prepared is never filled); repro executor::tests::typescript_cells::code_mode_receives_the_structured_tool_value_and_ignores_its_view"]
 pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outputs() {
     block_on(async {
         let resolver_calls = Arc::new(AtomicUsize::new(0));

@@ -85,7 +85,7 @@ fn definition_engines(
 
 #[tokio::test(flavor = "current_thread")]
 async fn artifact_resolution_yields_to_the_task_releasing_the_only_slot() {
-    let (host, workers, artifacts, created) =
+    let (_host, workers, artifacts, created) =
         published_definition_fixture(std::time::Duration::from_secs(10)).await;
     let engines = definition_engines(&workers, artifacts);
     let held = held_worker(&workers);
