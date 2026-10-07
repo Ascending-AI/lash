@@ -334,8 +334,8 @@ async fn every_operation_commits_its_admission_with_a_snapshot_before_its_body_r
             .as_ref()
             .expect("the VM stands on its operation");
         assert_eq!(
-            pending.operation,
-            Some(OperationId {
+            pending.admission,
+            crate::OperationAdmission::Execution(OperationId {
                 run: run as u64,
                 ordinal: 1
             }),
@@ -454,7 +454,8 @@ async fn an_operation_handed_over_suspends_on_its_quiet_point_and_runs_again_on_
         .pending
         .expect("the VM stands on the sleep");
     assert_eq!(
-        pending.operation, None,
+        pending.admission,
+        crate::OperationAdmission::NoExecution { run: 0 },
         "a wait is admitted as no execution"
     );
     fixture
@@ -754,4 +755,44 @@ async fn an_oversized_effect_result_stays_recorded_and_is_a_typed_run_limit() {
             "the outcome stays recorded"
         );
     }
+}
+
+/// FIG-5235: a decoded checkpoint cannot stand on an unissued admission.
+#[tokio::test]
+async fn a_checkpoint_refuses_a_pending_admission_outside_its_ledger() {
+    let fixture = Fixture::new(1);
+    fixture
+        .host
+        .hand_over
+        .lock()
+        .expect("hand-over set")
+        .insert("sleep".into());
+    let program = ScriptedProgram::new(vec![Step::Sleep(5)]);
+    let BrokeredEnd::Suspended { mut checkpoint } = fixture.run(&program).await.unwrap() else {
+        panic!("the sleep suspends");
+    };
+    checkpoint.ledger.next_admission = 0;
+    let stored = serde_json::to_string(&checkpoint).unwrap();
+    assert!(
+        serde_json::from_str::<Checkpoint>(&stored).is_err(),
+        "decoded an unissued pending admission"
+    );
+
+    let fixture = Fixture::new(1);
+    fixture
+        .run(&ScriptedProgram::new(vec![echo(1)]))
+        .await
+        .unwrap();
+    let mut checkpoint = fixture.checkpoints.commits()[0].checkpoint.clone();
+    let stored = serde_json::to_string(&checkpoint).unwrap();
+    assert!(
+        serde_json::from_str::<Checkpoint>(&stored).is_ok(),
+        "valid execution admission decodes"
+    );
+    checkpoint.ledger.operations.clear();
+    let stored = serde_json::to_string(&checkpoint).unwrap();
+    assert!(
+        serde_json::from_str::<Checkpoint>(&stored).is_err(),
+        "decoded an execution absent from the ledger"
+    );
 }

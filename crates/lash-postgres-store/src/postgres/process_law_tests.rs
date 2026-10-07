@@ -48,3 +48,53 @@ law!(
     c1_a_parked_child_ends_engine_free_and_its_child_receives_parent_ended,
     a_cascade_wider_than_its_batch_ends_a_tree_three_levels_deep,
 );
+
+/// FIG-5235: a deterministic 40P01 inside the terminal is retried, not refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_deadlock_inside_a_process_terminal_is_retried() {
+    let database_url =
+        crate::postgres_test_support::database_url().expect("hermetic PostgreSQL URL");
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(database.url())
+        .await
+        .expect("isolated store");
+    sqlx::raw_sql(
+        r#"
+        CREATE SEQUENCE terminal_attempts;
+        CREATE FUNCTION fail_first_terminal() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF NEW.status NOT IN ('running', 'waiting') AND nextval('terminal_attempts') = 1 THEN
+                RAISE EXCEPTION 'injected terminal deadlock' USING ERRCODE = '40P01';
+            END IF;
+            RETURN NEW;
+        END $$;
+        CREATE TRIGGER terminal_contention BEFORE UPDATE OF status ON lash_processes
+            FOR EACH ROW EXECUTE FUNCTION fail_first_terminal();
+    "#,
+    )
+    .execute(storage.pool())
+    .await
+    .expect("install one-shot deadlock");
+    let backend = Backend::assemble(BackendParts {
+        formats: Vec::new(),
+        stores: Arc::new(PostgresStoreSet::new(
+            &storage,
+            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+        )),
+        settings: process_laws::settings(),
+        engines: Vec::new(),
+        providers: Arc::new(NoProjectionProviders),
+    })
+    .expect("assemble law backend");
+    process_laws::a_process_terminal_keeps_its_real_outcome_after_contention(&backend)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+    let attempts: i64 = sqlx::query_scalar("SELECT last_value FROM terminal_attempts")
+        .fetch_one(storage.pool())
+        .await
+        .expect("count terminal attempts");
+    assert_eq!(
+        attempts, 2,
+        "the injected failure and one real terminal commit"
+    );
+}

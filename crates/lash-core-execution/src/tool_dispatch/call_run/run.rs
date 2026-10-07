@@ -242,8 +242,13 @@ impl<'a> ToolRun<'a> {
     ) -> Result<(), SingletonRunError> {
         self.refuse_after_abort()?;
         let call_id = call.call_id.clone();
-        if self.calls.insert(call_id.clone(), None).is_some() {
-            return Err(run_fault(format!("call {call_id} is admitted twice")));
+        match self.calls.entry(call_id.clone()) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(None);
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {
+                return Err(run_fault(format!("call {call_id} is admitted twice")));
+            }
         }
         self.owners
             .insert(call_id.clone(), (Arc::clone(&handlers), call.cancel));

@@ -235,7 +235,11 @@ pub(super) async fn execute_with_projected(
     let admissions = lash_lashlang_runtime::RunAdmissions {
         cx: &cx,
         opener: lash_core::EffectOpener::process(process_id),
-        limit: lash_lashlang_runtime::run_operation_limit(&cx),
+        limit: lash_sansio::ExecutionLimit::starting_at(
+            0,
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(60),
+        ),
         policy: &|_, _| None,
         host_state: &|| Ok(None),
     };

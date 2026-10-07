@@ -62,8 +62,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_core_store::tool_run::{AttemptOutcome, AvailableEvidence, MaterialRef};
-use lash_durable::ActorTx;
 use lash_durable::domain::{AdmittedId, Ordinal, RunRecordKind};
+use lash_durable::{ActorTx, DurableError};
 use lash_sansio::{ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause};
 use tokio_util::sync::CancellationToken;
 
@@ -750,7 +750,7 @@ pub fn member_ordinal(member: u64) -> Ordinal {
 }
 
 /// How an admitted body's run stopped short of its own answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Stop {
     /// The execution's slice or limit ran out.
     Limit(LimitCause),
@@ -762,6 +762,8 @@ pub(crate) enum Stop {
     /// The node's lease lapsed before the body started: it never ran, and
     /// nothing may be recorded for it on this owner.
     Lapsed,
+    /// The durable clock could not be read; the activation retries without an outcome.
+    Durable(DurableError),
 }
 
 /// Run `admitted`'s body under its limit, the context's cancel token and
@@ -769,35 +771,38 @@ pub(crate) enum Stop {
 /// context's probe.
 ///
 /// The body runs for at most one slice of what remains of its limit on the
-/// node's clock. When the slice or the limit ends, or the activation is
+/// store's clock. When the slice or the limit ends, or the activation is
 /// cancelled, the body's token is cancelled and it has the stop grace to
 /// answer; after that it is dropped and the stop is its outcome. A limit
 /// already expired settles at once, without entering the body.
 ///
 /// Answers `None` when the node's lease lapsed before the body could start:
 /// the body never runs, and nothing may be recorded for it on this owner.
+///
+/// # Errors
+///
+/// The durable clock could not be read; nothing is settled.
 pub async fn run_body(
     cx: &ActorContext,
     admitted: &AdmittedExecution,
     body: ToolBody,
-) -> Option<BodyOutput> {
-    match run_bounded(cx, admitted, body, &CancellationToken::new()).await {
-        Ok(output) => Some(output),
-        Err(Stop::Limit(cause)) => Some(
-            AttemptOutcome::TimedOut {
+) -> Result<Option<BodyOutput>, DurableError> {
+    Ok(Some(
+        match run_bounded(cx, admitted, body, &CancellationToken::new()).await {
+            Ok(output) => output,
+            Err(Stop::Limit(cause)) => AttemptOutcome::TimedOut {
                 cause,
                 evidence: AvailableEvidence::default(),
             }
             .into(),
-        ),
-        Err(Stop::Cancelled | Stop::Activation) => Some(
-            AttemptOutcome::Cancelled {
+            Err(Stop::Cancelled | Stop::Activation) => AttemptOutcome::Cancelled {
                 evidence: AvailableEvidence::default(),
             }
             .into(),
-        ),
-        Err(Stop::Lapsed) => None,
-    }
+            Err(Stop::Lapsed) => return Ok(None),
+            Err(Stop::Durable(error)) => return Err(error),
+        },
+    ))
 }
 
 /// [`run_body`] with a member cancel besides the activation's: the body's
@@ -815,7 +820,11 @@ pub(crate) async fn run_bounded(
         return Err(Stop::Lapsed);
     }
     let clock = Arc::clone(cx.clock());
-    let now = u64::try_from(cx.now().0).unwrap_or(0);
+    let now = u64::try_from(cx.durable_now().await.map_err(Stop::Durable)?.0).unwrap_or(0);
+    // Reading the durable clock can yield past the node's self-stop deadline.
+    if !cx.lease_held() {
+        return Err(Stop::Lapsed);
+    }
     let limit = admitted.limit();
     let remaining = limit.remaining(now);
     if remaining.is_zero() {

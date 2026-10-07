@@ -85,8 +85,19 @@ impl OperationAdmissions for RunAdmissions<'_> {
 }
 
 /// The limit a run's operations are admitted under: the tool default from
-/// now on `cx`'s clock.
-pub fn run_operation_limit(cx: &lash_core::ActorContext) -> lash_sansio::ExecutionLimit {
+/// now on the durable store's clock.
+///
+/// # Errors
+///
+/// The store's refusal to read its clock.
+pub async fn run_operation_limit(
+    cx: &lash_core::ActorContext,
+) -> Result<lash_sansio::ExecutionLimit, lash_core::durable_port::DurableError> {
     let budget = lash_sansio::ExecutionBudgets::default().tool_default();
-    lash_sansio::ExecutionLimit::starting_at(u64::try_from(cx.now().0).unwrap_or(0), budget, budget)
+    let now = cx.durable_now().await?;
+    Ok(lash_sansio::ExecutionLimit::starting_at(
+        u64::try_from(now.0).unwrap_or(0),
+        budget,
+        budget,
+    ))
 }

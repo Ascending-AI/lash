@@ -138,11 +138,10 @@ impl ParentLedger {
         self.state.next_admission += 1;
         let operation = admitted(context, run, resolved, None);
         self.state.pending = Some(PendingOperation {
-            run,
+            admission: crate::snapshot::OperationAdmission::NoExecution { run },
             kind: request.kind,
             request: request.payload.clone(),
             fingerprint: operation.fingerprint,
-            operation: None,
             waits: Vec::new(),
         });
         AdmittedOperation {
@@ -161,7 +160,7 @@ impl ParentLedger {
     ) -> AdmittedOperation {
         AdmittedOperation {
             request: Some(pending.request.clone()),
-            ..admitted(context, pending.run, resolved, pending.operation)
+            ..admitted(context, pending.run(), resolved, pending.operation())
         }
     }
 
@@ -246,7 +245,7 @@ pub enum RecordedEnd {
 /// VM bytes, the ledger that matches them and the host's state for the
 /// execution: committed together or not at all.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "DecodedCheckpoint")]
 pub struct Checkpoint {
     pub vm: OpaqueVmState,
     pub ledger: BrokerLedger,
@@ -256,6 +255,56 @@ pub struct Checkpoint {
     pub host: Option<EncodedPayload>,
     /// How the run ended, once it ended.
     pub end: Option<RecordedEnd>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DecodedCheckpoint {
+    vm: OpaqueVmState,
+    ledger: BrokerLedger,
+    host: Option<EncodedPayload>,
+    end: Option<RecordedEnd>,
+}
+
+impl TryFrom<DecodedCheckpoint> for Checkpoint {
+    type Error = QuietPointRefusal;
+
+    fn try_from(decoded: DecodedCheckpoint) -> Result<Self, Self::Error> {
+        let ledger = &decoded.ledger;
+        if let Some(pending) = &ledger.pending {
+            if pending.run() >= ledger.next_admission {
+                return Err(QuietPointRefusal(
+                    "pending operation names an unissued admission".into(),
+                ));
+            }
+            match pending.admission {
+                crate::snapshot::OperationAdmission::Execution(operation) => {
+                    if operation.ordinal == 0 || !ledger.operations.contains_key(&operation) {
+                        return Err(QuietPointRefusal(
+                            "pending execution is absent from the broker ledger".into(),
+                        ));
+                    }
+                }
+                crate::snapshot::OperationAdmission::NoExecution { run } => {
+                    if ledger
+                        .operations
+                        .keys()
+                        .any(|operation| operation.run == run)
+                    {
+                        return Err(QuietPointRefusal(
+                            "no-execution admission names a recorded execution".into(),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(Self {
+            vm: decoded.vm,
+            ledger: decoded.ledger,
+            host: decoded.host,
+            end: decoded.end,
+        })
+    }
 }
 
 impl Checkpoint {

@@ -208,6 +208,15 @@ fn is_contention_sqlstate(code: &str) -> bool {
 }
 
 pub(crate) fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {
+    if matches!(
+        err,
+        sqlx::Error::Decode(_) | sqlx::Error::ColumnDecode { .. }
+    ) {
+        return PluginError::StoredDataCorrupt {
+            record_kind: "PostgreSQL row".to_owned(),
+            message: err.to_string(),
+        };
+    }
     PluginError::from(store_sqlx_error(err))
 }
 

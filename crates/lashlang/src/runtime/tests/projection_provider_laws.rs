@@ -232,3 +232,48 @@ fn a_catalog_refuses_a_second_provider_of_a_type() {
         })
     );
 }
+
+struct LengthAnswer(ProjectedReadResponse);
+
+impl ProjectionReader for LengthAnswer {
+    fn read(
+        &self,
+        _resource: &ResourceRef,
+        request: ProjectedReadRequest,
+    ) -> Result<Option<ProjectedReadResponse>, crate::ProjectionReadError> {
+        Ok(matches!(request, ProjectedReadRequest::Len).then(|| self.0.clone()))
+    }
+
+    fn read_range(
+        &self,
+        resource: &ResourceRef,
+        requests: Vec<ProjectedReadRequest>,
+    ) -> Result<Vec<Option<ProjectedReadResponse>>, crate::ProjectionReadError> {
+        requests
+            .into_iter()
+            .map(|request| self.read(resource, request))
+            .collect()
+    }
+}
+
+/// FIG-5235: every supported length answer means the same to len and rendering.
+#[tokio::test(flavor = "current_thread")]
+async fn projection_len_and_renderer_agree_on_length_answers() {
+    use lash_render::{RenderNode, RenderValue as _};
+    for answer in [
+        ProjectedReadResponse::Len(2),
+        ProjectedReadResponse::Value(Value::Number(2.0)),
+        ProjectedReadResponse::Value(Value::List(vec![Value::Null; 2].into())),
+        ProjectedReadResponse::Text("éx".into()),
+        ProjectedReadResponse::Keys(vec!["a".into(), "b".into()]),
+    ] {
+        super::super::projection_provider::reading_through(
+            Some(Arc::new(LengthAnswer(answer.clone()))), async {
+                let projected = rows_value();
+                let length = projected.len().expect("supported length answer");
+                assert_eq!(length, 2, "{answer:?}");
+                assert!(matches!(Value::Projected(projected).node(), RenderNode::Array(n) if n == length), "renderer disagrees for {answer:?}");
+            }
+        ).await;
+    }
+}

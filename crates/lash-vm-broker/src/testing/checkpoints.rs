@@ -76,10 +76,10 @@ impl SnapshotStore for MemoryCheckpoints {
                 QuietPointRefusal("an admission needs the operation the VM stands on".into())
             })?;
             let operation = OperationId {
-                run: pending.run,
+                run: pending.run(),
                 ordinal: 1,
             };
-            pending.operation = Some(operation);
+            pending.admission = crate::snapshot::OperationAdmission::Execution(operation);
             ledger.operations.insert(operation, draft.call().clone());
         }
         held.latest = Some(point.checkpoint.clone());
@@ -110,7 +110,7 @@ impl SnapshotStore for MemoryCheckpoints {
         let held = self.held();
         Ok(
             match pending
-                .operation
+                .operation()
                 .and_then(|operation| held.settled.get(&operation))
             {
                 Some(performed) => Recovered::Settled(performed.clone()),

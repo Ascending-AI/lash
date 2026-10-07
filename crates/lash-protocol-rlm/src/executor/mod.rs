@@ -860,10 +860,35 @@ async fn execute_code_in_worker_scope(
     // Until a cell's operation runs as its tool's own admitted execution
     // (L4, FIG-5174), its admission takes `Once`: a crash inside it is
     // `Interrupted`, never a second run.
+    let limit = match lash_lashlang_runtime::run_operation_limit(ctx.actor_context()).await {
+        Ok(limit) => limit,
+        Err(error) => {
+            let fault = match &error {
+                lash_core::durable_port::DurableError::Store(failure)
+                    if failure.kind == lash_core::durable_port::StoreFailureKind::Contended =>
+                {
+                    lash_core::store::StoreFault::Contended
+                }
+                _ => lash_core::store::StoreFault::Backend {
+                    message: error.to_string(),
+                },
+            };
+            ctx.record_nested_effect_error(
+                lash_core::RuntimeEffectControllerError::from(lash_core::PluginError::from(fault))
+                    .retryable_uncommitted_derivation(),
+            );
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailureKind::Host,
+                error.to_string(),
+            );
+        }
+    };
     let admissions = lash_lashlang_runtime::RunAdmissions {
         cx: ctx.actor_context(),
         opener: identities.opener().clone(),
-        limit: lash_lashlang_runtime::run_operation_limit(ctx.actor_context()),
+        limit,
         policy: &|_, _| None,
         host_state: &envelope,
     };

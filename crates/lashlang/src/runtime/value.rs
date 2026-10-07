@@ -70,14 +70,9 @@ impl RenderValue for Value {
                                 .unwrap_or_else(|error| format!("[{error}]")),
                         ))
                     };
-                    let len = || match projected.read_one(resource, ProjectedReadRequest::Len) {
-                        Ok(Some(ProjectedReadResponse::Len(len))) => RenderNode::Array(len),
-                        Ok(Some(ProjectedReadResponse::Value(Value::Number(len))))
-                            if len >= 0.0 =>
-                        {
-                            RenderNode::Array(len as usize)
-                        }
-                        _ => fallback(),
+                    let len = || match projected.len() {
+                        Ok(len) => RenderNode::Array(len),
+                        Err(_) => fallback(),
                     };
                     if type_name.as_ref() == "list" {
                         return len();
@@ -895,6 +890,20 @@ impl From<ProjectedReadResponse> for Value {
     }
 }
 
+/// The length named by a provider's answer, shared by len and rendering.
+fn projection_length_answer(answer: &ProjectedReadResponse) -> Option<usize> {
+    match answer {
+        ProjectedReadResponse::Len(len) => Some(*len),
+        ProjectedReadResponse::Value(Value::Number(len)) => {
+            (len.is_finite() && *len >= 0.0).then_some(*len as usize)
+        }
+        ProjectedReadResponse::Value(value) => Some(value_len(value).unwrap_or(0)),
+        ProjectedReadResponse::Text(text) => Some(text.chars().count()),
+        ProjectedReadResponse::Keys(keys) => Some(keys.len()),
+        ProjectedReadResponse::Bool(_) => None,
+    }
+}
+
 impl ProjectedValue {
     pub fn scalar(name: impl Into<Arc<str>>, value: Value) -> Self {
         Self {
@@ -1068,17 +1077,11 @@ impl ProjectedValue {
     pub(crate) fn len(&self) -> Result<usize, RuntimeError> {
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => value_len(value).unwrap_or(0),
-            ProjectedKind::Resource { resource, .. } => {
-                match self.read_one(resource, ProjectedReadRequest::Len)? {
-                    Some(ProjectedReadResponse::Len(value)) => value,
-                    Some(ProjectedReadResponse::Value(value)) => value_len(&value).unwrap_or(0),
-                    Some(ProjectedReadResponse::Text(value)) => value.chars().count(),
-                    Some(ProjectedReadResponse::Keys(values)) => values.len(),
-                    Some(ProjectedReadResponse::Bool(_)) | None => {
-                        return Err(self.unsupported(&ProjectedReadRequest::Len));
-                    }
-                }
-            }
+            ProjectedKind::Resource { resource, .. } => self
+                .read_one(resource, ProjectedReadRequest::Len)?
+                .as_ref()
+                .and_then(projection_length_answer)
+                .ok_or_else(|| self.unsupported(&ProjectedReadRequest::Len))?,
         })
     }
 

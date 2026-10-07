@@ -248,6 +248,7 @@ impl ProcessEngine for LawEngine {
                     input: json!({}),
                 }]),
                 "await" => await_action(&script)?,
+                "complete" => ended(json!({"real_terminal": true})),
                 _ => EngineAction::Idle,
             },
             EngineEvent::Signal(signal) if act == "await_signal" => {
@@ -273,7 +274,14 @@ impl ProcessEngine for LawEngine {
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
         Ok((
             EngineState {
-                format: self.state_format(),
+                format: if act == "wrong_format" {
+                    EngineStateFormat {
+                        kind: "another-engine".into(),
+                        version: 99,
+                    }
+                } else {
+                    self.state_format()
+                },
                 bytes,
             },
             action,
@@ -1189,4 +1197,71 @@ pub async fn a_cascade_wider_than_its_batch_ends_a_tree_three_levels_deep(
         "the descendants did not all end ParentEnded: {origins:?}"
     );
     Ok(())
+}
+
+/// FIG-5235: transient contention must leave the engine's terminal intact.
+///
+/// # Errors
+///
+/// The first rule broken. The dialect may inject contention into the terminal.
+pub async fn a_process_terminal_keeps_its_real_outcome_after_contention(
+    backend: &Backend,
+) -> LawResult {
+    let backend = law_backend(backend)?;
+    let serving = serve(&backend);
+    let process = root(&backend, payload(&tag("contention"), "complete")).await?;
+    let result = async {
+        eventually(SETTLE, "the real terminal commits", || async {
+            Ok(terminal(&backend, &process).await?.is_some())
+        })
+        .await?;
+        let end = terminal(&backend, &process).await?.unwrap_or_default();
+        ensure!(
+            find(&end, "real_terminal").and_then(Value::as_bool) == Some(true),
+            "contention replaced the real terminal: {end}"
+        );
+        Ok(())
+    }
+    .await;
+    serving.stop().await;
+    result
+}
+
+/// FIG-5235: a transition in another format is refused before any state write.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_transition_in_another_format_commits_no_state(backend: &Backend) -> LawResult {
+    let backend = law_backend(backend)?;
+    let serving = serve(&backend);
+    let process = root(&backend, payload(&tag("format"), "wrong_format")).await?;
+    let result = async {
+        eventually(SETTLE, "the invalid transition parks", || async {
+            Ok(actor_state(&backend, &process).await? == Some(ActorState::Parked))
+        })
+        .await?;
+        let row = backend
+            .durable()
+            .process(&process)
+            .await?
+            .ok_or_else(|| LawBroken("missing process".into()))?;
+        ensure!(
+            row.state_rev == 0,
+            "invalid format advanced state to revision {}",
+            row.state_rev
+        );
+        ensure!(
+            backend
+                .durable()
+                .snapshot(&lash_durable::domain::ExecKey::Process(process.clone()))
+                .await?
+                .is_none(),
+            "invalid format wrote a snapshot"
+        );
+        Ok(())
+    }
+    .await;
+    serving.stop().await;
+    result
 }

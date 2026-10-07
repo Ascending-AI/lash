@@ -117,7 +117,11 @@ pub(super) struct Live {
     /// The context step bodies run under; its token is the steps' cancel.
     steps_cx: ActorContext,
     steps_token: CancellationToken,
-    running: JoinSet<(StepName, AdmittedId, Option<BodyOutput>)>,
+    running: JoinSet<(
+        StepName,
+        AdmittedId,
+        Result<Option<BodyOutput>, DurableError>,
+    )>,
     /// The step each running body's task runs, to release a body whose
     /// task ended without an output.
     tasks: std::collections::HashMap<tokio::task::Id, StepName>,
@@ -277,13 +281,15 @@ impl ProcessActivation {
                 // A step whose body never started because the node's lease
                 // lapsed stays started: this owner is stopping, and the next
                 // one recovers the step from the rows.
-                let lapsed = matches!(&finished, Some(Ok((_, (_, _, None)))));
+                let lapsed = matches!(&finished, Some(Ok((_, (_, _, Ok(None))))));
                 if let Some(name) = task.and_then(|task| live.tasks.remove(&task))
                     && !lapsed
                 {
                     live.started.remove(&name);
                 }
-                if let Some(Ok((_, (_, id, Some(output))))) = finished {
+                if let Some(Ok((_, (_, id, output)))) = finished
+                    && let Some(output) = output?
+                {
                     let admitted = fold
                         .admitted(&id)
                         .ok_or_else(|| corrupt("a running process step", "its start has no row"))?;
@@ -471,6 +477,16 @@ impl ProcessActivation {
                 return self.park(owned, tx, &reason).await;
             }
         };
+        let declared = engine.state_format();
+        if next.format != declared {
+            let reason = ProcessParkReason::AdvanceRefused {
+                message: format!(
+                    "engine returned state format {:?}, declared {:?}",
+                    next.format, declared
+                ),
+            };
+            return self.park(owned, tx, &reason).await;
+        }
         let applied = self.apply(
             &mut tx,
             process,

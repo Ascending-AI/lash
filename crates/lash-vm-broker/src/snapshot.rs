@@ -72,25 +72,50 @@ impl OperationId {
     }
 }
 
-/// The operation a VM stands on: the admission it took, the fingerprint of
-/// what it asked, and its identity once its admission committed (`None` for
-/// an operation admitted as no execution, such as a wait the host performs
-/// again on restore).
+/// How a pending operation was admitted, including an explicit no-execution admission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum OperationAdmission {
+    /// A started execution, whose run is part of its identity.
+    Execution(OperationId),
+    /// An operation such as a wait, performed again on restore.
+    NoExecution { run: u64 },
+}
+
+/// The operation a VM stands on, with its committed admission and pinned waits.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PendingOperation {
     /// The admission it took.
-    pub run: u64,
+    pub admission: OperationAdmission,
     /// The request it was issued from, resolved again on restore.
     pub kind: lash_vm_protocol::EffectKind,
     /// The request's payload.
     pub request: lash_vm_protocol::EncodedPayload,
     /// What it asked: a resumed run must ask exactly this again.
     pub fingerprint: RequestFingerprint,
-    /// Its identity, minted at admission.
-    pub operation: Option<OperationId>,
     /// The waits its quiet point pinned, by identity.
     pub waits: Vec<[u8; 16]>,
+}
+
+impl PendingOperation {
+    /// The admission's run, stored once in its admission.
+    #[must_use]
+    pub fn run(&self) -> u64 {
+        match self.admission {
+            OperationAdmission::Execution(operation) => operation.run,
+            OperationAdmission::NoExecution { run } => run,
+        }
+    }
+
+    /// Its execution identity, when admitted as an execution.
+    #[must_use]
+    pub fn operation(&self) -> Option<OperationId> {
+        match self.admission {
+            OperationAdmission::Execution(operation) => Some(operation),
+            OperationAdmission::NoExecution { .. } => None,
+        }
+    }
 }
 
 /// The broker's state that commits with the VM: the operations whose
@@ -247,7 +272,7 @@ pub fn outcomes_to_inject(
     let Some(operation) = ledger
         .pending
         .as_ref()
-        .and_then(|pending| pending.operation)
+        .and_then(|pending| pending.operation())
     else {
         return Ok(None);
     };
@@ -549,7 +574,7 @@ impl DurableSnapshotStore {
                 .ok_or_else(|| QuietPointRefusal(format!("pinned wait {id:?} is gone")))?;
             waits.push(WaitRef::new(id, row.kind));
         }
-        let Some(operation) = pending.operation else {
+        let Some(operation) = pending.operation() else {
             return Ok(Recovered::Rerun { waits });
         };
         let fold = self.fold().await?;
@@ -612,14 +637,14 @@ impl SnapshotStore for DurableSnapshotStore {
             let execution = round::admit(
                 &mut tx,
                 &self.exec.owner(),
-                RunSeq(pending.run),
+                RunSeq(pending.run()),
                 vec![draft],
             )
             .map_err(refused)?
             .pop()
             .ok_or_else(|| QuietPointRefusal("the admission admitted nothing".to_owned()))?;
             let operation = OperationId::of(execution.id());
-            pending.operation = Some(operation);
+            pending.admission = OperationAdmission::Execution(operation);
             checkpoint
                 .ledger
                 .operations
@@ -641,7 +666,7 @@ impl SnapshotStore for DurableSnapshotStore {
             .operations
             .keys()
             .map(|operation| operation.run)
-            .chain(ledger.pending.as_ref().map(|pending| pending.run))
+            .chain(ledger.pending.as_ref().map(|pending| pending.run()))
             .min()
             .unwrap_or(ledger.next_admission);
         if oldest > 0 {

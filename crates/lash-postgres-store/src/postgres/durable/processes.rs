@@ -27,10 +27,19 @@ use crate::process_helpers::{
 };
 
 /// A registry failure inside a durable commit: the registry row did not
-/// decode or refused, which the port reports as a store failure.
+/// decode or refused, which the port reports as a store failure. Transient
+/// substrate faults retain their typed classification for retry.
 fn registry_failure(error: &lash_core_execution::PluginError) -> DurableError {
     DurableError::Store(StoreFailure {
-        kind: StoreFailureKind::Corrupt,
+        kind: match error {
+            lash_core_execution::PluginError::StoreUnavailable {
+                fault: lash_core_execution::store::StoreFault::Contended,
+            } => StoreFailureKind::Contended,
+            lash_core_execution::PluginError::StoreUnavailable { .. } => {
+                StoreFailureKind::Unavailable
+            }
+            _ => StoreFailureKind::Corrupt,
+        },
         message: error.to_string(),
     })
 }
@@ -386,4 +395,27 @@ fn process_ids(ids: Vec<String>) -> Result<Vec<ProcessId>, DurableError> {
     ids.into_iter()
         .map(|id| ProcessId::parse(&id).map_err(|_| corrupt("process id", &id)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-5235: row decode failures remain corruption across the registry boundary.
+    #[test]
+    fn a_registry_decode_failure_stays_corrupt() {
+        let error = crate::support::plugin_sqlx_error(sqlx::Error::Decode(Box::new(
+            std::io::Error::other("invalid registry column"),
+        )));
+        assert!(
+            matches!(
+                registry_failure(&error),
+                DurableError::Store(StoreFailure {
+                    kind: StoreFailureKind::Corrupt,
+                    ..
+                })
+            ),
+            "decode failure became retryable: {error:?}"
+        );
+    }
 }

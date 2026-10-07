@@ -51,7 +51,7 @@ pub use ledger::{
 };
 pub use session::VmSession;
 pub use snapshot::{
-    BrokerLedger, Committed, DurableSnapshotStore, OperationId, PendingOperation, QuietPoint,
-    Recovered, SnapshotStore, outcomes_to_inject,
+    BrokerLedger, Committed, DurableSnapshotStore, OperationAdmission, OperationId,
+    PendingOperation, QuietPoint, Recovered, SnapshotStore, outcomes_to_inject,
 };
 pub use transport::{CheckoutRefusal, WorkerCheckout, WorkerRead, WorkerSlots, WorkerTransport};

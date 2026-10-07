@@ -48,6 +48,14 @@ pub enum DurableBuildError {
         /// The kind.
         kind: String,
     },
+    /// A process engine declares a state format for another kind.
+    #[error("process engine `{kind}` declares state format for `{format_kind}`")]
+    EngineFormatMismatch {
+        /// The registered engine kind.
+        kind: String,
+        /// The kind its state format declares.
+        format_kind: String,
+    },
     /// Two projection providers answer one type.
     #[error("two projection providers answer type `{projection}`")]
     DuplicateProvider {
@@ -109,13 +117,20 @@ impl Backend {
     ///
     /// # Errors
     ///
-    /// [`DurableBuildError`]: invalid settings, duplicate engines or
-    /// providers.
+    /// [`DurableBuildError`]: invalid settings, mismatched engine formats,
+    /// duplicate engines or providers.
     pub fn assemble(parts: BackendParts) -> Result<Self, DurableBuildError> {
         let config = parts.settings.validate()?;
         let mut engines = BTreeMap::new();
         for engine in parts.engines {
             let kind = engine.kind().to_owned();
+            let format = engine.state_format();
+            if format.kind != kind {
+                return Err(DurableBuildError::EngineFormatMismatch {
+                    kind,
+                    format_kind: format.kind,
+                });
+            }
             if engines.insert(kind.clone(), engine).is_some() {
                 return Err(DurableBuildError::DuplicateEngine { kind });
             }

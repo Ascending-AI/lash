@@ -274,7 +274,7 @@ impl RoundRunner {
                 });
             }
             let cancelled = self.cancel.is_cancelled();
-            let now = self.cx.now();
+            let now = self.cx.durable_now().await?;
 
             // Run what this activation admitted; recover what it did not.
             let mut settlements = Vec::new();
@@ -433,6 +433,9 @@ impl RoundRunner {
                     in_flight.remove(&done.id);
                     if matches!(done.result, Err(Stop::Activation | Stop::Lapsed)) {
                         return Err(RoundError::Stopped);
+                    }
+                    if let Err(Stop::Durable(error)) = &done.result {
+                        return Err(error.clone().into());
                     }
                     finished.insert(done.id, done.result);
                     batch_opened.get_or_insert_with(|| clock.now());
@@ -601,6 +604,7 @@ impl RoundRunner {
             Err(Stop::Cancelled | Stop::Activation | Stop::Lapsed) => {
                 (cancelled_outcome().into(), None, None)
             }
+            Err(Stop::Durable(error)) => return Err(error.into()),
         };
         // A park whose resolver awaits a process waits on its terminal too:
         // the wait is pinned with the park, under the call's own deadline.

@@ -435,7 +435,7 @@ impl Broker<'_> {
                         .map_err(|refusal| BrokerFailure::Checkpoint { refusal })?;
                     snapshotted = true;
                     ledger = ParentLedger::restore(committed.checkpoint.ledger.clone());
-                    operation.operation = ledger.pending().and_then(|pending| pending.operation);
+                    operation.operation = ledger.pending().and_then(|pending| pending.operation());
                     let performed = self
                         .effects
                         .perform(&operation, &committed.waits)

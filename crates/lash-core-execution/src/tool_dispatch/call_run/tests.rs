@@ -457,3 +457,23 @@ async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
         );
     }
 }
+
+/// FIG-5235: refusing a duplicate start preserves the first call's terminal.
+#[tokio::test]
+async fn a_duplicate_start_keeps_the_ended_call() {
+    let calls = Arc::new(Calls::default());
+    let handlers: Arc<dyn SingletonToolHandlers> = calls.clone();
+    let mut run = run();
+    let call = calls.call("duplicate");
+    let id = call.call_id.clone();
+    run.start(calls.call("duplicate"), Arc::clone(&handlers))
+        .unwrap();
+    calls.release(&id);
+    run.next_end().await;
+    assert!(run.end(&id).unwrap().is_some());
+    assert!(run.start(call, handlers).is_err());
+    assert!(
+        run.end(&id).unwrap().is_some(),
+        "duplicate start erased the terminal"
+    );
+}
