@@ -7,9 +7,14 @@
 //! own laws. The catalog audit holds the cases to every label the runtime
 //! emits.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use lash_sim::crash_matrix::deployment::Dialect;
+use lash_durable::CommitLabel;
+use lash_durable_test::{Fault, Matrix};
+use lash_sim::crash_matrix::deployment::{Deployment, Dialect};
+use lash_sim::crash_matrix::services::EXT_WRITE;
 use lash_sim::crash_matrix::{Case, assert_case, assert_case_on, catalog_audit, run_case};
 
 macro_rules! crash_matrix {
@@ -35,6 +40,44 @@ crash_matrix! {
     a_session_close_cut_at_every_label_ends_at_its_tombstone => Close;
     a_trigger_occurrence_cut_at_every_label_starts_each_delivery_once => Trigger;
     a_drained_node_cut_at_every_label_releases_its_actors_to_the_next_once => Drain;
+}
+
+/// A stale-epoch cut at `cell.snapshot+admit` runs no body on the old owner:
+/// its admission commits, its node pauses past its lease, and the new owner
+/// restores from the snapshot and settles the started `Once` `Interrupted`.
+/// The old owner's acknowledged admission reaches it only past its
+/// self-stop deadline, so the body never starts there, nor anywhere.
+#[tokio::test]
+async fn a_stale_epoch_cut_at_a_cell_admission_runs_no_body_on_the_old_owner() {
+    for seed in 0..8 {
+        let worlds = RefCell::new(Vec::new());
+        let report = Matrix::new()
+            .faults(&[Fault::StaleEpoch])
+            .labels(&[CommitLabel::CELL_SNAPSHOT_ADMIT])
+            .run(|| {
+                let deployment = Deployment::new(Case::Cell, seed, Dialect::SqliteMemory);
+                worlds.borrow_mut().push(Arc::clone(deployment.world()));
+                deployment
+            })
+            .await;
+        assert!(
+            !report.cells.is_empty(),
+            "seed {seed}: no admission was cut"
+        );
+        // The first run is the uncut one; each cut's run follows in order.
+        let worlds = worlds.into_inner();
+        for (cell, world) in report.cells.iter().zip(&worlds[1..]) {
+            let bodies = world.ledger().of_tool(EXT_WRITE);
+            assert!(
+                bodies.is_empty(),
+                "seed {seed}: {} {}: {EXT_WRITE}'s body ran: {bodies:?}\n  {}",
+                cell.point,
+                cell.fault,
+                cell.trace
+            );
+        }
+        report.assert_held();
+    }
 }
 
 /// Every label the runtime emits is committed by some case's uncut run, so

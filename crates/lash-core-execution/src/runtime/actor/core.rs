@@ -82,6 +82,9 @@ pub(super) struct Inner {
     /// What the claim's activation waits on for mail; a context that owns
     /// no claim polls on the backend's claim interval.
     mail: Option<lash_durable::runner::MailWaker>,
+    /// The claiming node's lease as its own clock sees it; a context that
+    /// owns no claim holds no node lease.
+    liveness: Option<lash_durable::runner::Liveness>,
     clock: Arc<dyn Clock>,
     cancel: CancellationToken,
     probe: Arc<dyn DurableProbe>,
@@ -122,6 +125,7 @@ impl ActorContext {
                 actor,
                 epoch,
                 mail: None,
+                liveness: None,
                 clock,
                 cancel,
                 probe,
@@ -149,6 +153,7 @@ impl ActorContext {
                 actor: owned.actor().clone(),
                 epoch: owned.epoch(),
                 mail: Some(owned.mail_waker()),
+                liveness: Some(owned.liveness().clone()),
                 clock: Arc::clone(owned.clock()),
                 cancel,
                 probe,
@@ -174,6 +179,7 @@ impl ActorContext {
                 actor: ActorKey::session("unavailable").expect("a constant actor id"),
                 epoch: Epoch(0),
                 mail: None,
+                liveness: None,
                 clock: Arc::new(crate::SystemClock),
                 cancel: CancellationToken::new(),
                 probe: Arc::new(lash_durable::NoProbe),
@@ -279,6 +285,20 @@ impl ActorContext {
             .mail
             .as_ref()
             .is_some_and(lash_durable::runner::MailWaker::draining)
+    }
+
+    /// Whether the claiming node still holds its lease by its own clock:
+    /// its self-stop deadline is ahead. Past it the node may already be
+    /// reaped and the actor owned elsewhere, even though a commit it sent
+    /// before was acknowledged, so an owner starts no body once this is
+    /// false (ADR 0132 §3). A context that owns no claim holds no node
+    /// lease and answers true.
+    #[must_use]
+    pub fn lease_held(&self) -> bool {
+        self.inner
+            .liveness
+            .as_ref()
+            .is_none_or(lash_durable::runner::Liveness::held)
     }
 
     /// Cancelled when the activation must stop.

@@ -4,11 +4,11 @@
 //! point. The host then commits, in one `cell.snapshot+admit` transaction,
 //! the next snapshot revision, the [`BrokerLedger`] that matches it, the
 //! admission and `x_start` (S4) of the operation the VM stands on, and its
-//! waits. The operation's body starts only after that commit, and its
-//! outcome commits as `round.outcome`. On restore the operation's saved
-//! outcome (or `Interrupted` for a started `Once`) is fed back by
-//! [`OperationId`]; nothing re-dispatches and no earlier host operation
-//! re-runs.
+//! waits. The operation's body starts only after that commit, and only
+//! while the node still holds its lease; its outcome commits as
+//! `round.outcome`. On restore the operation's saved outcome (or
+//! `Interrupted` for a started `Once`) is fed back by [`OperationId`];
+//! nothing re-dispatches and no earlier host operation re-runs.
 //!
 //! An operation's identity is minted at admission and stored in the
 //! snapshot. It is never a journal position.
@@ -447,6 +447,25 @@ impl DurableSnapshotStore {
         }
     }
 
+    /// Refuse to hand an execution to its body once the node's lease
+    /// lapsed. An admission's commit can be acknowledged after the node
+    /// paused past its self-stop deadline: by then it may be reaped and the
+    /// actor's new owner may have restored from this snapshot and settled
+    /// the started `Once` `Interrupted`. The body never runs on this owner;
+    /// the store forgets what it held, and the run stops.
+    fn lease_held(&self) -> Result<(), QuietPointRefusal> {
+        if self.cx.lease_held() {
+            return Ok(());
+        }
+        let mut held = self.held();
+        held.rev = None;
+        held.admitted.clear();
+        Err(QuietPointRefusal(format!(
+            "the node's lease lapsed before {:?}'s admitted body could start",
+            self.exec
+        )))
+    }
+
     /// The owner's run records, folded.
     async fn fold(&self) -> Result<RunFold, QuietPointRefusal> {
         let rows = self
@@ -553,6 +572,7 @@ impl DurableSnapshotStore {
                 let execution = fold.admitted(&id).ok_or_else(|| {
                     QuietPointRefusal(format!("operation {operation:?} has no started execution"))
                 })?;
+                self.lease_held()?;
                 self.held().admitted.insert(operation, execution);
                 Ok(Recovered::Rerun { waits })
             }
@@ -648,6 +668,9 @@ impl SnapshotStore for DurableSnapshotStore {
             CommitLabel::CELL_SNAPSHOT
         };
         self.commit(tx, label).await?;
+        if admitted.is_some() {
+            self.lease_held()?;
+        }
         let rev = SnapshotRev(expected.map_or(1, |rev| rev.0 + 1));
         let mut held = self.held();
         held.rev = Some(Some(rev));

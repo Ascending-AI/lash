@@ -142,6 +142,47 @@ impl std::fmt::Debug for Drain {
     }
 }
 
+/// A node's lease as its own clock sees it: held until its self-stop
+/// deadline, `self_stop_after` past its last renewal. The runner moves the
+/// deadline at each renewal and stops at it. Between the deadline and the
+/// runner's next tick the node may already be reaped and its actors owned
+/// elsewhere while a reply it waited on still reaches its caller, so an
+/// owner reads this before it hands an admitted execution to its body
+/// (ADR 0132 §3).
+#[derive(Clone)]
+pub struct Liveness {
+    deadline: Arc<Mutex<Instant>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl Liveness {
+    fn new(clock: Arc<dyn Clock>, deadline: Instant) -> Self {
+        Self {
+            deadline: Arc::new(Mutex::new(deadline)),
+            clock,
+        }
+    }
+
+    fn renew(&self, deadline: Instant) {
+        *self.deadline.lock().unwrap_or_else(PoisonError::into_inner) = deadline;
+    }
+
+    /// Whether the node still holds its lease: its self-stop deadline is
+    /// ahead of its clock.
+    #[must_use]
+    pub fn held(&self) -> bool {
+        self.clock.now() < *self.deadline.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl std::fmt::Debug for Liveness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Liveness")
+            .field("held", &self.held())
+            .finish()
+    }
+}
+
 /// What a node does with one actor it claimed.
 #[async_trait::async_trait]
 pub trait Activation: Send + Sync + 'static {
@@ -161,6 +202,7 @@ pub struct Owned {
     hint: Arc<Notify>,
     poll: std::time::Duration,
     drain: Drain,
+    liveness: Liveness,
 }
 
 impl Owned {
@@ -202,6 +244,12 @@ impl Owned {
     #[must_use]
     pub fn drain(&self) -> &Drain {
         &self.drain
+    }
+
+    /// The node's lease as its own clock sees it.
+    #[must_use]
+    pub fn liveness(&self) -> &Liveness {
+        &self.liveness
     }
 
     /// Open an owner transaction over the actor at the owned epoch.
@@ -453,6 +501,7 @@ pub struct Runner {
     hints: Hints,
     signals: Option<Arc<dyn Signals>>,
     drain: Drain,
+    liveness: Liveness,
 }
 
 /// Publish the node's coalesced wakes, one flush at a time: whatever is
@@ -485,6 +534,7 @@ impl Runner {
         config: RunnerConfig,
         activation: Arc<dyn Activation>,
     ) -> Self {
+        let liveness = Liveness::new(Arc::clone(&clock), clock.now());
         Self {
             store,
             clock,
@@ -493,6 +543,7 @@ impl Runner {
             hints: Hints::default(),
             signals: None,
             drain: Drain::default(),
+            liveness,
         }
     }
 
@@ -568,6 +619,7 @@ impl Runner {
         let mut active: JoinSet<()> = JoinSet::new();
         let start = self.clock.now();
         let mut last_renewed = start;
+        self.liveness.renew(start + settings.self_stop_after);
         let mut next_heartbeat = start + settings.heartbeat_every;
         let mut next_reap = start + settings.reap_every;
         let mut next_claim = start;
@@ -641,7 +693,10 @@ impl Runner {
                 next_heartbeat = now + settings.heartbeat_every;
                 let beat = self.store.heartbeat(&lease);
                 match self.bounded(&mut stop, unrenewed, beat).await {
-                    Ok(Ok(HeartbeatOutcome::Renewed { .. })) => last_renewed = now,
+                    Ok(Ok(HeartbeatOutcome::Renewed { .. })) => {
+                        last_renewed = now;
+                        self.liveness.renew(now + settings.self_stop_after);
+                    }
                     Ok(Ok(HeartbeatOutcome::Reaped) | Err(DurableError::NodeLeaseLost { .. })) => {
                         break Stopped::LeaseLost;
                     }
@@ -786,6 +841,7 @@ impl Runner {
             claimed,
             poll: self.config.lease.settings().claim_poll,
             drain: self.drain.clone(),
+            liveness: self.liveness.clone(),
         };
         let activation = Arc::clone(&self.activation);
         let running = Running {
