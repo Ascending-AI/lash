@@ -66,6 +66,20 @@ class WriterTests(unittest.TestCase):
         self.assertIn("left <&> right", failure)
         self.assertIn("not xml ? and not utf-8 �", suite.find("system-out").text)
 
+    def test_matrix_wall_time_is_attached_to_its_law(self):
+        log = b"""running 2 tests
+test matrix::law ... matrix law=matrix::law cells=8 total=1.234567s p50=0.2s max=0.3s slowest=a:t#1/abort
+ok
+test matrix::other ... matrix law=matrix::other cells=2 total=0.125000s p50=0.1s max=0.1s slowest=a:t#1/abort
+matrix law=matrix::other cells=2 total=0.250000s p50=0.1s max=0.1s slowest=a:t#1/abort
+ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+"""
+        (suite,) = self.write(("matrix", "0", log))
+        found = cases(suite)
+        self.assertEqual(found["matrix::law"].get("time"), "1.234567")
+        self.assertEqual(found["matrix::other"].get("time"), "0.375000")
+
     def test_exit_without_a_failed_case_is_an_error_case(self):
         (suite,) = self.write(("crates/x/x__test", "134", b"test a::ok ... ok\nabort\n"))
         self.assertEqual((suite.get("tests"), suite.get("errors")), ("2", "1"))

@@ -216,7 +216,19 @@ pub async fn run_case(case: Case, seed: u64, modes: &[Fault]) -> CaseReport {
 
 /// [`run_case`] over `dialect`.
 pub async fn run_case_on(case: Case, seed: u64, modes: &[Fault], dialect: &Dialect) -> CaseReport {
+    let parallelism = match std::env::var("LASH_MATRIX_THREADS") {
+        Ok(value) => value
+            .parse::<std::num::NonZeroUsize>()
+            .unwrap_or_else(|error| {
+                panic!("LASH_MATRIX_THREADS must be a positive integer: {error}")
+            }),
+        Err(std::env::VarError::NotPresent) => {
+            std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN)
+        }
+        Err(error) => panic!("read LASH_MATRIX_THREADS: {error}"),
+    };
     let report = Matrix::new()
+        .parallelism(parallelism)
         .faults(modes)
         .horizon(HORIZON)
         .run(|| Deployment::new(case, seed, dialect.clone()))

@@ -145,7 +145,7 @@ lash_rust_integration_test(
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     shard_count = 4,
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"LASH_MATRIX_THREADS": "4", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)", "RUST_TEST_THREADS": "1"},
     library = ":lash-sim",
     library_crate_name = "lash_sim",
     manifest_dir = "crates/lash-sim",

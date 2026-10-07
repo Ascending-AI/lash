@@ -15,7 +15,8 @@ stable `test <name> ... ok|FAILED|ignored` records, and a failing case carries
 its `---- <name> stdout ----` section. A record may be split by the output of
 the tests themselves; `libtest_cases` reads it across lines. Where libtest names
 its tests, the cases must add up to its own `test result:` summary. A case
-carries a `time` when libtest reports one (`--report-time`). If they do
+carries a `time` when libtest reports one (`--report-time`) or its matrix
+prints a wall-time summary. If they do
 not, the suite carries an error and this exits non-zero, so the callers fail
 the test. A test's child process may print libtest output of its own into the
 same stream; `libtest_runs` and `own_cases` keep the child's cases and summary
@@ -28,6 +29,7 @@ command case. The whole log is the suite's `<system-out>`.
 """
 
 from collections import Counter
+from decimal import Decimal
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -46,6 +48,7 @@ WHOLE_RECORD = re.compile(rf"^test (.+?) \.\.\. {RESULT}$")
 TRAILING_RESULT = re.compile(r"(ok|FAILED|ignored)$")
 HEADER = re.compile(r"^running (\d+) tests?$")
 SUMMARY_LINE = re.compile(r"^test result: \S+ (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured;")
+MATRIX_TIME = re.compile(r"matrix law=(.+?) cells=\d+ total=([0-9.]+)s(?: |$)")
 FAILURE_SECTION = re.compile(r"^---- (.+?) stdout ----$")
 # Code points XML 1.0 cannot carry, even escaped.
 NOT_XML = re.compile("[^\t\n\r\x20-퟿-�\U00010000-\U0010ffff]")
@@ -332,11 +335,19 @@ def add_suite(root, name, code, seconds, log_path):
     lines = text.splitlines()
     outcomes, mismatch = timed_cases(text)
     details = failure_sections(lines)
+    matrix_times = {}
+    for line in lines:
+        match = MATRIX_TIME.search(line)
+        if match:
+            law, elapsed = match.groups()
+            matrix_times[law] = matrix_times.get(law, Decimal(0)) + Decimal(elapsed)
 
     suite = ET.SubElement(root, "testsuite", name=name, time=seconds)
     failures = skipped = errors = 0
     for case_name, (outcome, case_seconds) in outcomes.items():
         case = ET.SubElement(suite, "testcase", name=case_name, classname=name)
+        if case_seconds is None and case_name in matrix_times:
+            case_seconds = f"{matrix_times[case_name]:.6f}"
         if case_seconds is not None:
             # `shard_weights.py --refresh` balances shards by these.
             case.set("time", case_seconds)

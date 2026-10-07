@@ -16,8 +16,10 @@ use crate::script::{Cut, Fault, Script, Stored, Write, WriteKind};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, CommitLabel, DurableStore};
 use std::collections::BTreeMap;
+use std::io::Write as _;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// One run of a deployment, built fresh for every cell of a matrix.
 #[async_trait::async_trait]
@@ -81,6 +83,19 @@ pub struct Cell {
     pub verdict: Verdict,
     /// The run's write trace, rendered.
     pub trace: String,
+    /// Building the database, clock and nodes.
+    pub setup: Duration,
+    /// Seeding and driving the scenario to completion.
+    pub run: Duration,
+    /// Checking its domain laws and collecting its trace.
+    pub check: Duration,
+}
+
+impl Cell {
+    /// Total wall time spent in this cell's three phases.
+    pub fn elapsed(&self) -> Duration {
+        self.setup + self.run + self.check
+    }
 }
 
 /// A whole matrix's result.
@@ -89,9 +104,45 @@ pub struct MatrixReport {
     /// The uncut run's writes.
     pub baseline: Vec<Write>,
     pub cells: Vec<Cell>,
+    /// Wall time of the baseline and all cells, including cleanup.
+    pub elapsed: Duration,
 }
 
 impl MatrixReport {
+    fn print_times(&self, law: &str) {
+        let mut times: Vec<Duration> = self.cells.iter().map(Cell::elapsed).collect();
+        times.sort();
+        let p50 = times
+            .get(times.len().saturating_sub(1) / 2)
+            .copied()
+            .unwrap_or_default();
+        let slowest = self.cells.iter().max_by_key(|cell| cell.elapsed());
+        let max = slowest.map(Cell::elapsed).unwrap_or_default();
+        let name = slowest
+            .map(|cell| format!("{}/{}", cell.point, cell.fault))
+            .unwrap_or_else(|| "none".into());
+        let mut output = std::io::stderr().lock();
+        let _ = writeln!(
+            output,
+            "matrix law={law} cells={} total={:.6}s p50={:.6}s max={:.6}s slowest={name}",
+            self.cells.len(),
+            self.elapsed.as_secs_f64(),
+            p50.as_secs_f64(),
+            max.as_secs_f64()
+        );
+        for cell in &self.cells {
+            let _ = writeln!(
+                output,
+                "matrix cell={}/{} setup={:.6}s run={:.6}s check={:.6}s",
+                cell.point,
+                cell.fault,
+                cell.setup.as_secs_f64(),
+                cell.run.as_secs_f64(),
+                cell.check.as_secs_f64()
+            );
+        }
+    }
+
     /// Every cell whose laws did not hold, or whose cut was never reached.
     pub fn failures(&self) -> Vec<&Cell> {
         self.cells
@@ -141,6 +192,7 @@ pub struct Matrix {
     labels: Option<Vec<CommitLabel>>,
     across_nodes: bool,
     activations_first: bool,
+    parallelism: Option<NonZeroUsize>,
 }
 
 impl Default for Matrix {
@@ -167,7 +219,15 @@ impl Matrix {
             labels: None,
             across_nodes: false,
             activations_first: false,
+            parallelism: None,
         }
+    }
+
+    /// Bound the number of cells running at once. By default, use
+    /// the available CPUs. Hosts can pass their environment override here.
+    pub fn parallelism(mut self, parallelism: NonZeroUsize) -> Self {
+        self.parallelism = Some(parallelism);
+        self
     }
 
     /// Cut with these faults only.
@@ -216,6 +276,7 @@ impl Matrix {
     /// Run `make`'s scenario uncut, then cut at every point under every
     /// fault that applies there.
     pub async fn run<S: Scenario>(&self, make: impl Fn() -> S) -> MatrixReport {
+        let started = Instant::now();
         let baseline = self.run_one(&make(), None).await;
         assert_eq!(
             baseline.verdict,
@@ -223,37 +284,94 @@ impl Matrix {
             "the uncut run must hold before any cut means anything\n  {}",
             baseline.trace
         );
-        let mut cells = Vec::new();
-        for point in cut_points(&baseline.writes, self.across_nodes)
+        let jobs: Vec<(CutPoint, Fault)> = cut_points(&baseline.writes, self.across_nodes)
             .into_iter()
             .filter(|point| {
                 self.labels
                     .as_ref()
                     .is_none_or(|labels| labels.contains(&point.label))
             })
-        {
-            for fault in self
-                .faults
-                .iter()
-                .copied()
-                .filter(|fault| applies(point.kind, *fault))
-            {
-                let run = self.run_one(&make(), Some((&point, fault))).await;
-                cells.push(Cell {
-                    point: point.clone(),
-                    fault,
-                    verdict: run.verdict,
-                    trace: run.trace,
-                });
+            .flat_map(|point| {
+                self.faults
+                    .iter()
+                    .copied()
+                    .filter(move |fault| applies(point.kind, *fault))
+                    .map(move |fault| (point.clone(), fault))
+            })
+            .collect();
+        let width = self
+            .parallelism
+            .unwrap_or_else(|| std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN))
+            .get();
+        let mut cells = std::thread::scope(|scope| {
+            let (completed, ready) = std::sync::mpsc::channel();
+            let mut jobs = jobs.into_iter();
+            let mut running = 0;
+            let mut cells = Vec::new();
+            loop {
+                while running < width {
+                    let Some((point, fault)) = jobs.next() else {
+                        break;
+                    };
+                    let completed = completed.clone();
+                    // Construct on the calling thread, preserving factories
+                    // that collect scenario evidence in non-Sync state.
+                    let started = Instant::now();
+                    let scenario = make();
+                    let factory = started.elapsed();
+                    // Each cell owns its thread and runtime. A completed
+                    // cell admits the next one, even while another is slow.
+                    scope.spawn(move || {
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let runtime = tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .unwrap_or_else(|error| panic!("a matrix cell runtime: {error}"));
+                            runtime.block_on(async {
+                                let run = self.run_one(&scenario, Some((&point, fault))).await;
+                                Cell {
+                                    point,
+                                    fault,
+                                    verdict: run.verdict,
+                                    trace: run.trace,
+                                    setup: factory + run.setup,
+                                    run: run.run,
+                                    check: run.check,
+                                }
+                            })
+                        }));
+                        // Send a panic too, so a failed cell cannot strand
+                        // the receiver waiting for its result.
+                        let _ = completed.send(result);
+                    });
+                    running += 1;
+                }
+                if running == 0 {
+                    break;
+                }
+                let result = ready
+                    .recv()
+                    .unwrap_or_else(|error| panic!("a matrix cell result: {error}"));
+                running -= 1;
+                match result {
+                    Ok(cell) => cells.push(cell),
+                    Err(panic) => std::panic::resume_unwind(panic),
+                }
             }
-        }
-        MatrixReport {
+            cells
+        });
+        cells.sort_by(|left, right| (&left.point, left.fault).cmp(&(&right.point, right.fault)));
+        let report = MatrixReport {
             baseline: baseline.writes,
             cells,
-        }
+            elapsed: started.elapsed(),
+        };
+        report.print_times(std::thread::current().name().unwrap_or("unnamed"));
+        report
     }
 
     async fn run_one<S: Scenario>(&self, scenario: &S, cut: Option<(&CutPoint, Fault)>) -> Run {
+        let started = Instant::now();
         let clock = SimClock::new();
         let database = scenario.database(Arc::clone(&clock)).await;
         let script = Script::new();
@@ -275,6 +393,8 @@ impl Matrix {
         if self.activations_first {
             nodes.run_activations_first();
         }
+        let setup = started.elapsed();
+        let started = Instant::now();
         let mut violations = Vec::new();
         if let Err(error) = scenario.start(&nodes).await {
             violations.push(format!("the scenario did not start: {error}"));
@@ -317,6 +437,8 @@ impl Matrix {
             }
         }
         nodes.quiesce().await;
+        let run = started.elapsed();
+        let started = Instant::now();
         let cuts = nodes.script().cuts();
         violations.extend(scenario.check(&nodes, cuts.first()).await);
         let unreached = !nodes.script().disarm_unfired().is_empty();
@@ -333,6 +455,9 @@ impl Matrix {
             verdict,
             trace,
             writes,
+            setup,
+            run,
+            check: started.elapsed(),
         }
     }
 }
@@ -341,6 +466,9 @@ struct Run {
     verdict: Verdict,
     trace: String,
     writes: Vec<Write>,
+    setup: Duration,
+    run: Duration,
+    check: Duration,
 }
 
 /// How long a paused node stays paused: past its lease, a reap and a claim,
@@ -400,5 +528,142 @@ fn applies(kind: WriteKind, fault: Fault) -> bool {
         | Fault::CommitThenAbort
         | Fault::AckHidden
         | Fault::DelayedAck(_) => true,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::testing::{FORMATS, actor, sqlite};
+    use lash_durable::runner::{Exit, Owned};
+    use lash_durable::{FormatSet, LeaseConfig, MailKind, MailTx};
+    use std::num::NonZeroUsize;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const LABELS: [CommitLabel; 3] = [
+        CommitLabel::new("matrix.z"),
+        CommitLabel::new("matrix.y"),
+        CommitLabel::new("matrix.x"),
+    ];
+
+    struct MailScenario {
+        active: Arc<AtomicUsize>,
+        peak: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl Activation for MailScenario {
+        async fn activate(&self, _owned: Owned) -> Exit {
+            panic!("this producer-only scenario starts no nodes")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Scenario for MailScenario {
+        async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(active, Ordering::SeqCst);
+            let database = sqlite(clock).await;
+            // Keep independent setups overlapping, so the pool's bound is
+            // observable without relying on the speed of SQLite setup.
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            database
+        }
+
+        fn config(&self) -> SimNodesConfig {
+            SimNodesConfig {
+                lease: LeaseConfig::default(),
+                decodes: vec![FormatSet::new(FORMATS)],
+                max_active: 1,
+            }
+        }
+
+        fn activation(&self) -> Arc<dyn Activation> {
+            Arc::new(Self {
+                active: Arc::clone(&self.active),
+                peak: Arc::clone(&self.peak),
+            })
+        }
+
+        async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+            let producer = nodes.producer("producer");
+            for label in LABELS {
+                let mut error = None;
+                for _ in 0..2 {
+                    let mut tx = MailTx::new();
+                    tx.create_actor(actor(label.as_str()), FormatSet::new(FORMATS))
+                        .append(actor(label.as_str()), MailKind::new("test"), "input");
+                    match producer.commit_mail(tx, label).await {
+                        Ok(_) => {
+                            error = None;
+                            break;
+                        }
+                        Err(failed) => error = Some(failed),
+                    }
+                }
+                if let Some(error) = error {
+                    return Err(error.to_string());
+                }
+            }
+            Ok(())
+        }
+
+        fn actors(&self) -> Vec<ActorKey> {
+            LABELS.iter().map(|label| actor(label.as_str())).collect()
+        }
+
+        async fn done(&self, _nodes: &SimNodes) -> bool {
+            true
+        }
+
+        async fn check(&self, nodes: &SimNodes, _cut: Option<&Cut>) -> Vec<String> {
+            let mut violations = Vec::new();
+            for actor in self.actors() {
+                if !matches!(nodes.database().actor(&actor).await, Ok(Some(row)) if row.pending_mail == 1)
+                {
+                    violations.push(format!("{actor} must retain exactly one input"));
+                }
+            }
+            violations
+        }
+    }
+
+    /// FIG-5278: scheduling changes neither a matrix's verdicts nor its
+    /// traces, and at most the requested number of isolated cells run.
+    #[tokio::test]
+    async fn serial_and_parallel_matrices_have_identical_verdicts_and_traces() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let make = || MailScenario {
+            active: Arc::clone(&active),
+            peak: Arc::clone(&peak),
+        };
+        let matrix = || Matrix::new().faults(&[Fault::LostWake, Fault::FailBefore]);
+        let serial = matrix()
+            .parallelism(NonZeroUsize::new(1).unwrap())
+            .run(make)
+            .await;
+        serial.assert_held();
+        assert_eq!(peak.swap(0, Ordering::SeqCst), 1);
+        let parallel = matrix()
+            .parallelism(NonZeroUsize::new(4).unwrap())
+            .run(make)
+            .await;
+        parallel.assert_held();
+        assert!(
+            (2..=4).contains(&peak.load(Ordering::SeqCst)),
+            "the bounded pool must overlap independent cells"
+        );
+        assert_eq!(serial.baseline, parallel.baseline);
+        let without_times = |report: MatrixReport| {
+            report
+                .cells
+                .into_iter()
+                .map(|cell| (cell.point, cell.fault, cell.verdict, cell.trace))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(without_times(serial), without_times(parallel));
     }
 }
