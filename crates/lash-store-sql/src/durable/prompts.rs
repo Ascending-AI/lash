@@ -10,6 +10,10 @@
 //! through an edge row, and a text is stored once however many roots share
 //! it. Nothing but a release removes a root, and a text is reclaimed only
 //! when no edge names it.
+//!
+//! The batch statements over texts and edges fork: each dialect binds a
+//! call's texts as one list, `json_each` on SQLite and `unnest` on
+//! PostgreSQL, so its own module declares them.
 
 /// The table of snapshot roots, one row per admitted model call.
 pub const TABLE: &str = "prompt_snapshots";
@@ -31,15 +35,6 @@ crate::statements! {
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT (session_id, run, call_ordinal) DO NOTHING
              RETURNING call_ordinal";
-
-        /// Store text `?2` at content address `?1`, keeping what is already
-        /// there: the address names the bytes, so a conflict is the same text.
-        insert_text = "INSERT INTO prompt_texts (hash, text) VALUES (?1, ?2)
-             ON CONFLICT (hash) DO NOTHING";
-
-        /// Root text `?4` under call `?3` of turn `?2` in session `?1`.
-        insert_edge = "INSERT INTO prompt_snapshot_texts (session_id, run, call_ordinal, hash)
-             VALUES (?1, ?2, ?3, ?4)";
 
         /// Call `?3` of turn `?2` in session `?1`: its snapshot and the epoch
         /// that wrote it.
@@ -70,10 +65,5 @@ crate::statements! {
         /// Release every root of turn `?2` in session `?1`.
         release_run_snapshots = "DELETE FROM prompt_snapshots
              WHERE session_id = ?1 AND run = ?2";
-
-        /// Reclaim the text at `?1` when no root references it any more.
-        reclaim_text = "DELETE FROM prompt_texts
-             WHERE hash = ?1
-               AND NOT EXISTS (SELECT 1 FROM prompt_snapshot_texts AS edge WHERE edge.hash = ?1)";
     }
 }

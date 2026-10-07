@@ -233,6 +233,11 @@ pub(super) async fn delete_session_from_catalog(
                 crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
                     .map_err(sqlite_error)?;
             }
+            // Deleting the session is the explicit retention its prompt
+            // snapshots wait for: its roots go, and every text no other
+            // root shares.
+            crate::durable::release_prompt_snapshots(tx, &session_id, None)
+                .map_err(sqlite_error)?;
             if !candidates.is_empty() {
                 // A superseded root outside this session can still reference
                 // a candidate. Apply GC's root rules to every touching edge

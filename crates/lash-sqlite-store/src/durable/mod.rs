@@ -50,6 +50,7 @@ mod waits;
 // each domain's own lane adds its tables beside them.
 pub(crate) use park_events::TABLES as PARK_EVENTS_TABLES;
 pub(crate) use prompts::TABLES as PROMPT_SNAPSHOTS_TABLES;
+pub(crate) use prompts::release as release_prompt_snapshots;
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
 pub(crate) use session_close::TABLES as SESSION_CLOSE_TABLES;
 pub(crate) use snapshots::TABLES as EXEC_SNAPSHOTS_TABLES;

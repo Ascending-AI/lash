@@ -340,3 +340,255 @@ async fn sixteen_claimers_on_a_hot_set_take_disjoint_actors() {
         at(99),
     );
 }
+
+/// Whether lock waiters in this database reach `waiters` before one of
+/// `racing` ends.
+async fn until_lock_waiters<T>(
+    pool: &sqlx::PgPool,
+    waiters: i64,
+    racing: &[&tokio::task::JoinHandle<T>],
+) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        )
+        .fetch_one(pool)
+        .await
+        .expect("count lock waiters");
+        if waiting >= waiters {
+            return true;
+        }
+        if racing.iter().any(|task| task.is_finished()) {
+            return false;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "lock waiters stayed at {waiting}, short of {waiters}"
+        );
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+}
+
+/// A record and a release that share a text, interleaved in both orders,
+/// round after round (S6, FIG-5272). In one order the record has rooted the
+/// text and is still open when the release drops the text's last other
+/// edge; in the other the release has reclaimed the text and is still open
+/// when the record names it. Each side is held open by an edge waiting
+/// behind a held row, so the interleaving is fixed, not timed. Both always
+/// commit, the recorded call keeps its text, and once both sessions release
+/// nothing of theirs is left.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
+    use lash_durable::domain::{PromptCallKey, PromptText, PromptWrite};
+    use lash_durable::{DomainWrite, DurableReads as _};
+    use lash_sansio::{SessionId, TurnId};
+
+    let Some((_database, storage)) =
+        storage("a_record_racing_a_release_of_a_shared_text_keeps_it").await
+    else {
+        return;
+    };
+    let store = storage
+        .durable_store()
+        .with_clock_for_testing(Arc::new(TestClock::new(1_000_000)));
+    let pool = storage.pool().clone();
+    let names = ["releasing", "recording", "anchor"];
+    let actors: Vec<ActorKey> = names.iter().map(|name| actor(name)).collect();
+    create(&store, &actors).await;
+    let owner = node(&store, "prompt-owner").await;
+    let claimed = store.claim(&owner, actors.len()).await.expect("claim all");
+    assert_eq!(claimed.len(), actors.len());
+    let epoch_of = |name: &str| {
+        claimed
+            .iter()
+            .find(|claimed| claimed.actor == actor(name))
+            .expect("every actor is claimed")
+            .epoch
+    };
+    let call = |session: &str, run: &str, call: u32| PromptCallKey {
+        session: SessionId::try_from(session.to_owned()).expect("a law's session id"),
+        run: TurnId::try_from(run.to_owned()).expect("a law's turn id"),
+        call,
+    };
+    let text = |hash: &str| PromptText {
+        hash: hash.to_owned(),
+        text: format!("text of {hash}"),
+    };
+    let record = |call: PromptCallKey, hashes: &[&str]| {
+        DomainWrite::Prompt(PromptWrite::Record {
+            snapshot: format!("snapshot of call {} of {}", call.call, call.run),
+            call,
+            texts: hashes.iter().map(|hash| text(hash)).collect(),
+        })
+    };
+    let release = |session: &str, run: &str| {
+        DomainWrite::Prompt(PromptWrite::Release {
+            session: SessionId::try_from(session.to_owned()).expect("a law's session id"),
+            run: Some(TurnId::try_from(run.to_owned()).expect("a law's turn id")),
+        })
+    };
+    let commit = |name: &'static str, writes: Vec<DomainWrite>| {
+        let store = store.clone();
+        let epoch = epoch_of(name);
+        async move {
+            let mut tx = store.begin(&actor(name), epoch).await?;
+            for write in writes {
+                tx.write(write);
+            }
+            store.commit(tx, LABEL).await
+        }
+    };
+    let hold = |hash: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let mut held = pool.begin().await.expect("open the holding transaction");
+            sqlx::query(super::prompts::LAW_SQL.hold_text.sql())
+                .bind(hash)
+                .fetch_one(&mut *held)
+                .await
+                .expect("hold the blocking text");
+            held
+        }
+    };
+    // The anchor roots the blocking text for good; holding its row stalls
+    // any commit that roots it too, after that commit's earlier writes.
+    commit(
+        "anchor",
+        vec![record(call("anchor", "anchor", 1), &["blocker"])],
+    )
+    .await
+    .expect("root the blocking text");
+
+    for round in 0..20 {
+        let (seed, shared) = (format!("seed-{round}"), format!("shared-{round}"));
+        let shared = shared.as_str();
+        commit(
+            "releasing",
+            vec![record(call("releasing", &seed, 1), &[shared])],
+        )
+        .await
+        .unwrap_or_else(|error| panic!("round {round}: seed the shared text: {error}"));
+
+        // The record roots the text and stays open; the release then drops
+        // the text's only other edge.
+        let held = hold("blocker").await;
+        let recorded = tokio::spawn(commit(
+            "recording",
+            vec![
+                record(call("recording", &format!("rooted-{round}"), 1), &[shared]),
+                record(
+                    call("recording", &format!("rooted-{round}"), 2),
+                    &["blocker"],
+                ),
+            ],
+        ));
+        let stalled = until_lock_waiters(&pool, 1, &[&recorded]).await;
+        let released = tokio::spawn(commit("releasing", vec![release("releasing", &seed)]));
+        let waited = stalled && until_lock_waiters(&pool, 2, &[&recorded, &released]).await;
+        held.rollback().await.expect("let the record finish");
+        let (recorded, released) = (recorded.await, released.await);
+        assert!(
+            waited,
+            "round {round}: the release did not wait for the open record: \
+             {recorded:?} and {released:?}"
+        );
+        assert!(
+            matches!((&recorded, &released), (Ok(Ok(_)), Ok(Ok(_)))),
+            "round {round}: a record open across a release answered {recorded:?} and {released:?}"
+        );
+        let kept = store
+            .prompt_snapshot(&call("recording", &format!("rooted-{round}"), 1))
+            .await
+            .expect("read the recorded root");
+        assert!(
+            kept.is_some_and(|root| root.texts == [shared]),
+            "round {round}: the recorded call lost its root"
+        );
+        assert_eq!(
+            store
+                .prompt_texts(&[shared.to_owned()])
+                .await
+                .expect("read"),
+            [text(shared)],
+            "round {round}: the release reclaimed a text a committed record roots"
+        );
+
+        // The release reclaims the text and stays open; the record then
+        // names it.
+        let (seed, shared) = (format!("reseed-{round}"), format!("reshared-{round}"));
+        let shared = shared.as_str();
+        commit(
+            "releasing",
+            vec![record(call("releasing", &seed, 1), &[shared])],
+        )
+        .await
+        .unwrap_or_else(|error| panic!("round {round}: seed the shared text: {error}"));
+        let held = hold("blocker").await;
+        let released = tokio::spawn(commit(
+            "releasing",
+            vec![
+                release("releasing", &seed),
+                record(
+                    call("releasing", &format!("after-{round}"), 1),
+                    &["blocker"],
+                ),
+            ],
+        ));
+        let stalled = until_lock_waiters(&pool, 1, &[&released]).await;
+        let recorded = tokio::spawn(commit(
+            "recording",
+            vec![record(
+                call("recording", &format!("named-{round}"), 1),
+                &[shared],
+            )],
+        ));
+        let waited = stalled && until_lock_waiters(&pool, 2, &[&released, &recorded]).await;
+        held.rollback().await.expect("let the release finish");
+        let (released, recorded) = (released.await, recorded.await);
+        assert!(
+            waited,
+            "round {round}: the record did not wait for the open release: \
+             {recorded:?} and {released:?}"
+        );
+        assert!(
+            matches!((&recorded, &released), (Ok(Ok(_)), Ok(Ok(_)))),
+            "round {round}: a record behind an open release answered {recorded:?} and {released:?}"
+        );
+        assert_eq!(
+            store
+                .prompt_texts(&[shared.to_owned()])
+                .await
+                .expect("read"),
+            [text(shared)],
+            "round {round}: a record behind a reclaim lost its text"
+        );
+    }
+
+    // Releasing both sessions leaves no text of theirs: nothing orphaned.
+    for name in ["releasing", "recording"] {
+        commit(
+            name,
+            vec![DomainWrite::Prompt(PromptWrite::Release {
+                session: SessionId::try_from(name.to_owned()).expect("a law's session id"),
+                run: None,
+            })],
+        )
+        .await
+        .unwrap_or_else(|error| panic!("release {name}: {error}"));
+    }
+    let used: Vec<String> = (0..20)
+        .flat_map(|round| [format!("shared-{round}"), format!("reshared-{round}")])
+        .collect();
+    let left = store.prompt_texts(&used).await.expect("read");
+    assert!(left.is_empty(), "released texts were left behind: {left:?}");
+    assert_eq!(
+        store
+            .prompt_texts(&["blocker".to_owned()])
+            .await
+            .expect("read"),
+        [text("blocker")],
+        "a text the anchor still roots was reclaimed"
+    );
+}

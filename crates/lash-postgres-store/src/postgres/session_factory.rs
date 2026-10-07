@@ -1067,6 +1067,13 @@ pub(crate) async fn delete_session_tx(
     }
     crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(tx, candidates, report)
         .await?;
+    // Deleting the session is the explicit retention its prompt snapshots
+    // wait for: its roots go, and every text no other root shares. Last
+    // among the resource locks, so the shared texts' locks are held for the
+    // shortest time.
+    crate::durable::release_prompt_snapshots(tx, session_id, None)
+        .await
+        .map_err(store_sqlx_error)?;
     if materialized {
         // Take the shared feed clock after the deletion's resource locks.
         let at_ms = crate::support::postgres_transaction_epoch_ms(tx).await?;

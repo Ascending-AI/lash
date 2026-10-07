@@ -63,6 +63,7 @@ use crate::support::store_sqlx_error;
 mod park_events;
 pub(crate) mod processes;
 mod prompts;
+pub(crate) use prompts::release as release_prompt_snapshots;
 #[path = "../durable_replay.rs"]
 mod replay;
 mod run_records;

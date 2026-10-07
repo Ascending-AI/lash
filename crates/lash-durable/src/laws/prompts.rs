@@ -4,7 +4,7 @@ use super::{LABEL, LawBroken, LawResult, create, ensure, node, session};
 use crate::domain::{DomainRefusal, PromptCallKey, PromptText, PromptWrite, TurnWrite};
 use crate::{DomainWrite, DurableError, DurableStore, Epoch};
 use lash_core_store::store::{
-    AdmittedTurnRows, ControlIntentId, RunAdmissionRecord, RunTerminalCause,
+    AdmittedTurnRows, ControlIntentId, RunAdmissionRecord, RunTerminalCause, SessionCatalogStore,
 };
 use lash_sansio::{SessionId, TurnId};
 
@@ -179,6 +179,85 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
     ensure!(
         stored(&["a", "b", "c"]).await?.is_empty(),
         "releasing the session left texts"
+    );
+    Ok(())
+}
+
+/// Deleting a session is the explicit retention its prompt snapshots wait
+/// for (FIG-5272). The delete releases every root of the session, in each of
+/// its turns, and reclaims every text only those roots referenced; a text
+/// another live session still roots survives with that session's root.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
+    store: &dyn DurableStore,
+    catalog: &dyn SessionCatalogStore,
+) -> LawResult {
+    let id = |name: &str| {
+        SessionId::try_from(name.to_owned()).map_err(|_| LawBroken(format!("session id {name}")))
+    };
+    let turn = |name: &str| {
+        TurnId::try_from(name.to_owned()).map_err(|_| LawBroken(format!("turn id {name}")))
+    };
+    let (deleted, live) = (id("deleted-session")?, id("live-session")?);
+    let actors = [session(deleted.as_str())?, session(live.as_str())?];
+    create(store, &actors).await?;
+    let owner = node(store, "prompt-owner").await?;
+    let claimed = store.claim(&owner, actors.len()).await?;
+    ensure!(claimed.len() == 2, "the sessions were not both claimed");
+    let call = |session: &SessionId, run: &str, call: u32| {
+        Ok::<_, LawBroken>(PromptCallKey {
+            session: session.clone(),
+            run: turn(run)?,
+            call,
+        })
+    };
+    let calls = [
+        (call(&deleted, "first-turn", 1)?, &["own", "shared"][..]),
+        (call(&deleted, "first-turn", 2)?, &["own"][..]),
+        (call(&deleted, "second-turn", 1)?, &["later"][..]),
+        (call(&live, "first-turn", 1)?, &["shared", "kept"][..]),
+    ];
+    for (call, names) in &calls {
+        let actor = session(call.session.as_str())?;
+        let Some(owned) = claimed.iter().find(|claimed| claimed.actor == actor) else {
+            return Err(LawBroken(format!("{} was not claimed", call.session)));
+        };
+        let mut tx = store.begin(&owned.actor, owned.epoch).await?;
+        tx.write(DomainWrite::Prompt(PromptWrite::Record {
+            call: call.clone(),
+            snapshot: format!("snapshot of call {} of {}", call.call, call.run),
+            texts: names.iter().map(|name| text(name)).collect(),
+        }));
+        store.commit(tx, LABEL).await?;
+    }
+
+    catalog
+        .delete_session(&deleted)
+        .await
+        .map_err(|failure| LawBroken(format!("the delete failed: {failure:?}")))?;
+    for (call, _) in &calls[..3] {
+        ensure!(
+            store.prompt_snapshot(call).await?.is_none(),
+            "the deleted session kept the root of {call:?}"
+        );
+    }
+    let root = store
+        .prompt_snapshot(&calls[3].0)
+        .await?
+        .ok_or_else(|| LawBroken("deleting one session released another's root".into()))?;
+    ensure!(
+        root.texts == hashes(&["kept", "shared"]),
+        "the live root reads back as {root:?}"
+    );
+    let stored = store
+        .prompt_texts(&hashes(&["own", "shared", "later", "kept"]))
+        .await?;
+    ensure!(
+        stored == [text("shared"), text("kept")],
+        "after the delete the stored texts are {stored:?}"
     );
     Ok(())
 }

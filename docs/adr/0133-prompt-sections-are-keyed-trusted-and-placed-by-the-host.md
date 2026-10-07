@@ -182,7 +182,12 @@ by content address, however many calls share it. A call records once; a
 second record is refused (`DomainRefusal::PromptCallRecorded`). Ending a turn,
 which prunes its phase rows, leaves its roots. Only the explicit retention,
 `PromptWrite::Release` for a turn or a whole session, removes roots, and a
-text goes with the last root that names it. `load_prompt_snapshot` reads a
+text goes with the last root that names it. Deleting a session is that
+retention: the delete releases every root of the session in its own
+transaction (FIG-5272). On PostgreSQL a record and a release that share a
+text serialize on that text's advisory lock, shared for the record and
+exclusive for the release, so neither fails the text's foreign key and no
+recorded call loses its text. `load_prompt_snapshot` reads a
 root back with every text verified against its address and calls no
 renderer.
 

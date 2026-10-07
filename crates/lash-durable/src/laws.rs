@@ -43,7 +43,10 @@ pub use formats::{
     a_newer_format_is_not_written_while_an_older_node_is_live,
     a_node_claims_only_actors_whose_formats_it_decodes,
 };
-pub use prompts::prompt_snapshot_roots_survive_phase_pruning_until_released;
+pub use prompts::{
+    deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text,
+    prompt_snapshot_roots_survive_phase_pruning_until_released,
+};
 pub use session_close::a_session_close_moves_one_step_at_a_time;
 
 macro_rules! ensure {

@@ -97,6 +97,30 @@ law!(
     |store, _advance| { laws::a_draining_node_claims_nothing_and_releases_ready(store) }
 );
 
+mod deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text {
+    use super::*;
+
+    async fn run(file: bool) {
+        let (_root, set, _clock) = world(file).await;
+        laws::deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
+            &set.durable_store(),
+            &*set.session_store_factory(),
+        )
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn memory() {
+        run(false).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn file() {
+        run(true).await;
+    }
+}
+
 /// A process-registry row and a trigger row keyed by `?1`.
 const REGISTRY_ROW: &str = "INSERT INTO process_tombstones \
      (process_id, terminal_label, pruned_at_ms, pruned_change_seq) VALUES (?1, 'completed', 1, 1)";

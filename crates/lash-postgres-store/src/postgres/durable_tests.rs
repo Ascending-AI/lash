@@ -77,3 +77,24 @@ law!(
     a_draining_node_claims_nothing_and_releases_ready,
     |store, _advance| { laws::a_draining_node_claims_nothing_and_releases_ready(store) }
 );
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text() {
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!(
+            "skipping deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text: \
+             database URL is not set"
+        );
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    laws::deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
+        &storage.durable_store(),
+        &storage.session_store_factory(),
+    )
+    .await
+    .unwrap_or_else(|broken| panic!("{broken}"));
+}
