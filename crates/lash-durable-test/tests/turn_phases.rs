@@ -37,7 +37,7 @@ use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
     AdmittedInputs, CodeCell, SessionActivation, TurnCancelRequest, TurnCommit, TurnDone,
-    TurnDrive, TurnError, TurnRow, TurnServices, admit_mail, request_turn_cancel,
+    TurnDrive, TurnError, TurnRow, TurnServices, admit_mail, request_turn_cancel, restore_turn,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -278,14 +278,21 @@ impl TurnServices for L3Services {
         _cx: &ActorContext,
         row: &TurnRow,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        // The scenario admits a turn with the messages it starts from.
-        let messages: Vec<Message> = serde_json::from_str(&row.admission_json)
+        // The turn starts from the session head's window, with the messages
+        // it was admitted with.
+        let window = SessionHead::load(&self.backend(), &row.session, commit_budget())
+            .await?
+            .window()?;
+        let admitted: Vec<Message> = serde_json::from_str(&row.admission_json)
             .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let machine = TurnMachine::new(
+        let messages = window.then(admitted);
+        let machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run),
+            window,
             messages,
-            Default::default(),
+            Vec::new(),
             0,
+            Vec::new(),
         );
         Ok(self.drive(row, machine))
     }
@@ -920,4 +927,173 @@ async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_ne
 async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary_on_postgres()
  {
     prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::Postgres).await;
+}
+
+/// A message of the scenario's session.
+fn session_message(id: &str, role: MessageRole, text: &str) -> Message {
+    Message {
+        id: id.to_owned(),
+        role,
+        parts: shared_parts(vec![Part::text(format!("{id}.p0"), text.to_owned(), None)]),
+        origin: None,
+        reply_marker: None,
+    }
+}
+
+/// Commit `messages` over the session head, as run `run` answering
+/// would: the head moves to its next revision.
+async fn move_head(backend: &Backend, run: &str, messages: Vec<Message>) {
+    let commit = SessionHead::load(backend, &session(), commit_budget())
+        .await
+        .expect("the head loads")
+        .commit(
+            &TurnId::try_from(run.to_owned()).unwrap(),
+            TurnDone {
+                messages: messages.into(),
+                event_delta: Vec::new(),
+                protocol_iteration: 0,
+                outcome: Some(TurnOutcome::Finished(TurnFinish::AssistantMessage {
+                    text: format!("{run} answered"),
+                })),
+            },
+        )
+        .expect("the head commit builds");
+    let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
+    catalog
+        .commit_runtime_state(
+            lash_core_store::store::decode_session_commit(&commit.commit_json)
+                .expect("the head commit decodes"),
+        )
+        .await
+        .expect("the head commit applies");
+}
+
+/// FIG-5206: a turn's checkpoint pins the committed window the turn started
+/// from instead of holding it. A restore after the session head has moved
+/// past the pinned revision reads the window at the pin and rebuilds exactly
+/// the turn's starting messages and history, so the pinned model request is
+/// re-delivered byte-identical.
+async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<String>) {
+    let keep = Mutex::default();
+    let (stores, _database) =
+        dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
+    let backend = Backend::for_testing(stores);
+    create_session(&backend).await;
+    let earlier = vec![
+        session_message("earlier-question", MessageRole::User, "an earlier question"),
+        session_message(
+            "earlier-answer",
+            MessageRole::Assistant,
+            "an earlier answer",
+        ),
+    ];
+    move_head(&backend, "l3-earlier", earlier.clone()).await;
+
+    // The turn starts from the head's window and waits on its model call.
+    let head = SessionHead::load(&backend, &session(), commit_budget())
+        .await
+        .expect("the head loads");
+    let window = head.window().expect("the head's window");
+    let mut machine = TurnMachine::in_window(
+        machine_config(&session(), &run()),
+        window.clone(),
+        window.then(vec![session_message(
+            "l3-input",
+            MessageRole::User,
+            "the turn's own input",
+        )]),
+        Vec::new(),
+        0,
+        Vec::new(),
+    );
+    let pinned = loop {
+        match machine
+            .poll_effect()
+            .expect("the machine reaches its model call")
+        {
+            Effect::SyncExecutionEnvironment { id } => {
+                machine.handle_response(Response::ExecutionEnvironmentSynced {
+                    id,
+                    result: Ok(ExecutionEnvironmentSync::default()),
+                });
+            }
+            Effect::LlmCall { request, .. } => break request,
+            _ => {}
+        }
+    };
+    let checkpoint = serde_json::to_string(&machine.checkpoint()).expect("checkpoint encodes");
+
+    // The head moves past the pinned revision while the turn is open.
+    let mut later = earlier;
+    later.push(session_message(
+        "later-note",
+        MessageRole::User,
+        "a note committed after the turn started",
+    ));
+    move_head(&backend, "l3-later", later).await;
+    let moved = SessionHead::load(&backend, &session(), commit_budget())
+        .await
+        .expect("the head loads");
+    assert!(
+        moved.revision() > head.revision(),
+        "the head moved past {}",
+        head.revision()
+    );
+
+    let row = TurnRow {
+        session: session(),
+        run: run(),
+        admission_json: String::new(),
+        phase: lash_core::runtime::durable::session::TurnPhase::Model { attempt: 1 },
+        iteration: 0,
+        checkpoint_ref: Some(checkpoint),
+        model: None,
+        turn_deadline: None,
+        written_epoch: lash_durable::Epoch(1),
+        cancel: None,
+    };
+    let restored = restore_turn(
+        &ActorContext::detached(backend.clone()),
+        machine_config(&session(), &run()),
+        &row,
+    )
+    .await
+    .expect("the turn restores over its pinned window");
+    assert_eq!(
+        serde_json::to_string(restored.machine.messages().as_slice()).unwrap(),
+        serde_json::to_string(machine.messages().as_slice()).unwrap(),
+        "the restored turn starts from its own window, not the moved head's"
+    );
+    assert_eq!(
+        serde_json::to_string(restored.machine.events().as_slice()).unwrap(),
+        serde_json::to_string(machine.events().as_slice()).unwrap(),
+        "the restored turn's history is its window's"
+    );
+    let Some(Effect::LlmCall { request, .. }) = restored.pending else {
+        panic!("the restored turn re-delivers its model call");
+    };
+    assert_eq!(
+        serde_json::to_string(request.as_ref()).unwrap(),
+        serde_json::to_string(pinned.as_ref()).unwrap(),
+        "the re-delivered model request is the pinned one"
+    );
+}
+
+#[tokio::test]
+async fn a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from() {
+    restore_after_the_head_moved(Dialect::SqliteMemory, None).await;
+}
+
+#[tokio::test]
+async fn a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from_on_sqlite_file() {
+    restore_after_the_head_moved(Dialect::SqliteFile, None).await;
+}
+
+#[tokio::test]
+async fn a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from_on_postgres() {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    restore_after_the_head_moved(Dialect::Postgres, Some(url)).await;
 }

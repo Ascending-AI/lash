@@ -56,6 +56,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             side_effect_outbox: VecDeque::new(),
             next_effect_id: 1,
             next_synthetic_message_id,
+            window: None,
             prompt_messages: messages.clone(),
             messages,
             progress_event_cursor: events.len(),
@@ -69,6 +70,35 @@ impl<M: TurnProtocol> TurnMachine<M> {
             resume_work: None,
             run_abort: None,
         }
+    }
+
+    /// A machine for a turn that starts from the committed `window`
+    /// (FIG-5206): its messages are `messages`, which lead with the window's
+    /// (see [`TurnWindow::then`]), and its history is the window's records
+    /// followed by `turn_events`. Its checkpoint names the window by its pin
+    /// instead of holding it, and [`Self::restore_from_checkpoint`] is handed
+    /// the same window again.
+    pub fn in_window(
+        config: TurnMachineConfig<M>,
+        window: TurnWindow<M::Event>,
+        messages: MessageSequence,
+        turn_events: Vec<SessionHistoryRecord<M::Event>>,
+        protocol_run_offset: usize,
+        turn_causes: Vec<TurnCause>,
+    ) -> Self {
+        let mut events = window.events().clone();
+        for event in turn_events {
+            events.push(event);
+        }
+        let mut machine = Self::new_shared_with_turn_causes(
+            config,
+            messages,
+            events,
+            protocol_run_offset,
+            turn_causes,
+        );
+        machine.window = Some(window);
+        machine
     }
 
     /// Start this machine at `work` instead of at the driver's first step
@@ -178,12 +208,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     /// The machine's bounded checkpoint, with the transcript content it
-    /// names by digest.
+    /// names by digest: what the turn added to the window it started from.
     pub fn checkpoint(&self) -> SavedTurn<M> {
         let mut content = TurnCheckpointContent::default();
+        let window = self.window.as_ref();
+        let window_events = window.map_or(0, |window| window.events().len());
         let checkpoint = TurnCheckpoint {
             schema_version: TURN_CHECKPOINT_SCHEMA_VERSION,
-            state: CheckpointState::record(&self.state, &mut content),
+            state: CheckpointState::record(&self.state, &mut content, window),
             pending_effects: self
                 .side_effect_outbox
                 .iter()
@@ -209,9 +241,21 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 .collect(),
             next_effect_id: self.next_effect_id,
             next_synthetic_message_id: self.next_synthetic_message_id,
-            messages: content.put_sequence(self.messages.iter()),
-            prompt_messages: content.put_sequence(self.prompt_messages.iter()),
-            events: content.put_sequence(self.events.to_vec().iter()),
+            window: window.map(CheckpointWindow::of),
+            messages: CheckpointMessages::record(&self.messages, &mut content, window),
+            prompt_messages: CheckpointMessages::record(
+                &self.prompt_messages,
+                &mut content,
+                window,
+            ),
+            // The machine only appends to its history, so the window's
+            // records lead it.
+            events: content.put_sequence(
+                self.events
+                    .as_slice()
+                    .get(window_events..)
+                    .unwrap_or_default(),
+            ),
             turn_causes: self.turn_causes.clone(),
             progress_event_cursor: self.progress_event_cursor,
             protocol_iteration: self.protocol_iteration,
@@ -225,13 +269,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
-    /// Re-hydrate a machine from a checkpoint and the content it names. The
-    /// schema version and environment are validated before any content is
-    /// read; content that is missing or not the bytes its digest names is
-    /// refused.
+    /// Re-hydrate a machine from a checkpoint, the content it names and the
+    /// committed window it started from ([`TurnCheckpoint::window_pin`]). The
+    /// schema version, window and environment are validated before any
+    /// content is read; content that is missing or not the bytes its digest
+    /// names is refused.
     pub fn restore_from_checkpoint(
         config: TurnMachineConfig<M>,
         saved: SavedTurn<M>,
+        window: Option<TurnWindow<M::Event>>,
     ) -> Result<Self, TurnCheckpointRestoreError> {
         let SavedTurn {
             checkpoint,
@@ -251,22 +297,32 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     .to_string(),
             });
         }
+        CheckpointWindow::check(checkpoint.window.as_ref(), window.as_ref())?;
         let side_effect_outbox = checkpoint
             .pending_effects
             .into_iter()
             .collect::<VecDeque<_>>();
-        let messages = content.sequence(&checkpoint.messages)?;
-        let prompt_messages = content.sequence(&checkpoint.prompt_messages)?;
-        let events = content.sequence(&checkpoint.events)?;
+        let messages = checkpoint.messages.restore(&content, window.as_ref())?;
+        let prompt_messages = checkpoint
+            .prompt_messages
+            .restore(&content, window.as_ref())?;
+        let mut events = window
+            .as_ref()
+            .map(|window| window.events().clone())
+            .unwrap_or_default();
+        for event in content.sequence(&checkpoint.events)? {
+            events.push(event);
+        }
         Ok(Self {
             config,
-            state: checkpoint.state.restore(&content)?,
+            state: checkpoint.state.restore(&content, window.as_ref())?,
             side_effect_outbox,
             next_effect_id: checkpoint.next_effect_id,
             next_synthetic_message_id: checkpoint.next_synthetic_message_id,
-            messages: MessageSequence::from_owned(messages),
-            prompt_messages: MessageSequence::from_owned(prompt_messages),
-            events: crate::AppendVec::from(events),
+            window,
+            messages,
+            prompt_messages,
+            events,
             turn_causes: checkpoint.turn_causes,
             progress_event_cursor: checkpoint.progress_event_cursor,
             protocol_iteration: checkpoint.protocol_iteration,

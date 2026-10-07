@@ -1,6 +1,6 @@
 # Durable substrate against the Restate baseline, 2026-10-07
 
-**H1 passes at engine level, and H5 passes for the specified RLM cell. H2's flatness check fails: cold-resume time grows linearly with a session's prior turns.** H5 also fails outside its scenario, once a cell keeps about 16 KiB per tool result.
+**H1 passes at engine level, and H5 passes for the specified RLM cell. H2 passes as restated by FIG-5206: a cold resume costs a fresh turn plus O(current turn), and its checkpoint no longer grows with prior turns.** H5 also fails outside its scenario, once a cell keeps about 16 KiB per tool result.
 
 FIG-5188 / substrate L12b. Every number here comes from a run recorded below,
 on the same machine and the same default developer build profile as L12a's
@@ -50,18 +50,28 @@ pass the gate.
   plus encode is 3.19 ms p99 for 10k numbers and 28.1 ms for 10k records.
   S1's case for chunked large heaps therefore stands, but the gate as
   specified passes.
-- **H2 flatness (cold resume is O(current turn), flat in prior turns): fail.**
-  A turn held at its model call is restored by a fresh node, with nothing
-  cached, from its committed checkpoint. On PostgreSQL, claim to `turn.commit`
-  takes 37.5 / 38.3 / 92.8 / 172.4 ms after 0 / 10 / 100 / 300 prior turns;
-  on SQLite it takes 9.9 / 12.3 / 46.9 / 133.2 ms. The held turn's checkpoint
-  grows from 2.9 KiB to 17.0, 147.0 and 437.9 KiB, about 1.44 KiB per prior
-  turn. Hypothesis: `TurnCheckpoint` embeds the whole conversation the turn
-  started from, which is the session head's window, and this bench never
-  compacts it. Restore then decodes O(history), as verify.md predicted, and
-  the 1.0 encoding needs transcript references. Within one session's turn,
-  growth is O(current turn) as intended: 36.8 / 41.2 / 63.4 ms on PostgreSQL
-  after 1 / 5 / 20 rounds.
+- **H2 (cold resume costs a fresh turn plus O(current turn)): pass after
+  FIG-5206.** A turn held at its model call is restored by a fresh node, with
+  nothing cached, from its committed checkpoint. L12b measured it failing a
+  stricter bar, "flat in prior turns": its checkpoint embedded the whole
+  window the turn started from (2.9 KiB growing to 437.9 KiB after 300 prior
+  turns). FIG-5206 makes the checkpoint pin that window by the session head it
+  started from and hold only the turn's own delta; a restore reads the window
+  at the pin. The checkpoint is now 3.1–3.2 KiB at 0 / 10 / 100 / 300 prior
+  turns on both dialects. Claim to `turn.commit` is 41.6 / 46.6 / 92.2 /
+  161.4 ms on PostgreSQL (was 37.5 / 38.3 / 92.8 / 172.4) and 9.1 / 13.6 /
+  43.5 / 117.7 ms on SQLite (was 9.9 / 12.3 / 46.9 / 133.2). The remaining
+  slope is not the resume's: instrumented at 300 prior turns on SQLite (900
+  window messages, this debug profile), `restore_from_checkpoint` takes
+  1–2 ms; reading the window at the pin takes 44–51 ms (the store's window
+  read 36–40 ms, adopting it 6–9 ms); the bench's `finish` reads the head
+  window again for the head commit (47–69 ms); and the pin check hashes the
+  O(prompt) request (4–8 ms). A fresh turn pays the same: its start reads the
+  head window (47–61 ms) and its `finish` reads it again. The model call needs
+  the window, so a cold resume reads it once, as a fresh turn does; "flat in
+  prior turns" was the wrong bar for a bench that never compacts. The second
+  window read in `finish` and the repeated request hash are waste every turn
+  pays, tracked as FIG-5207.
 - **H7 (failover): as designed.** With the liveness lock, a turn killed with
   `kill -9` mid-model-call is detected in 259 ms and its model call is re-sent
   290 ms after the kill. Without the lock (lease only) detection takes
@@ -106,7 +116,9 @@ not run:
 3. **Checkpoint bytes are quadratic within a turn.** This is not a latency
    regression, but a 20-round turn writes 454 KiB of checkpoints (169 KiB of
    PostgreSQL WAL), against 6.1 KiB for one round. Hypothesis: each round's
-   checkpoint re-embeds every message of the turn (the same cause as H2).
+   checkpoint re-embeds every message of the turn. FIG-5206 removed the
+   prior window from each checkpoint (H2), not the turn's own messages, and
+   these sessions start with an empty window, so this row is unchanged.
 4. **A host's resolution carries no wake hint.** This is not a regression
    (243–252 ms against Restate's 512 ms), but a parked process on one node
    resumes at the claim poll's 250 ms ceiling, and on four nodes in 21–75 ms.
@@ -259,6 +271,9 @@ the commit's post-commit hint published to that owner's listener.
 
 ### Cold resume after N rounds
 
+L12b's rows, before FIG-5206: their checkpoints still embedded the prior
+window, so the first / last sizes grow with the case's prior turns (0–9).
+
 | Store | Case | Rounds before hold | Prior turns | Samples | Checkpoint KiB (first / last) | Claim to commit p50 / max ms | Fresh boot to commit p50 / max ms | Resumed `turn.commit` p50 ms |
 |---|---|---:|---|---:|---:|---:|---:|---:|
 | PostgreSQL x1 | resume-1 | 1 | 0–9 | 10 | 2.9 / 15.5 | 36.8 / 47.6 | 84.0 / 110.4 | 13.3 |
@@ -270,16 +285,19 @@ the commit's post-commit hint published to that owner's listener.
 
 ### Cold resume after prior turns (H2)
 
+Re-run by FIG-5206 on its change (see Commands); L12b's rows are quoted in
+the H2 verdict.
+
 | Store | Case | Rounds before hold | Prior turns | Samples | Checkpoint KiB (first / last) | Claim to commit p50 / max ms | Fresh boot to commit p50 / max ms | Resumed `turn.commit` p50 ms |
 |---|---|---:|---|---:|---:|---:|---:|---:|
-| PostgreSQL x1 | prior-0 | 1 | 0–4 | 5 | 2.9 / 8.5 | 37.5 / 40.0 | 82.9 / 89.2 | 13.5 |
-| PostgreSQL x1 | prior-10 | 1 | 10–14 | 5 | 17.0 / 22.8 | 38.3 / 41.4 | 87.0 / 88.5 | 13.0 |
-| PostgreSQL x1 | prior-100 | 1 | 100–104 | 5 | 147.0 / 152.7 | 92.8 / 106.5 | 141.0 / 152.4 | 18.4 |
-| PostgreSQL x1 | prior-300 | 1 | 300–304 | 5 | 437.9 / 443.6 | 172.4 / 177.0 | 219.9 / 224.4 | 13.8 |
-| SQLite file | prior-0 | 1 | 0–4 | 5 | 2.9 / 8.5 | 9.9 / 14.8 | 27.9 / 48.9 | 3.8 |
-| SQLite file | prior-10 | 1 | 10–14 | 5 | 17.0 / 22.8 | 12.3 / 12.8 | 30.2 / 30.5 | 2.9 |
-| SQLite file | prior-100 | 1 | 100–104 | 5 | 147.0 / 152.7 | 46.9 / 55.9 | 64.7 / 72.7 | 3.2 |
-| SQLite file | prior-300 | 1 | 300–304 | 5 | 437.9 / 443.6 | 133.2 / 139.2 | 149.9 / 155.7 | 3.8 |
+| PostgreSQL x1 | prior-0 | 1 | 0–4 | 5 | 3.1 / 3.2 | 41.6 / 44.2 | 87.7 / 90.0 | 12.8 |
+| PostgreSQL x1 | prior-10 | 1 | 10–14 | 5 | 3.2 / 3.2 | 46.6 / 52.6 | 91.0 / 102.9 | 13.3 |
+| PostgreSQL x1 | prior-100 | 1 | 100–104 | 5 | 3.2 / 3.2 | 92.2 / 116.9 | 138.6 / 163.3 | 15.1 |
+| PostgreSQL x1 | prior-300 | 1 | 300–304 | 5 | 3.2 / 3.2 | 161.4 / 181.7 | 206.7 / 227.2 | 12.8 |
+| SQLite file | prior-0 | 1 | 0–4 | 5 | 3.1 / 3.2 | 9.1 / 10.2 | 25.3 / 26.0 | 3.0 |
+| SQLite file | prior-10 | 1 | 10–14 | 5 | 3.2 / 3.2 | 13.6 / 17.9 | 28.7 / 33.7 | 3.4 |
+| SQLite file | prior-100 | 1 | 100–104 | 5 | 3.2 / 3.2 | 43.5 / 48.9 | 60.6 / 64.4 | 3.5 |
+| SQLite file | prior-300 | 1 | 300–304 | 5 | 3.2 / 3.2 | 117.7 / 125.2 | 133.0 / 142.2 | 4.8 |
 
 ### Processes
 
@@ -437,6 +455,29 @@ The ledger concatenates `final/sqlite/sqlite.jsonl`,
 `final/pg/postgres-nodes{1,4}.jsonl` and `final/store/postgres-nodes1.jsonl`,
 dropping only session names. The superseded first SQLite run (without
 teardown), the smoke runs and every log stay under `.kiln/FIG-5188/`.
+
+### H2 re-run (FIG-5206)
+
+From `/workspace/kiln/lash/forks/fig-5206` after `. ./env.sh`, on origin/main
+`1dead3802d` plus FIG-5206's change, same host and profile (bench binary
+SHA-256 `f6644aafdc6758ab6876a8ef63701784ebc48b76f981e075b7298ee2be545979`;
+one-minute load 3.6–4.5 around the SQLite run, 1.3–2.7 around PostgreSQL).
+The ledger's `prior-*` records (resume, summary and run) were replaced by
+this run's; every other record is L12b's. Evidence, the per-phase timing
+probe included, is in that fork's `.kiln/FIG-5206/`.
+
+```sh
+B=.kiln/FIG-5206/bin/durable_substrate
+kiln build //crates/lash-perf:durable-substrate__bin --materializations final \
+  --build-report .kiln/FIG-5206/build-report.json
+cp "$(python3 tools/buck2/outputs.py --report .kiln/FIG-5206/build-report.json \
+  --label //crates/lash-perf:durable-substrate__bin --single)" "$B"
+$B --store sqlite --sqlite-dir "$PWD/.kiln/FIG-5206/h2/sqlite/db-c" --case prior-0 --case prior-10 \
+  --case prior-100 --case prior-300 --samples 5 --out "$PWD/.kiln/FIG-5206/h2/sqlite/sqlite.jsonl"
+kiln gate lash fig-5206 -- python3 crates/lash-perf/src/bin/durable_substrate/bench.py --binary "$B" \
+  --evidence-dir .kiln/FIG-5206/h2/pg --nodes 1 --case prior-0 --case prior-10 --case prior-100 \
+  --case prior-300 -- --samples 5
+```
 
 ## Not measured, and why
 

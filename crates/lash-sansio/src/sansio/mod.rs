@@ -50,8 +50,13 @@ pub use turn_protocol::{
 };
 mod checkpoint_content;
 pub use checkpoint_content::{CheckpointContentRef, TurnCheckpointContent};
+mod turn_window;
+pub use turn_window::{TurnWindow, TurnWindowPin};
 mod machine_state;
-use machine_state::{CheckpointState, EffectDeliveryStatus, MachineState, RunAbort};
+use machine_state::{
+    CheckpointMessages, CheckpointState, CheckpointWindow, EffectDeliveryStatus, MachineState,
+    RunAbort,
+};
 pub use machine_state::{
     SavedTurn, TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnCheckpointRestoreError,
     TurnMachine,

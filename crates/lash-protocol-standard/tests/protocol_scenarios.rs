@@ -1055,7 +1055,7 @@ fn public_effect_emission_contract_matrix() {
         let checkpoint =
             serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap()).unwrap();
         let mut restored =
-            TurnMachine::restore_from_checkpoint(external_config(work), checkpoint).unwrap();
+            TurnMachine::restore_from_checkpoint(external_config(work), checkpoint, None).unwrap();
         let replayed = drain_effects(&mut restored);
         for effects in [&first, &replayed] {
             let waiting = effects

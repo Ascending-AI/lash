@@ -573,6 +573,15 @@ pub enum TurnRestoreError {
     /// The checkpoint does not restore.
     #[error(transparent)]
     Checkpoint(#[from] lash_sansio::TurnCheckpointRestoreError),
+    /// The committed window the checkpoint pins cannot be read.
+    #[error("turn {run}'s window cannot be read: {source}")]
+    Window {
+        /// The turn.
+        run: TurnId,
+        /// Why.
+        #[source]
+        source: Box<TurnError>,
+    },
     /// The stored checkpoint does not decode.
     #[error("turn {run} checkpoint does not decode: {reason}")]
     Undecodable {
@@ -667,8 +676,9 @@ fn session_of(cx: &ActorContext) -> SessionId {
 }
 
 /// Restore `row`'s turn under `config`: exactly one
-/// `restore_from_checkpoint`, reported to the context's probe, and the
-/// effect it re-delivers.
+/// `restore_from_checkpoint`, over the committed window its checkpoint pins
+/// read back from the session store, reported to the context's probe, and
+/// the effect it re-delivers.
 ///
 /// # Errors
 ///
@@ -687,8 +697,19 @@ pub async fn restore_turn(
             run: row.run.clone(),
             reason: error.to_string(),
         })?;
+    let window = match saved.checkpoint.window_pin() {
+        Some(pin) => Some(
+            super::head::load_window(cx.backend(), &row.session, pin)
+                .await
+                .map_err(|source| TurnRestoreError::Window {
+                    run: row.run.clone(),
+                    source: Box::new(source),
+                })?,
+        ),
+        None => None,
+    };
     cx.probe().checkpoint_restored(&row.session, &row.run);
-    let mut machine = TurnMachine::restore_from_checkpoint(config, saved)?;
+    let mut machine = TurnMachine::restore_from_checkpoint(config, saved, window)?;
     let pending = next_work(&mut machine);
     Ok(RestoredTurn {
         machine,

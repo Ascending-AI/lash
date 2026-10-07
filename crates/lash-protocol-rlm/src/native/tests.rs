@@ -251,8 +251,9 @@ fn run(
         // Pending provider replay metadata survives the parked execution boundary.
         let checkpoint = serde_json::to_string(&machine.checkpoint()).unwrap();
         let saved = serde_json::from_str(&checkpoint).unwrap();
-        machine = TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved)
-            .expect("supported checkpoint");
+        machine =
+            TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved, None)
+                .expect("supported checkpoint");
         drain(&mut machine);
         machine.handle_response(Response::ExecResult { id, result });
         effects = drain(&mut machine);
@@ -271,8 +272,9 @@ fn run(
         checkpoints.push(serde_json::to_value(checkpoint).unwrap());
         let saved =
             serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
-        machine = TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved)
-            .expect("supported checkpoint");
+        machine =
+            TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved, None)
+                .expect("supported checkpoint");
         drain(&mut machine);
         machine.handle_response(Response::Checkpoint {
             id,
@@ -923,6 +925,7 @@ fn output_limit_prose_repairs_on_both_plugins() {
         machine = TurnMachine::restore_from_checkpoint(
             config(native, RlmTermination::Natural { schema: None }),
             saved,
+            None,
         )
         .expect("supported checkpoint");
         drain(&mut machine);
@@ -996,6 +999,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
             machine = TurnMachine::restore_from_checkpoint(
                 config(true, RlmTermination::Natural { schema: None }),
                 saved,
+                None,
             )
             .expect("supported checkpoint");
             drain(&mut machine);
@@ -1129,6 +1133,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
         machine = TurnMachine::restore_from_checkpoint(
             config(false, RlmTermination::Natural { schema: None }),
             saved,
+            None,
         )
         .expect("supported checkpoint");
         drain(&mut machine);
@@ -1518,6 +1523,7 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
             machine = TurnMachine::restore_from_checkpoint(
                 config(true, RlmTermination::Natural { schema: None }),
                 checkpoint,
+                None,
             )
             .unwrap();
             effects = drain(&mut machine);
@@ -1650,6 +1656,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         machine = TurnMachine::restore_from_checkpoint(
             config(native, RlmTermination::Natural { schema: None }),
             serde_json::from_value(saved).unwrap(),
+            None,
         )
         .expect("restore pending execution");
         let replayed = drain(&mut machine);
@@ -1712,6 +1719,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         machine = TurnMachine::restore_from_checkpoint(
             config(native, RlmTermination::Natural { schema: None }),
             serde_json::from_value(saved).unwrap(),
+            None,
         )
         .expect("restore terminal checkpoint");
         let redelivered = drain(&mut machine);

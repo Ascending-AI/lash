@@ -585,7 +585,8 @@ fn checkpoint_pending_llm(
     let checkpoint = machine.checkpoint();
     let bytes = serde_json::to_vec(&checkpoint)?;
     let checkpoint = serde_json::from_slice(&bytes)?;
-    let mut restored = TurnMachine::restore_from_checkpoint(configs.llm_config(), checkpoint)?;
+    let mut restored =
+        TurnMachine::restore_from_checkpoint(configs.llm_config(), checkpoint, None)?;
     assert_restored_llm(&mut restored, id)?;
     restored.handle_response(Response::LlmComplete {
         id,
@@ -618,7 +619,8 @@ fn checkpoint_pending_parallel_tools(
     let checkpoint = machine.checkpoint();
     let bytes = serde_json::to_vec(&checkpoint)?;
     let checkpoint = serde_json::from_slice(&bytes)?;
-    let mut restored = TurnMachine::restore_from_checkpoint(configs.tools_config(), checkpoint)?;
+    let mut restored =
+        TurnMachine::restore_from_checkpoint(configs.tools_config(), checkpoint, None)?;
     assert_restored_tool_batch(&mut restored, id, calls.len())?;
     restored.handle_response(Response::ToolResults {
         id,
@@ -647,7 +649,8 @@ fn checkpoint_pending_exec(
     let checkpoint = machine.checkpoint();
     let bytes = serde_json::to_vec(&checkpoint)?;
     let checkpoint = serde_json::from_slice(&bytes)?;
-    let mut restored = TurnMachine::restore_from_checkpoint(configs.exec_config(), checkpoint)?;
+    let mut restored =
+        TurnMachine::restore_from_checkpoint(configs.exec_config(), checkpoint, None)?;
     assert_restored_exec(&mut restored, id, &code)?;
     restored.handle_response(Response::ExecResult {
         id,

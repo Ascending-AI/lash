@@ -5,13 +5,23 @@
 //! The head is read from the session store's current window, never from the
 //! history before it, so what a turn loads does not grow with the turns the
 //! session committed before its window.
+//!
+//! A turn starts from the head's window pinned by the head it is (FIG-5206):
+//! its checkpoint names the window by that pin instead of holding it, and a
+//! restore reads the window again at the pinned head, however far the live
+//! head has moved since.
 
 use std::sync::Arc;
 
+use lash_sansio::TurnWindowPin;
+
 use super::session::{TurnCommit, TurnDone, TurnError};
 use crate::runtime::{RuntimeSessionState, TurnBoundary};
-use crate::store::SessionStore;
-use crate::{Backend, Clock, CommitBudget, Message, SessionId, TurnId, TurnOutcome};
+use crate::store::{SessionHeadRef, SessionStore, WindowSelector};
+use crate::{Backend, Clock, CommitBudget, SessionId, TurnId, TurnOutcome};
+
+/// The committed window a session's turn starts from.
+pub type TurnWindow = lash_sansio::TurnWindow<crate::ProtocolEvent>;
 
 /// A session's committed head.
 #[derive(Clone)]
@@ -45,7 +55,7 @@ impl SessionHead {
         budget: CommitBudget,
     ) -> Result<Self, TurnError> {
         let store = session_store(backend, session).await?;
-        let state = load_state(&store, session).await?;
+        let state = load_state(&store, session, WindowSelector::Current).await?;
         Ok(Self {
             state,
             fleet: store.fleet_format(),
@@ -60,16 +70,29 @@ impl SessionHead {
         self.state.head_revision
     }
 
-    /// The conversation the head holds in its current window.
-    #[must_use]
-    pub fn messages(&self) -> Vec<Message> {
-        self.state.read_model().messages.as_slice().to_vec()
-    }
-
     /// The head's state.
     #[must_use]
     pub fn state(&self) -> &RuntimeSessionState {
         &self.state
+    }
+
+    /// The head's window, pinned by this head: what a turn that starts here
+    /// starts from ([`TurnMachine::in_window`](crate::TurnMachine::in_window)).
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError::Exec`] when the pin does not encode.
+    pub fn window(&self) -> Result<TurnWindow, TurnError> {
+        let head = SessionHeadRef {
+            generation: 0,
+            revision: self.state.head_revision,
+            leaf: self.state.session_graph.leaf_node_id.clone(),
+            checkpoint: self.state.checkpoint_ref.clone(),
+        };
+        let pin = serde_json::to_string(&head).map_err(|error| {
+            TurnError::Exec(format!("the window's pin does not encode: {error}"))
+        })?;
+        Ok(window_of(&self.state, TurnWindowPin::new(pin)))
     }
 
     /// The commit of `run` that publishes `done`'s messages and outcome as
@@ -128,16 +151,55 @@ pub(crate) async fn session_store(
     }
 }
 
-/// The session's current window as runtime state.
+/// The window `pin` names in `session`'s store ([`SessionHead::window`]),
+/// read at the pinned head however far the live head has moved since.
+/// Revision zero is the session before any head existed, whose window is
+/// empty; any other is read at the pinned leaf (ADR 0112 §5).
+///
+/// # Errors
+///
+/// [`TurnError::Exec`] when the pin does not decode or the store no longer
+/// retains the pinned head; the store's refusal.
+pub async fn load_window(
+    backend: &Backend,
+    session: &SessionId,
+    pin: &TurnWindowPin,
+) -> Result<TurnWindow, TurnError> {
+    let head: SessionHeadRef = serde_json::from_str(pin.as_str()).map_err(|error| {
+        TurnError::Exec(format!(
+            "window pin `{}` does not decode: {error}",
+            pin.as_str()
+        ))
+    })?;
+    if head.revision == 0 {
+        return Ok(TurnWindow::new(
+            pin.clone(),
+            lash_sansio::AppendVec::new(),
+            lash_sansio::AppendVec::new(),
+        ));
+    }
+    let store = session_store(backend, session).await?;
+    let state = load_state(&store, session, WindowSelector::Admitted(head)).await?;
+    Ok(window_of(&state, pin.clone()))
+}
+
+/// `state`'s window under `pin`.
+fn window_of(state: &RuntimeSessionState, pin: TurnWindowPin) -> TurnWindow {
+    let read = state.read_model();
+    TurnWindow::new(pin, read.messages, read.active_events)
+        .with_render_cache(read.prompt_render_cache)
+}
+
+/// The session's window `selector` names as runtime state.
 pub(crate) async fn load_state(
     store: &SessionStore,
     session: &SessionId,
+    selector: WindowSelector,
 ) -> Result<RuntimeSessionState, TurnError> {
-    let loaded =
-        crate::store::load_session_window_state(store, crate::store::WindowSelector::Current)
-            .await
-            .map_err(|error| TurnError::Exec(error.to_string()))?
-            .ok_or_else(|| TurnError::Exec(format!("session {session} has no head")))?;
+    let loaded = crate::store::load_session_window_state(store, selector)
+        .await
+        .map_err(|error| TurnError::Exec(error.to_string()))?
+        .ok_or_else(|| TurnError::Exec(format!("session {session} has no head")))?;
     if loaded.state.session_id != *session {
         return Err(TurnError::Exec(format!(
             "session {session}'s store holds session {}",

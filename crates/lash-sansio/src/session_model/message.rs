@@ -1322,6 +1322,12 @@ impl MessageSequence {
             .then_some(tail)
     }
 
+    /// Whether this sequence is `base` followed by its own messages,
+    /// witnessed by construction rather than compared.
+    pub(crate) fn has_base(&self, base: &AppendVec<Message>) -> bool {
+        matches!(&self.mode, SequenceMode::Layered { base: own, .. } if AppendVec::ptr_eq(own, base))
+    }
+
     pub(crate) fn iter(&self) -> MessageSequenceIter<'_> {
         match &self.mode {
             SequenceMode::Owned(owned) => MessageSequenceIter::Owned(owned.iter()),

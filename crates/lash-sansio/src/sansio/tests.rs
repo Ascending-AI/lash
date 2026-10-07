@@ -207,9 +207,11 @@ fn turn_checkpoint_restore_refuses_every_non_current_version() {
         incompatible["checkpoint"]["schema_version"] = serde_json::json!(actual);
         let checkpoint: SavedTurn =
             serde_json::from_value(incompatible).expect("well-formed incompatible checkpoint");
-        let Err(error) =
-            TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
-        else {
+        let Err(error) = TurnMachine::restore_from_checkpoint(
+            test_config(Arc::new(ProseDriver)),
+            checkpoint,
+            None,
+        ) else {
             panic!("checkpoint schema version {actual} must be refused");
         };
         assert_eq!(
@@ -310,7 +312,7 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
         TURN_CHECKPOINT_SCHEMA_VERSION
     );
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint, None)
             .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
 
@@ -642,7 +644,7 @@ fn machine_at_protocol_iteration(
 
     let mut config = test_config(Arc::new(CellEveryIterationDriver));
     config.turn_budget = turn_budget;
-    TurnMachine::restore_from_checkpoint(config, checkpoint).expect("current checkpoint")
+    TurnMachine::restore_from_checkpoint(config, checkpoint, None).expect("current checkpoint")
 }
 
 #[test]
@@ -1098,7 +1100,7 @@ fn checkpoint_after_llm_result_replays_checkpoint_without_second_llm() {
 
     let checkpoint = roundtrip_checkpoint(machine.checkpoint());
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint, None)
             .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
 
@@ -1599,9 +1601,12 @@ fn checkpoint_after_mixed_tool_batch_results_replays_model_feedback_once() {
     });
 
     let checkpoint = roundtrip_checkpoint(machine.checkpoint());
-    let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ToolBatchDriver)), checkpoint)
-            .expect("supported checkpoint");
+    let mut restored = TurnMachine::restore_from_checkpoint(
+        test_config(Arc::new(ToolBatchDriver)),
+        checkpoint,
+        None,
+    )
+    .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
     assert!(find_llm_call(&effects).is_none());
     assert!(effects.iter().any(|effect| matches!(
@@ -1638,7 +1643,7 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
     let decoded = roundtrip_checkpoint(machine.checkpoint());
 
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ExecDriver)), decoded)
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ExecDriver)), decoded, None)
             .expect("supported checkpoint");
     restored.handle_response(Response::ExecResult {
         id: *exec_id,
@@ -1693,6 +1698,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
                 checkpoint: decoded,
                 content: saved.content,
             },
+            None,
         )
         .expect("supported checkpoint");
         let redelivered = drain_unsynced_effects(&mut restored);
@@ -1737,6 +1743,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
             "request": super::checkpoint_content::CheckpointContentRef::of_bytes(
                 serde_json::to_string(request).expect("request json").as_bytes(),
             ),
+            "rendered_from_window": 0,
             "driver_state": null,
         }}}),
     );
@@ -1884,7 +1891,7 @@ fn stale_response_does_not_cancel_checkpoint_redelivery() {
 
     let checkpoint = roundtrip_checkpoint(machine.checkpoint());
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint, None)
             .expect("supported checkpoint");
     restored.handle_response(Response::LlmComplete {
         id: EffectId(llm_id.0 + 1),
@@ -1944,7 +1951,7 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
     );
     let checkpoint: SavedTurn = serde_json::from_value(encoded).expect("checkpoint");
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint, None)
             .expect("supported checkpoint");
 
     let effects = drain_unsynced_effects(&mut restored);
@@ -1981,7 +1988,7 @@ fn a_checkpoint_waiting_on_driver_work_without_an_environment_is_refused() {
     let checkpoint: SavedTurn = serde_json::from_value(encoded).expect("checkpoint");
 
     let Err(error) =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint, None)
     else {
         panic!("a checkpoint with no environment must be refused");
     };
