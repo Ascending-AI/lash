@@ -12,6 +12,7 @@ pub(crate) mod issue;
 mod lease;
 mod local_effects;
 mod machine;
+mod prompt;
 mod streaming;
 mod tool_catalog;
 mod tools;

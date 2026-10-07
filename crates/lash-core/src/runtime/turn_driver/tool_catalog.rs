@@ -1,10 +1,9 @@
 use super::*;
 use crate::sansio::ExecutionEnvironmentSyncFailureKind as SyncFailureKind;
 pub(in crate::runtime) use crate::session::ExecutionEnvironmentSyncError as SyncFailure;
-use crate::{PluginError, ToolCatalog, TurnDriverPreamble};
+use crate::{PluginError, TurnDriverPreamble};
 
 pub(super) struct PreparedExecutionEnvironment {
-    tool_catalog: Arc<ToolCatalog>,
     pub(super) tool_definitions: Vec<crate::ToolDefinition>,
     turn_driver_preamble: Arc<TurnDriverPreamble>,
 }
@@ -68,13 +67,14 @@ impl RuntimeTurnDriver<'_> {
         machine
     }
 
-    /// The step body of an execution-environment sync: composes the prompt
-    /// sections and builds the tool surface over the live registry, and
-    /// returns both with the surface's definitions, which the sync records.
-    /// It installs nothing: the shift installs the surface the sync recorded.
-    pub(in crate::runtime) async fn refresh_execution_environment(
-        &mut self,
-        protocol_iteration: usize,
+    /// The step body of an execution-environment sync: builds the tool
+    /// surface over the live registry and returns it with the surface's
+    /// definitions, which the sync records. It installs nothing: the shift
+    /// installs the surface the sync recorded. It composes no prompt: each
+    /// model call composes its own at admission (ADR 0133 §6), over the
+    /// surface installed here.
+    pub(in crate::runtime) fn refresh_execution_environment(
+        &self,
     ) -> Result<
         (
             crate::sansio::ExecutionEnvironmentSync,
@@ -85,14 +85,8 @@ impl RuntimeTurnDriver<'_> {
         let execution_environment = self
             .prepare_execution_environment()
             .map_err(|error| SyncFailure::of_plugin_error(SyncFailureKind::ToolSurface, error))?;
-        let composed = self
-            .compose_turn_prompt(protocol_iteration, &execution_environment)
-            .await?;
-        self.trace_prompt_built(protocol_iteration, &composed);
         Ok((
             crate::sansio::ExecutionEnvironmentSync {
-                instructions: composed.initial_instructions.map(Arc::from),
-                current_context: composed.current_context.map(Arc::from),
                 tool_specs: execution_environment
                     .turn_driver_preamble
                     .tool_specs
@@ -100,161 +94,6 @@ impl RuntimeTurnDriver<'_> {
             },
             execution_environment.tool_definitions,
         ))
-    }
-
-    /// Compose the iteration's prompt sections (ADR 0133) under the running
-    /// run's admitted plan and config (FIG-4589): a config command applied
-    /// while this run executes reaches the next run, and a sync redriven
-    /// after a redeploy serves what the run recorded. The cut offers the
-    /// pinned tool surface, the session's committed usage and namespaces,
-    /// and the protocol's facts.
-    async fn compose_turn_prompt(
-        &mut self,
-        protocol_iteration: usize,
-        execution_environment: &PreparedExecutionEnvironment,
-    ) -> Result<crate::plugin::prompt::ComposedPrompt, SyncFailure> {
-        use crate::plugin::prompt::{
-            OfferedTools, ProjectedHistoryStats, PromptCall, PromptCut, PromptCutParts,
-            PromptModel, PromptPurpose, PromptRenderPool,
-        };
-        let protocol_facts = self.protocol_prompt_facts().await.map_err(|error| {
-            SyncFailure::of_session_error(SyncFailureKind::ProtocolFacts, error)
-        })?;
-        let plugins = Arc::clone(self.session.plugins());
-        let state = self.turn_pipeline.state();
-        let native = execution_environment
-            .turn_driver_preamble
-            .tool_specs
-            .iter()
-            .map(|spec| spec.name.clone())
-            .collect::<Vec<_>>();
-        let callable = execution_environment
-            .tool_catalog
-            .tool_names()
-            .iter()
-            .filter(|name| !native.contains(name))
-            .cloned()
-            .collect();
-        let history = self.prelude.context.messages.clone();
-        let profile = self.policy.llm_profile_config();
-        let iteration = u32::try_from(protocol_iteration).unwrap_or(u32::MAX);
-        let cut = PromptCut::new(PromptCutParts {
-            call: PromptCall {
-                session_id: self.session_id.clone(),
-                frame: state.current_frame_node_id.clone(),
-                run: None,
-                turn: Some(self.turn_id.clone()),
-                iteration,
-                call: iteration,
-                purpose: PromptPurpose::Turn,
-            },
-            config: plugins.admitted_plugin_config(),
-            session: Some(self.checkpoint_state_view(history.clone(), protocol_iteration)),
-            offered: OfferedTools {
-                native,
-                callable,
-                catalog: Arc::clone(&execution_environment.tool_catalog),
-            },
-            model: PromptModel {
-                profile: Some(profile.key().clone()),
-                context_window_tokens: Some(profile.context_window_tokens() as u64),
-                committed_usage: state.last_prompt_usage.clone(),
-            },
-            history: ProjectedHistoryStats {
-                messages: u32::try_from(history.len()).unwrap_or(u32::MAX),
-                estimated_tokens: 0,
-            },
-            namespaces: plugins.committed_namespaces(),
-        })
-        .with_subagent(state.authority.subagent.clone())
-        .with_protocol_facts(protocol_facts);
-        plugins
-            .prompt_catalog()
-            .compose(
-                &state.authority.prompt_plan,
-                &PromptPurpose::Turn,
-                Arc::new(cut),
-                PromptRenderPool::shared(),
-            )
-            .await
-            .map_err(SyncFailure::of_prompt_error)
-    }
-
-    fn trace_prompt_built(
-        &self,
-        protocol_iteration: usize,
-        composed: &crate::plugin::prompt::ComposedPrompt,
-    ) {
-        if !self.trace.is_observed() {
-            return;
-        }
-        let system_prompt = composed.initial_instructions.as_deref().unwrap_or("");
-        let prompt_hash = lash_trace::sha256_hex(system_prompt.as_bytes());
-        let prompt_chars = system_prompt.chars().count();
-        let components = composed
-            .snapshot
-            .sections
-            .iter()
-            .filter_map(|section| match &section.value {
-                crate::prompt_sections::RecordedSectionText::Text { text } => {
-                    Some(lash_trace::TracePromptComponent {
-                        id: section.section.to_string(),
-                        kind: match section.placement {
-                            crate::prompt_sections::PromptPlacement::InitialInstructions => {
-                                "initial_instructions".to_string()
-                            }
-                            crate::prompt_sections::PromptPlacement::CurrentContext => {
-                                "current_context".to_string()
-                            }
-                            crate::prompt_sections::PromptPlacement::Excluded => {
-                                "excluded".to_string()
-                            }
-                        },
-                        hash: text.blob.0.clone(),
-                        chars: composed
-                            .texts
-                            .get(&text.blob)
-                            .map(|text| text.chars().count()),
-                    })
-                }
-                crate::prompt_sections::RecordedSectionText::Omitted => None,
-            })
-            .collect::<Vec<_>>();
-        self.trace.observe(|| {
-            (
-                self.trace_context(protocol_iteration),
-                lash_trace::TraceEvent::PromptBuilt {
-                    prompt_hash: prompt_hash.clone(),
-                    prompt_chars,
-                    components: components.clone(),
-                },
-            )
-        });
-    }
-
-    /// The protocol's facts for its prompt sections, derived from its
-    /// committed execution state under the run's recorded render. The
-    /// composed text they feed is journaled with each execution-environment
-    /// sync, so a redriven iteration replays it rather than asking again
-    /// (FIG-3538).
-    async fn protocol_prompt_facts(
-        &mut self,
-    ) -> Result<Option<crate::plugin::prompt::ProtocolPromptFacts>, crate::SessionError> {
-        let protocol_session = std::sync::Arc::clone(self.session.plugins().protocol_session());
-        let recorded_render = self
-            .turn_pipeline
-            .state()
-            .authority
-            .run_view()
-            .and_then(|view| view.run.render.as_ref());
-        let mut context = crate::plugin::ProtocolSessionContext::new(
-            &self.session_id,
-            self.session.fleet_format(),
-        );
-        if let Some(recorded_render) = recorded_render {
-            context = context.with_recorded_render(recorded_render);
-        }
-        protocol_session.prompt_facts(context).await
     }
 
     pub(super) fn prepare_execution_environment(
@@ -266,7 +105,6 @@ impl RuntimeTurnDriver<'_> {
             state.authority.subagent.as_ref(),
         )?;
         Ok(PreparedExecutionEnvironment {
-            tool_catalog: tool_surface.tool_catalog(),
             tool_definitions: tool_surface.definitions(),
             turn_driver_preamble: tool_surface.preamble(),
         })

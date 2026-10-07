@@ -35,6 +35,7 @@ pub type LawResult = Result<(), LawBroken>;
 pub type Advance<'a> = &'a (dyn Fn(Duration) + Sync);
 
 mod formats;
+mod model_calls;
 mod prompts;
 mod session_close;
 
@@ -43,6 +44,7 @@ pub use formats::{
     a_newer_format_is_not_written_while_an_older_node_is_live,
     a_node_claims_only_actors_whose_formats_it_decodes,
 };
+pub use model_calls::a_turn_counts_the_model_calls_it_admitted;
 pub use prompts::{
     deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text,
     prompt_snapshot_roots_survive_phase_pruning_until_released,

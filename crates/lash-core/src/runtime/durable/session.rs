@@ -150,6 +150,47 @@ pub trait TurnDrive: Send {
         limit: crate::ExecutionLimit,
     ) -> Result<(), TurnError>;
 
+    /// Compose the prompt of model call `call`, new to the turn, whose
+    /// request the machine built as `request`, and answer the request to
+    /// admit: `request` with the call's prompt sections lowered into it
+    /// (ADR 0133 §6). It reads the turn's last commit and what the turn
+    /// published since, all of which `model.start` commits with the call. A
+    /// resend of an admitted call never composes; a crash before admission
+    /// composes the call again, so what it runs must be repeat-safe until
+    /// the call is admitted. A drive with no prompt sections admits the
+    /// request as the machine built it.
+    ///
+    /// `Ok(Err(error))`: the composition failed closed. Nothing is sent, and
+    /// the call settles with `error`.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the call aborts the turn rather than settling.
+    async fn compose_call(
+        &mut self,
+        _cx: &ActorContext,
+        _call: u32,
+        request: Arc<LlmRequest>,
+    ) -> Result<Result<ComposedCall, crate::LlmCallError>, TurnError> {
+        Ok(Ok(ComposedCall {
+            request,
+            records: Vec::new(),
+        }))
+    }
+
+    /// The plugin state the turn has published: every namespace with its
+    /// frontier, as a commit records it. Each phase commits it with its
+    /// checkpoint, the pending checkpoint-callback decisions among it, and
+    /// a resume reinstalls it before the machine restores. `None` for a
+    /// drive that holds no plugins.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the state cannot be recorded.
+    fn plugin_state(&self) -> Result<Option<crate::PluginState>, TurnError> {
+        Ok(None)
+    }
+
     /// Restart the session's live stream before a re-sent model call streams:
     /// existing cursors gap and observers reload (the live replay store's
     /// `invalidate_session`), so no one sees an abandoned attempt's partial
@@ -673,11 +714,38 @@ pub struct AdmittedInputs {
     pub admission: crate::store::RunAdmissionRecord,
 }
 
+/// A new model call's composed prompt: the request to admit, and what its
+/// composition records, which `model.start` writes in the call's admission.
+pub struct ComposedCall {
+    /// The request the machine built, with the call's sections in it.
+    pub request: Arc<LlmRequest>,
+    /// The writes that record the call's composition.
+    pub records: Vec<DomainWrite>,
+}
+
+/// What a phase row's checkpoint holds: the machine's saved turn, and the
+/// plugin state the turn had published when the phase committed, which a
+/// resume reinstalls before it restores the machine. Encoded by the phase
+/// runner, its owner.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseCheckpoint {
+    /// The machine's checkpoint with the content it names.
+    pub saved: SavedTurn<HostTurnProtocol>,
+    /// The turn's published plugin state; `None` for a drive that holds no
+    /// plugins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_state: Option<crate::PluginState>,
+}
+
 /// A turn restored from its rows: the machine, the effect it re-delivers,
-/// and its row.
+/// the plugin state its phase committed, and its row.
 pub struct RestoredTurn {
     /// The machine, restored from the checkpoint.
     pub machine: TurnMachine,
+    /// The plugin state the turn's last phase committed, which the resumed
+    /// drive reinstalls.
+    pub plugin_state: Option<crate::PluginState>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
     pub pending: Option<Effect>,
     /// The turn's row.
@@ -822,6 +890,7 @@ pub async fn admit_turn(
         admission: inputs.admission,
         phase: UnfinishedPhase::Admitted,
         iteration: 0,
+        model_calls: 0,
         turn_deadline: None,
         written_epoch: cx.epoch(),
         cancel: None,
@@ -878,11 +947,13 @@ impl<'a> TurnRestore<'a> {
             .phase
             .checkpoint()
             .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
-        let saved: SavedTurn<HostTurnProtocol> =
-            serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
-                run: row.run.clone(),
-                reason: error.to_string(),
-            })?;
+        let PhaseCheckpoint {
+            saved,
+            plugin_state,
+        } = serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
+            run: row.run.clone(),
+            reason: error.to_string(),
+        })?;
         let window = match saved.checkpoint.window_pin() {
             Some(pin) => Some(
                 self.heads
@@ -900,6 +971,7 @@ impl<'a> TurnRestore<'a> {
         let pending = next_work(&mut machine);
         Ok(RestoredTurn {
             machine,
+            plugin_state,
             pending,
             row: row.clone(),
         })

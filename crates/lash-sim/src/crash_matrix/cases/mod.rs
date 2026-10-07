@@ -14,6 +14,7 @@ pub mod command;
 pub mod drain;
 pub mod effects;
 pub mod process;
+pub mod prompt;
 pub mod round;
 pub mod signal;
 pub mod trigger;
@@ -61,9 +62,9 @@ pub fn process_actor(process: &ProcessId) -> Result<ActorKey, String> {
 }
 
 /// Admit a session of `script` named by `tag` with its one turn, seeded
-/// uncut the way a host sends it: a cell session created and sent through the
-/// run's cell core, a scripted one created in the catalog at its creation
-/// head with its input's row, whose commit wakes its actor.
+/// uncut the way a host sends it: a cell or prompt session created and sent
+/// through the run's core for it, a scripted one created in the catalog at
+/// its creation head with its input's row, whose commit wakes its actor.
 ///
 /// # Errors
 ///
@@ -78,6 +79,9 @@ pub async fn admit_turn(
     if matches!(script, TurnScript::Cell | TurnScript::CellKilled) {
         let core = super::cells::cell_core(world)?;
         super::cells::send(&core, &session, &run).await?;
+    } else if script == TurnScript::Prompt {
+        let core = super::prompts::prompt_core(world)?;
+        super::prompts::send(&core, &session, &run).await?;
     } else {
         let catalog: Arc<dyn lash_core::store::RuntimeStore> =
             world.backend()?.session_store_factory();

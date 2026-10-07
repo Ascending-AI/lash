@@ -563,6 +563,7 @@ table lash_turn_change_clock
 table lash_turn_phases
   column checkpoint_ref text nullable
   column iteration bigint not-null
+  column model_calls bigint not-null default
   column model_deadline_ms bigint nullable
   column model_request_ref text nullable
   column phase text not-null

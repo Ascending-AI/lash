@@ -1906,10 +1906,8 @@ fn stale_response_does_not_cancel_checkpoint_redelivery() {
     assert_eq!(*redelivered_id, llm_id);
 }
 
-fn recorded_environment(prompt: &str, tool: &str) -> ExecutionEnvironmentSync {
+fn recorded_environment(tool: &str) -> ExecutionEnvironmentSync {
     ExecutionEnvironmentSync {
-        instructions: Some(Arc::from(prompt)),
-        current_context: None,
         tool_specs: Arc::new(vec![crate::llm::types::LlmToolSpec {
             name: tool.to_string(),
             description: "desc".to_string(),
@@ -1937,7 +1935,7 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
     let sync_id = find_execution_environment_sync(&effects).expect("execution environment sync");
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: sync_id,
-        result: Ok(recorded_environment("recorded prompt", "recorded_tool")),
+        result: Ok(recorded_environment("recorded_tool")),
     });
 
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
@@ -1946,8 +1944,8 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
         0
     );
     assert_eq!(
-        encoded["checkpoint"]["environment"]["sync"]["instructions"],
-        "recorded prompt"
+        encoded["checkpoint"]["environment"]["sync"]["tool_specs"][0]["name"],
+        "recorded_tool"
     );
     let checkpoint: SavedTurn = serde_json::from_value(encoded).expect("checkpoint");
     let mut restored =
@@ -1959,8 +1957,7 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
         find_execution_environment_sync(&effects).is_none(),
         "a restored machine keeps the sync it recorded: {effects:?}"
     );
-    let (_, request) = find_llm_call(&effects).expect("first llm call");
-    assert_eq!(request.instructions.as_deref(), Some("recorded prompt"));
+    assert!(find_llm_call(&effects).is_some(), "first llm call");
     assert!(
         effects.iter().any(|effect| matches!(
             effect,
@@ -2018,8 +2015,8 @@ fn a_recorded_sync_failure_fails_the_turn_under_its_own_code() {
         id: sync_id,
         result: Err(ExecutionEnvironmentSyncFailure {
             code: code.clone(),
-            kind: ExecutionEnvironmentSyncFailureKind::Prompt,
-            message: "the prompt template names no dialect".to_string(),
+            kind: ExecutionEnvironmentSyncFailureKind::ToolSurface,
+            message: "the tool surface names no dialect".to_string(),
         }),
     });
 
@@ -2041,12 +2038,12 @@ fn a_recorded_sync_failure_fails_the_turn_under_its_own_code() {
     assert_eq!(envelope.code, Some(code));
     assert_eq!(
         envelope.raw.as_deref(),
-        Some("the prompt template names no dialect")
+        Some("the tool surface names no dialect")
     );
 }
 
 #[test]
-fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
+fn iteration_execution_environment_sync_can_refresh_tools() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(SyncThenAdvanceDriver)),
         vec![user_message("hello")],
@@ -2059,12 +2056,12 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
         find_execution_environment_sync(&effects).expect("initial execution environment sync");
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: initial_sync_id,
-        result: Ok(recorded_environment("initial prompt", "old_tool")),
+        result: Ok(recorded_environment("old_tool")),
     });
 
     let effects = drain_unsynced_effects(&mut machine);
     let (llm_id, request) = find_llm_call(&effects).expect("llm call");
-    assert_eq!(request.instructions.as_deref(), Some("initial prompt"));
+    assert_eq!(request.tools[0].name, "old_tool");
     let llm_id = *llm_id;
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
@@ -2092,14 +2089,13 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
 
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: sync_id,
-        result: Ok(recorded_environment("updated prompt", "new_tool")),
+        result: Ok(recorded_environment("new_tool")),
     });
 
     let effects = drain_unsynced_effects(&mut machine);
     let (_, request) = find_llm_call(&effects).expect("second llm call");
     assert_eq!(request.tools.len(), 1);
     assert_eq!(request.tools[0].name, "new_tool");
-    assert_eq!(request.instructions.as_deref(), Some("updated prompt"));
     assert!(
         request
             .messages

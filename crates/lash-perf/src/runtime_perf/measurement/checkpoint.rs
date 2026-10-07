@@ -818,10 +818,7 @@ fn next_checkpoint_effect(machine: &mut TurnMachine) -> Option<Effect> {
             Effect::SyncExecutionEnvironment { id } => {
                 machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
                     id,
-                    result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
-                        instructions: Some(Arc::from("Synthetic sans-IO checkpoint profiler prompt. Preserve pending effects across checkpoint restore.")),
-                        ..Default::default()
-                    }),
+                    result: Ok(lash_core::sansio::ExecutionEnvironmentSync::default()),
                 });
             }
             Effect::Emit(_)

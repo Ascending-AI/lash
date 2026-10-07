@@ -101,7 +101,7 @@ impl ProviderRateLimiter {
         request: &LlmRequest,
     ) -> ProviderRateLimitPermit {
         let concurrency = self.acquire_concurrency(provider).await;
-        self.wait_for_buckets(provider, 1, estimate_request_tokens(request))
+        self.wait_for_buckets(provider, 1, request.estimated_tokens())
             .await;
         ProviderRateLimitPermit {
             _concurrency: concurrency,
@@ -130,16 +130,11 @@ impl ProviderRateLimiter {
         deadline: std::time::Instant,
     ) -> Option<ProviderRateLimitPermit> {
         let concurrency = self.acquire_concurrency(provider).await;
-        self.wait_for_buckets_within(
-            provider,
-            1,
-            estimate_request_tokens(request),
-            Some(deadline),
-        )
-        .await
-        .then_some(ProviderRateLimitPermit {
-            _concurrency: concurrency,
-        })
+        self.wait_for_buckets_within(provider, 1, request.estimated_tokens(), Some(deadline))
+            .await
+            .then_some(ProviderRateLimitPermit {
+                _concurrency: concurrency,
+            })
     }
 
     async fn wait_for_buckets(&self, provider: &dyn Provider, requests: u32, tokens: u32) {
@@ -238,40 +233,6 @@ fn bucket_decision(
         decision.wait = Some(decision.refreshed.reset_at.saturating_duration_since(now));
     }
     decision
-}
-
-fn estimate_request_tokens(request: &LlmRequest) -> u32 {
-    let mut chars = request.model.wire_model().len();
-    for message in &request.messages {
-        for block in message.blocks.iter() {
-            match block {
-                LlmContentBlock::Text { text, .. } => chars += text.len(),
-                LlmContentBlock::ToolCall { input_json, .. } => chars += input_json.len(),
-                LlmContentBlock::ToolResult { content, .. } => {
-                    for part in content {
-                        chars += match part {
-                            lash_sansio::ModelToolReturnPart::Text { text } => text.len(),
-                            lash_sansio::ModelToolReturnPart::Retained(retained) => {
-                                retained.witness.len()
-                            }
-                            lash_sansio::ModelToolReturnPart::Attachment(_) => 256,
-                        };
-                    }
-                }
-                LlmContentBlock::Reasoning { text, .. } => chars += text.len(),
-                LlmContentBlock::Attachment { .. } => chars += 256,
-            }
-        }
-    }
-    chars = chars.saturating_add(
-        request
-            .attachments()
-            .iter()
-            .filter_map(|source| request.attachment_bytes(source))
-            .map(|bytes| bytes.len() / 4)
-            .sum(),
-    );
-    ((chars / 4).max(1)).try_into().unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
@@ -468,7 +429,7 @@ mod admission_tests {
         }
         clock.advance_to(300);
         let permit = admission.await;
-        assert_usage(1, estimate_request_tokens(&request).min(2));
+        assert_usage(1, request.estimated_tokens().min(2));
         let state = limiter.state.lock_recover();
         assert_eq!(
             state.request_bucket.reset_at,

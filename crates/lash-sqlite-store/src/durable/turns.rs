@@ -27,7 +27,8 @@ use crate::conn::cached_execute;
 /// `turn_phases`: V0's (FIG-5170) side table of `session_runs`. Each phase
 /// row carries exactly what its phase restores from (FIG-5221): no
 /// checkpoint while admitted and one after, and the model pin exactly in the
-/// model phase, whose attempt is the phase argument.
+/// model phase, whose attempt is the phase argument and whose call is
+/// `model_calls`, the count of model calls the turn admitted.
 pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS turn_phases (
     session_id TEXT NOT NULL,
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     model_deadline_ms INTEGER,
     turn_deadline_ms INTEGER,
     written_epoch INTEGER NOT NULL,
+    model_calls INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
@@ -131,6 +133,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                         pin.map(|pin| pin.request_ref.as_str()),
                         pin.map(|pin| pin.deadline.0),
                         commit.epoch.0,
+                        pin.map(|pin| i64::from(pin.call)),
                     ],
                     |_| Ok(()),
                 )
@@ -401,6 +404,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         deadline: Option<i64>,
         turn_deadline: Option<i64>,
         epoch: i64,
+        model_calls: i64,
     }
     let stored = tx
         .prepare_cached(SQL.unfinished.sql())?
@@ -416,6 +420,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
                 deadline: row.get(7)?,
                 turn_deadline: row.get(8)?,
                 epoch: row.get(9)?,
+                model_calls: row.get(10)?,
             })
         })
         .optional()?;
@@ -431,8 +436,10 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
     };
     let argument = stored.argument.map(integer::<u64>).transpose()?;
     let iteration = integer::<u32>(stored.iteration)?;
+    let model_calls = integer::<u32>(stored.model_calls)?;
     let pin = stored.request.zip(stored.deadline.map(DurableInstant));
-    let Some(phase) = UnfinishedPhase::parse(&stored.phase, argument, stored.checkpoint, pin)
+    let Some(phase) =
+        UnfinishedPhase::parse(&stored.phase, argument, stored.checkpoint, pin, model_calls)
     else {
         return Ok(Err(corrupt("turn phase", &stored.phase)));
     };
@@ -446,6 +453,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         admission,
         phase,
         iteration,
+        model_calls,
         turn_deadline: stored.turn_deadline.map(DurableInstant),
         written_epoch: Epoch(stored.epoch),
         cancel,

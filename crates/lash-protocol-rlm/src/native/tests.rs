@@ -159,20 +159,12 @@ fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
 /// Every ready effect, with each execution-environment sync answered by an
 /// empty environment on the way.
 fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
-    drain_with_prompt(machine, "")
-}
-/// As [`drain`], with each sync recording `prompt` as the composed initial
-/// instructions.
-fn drain_with_prompt(machine: &mut TurnMachine, prompt: &str) -> Vec<Effect> {
     let mut effects = Vec::new();
     while let Some(effect) = machine.poll_effect() {
         if let Effect::SyncExecutionEnvironment { id } = effect {
             machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
                 id,
-                result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
-                    instructions: (!prompt.is_empty()).then(|| Arc::from(prompt)),
-                    ..Default::default()
-                }),
+                result: Ok(lash_core::sansio::ExecutionEnvironmentSync::default()),
             });
             continue;
         }
@@ -1278,14 +1270,26 @@ fn configured_prompt_is_instructions_on_both_channels() {
                 Default::default(),
                 0,
             );
-            let effects = drain_with_prompt(&mut machine, prompt);
-            let request = effects
+            let effects = drain(&mut machine);
+            let projected = effects
                 .iter()
                 .find_map(|effect| match effect {
                     Effect::LlmCall { request, .. } => Some(request),
                     _ => None,
                 })
                 .expect("initial provider request");
+            assert_eq!(
+                projected.instructions, None,
+                "native={native}: history only"
+            );
+            // The call's admission lowers its composed prompt onto the
+            // projected request.
+            let mut request = (**projected).clone();
+            lash_core::sansio::place_prompt(
+                &mut request,
+                (!prompt.is_empty()).then(|| Arc::from(prompt)),
+                None,
+            );
             assert_eq!(request.instructions.as_deref(), expected, "native={native}");
             assert!(
                 request

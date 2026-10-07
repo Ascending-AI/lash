@@ -147,11 +147,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // not the sync's outcome: the step stays unrecorded and the
                 // turn aborts, so a redrive rebuilds it rather than replaying
                 // the fault as a failed turn.
-                let (result, tool_surface) = match runner
-                    .driver
-                    .refresh_execution_environment(runner.protocol_iteration)
-                    .await
-                {
+                let (result, tool_surface) = match runner.driver.refresh_execution_environment() {
                     Ok((sync, tool_surface)) => (Ok(sync), tool_surface),
                     Err(super::tool_catalog::SyncFailure::Recorded(failure)) => {
                         (Err(failure), Vec::new())

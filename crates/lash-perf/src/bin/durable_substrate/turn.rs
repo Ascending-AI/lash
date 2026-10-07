@@ -484,8 +484,6 @@ impl TurnDrive for BenchDrive {
                     .handle_response(Response::ExecutionEnvironmentSynced {
                         id,
                         result: Ok(ExecutionEnvironmentSync {
-                            instructions: Some(Arc::from("bench")),
-                            current_context: None,
                             tool_specs: Arc::new(Vec::new()),
                         }),
                     });

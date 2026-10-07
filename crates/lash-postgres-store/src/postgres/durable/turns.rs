@@ -103,6 +103,7 @@ pub(super) async fn apply(
                 .bind(pin.map(|pin| pin.request_ref.as_str()))
                 .bind(pin.map(|pin| pin.deadline.0))
                 .bind(commit.epoch.0)
+                .bind(pin.map(|pin| i64::from(pin.call)))
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
@@ -347,7 +348,9 @@ pub(super) async fn turn(
     let request: Option<String> = row.try_get(6).map_err(decode)?;
     let deadline: Option<i64> = row.try_get(7).map_err(decode)?;
     let pin = request.zip(deadline.map(DurableInstant));
-    let phase = UnfinishedPhase::parse(&stored_phase, argument, checkpoint, pin)
+    let model_calls: i64 = row.try_get(10).map_err(decode)?;
+    let model_calls = integer::<u32>(model_calls)?;
+    let phase = UnfinishedPhase::parse(&stored_phase, argument, checkpoint, pin, model_calls)
         .ok_or_else(|| corrupt("turn phase", &stored_phase))?;
     let iteration: i64 = row.try_get(4).map_err(decode)?;
     let iteration = integer::<u32>(iteration)?;
@@ -363,6 +366,7 @@ pub(super) async fn turn(
         admission,
         phase,
         iteration,
+        model_calls,
         turn_deadline: turn_deadline.map(DurableInstant),
         written_epoch,
         cancel,

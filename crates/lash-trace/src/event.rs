@@ -48,6 +48,18 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         components: Vec<TracePromptComponent>,
     },
+    /// A model call's prompt did not compose, so nothing was sent: the
+    /// decision evidence. `plan` is the resolved plan the composition ran
+    /// (absent when the plan itself did not resolve), `limits` the plan's
+    /// configured limits, `error` the typed failure with its site and the
+    /// measured bytes, and `elapsed_ms` the time the composition took.
+    PromptCompositionFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan: Option<Value>,
+        limits: Value,
+        error: Value,
+        elapsed_ms: u64,
+    },
     /// One attachment was omitted so an otherwise valid session can continue.
     AttachmentDegraded {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -285,6 +297,7 @@ impl TraceEvent {
     pub fn is_failed(&self) -> bool {
         match self {
             Self::LlmCallFailed { .. }
+            | Self::PromptCompositionFailed { .. }
             | Self::EffectEnvelopeDiff { .. }
             | Self::StoreErrorObserved { .. } => true,
             Self::ProgramStep { outcome, .. } => match outcome {

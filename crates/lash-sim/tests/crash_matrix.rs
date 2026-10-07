@@ -42,6 +42,7 @@ crash_matrix! {
     a_session_command_cut_at_every_label_settles_once => Command;
     a_trigger_occurrence_cut_at_every_label_starts_each_delivery_once => Trigger;
     a_drained_node_cut_at_every_label_releases_its_actors_to_the_next_once => Drain;
+    a_turn_s_prompt_sections_cut_at_every_label_commit_with_each_call_s_admission => Prompt;
 }
 
 /// A stale-epoch cut at `cell.snapshot+admit` runs no body on the old owner:

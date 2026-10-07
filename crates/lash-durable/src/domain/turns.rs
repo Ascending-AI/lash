@@ -68,18 +68,24 @@ impl UnfinishedPhase {
 
     /// The phase its stored columns name; `None` for anything
     /// [`Self::stored`] does not write. The DDL refuses those rows too.
+    /// `model_calls` is the turn's admitted model calls: in the model phase,
+    /// the pinned call is the latest of them.
     #[must_use]
     pub fn parse(
         stored: &str,
         argument: Option<u64>,
         checkpoint: Option<String>,
         pin: Option<(String, DurableInstant)>,
+        model_calls: u32,
     ) -> Option<Self> {
         Some(match (stored, argument, checkpoint, pin) {
             ("admitted", None, None, None) => Self::Admitted,
-            ("model", Some(attempt), Some(checkpoint), Some((request_ref, deadline))) => {
+            ("model", Some(attempt), Some(checkpoint), Some((request_ref, deadline)))
+                if model_calls > 0 =>
+            {
                 Self::Model {
                     pin: ModelPin {
+                        call: model_calls,
                         attempt: u32::try_from(attempt).ok()?,
                         request_ref,
                         deadline,
@@ -120,6 +126,11 @@ impl TurnEnd {
 /// sent and never refreshed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelPin {
+    /// The call's identity: its ordinal among the turn's model calls,
+    /// counted from one. A resend is an attempt of the same call and keeps
+    /// it; every new call takes the next one, also within one protocol
+    /// iteration.
+    pub call: u32,
     /// The attempt, from 1.
     pub attempt: u32,
     /// The pinned request, encoded by its owner.
@@ -139,8 +150,11 @@ pub struct TurnRow {
     pub admission: RunAdmissionRecord,
     /// The phase, with what a restore resumes it from.
     pub phase: UnfinishedPhase,
-    /// The protocol iteration: the model-call ordinal.
+    /// The protocol iteration.
     pub iteration: u32,
+    /// How many model calls the turn admitted: the latest call's ordinal,
+    /// and the pinned one's in the model phase; 0 before the first.
+    pub model_calls: u32,
     /// The host's turn deadline, recorded at admission.
     pub turn_deadline: Option<DurableInstant>,
     /// The epoch of the commit that last wrote the row.
@@ -165,7 +179,9 @@ pub enum TurnWrite {
         /// The host's turn deadline.
         turn_deadline: Option<DurableInstant>,
     },
-    /// Move an unfinished turn to `phase`. Refused with
+    /// Move an unfinished turn to `phase`. A model phase admits its pin's
+    /// call, which becomes the turn's latest; any other phase keeps the
+    /// turn's call count. Refused with
     /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
     /// it is not the session's unfinished turn.
     Advance {

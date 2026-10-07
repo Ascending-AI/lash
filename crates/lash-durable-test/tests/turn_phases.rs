@@ -36,6 +36,15 @@
 //! - **Withdraw or cancel (FIG-5262):** a cancel sent at the admission cut
 //!   either withdraws the input, which never runs, or cancels the run that
 //!   took it: never both, never neither.
+//! - **Admission at `model.start` (FIG-5255):** every new model call composes
+//!   its prompt before admission and a resend never does. IDENTITY: the
+//!   turn's calls are 1 and 2 in order, and every attempt of a call is that
+//!   call. FENCE and CUT-ACK: every attempt the model receives is of an
+//!   admitted call, whose row pins that call with the composition the
+//!   attempt carries, so no owner sends what it did not admit and a lost
+//!   acknowledgement sends the admitted composition. A cut at `model.start`
+//!   whose commit landed composes the call once; one whose commit did not
+//!   land composes it again.
 
 // Test code.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -51,9 +60,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, OpenTurn, SessionActivation, SessionParkReason,
-    TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow,
-    TurnServices, UnfinishedPhase, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, OpenTurn, PhaseCheckpoint, SessionActivation,
+    SessionParkReason, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
+    TurnRow, TurnServices, UnfinishedPhase, request_turn_cancel,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -90,6 +99,9 @@ const SESSION: &str = "l3-session";
 const RUN: &str = "l3-turn";
 const AGAIN: &str = "again";
 const AGAIN_MARKER: &str = "l3-again-";
+/// What starts the instructions a call's composition lowers into its
+/// request.
+const COMPOSED: &str = "l3-composed";
 
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
@@ -223,14 +235,50 @@ struct Call {
     second: bool,
     attempt: u32,
     request: String,
+    /// The composition the attempt carries: its call and render.
+    composed: Option<Composition>,
+    /// The call the turn's row pinned when the attempt was sent, and
+    /// whether its stored checkpoint carries the attempt's composition.
+    admitted: Option<(u32, bool)>,
     /// Whether the turn's cancel had been requested when it started.
     after_cancel: bool,
+}
+
+/// One composition of a model call's prompt: the call it composed, and the
+/// render, counted across every node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Composition {
+    call: u32,
+    render: u64,
+}
+
+impl Composition {
+    fn instructions(self) -> String {
+        format!("{COMPOSED} call={} render={}", self.call, self.render)
+    }
+
+    /// The composition `request` carries.
+    fn of(request: &LlmRequest) -> Option<Self> {
+        let text = request.instructions.as_deref()?.strip_prefix(COMPOSED)?;
+        let mut fields = text.split_whitespace().map(|field| field.split_once('='));
+        let call = match fields.next()? {
+            Some(("call", call)) => call.parse().ok()?,
+            _ => return None,
+        };
+        let render = match fields.next()? {
+            Some(("render", render)) => render.parse().ok()?,
+            _ => return None,
+        };
+        Some(Self { call, render })
+    }
 }
 
 /// What every node's services saw, kept across nodes.
 #[derive(Debug, Default)]
 struct Seen {
     calls: Vec<Call>,
+    /// Every composition, in the order the owners composed them.
+    compositions: Vec<Composition>,
     restarts: Vec<u32>,
     cancel_requested: bool,
     /// Calls that requested the cancel, and how many of them answered.
@@ -394,8 +442,6 @@ impl TurnDrive for L3Drive {
                     .handle_response(Response::ExecutionEnvironmentSynced {
                         id,
                         result: Ok(ExecutionEnvironmentSync {
-                            instructions: Some(Arc::from("l3")),
-                            current_context: None,
                             tool_specs: Arc::new(Vec::new()),
                         }),
                     });
@@ -411,9 +457,34 @@ impl TurnDrive for L3Drive {
         Ok(())
     }
 
-    async fn model_call(
+    /// A composition the scenario can tell apart: its call and a render
+    /// count across every node, lowered into the request's instructions.
+    async fn compose_call(
         &mut self,
         _cx: &ActorContext,
+        call: u32,
+        request: Arc<LlmRequest>,
+    ) -> Result<Result<ComposedCall, lash_core::LlmCallError>, TurnError> {
+        let composition = {
+            let mut seen = self.services.seen.lock_recover();
+            let composition = Composition {
+                call,
+                render: u64::try_from(seen.compositions.len()).unwrap() + 1,
+            };
+            seen.compositions.push(composition);
+            composition
+        };
+        let mut request = LlmRequest::clone(&request);
+        request.instructions = Some(Arc::from(composition.instructions()));
+        Ok(Ok(ComposedCall {
+            request: Arc::new(request),
+            records: Vec::new(),
+        }))
+    }
+
+    async fn model_call(
+        &mut self,
+        cx: &ActorContext,
         id: EffectId,
         request: Arc<LlmRequest>,
         attempt: u32,
@@ -421,6 +492,20 @@ impl TurnDrive for L3Drive {
     ) -> Result<(), TurnError> {
         let rendered = serde_json::to_string(&*request).expect("a request encodes");
         let second = rendered.contains(AGAIN_MARKER);
+        let composed = Composition::of(&request);
+        // What the rows admitted when this attempt is sent.
+        let admitted =
+            cx.durable_reads()?
+                .turn(&session())
+                .await?
+                .and_then(|row| match &row.phase {
+                    UnfinishedPhase::Model { pin, checkpoint } => Some((
+                        pin.call,
+                        composed
+                            .is_some_and(|composed| checkpoint.contains(&composed.instructions())),
+                    )),
+                    UnfinishedPhase::Admitted | UnfinishedPhase::Tools { .. } => None,
+                });
         if self.services.mode == Mode::HeadMovesUnderTheTurn && second && attempt == 1 {
             let backend = self.services.backend();
             let from = SessionHead::load(&backend, &session())
@@ -447,6 +532,8 @@ impl TurnDrive for L3Drive {
                 second,
                 attempt,
                 request: rendered,
+                composed,
+                admitted,
                 after_cancel,
             });
             let cancels = matches!(
@@ -781,6 +868,19 @@ impl Scenario for L3 {
             ));
         }
 
+        violations.extend(admission_laws(&seen));
+        // Uncut, every call composes once: nothing resends.
+        if cut.is_none() {
+            for call in [1, 2] {
+                let composed = compositions_of(&seen, call);
+                if composed > 1 {
+                    violations.push(format!(
+                        "admission: uncut call {call} composed {composed} times"
+                    ));
+                }
+            }
+        }
+
         match self.mode {
             Mode::Plain | Mode::ShortDeadline | Mode::HeadMovesUnderTheTurn => {
                 // Atomic turn progress: one head advance, with its terminal.
@@ -1010,9 +1110,85 @@ async fn withdraw_or_cancel_laws(
     violations
 }
 
-/// The laws of one cut: a node killed after `model.start` committed.
+/// Admission at `model.start` (FIG-5255), in every cell.
+///
+/// - IDENTITY: the turn's first call is call 1 and its second call 2, and
+///   every attempt of a call carries that call's one composition.
+/// - FENCE and CUT-ACK: every attempt the model receives is of an admitted
+///   call: the turn's row, read as the attempt is sent, pins that call and
+///   stores the composition the attempt carries.
+fn admission_laws(seen: &Seen) -> Vec<String> {
+    let mut violations = Vec::new();
+    for call in &seen.calls {
+        let ordinal = if call.second { 2 } else { 1 };
+        match call.composed {
+            Some(composed) if composed.call == ordinal => {}
+            other => violations.push(format!(
+                "IDENTITY: attempt {} of call {ordinal} carried composition {other:?}",
+                call.attempt
+            )),
+        }
+        if call.admitted != Some((ordinal, true)) {
+            violations.push(format!(
+                "FENCE: attempt {} of call {ordinal} was sent while the rows admitted {:?}",
+                call.attempt, call.admitted
+            ));
+        }
+    }
+    for ordinal in [1, 2] {
+        let mut sent = seen
+            .calls
+            .iter()
+            .filter(|call| {
+                call.composed
+                    .is_some_and(|composed| composed.call == ordinal)
+            })
+            .filter_map(|call| call.composed);
+        if let Some(first) = sent.next()
+            && sent.any(|other| other != first)
+        {
+            violations.push(format!(
+                "IDENTITY: call {ordinal} was sent with two compositions: {:?}",
+                seen.calls
+            ));
+        }
+    }
+    violations
+}
+
+/// How often call `call` composed its prompt.
+fn compositions_of(seen: &Seen, call: u32) -> usize {
+    seen.compositions
+        .iter()
+        .filter(|composition| composition.call == call)
+        .count()
+}
+
+/// The laws of one cut: a node killed after `model.start` committed, and
+/// how often a call cut at its `model.start` composed (FIG-5255).
 fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
     let mut violations = Vec::new();
+    if mode == Mode::Plain && cut.point.label == CommitLabel::MODEL_START {
+        // Uncut up to its cut, a plain turn's nth `model.start` admits its
+        // nth call. A crash after admission resends the admitted call and
+        // composes nothing; one before it composes the call again.
+        let call = u32::try_from(cut.point.nth).unwrap();
+        let expected = match cut.fault {
+            Fault::CommitThenAbort | Fault::AckHidden => Some(1),
+            Fault::FailBefore | Fault::Abort => Some(2),
+            _ => None,
+        };
+        let composed = compositions_of(seen, call);
+        if let Some(expected) = expected
+            && composed != expected
+        {
+            violations.push(format!(
+                "admission: call {call} cut at model.start under {:?} composed {composed} times, \
+                 not {expected}",
+                cut.fault
+            ));
+        }
+    }
     let killed_after_pin =
         cut.point.label == CommitLabel::MODEL_START && matches!(cut.fault, Fault::CommitThenAbort);
     if !killed_after_pin {
@@ -1616,7 +1792,11 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
             _ => {}
         }
     };
-    let checkpoint = serde_json::to_string(&machine.checkpoint()).expect("checkpoint encodes");
+    let checkpoint = serde_json::to_string(&PhaseCheckpoint {
+        saved: machine.checkpoint(),
+        plugin_state: None,
+    })
+    .expect("checkpoint encodes");
 
     // The head moves past the pinned revision while the turn is open.
     let mut later = earlier;
@@ -1645,6 +1825,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         },
         phase: UnfinishedPhase::Model {
             pin: lash_durable::domain::ModelPin {
+                call: 1,
                 attempt: 1,
                 request_ref: "pinned".to_owned(),
                 deadline: lash_durable::DurableInstant(i64::MAX),
@@ -1652,6 +1833,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
             checkpoint,
         },
         iteration: 0,
+        model_calls: 1,
         turn_deadline: None,
         written_epoch: lash_durable::Epoch(1),
         cancel: None,

@@ -127,6 +127,40 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
+    /// The effect of the model call the machine waits on, if that is what
+    /// it waits on: a restored machine re-delivers this call.
+    pub fn waiting_model_call(&self) -> Option<EffectId> {
+        match &self.state {
+            MachineState::Waiting {
+                effect_id,
+                work: PendingWork::Llm { .. },
+                ..
+            } => Some(*effect_id),
+            _ => None,
+        }
+    }
+
+    /// Admit `request` as the model request the machine waits on under
+    /// `id`: the host composed the call's prompt into it before admission,
+    /// and the checkpoint taken next names this request, so a restore
+    /// re-delivers it unchanged. Answers `false`, changing nothing, when the
+    /// machine waits on no model call under `id`.
+    pub fn admit_request(&mut self, id: EffectId, request: Arc<LlmRequest>) -> bool {
+        match &mut self.state {
+            MachineState::Waiting {
+                effect_id,
+                work: PendingWork::Llm {
+                    request: pending, ..
+                },
+                ..
+            } if *effect_id == id => {
+                *pending = request;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn settle_tool_dispatch(&mut self, state: serde_json::Value) -> bool {
         match &mut self.state {
             MachineState::Waiting {

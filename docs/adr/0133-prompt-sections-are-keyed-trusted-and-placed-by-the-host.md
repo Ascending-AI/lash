@@ -9,13 +9,13 @@ and chain contract. The composer, its limits and the content-shared snapshot
 storage of §5 and §7 are on main too (FIG-5256):
 `lash-core-execution/src/plugin/prompt/composer.rs` and the durable `prompts`
 domain. The Standard and RLM protocols contribute their prompt as keyed
-sections, and a turn composes them at each execution-environment sync
-(FIG-5257). Tool and MCP guidance, host exclusion and readback, and the
-workbench's sections are on main (FIG-5258), and §9's plugin message and
-context-overlay routes and `TurnContextTransform` are deleted. The rest is
-open work this decision depends on:
+sections (FIG-5257). Tool and MCP guidance, host exclusion and readback, and
+the workbench's sections are on main (FIG-5258), and §9's plugin message and
+context-overlay routes and `TurnContextTransform` are deleted. §6, admission
+at `model.start`, is on main (FIG-5255): `lash-core/src/runtime/durable/phases.rs`
+admits each call and `lash-core/src/runtime/turn_driver/prompt.rs` composes
+it. The rest is open work this decision depends on:
 
-- FIG-5255: §6 admission at `model.start`;
 - FIG-5259: exact provider bodies for every call kind;
 - FIG-5260: deleting every other prompt route (§9).
 
@@ -195,12 +195,41 @@ renderer.
 
 A prompt is composed before every new model call, including after each tool
 round within a turn. Composition reads the last commit (`round.outcome` or
-`turn.admit`). `model.start` commits three things in one transaction: the
-pending checkpoint-callback decisions, the call's snapshot, and the exact
-provider request body. There is no separate prepare phase. A crash before
-admission composes again, which is safe because nothing was sent. After
-admission, a resend sends the stored bytes and calls no renderer, wrapper,
-projector or hook.
+`turn.admit`) and what the turn published since it: the decisions of the
+checkpoint callbacks that ran after it. `model.start` commits, in one
+transaction:
+
+- the call's identity: its ordinal among the turn's model calls
+  (`ModelPin::call`, the turn row's `model_calls`);
+- the turn's plugin state, the pending checkpoint-callback decisions among
+  it, in the checkpoint that re-delivers the call;
+- the call's snapshot (`PromptWrite::Record`);
+- the request, with the composed text lowered into it: the
+  `InitialInstructions` text after the request's own instructions, the
+  `CurrentContext` text as one system message after the conversation. FIG-5259
+  extends this to the exact provider body.
+
+The call is the turn's one composition point. The execution-environment
+sync builds the iteration's tool surface and composes nothing; the call's
+cut offers the surface the sync installed, the protocol's facts and the
+session's committed usage.
+
+There is no separate prepare phase. A crash before admission composes again,
+and the callbacks before it run again, which is safe because nothing was
+sent: renderers, wrappers and checkpoint callbacks must be repeat-safe until
+the call is admitted. After admission, a resend is the same call: it sends
+the admitted request, records nothing, and calls no renderer, wrapper,
+projector or hook, and a resume reinstalls the plugin state the admission
+committed before the turn continues. A composition that fails settles the
+call unsent with `TurnFailureCode::PromptCompositionFailed`, and protocol
+facts that cannot be derived settle it with their own code. A live store
+fault aborts the activation instead; it admitted nothing, so the resume
+composes again.
+
+A tool member's state resolutions commit with its `round.outcome`
+(FIG-5266), and a resume publishes them from that record before the round is
+presented, so the next call composes over them even when a crash falls
+between that outcome and the call's admission.
 
 ### 7. Failure and limits
 
@@ -220,8 +249,13 @@ returns `SectionText::Omit`.
 The host configures them in the plan. Oversize is refused, never truncated.
 
 Renders run on a bounded worker pool (`PromptRenderPool`), off the caller's
-scheduler. A full queue refuses the call (`RenderersBusy`) rather than
-growing. When the budget passes, the call fails with `BudgetExceeded`; renders
+scheduler, shared by every session of the process. A full queue refuses the
+composition (`RenderersBusy`) rather than growing; that is a live fault
+(`RuntimeErrorCode::PromptRenderersBusy`), never the call's outcome: the
+activation ends unadmitted and its resume composes again. The budget bounds
+the call's whole composition from its submission, so time queued behind other
+sessions' renders counts against it. When the budget passes, the call fails
+with `BudgetExceeded`; renders
 of that call still queued never start, and one still running finishes into a
 dropped result. The pool cannot stop native code that never returns: a
 renderer that hangs holds its worker. Results are assembled in plan order,

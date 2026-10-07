@@ -43,7 +43,7 @@ pub use turn_protocol::{
     ExecutionEnvironmentSyncFailure, ExecutionEnvironmentSyncFailureKind, ExpandedRow,
     ExpandedWrapper, LlmCallError, LogEvent, ModelToolCalls, PendingToolCall, PendingWork,
     ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SyncedEnvironment,
-    ToolExpansionPlan, TurnCause, TurnMachineConfig, render_turn_causes_prompt,
+    ToolExpansionPlan, TurnCause, TurnMachineConfig, place_prompt, render_turn_causes_prompt,
     stored_history_refusal_actions,
 };
 mod checkpoint_content;

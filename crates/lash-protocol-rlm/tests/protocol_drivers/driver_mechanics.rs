@@ -1851,56 +1851,37 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
 }
 
 /// FIG-3538: a crash before the iteration-2 LLM commit must redrive into a
-/// byte-identical journaled envelope. Each iteration's composed prompt
-/// sections ride the journaled execution-environment sync, so replay — which
-/// rebuilds the machine from recorded state — cannot leak divergent live
-/// plugin state into the request.
+/// byte-identical projected envelope. Each iteration projects from the
+/// machine's recorded state and the sync journaled at its own boundary, so
+/// replay cannot leak divergent live state into the request. The composed
+/// prompt is not the machine's: it commits with the call's admission, and a
+/// resend sends the admitted request (ADR 0133 §6).
 #[test]
 fn rlm_redrive_projects_identical_llm_envelope() {
-    // What the host journaled at the iteration-1 boundary: the composed
-    // sections, the late bound-variables text among them.
-    let journaled_sync = sansio::ExecutionEnvironmentSync {
-        instructions: Some(Arc::from("journaled system prompt")),
-        current_context: Some(Arc::from("rlm-bound-vars: step_total = 41")),
-        tool_specs: Arc::new(Vec::new()),
-    };
+    let journaled_sync = sansio::ExecutionEnvironmentSync::default();
 
-    let recorded_initial = drive_rlm_to_second_llm_request(None, &journaled_sync);
-    // A different protocol-start record — deliberately stale here — changes
-    // iteration 1 only: each iteration projects from the sync journaled at
-    // its own boundary and carries nothing over from the one before.
-    let redriven =
-        drive_rlm_to_second_llm_request(Some(Arc::from("rlm-bound-vars: STALE")), &journaled_sync);
+    let recorded = drive_rlm_to_second_llm_request(&journaled_sync);
+    let redriven = drive_rlm_to_second_llm_request(&journaled_sync);
 
-    assert_ne!(
-        serde_json::to_vec(&recorded_initial.0).expect("first request serializes"),
-        serde_json::to_vec(&redriven.0).expect("first request serializes"),
-        "the protocol-start sync executes iteration 1, so the stale record differs there"
-    );
-    assert_eq!(
-        serde_json::to_vec(&recorded_initial.1).expect("second request serializes"),
-        serde_json::to_vec(&redriven.1).expect("second request serializes"),
-        "the journaled sync pins iteration 2's prompt sections on redrive"
-    );
-    let encoded = serde_json::to_string(&redriven.1).expect("second request serializes");
-    assert!(
-        encoded.contains("rlm-bound-vars: step_total = 41"),
-        "the journaled bound-variables render reached the envelope"
-    );
-    assert!(
-        !encoded.contains("STALE"),
-        "the stale protocol-start sections must not survive the journaled boundary"
-    );
+    for (iteration, (recorded, redriven)) in
+        [(&recorded.0, &redriven.0), (&recorded.1, &redriven.1)]
+            .into_iter()
+            .enumerate()
+    {
+        assert_eq!(
+            serde_json::to_vec(recorded).expect("request serializes"),
+            serde_json::to_vec(redriven).expect("request serializes"),
+            "the redrive projects iteration {}'s envelope byte for byte",
+            iteration + 1
+        );
+    }
 }
 
 /// Execute an RLM machine through one executed cell and return the two projected
-/// LLM requests. The protocol-start sync records `initial_context` as its late
-/// sections, and the iteration boundary's `SyncExecutionEnvironment` is
-/// answered with
-/// `journaled_sync` — the recorded outcome a redrive replays verbatim instead
+/// LLM requests. Every `SyncExecutionEnvironment` is answered with
+/// `journaled_sync`, the recorded outcome a redrive replays verbatim instead
 /// of re-deriving.
 fn drive_rlm_to_second_llm_request(
-    initial_context: Option<Arc<str>>,
     journaled_sync: &sansio::ExecutionEnvironmentSync,
 ) -> (LlmRequest, LlmRequest) {
     let preamble = lash_protocol_rlm::build_rlm_preamble(
@@ -1930,14 +1911,7 @@ fn drive_rlm_to_second_llm_request(
         };
         match effect {
             Effect::SyncExecutionEnvironment { id } => {
-                let result = Ok(if requests.is_empty() {
-                    sansio::ExecutionEnvironmentSync {
-                        current_context: initial_context.clone(),
-                        ..Default::default()
-                    }
-                } else {
-                    journaled_sync.clone()
-                });
+                let result = Ok(journaled_sync.clone());
                 machine.handle_response(Response::ExecutionEnvironmentSynced { id, result });
             }
             Effect::LlmCall { id, request } => {

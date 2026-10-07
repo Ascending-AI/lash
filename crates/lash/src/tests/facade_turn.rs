@@ -1002,10 +1002,11 @@ impl lash_core::plugin::SessionPlugin for HostSections {
     }
 }
 
-/// FIG-5257: a turn composes its sections at the iteration's sync and places
-/// them on the model request: the standard protocol's in the instructions,
-/// over the offered tools, with a host wrapper's replacement intro, and a
-/// host's late section after the projected conversation, outside it.
+/// FIG-5257: a turn's model call composes its sections at its admission
+/// (FIG-5255) and places them on the model request: the standard
+/// protocol's in the instructions, over the offered tools, with a host
+/// wrapper's replacement intro, and a host's late section after the
+/// projected conversation, outside it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_turns_request_carries_its_sections_where_they_are_placed() {
     let sent: Arc<StdMutex<Vec<LlmRequest>>> = Arc::new(StdMutex::new(Vec::new()));
@@ -1065,5 +1066,97 @@ async fn a_turns_request_carries_its_sections_where_they_are_placed() {
         [LlmContentBlock::Text { text, .. }] if text.as_ref() == "Release 4.2 freezes on Friday."
     ));
     assert_eq!(last_user_text(&request), "hello");
+    core.shutdown().await.expect("shutdown");
+}
+
+/// A host plugin whose one section refuses to render.
+struct BrokenSection;
+
+impl PluginFactory for BrokenSection {
+    fn id(&self) -> &'static str {
+        "broken_section"
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::plugin::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
+    {
+        Ok(Arc::new(BrokenSection))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for BrokenSection {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("broken_section")
+    }
+}
+
+impl lash_core::plugin::SessionPlugin for BrokenSection {
+    fn id(&self) -> &'static str {
+        "broken_section"
+    }
+
+    fn register(
+        &self,
+        reg: &mut lash_core::plugin::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        use crate::plugins::{PromptInput, PromptRenderError, PromptSectionSpec, SectionText};
+        use crate::prompt::{PromptPlacement, PromptSectionKey};
+        reg.prompt().section(
+            PromptSectionSpec::new(
+                PromptSectionKey::new("calendar").expect("valid section key"),
+                PromptPlacement::CurrentContext,
+            ),
+            Arc::new(|_: &PromptInput<'_>| {
+                Err::<SectionText, _>(PromptRenderError::new(
+                    "the release calendar is unreachable",
+                ))
+            }),
+        )
+    }
+}
+
+/// FIG-5255 (ADR 0133 §6, §7): a call whose section refuses to render fails
+/// closed at its admission: no earlier text stands in, and nothing reaches
+/// the provider.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_call_whose_section_refuses_fails_closed_and_sends_nothing() {
+    let sent: Arc<StdMutex<Vec<LlmRequest>>> = Arc::new(StdMutex::new(Vec::new()));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("prompt-sections")
+        .complete({
+            let sent = Arc::clone(&sent);
+            move |request: LlmRequest| {
+                sent.lock_recover().push(request.clone());
+                async move { Ok(text_response("noted")) }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
+    .plugin(Arc::new(BrokenSection))
+    .build(crate::testing::runtime_lease_owner())
+    .expect("standard core");
+    let session_id = lash_sansio::SessionId::try_from("broken-section".to_owned()).expect("id");
+    let session = core
+        .session(session_id)
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    let output = session
+        .send(crate::TurnInput::text("hello"))
+        .output()
+        .await
+        .expect("the turn ends");
+    assert!(!output.is_success(), "{output:?}");
+    assert!(
+        sent.lock_recover().is_empty(),
+        "no request reached the model"
+    );
+
     core.shutdown().await.expect("shutdown");
 }

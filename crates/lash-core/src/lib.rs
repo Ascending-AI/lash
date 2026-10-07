@@ -480,7 +480,8 @@ pub mod sansio {
         EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
         ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, LlmCallError,
         ModelToolCalls, PendingToolCall, PendingWork, ProtocolDriverHandle, ResponseToolCalls,
-        SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine, render_turn_causes_prompt,
+        SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine, place_prompt,
+        render_turn_causes_prompt,
     };
 }
 

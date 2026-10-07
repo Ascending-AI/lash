@@ -543,8 +543,6 @@ impl TurnDrive for L4Drive {
                     .handle_response(Response::ExecutionEnvironmentSynced {
                         id,
                         result: Ok(ExecutionEnvironmentSync {
-                            instructions: Some(Arc::from("l4t")),
-                            current_context: None,
                             tool_specs: Arc::new(Vec::new()),
                         }),
                     });

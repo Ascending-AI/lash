@@ -179,6 +179,12 @@ fn event_samples() -> Vec<TraceEvent> {
             prompt_chars: 12,
             components: Vec::new(),
         },
+        TraceEvent::PromptCompositionFailed {
+            plan: Some(json!({ "purpose": "turn", "sections": [] })),
+            limits: json!({ "render_budget_ms": 2000 }),
+            error: json!({ "kind": "total_too_large", "bytes": 300_000, "limit": 262_144 }),
+            elapsed_ms: 3,
+        },
         TraceEvent::AttachmentDegraded {
             attachment_id: Some("attachment-id".to_string()),
             label: Some("artifact.bin".to_string()),

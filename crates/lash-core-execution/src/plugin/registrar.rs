@@ -241,6 +241,11 @@ impl TurnRegistrations<'_> {
         )
     }
 
+    /// Runs at the machine's checkpoints, between a round's outcomes and the
+    /// next model call. Its decisions commit with that call's `model.start`
+    /// (ADR 0133 §6): a crash before it runs the hook again, so the hook must
+    /// be repeat-safe until the call is admitted; after it, nothing runs it
+    /// again.
     pub fn checkpoint(self, key: HookKey, hook: CheckpointHook) -> Result<(), PluginError> {
         push_keyed_hook(
             &mut self.reg.contributions.checkpoint_hooks,

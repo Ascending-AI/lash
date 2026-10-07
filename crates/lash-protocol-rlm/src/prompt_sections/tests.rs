@@ -615,12 +615,11 @@ fn a_section_renders_the_same_text_wherever_the_host_places_it() {
     // runtime feedback, outside it; the early text is the instructions'.
     let place = |composed: &ComposedPrompt| {
         let mut request = crate::driver::tests::projected_request();
-        lash_core::sansio::ExecutionEnvironmentSync {
-            instructions: composed.initial_instructions.as_deref().map(Arc::from),
-            current_context: composed.current_context.as_deref().map(Arc::from),
-            ..Default::default()
-        }
-        .place_prompt(&mut request);
+        lash_core::sansio::place_prompt(
+            &mut request,
+            composed.initial_instructions.as_deref().map(Arc::from),
+            composed.current_context.as_deref().map(Arc::from),
+        );
         request
     };
     let late_request = place(&late_first);

@@ -143,6 +143,11 @@ runtime_error_codes! {
         /// retry policy - the runtime deliberately stops waiting instead of
         /// blocking one invocation indefinitely.
         SessionExecutionLaneBusy = "session_execution_lane_busy" => Retryable,
+        // the process-wide render pool drains; the identical composition then runs.
+        /// A model call's prompt composition found the process-wide render
+        /// pool's queue full (ADR 0133 §7). Nothing was admitted or sent, so
+        /// the activation ends and its resume composes the call again.
+        PromptRenderersBusy = "prompt_renderers_busy" => Retryable,
         // the park's redrive settles within a tick; the identical admission then proceeds.
         /// A session's shift admission found a turn input while the parked
         /// run's park still names a redrive intent that is not yet settled

@@ -9,7 +9,8 @@
 /// `session_runs` row while the turn is unfinished. The run row stays the one
 /// admission authority (its one-unfinished-run index); this row carries only
 /// the phase with what a restore resumes it from: the encoded checkpoint
-/// and, in the model phase, the model pin (its attempt is `phase_arg`).
+/// and, in the model phase, the model pin (its attempt is `phase_arg`, its
+/// call `model_calls`), and how many model calls the turn admitted.
 pub const TABLE: &str = "turn_phases";
 
 crate::statements! {
@@ -35,10 +36,13 @@ crate::statements! {
 
         /// Move run `?2` of session `?1` to phase `?3` (argument `?4`) at
         /// iteration `?5` with checkpoint `?6` and model pin `?7`, `?8`, at
-        /// epoch `?9`. No row when the run has no phase row.
+        /// epoch `?9`. A model phase's call `?10` becomes the turn's latest;
+        /// a null `?10` keeps the count. No row when the run has no phase
+        /// row.
         advance_phase = "UPDATE turn_phases
              SET phase = ?3, phase_arg = ?4, iteration = ?5, checkpoint_ref = ?6,
-                 model_request_ref = ?7, model_deadline_ms = ?8, written_epoch = ?9
+                 model_request_ref = ?7, model_deadline_ms = ?8, written_epoch = ?9,
+                 model_calls = COALESCE(?10, model_calls)
              WHERE session_id = ?1 AND run = ?2
              RETURNING run";
 
@@ -58,7 +62,7 @@ crate::statements! {
         /// Session `?1`'s unfinished turn with its phase row.
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                     p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
-                    p.turn_deadline_ms, p.written_epoch
+                    p.turn_deadline_ms, p.written_epoch, p.model_calls
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL

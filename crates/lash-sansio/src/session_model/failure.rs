@@ -242,6 +242,11 @@ pub enum TurnFailureCode {
     /// over throttle, backoff and every provider attempt; the turn ends with
     /// this typed model timeout.
     ModelTotalExceeded,
+    /// A model call's prompt sections did not compose (ADR 0133 §7): a
+    /// renderer or wrapper refused or overran, or the host's plan does not
+    /// resolve. The call was never sent; its message names the attributed
+    /// site.
+    PromptCompositionFailed,
     /// A driver task join failed.
     TaskJoinFailed,
     /// An SSE event exceeded the configured byte limit.
@@ -356,6 +361,7 @@ impl TurnFailureCode {
             Self::CredentialRefreshFailed => "credential_refresh_failed",
             Self::Timeout => "timeout",
             Self::ModelTotalExceeded => "model_total_exceeded",
+            Self::PromptCompositionFailed => "prompt_composition_failed",
             Self::TaskJoinFailed => "task_join_failed",
             Self::SseEventTooLarge => "sse_event_too_large",
             Self::SseResponseTooLarge => "sse_response_too_large",
@@ -461,6 +467,7 @@ impl TurnFailureCode {
             "credential_refresh_failed" => Self::CredentialRefreshFailed,
             "timeout" => Self::Timeout,
             "model_total_exceeded" => Self::ModelTotalExceeded,
+            "prompt_composition_failed" => Self::PromptCompositionFailed,
             "task_join_failed" => Self::TaskJoinFailed,
             "sse_event_too_large" => Self::SseEventTooLarge,
             "sse_response_too_large" => Self::SseResponseTooLarge,
@@ -546,6 +553,7 @@ impl TurnFailureCode {
         Self::CredentialRefreshFailed,
         Self::Timeout,
         Self::ModelTotalExceeded,
+        Self::PromptCompositionFailed,
         Self::TaskJoinFailed,
         Self::SseEventTooLarge,
         Self::SseResponseTooLarge,

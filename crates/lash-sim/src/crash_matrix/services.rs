@@ -63,17 +63,21 @@ pub enum TurnScript {
     /// A round of two `Once` tools with store-local effects: one starts a
     /// process, the other signals the session's target process.
     Effects,
+    /// A turn behind the facade whose every model call composes plugin
+    /// prompt sections ([`super::prompts`]).
+    Prompt,
 }
 
 impl TurnScript {
     /// Every script.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Plain,
         Self::Round,
         Self::Hang,
         Self::Cell,
         Self::CellKilled,
         Self::Effects,
+        Self::Prompt,
     ];
 
     /// The script's name, the prefix of its sessions' ids.
@@ -86,6 +90,7 @@ impl TurnScript {
             Self::Cell => "cell",
             Self::CellKilled => "cellkilled",
             Self::Effects => "effects",
+            Self::Prompt => "prompt",
         }
     }
 
@@ -469,11 +474,15 @@ impl TurnServices for SimServices {
 }
 
 impl SimServices {
-    /// The services a cell session runs with, or `None` for a scripted one.
+    /// The services a session behind the facade (a cell or a prompt session)
+    /// runs with, or `None` for a scripted one.
     fn cells(&self, session: &SessionId) -> Result<Option<Arc<dyn TurnServices>>, TurnError> {
         match TurnScript::of(session) {
             Some(TurnScript::Cell | TurnScript::CellKilled) => Ok(Some(super::cells::services(
                 &super::cells::cell_core(&self.world).map_err(TurnError::Exec)?,
+            ))),
+            Some(TurnScript::Prompt) => Ok(Some(super::cells::services(
+                &super::prompts::prompt_core(&self.world).map_err(TurnError::Exec)?,
             ))),
             _ => Ok(None),
         }
@@ -552,8 +561,6 @@ impl TurnDrive for SimDrive {
                     .handle_response(Response::ExecutionEnvironmentSynced {
                         id,
                         result: Ok(ExecutionEnvironmentSync {
-                            instructions: Some(Arc::from("lash-sim")),
-                            current_context: None,
                             tool_specs: Arc::new(Vec::new()),
                         }),
                     });
@@ -594,7 +601,9 @@ impl TurnDrive for SimDrive {
         }
         let tools: &[Tool] = match self.script()? {
             _ if answered => &[],
-            TurnScript::Plain | TurnScript::Cell | TurnScript::CellKilled => &[],
+            TurnScript::Plain | TurnScript::Cell | TurnScript::CellKilled | TurnScript::Prompt => {
+                &[]
+            }
             TurnScript::Round => &[Tool::WriteSlow, Tool::Flaky, Tool::WriteNow],
             TurnScript::Hang => &[Tool::Hang],
             TurnScript::Effects => &[Tool::Spawn, Tool::Poke],

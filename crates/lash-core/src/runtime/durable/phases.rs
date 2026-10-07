@@ -2,8 +2,13 @@
 //! (FIG-5172).
 //!
 //! The runner polls the turn's machine through its [`TurnDrive`] and commits
-//! at the catalog's labels: `model.start` pins a model call before its first
-//! byte, `model.done` commits the phase that re-delivers a round or a cell
+//! at the catalog's labels: `model.start` admits a model call before its
+//! first byte (ADR 0133 §6): a new call takes the next ordinal of the turn's
+//! calls and composes its prompt into its request, and its admission commits
+//! its pin, the checkpoint that re-delivers it, the turn's plugin state (the
+//! pending checkpoint-callback decisions among it) and its snapshot record;
+//! a resend is the same call and composes nothing. `model.done` commits the
+//! phase that re-delivers a round or a cell
 //! before it starts, and `turn.commit` publishes the next revision of the
 //! head the owner cached with the turn's terminal in one fenced
 //! transaction, the store's compare-and-set against that head. A frame
@@ -28,8 +33,8 @@ use lash_durable::domain::{RunSeq, SessionCommitWrite, TurnWrite};
 
 use super::head::HeadCache;
 use super::session::{
-    CellExit, CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices,
-    UnfinishedPhase,
+    CellExit, CodeCell, ComposedCall, OpenTurn, PhaseCheckpoint, PhaseExit, TurnDone, TurnDrive,
+    TurnError, TurnRow, TurnServices, UnfinishedPhase,
 };
 use super::session_mail::follow_on_mail;
 use super::tool_round::{self, RoundExit};
@@ -37,13 +42,24 @@ use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel};
 use crate::{ActorContext, Effect, HostTurnProtocol, SessionStreamEvent, TurnMachine};
 use lash_sansio::SavedTurn;
+use std::sync::Arc;
 
-fn encode_checkpoint(machine: &TurnMachine) -> Result<String, TurnError> {
-    encode_saved(&machine.checkpoint())
+/// The phase checkpoint of `drive` as it stands: its machine's checkpoint
+/// and the plugin state the turn has published.
+fn encode_checkpoint(drive: &mut dyn TurnDrive) -> Result<String, TurnError> {
+    let saved = drive.machine().checkpoint();
+    encode_phase(drive, saved)
 }
 
-fn encode_saved(saved: &SavedTurn<HostTurnProtocol>) -> Result<String, TurnError> {
-    serde_json::to_string(saved)
+fn encode_phase(
+    drive: &mut dyn TurnDrive,
+    saved: SavedTurn<HostTurnProtocol>,
+) -> Result<String, TurnError> {
+    let checkpoint = PhaseCheckpoint {
+        saved,
+        plugin_state: drive.plugin_state()?,
+    };
+    serde_json::to_string(&checkpoint)
         .map_err(|error| TurnError::Exec(format!("the turn checkpoint does not encode: {error}")))
 }
 
@@ -71,9 +87,18 @@ pub async fn run_phases(
     } = turn;
     let session = row.session.clone();
     let run = row.run.clone();
-    // The model call in flight as the rows left it: a re-delivered call is
-    // its next attempt, under its recorded deadline.
-    let mut model = row.phase.model().map(|pin| (row.iteration, pin.clone()));
+    // The model call in flight as the rows left it, and the effect the
+    // restored machine re-delivers it as: that call is resent as its next
+    // attempt, under its recorded deadline, and never composed again.
+    let mut model = row.phase.model().and_then(|pin| {
+        drive
+            .machine()
+            .waiting_model_call()
+            .map(|redelivered| (redelivered, pin.clone()))
+    });
+    // How many model calls the turn admitted: a new call takes the next
+    // ordinal, a resend keeps its own.
+    let mut calls = row.model_calls;
     let mut outcome = None;
     // A settled round's presentation, committed with the turn's next commit.
     let mut carry: Option<DomainWrite> = None;
@@ -94,9 +119,32 @@ pub async fn run_phases(
                     return Ok(PhaseExit::Drained);
                 }
                 let current = iteration(drive.machine());
-                let pinned = match model.take() {
-                    Some((pinned, pin)) if pinned == current => Some(pin),
-                    _ => None,
+                // `model` is spent: only the call the restored machine
+                // re-delivers is the pinned one; every other call is new.
+                let (pinned, request, records) = match model.take() {
+                    Some((redelivered, pin)) if redelivered == id => {
+                        (Some(pin), request, Vec::new())
+                    }
+                    _ => {
+                        // A new call composes its prompt over the turn's
+                        // committed state; the machine waits on the request
+                        // that carries it, so the checkpoint names it.
+                        let call = calls.saturating_add(1);
+                        match drive.compose_call(cx, call, request).await? {
+                            Ok(ComposedCall { request, records }) => {
+                                if !drive.machine().admit_request(id, Arc::clone(&request)) {
+                                    return Err(TurnError::Exec(format!(
+                                        "the turn machine does not wait on model call {id:?}"
+                                    )));
+                                }
+                                (None, request, records)
+                            }
+                            Err(refused) => {
+                                settle_unsent(drive.as_mut(), id, refused);
+                                continue;
+                            }
+                        }
+                    }
                 };
                 // The checkpoint `model.start` commits names the request by
                 // content digest; its pin reuses that digest.
@@ -106,28 +154,38 @@ pub async fn run_phases(
                     cx.durable_now().await?,
                     row.turn_deadline,
                     pinned,
+                    calls.saturating_add(1),
                     model_call::request_ref(&saved.checkpoint)?,
                 )?;
-                if let model_call::ModelStart::Send { pin, .. } = &start {
+                if let model_call::ModelStart::Send { pin, resent, .. } = &start {
+                    // `model.start` admits the call: its identity and pin,
+                    // the checkpoint that re-delivers its request, the
+                    // plugin state the turn published, the pending
+                    // checkpoint-callback decisions among it, and what its
+                    // composition records, in one transaction. A resend
+                    // commits its next attempt and records nothing.
                     let label = tool_round::model_start_label(&carry);
                     let mut tx = cx.begin().await?;
                     if let Some(present) = carry.take() {
                         tx.write(present);
+                    }
+                    for record in records {
+                        tx.write(record);
                     }
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
                         phase: UnfinishedPhase::Model {
                             pin: pin.clone(),
-                            checkpoint: encode_saved(&saved)?,
+                            checkpoint: encode_phase(drive.as_mut(), saved)?,
                         },
                         iteration: current,
                     }));
                     cx.commit(tx, label).await?;
+                    if !resent {
+                        calls = pin.call;
+                    }
                 }
-                // `model` is spent: only the first call after a restore
-                // re-delivers the pinned one, and a later call of the same
-                // iteration is a new call.
                 let sent = turn_cancel::unless_cancelled(
                     cx,
                     &session,
@@ -164,7 +222,7 @@ pub async fn run_phases(
                         run: run.clone(),
                         phase: UnfinishedPhase::Tools {
                             run: cell,
-                            checkpoint: encode_checkpoint(drive.machine())?,
+                            checkpoint: encode_checkpoint(drive.as_mut())?,
                         },
                         iteration: iteration(drive.machine()),
                     }));
@@ -185,7 +243,7 @@ pub async fn run_phases(
             }
             Effect::ToolCalls { id, calls, .. } => {
                 model = None;
-                let checkpoint = encode_checkpoint(drive.machine())?;
+                let checkpoint = encode_checkpoint(drive.as_mut())?;
                 let current = iteration(drive.machine());
                 match tool_round::run(cx, drive.as_mut(), &row, id, calls, checkpoint, current)
                     .await?

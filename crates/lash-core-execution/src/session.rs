@@ -377,7 +377,7 @@ impl ExecutionEnvironmentSyncError {
         let message = format!("protocol error: {error}");
         let failure = error.into_turn_failure(match kind {
             Kind::ToolSurface => crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
-            Kind::Prompt | Kind::ProtocolFacts => crate::RuntimeErrorCode::ProtocolBeforeLlmCall,
+            Kind::ProtocolFacts => crate::RuntimeErrorCode::ProtocolBeforeLlmCall,
         });
         if failure.turn_failure_cause().aborts_invocation() {
             Self::Live(failure)
@@ -388,17 +388,6 @@ impl ExecutionEnvironmentSyncError {
                 message,
             })
         }
-    }
-
-    /// A composition that failed closed (ADR 0133): deterministic over the
-    /// call's cut, so it is the sync's recorded outcome and no request is
-    /// sent. The message names the attributed renderer or wrapper.
-    pub fn of_prompt_error(error: crate::plugin::prompt::PromptCompositionError) -> Self {
-        Self::Recorded(crate::sansio::ExecutionEnvironmentSyncFailure {
-            code: crate::FailureCode::from(&crate::RuntimeErrorCode::ProtocolBeforeLlmCall),
-            kind: crate::sansio::ExecutionEnvironmentSyncFailureKind::Prompt,
-            message: error.to_string(),
-        })
     }
 
     pub fn of_session_error(
@@ -756,6 +745,12 @@ impl Session {
 
     pub fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, crate::PluginError> {
         Ok(self.shared_tool_catalog()?.as_ref().clone())
+    }
+
+    /// The pinned catalog of the installed surface: the one the turn's latest
+    /// execution-environment sync recorded, which its model calls offer.
+    pub fn installed_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
+        Ok(self.active_tool_surface_entry()?.tool_catalog())
     }
 
     #[allow(

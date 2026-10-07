@@ -146,12 +146,13 @@ pub enum PromptCompositionError {
     /// The call's final section text exceeds the total limit.
     #[error("the prompt's sections total {bytes} bytes, above the limit of {limit}")]
     TotalTooLarge { bytes: u64, limit: u32 },
-    /// Rendering outlasted the call's render budget. A render still running
-    /// then finishes unseen.
+    /// Rendering outlasted the call's render budget, queue wait included. A
+    /// render still running then finishes unseen.
     #[error("prompt rendering outlasted its {budget_ms} ms budget")]
     BudgetExceeded { budget_ms: u32 },
     /// The render pool's queue of `capacity` renders is full, or the pool
-    /// dropped a render without running it.
+    /// dropped a render without running it: a live fault of the process,
+    /// never a call's outcome.
     #[error("the prompt render pool cannot take this call's renders (capacity {capacity})")]
     RenderersBusy { capacity: u32 },
 }

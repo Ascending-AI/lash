@@ -1,4 +1,5 @@
 pub mod capability;
+mod estimate;
 mod provider_keys;
 mod provider_route;
 mod stream_senders;

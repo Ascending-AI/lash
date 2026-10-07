@@ -420,38 +420,34 @@ pub enum Response<I = ()> {
     },
 }
 
-/// The environment one protocol iteration's model call is built from: the
-/// composed prompt sections and the tool specs. The host journals it as the
-/// iteration's sync outcome, and the machine holds it as
-/// [`SyncedEnvironment`]; it has no other home.
-///
-/// The projector renders history only. [`DriverContextView::project_llm_request`]
-/// places the sections: `instructions` in the request's instruction field,
-/// and `current_context` late, after the projected conversation and outside
-/// history, as runtime feedback (ADR 0133).
+/// The environment one protocol iteration's model calls are built from: its
+/// tool specs. The host journals it as the iteration's sync outcome, and the
+/// machine holds it as [`SyncedEnvironment`]; it has no other home. It
+/// carries no prompt text: each model call composes its prompt sections at
+/// its admission, and the call's admission record is their only durable home
+/// (ADR 0133 §6).
 #[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionEnvironmentSync {
-    /// The final text of the call's `InitialInstructions` sections.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<Arc<str>>,
-    /// The final text of the call's `CurrentContext` sections.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_context: Option<Arc<str>>,
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
 }
 
-impl ExecutionEnvironmentSync {
-    /// Place the composed sections on `request`, which a projector rendered
-    /// from history alone.
-    pub fn place_prompt(&self, request: &mut LlmRequest) {
-        request.instructions = self.instructions.clone();
-        if let Some(context) = &self.current_context {
-            request.messages.push(crate::llm::types::LlmMessage::text(
-                crate::llm::types::LlmRole::System,
-                Arc::clone(context),
-            ));
-        }
+/// Lower a call's composed prompt onto `request`, which a projector rendered
+/// from history alone: the `InitialInstructions` text is the request's
+/// instructions, and the `CurrentContext` text one system message late, after
+/// the projected conversation and outside history, as runtime feedback (ADR
+/// 0133). A placement with no text adds nothing.
+pub fn place_prompt(
+    request: &mut LlmRequest,
+    instructions: Option<Arc<str>>,
+    current_context: Option<Arc<str>>,
+) {
+    request.instructions = instructions;
+    if let Some(context) = current_context {
+        request.messages.push(crate::llm::types::LlmMessage::text(
+            crate::llm::types::LlmRole::System,
+            context,
+        ));
     }
 }
 
@@ -470,8 +466,6 @@ pub struct SyncedEnvironment {
 pub enum ExecutionEnvironmentSyncFailureKind {
     /// The turn's tool surface could not be pinned.
     ToolSurface,
-    /// The protocol could not render the system prompt.
-    Prompt,
     /// The protocol could not derive its prompt facts.
     ProtocolFacts,
 }
@@ -770,8 +764,9 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
 }
 
 impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
-    /// The iteration's model request: the projector's history, with the
-    /// synced prompt sections placed where the plan put them.
+    /// The iteration's model request: the projector's history and the
+    /// synced tool surface. The host lowers the call's composed prompt onto
+    /// it at admission ([`place_prompt`]).
     pub fn project_llm_request(
         &self,
         use_tools: bool,
@@ -785,9 +780,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
             use_tools,
             environment: self.environment,
         })?;
-        let mut request = Arc::unwrap_or_clone(projected);
-        self.environment.place_prompt(&mut request);
-        Ok(Arc::new(request))
+        Ok(projected)
     }
 
     pub fn protocol_iteration(&self) -> usize {

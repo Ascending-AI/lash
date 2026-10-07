@@ -11,8 +11,8 @@ use super::*;
 use crate::runtime::durable::commit_publication::{CommitBase, PublishedHeads};
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
-    CellExit, CodeCell, OpenTurn, RestoredTurn, TurnCommit, TurnDone, TurnDrive, TurnError,
-    TurnRestore,
+    CellExit, CodeCell, ComposedCall, OpenTurn, RestoredTurn, TurnCommit, TurnDone, TurnDrive,
+    TurnError, TurnRestore,
 };
 use crate::runtime::turn_loop::DurableTurn;
 
@@ -80,9 +80,25 @@ impl RuntimeDrive {
             fresh_machine(&mut driver, messages, &parts.observer, invalid_input)?.into_config();
         let RestoredTurn {
             machine,
+            plugin_state,
             pending,
             row,
         } = restore.restore(config).await?;
+        // The plugin state the turn's last phase committed, the pending
+        // checkpoint-callback decisions of an admitted call among it,
+        // replaces what preparing the turn again published: nothing that
+        // committed runs again.
+        if let Some(state) = &plugin_state {
+            driver
+                .session
+                .plugins()
+                .hydrate_state(state)
+                .map_err(|error| {
+                    TurnError::Exec(format!(
+                        "the turn's plugin state did not reinstall: {error}"
+                    ))
+                })?;
+        }
         // The records the restored machine already delivered through its
         // progress boundaries reached only the previous owner's draft: they
         // join this one, so the turn's commit holds the history an uncut run
@@ -247,6 +263,29 @@ impl TurnDrive for RuntimeDrive {
         )
         .await
         .map_err(runtime)
+    }
+
+    async fn compose_call(
+        &mut self,
+        _cx: &ActorContext,
+        call: u32,
+        request: Arc<LlmRequest>,
+    ) -> Result<Result<ComposedCall, crate::LlmCallError>, TurnError> {
+        let iteration = self.machine.protocol_iteration();
+        let messages = self.machine.prompt_message_sequence();
+        self.driver
+            .compose_call(iteration, call, messages, request)
+            .await
+            .map_err(runtime)
+    }
+
+    fn plugin_state(&self) -> Result<Option<crate::PluginState>, TurnError> {
+        self.driver
+            .session
+            .plugins()
+            .committed_state()
+            .map(Some)
+            .map_err(|error| TurnError::Exec(format!("the turn's plugin state: {error}")))
     }
 
     async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {

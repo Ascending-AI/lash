@@ -3704,6 +3704,30 @@
           "type": "object"
         },
         {
+          "description": "A model call's prompt did not compose, so nothing was sent: the\ndecision evidence. `plan` is the resolved plan the composition ran\n(absent when the plan itself did not resolve), `limits` the plan's\nconfigured limits, `error` the typed failure with its site and the\nmeasured bytes, and `elapsed_ms` the time the composition took.",
+          "properties": {
+            "elapsed_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "error": true,
+            "limits": true,
+            "plan": true,
+            "type": {
+              "const": "prompt_composition_failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "limits",
+            "error",
+            "elapsed_ms"
+          ],
+          "type": "object"
+        },
+        {
           "description": "One attachment was omitted so an otherwise valid session can continue.",
           "properties": {
             "attachment_id": {

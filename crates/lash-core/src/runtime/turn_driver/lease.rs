@@ -53,7 +53,13 @@ impl<'run> RuntimeTurnDriver<'run> {
             envelope.invocation.effect_replay_key(),
         );
         let outcome =
-            super::issue::issue_effect(&scoped_effect_controller, envelope, local_executor).await;
-        decode(outcome?)
+            super::issue::issue_effect(&scoped_effect_controller, envelope, local_executor).await?;
+        // The plugin state the body's callbacks resolved publishes to the
+        // resident namespace now: it is the turn's pending decision, which
+        // the turn's next phase commits with its checkpoint (`model.start`
+        // for a checkpoint callback, ADR 0133 §6), so a restore after that
+        // commit reinstalls it and one before it runs the callback again.
+        let outcome = self.session.plugins().publish_effect_state(outcome)?;
+        decode(outcome)
     }
 }

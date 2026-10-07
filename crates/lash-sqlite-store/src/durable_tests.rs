@@ -77,6 +77,10 @@ law!(
     |store, _advance| { laws::a_turn_cancel_is_a_first_winner_row_with_a_wake(store) }
 );
 law!(
+    a_turn_counts_the_model_calls_it_admitted,
+    |store, _advance| { laws::a_turn_counts_the_model_calls_it_admitted(store) }
+);
+law!(
     a_session_close_moves_one_step_at_a_time,
     |store, _advance| { laws::a_session_close_moves_one_step_at_a_time(store) }
 );

@@ -111,6 +111,8 @@ pub struct World {
     tripwire: Arc<Tripwire>,
     /// The core the run's cell sessions run behind ([`super::cells`]).
     cell_core: OnceLock<lash::LashCore>,
+    /// The core the run's prompt sessions run behind ([`super::prompts`]).
+    prompt_core: OnceLock<lash::LashCore>,
     ledger: BodyLedger,
     parts: OnceLock<Parts>,
     host: Mutex<Option<HostParts>>,
@@ -130,6 +132,11 @@ impl World {
     /// The run's cell core, once built.
     pub(crate) fn cell_core(&self) -> &OnceLock<lash::LashCore> {
         &self.cell_core
+    }
+
+    /// The run's prompt core, once built.
+    pub(crate) fn prompt_core(&self) -> &OnceLock<lash::LashCore> {
+        &self.prompt_core
     }
 
     /// The outside world's body ledger.

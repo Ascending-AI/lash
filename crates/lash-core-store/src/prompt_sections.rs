@@ -206,7 +206,9 @@ pub struct PromptLimits {
     pub max_section_bytes: NonZeroU32,
     /// The most UTF-8 bytes of final section text one call composes.
     pub max_total_bytes: NonZeroU32,
-    /// The wall-clock budget, in milliseconds, for rendering one call.
+    /// The wall-clock budget, in milliseconds, for rendering one call,
+    /// counted from the call's submission to the shared render pool: time
+    /// queued behind other renders counts against it.
     pub render_budget_ms: NonZeroU32,
 }
 

@@ -6,7 +6,7 @@
 //! round's store-local effects, a turn cancel, a code cell, a code cell
 //! killed inside its body, a process with its waits and cascade, a
 //! process's mail, a session close, a session's commands, a trigger
-//! occurrence and a node's drain by release. Each runs
+//! occurrence, a node's drain by release and a turn's prompt sections. Each runs
 //! as a [`deployment::Deployment`]: the production session and process
 //! activations behind one dispatch on simulated nodes `a` and `b` over one
 //! SQLite memory database, the host acting from outside through its own
@@ -38,6 +38,7 @@ pub mod effects;
 pub mod engine;
 pub mod findings;
 pub mod invariants;
+pub mod prompts;
 pub mod services;
 pub mod world;
 
@@ -84,11 +85,15 @@ pub enum Case {
     /// A rolling deploy by release: the serving node drained while a
     /// process is parked, and its actors claimed by the next.
     Drain,
+    /// A turn whose every model call composes plugin prompt sections: the
+    /// call's prompt, its identity and the pending checkpoint decisions
+    /// commit together at `model.start`, and a resend composes nothing.
+    Prompt,
 }
 
 impl Case {
     /// Every case, in registry order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Turn,
         Self::Round,
         Self::Effects,
@@ -101,6 +106,7 @@ impl Case {
         Self::Command,
         Self::Trigger,
         Self::Drain,
+        Self::Prompt,
     ];
 
     /// The case's name.
@@ -119,6 +125,7 @@ impl Case {
             Self::Command => "command",
             Self::Trigger => "trigger",
             Self::Drain => "drain",
+            Self::Prompt => "prompt",
         }
     }
 
@@ -145,6 +152,7 @@ impl Case {
             Self::Command => Box::new(cases::command::CommandCase::tagged(tag)),
             Self::Trigger => Box::new(cases::trigger::TriggerCase::tagged(tag)),
             Self::Drain => Box::<cases::drain::DrainCase>::default(),
+            Self::Prompt => Box::new(cases::prompt::PromptCase::tagged(tag)),
         }
     }
 }

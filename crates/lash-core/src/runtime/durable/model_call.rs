@@ -81,8 +81,11 @@ pub(super) fn request_ref(
 /// Decide how the call whose request has `reference` ([`request_ref`])
 /// starts at the store's `now`.
 ///
-/// `pinned` is the turn row's pin when it names this call; `turn_deadline`
-/// is the turn's own deadline, which a fresh call's deadline never outlives.
+/// `pinned` is the turn row's pin when it names this call, which is then
+/// resent under its own identity; otherwise the call is new and its pin
+/// takes `call`, the next ordinal of the turn's model calls.
+/// `turn_deadline` is the turn's own deadline, which a fresh call's deadline
+/// never outlives.
 ///
 /// # Errors
 ///
@@ -93,6 +96,7 @@ pub(super) fn start(
     now: DurableInstant,
     turn_deadline: Option<DurableInstant>,
     pinned: Option<ModelPin>,
+    call: u32,
     reference: String,
 ) -> Result<ModelStart, TurnError> {
     let now_ms = millis(now);
@@ -131,6 +135,7 @@ pub(super) fn start(
             });
             let limit = budgets.model_call_limit(now_ms, enclosing.as_ref());
             let pin = ModelPin {
+                call,
                 attempt: 1,
                 request_ref: reference,
                 deadline: DurableInstant(i64::try_from(limit.expires_at).unwrap_or(i64::MAX)),
@@ -230,11 +235,12 @@ mod tests {
     fn a_fresh_call_pins_its_digest_and_a_deadline_clipped_to_the_turn() {
         let now = DurableInstant(10_000);
         let ModelStart::Send { pin, resent, .. } =
-            start(&budgets(), now, None, None, reference("hi")).expect("starts")
+            start(&budgets(), now, None, None, 1, reference("hi")).expect("starts")
         else {
             panic!("a fresh call is sent");
         };
         let total = i64::try_from(budgets().model_total().as_millis()).expect("millis");
+        assert_eq!(pin.call, 1);
         assert_eq!(pin.attempt, 1);
         assert_eq!(pin.deadline, DurableInstant(10_000 + total));
         assert_eq!(pin.request_ref, reference("hi"));
@@ -242,7 +248,7 @@ mod tests {
 
         let turn_ends = DurableInstant(10_500);
         let ModelStart::Send { pin, limit, .. } =
-            start(&budgets(), now, Some(turn_ends), None, reference("hi")).expect("starts")
+            start(&budgets(), now, Some(turn_ends), None, 1, reference("hi")).expect("starts")
         else {
             panic!("a fresh call inside its turn is sent");
         };
@@ -255,6 +261,7 @@ mod tests {
     #[test]
     fn a_resumed_call_keeps_its_deadline_and_an_expired_one_settles_unsent() {
         let pinned = ModelPin {
+            call: 2,
             attempt: 1,
             request_ref: reference("hi"),
             deadline: DurableInstant(20_000),
@@ -264,12 +271,14 @@ mod tests {
             DurableInstant(15_000),
             None,
             Some(pinned.clone()),
+            3,
             reference("hi"),
         )
         .expect("starts") else {
             panic!("a pinned call inside its deadline is re-sent");
         };
         assert_eq!(pin.attempt, 2);
+        assert_eq!(pin.call, 2, "a resend is the same call");
         assert_eq!(
             pin.deadline, pinned.deadline,
             "the deadline is never refreshed"
@@ -282,6 +291,7 @@ mod tests {
             DurableInstant(20_000),
             None,
             Some(pinned.clone()),
+            3,
             reference("hi"),
         )
         .expect("starts");
@@ -291,6 +301,7 @@ mod tests {
     #[test]
     fn a_pinned_call_that_redelivers_another_request_is_a_broken_pin() {
         let pinned = ModelPin {
+            call: 2,
             attempt: 1,
             request_ref: reference("hi"),
             deadline: DurableInstant(20_000),
@@ -301,6 +312,7 @@ mod tests {
                 DurableInstant(15_000),
                 None,
                 Some(pinned),
+                3,
                 reference("something else"),
             ),
             Err(TurnError::ModelPinBroken { .. })
