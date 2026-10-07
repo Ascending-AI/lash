@@ -19,7 +19,8 @@ impl CommitLabel {
     pub const MODEL_DONE: Self = Self::new("model.done");
     /// `round.present+model.start`: A round's presentation and the next model start, fused (C6).
     pub const ROUND_PRESENT_MODEL_START: Self = Self::new("round.present+model.start");
-    /// `turn.commit`: The turn's commit: head compare-and-set, terminal, phase-row pruning (C7).
+    /// `turn.commit`: The turn's commit: head compare-and-set, terminal, phase-row pruning (C7);
+    /// for a turn whose preparation was refused, its `Refused` terminal alone.
     pub const TURN_COMMIT: Self = Self::new("turn.commit");
     /// `turn.cancel`: A turn's cancel terminal.
     pub const TURN_CANCEL: Self = Self::new("turn.cancel");

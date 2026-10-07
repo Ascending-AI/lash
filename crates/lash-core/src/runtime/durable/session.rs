@@ -428,20 +428,34 @@ impl SessionActivation {
             }
             return Ok(Pass::Again);
         }
-        let turn = match row.phase {
+        let opened = match row.phase {
             UnfinishedPhase::Admitted => {
                 let head = heads.head(cx, session).await?;
-                OpenTurn {
-                    drive: self.services.start(cx, &row, head).await?,
-                    pending: None,
-                    row,
-                }
+                self.services
+                    .start(cx, &row, head)
+                    .await
+                    .map(|drive| OpenTurn {
+                        drive,
+                        pending: None,
+                        row: row.clone(),
+                    })
             }
             UnfinishedPhase::Model { .. } | UnfinishedPhase::Tools { .. } => {
                 self.services
                     .resume(cx, TurnRestore::new(cx, &row, heads))
-                    .await?
+                    .await
             }
+        };
+        let turn = match opened {
+            Ok(turn) => turn,
+            // A turn its committed state cannot prepare, on any pass (a
+            // plugin build its recorded config refuses, FIG-5246), ends
+            // with that refusal as its run's cause: no pass would clear it.
+            Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => {
+                phases::refuse(cx, &row, refusal).await?;
+                return Ok(Pass::Again);
+            }
+            Err(error) => return Err(error),
         };
         match phases::run_phases(cx, self.services.as_ref(), turn, heads).await? {
             PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),

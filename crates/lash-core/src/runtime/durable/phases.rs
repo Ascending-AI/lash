@@ -28,7 +28,8 @@ use lash_durable::domain::{RunSeq, SessionCommitWrite, TurnWrite};
 
 use super::head::HeadCache;
 use super::session::{
-    CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnServices, UnfinishedPhase,
+    CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices,
+    UnfinishedPhase,
 };
 use super::session_mail::follow_on_mail;
 use super::tool_round::{self, RoundExit};
@@ -258,6 +259,43 @@ pub async fn run_phases(
             }
         }
     }
+}
+
+/// End `row`'s turn with `refusal`, the terminal error its preparation
+/// met (FIG-5246): the run's `Refused` terminal, which answers every input it
+/// took with the refusal's code and cause, in one `turn.commit`. Nothing ran,
+/// so the session head does not move; an open round's members settle
+/// `Cancelled` and the turn's scope ends, as a cancel's do.
+///
+/// # Errors
+///
+/// [`TurnError::Durable`]: ownership lost, or the turn no longer open.
+pub(super) async fn refuse(
+    cx: &ActorContext,
+    row: &TurnRow,
+    refusal: crate::RuntimeError,
+) -> Result<(), TurnError> {
+    tracing::warn!(
+        session = %row.session,
+        run = %row.run,
+        error = %refusal,
+        "the turn's preparation was refused; the turn ends with the refusal"
+    );
+    let mut tx = cx.begin().await?;
+    tool_round::cancel_open_round(cx, &mut tx, row).await?;
+    tx.write(DomainWrite::Turn(TurnWrite::Terminal {
+        session: row.session.clone(),
+        run: row.run.clone(),
+        cause: Box::new(crate::store::RunTerminalCause::Refused {
+            code: refusal.code,
+            message: refusal.message,
+            refusal_cause: refusal.cause,
+        }),
+        head_revision: None,
+    }));
+    end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
+    cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
+    Ok(())
 }
 
 /// Hand `drive`'s machine the settlement of a model call it never sent.
