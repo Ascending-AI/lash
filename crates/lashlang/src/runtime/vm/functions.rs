@@ -1526,7 +1526,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         match op {
             IntrinsicOp::BindingCellNew => {
                 let popped = self.pop_stack()?;
-                let value = self.binding_cell_member(popped)?;
+                let value = self.admit_binding_value(popped)?;
                 let cell = self.heap.allocate_cell(value)?;
                 self.stack.push(cell);
             }
@@ -1537,7 +1537,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             IntrinsicOp::BindingCellSet => {
                 let popped = self.pop_stack()?;
-                let value = self.binding_cell_member(popped)?;
+                let value = self.admit_binding_value(popped)?;
                 let cell = self.pop_stack()?;
                 self.heap.set_cell(&cell, value.clone())?;
                 self.stack.push(value);
@@ -1547,12 +1547,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    /// The value a binding cell stores, admitted the way a slot admits one: a
-    /// host projection is read, and an inline compound goes through the same
-    /// heap import a slot's value does (`heapify_vm_state`), so a member write
-    /// through the binding reaches the object every reader of the binding
-    /// sees.
-    fn binding_cell_member(&mut self, value: Value) -> Result<Value, RuntimeError> {
+    /// The value a binding stores, a slot or a binding cell: a host projection
+    /// is read, and an inline compound goes through the same heap import a
+    /// slot's value does (`heapify_vm_state`), so a member write through the
+    /// binding reaches the object every reader of the binding sees. A store
+    /// keeps VM state heapified (`instruction_keeps_vm_state_heapified`), so
+    /// the record a projection reads must not reach the slot inline, where a
+    /// closure capturing the binding would take it into the heap inline
+    /// (FIG-5197).
+    pub(super) fn admit_binding_value(&mut self, value: Value) -> Result<Value, RuntimeError> {
         match materialize_value(value)? {
             value @ (Value::Tuple(_) | Value::List(_) | Value::Record(_)) => {
                 // Importing the captured value walks its whole graph once.

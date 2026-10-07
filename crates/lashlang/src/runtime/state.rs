@@ -674,10 +674,12 @@ enum CanonicalValue {
     Tuple { items: Vec<CanonicalValue> },
     List { items: Vec<CanonicalValue> },
     Record { fields: Vec<CanonicalBinding> },
-    Projected { value: CanonicalProjectedValue },
+    Projected { value: CanonicalProjected },
 }
 
-use super::projected_wire::CanonicalProjectedValue;
+/// A projection in the snapshot wire, its scalar value in this wire's own
+/// value encoding.
+type CanonicalProjected = super::projected_wire::CanonicalProjectedValue<CanonicalValue>;
 
 impl CanonicalSnapshot {
     fn encode(snapshot: &Snapshot, stamps: SnapshotStamps) -> Result<Self, ContinuationError> {
@@ -1096,76 +1098,6 @@ fn validate_snapshot_globals_for_fleet(
     validate_canonical_messagepack(&legacy_root)
 }
 
-fn skip_messagepack_value(bytes: &[u8], cursor: &mut usize) -> Result<(), SnapshotDecodeError> {
-    let marker = take_byte(bytes, cursor)?;
-    match marker {
-        0x00..=0x7f | 0xe0..=0xff | 0xc0 | 0xc2 | 0xc3 => Ok(()),
-        0xcc | 0xd0 => skip_bytes(bytes, cursor, 1),
-        0xcd | 0xd1 => skip_bytes(bytes, cursor, 2),
-        0xce | 0xd2 | 0xca => skip_bytes(bytes, cursor, 4),
-        0xcf | 0xd3 | 0xcb => skip_bytes(bytes, cursor, 8),
-        0xa0..=0xbf => skip_bytes(bytes, cursor, usize::from(marker & 0x1f)),
-        0xd9 | 0xc4 => {
-            let length = usize::from(take_byte(bytes, cursor)?);
-            skip_bytes(bytes, cursor, length)
-        }
-        0xda | 0xc5 => {
-            let length = usize::from(take_u16(bytes, cursor)?);
-            skip_bytes(bytes, cursor, length)
-        }
-        0xdb | 0xc6 => {
-            let length = usize_from_u32(take_u32(bytes, cursor)?)?;
-            skip_bytes(bytes, cursor, length)
-        }
-        0x90..=0x9f => {
-            for _ in 0..usize::from(marker & 0x0f) {
-                skip_messagepack_value(bytes, cursor)?;
-            }
-            Ok(())
-        }
-        0xdc => {
-            let length = usize::from(take_u16(bytes, cursor)?);
-            for _ in 0..length {
-                skip_messagepack_value(bytes, cursor)?;
-            }
-            Ok(())
-        }
-        0xdd => {
-            let length = usize_from_u32(take_u32(bytes, cursor)?)?;
-            for _ in 0..length {
-                skip_messagepack_value(bytes, cursor)?;
-            }
-            Ok(())
-        }
-        0x80..=0x8f => {
-            for _ in 0..usize::from(marker & 0x0f) {
-                skip_messagepack_value(bytes, cursor)?;
-                skip_messagepack_value(bytes, cursor)?;
-            }
-            Ok(())
-        }
-        0xde => {
-            let length = usize::from(take_u16(bytes, cursor)?);
-            for _ in 0..length {
-                skip_messagepack_value(bytes, cursor)?;
-                skip_messagepack_value(bytes, cursor)?;
-            }
-            Ok(())
-        }
-        0xdf => {
-            let length = usize_from_u32(take_u32(bytes, cursor)?)?;
-            for _ in 0..length {
-                skip_messagepack_value(bytes, cursor)?;
-                skip_messagepack_value(bytes, cursor)?;
-            }
-            Ok(())
-        }
-        _ => Err(invalid_messagepack(&format!(
-            "unsupported MessagePack marker 0x{marker:02x}"
-        ))),
-    }
-}
-
 fn is_collection_entry(path: &[CanonicalPathSegment], collection: &str) -> bool {
     matches!(path, [.., field, CanonicalPathSegment::Index(_)] if field.key() == Some(collection))
 }
@@ -1205,24 +1137,54 @@ fn validate_expected(
         }
         ExpectedValue::Projected => {
             ensure_depth(depth)?;
-            expect_struct_map(bytes, cursor, 3, &location, "projected value")?;
+            let fields = take_map_length(bytes, cursor, &location, "projected value")?;
+            expect_key(bytes, cursor, "kind", &location)?;
+            let kind = take_canonical_string(bytes, cursor, &format!("{location}.kind"))?;
+            // Pending frames run last-pushed first, so each form's fields push
+            // in reverse.
+            match (kind, fields) {
+                ("scalar", 3) => {
+                    push(
+                        pending,
+                        ExpectedValue::Runtime,
+                        format!("{location}.value"),
+                        depth + 1,
+                        value_depth + 1,
+                    );
+                    push_key(pending, "value", &location, depth + 1, value_depth);
+                }
+                ("resource", 4) => {
+                    push(
+                        pending,
+                        ExpectedValue::ProjectionResource,
+                        format!("{location}.resource"),
+                        depth + 1,
+                        value_depth,
+                    );
+                    push_key(pending, "resource", &location, depth + 1, value_depth);
+                    push(
+                        pending,
+                        ExpectedValue::String,
+                        format!("{location}.type_name"),
+                        depth + 1,
+                        value_depth,
+                    );
+                    push_key(pending, "type_name", &location, depth + 1, value_depth);
+                }
+                ("scalar" | "resource", _) => {
+                    return Err(non_canonical(
+                        &location,
+                        "projected value has a non-canonical field count",
+                    ));
+                }
+                _ => {
+                    return Err(invalid_at(
+                        &location,
+                        &format!("unknown projected value kind `{kind}`"),
+                    ));
+                }
+            }
             expect_key(bytes, cursor, "name", &location)?;
-            push(
-                pending,
-                ExpectedValue::ProjectionResource,
-                format!("{location}.resource"),
-                depth + 1,
-                value_depth,
-            );
-            push_key(pending, "resource", &location, depth + 1, value_depth);
-            push(
-                pending,
-                ExpectedValue::String,
-                format!("{location}.type_name"),
-                depth + 1,
-                value_depth,
-            );
-            push_key(pending, "type_name", &location, depth + 1, value_depth);
             push(
                 pending,
                 ExpectedValue::String,

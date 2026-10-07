@@ -5,50 +5,72 @@
 //! the same way, so a value that one writer accepts the other accepts
 //! (FIG-2865).
 //!
-//! A projection is plain data (ADR 0132 §9): a resource projection is its
+//! A projection is plain data (ADR 0132 §9) and one leaf of the encoding, a
+//! scalar member wherever it sits: a heap object, an array or a closure
+//! capture holds it as it holds a number. A resource projection is its
 //! `name`, its declared `type_name` and its [`ResourceRef`], which is all the
 //! VM ever holds of it, so it decodes into the same projection on any node and
 //! reads through the provider registered for its type there. A scalar
-//! projection is its value: the writers encode the value itself, and the
-//! host's binding re-occupies its named slot on resume.
+//! projection is its `name` and the host value it stands for, written in the
+//! writer's own value encoding `V`. That value is host data and holds no heap
+//! reference: each writer refuses one on both sides, because heap tracing
+//! never looks inside a projection.
 
 use serde::{Deserialize, Serialize};
 
-use super::{ContinuationError, ProjectedValue, ResourceRef};
+use super::value::ProjectedForm;
+use super::{ProjectedValue, ResourceRef, Value};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct CanonicalProjectedValue {
-    pub(crate) name: String,
-    pub(crate) type_name: String,
-    pub(crate) resource: ResourceRef,
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum CanonicalProjectedValue<V> {
+    Scalar {
+        name: String,
+        value: Box<V>,
+    },
+    Resource {
+        name: String,
+        type_name: String,
+        resource: ResourceRef,
+    },
 }
 
-impl CanonicalProjectedValue {
-    /// The canonical form of a resource projection.
-    ///
-    /// # Errors
-    ///
-    /// A scalar projection has none: its writer encodes its value instead.
-    pub(crate) fn from_projected(
+impl<V> CanonicalProjectedValue<V> {
+    /// The canonical form of `projected`, writing a scalar projection's value
+    /// with `encode`.
+    pub(crate) fn from_projected<E>(
         projected: &ProjectedValue,
-        location: &str,
-    ) -> Result<Self, ContinuationError> {
-        let resource =
-            projected
-                .resource_ref()
-                .ok_or_else(|| ContinuationError::UnserializableValue {
-                    location: location.to_string(),
-                    variant: "scalar projection, which is encoded by its value",
-                })?;
-        Ok(Self {
-            name: projected.name().to_string(),
-            type_name: projected.value_type_name().to_string(),
-            resource: resource.clone(),
+        encode: impl FnOnce(&Value) -> Result<V, E>,
+    ) -> Result<Self, E> {
+        Ok(match projected.form() {
+            ProjectedForm::Scalar(value) => Self::Scalar {
+                name: projected.name().to_string(),
+                value: Box::new(encode(value)?),
+            },
+            ProjectedForm::Resource {
+                type_name,
+                resource,
+            } => Self::Resource {
+                name: projected.name().to_string(),
+                type_name: type_name.to_string(),
+                resource: resource.clone(),
+            },
         })
     }
 
-    pub(crate) fn into_projected(self) -> ProjectedValue {
-        ProjectedValue::resource(self.name, self.type_name, self.resource)
+    /// The projection this form encodes, reading a scalar projection's value
+    /// with `decode`.
+    pub(crate) fn into_projected<E>(
+        self,
+        decode: impl FnOnce(V) -> Result<Value, E>,
+    ) -> Result<ProjectedValue, E> {
+        Ok(match self {
+            Self::Scalar { name, value } => ProjectedValue::scalar(name, decode(*value)?),
+            Self::Resource {
+                name,
+                type_name,
+                resource,
+            } => ProjectedValue::resource(name, type_name, resource),
+        })
     }
 }

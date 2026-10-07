@@ -35,6 +35,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::runtime::heap::DurablePartition;
+use crate::runtime::value::ProjectedForm;
 
 /// A state's durable form as a capture produced it: see the module docs.
 #[derive(Clone, Debug)]
@@ -383,20 +384,12 @@ fn non_fixed_point(location: &str) -> SnapshotDecodeError {
     }
 }
 
-/// What the durable wire encodes for `value`: a scalar projection's value.
-fn durable_view(value: &Value) -> &Value {
-    match value {
-        Value::Projected(projected) => projected.scalar_value().map_or(value, durable_view),
-        other => other,
-    }
-}
-
 /// Whether two root values encode to the same bytes, without encoding them:
 /// numbers by their canonical bits (so `-0` and `+0` differ), records in
-/// property order, a resource projection by the identity the wire carries
-/// and a scalar projection as the value it is encoded as.
+/// property order, and a projection by its name and the scalar value or the
+/// resource the wire carries.
 fn durably_identical(left: &Value, right: &Value) -> bool {
-    match (durable_view(left), durable_view(right)) {
+    match (left, right) {
         (Value::Number(left), Value::Number(right)) => {
             canonical_bits(*left) == canonical_bits(*right)
         }
@@ -418,8 +411,22 @@ fn durably_identical(left: &Value, right: &Value) -> bool {
         }
         (Value::Projected(left), Value::Projected(right)) => {
             left.name() == right.name()
-                && left.value_type_name() == right.value_type_name()
-                && left.resource_ref() == right.resource_ref()
+                && match (left.form(), right.form()) {
+                    (ProjectedForm::Scalar(left), ProjectedForm::Scalar(right)) => {
+                        durably_identical(left, right)
+                    }
+                    (
+                        ProjectedForm::Resource {
+                            type_name: left_type,
+                            resource: left,
+                        },
+                        ProjectedForm::Resource {
+                            type_name: right_type,
+                            resource: right,
+                        },
+                    ) => left_type == right_type && left == right,
+                    _ => false,
+                }
         }
         (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
         (Value::Bool(left), Value::Bool(right)) => left == right,

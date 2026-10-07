@@ -365,6 +365,7 @@ fn nested_projection_survives_the_continuation_wire() {
         serde_json::json!({
             "kind": "projected",
             "value": {
+                "kind": "resource",
                 "name": "report",
                 "type_name": "string",
                 "resource": { "projection": "report", "id": "7", "revision": "r1" },

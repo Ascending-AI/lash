@@ -351,14 +351,15 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::StoreName(name) => {
                 let value = self.pop_stack()?;
-                self.slots.assign(
+                self.slots.ensure_assignable(
                     name,
-                    value.clone(),
                     slot_names_for(self.chunk, self.active_function),
                     self.active_function
                         .is_none()
                         .then_some(&self.projected_bindings),
                 )?;
+                let value = self.admit_binding_value(value)?;
+                self.slots.values[name] = Some(value.clone());
                 self.last_value = Some(value);
             }
             Instruction::BuildHeapList(len) => {

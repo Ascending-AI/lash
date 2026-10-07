@@ -370,7 +370,12 @@ impl CanonicalValue {
             | Self::String { .. }
             | Self::Image { .. }
             | Self::Resource { .. }
-            | Self::Projected { .. } => {}
+            | Self::Projected {
+                value: CanonicalProjected::Resource { .. },
+            } => {}
+            Self::Projected {
+                value: CanonicalProjected::Scalar { value, .. },
+            } => value.ensure_heapless(location)?,
         }
         Ok(())
     }
@@ -459,14 +464,12 @@ impl CanonicalValue {
                     })
                     .collect::<Result<_, ContinuationError>>()?,
             },
-            // A scalar projection is its value on the wire (ADR 0132 §9).
-            Value::Projected(projected) => match projected.scalar_value() {
-                Some(value) => {
-                    Self::from_runtime_with_references(value, location, depth, references_allowed)?
-                }
-                None => Self::Projected {
-                    value: CanonicalProjectedValue::from_projected(projected, location)?,
-                },
+            // One leaf wherever it sits; a scalar projection's value is host
+            // data and holds no heap reference (ADR 0132 §9).
+            Value::Projected(projected) => Self::Projected {
+                value: CanonicalProjected::from_projected(projected, |value| {
+                    Self::from_heapless_runtime(value, location, depth + 1)
+                })?,
             },
         })
     }
@@ -507,7 +510,14 @@ impl CanonicalValue {
                     })
                     .collect::<Result<_, _>>()?,
             )),
-            Self::Projected { value } => Value::Projected(value.into_projected()),
+            Self::Projected { value } => Value::Projected(value.into_projected(|value| {
+                value.ensure_heapless("projected scalar").map_err(|_| {
+                    SnapshotDecodeError::InvalidEncoding(
+                        "a scalar projection's value must hold no heap reference".to_string(),
+                    )
+                })?;
+                value.into_runtime()
+            })?),
         })
     }
 }

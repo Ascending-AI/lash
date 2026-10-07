@@ -789,9 +789,9 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                             AbilityOp::Sleep(_) => EffectKind::Sleep,
                             AbilityOp::WaitSignal { .. } => EffectKind::WaitSignal,
                         };
-                        // The VM wire carries a scalar projection as its value,
-                        // so a request rebuilt from the continuation is not
-                        // the one already issued: resume reads that request.
+                        // A request rebuilt from the continuation need not be
+                        // byte-for-byte the one already issued: resume reads
+                        // that request.
                         match self.reissue.take() {
                             Some(recorded) if recorded.kind == kind => {
                                 (recorded.kind, recorded.payload.0)

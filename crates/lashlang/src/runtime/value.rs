@@ -743,6 +743,15 @@ enum ProjectedKind {
     },
 }
 
+/// A projection's kind, borrowed: see [`ProjectedValue::form`].
+pub(crate) enum ProjectedForm<'a> {
+    Scalar(&'a Value),
+    Resource {
+        type_name: &'a str,
+        resource: &'a ResourceRef,
+    },
+}
+
 /// A projection type: the name its provider is registered under.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -953,6 +962,21 @@ impl ProjectedValue {
     /// projections their declared type name.
     pub fn type_name(&self) -> &str {
         self.value_type_name()
+    }
+
+    /// What this projection is, for a durable writer: the value a scalar
+    /// projection stands for, or a resource projection's type and resource.
+    pub(crate) fn form(&self) -> ProjectedForm<'_> {
+        match &self.kind {
+            ProjectedKind::Scalar(value) => ProjectedForm::Scalar(value),
+            ProjectedKind::Resource {
+                type_name,
+                resource,
+            } => ProjectedForm::Resource {
+                type_name,
+                resource,
+            },
+        }
     }
 
     /// The resource a resource projection reads, which is all of it the VM

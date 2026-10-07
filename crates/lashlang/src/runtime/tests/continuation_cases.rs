@@ -454,10 +454,10 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
 /// FIG-2865: the continuation wire used to refuse `Value::Projected` outright,
 /// so a slot holding a projected binding could not park at all — while the
 /// `State` snapshot accepted the identical value. A scalar projection is plain
-/// data (ADR 0132 §9), so both writers carry it as its value, and the host's
-/// binding re-occupies the slot on resume.
+/// data (ADR 0132 §9), so both writers carry it as one leaf, its name and its
+/// value, and it resumes as the same projection (FIG-5197).
 #[test]
-fn continuation_carries_a_projected_binding_slot_as_its_value() {
+fn continuation_carries_a_projected_binding_slot_as_a_projection() {
     // `finish input`
     let program = compile_program_for_tests(builders::program(vec![builders::finish(
         builders::var("input"),
@@ -478,11 +478,11 @@ fn continuation_carries_a_projected_binding_slot_as_its_value() {
     let wire = serde_json::to_vec(&continuation).expect("continuation should serialize");
     let restored: VmContinuation =
         serde_json::from_slice(&wire).expect("continuation should deserialize");
-    assert_eq!(
-        restored.slots.first(),
-        Some(&Some(Value::Number(3.0))),
-        "the continuation wire carries the scalar projection's value"
-    );
+    let Some(Some(Value::Projected(slot))) = restored.slots.first() else {
+        panic!("the continuation wire carries the scalar projection as a projection");
+    };
+    assert_eq!(slot.name(), "input");
+    assert_eq!(slot.scalar_value(), Some(&Value::Number(3.0)));
 }
 
 /// FIG-1839: a slot's read-only-ness is derived from the host's projected

@@ -560,7 +560,7 @@ mod continuation_serde {
         Record(Vec<(String, ValueWire)>),
         /// The same canonical shape the `State` snapshot writes, so a value one
         /// durable writer accepts the other accepts too (FIG-2865).
-        Projected(CanonicalProjectedValue),
+        Projected(CanonicalProjectedValue<ValueWire>),
     }
 
     #[derive(Serialize, Deserialize)]
@@ -690,14 +690,16 @@ mod continuation_serde {
                 ValueWire::List(values.iter().map(value_to_wire).collect::<Result<_, _>>()?)
             }
             Value::Record(record) => ValueWire::Record(record_to_wire(record)?),
-            // A scalar projection is its value on the wire (ADR 0132 §9).
-            Value::Projected(projected) => match projected.scalar_value() {
-                Some(value) => value_to_wire(value)?,
-                None => ValueWire::Projected(
-                    CanonicalProjectedValue::from_projected(projected, "continuation value")
-                        .map_err(|_| "scalar projection without a value")?,
-                ),
-            },
+            // One leaf wherever it sits; a scalar projection's value is host
+            // data and holds no heap reference (ADR 0132 §9).
+            Value::Projected(projected) => ValueWire::Projected(
+                CanonicalProjectedValue::from_projected(projected, |value| {
+                    if value_holds_reference(value) {
+                        return Err(PROJECTED_SCALAR_REFERENCE);
+                    }
+                    value_to_wire(value)
+                })?,
+            ),
         })
     }
 
@@ -726,8 +728,33 @@ mod continuation_serde {
                     .into(),
             ),
             ValueWire::Record(entries) => Value::Record(Arc::new(record_from_wire(entries)?)),
-            ValueWire::Projected(projected) => Value::Projected(projected.into_projected()),
+            ValueWire::Projected(projected) => {
+                Value::Projected(projected.into_projected(|value| {
+                    let value = value_from_wire(value)?;
+                    if value_holds_reference(&value) {
+                        return Err(PROJECTED_SCALAR_REFERENCE);
+                    }
+                    Ok(value)
+                })?)
+            }
         })
+    }
+
+    const PROJECTED_SCALAR_REFERENCE: &str =
+        "a scalar projection's value must hold no heap reference";
+
+    /// Whether `value` reaches a heap reference, a scalar projection's own
+    /// value included.
+    fn value_holds_reference(value: &Value) -> bool {
+        match value {
+            Value::Ref(_) => true,
+            Value::Tuple(values) | Value::List(values) => values.iter().any(value_holds_reference),
+            Value::Record(record) => record.values().any(value_holds_reference),
+            Value::Projected(projected) => {
+                projected.scalar_value().is_some_and(value_holds_reference)
+            }
+            _ => false,
+        }
     }
 
     fn record_to_wire(record: &Record) -> Result<Vec<(String, ValueWire)>, &'static str> {
@@ -1308,7 +1335,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     ///
     /// Projected values cross the boundary as the plain data they are: a
     /// resource projection as its name, declared type and `ResourceRef`, a
-    /// scalar projection as its value (ADR 0132 §9). Refusing them instead —
+    /// scalar projection as its name and value (ADR 0132 §9). Refusing them instead —
     /// which is what this did before FIG-2865 — made an ordinary program that
     /// merely put a projected binding in a list unable to park at all.
     pub fn suspend(&mut self) -> Result<VmContinuation, ContinuationError> {

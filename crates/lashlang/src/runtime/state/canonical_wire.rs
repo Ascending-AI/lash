@@ -143,6 +143,79 @@ fn take_slice<'a>(
     Ok(&bytes[start..*cursor])
 }
 
+pub(super) fn skip_messagepack_value(
+    bytes: &[u8],
+    cursor: &mut usize,
+) -> Result<(), SnapshotDecodeError> {
+    let marker = take_byte(bytes, cursor)?;
+    match marker {
+        0x00..=0x7f | 0xe0..=0xff | 0xc0 | 0xc2 | 0xc3 => Ok(()),
+        0xcc | 0xd0 => skip_bytes(bytes, cursor, 1),
+        0xcd | 0xd1 => skip_bytes(bytes, cursor, 2),
+        0xce | 0xd2 | 0xca => skip_bytes(bytes, cursor, 4),
+        0xcf | 0xd3 | 0xcb => skip_bytes(bytes, cursor, 8),
+        0xa0..=0xbf => skip_bytes(bytes, cursor, usize::from(marker & 0x1f)),
+        0xd9 | 0xc4 => {
+            let length = usize::from(take_byte(bytes, cursor)?);
+            skip_bytes(bytes, cursor, length)
+        }
+        0xda | 0xc5 => {
+            let length = usize::from(take_u16(bytes, cursor)?);
+            skip_bytes(bytes, cursor, length)
+        }
+        0xdb | 0xc6 => {
+            let length = usize_from_u32(take_u32(bytes, cursor)?)?;
+            skip_bytes(bytes, cursor, length)
+        }
+        0x90..=0x9f => {
+            for _ in 0..usize::from(marker & 0x0f) {
+                skip_messagepack_value(bytes, cursor)?;
+            }
+            Ok(())
+        }
+        0xdc => {
+            let length = usize::from(take_u16(bytes, cursor)?);
+            for _ in 0..length {
+                skip_messagepack_value(bytes, cursor)?;
+            }
+            Ok(())
+        }
+        0xdd => {
+            let length = usize_from_u32(take_u32(bytes, cursor)?)?;
+            for _ in 0..length {
+                skip_messagepack_value(bytes, cursor)?;
+            }
+            Ok(())
+        }
+        0x80..=0x8f => {
+            for _ in 0..usize::from(marker & 0x0f) {
+                skip_messagepack_value(bytes, cursor)?;
+                skip_messagepack_value(bytes, cursor)?;
+            }
+            Ok(())
+        }
+        0xde => {
+            let length = usize::from(take_u16(bytes, cursor)?);
+            for _ in 0..length {
+                skip_messagepack_value(bytes, cursor)?;
+                skip_messagepack_value(bytes, cursor)?;
+            }
+            Ok(())
+        }
+        0xdf => {
+            let length = usize_from_u32(take_u32(bytes, cursor)?)?;
+            for _ in 0..length {
+                skip_messagepack_value(bytes, cursor)?;
+                skip_messagepack_value(bytes, cursor)?;
+            }
+            Ok(())
+        }
+        _ => Err(invalid_messagepack(&format!(
+            "unsupported MessagePack marker 0x{marker:02x}"
+        ))),
+    }
+}
+
 pub(super) fn usize_from_u32(value: u32) -> Result<usize, SnapshotDecodeError> {
     usize::try_from(value).map_err(|_| invalid_messagepack("length does not fit usize"))
 }

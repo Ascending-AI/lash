@@ -418,7 +418,7 @@ fn canonical_decode_rejects_a_depth_bomb_before_deserializing() {
 // Pins N's version and bytes; the synthetic N+1 moves them.
 #[cfg(not(feature = "synthetic-next"))]
 #[test]
-fn canonical_wire_golden_covers_every_value_kind_and_projection_resource() {
+fn canonical_wire_golden_covers_every_value_kind_and_both_projection_forms() {
     let image = ImageValue::new(
         "sha256:00ff",
         crate::MediaType::parse("image/png").expect("media type"),
@@ -447,6 +447,17 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_resource() {
                 )),
             ),
             (
+                "projected_scalar".to_string(),
+                Value::Projected(ProjectedValue::scalar(
+                    "input",
+                    Value::Record(Arc::new(
+                        [("title".to_string(), Value::String("q3".into()))]
+                            .into_iter()
+                            .collect(),
+                    )),
+                )),
+            ),
+            (
                 "record".to_string(),
                 Value::Record(Arc::new(
                     [("field".to_string(), Value::String("body".into()))]
@@ -472,13 +483,13 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_resource() {
     );
     let bytes = snapshot.to_canonical_bytes().expect("golden snapshot");
     use sha2::Digest as _;
-    assert_eq!(bytes.len(), 704);
+    assert_eq!(bytes.len(), 860);
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x8e, 0x60, 0x59, 0x5c, 0x35, 0x8a, 0x15, 0x88, 0xd1, 0xfc, 0x79, 0x11, 0x2f, 0x5e,
-            0xb0, 0xc6, 0x04, 0x2c, 0x99, 0x1f, 0x84, 0xde, 0x6b, 0x84, 0x8d, 0xc1, 0xb7, 0x54,
-            0x16, 0x6d, 0x3a, 0xda,
+            0x4a, 0xd5, 0xd2, 0x26, 0xe7, 0x8e, 0xb9, 0x0e, 0x69, 0x7c, 0x9b, 0x61, 0x91, 0xd8,
+            0x1e, 0x2b, 0x7c, 0x73, 0x30, 0xd0, 0xc0, 0x65, 0x2f, 0xca, 0x32, 0x12, 0x8b, 0xba,
+            0x83, 0x25, 0x49, 0xef,
         ]
     );
 }
@@ -621,7 +632,7 @@ fn canonical_runtime_value_validator_covers_every_canonical_value_variant() {
             }],
         },
         CanonicalValue::Projected {
-            value: CanonicalProjectedValue {
+            value: CanonicalProjected::Resource {
                 name: "root".to_string(),
                 type_name: "object".to_string(),
                 resource: ResourceRef {
@@ -629,6 +640,19 @@ fn canonical_runtime_value_validator_covers_every_canonical_value_variant() {
                     id: "root".to_string(),
                     revision: None,
                 },
+            },
+        },
+        CanonicalValue::Projected {
+            value: CanonicalProjected::Scalar {
+                name: "input".to_string(),
+                value: Box::new(CanonicalValue::Record {
+                    fields: vec![CanonicalBinding {
+                        name: "title".to_string(),
+                        value: CanonicalValue::String {
+                            value: "q3".to_string(),
+                        },
+                    }],
+                }),
             },
         },
     ];
@@ -1027,6 +1051,35 @@ fn canonical_decode_rejects_dangling_root_and_nested_references() {
         error
             .to_string()
             .contains("heap object members must be scalars or heap references")
+    );
+
+    // A scalar projection is one member leaf, so its value may not hide a
+    // reference either: tracing never looks inside a projection.
+    let projected_reference = canonical_heap_with(
+        Vec::new(),
+        vec![CanonicalHeapEntry {
+            id: HeapId::from_counter(1),
+            object: CanonicalHeapObject::List {
+                holes: Vec::new(),
+                items: vec![CanonicalValue::Projected {
+                    value: CanonicalProjected::Scalar {
+                        name: "report".to_string(),
+                        value: Box::new(CanonicalValue::Ref {
+                            value: HeapId::from_counter(1),
+                        }),
+                    },
+                }],
+            },
+        }],
+        1,
+    );
+    let error = Snapshot::from_canonical_bytes(&named_bytes(&projected_reference))
+        .expect_err("a reference inside a scalar projection must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("a scalar projection's value must hold no heap reference"),
+        "unexpected rejection: {error}"
     );
 }
 
