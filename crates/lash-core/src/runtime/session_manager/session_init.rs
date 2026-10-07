@@ -60,7 +60,27 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
 ) -> Result<SessionInitPlan, crate::PluginError> {
     let (session_id, request) = identified_create_request(request)?;
     let facts = resolve_child_facts(&StarterFacts::of(current), &request, &session_id)?;
-    plan_session_init(current, request, session_id, facts)
+    let mut plan = plan_session_init(current, request, session_id, facts)?;
+    if let Some(parent) = plan.relation.parent_session_id() {
+        // D-PSECREV (FIG-5273): inherit the committed head, never worker
+        // defaults or a turn's uncommitted view. The child's admission writes
+        // this copy with its initial config; later commands affect only it.
+        let store = durable_session_store(current, parent).await?;
+        let head = match store {
+            Some(store) => store
+                .load_session_head_meta()
+                .await
+                .map_err(crate::PluginError::from)?,
+            None => None,
+        }
+        .ok_or_else(|| {
+            crate::PluginError::from(crate::StoreError::SessionNotFound {
+                session_id: parent.clone(),
+            })
+        })?;
+        plan.initial_runtime_state.authority.prompt_plan = head.config.prompt_plan;
+    }
+    Ok(plan)
 }
 
 /// The plan that finishes a partial create from the config its admission
@@ -83,7 +103,11 @@ fn recorded_creation_plan(
         policy,
         plugin_config: created.authority.plugin_config.clone(),
     };
-    plan_session_init(current, request, session_id, facts)
+    let mut plan = plan_session_init(current, request, session_id, facts)?;
+    // A partial create already recorded its inherited plan. Redelivery must
+    // finish that config even if the parent's plan has changed since.
+    plan.initial_runtime_state.authority.prompt_plan = created.authority.prompt_plan.clone();
+    Ok(plan)
 }
 
 /// `request` with its session identified: the id it names, or a minted one.

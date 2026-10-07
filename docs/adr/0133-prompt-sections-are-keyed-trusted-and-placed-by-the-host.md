@@ -96,7 +96,10 @@ registration order. Worker completion order never affects composition.
 
 The host's `PromptPlan` is session config, recorded with the config head and
 changed only by the core command `SetPromptPlan`. A run executes under the
-plan its resolved config records. The plan has three parts:
+plan its resolved config records. Every child session starts with a copy of
+its parent's committed plan (D-PSECREV, FIG-5273); a catalog fork copies the
+plan of its selected retained revision. After creation, each session's plan
+is configured independently. The plan has three parts:
 
 - `order`: the sections that come first, in that order. Every other section
   follows in registration order.

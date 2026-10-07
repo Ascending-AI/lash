@@ -323,6 +323,242 @@ async fn spawn_agent_child_runs_and_answers_its_parent(tier: Tier) {
 
 on_every_tier!(spawn_agent_child_runs_and_answers_its_parent);
 
+// FIG-5273 / D-PSECREV: each child starts with its parent's committed
+// prompt plan and thereafter owns its configuration independently.
+#[derive(Clone, Copy)]
+enum PromptChild {
+    Spawn,
+    Fork,
+    Related,
+}
+
+async fn set_prompt_plan(
+    core: &lash::LashCore,
+    session_id: &SessionId,
+    id: &str,
+    plan: lash::prompt::PromptPlan,
+) {
+    let session = core.session(session_id.clone()).open().await.unwrap();
+    let config = session.admin().config();
+    let outcome = config
+        .apply(
+            lash::config::ConfigWrite::new(id, config.revision().await.unwrap()),
+            lash::config::ConfigTransaction::of(lash::config::SetPromptPlan { plan }),
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            outcome,
+            lash::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{outcome:?}"
+    );
+}
+
+async fn child_starts_with_parent_prompt_plan(tier: Tier, kind: PromptChild) {
+    use lash::prompt::{
+        PromptPlacement, PromptPlan, PromptSectionId, PromptSectionKey, PromptSectionPlacement,
+    };
+    const CHILD_INPUT: &str = "prompt-plan child call";
+    const INTRO: &str = "You are an assistant operating the lash harness.";
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = {
+        let requests = Arc::clone(&requests);
+        scripted(move |request, transcript| {
+            if (transcript.contains(CHILD_TASK) && !transcript.contains(PARENT_INPUT))
+                || transcript.contains(CHILD_INPUT)
+            {
+                requests
+                    .lock()
+                    .unwrap()
+                    .push((request.instructions.clone(), transcript.to_owned()));
+                return text(request, CHILD_REPLY);
+            }
+            if transcript.contains(PARENT_INPUT) && results(request).is_empty() {
+                return call(
+                    "prompt-plan-spawn",
+                    "spawn_agent",
+                    serde_json::json!({ "task": CHILD_TASK, "capability": "default" }),
+                );
+            }
+            text(request, PARENT_DONE)
+        })
+    };
+    let deployment = deploy(tier, Vec::new(), |builder| {
+        builder
+            .serve_test_llm_profile(model, metadata())
+            .plugin(subagents())
+    })
+    .await;
+    let parent_id = SessionId::from("prompt-plan-parent");
+    let parent = deployment
+        .core
+        .session(parent_id.clone())
+        .create(lash::SessionCreation::root(spec()))
+        .await
+        .unwrap();
+    let section =
+        |key| PromptSectionId::new("standard_protocol", PromptSectionKey::new(key).unwrap());
+    let plan = PromptPlan {
+        order: vec![section("guidance"), section("execution")],
+        placements: vec![PromptSectionPlacement {
+            section: section("intro"),
+            placement: PromptPlacement::CurrentContext,
+        }],
+        limits: lash::prompt::PromptLimits {
+            max_sections: std::num::NonZeroU32::new(16).unwrap(),
+            max_wrappers: std::num::NonZeroU32::new(16).unwrap(),
+            max_section_bytes: std::num::NonZeroU32::new(16_384).unwrap(),
+            max_total_bytes: std::num::NonZeroU32::new(65_536).unwrap(),
+            render_budget_ms: std::num::NonZeroU32::new(1_000).unwrap(),
+        },
+    };
+    set_prompt_plan(&deployment.core, &parent_id, "parent-plan", plan.clone()).await;
+    let catalog = deployment.backend.stores().session_store_factory();
+    let child_id = SessionId::from("prompt-plan-child");
+    let child_id = match kind {
+        PromptChild::Spawn => {
+            let output = parent
+                .send(lash::TurnInput::text(PARENT_INPUT))
+                .output()
+                .await
+                .unwrap();
+            assert!(output.is_success(), "{output:?}");
+            let children = catalog
+                .list_sessions(&lash_core::SessionListFilter {
+                    relation: Some(lash_core::SessionRelationKind::Child),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            assert_eq!(children.len(), 1);
+            children[0].session_id.clone()
+        }
+        PromptChild::Fork => {
+            let head =
+                lash_core::SessionCommitStore::load_session_head_meta(catalog.as_ref(), &parent_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+            deployment
+                .core
+                .fork_at(
+                    &parent_id,
+                    lash::Target::Revision(head.head_revision),
+                    lash::ForkRequest {
+                        session_id: child_id.clone(),
+                        relation: lash_core::SessionRelation::Fork {
+                            source_session_id: parent_id.clone(),
+                            source_node_id: None,
+                        },
+                        observed_processes: Vec::new(),
+                    },
+                )
+                .await
+                .unwrap();
+            child_id
+        }
+        PromptChild::Related => {
+            deployment
+                .core
+                .session(child_id.clone())
+                .create(lash::SessionCreation::child_of(parent_id.clone(), spec()))
+                .await
+                .unwrap();
+            child_id
+        }
+    };
+    let child = deployment
+        .core
+        .session(child_id.clone())
+        .durable()
+        .await
+        .unwrap();
+    if !matches!(kind, PromptChild::Spawn) {
+        let output = child
+            .send(lash::TurnInput::text(CHILD_INPUT))
+            .output()
+            .await
+            .unwrap();
+        assert!(output.is_success(), "{output:?}");
+    }
+    {
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "the child's first model call is observed"
+        );
+        let (instructions, context) = &requests[0];
+        let instructions = instructions.as_deref().unwrap();
+        assert!(
+            instructions.starts_with("## Guidance"),
+            "the child inherits section order: {instructions}"
+        );
+        assert!(
+            !instructions.contains(INTRO),
+            "the child inherits the intro's late placement"
+        );
+        assert!(
+            context.contains(INTRO),
+            "the child's first call carries the intro late: {context}"
+        );
+    }
+    let head = lash_core::SessionCommitStore::load_session_head_meta(catalog.as_ref(), &child_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        head.config.prompt_plan, plan,
+        "the child records the entire plan, including limits"
+    );
+    set_prompt_plan(
+        &deployment.core,
+        &child_id,
+        "child-plan",
+        PromptPlan::default(),
+    )
+    .await;
+    let parent_head =
+        lash_core::SessionCommitStore::load_session_head_meta(catalog.as_ref(), &parent_id)
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(
+        parent_head.config.prompt_plan, plan,
+        "configuring the child leaves its parent's plan intact"
+    );
+    let output = child
+        .send(lash::TurnInput::text(CHILD_INPUT))
+        .output()
+        .await
+        .unwrap();
+    assert!(output.is_success(), "{output:?}");
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1].0.as_deref().unwrap().starts_with(INTRO),
+        "the child's next call uses its own new plan"
+    );
+}
+
+async fn a_spawned_child_starts_with_its_parents_prompt_plan(tier: Tier) {
+    child_starts_with_parent_prompt_plan(tier, PromptChild::Spawn).await;
+}
+
+async fn a_fork_starts_with_its_parents_prompt_plan(tier: Tier) {
+    child_starts_with_parent_prompt_plan(tier, PromptChild::Fork).await;
+}
+
+async fn a_related_child_starts_with_its_parents_prompt_plan(tier: Tier) {
+    child_starts_with_parent_prompt_plan(tier, PromptChild::Related).await;
+}
+
+on_every_tier!(a_spawned_child_starts_with_its_parents_prompt_plan);
+on_every_tier!(a_fork_starts_with_its_parents_prompt_plan);
+on_every_tier!(a_related_child_starts_with_its_parents_prompt_plan);
+
 // --- host engines -----------------------------------------------------------
 
 /// How a scripted engine answers each event: its state is a JSON value it

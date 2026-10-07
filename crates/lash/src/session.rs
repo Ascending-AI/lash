@@ -67,8 +67,7 @@ pub struct SessionCreation {
     /// built-in defaults included, and the result is recorded with the
     /// session's initial config head: every open delivers it unchanged, and
     /// only its owner's typed config commands change it ([`crate::config`]).
-    /// The protocol plugin's prompt config is one of these options. A key no
-    /// installed plugin owns, or a value its owner refuses, fails the
+    /// A key no installed plugin owns, or a value its owner refuses, fails the
     /// creation typed as
     /// [`SessionConfigRefused`](lash_core::SessionError::SessionConfigRefused).
     pub spec: SessionSpec,
@@ -76,7 +75,9 @@ pub struct SessionCreation {
     /// This is the only facade path to a related session: the session is an
     /// ordinary session with its own Session Binding and its own usage
     /// ledger — rolling related sessions together is host policy, not a
-    /// facade service. `None` creates a root session.
+    /// facade service. The child starts with a copy of this parent's
+    /// committed prompt plan, which it then configures independently.
+    /// `None` creates a root session.
     pub parent: Option<SessionId>,
 }
 
@@ -87,8 +88,8 @@ impl SessionCreation {
     }
 
     /// A session created from `spec` and recorded as `parent`'s child
-    /// (ADR 0089). It is an ordinary session: its config is `spec`, not its
-    /// parent's.
+    /// (ADR 0089). It records `spec` and a copy of its parent's committed
+    /// prompt plan; later configuration is independent (FIG-5273).
     pub fn child_of(parent: SessionId, spec: SessionSpec) -> Self {
         Self {
             spec,
@@ -239,16 +240,25 @@ impl SessionBuilder {
     /// inside [`SessionError::SessionConfigRefused`].
     pub async fn create(self, creation: SessionCreation) -> Result<DurableSession> {
         let SessionCreation { spec, parent } = creation;
-        // A session created here is an ordinary session even when it names
-        // a parent (ADR 0089): it records the spec its creator states,
-        // unlike a child a running parent creates, which copies its parent's
-        // recorded config.
+        // A related session records the spec its creator states (ADR 0089)
+        // and starts with its parent's committed prompt plan (FIG-5273).
         let policy = self.minted_policy(&spec)?;
         let plugin_options = spec.plugin_options;
         lash_core::CoreConfigOwner::validate_charge_safety(&policy.charge_safety)
             .map_err(lash_core::CoreConfigOwner::creation_refusal)
             .map_err(lash_core::SessionError::SessionConfigRefused)?;
         let mut config = lash_core::PersistedSessionConfig::from(&policy);
+        if let Some(parent_id) = parent.as_ref() {
+            let parent_store =
+                resolve_existing_session(&self.core.store_factory, parent_id).await?;
+            let head = parent_store
+                .load_session_head_meta()
+                .await?
+                .ok_or_else(|| EmbedError::UnknownSession {
+                    session_id: parent_id.clone(),
+                })?;
+            config.prompt_plan = head.config.prompt_plan;
+        }
         // Every plugin the core installs resolves its recorded namespace —
         // the protocol's among them — from what the creator stated (FIG-4379).
         let plugin_host = build_plugin_host(
