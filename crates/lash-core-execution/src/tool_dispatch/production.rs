@@ -431,13 +431,19 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             failure = Some(cause.clone());
         }
         let original_args = (original_args != prepared.args).then_some(original_args);
-        serde_json::to_value(Prepared {
+        let prepared = Prepared {
             input,
             original_args,
             call: prepared,
             failure,
-        })
-        .map_err(|error| error.to_string())
+        };
+        let request = serde_json::to_value(&prepared).map_err(|error| error.to_string())?;
+        // The admission this call runs under: what its decision, realization,
+        // presentation and observations read until it ends.
+        self.prepared
+            .lock_recover()
+            .insert(call.call_id.clone(), prepared);
+        Ok(request)
     }
     async fn before_checks(
         &self,
