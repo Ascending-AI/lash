@@ -16,6 +16,7 @@ use std::sync::Mutex;
 mod deferred_and_processes;
 mod frame_referrers;
 mod lifecycle_and_diagnostics;
+mod one_slot_process_await;
 mod output_retention;
 mod projections_and_snapshots;
 mod triggers;
