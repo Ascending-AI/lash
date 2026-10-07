@@ -368,6 +368,29 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "session_send__test",
+    crate_features = [],
+    crate_name = "session_send",
+    crate_root = "tests/session_send.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "session_send", "//crates/lash-durable-test:session_send__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "tool_activity__test",
     crate_features = [],
     crate_name = "tool_activity",

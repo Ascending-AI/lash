@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1575 rows over 853 files, 3929 laws.
-# By class: mechanical 163, semantic 111, delete 852, replace 449.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
-# By status: todo 406, ported 89, deleted 1080.
+# 1577 rows over 853 files, 3929 laws.
+# By class: mechanical 163, semantic 111, delete 852, replace 451.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 342, L9d 79, L9e 130, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
+# By status: todo 406, ported 89, deleted 1082.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -46,7 +46,7 @@
 # - L9c: crates/lash-restate-test/tests/run_close.rs
 #   the next run is admitted while the previous run's close is owed, and a close crashed after the next admission converges once
 # - L9c: crates/lash-restate-test/tests/session_send.rs
-#   session sends: an idle send is admitted at once, busy sends answer in arrival order, at most one drive is queued, withdraw-while-queued differs from cancel-while-running, and dropping a handle stops nothing
+#   session sends: an idle send is admitted at once, busy sends answer in arrival order, at most one drive is queued, dropping a handle stops nothing
 # - L9c: crates/lash-restate-test/tests/session_shifts.rs
 #   a session actor runs every open item once, in arrival order and one at a time; a repeated request id is one drive; a crash at any commit label consumes each item once
 # - L9c: crates/lash-restate/src/tests/otel_laws.rs::golden_tree_survives_replay_and_redrive
@@ -256,7 +256,7 @@
 # - L9e: crates/lash/src/tests/aggregate_oracle/timer_identity.rs
 #   sqlite each timer aggregate in a cell waits on its own; and 1 more law(s) of the file, by test name
 # - L9e: crates/lash/src/tests/turn_streaming/control_and_cancel.rs
-#   turn stream finish returns committed assistant prose; and 10 more law(s) of the file, by test name
+#   turn stream finish returns committed assistant prose; and 9 more law(s) of the file, by test name
 # - L9f: crates/lash-sim/src/backend_fault.rs::generated_backend_failure_seed_records_script_evidence
 #   generated backend failure seed records script evidence
 # - L9f: crates/lash-sim/src/cache_regression.rs::rlm_live_bound_state_is_prefix_stable_for_every_serializer
@@ -4364,7 +4364,6 @@ laws = [
   "busy_sends_answer_in_arrival_order",
   "back_to_back_sends_queue_at_most_one_shift",
   "a_held_shift_admits_nothing_until_released",
-  "withdraw_while_queued_vs_cancel_while_running",
   "dropping_the_handle_stops_nothing",
   "a_dropped_child_turn_leaves_the_child_session_reusable",
   "dropped_schedule_is_reconciled",
@@ -4373,8 +4372,21 @@ laws = [
 ]
 disposition = "owed"
 status = "todo"
-owed = "session sends: an idle send is admitted at once, busy sends answer in arrival order, at most one drive is queued, withdraw-while-queued differs from cancel-while-running, and dropping a handle stops nothing"
+owed = "session sends: an idle send is admitted at once, busy sends answer in arrival order, at most one drive is queued, dropping a handle stops nothing"
 note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+
+[[row]]
+path = "crates/lash-restate-test/tests/session_send.rs"
+test = "withdraw_while_queued_vs_cancel_while_running"
+area = "send-handle"
+needs = ["turn"]
+class = "replace"
+lane = "L9c"
+laws = ["withdraw_while_queued_vs_cancel_while_running"]
+disposition = "replaced-by:crates/lash-durable-test/tests/session_send.rs::withdraw_while_queued_vs_cancel_while_running"
+status = "deleted"
+owed = "queued withdrawal and running cancellation through the facade send/cancel API"
+note = "FIG-5252: served-node law on SQLite memory, SQLite file and PostgreSQL; the running send commits its stop, the queued send answers Withdrawn without an output, provider call, application or transcript row. The L9c law also cancels by queued run id and checks the typed FIG-5262 withdrawal and retained tombstone. Other laws in the original file remain owed."
 
 [[row]]
 path = "crates/lash-restate-test/tests/session_send.rs"
@@ -15337,7 +15349,6 @@ laws = [
   "retry_status_streams_as_semantic_turn_event",
   "queued_input_acceptance_streams_semantic_ack_with_id",
   "next_turn_notification_during_a_live_turn_has_bounded_hydrations",
-  "cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one",
   "send_cancel_defaults_to_deferring_undelivered_active_input",
   "active_steer_after_last_call_defers_to_next_turn_first_call",
   "accepted_active_steer_interrupt_is_not_requeued",
@@ -15347,8 +15358,21 @@ laws = [
 ]
 disposition = "owed"
 status = "todo"
-owed = "turn stream finish returns committed assistant prose; and 10 more law(s) of the file, by test name"
+owed = "turn stream finish returns committed assistant prose; and 9 more law(s) of the file, by test name"
 note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+
+[[row]]
+path = "crates/lash/src/tests/turn_streaming/control_and_cancel.rs"
+test = "cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one"
+area = "lash"
+needs = ["cell"]
+class = "replace"
+lane = "L9e"
+laws = ["cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one"]
+disposition = "replaced-by:crates/lash-durable-test/tests/session_send.rs::cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one"
+status = "deleted"
+owed = "queued withdrawal and running cancellation through the facade send/cancel API"
+note = "FIG-5252: served-node law on SQLite memory, SQLite file and PostgreSQL; the running send commits its stop, the queued send answers Withdrawn without an output, provider call, application or transcript row. The L9c law also cancels by queued run id and checks the typed FIG-5262 withdrawal and retained tombstone. Other laws in the original file remain owed."
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observation_recovery.rs"
@@ -24616,7 +24640,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::spawn_agent_record_carries_child_identity"
 status = "deleted"
 owed = "spawn agent record carries child identity, through send()"
-note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18. The record's kind, label, originator and session capability are read from the registry, the model-hidden handle from the transcript; FIG-5251 restored the receipt half: the host's activity carries one executed-start receipt for the call, naming the child"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18. The record's kind, label, originator and session capability are read from the registry, the model-hidden handle from the transcript; FIG-5251 restored the receipt half: the host's activity carries one executed-start receipt for the call, naming the child; FIG-5252 verified these restored assertions on both SQLite tiers"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24646,7 +24670,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults"
 status = "deleted"
 owed = "declared start child runs under recorded facts on a worker with other defaults, through send()"
-note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the recorded environment and the child session's builds carry the parent's facts over the node's other default; FIG-5251 restored the process-owner plugin half: the node builds the SessionTurn process's own plugin runtime under the recorded facts"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the recorded environment and the child session's builds carry the parent's facts over the node's other default; FIG-5251 restored the process-owner plugin half: the node builds the SessionTurn process's own plugin runtime under the recorded facts; FIG-5252 verified these restored assertions on both SQLite tiers"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -24721,7 +24745,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::batch_of_spawns_overlaps"
 status = "deleted"
 owed = "batch of spawns overlaps, through send()"
-note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18, at width 8 with two native siblings behind a barrier, and a mid-flight cancel. The RLM Promise.all width is not ported: a cell refuses a deferring call until FIG-5174"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18, at width 8 with two native siblings behind a barrier, and a mid-flight cancel. FIG-5252 restores width 2 RLM Promise.all over agents.spawn: each child model call waits for both children to start, both run once and their projected replies form the cell's final value; FIG-5225 supplies each call's admitted execution and completion wait"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"

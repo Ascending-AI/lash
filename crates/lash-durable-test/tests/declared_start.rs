@@ -93,6 +93,8 @@ enum Producer {
     /// declaration and keeps its bytes without launching it; the second
     /// submits those bytes as its own.
     ReusedIdentity,
+    /// Concurrent deferring calls from one RLM cell.
+    PromiseAll,
 }
 
 /// The one model every session of a law's world is served by.
@@ -195,6 +197,20 @@ impl Script {
                 });
                 served::response(spawns.chain(echoes).chain(keep).collect())
             }
+            Producer::PromiseAll => {
+                let spawns = (0..self.children)
+                    .map(|index| {
+                        format!(
+                            "agents.spawn({{ task: {:?}, capability: \"default\" }})",
+                            child_task(index)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                served::cell(&format!(
+                    "const replies = await Promise.all([{spawns}]);\nfinish(replies.join(\" | \"));"
+                ))
+            }
             Producer::Probe(probe) => probe_step(0, probe),
             Producer::ReusedIdentity => probe_step(
                 0,
@@ -244,7 +260,11 @@ impl Script {
             }
             *self.child_saw.lock_recover() = seen;
         }
-        served::text(&request, &child_reply(index))
+        if self.producer == Producer::PromiseAll {
+            served::cell(&format!("finish({:?});", child_reply(index)))
+        } else {
+            served::text(&request, &child_reply(index))
+        }
     }
 }
 
@@ -767,11 +787,19 @@ impl World {
                 vec![Arc::new(lash_core_execution::testing::HeldProcessEngine)],
                 model(&script),
                 move |backend| {
-                    lash::LashCore::standard_builder(backend.clone())
-                        .plugin(subagents(shape.lifetimes))
-                        .plugin(facts)
-                        .tools(probe)
-                        .tools(Arc::new(lash_core_execution::testing::FixtureTools::new()))
+                    let builder = if shape.producer == Producer::PromiseAll {
+                        lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, None))
+                    } else {
+                        lash::LashCore::standard_builder(backend.clone())
+                    };
+                    let builder = builder.plugin(subagents(shape.lifetimes)).plugin(facts);
+                    if shape.producer == Producer::PromiseAll {
+                        builder
+                    } else {
+                        builder
+                            .tools(probe)
+                            .tools(Arc::new(lash_core_execution::testing::FixtureTools::new()))
+                    }
                 },
             )
             .await?
@@ -1485,47 +1513,69 @@ async fn declared_start_rejects_foreign_or_reused_serialized_identity_before_lau
     }
 }
 
-/// Children spawned in one parent step run at once: each child's first step
-/// waits until every sibling started: native parallel calls with ordinary
-/// siblings. A turn cancelled while every child of its batch runs cancels
-/// each child, once.
-///
-/// The old law's second width, an RLM `Promise.all` over `agents.spawn`,
-/// waits on FIG-5174: a cell's call pins no completion wait, so a cell
-/// refuses a deferring tool.
+/// Children spawned in one parent step run at once: each child's first
+/// model call waits for every sibling to start. Native width 8 includes two
+/// ordinary siblings; RLM width 2 uses `Promise.all` over `agents.spawn`.
+/// A turn cancelled while its native batch runs cancels each child once.
 async fn batch_of_spawns_overlaps(tier: Tier) {
     const WIDTH: usize = 8;
     const SIBLINGS: usize = 2;
-    let Some(world) = World::new(
-        tier,
-        "overlap",
-        Shape {
-            children: WIDTH,
-            producer: Producer::Native { siblings: SIBLINGS },
-            barrier: Some(WIDTH),
-            ..Shape::one_child()
-        },
-    )
-    .await
-    else {
-        return;
-    };
-    let output = world.run().await;
-    served::assert_answered("the batch", &output);
-    assert_eq!(world.children().await.len(), WIDTH, "one child each");
-    assert_eq!(world.script.child_calls(), WIDTH, "each child ran once");
-    let saw = world.script.parent_saw();
-    assert_eq!(saw.len(), WIDTH + SIBLINGS, "every call settled: {saw:?}");
-    for index in 0..WIDTH {
-        assert_eq!(
-            saw.iter()
-                .filter(|result| result.contains(&child_reply(index)))
-                .count(),
-            1,
-            "spawn {index} answers its own child: {saw:?}"
+    for (width, producer) in [
+        (WIDTH, Producer::Native { siblings: SIBLINGS }),
+        (2, Producer::PromiseAll),
+    ] {
+        let Some(world) = World::new(
+            tier,
+            &format!("overlap-{width}"),
+            Shape {
+                children: width,
+                producer,
+                barrier: Some(width),
+                ..Shape::one_child()
+            },
+        )
+        .await
+        else {
+            return;
+        };
+        let output = world.run().await;
+        assert!(
+            output.is_success(),
+            "width {width}, {producer:?}: the batch answers: {:?}; activities: {:#?}; parent asked: {}; child calls: {}",
+            output.result.outcome,
+            output.activities,
+            *world.script.parent_asked.borrow(),
+            world.script.child_calls()
         );
+        assert_eq!(world.children().await.len(), width, "one child each");
+        assert_eq!(world.script.child_calls(), width, "each child ran once");
+        match producer {
+            Producer::Native { siblings } => {
+                let saw = world.script.parent_saw();
+                assert_eq!(saw.len(), width + siblings, "every call settled: {saw:?}");
+                for index in 0..width {
+                    assert_eq!(
+                        saw.iter()
+                            .filter(|result| result.contains(&child_reply(index)))
+                            .count(),
+                        1,
+                        "spawn {index} answers its own child: {saw:?}"
+                    );
+                }
+            }
+            Producer::PromiseAll => {
+                let reply = format!("{:?}", output.result.outcome);
+                for index in 0..width {
+                    assert!(
+                        reply.contains(&child_reply(index)),
+                        "the cell answers child {index}: {reply}"
+                    );
+                }
+            }
+            _ => unreachable!("the overlap law spawns agents"),
+        }
+        world.shutdown().await;
     }
-    world.shutdown().await;
 
     let Some(world) = World::new(
         tier,

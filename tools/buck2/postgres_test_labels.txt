@@ -5,6 +5,7 @@
 //crates/lash-durable-test:drain_by_release__test
 //crates/lash-durable-test:process_tool_call_crash_laws__test
 //crates/lash-durable-test:process_tool_calls__test
+//crates/lash-durable-test:session_send__test
 //crates/lash-durable-test:tool_activity__test
 //crates/lash-durable-test:tool_batches__test
 //crates/lash-durable-test:tool_call_identity__test

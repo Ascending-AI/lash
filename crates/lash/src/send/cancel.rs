@@ -31,6 +31,9 @@ pub(super) async fn apply(
     let run = match subject {
         Subject::Run(run) => run.clone(),
         Subject::Input(input) => {
+            // A cancelled input can retain its admitted run's binding.
+            // Address that run even after it stopped: its terminal answers
+            // UnknownOrRevoked, never a queued withdrawal.
             if let Some(run) = parts.store.run_of_input(&input.input_id).await? {
                 run
             } else {

@@ -60,7 +60,7 @@ tags = ["hermetic-postgres"]
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
-targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity"]
+targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity", "session_send"]
 tags = ["hermetic-postgres"]
 
 # The declared-start crash laws (FIG-5216) are five matrices and two single
