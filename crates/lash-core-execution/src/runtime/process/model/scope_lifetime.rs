@@ -448,11 +448,11 @@ mod tests {
     }
 
     /// ADR 0094's parent-scope payload is refused, never reinterpreted as a
-    /// scope.
+    /// scope, even stamped with the version this build writes.
     #[test]
     fn a_parent_scope_payload_is_refused() {
         let old = serde_json::json!({
-            "version": 2,
+            "version": SCOPE_STORAGE_PAYLOAD_VERSION,
             "scope": { "kind": "owned", "opener": { "kind": "turn", "session_id": "s", "turn_id": "t" } },
         })
         .to_string();
