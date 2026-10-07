@@ -18,15 +18,6 @@ pub(crate) fn writing_release(conn: &Connection) -> Option<String> {
     crate::release_stamp::read_release(conn)
 }
 
-/// A stamp refusal with the store's release evidence: the writing release,
-/// and the reason as that release corrects it
-/// ([`CompatRefusal::read_against_release`]).
-fn attribute(refusal: CompatRefusal, release: Option<String>) -> CompatRefusal {
-    refusal
-        .read_against_release(release.as_deref(), crate::release_stamp::BUILD_RELEASE)
-        .with_writing_release(release)
-}
-
 pub(crate) fn malformed(detail: impl Into<String>) -> rusqlite::Error {
     incompatible(CompatRefusal::MalformedStamp {
         component: COMPONENT.as_str().to_owned(),
@@ -94,6 +85,20 @@ pub(crate) fn admit(
     conn: &Connection,
     writable: VersionRange,
 ) -> rusqlite::Result<(CompatAdmission, FleetFormat)> {
+    admit_with_release(conn, writable, crate::release_stamp::BUILD_RELEASE)
+}
+
+pub(crate) fn admit_with_release(
+    conn: &Connection,
+    writable: VersionRange,
+    build_release: &str,
+) -> rusqlite::Result<(CompatAdmission, FleetFormat)> {
+    let release = writing_release(conn);
+    if let Some(refusal) =
+        CompatRefusal::pre_release(COMPONENT.as_str(), release.as_deref(), build_release)
+    {
+        return Err(incompatible(refusal));
+    }
     let row = read(conn)?;
     let stamp = row.map_or_else(
         || StampRead::Absent {
@@ -102,9 +107,8 @@ pub(crate) fn admit(
         |(stamp, _)| StampRead::Present(stamp),
     );
     let descriptor = descriptor(conn)?;
-    let release = writing_release(conn);
     let admission = compat::admit(descriptor, stamp)
-        .map_err(|refusal| incompatible(attribute(refusal, release.clone())))?;
+        .map_err(|refusal| incompatible(refusal.with_writing_release(release.clone())))?;
     let fleet = match row {
         Some((_, fleet)) => FleetFormat::admit(fleet, writable).map_err(|error| match error {
             StoreError::Incompatible { refusal } => {
@@ -159,7 +163,7 @@ pub(crate) fn fence(conn: &Connection, writable: VersionRange) -> rusqlite::Resu
             .map_err(|error| malformed_on(conn, error.to_string()))?,
     };
     compat::admit(descriptor, StampRead::Present(stamp))
-        .map_err(|refusal| incompatible(attribute(refusal, writing_release(conn))))?;
+        .map_err(|refusal| incompatible(refusal.with_writing_release(writing_release(conn))))?;
     let fleet = u32::try_from(fleet).map_err(|error| malformed_on(conn, error.to_string()))?;
     FleetFormat::fence(fleet, writable).map_err(crate::sqlite_conversion_error)
 }

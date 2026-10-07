@@ -365,6 +365,12 @@ pub(crate) async fn migrate_on_open(
     clock: &dyn Clock,
     probe: Probe,
 ) -> Result<(), StoreError> {
+    SqliteConnection::check_release_before_open(
+        &location.target(),
+        crate::release_stamp::BUILD_RELEASE,
+    )
+    .await
+    .map_err(crate::sqlite_async_error)?;
     let SqliteLocation::File { path } = location else {
         return Ok(());
     };

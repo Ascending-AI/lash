@@ -76,6 +76,15 @@ pub(crate) async fn ensure_schema(
     check: SchemaCheck,
     writable: lash_core_execution::compat::VersionRange,
 ) -> Result<(String, lash_core_execution::FleetFormat), StoreError> {
+    ensure_schema_with_release(pool, check, writable, crate::release_stamp::BUILD_RELEASE).await
+}
+
+pub(crate) async fn ensure_schema_with_release(
+    pool: &PgPool,
+    check: SchemaCheck,
+    writable: lash_core_execution::compat::VersionRange,
+    build_release: &str,
+) -> Result<(String, lash_core_execution::FleetFormat), StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
     // Serializes lash's own openers with each other and with a `lash migrate`
     // run holding the same key exclusively, so a verifying open cannot read a
@@ -89,13 +98,21 @@ pub(crate) async fn ensure_schema(
         .await
         .map_err(store_sqlx_error)?;
 
-    let report = verify_schema_shape(&mut tx).await?;
     let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
     let descriptor =
         lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
             .ok_or_else(|| {
                 StoreError::Backend("missing PostgreSQL compatibility descriptor".into())
             })?;
+    if let Some(refusal) = lash_core_execution::compat::CompatRefusal::pre_release(
+        descriptor.component.as_str(),
+        writing_release.as_deref(),
+        build_release,
+    ) {
+        tracing::warn!(component = descriptor.component.as_str(), writing_release = ?writing_release, build_release, refusal = %refusal, "lash Postgres release gate refused the database");
+        return Err(StoreError::Incompatible { refusal });
+    }
+    let report = verify_schema_shape(&mut tx).await?;
     let stamp = if report.schema.is_some() {
         read_compat_stamp(&mut *tx, true).await
     } else {
@@ -110,12 +127,7 @@ pub(crate) async fn ensure_schema(
     #[cfg(not(feature = "synthetic-next"))]
     let synthetic_expanded = false;
     let admission = lash_core_execution::compat::admit(descriptor, stamp).map_err(|refusal| {
-        let refusal = refusal
-            .read_against_release(
-                writing_release.as_deref(),
-                crate::release_stamp::BUILD_RELEASE,
-            )
-            .with_writing_release(writing_release.clone());
+        let refusal = refusal.with_writing_release(writing_release.clone());
         record_schema_gate_refusal(&report, check, &refusal);
         StoreError::Incompatible { refusal }
     })?;
@@ -301,6 +313,7 @@ pub(crate) struct SchemaObservation {
     pub(crate) stamp: lash_core_execution::compat::StampRead,
     pub(crate) admission_findings: Vec<String>,
     pub(crate) release: lash_core_execution::StoreReleaseState,
+    pub(crate) writing_release: Option<String>,
     pub(crate) fleet_format: lash_core_execution::FleetFormatState,
 }
 
@@ -327,6 +340,7 @@ async fn observe_within_repeatable_read(
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
+    let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
     let report = verify_schema_shape(&mut tx).await?;
     let stamp = if report.schema.is_some() {
         // A malformed compatibility relation must yield Unreadable without
@@ -362,6 +376,7 @@ async fn observe_within_repeatable_read(
         stamp,
         admission_findings,
         release,
+        writing_release,
         fleet_format,
     })
 }

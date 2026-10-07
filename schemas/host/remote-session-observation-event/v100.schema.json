@@ -1463,7 +1463,7 @@
           "type": "object"
         },
         {
-          "description": "State or a call a pre-release build wrote (FIG-4819). The 1.0 cut\nrestarted every counter, so its numbers do not mean what this\nbuild's do, and no release reads it: a store whose floor is above this\nbuild's range although an older release stamped it.",
+          "description": "A stable release build refuses a store stamped before 1.0, regardless\nof format counters: pre-release shapes changed in place under the freeze.",
           "properties": {
             "component": {
               "type": "string"

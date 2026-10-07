@@ -13,7 +13,12 @@ stored shapes in place without moving a version, so unchanged versions are
 not evidence that two builds are compatible.
 
 Every lash version bump before 1.0 must therefore reset lash's state
-instead of rolling: stop the old build and recreate the stores. Drain by
+instead of rolling: stop the old build and recreate the stores. At the 1.0
+cutover, a stable build at or above 1.0.0 refuses every store stamped by a
+release below 1.0.0, including `0.0.0-dev` and `1.0.0-rc.1`, with the typed
+`pre_release` refusal regardless of its format counters. This refusal is the
+one documented signal to recreate the store once at the cutover; every other
+refusal stops the deploy. Drain by
 release does not make a pre-1.0 roll safe: with the versions frozen, both
 builds spell the same format sets, so the next build would claim state whose
 shape it may not decode.
@@ -142,7 +147,7 @@ An incompatible store may report a typed refusal:
 | `fleet_unrecorded` | The PostgreSQL store records no `F`. `lashctl migrate` seeds it and a worker open never records one. Run `lashctl migrate`, then open again. |
 | `retired_sqlite_layout` | The configured SQLite path is a directory in the retired layout of three database files. Nothing migrates it: configure the path of a database file and recreate the store there. |
 | `unknown_vocabulary` | A stored kind or state is unknown to this build. Keep the record and route to a build that understands it. |
-| `pre_release` | A build from before 1.0 wrote the store. 1.0 restarted every counter, so nothing reads or migrates it. Recreate the stores. |
+| `pre_release` | A stable build at or above 1.0.0 refuses every store stamped below 1.0.0, whatever its counters. This is the one signal to recreate the store once at the 1.0 cutover; every other refusal stops the deploy. The refusal names `writing_release` and leaves the store unchanged. |
 
 A writer that observes a finalized `F` outside its range stops with
 `WriterFenced` before making a mutation. Preserve the old build and the

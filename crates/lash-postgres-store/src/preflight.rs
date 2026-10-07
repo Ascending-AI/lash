@@ -132,16 +132,18 @@ pub(crate) fn redact_options(options: &PgConnectOptions) -> String {
     )
 }
 
-fn project_schema_status(
+pub(crate) fn project_schema_status(
     observation: SchemaObservation,
     descriptor: &compat::CompatDescriptor,
     location: String,
+    build_release: &str,
 ) -> StoreSchemaStatus {
     let SchemaObservation {
         report,
         stamp,
         admission_findings,
         release,
+        writing_release,
         fleet_format,
     } = observation;
     let min_reader = match &stamp {
@@ -153,11 +155,14 @@ fn project_schema_status(
         &stamp,
         StampRead::Present(stamp) if stamp.version == descriptor.writes.max()
     );
-    let verdict = match compat::admit(descriptor, stamp) {
-        Err(refusal) => StoreSchemaVerdict::Refused {
-            refusal: refusal
-                .read_against_release(release.release(), crate::release_stamp::BUILD_RELEASE),
-        },
+    let admission = compat::CompatRefusal::pre_release(
+        descriptor.component.as_str(),
+        writing_release.as_deref(),
+        build_release,
+    )
+    .map_or_else(|| compat::admit(descriptor, stamp), Err);
+    let verdict = match admission {
+        Err(refusal) => StoreSchemaVerdict::Refused { refusal },
         Ok(CompatAdmission::Provision) => StoreSchemaVerdict::Absent,
         #[cfg(feature = "synthetic-next")]
         Ok(CompatAdmission::Native) if synthetic_expanded => {
@@ -225,6 +230,7 @@ impl StorePreflight for PostgresStorePreflight {
             observation,
             descriptor,
             self.location.clone(),
+            crate::release_stamp::BUILD_RELEASE,
         ))
     }
 

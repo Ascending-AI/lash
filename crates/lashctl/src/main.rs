@@ -373,10 +373,30 @@ fn host_config() -> Result<lash::postgres::PostgresHostConfig, CliError> {
     Ok(config)
 }
 
-async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
+fn preflight_status_error(status: &StoreSchemaStatus) -> Option<CliError> {
+    match status.outcome() {
+        StoreSchemaOutcome::Ready => None,
+        StoreSchemaOutcome::Refused => status.refusals().find_map(|database| {
+            if let lash_core_execution::StoreSchemaVerdict::Refused { refusal } = &database.verdict
+            {
+                Some(CliError::store(StoreError::Incompatible {
+                    refusal: refusal.clone(),
+                }))
+            } else {
+                None
+            }
+        }),
+        _ => Some(CliError::new(
+            Exit::Refused,
+            "the operation did not complete",
+        )),
+    }
+}
+
+async fn run(command: &Command) -> Result<(Value, Exit, Option<CliError>), CliError> {
     let outcome = match command {
-        Command::Recovery(invocation) => (invocation.run().await?, Exit::Done),
-        Command::Version => (version_result(), Exit::Done),
+        Command::Recovery(invocation) => (invocation.run().await?, Exit::Done, None),
+        Command::Version => (version_result(), Exit::Done, None),
         Command::Migrate { phase, dry_run } => {
             let (endpoints, config) = (endpoints()?, host_config()?);
             let report = if *dry_run {
@@ -385,7 +405,7 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
                 PostgresStorage::migrate(&endpoints, &config, *phase).await
             }
             .map_err(CliError::migrate)?;
-            (migration_result(&report, *dry_run), Exit::Done)
+            (migration_result(&report, *dry_run), Exit::Done, None)
         }
         Command::Preflight { budget } => {
             let probe = PostgresStorePreflight::connect_lazy(&endpoints()?, &host_config()?);
@@ -412,13 +432,9 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             let status = probe.schema_status().await.map_err(CliError::store);
             probe.close().await;
             let status = status?;
-            let exit = match status.outcome() {
-                StoreSchemaOutcome::Ready => Exit::Done,
-                StoreSchemaOutcome::Refused => Exit::Incompatible,
-                StoreSchemaOutcome::Undecided => Exit::Refused,
-                _ => Exit::Refused,
-            };
-            (preflight_result(&status, capacity.as_ref())?, exit)
+            let error = preflight_status_error(&status);
+            let exit = error.as_ref().map_or(Exit::Done, |error| error.exit);
+            (preflight_result(&status, capacity.as_ref())?, exit, error)
         }
     };
     Ok(outcome)
@@ -464,15 +480,7 @@ async fn main() -> std::process::ExitCode {
         Ok(invocation) => {
             let command = invocation.command.name();
             match run(&invocation.command).await {
-                Ok((result, status)) => {
-                    let status_error = match status {
-                        Exit::Done => None,
-                        Exit::Incompatible => Some(CliError::new(
-                            status,
-                            "the store schema is incompatible with this build",
-                        )),
-                        _ => Some(CliError::new(status, "the operation did not complete")),
-                    };
+                Ok((result, status, status_error)) => {
                     output(
                         command,
                         Some(result),
@@ -562,6 +570,34 @@ mod tests {
         assert_eq!(
             error_json(&error)["refusal"],
             json!({"refusal":"unstamped","component":"postgres"})
+        );
+    }
+
+    /// FIG-5270: the preflight exit and JSON error carry the reset signal.
+    #[test]
+    fn preflight_pre_release_refusal_exits_four_and_names_the_writing_release() {
+        let refusal = CompatRefusal::pre_release("postgres", Some("0.0.0-dev"), "1.0.0")
+            .expect("refuse pre-release stamp");
+        let status = StoreSchemaStatus {
+            databases: vec![lash_core_execution::StoreSchemaDatabase {
+                name: "component schema".into(),
+                location: "postgres".into(),
+                expected: 1,
+                min_reader: Some(1),
+                verdict: lash_core_execution::StoreSchemaVerdict::Refused { refusal },
+            }],
+            release: lash_core_execution::StoreReleaseState::Unstamped,
+            fleet_format: lash_core_execution::FleetFormatState::Unrecorded,
+        };
+        let error = preflight_status_error(&status).expect("preflight refuses");
+        assert_eq!(error.exit as u8, 4);
+        let json = error_json(&error);
+        assert_eq!(json["refusal"]["refusal"], "pre_release");
+        assert_eq!(json["refusal"]["writing_release"], "0.0.0-dev");
+        assert_eq!(
+            preflight_result(&status, None).unwrap_or_else(|error| panic!("{}", error.message))["databases"]
+                [0]["refusal"]["refusal"],
+            "pre_release"
         );
     }
 

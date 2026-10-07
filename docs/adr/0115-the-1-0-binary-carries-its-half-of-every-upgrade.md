@@ -57,8 +57,9 @@ database components read `[1,2]` and write version 2
 #### 1.2 Where the stamps live
 
 PostgreSQL stores `(component, version, min_reader)` in
-`lash_schema_versions` and `F` in `lash_fleet_format`. A release stamp is
-operator evidence, rather than an admission input
+`lash_schema_versions` and `F` in `lash_fleet_format`. The release stamp
+refuses pre-release state at the stable 1.0 boundary (§3.6); for released
+stores it remains operator evidence
 (`crates/lash-postgres-store/schema.sql`,
 `crates/lash-postgres-store/src/postgres/schema.rs`).
 
@@ -72,7 +73,8 @@ authority (`crates/lash-sqlite-store/src/schema.rs`,
 
 #### 1.3 The admission rule
 
-`admit` checks in this order:
+Before `admit` checks counters, `CompatRefusal::pre_release` applies the
+release boundary in §3.6. Then `admit` checks in this order:
 
 1. An unstamped empty component returns `Provision`; an unstamped populated
    component refuses `Unstamped`.
@@ -336,18 +338,23 @@ the newer formats. An unreadable node table fails closed.
 
 #### 3.6 The release line refuses pre-release state
 
-The 1.0 cut restarts every counter at 1, so state a pre-release build wrote
-carries numbers a release build reads, over shapes that changed in place
-under the freeze. A pre-release store's version and floor are above a release
-build's range, so admission already refuses it; within one line counters only
-grow, so that floor refusal would read as "a newer release contracted it".
-When the store's release stamp names a release older than the opening
-build's, the refusal is `CompatRefusal::PreRelease` instead. The stamp still
-decides no admission (§1.2): it corrects the reason of a refusal the numbers
-made. A store with no readable stamp keeps the floor refusal
-(`crates/lash-core-store/src/compat.rs`).
+A stable build at or above 1.0.0 refuses every store whose writing release
+orders below 1.0.0, including `0.x` builds and `1.0.0-rc.1`, with
+`CompatRefusal::PreRelease`. The refusal carries `component` and
+`writing_release`; its JSON tag is `pre_release`. The shared rule in
+`crates/lash-core-store/src/compat.rs` runs before, and regardless of, the
+format-counter checks in preflight and store open. The store stays unchanged.
+Frozen pre-release counters can match 1.0's baseline over incompatible shapes,
+so counters cannot establish admission across this boundary.
 
-Pre-release state is never migrated: recreate the stores.
+A pre-release build opening a pre-release store keeps ordinary admission.
+Released stores, and absent or unorderable release evidence, keep the normal
+counter checks. An older released store is not pre-release state merely
+because a newer released build opens it.
+
+`pre_release` is the one documented signal to recreate the store once at the
+1.0 cutover. Every other refusal stops the deploy. Pre-release state is never
+migrated.
 
 ### 4. Remote protocol negotiation
 

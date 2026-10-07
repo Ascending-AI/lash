@@ -576,6 +576,7 @@ impl SqliteConnection {
         policy: SqliteConnectionPolicy,
         #[cfg(feature = "testing")] hooks: crate::testing::ConnectionHooks,
     ) -> tokio_rusqlite::Result<Self> {
+        Self::check_release_before_open(target, crate::release_stamp::BUILD_RELEASE).await?;
         let gate = write_gate(target);
         let reads = read_gate(target);
         let path = target.open_name();
@@ -640,6 +641,35 @@ impl SqliteConnection {
             #[cfg(feature = "testing")]
             inline_calls: false,
         })
+    }
+
+    /// Refuse pre-release file stores before journal setup, recovery or backup
+    /// can change their bytes. The installer checks again in its transaction.
+    pub(crate) async fn check_release_before_open(
+        target: &DatabaseTarget,
+        build_release: &str,
+    ) -> tokio_rusqlite::Result<()> {
+        // A named SQLite memory database belongs to this process's build.
+        if !matches!(target, DatabaseTarget::File(_)) || !target.exists() {
+            return Ok(());
+        }
+        let connection = Self::open_readonly(target).await?;
+        let build_release = build_release.to_owned();
+        let result = connection.call(move |c| {
+            let writing_release = crate::release_stamp::read_release(c);
+            if let Some(refusal) = lash_core_execution::compat::CompatRefusal::pre_release(
+                crate::schema::COMPONENT.as_str(), writing_release.as_deref(), &build_release,
+            ) {
+                tracing::warn!(writing_release = ?writing_release, build_release, refusal = %refusal, "lash SQLite release gate refused the database");
+                Err(crate::sqlite_conversion_error(lash_core_execution::StoreError::Incompatible { refusal }))
+            } else {
+                Ok(())
+            }
+        }).await;
+        let closed = connection.inner.close().await;
+        result.map_err(tokio_rusqlite::Error::Error)?;
+        closed?;
+        Ok(())
     }
 
     /// Read a migration stamp without provisioning or changing the database.

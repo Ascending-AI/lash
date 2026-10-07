@@ -340,14 +340,12 @@ pub enum CompatRefusal {
         /// The retired layout's database files the directory holds.
         files: Vec<String>,
     },
-    /// State or a call a pre-release build wrote (FIG-4819). The 1.0 cut
-    /// restarted every counter, so its numbers do not mean what this
-    /// build's do, and no release reads it: a store whose floor is above this
-    /// build's range although an older release stamped it.
+    /// A stable release build refuses a store stamped before 1.0, regardless
+    /// of format counters: pre-release shapes changed in place under the freeze.
     #[error(
         "{component} holds pre-release state: a lash build from before the 1.0 release wrote \
-         it, and 1.0 restarted every format counter, so its numbers do not mean what this \
-         build's do. No release reads pre-release state and none migrates it; it is refused \
+         it, and pre-release formats changed in place, so matching counters do not certify \
+         compatible shapes. No release reads pre-release state and none migrates it; it is refused \
          unchanged. Recreate the store{}",
         release_suffix(.writing_release)
     )]
@@ -452,30 +450,31 @@ impl CompatRefusal {
         self
     }
 
-    /// This refusal as the store's release evidence corrects it.
+    /// Refuse pre-1.0 state before any format-counter admission.
     ///
-    /// Within one release line counters only grow, so a floor above this
-    /// build's range means a newer release contracted the store. A floor
-    /// above the range on a store that a release older than `build_release`
-    /// stamped can only predate the 1.0 counter restart: the refusal is
-    /// [`Self::PreRelease`], not "newer". The store is refused either way;
-    /// the stamp is evidence for the reason, never an admission input (ADR
-    /// 0115 §1.2). A store with no readable stamp, or one this build cannot
-    /// order against its own release, keeps the floor refusal.
-    pub fn read_against_release(self, writing_release: Option<&str>, build_release: &str) -> Self {
-        let older = writing_release.is_some_and(|writing| {
-            crate::store::compare_releases(writing, build_release) == Some(std::cmp::Ordering::Less)
-        });
-        match self {
-            Self::ReaderFloorAbove {
-                component,
-                writing_release: attached,
-                ..
-            } if older => Self::PreRelease {
-                component,
-                writing_release: attached,
-            },
-            other => other,
+    /// A stable build at or above 1.0.0 refuses a writing release below
+    /// 1.0.0, including its release candidates. Pre-release readers and
+    /// unreadable or absent release evidence keep ordinary admission.
+    pub fn pre_release(
+        component: &str,
+        writing_release: Option<&str>,
+        build_release: &str,
+    ) -> Option<Self> {
+        use std::cmp::Ordering;
+        let writing = writing_release?;
+        if !build_release.contains('-')
+            && matches!(
+                crate::store::compare_releases(build_release, "1.0.0"),
+                Some(Ordering::Equal | Ordering::Greater)
+            )
+            && crate::store::compare_releases(writing, "1.0.0") == Some(Ordering::Less)
+        {
+            Some(Self::PreRelease {
+                component: component.to_owned(),
+                writing_release: Some(writing.to_owned()),
+            })
+        } else {
+            None
         }
     }
 }
@@ -640,59 +639,43 @@ mod tests {
         );
     }
 
-    /// FIG-4819: a floor above this build's range on a store an older
-    /// release stamped predates the counter restart. The same floor under
-    /// this release, a newer one, or no readable stamp stays "newer".
+    /// FIG-5270: the release boundary is independent of format counters.
     #[test]
-    fn a_floor_refusal_of_an_older_releases_store_reads_as_pre_release() {
-        let floor = || CompatRefusal::ReaderFloorAbove {
-            component: "sqlite-core".into(),
-            found: 99,
-            min_reader: 99,
-            reads: VersionRange::exactly(1),
-            writing_release: None,
-        };
-        for older in ["0.0.0-dev", "0.9.3", "0.0.0-alpha"] {
-            assert_eq!(
-                floor().read_against_release(Some(older), "1.0.0"),
-                CompatRefusal::PreRelease {
-                    component: "sqlite-core".into(),
-                    writing_release: None,
-                },
-                "{older}"
-            );
+    fn stable_release_refuses_every_stamp_before_one_without_reclassifying_later_releases() {
+        for build in ["1.0.0", "1.0.1", "2.0.0"] {
+            for writing in ["0.0.0-dev", "0.9.3", "0.0.0-alpha", "1.0.0-rc.1"] {
+                assert_eq!(
+                    CompatRefusal::pre_release(
+                        ComponentId::SQLITE_CORE.as_str(),
+                        Some(writing),
+                        build
+                    ),
+                    Some(CompatRefusal::PreRelease {
+                        component: "sqlite-core".into(),
+                        writing_release: Some(writing.into()),
+                    })
+                );
+            }
         }
         for (writing, build) in [
-            (Some("1.1.0"), "1.0.0"),
             (Some("1.0.0"), "1.0.0"),
+            (Some("1.0.0"), "2.0.0"),
+            (Some("1.1.0"), "2.0.0"),
+            (Some("1.1.0-rc.1"), "2.0.0"),
             (Some("0.0.0-dev"), "0.0.0-dev"),
+            (Some("0.0.0-alpha"), "0.0.0-dev"),
+            (Some("0.0.0-dev"), "0.9.0"),
+            (Some("0.0.0-dev"), "1.0.0-rc.1"),
+            (Some("0.0.0-dev"), "2.0.0-rc.1"),
             (Some("not-a-version"), "1.0.0"),
+            (Some("0.0.0-dev"), "not-a-version"),
             (None, "1.0.0"),
         ] {
             assert_eq!(
-                floor().read_against_release(writing, build),
-                floor(),
+                CompatRefusal::pre_release(ComponentId::SQLITE_CORE.as_str(), writing, build),
+                None,
                 "{writing:?} under {build}"
             );
         }
-        // Only the floor refusal claims "newer"; no other reason changes.
-        let too_old = CompatRefusal::TooOld {
-            component: "sqlite-core".into(),
-            found: 1,
-            reads: VersionRange::exactly(2),
-            writing_release: None,
-        };
-        assert_eq!(
-            too_old.clone().read_against_release(Some("0.9.0"), "1.0.0"),
-            too_old
-        );
-        let refusal = CompatRefusal::PreRelease {
-            component: "postgres".into(),
-            writing_release: None,
-        };
-        assert_eq!(
-            serde_json::to_string(&refusal).expect("encode"),
-            r#"{"refusal":"pre_release","component":"postgres"}"#
-        );
     }
 }

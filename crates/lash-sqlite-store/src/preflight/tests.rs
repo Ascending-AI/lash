@@ -680,3 +680,88 @@ mod walk {
         assert!(page.items.is_empty(), "{:?}", page.items);
     }
 }
+
+/// FIG-5270: frozen version-1 counters cannot certify a pre-release shape.
+#[tokio::test]
+async fn release_build_refuses_pre_release_store_before_counters_without_mutation() {
+    for writing in ["0.0.0-dev", "0.9.0", "1.0.0-rc.1"] {
+        for counter in [1, 2, 99] {
+            assert_release_admission(writing, "1.0.0", counter, true).await;
+        }
+    }
+}
+
+/// FIG-5270: the baseline release opens its own version-1 store.
+#[tokio::test]
+async fn release_build_admits_release_store() {
+    assert_release_admission("1.0.0", "1.0.0", 1, false).await;
+}
+
+/// FIG-5270: the release cut rule does not change development admission.
+#[tokio::test]
+async fn pre_release_build_admits_pre_release_store() {
+    assert_release_admission("0.0.0-dev", "0.0.0-dev", 1, false).await;
+}
+
+async fn assert_release_admission(writing: &str, build: &str, counter: u32, refuses: bool) {
+    let root = temp_root();
+    let path = root.path().join("lash.db");
+    drop(
+        SqliteStore::open_file_for_testing(&path)
+            .await
+            .expect("provision"),
+    );
+    let connection = rusqlite::Connection::open(&path).expect("open stamp");
+    connection
+        .execute("UPDATE release_stamp SET release_version = ?1", [writing])
+        .expect("stamp release");
+    connection
+        .execute(
+            "UPDATE lash_compat SET version = ?1, min_reader = ?1, fleet_format = ?1",
+            [counter],
+        )
+        .expect("stamp counters");
+    // The open guard must refuse before changing DELETE mode to WAL.
+    connection
+        .execute_batch("PRAGMA journal_mode = DELETE")
+        .expect("checkpoint and switch journal mode");
+    drop(connection);
+    let before = std::fs::read(&path).expect("original bytes");
+    let target = crate::location::DatabaseTarget::File(path.clone());
+    let row = super::verify_schema_target(&target, build).await;
+    let early = crate::conn::SqliteConnection::check_release_before_open(&target, build).await;
+    let mut connection = rusqlite::Connection::open(&path).expect("open for admission");
+    let tx = connection.transaction().expect("open transaction");
+    let admission =
+        crate::compat::admit_with_release(&tx, lash_core_execution::FleetFormat::writable(), build);
+    if refuses {
+        let expected = lash_core_execution::compat::CompatRefusal::PreRelease {
+            component: "sqlite-core".into(),
+            writing_release: Some(writing.into()),
+        };
+        assert_eq!(
+            row.verdict,
+            StoreSchemaVerdict::Refused {
+                refusal: expected.clone()
+            }
+        );
+        for error in [
+            crate::sqlite_async_error(early.expect_err("refuse before journal setup")),
+            crate::sqlite_error(admission.expect_err("refuse in open transaction")),
+        ] {
+            assert!(
+                matches!(error, lash_core_execution::StoreError::Incompatible { refusal } if refusal == expected)
+            );
+        }
+    } else {
+        assert_eq!(row.verdict, StoreSchemaVerdict::Matches);
+        early.expect("release admitted before setup");
+        assert_eq!(
+            admission.expect("admit open").0,
+            lash_core_execution::compat::CompatAdmission::Native
+        );
+    }
+    tx.rollback().expect("rollback");
+    drop(connection);
+    assert_eq!(std::fs::read(&path).expect("unchanged bytes"), before);
+}

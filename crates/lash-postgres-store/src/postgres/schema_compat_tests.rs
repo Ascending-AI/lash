@@ -162,3 +162,110 @@ async fn postgres_refuses_each_unsafe_addition() {
         scratch.cleanup().await;
     }
 }
+
+/// FIG-5270: version-1 counters cannot certify pre-release stored shapes.
+#[tokio::test]
+async fn release_build_refuses_pre_release_store_before_counters_without_mutation() {
+    let url = crate::testing::required_database_url();
+    let scratch = Scratch::new(&url).await;
+    for writing in ["0.0.0-dev", "0.9.0", "1.0.0-rc.1"] {
+        for counter in [1, 2, 99] {
+            assert_release_admission(&scratch, writing, "1.0.0", counter, true).await;
+        }
+    }
+    scratch.cleanup().await;
+}
+
+/// FIG-5270: the baseline release opens its own version-1 store.
+#[tokio::test]
+async fn release_build_admits_release_store() {
+    let url = crate::testing::required_database_url();
+    let scratch = Scratch::new(&url).await;
+    assert_release_admission(&scratch, "1.0.0", "1.0.0", 1, false).await;
+    scratch.cleanup().await;
+}
+
+/// FIG-5270: the release cut rule leaves development admission unchanged.
+#[tokio::test]
+async fn pre_release_build_admits_pre_release_store() {
+    let url = crate::testing::required_database_url();
+    let scratch = Scratch::new(&url).await;
+    assert_release_admission(&scratch, "0.0.0-dev", "0.0.0-dev", 1, false).await;
+    scratch.cleanup().await;
+}
+
+async fn assert_release_admission(
+    scratch: &Scratch,
+    writing: &str,
+    build: &str,
+    counter: i32,
+    refuses: bool,
+) {
+    sqlx::query("INSERT INTO lash_release_stamp (singleton, release_version, schema_versions, written_at_epoch_ms) VALUES (TRUE, $1, 'Postgres schema=1', 42) ON CONFLICT (singleton) DO UPDATE SET release_version = excluded.release_version")
+        .bind(writing).execute(&scratch.pool).await.expect("stamp writing release");
+    sqlx::query("UPDATE lash_schema_versions SET version = $1, min_reader = $1 WHERE component = 'lash-postgres-store'")
+        .bind(counter).execute(&scratch.pool).await.expect("stamp component counters");
+    sqlx::query("UPDATE lash_fleet_format SET format_version = $1")
+        .bind(counter)
+        .execute(&scratch.pool)
+        .await
+        .expect("stamp fleet counter");
+    let before = snapshot_rows(&scratch.pool).await;
+    let descriptor = postgres_descriptor();
+    let observation = observe_schema(&scratch.pool, descriptor)
+        .await
+        .expect("read-only observation");
+    let status =
+        crate::preflight::project_schema_status(observation, descriptor, "postgres".into(), build);
+    let open = ensure_schema_with_release(
+        &scratch.pool,
+        SchemaCheck::Enforce,
+        lash_core_execution::FleetFormat::writable(),
+        build,
+    )
+    .await;
+    if refuses {
+        let expected = CompatRefusal::PreRelease {
+            component: descriptor.component.as_str().into(),
+            writing_release: Some(writing.into()),
+        };
+        assert_eq!(
+            status.databases[0].verdict,
+            lash_core_execution::StoreSchemaVerdict::Refused {
+                refusal: expected.clone()
+            }
+        );
+        assert!(
+            matches!(open.expect_err("refuse open"), StoreError::Incompatible { refusal } if refusal == expected)
+        );
+    } else {
+        assert_eq!(
+            status.databases[0].verdict,
+            lash_core_execution::StoreSchemaVerdict::Matches
+        );
+        open.expect("admit open");
+    }
+    assert_eq!(
+        snapshot_rows(&scratch.pool).await,
+        before,
+        "every stored row remains unchanged"
+    );
+}
+
+/// Compare every stored row, including the release timestamp and all counters.
+async fn snapshot_rows(pool: &PgPool) -> Vec<(String, Vec<String>)> {
+    let tables: Vec<String> = sqlx::query_scalar("SELECT tablename::text FROM pg_tables WHERE schemaname = current_schema() ORDER BY tablename")
+        .fetch_all(pool).await.expect("enumerate stored tables");
+    let mut snapshot = Vec::new();
+    for table in tables {
+        let quoted = table.replace('"', "\"\"");
+        let rows = sqlx::query_scalar::<_, String>(&format!(
+            "SELECT to_jsonb(row)::text FROM \"{quoted}\" AS row ORDER BY to_jsonb(row)::text"
+        ))
+        .fetch_all(pool)
+        .await
+        .expect("snapshot all stored rows");
+        snapshot.push((table, rows));
+    }
+    snapshot
+}

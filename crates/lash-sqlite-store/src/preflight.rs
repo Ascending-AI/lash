@@ -56,12 +56,16 @@ use crate::schema::COMPONENT;
 /// be read yields [`StoreSchemaVerdict::Unreadable`] carrying SQLite's own
 /// words, because an unreadable database is undecided rather than refused.
 pub async fn verify_schema_at(path: &Path) -> StoreSchemaDatabase {
-    verify_schema_target(&DatabaseTarget::File(path.to_path_buf())).await
+    verify_schema_target(
+        &DatabaseTarget::File(path.to_path_buf()),
+        crate::release_stamp::BUILD_RELEASE,
+    )
+    .await
 }
 
 /// The store's report row, read through its location-derived target.
-async fn verify_schema_target(target: &DatabaseTarget) -> StoreSchemaDatabase {
-    let (verdict, min_reader) = read_compat_verdict(target).await;
+async fn verify_schema_target(target: &DatabaseTarget, build_release: &str) -> StoreSchemaDatabase {
+    let (verdict, min_reader) = read_compat_verdict(target, build_release).await;
     StoreSchemaDatabase {
         name: crate::schema::DATABASE_NAME.to_string(),
         location: target.to_string(),
@@ -72,7 +76,10 @@ async fn verify_schema_target(target: &DatabaseTarget) -> StoreSchemaDatabase {
 }
 
 /// Inspect the authoritative compatibility row without changing the file.
-async fn read_compat_verdict(target: &DatabaseTarget) -> (StoreSchemaVerdict, Option<i64>) {
+async fn read_compat_verdict(
+    target: &DatabaseTarget,
+    build_release: &str,
+) -> (StoreSchemaVerdict, Option<i64>) {
     if !target.exists() {
         return (StoreSchemaVerdict::Absent, None);
     }
@@ -89,12 +96,21 @@ async fn read_compat_verdict(target: &DatabaseTarget) -> (StoreSchemaVerdict, Op
             );
         }
     };
+    let build_release = build_release.to_owned();
     let probe = conn
         .call(move |c| {
             // The engine enforces the promise the module documents: any
             // statement that would write fails here, including the implicit
             // ones a pragma could trigger.
             c.pragma_update(None, "query_only", true)?;
+            let release = crate::compat::writing_release(c);
+            if let Some(refusal) = lash_core_execution::compat::CompatRefusal::pre_release(
+                COMPONENT.as_str(),
+                release.as_deref(),
+                &build_release,
+            ) {
+                return Ok((StoreSchemaVerdict::Refused { refusal }, None));
+            }
             let Some((stamp, fleet)) = crate::compat::read(c)? else {
                 return if crate::schema::has_user_schema_objects(c)? {
                     Ok((
@@ -295,14 +311,7 @@ impl StorePreflight for SqliteStorePreflight {
         let target = self.location.target();
         let release = read_release_state(&target).await;
         let fleet_format = read_fleet_format_state(&target).await;
-        let mut row = verify_schema_target(&target).await;
-        // A floor refusal reads against the release that wrote the store.
-        if let StoreSchemaVerdict::Refused { refusal } = row.verdict {
-            row.verdict = StoreSchemaVerdict::Refused {
-                refusal: refusal
-                    .read_against_release(release.release(), crate::release_stamp::BUILD_RELEASE),
-            };
-        }
+        let row = verify_schema_target(&target, crate::release_stamp::BUILD_RELEASE).await;
         Ok(StoreSchemaStatus {
             databases: vec![row],
             release,
