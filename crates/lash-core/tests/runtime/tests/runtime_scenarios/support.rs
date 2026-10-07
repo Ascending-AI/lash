@@ -5,7 +5,7 @@ pub(crate) use std::collections::HashMap;
 
 pub(crate) use helpers::RecordingStore;
 pub(crate) use lash_core::store::{
-    AdmittedHead, CheckpointAdmission, QueuedWorkStore, RunAdmission, RunStore, SessionCommitStore,
+    AdmittedHead, CheckpointAdmission, QueuedWorkStore, RunStore, SessionCommitStore,
     TurnInputStore,
 };
 pub(crate) use lash_core::{

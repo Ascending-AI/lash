@@ -244,22 +244,16 @@ fn terminal_of(address: &TurnAddress, ended: &TurnEnd) -> Result<TurnTerminal, R
         RuntimeError::new(
             crate::RuntimeErrorCode::TurnTerminalDecode,
             format!(
-                "the terminal cause of turn `{}` in session `{}` does not decode: {error}",
+                "the terminal cause of turn `{}` in session `{}` is not a turn's: {error}",
                 address.turn_id, address.session_id
             ),
         )
     };
-    let cause = ended
-        .cause_json
-        .as_deref()
-        .ok_or_else(|| decode_error("the row records no cause".to_owned()))?;
-    let stop = match serde_json::from_str::<crate::store::RunTerminalCause>(cause)
-        .map_err(|error| decode_error(error.to_string()))?
-    {
+    let stop = match &ended.cause {
         crate::store::RunTerminalCause::Committed { outcome, .. } => outcome.stop().cloned(),
-        crate::store::RunTerminalCause::Cancelled { evidence } => {
-            Some(TurnStop::Cancelled { evidence })
-        }
+        crate::store::RunTerminalCause::Cancelled { evidence } => Some(TurnStop::Cancelled {
+            evidence: evidence.clone(),
+        }),
         other => {
             return Err(decode_error(format!(
                 "a session actor's turn ends committed or cancelled, not {other:?}"

@@ -91,6 +91,11 @@ crate::statements! {
         select_state_by_id = "SELECT state FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2";
 
+        /// The source key input `?2` of session `?1` was accepted under: the
+        /// turn a run that admits it executes (FIG-3946).
+        select_source_key_by_id = "SELECT source_key FROM pending_turn_inputs
+             WHERE session_id = ?1 AND input_id = ?2";
+
         /// The input session `?1` filed under source key `?2`.
         select_by_source_key = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,

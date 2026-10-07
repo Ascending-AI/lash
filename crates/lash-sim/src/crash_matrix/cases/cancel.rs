@@ -9,7 +9,7 @@
 use std::sync::{Arc, Mutex};
 
 use lash_core::sync::MutexExt as _;
-use lash_durable::domain::TurnTerminal;
+use lash_core_store::store::RunTerminalKind;
 use lash_durable_test::{Cut, SimNodes};
 use lash_sansio::SessionId;
 
@@ -60,7 +60,7 @@ impl Workload for CancelCase {
         };
         let final_call = world.noted(&format!("model.call {session} final"));
         match turn_end(nodes, &session).await {
-            Some(end) if end.terminal == TurnTerminal::Cancelled => {
+            Some(end) if end.kind() == RunTerminalKind::Cancelled => {
                 let mut violations = Vec::new();
                 if final_call {
                     violations.push("turn cancel: the model was called again".to_owned());
@@ -70,7 +70,7 @@ impl Workload for CancelCase {
                 }
                 violations
             }
-            Some(end) if end.terminal == TurnTerminal::Answered => {
+            Some(end) if end.kind() == RunTerminalKind::Answered => {
                 let run = run_of(&session);
                 let interrupted = interrupted_hang(nodes, &session, &run).await;
                 if interrupted {

@@ -19,7 +19,6 @@ use lash_core::runtime::durable::session::{
     AdmittedInputs, CodeCell, OpenTurn, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive,
     TurnError, TurnRestore, TurnRow, TurnServices, request_turn_cancel,
 };
-use lash_core::runtime::durable::session_mail::SessionMailAdmission;
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
     DriverAction, DriverContextView, Effect, ExecResponse, LlmOutputPart, LlmRequest, LlmResponse,
@@ -467,11 +466,9 @@ async fn admitted_messages(
     backend: &lash_core_execution::Backend,
     row: &TurnRow,
 ) -> Result<Vec<Message>, TurnError> {
-    let admission: SessionMailAdmission = serde_json::from_str(&row.admission_json)
-        .map_err(|error| TurnError::Exec(format!("the turn's admission: {error}")))?;
     let catalog = backend.session_store_factory();
-    let mut messages = Vec::with_capacity(admission.inputs.len());
-    for input in &admission.inputs {
+    let mut messages = Vec::with_capacity(row.admission.input_ids().len());
+    for input in row.admission.input_ids() {
         let read = catalog
             .pending_turn_input(&row.session, input)
             .await

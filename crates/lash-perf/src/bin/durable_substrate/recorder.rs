@@ -175,10 +175,10 @@ fn payload_bytes(writes: &[DomainWrite]) -> (usize, usize) {
     writes
         .iter()
         .fold((0, 0), |(checkpoints, snapshots), write| match write {
-            DomainWrite::Turn(TurnWrite::Advance {
-                checkpoint_ref: Some(checkpoint),
-                ..
-            }) => (checkpoints + checkpoint.len(), snapshots),
+            DomainWrite::Turn(TurnWrite::Advance { phase, .. }) => (
+                checkpoints + phase.checkpoint().map_or(0, str::len),
+                snapshots,
+            ),
             DomainWrite::Snapshot(SnapshotWrite::Put { snapshot_ref, .. }) => {
                 (checkpoints, snapshots + snapshot_ref.len())
             }

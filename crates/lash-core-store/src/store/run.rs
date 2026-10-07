@@ -23,8 +23,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::StoreError;
 use super::control_intent::ControlIntentId;
-use super::{SessionHeadRef, StoreError};
 use crate::{BatchId, InputId, SessionId, TurnId};
 use lash_sansio::{TurnFinish, TurnOutcome, TurnStop};
 
@@ -195,6 +195,32 @@ pub enum RunTerminalCause {
 }
 
 impl RunTerminalCause {
+    /// The cause's one stored form: `session_runs.terminal_cause_json`. Its
+    /// `terminal_kind` column is [`Self::kind`], checked against it by the
+    /// DDL.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::RecordEncodingFailed`] when it does not encode.
+    pub fn to_stored(&self) -> Result<String, StoreError> {
+        serde_json::to_string(self).map_err(|error| StoreError::RecordEncodingFailed {
+            record_kind: "RunTerminal".to_string(),
+            message: error.to_string(),
+        })
+    }
+
+    /// The cause `stored` holds, decoded by the codec that wrote it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::StoredDataCorrupt`] when it does not decode.
+    pub fn from_stored(stored: &str) -> Result<Self, StoreError> {
+        serde_json::from_str(stored).map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "RunTerminal",
+            message: format!("run terminal cause: {error}"),
+        })
+    }
+
     /// The kind this cause answers.
     #[must_use]
     pub fn kind(&self) -> RunTerminalKind {
@@ -371,12 +397,7 @@ impl RunTerminal {
     pub fn to_stored(&self) -> Result<StoredRunTerminal, StoreError> {
         Ok(StoredRunTerminal {
             kind: self.kind().as_str(),
-            cause_json: serde_json::to_string(&self.cause).map_err(|error| {
-                StoreError::RecordEncodingFailed {
-                    record_kind: "RunTerminal".to_string(),
-                    message: error.to_string(),
-                }
-            })?,
+            cause_json: self.cause.to_stored()?,
             head_revision: self.head_revision,
             at_ms: self.at_ms,
         })
@@ -390,12 +411,7 @@ impl RunTerminal {
         head_revision: Option<u64>,
         at_ms: u64,
     ) -> Result<Self, StoreError> {
-        let corrupt = |message: String| StoreError::StoredDataCorrupt {
-            record_kind: "RunTerminal",
-            message,
-        };
-        let cause: RunTerminalCause = serde_json::from_str(cause_json)
-            .map_err(|error| corrupt(format!("run terminal cause: {error}")))?;
+        let cause = RunTerminalCause::from_stored(cause_json)?;
         Ok(Self {
             session_id,
             run,
@@ -532,103 +548,169 @@ pub struct UnfinishedRun {
     pub head: AdmittedHead,
 }
 
-/// What a run's admission took: the rows it executes and the head it was
-/// admitted on, recorded on the run.
-///
-/// A composition is one family: an input head admits turn inputs, a batch
-/// head queued work. The members carry their payloads.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RunAdmission {
-    pub head: AdmittedHead,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub inputs: Option<Box<crate::AdmittedTurnInputs>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub queued: Option<Box<crate::AdmittedQueuedWork>>,
-    /// The session head the run was admitted on (FIG-3682).
-    pub base: SessionHeadRef,
-    pub turn_index: u64,
-    /// The plugin composition the run executes and the writer format chosen for
-    /// each plugin at its admission (FIG-4747). Every execution of the run
-    /// writes plugin namespaces in these formats, whatever the fleet record
-    /// permits by then.
-    pub plugins: super::plugin_writers::PluginAdmission,
-    /// The run's trace scope: what caused the rows it admitted, the anchor
-    /// its first admission selected and when it was admitted. Written with
-    /// the admission and read back unchanged by every later one, whatever
-    /// anchor that one offers. `None` on an admission recorded without one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace: Option<lash_trace::DurableTraceScope>,
-    /// Whether this call recorded the admission. It is the call's receipt,
-    /// never stored or journaled: an admission read back from the run's row
-    /// or from a journal is one an earlier call recorded.
-    #[serde(skip)]
-    pub recorded_by_this_call: bool,
+/// What a session run's admission took: the one stored form of
+/// `session_runs.admission_json`, written by the session actor's mail drain
+/// and read by every host reader (FIG-5221). A turn run takes its inputs or
+/// one turn batch; a command or operation run takes the one open batch its
+/// commit applies.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "run", rename_all = "snake_case")]
+pub enum RunAdmissionRecord {
+    /// A turn.
+    Turn {
+        /// The rows the turn executes, bound to its run.
+        took: AdmittedTurnRows,
+    },
+    /// One session command, applied by its commit.
+    Command {
+        /// The open command batch.
+        batch: BatchId,
+    },
+    /// A plugin task's operation run, applied by its commit.
+    Operation {
+        /// The open operation batch.
+        batch: BatchId,
+    },
 }
 
-impl RunAdmission {
-    /// The cause of a run that admits these rows: what caused them, in the
-    /// order it executes them.
-    pub fn trace_cause_of(
-        inputs: Option<&crate::AdmittedTurnInputs>,
-        queued: Option<&crate::AdmittedQueuedWork>,
-    ) -> lash_trace::TraceCause {
-        lash_trace::TraceCause::of_admitted(
-            inputs
-                .into_iter()
-                .flat_map(|inputs| inputs.inputs.iter().map(|input| &input.trace_cause))
-                .chain(
-                    queued
-                        .into_iter()
-                        .flat_map(|queued| queued.batches.iter().map(|batch| &batch.trace_cause)),
-                ),
-        )
-    }
+/// The rows a turn run executes: its inputs, never none, or one turn batch.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "rows", rename_all = "snake_case")]
+pub enum AdmittedTurnRows {
+    /// Accepted next-turn inputs, in admission order.
+    Inputs {
+        /// The inputs.
+        ids: AdmittedInputIds,
+    },
+    /// One ready queued-work batch.
+    Batch {
+        /// The batch.
+        id: BatchId,
+    },
+}
 
-    /// The run scope the admission inserting `run`'s record retains for
-    /// the rows it admitted, under the anchor its caller offered.
-    pub fn trace_scope_of(
-        session_id: &SessionId,
-        run: &TurnId,
-        inputs: Option<&crate::AdmittedTurnInputs>,
-        queued: Option<&crate::AdmittedQueuedWork>,
-        anchor: lash_trace::TraceAnchor,
-        admitted_at_ms: u64,
-    ) -> lash_trace::DurableTraceScope {
-        lash_trace::DurableTraceScope {
-            scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Run {
-                session_id: session_id.clone(),
-                run: run.clone(),
-            }),
-            cause: Self::trace_cause_of(inputs, queued),
-            anchor,
-            started_at_ms: admitted_at_ms,
+/// A turn's admitted inputs: at least one, in admission order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<InputId>", into = "Vec<InputId>")]
+pub struct AdmittedInputIds(Vec<InputId>);
+
+impl AdmittedInputIds {
+    /// `ids`, refused when empty: a turn admits at least one input.
+    ///
+    /// # Errors
+    ///
+    /// [`EmptyInputAdmission`] when `ids` is empty.
+    pub fn new(ids: Vec<InputId>) -> Result<Self, EmptyInputAdmission> {
+        if ids.is_empty() {
+            Err(EmptyInputAdmission)
+        } else {
+            Ok(Self(ids))
         }
     }
 
-    /// The trace admission this call's receipt reports: the retained scope,
-    /// inserted when this call recorded it.
-    pub fn trace_admission(&self) -> Option<lash_trace::TraceScopeAdmission> {
-        self.trace
-            .clone()
-            .map(|scope| lash_trace::TraceScopeAdmission::of(scope, self.recorded_by_this_call))
+    /// The first input: the one that heads the turn.
+    #[must_use]
+    pub fn head(&self) -> &InputId {
+        &self.0[0]
+    }
+
+    /// Every input, in admission order.
+    #[must_use]
+    pub fn as_slice(&self) -> &[InputId] {
+        &self.0
     }
 }
 
-impl RunAdmission {
-    /// The accepted inputs the admission executes, in `enqueue_seq` order.
-    pub fn input_ids(&self) -> Vec<InputId> {
-        self.inputs
-            .iter()
-            .flat_map(|admitted| admitted.input_ids())
-            .collect()
+impl TryFrom<Vec<InputId>> for AdmittedInputIds {
+    type Error = EmptyInputAdmission;
+
+    fn try_from(ids: Vec<InputId>) -> Result<Self, Self::Error> {
+        Self::new(ids)
+    }
+}
+
+impl From<AdmittedInputIds> for Vec<InputId> {
+    fn from(ids: AdmittedInputIds) -> Self {
+        ids.0
+    }
+}
+
+/// A turn admission that names no input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a turn admits at least one input")]
+pub struct EmptyInputAdmission;
+
+impl RunAdmissionRecord {
+    /// The turn-lane row that heads the run: its first input or its batch.
+    #[must_use]
+    pub fn head(&self) -> AdmittedHead {
+        match self {
+            Self::Turn {
+                took: AdmittedTurnRows::Inputs { ids },
+            } => AdmittedHead::Input(ids.head().clone()),
+            Self::Turn {
+                took: AdmittedTurnRows::Batch { id },
+            } => AdmittedHead::Batch(id.clone()),
+            Self::Command { batch } | Self::Operation { batch } => {
+                AdmittedHead::Batch(batch.clone())
+            }
+        }
     }
 
-    /// The queued-work batches the admission executes, in `enqueue_seq` order.
+    /// Whether the run is a turn.
+    #[must_use]
+    pub fn is_turn(&self) -> bool {
+        matches!(self, Self::Turn { .. })
+    }
+
+    /// The inputs the run took, in admission order.
+    #[must_use]
+    pub fn input_ids(&self) -> &[InputId] {
+        match self {
+            Self::Turn {
+                took: AdmittedTurnRows::Inputs { ids },
+            } => ids.as_slice(),
+            _ => &[],
+        }
+    }
+
+    /// The batches the run took: bound to a turn run, open for a command
+    /// or operation run.
+    #[must_use]
     pub fn batch_ids(&self) -> Vec<BatchId> {
-        self.queued
-            .iter()
-            .flat_map(|admitted| admitted.batch_ids())
-            .collect()
+        match self {
+            Self::Turn {
+                took: AdmittedTurnRows::Batch { id },
+            } => vec![id.clone()],
+            Self::Command { batch } | Self::Operation { batch } => vec![batch.clone()],
+            Self::Turn {
+                took: AdmittedTurnRows::Inputs { .. },
+            } => Vec::new(),
+        }
+    }
+
+    /// The admission's one stored form: `session_runs.admission_json`.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::RecordEncodingFailed`] when it does not encode.
+    pub fn to_stored(&self) -> Result<String, StoreError> {
+        serde_json::to_string(self).map_err(|error| StoreError::RecordEncodingFailed {
+            record_kind: "RunAdmissionRecord".to_string(),
+            message: error.to_string(),
+        })
+    }
+
+    /// The admission `stored` holds, decoded by the codec that wrote it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::StoredDataCorrupt`] when it does not decode.
+    pub fn from_stored(stored: &str) -> Result<Self, StoreError> {
+        serde_json::from_str(stored).map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "RunAdmissionRecord",
+            message: error.to_string(),
+        })
     }
 }
 
@@ -645,27 +727,12 @@ pub struct RunTurns {
 }
 
 impl RunTurns {
-    /// The turns `run` runs, given its recorded admission, if it has one.
-    pub fn new(run: &TurnId, admission: Option<&RunAdmission>) -> Self {
-        let members = admission
-            .into_iter()
-            .flat_map(|admission| {
-                let inputs = admission
-                    .inputs
-                    .iter()
-                    .flat_map(|admitted| admitted.inputs.iter())
-                    .filter_map(|input| input.source_key.clone());
-                let batches = admission
-                    .queued
-                    .iter()
-                    .flat_map(|admitted| admitted.batches.iter())
-                    .filter_map(|batch| batch.source_key.clone());
-                inputs.chain(batches).collect::<Vec<_>>()
-            })
-            .collect();
+    /// The turns `run` runs, given the turns its admission's rows were
+    /// accepted under (their source keys).
+    pub fn new(run: &TurnId, members: impl IntoIterator<Item = String>) -> Self {
         Self {
             run: run.clone(),
-            members,
+            members: members.into_iter().collect(),
         }
     }
 
@@ -817,7 +884,7 @@ pub fn run_binding_conflict(
     ))
 }
 
-impl crate::store::DurableRecord for RunAdmission {
+impl crate::store::DurableRecord for RunAdmissionRecord {
     const SURFACE: crate::store::SurfaceFormat =
         crate::surface_format!(crate::compat::SQLITE_CORE_SCHEMA_VERSION);
 }

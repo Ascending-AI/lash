@@ -2136,6 +2136,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "lash-internal-core-ids",
+ "lash-internal-core-store",
  "lash-internal-sansio",
  "thiserror",
  "tokio",

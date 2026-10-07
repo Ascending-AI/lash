@@ -166,7 +166,8 @@ pub use realization::{admit_runtime_commit_budget, commit_runtime_state_verified
 pub use recovery_leader::*;
 pub use retention::{RetentionBound, RetentionReport};
 pub use run::{
-    AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest, InMemoryRunLedger, RunAdmission,
+    AdmittedHead, AdmittedInputIds, AdmittedTurnRows, CheckpointAdmission,
+    CheckpointAdmissionRequest, EmptyInputAdmission, InMemoryRunLedger, RunAdmissionRecord,
     RunCommittedOutcome, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause, RunTerminalKind,
     RunTerminalWrite, RunTerminalWriteDecision, RunTurns, StoredRunTerminal, TurnCommitId,
     UnfinishedRun, decide_run_terminal_write, run_binding_conflict,

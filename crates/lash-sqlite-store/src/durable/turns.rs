@@ -7,13 +7,14 @@
 
 use std::sync::LazyLock;
 
+use lash_core_execution::store::{RunAdmissionRecord, RunTerminalCause};
 use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
     turn_cancel_undelivered_wire,
 };
 use lash_durable::domain::{
-    DomainRefusal, ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd,
-    TurnPhase, TurnRow, TurnTerminal, TurnWrite,
+    DomainRefusal, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnRow,
+    TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -23,26 +24,29 @@ use rusqlite::{Connection, OptionalExtension};
 use super::{Answer, Committing, corrupt, integer};
 use crate::conn::cached_execute;
 
-/// `turn_phases`: V0's (FIG-5170) side table of `session_runs`.
+/// `turn_phases`: V0's (FIG-5170) side table of `session_runs`. Each phase
+/// row carries exactly what its phase restores from (FIG-5221): no
+/// checkpoint while admitted and one after, and the model pin exactly in the
+/// model phase, whose attempt is the phase argument.
 pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS turn_phases (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
     phase TEXT NOT NULL CONSTRAINT ck_turn_phases_phase
-        CHECK (phase IN ('admitted', 'prepared', 'model', 'tools', 'waiting', 'committing')),
+        CHECK (phase IN ('admitted', 'model', 'tools')),
     phase_arg INTEGER,
     iteration INTEGER NOT NULL,
     checkpoint_ref TEXT,
-    model_attempt INTEGER,
     model_request_ref TEXT,
     model_deadline_ms INTEGER,
     turn_deadline_ms INTEGER,
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
+    CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
     CONSTRAINT ck_turn_phases_model CHECK (
-        (model_attempt IS NULL) = (model_request_ref IS NULL)
-        AND (model_attempt IS NULL) = (model_deadline_ms IS NULL))
+        (phase = 'model') = (model_request_ref IS NOT NULL)
+        AND (phase = 'model') = (model_deadline_ms IS NOT NULL))
 );
 ";
 
@@ -53,13 +57,11 @@ fn refuse<T>(refusal: DomainRefusal) -> Answer<T> {
     Ok(Err(DurableError::Domain(refusal)))
 }
 
-fn model_columns(model: Option<&ModelPin>) -> (Option<i64>, Option<String>, Option<i64>) {
-    model.map_or((None, None, None), |pin| {
-        (
-            Some(i64::from(pin.attempt)),
-            Some(pin.request_ref.clone()),
-            Some(pin.deadline.0),
-        )
+/// A store codec's refusal, as the durable port reports it.
+fn encoding(error: &lash_core_execution::StoreError) -> DurableError {
+    DurableError::Store(lash_durable::StoreFailure {
+        kind: lash_durable::StoreFailureKind::Corrupt,
+        message: error.to_string(),
     })
 }
 
@@ -68,7 +70,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
         TurnWrite::Admit {
             session,
             run,
-            admission_json,
+            admission,
             turn_deadline,
         } => {
             let open = tx
@@ -80,12 +82,16 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                     session: session.clone(),
                 });
             }
+            let admission = match admission.to_stored() {
+                Ok(admission) => admission,
+                Err(error) => return Ok(Err(encoding(&error))),
+            };
             cached_execute(
                 tx,
                 SQL.insert_run.sql(),
-                rusqlite::params![session.as_str(), run.as_str(), admission_json],
+                rusqlite::params![session.as_str(), run.as_str(), admission],
             )?;
-            let (phase, argument) = TurnPhase::Admitted.stored();
+            let (phase, argument) = UnfinishedPhase::Admitted.stored();
             cached_execute(
                 tx,
                 SQL.insert_phase.sql(),
@@ -96,7 +102,6 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                     argument.map(integer::<i64>).transpose()?,
                     0_i64,
                     Option::<String>::None,
-                    Option::<i64>::None,
                     Option::<String>::None,
                     Option::<i64>::None,
                     turn_deadline.map(|deadline| deadline.0),
@@ -110,24 +115,21 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
             run,
             phase,
             iteration,
-            checkpoint_ref,
-            model,
         } => {
-            let (phase, argument) = phase.stored();
-            let (attempt, request, deadline) = model_columns(model.as_ref());
+            let (stored, argument) = phase.stored();
+            let pin = phase.model();
             let advanced = tx
                 .prepare_cached(SQL.advance_phase.sql())?
                 .query_row(
                     rusqlite::params![
                         session.as_str(),
                         run.as_str(),
-                        phase,
+                        stored,
                         argument.map(integer::<i64>).transpose()?,
                         i64::from(*iteration),
-                        checkpoint_ref,
-                        attempt,
-                        request,
-                        deadline,
+                        phase.checkpoint(),
+                        pin.map(|pin| pin.request_ref.as_str()),
+                        pin.map(|pin| pin.deadline.0),
                         commit.epoch.0,
                     ],
                     |_| Ok(()),
@@ -144,18 +146,21 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
         TurnWrite::Terminal {
             session,
             run,
-            terminal,
-            cause_json,
+            cause,
             head_revision,
         } => {
+            let stored = match cause.to_stored() {
+                Ok(stored) => stored,
+                Err(error) => return Ok(Err(encoding(&error))),
+            };
             let ended = tx
                 .prepare_cached(SQL.end_run.sql())?
                 .query_row(
                     rusqlite::params![
                         session.as_str(),
                         run.as_str(),
-                        terminal.as_str(),
-                        cause_json.as_deref().unwrap_or("null"),
+                        cause.kind().as_str(),
+                        stored,
                         head_revision.map(integer::<i64>).transpose()?,
                         commit.now.0,
                     ],
@@ -355,35 +360,31 @@ pub(super) fn turn_end(
     let stored = tx
         .prepare_cached(SQL.ended.sql())?
         .query_row([session.as_str(), run.as_str()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-            ))
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
         })
         .optional()?;
-    let Some((terminal, cause_json, head_revision)) = stored else {
+    let Some((cause, head_revision)) = stored else {
         return Ok(Ok(None));
     };
-    let Some(terminal) = TurnTerminal::parse(&terminal) else {
-        return Ok(Err(corrupt("turn terminal", &terminal)));
+    let cause = match RunTerminalCause::from_stored(&cause) {
+        Ok(cause) => cause,
+        Err(error) => return Ok(Err(encoding(&error))),
     };
+    let head_revision = head_revision.map(integer::<u64>).transpose()?;
     Ok(Ok(Some(TurnEnd {
-        terminal,
-        cause_json: cause_json.filter(|cause| cause != "null"),
-        head_revision: head_revision.map(integer::<u64>).transpose()?,
+        cause,
+        head_revision,
     })))
 }
 
 pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRow>> {
     struct Stored {
         run: String,
-        admission_json: String,
+        admission: String,
         phase: String,
         argument: Option<i64>,
         iteration: i64,
-        checkpoint_ref: Option<String>,
-        attempt: Option<i64>,
+        checkpoint: Option<String>,
         request: Option<String>,
         deadline: Option<i64>,
         turn_deadline: Option<i64>,
@@ -394,16 +395,15 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         .query_row([session.as_str()], |row| {
             Ok(Stored {
                 run: row.get(0)?,
-                admission_json: row.get(1)?,
+                admission: row.get(1)?,
                 phase: row.get(2)?,
                 argument: row.get(3)?,
                 iteration: row.get(4)?,
-                checkpoint_ref: row.get(5)?,
-                attempt: row.get(6)?,
-                request: row.get(7)?,
-                deadline: row.get(8)?,
-                turn_deadline: row.get(9)?,
-                epoch: row.get(10)?,
+                checkpoint: row.get(5)?,
+                request: row.get(6)?,
+                deadline: row.get(7)?,
+                turn_deadline: row.get(8)?,
+                epoch: row.get(9)?,
             })
         })
         .optional()?;
@@ -413,17 +413,16 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
     let Ok(run) = TurnId::try_from(stored.run.clone()) else {
         return Ok(Err(corrupt("turn id", &stored.run)));
     };
-    let argument = stored.argument.map(integer::<u64>).transpose()?;
-    let Some(phase) = TurnPhase::parse(&stored.phase, argument) else {
-        return Ok(Err(corrupt("turn phase", &stored.phase)));
+    let admission = match RunAdmissionRecord::from_stored(&stored.admission) {
+        Ok(admission) => admission,
+        Err(error) => return Ok(Err(encoding(&error))),
     };
-    let model = match (stored.attempt, stored.request, stored.deadline) {
-        (Some(attempt), Some(request_ref), Some(deadline)) => Some(ModelPin {
-            attempt: integer::<u32>(attempt)?,
-            request_ref,
-            deadline: DurableInstant(deadline),
-        }),
-        _ => None,
+    let argument = stored.argument.map(integer::<u64>).transpose()?;
+    let iteration = integer::<u32>(stored.iteration)?;
+    let pin = stored.request.zip(stored.deadline.map(DurableInstant));
+    let Some(phase) = UnfinishedPhase::parse(&stored.phase, argument, stored.checkpoint, pin)
+    else {
+        return Ok(Err(corrupt("turn phase", &stored.phase)));
     };
     let cancel = match cancel_of(tx, session, &run)? {
         Ok(cancel) => cancel,
@@ -432,13 +431,120 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
     Ok(Ok(Some(TurnRow {
         session: session.clone(),
         run,
-        admission_json: stored.admission_json,
+        admission,
         phase,
-        iteration: integer::<u32>(stored.iteration)?,
-        checkpoint_ref: stored.checkpoint_ref,
-        model,
+        iteration,
         turn_deadline: stored.turn_deadline.map(DurableInstant),
         written_epoch: Epoch(stored.epoch),
         cancel,
     })))
+}
+
+#[cfg(test)]
+mod ddl_tests {
+    //! The storage laws of a turn's stored forms (FIG-5221): the DDL itself
+    //! refuses a phase row without what its phase restores from, and a run
+    //! terminal whose kind its cause does not derive.
+
+    use rusqlite::{Connection, params};
+
+    fn tables() -> Connection {
+        let conn = Connection::open_in_memory().expect("an in-memory database");
+        conn.execute_batch(super::TABLES).expect("turn_phases");
+        conn.execute_batch(crate::schema_fragments::SESSION_RUNS_TABLES)
+            .expect("session_runs");
+        conn
+    }
+
+    fn phase(
+        conn: &Connection,
+        run: &str,
+        phase: &str,
+        argument: Option<i64>,
+        checkpoint: Option<&str>,
+        pin: Option<(&str, i64)>,
+    ) -> rusqlite::Result<usize> {
+        conn.execute(
+            "INSERT INTO turn_phases (session_id, run, phase, phase_arg, iteration,
+                 checkpoint_ref, model_request_ref, model_deadline_ms, written_epoch)
+             VALUES ('s', ?1, ?2, ?3, 0, ?4, ?5, ?6, 1)",
+            params![
+                run,
+                phase,
+                argument,
+                checkpoint,
+                pin.map(|(request, _)| request),
+                pin.map(|(_, deadline)| deadline)
+            ],
+        )
+    }
+
+    #[test]
+    fn the_ddl_refuses_a_model_phase_without_its_pin() {
+        let conn = tables();
+        assert!(phase(&conn, "unpinned", "model", Some(1), Some("{}"), None).is_err());
+        assert!(
+            phase(
+                &conn,
+                "tools-pinned",
+                "tools",
+                Some(1),
+                Some("{}"),
+                Some(("r", 5))
+            )
+            .is_err()
+        );
+        phase(
+            &conn,
+            "pinned",
+            "model",
+            Some(1),
+            Some("{}"),
+            Some(("r", 5)),
+        )
+        .expect("a pinned model phase is stored");
+    }
+
+    #[test]
+    fn the_ddl_refuses_a_non_admitted_phase_without_a_checkpoint() {
+        let conn = tables();
+        assert!(phase(&conn, "model", "model", Some(1), None, Some(("r", 5))).is_err());
+        assert!(phase(&conn, "tools", "tools", Some(1), None, None).is_err());
+        assert!(
+            phase(
+                &conn,
+                "admitted-checkpoint",
+                "admitted",
+                None,
+                Some("{}"),
+                None
+            )
+            .is_err()
+        );
+        phase(&conn, "admitted", "admitted", None, None, None).expect("an admitted phase");
+        phase(&conn, "tools-ok", "tools", Some(1), Some("{}"), None).expect("a tools phase");
+    }
+
+    #[test]
+    fn the_ddl_refuses_a_terminal_kind_its_cause_does_not_derive() {
+        let conn = tables();
+        let end = |run: &str, kind: &str, cause: &str| {
+            conn.execute(
+                "INSERT INTO session_runs (session_id, run, admission_json, terminal_kind,
+                     terminal_cause_json, terminal_head_revision, terminal_at_ms)
+                 VALUES ('s', ?1, NULL, ?2, ?3, NULL, 1)",
+                params![run, kind, cause],
+            )
+        };
+        let cancelled = r#"{"cause":"operator_cancelled","intent":1}"#;
+        let lost = r#"{"cause":"substrate_lost","cancelled_by":null}"#;
+        let refused = r#"{"cause":"refused","code":"x","message":"m"}"#;
+        assert!(end("a", "answered", cancelled).is_err());
+        assert!(end("b", "cancelled", lost).is_err());
+        assert!(end("c", "answered", refused).is_err());
+        assert!(end("d", "cancelled", r#"{"cause":"unknown"}"#).is_err());
+        end("e", "cancelled", cancelled).expect("a cancelled cause ends cancelled");
+        end("f", "failed", lost).expect("an unclaimed loss fails");
+        end("g", "answered", r#"{"cause":"commands_applied"}"#).expect("applied commands answer");
+    }
 }

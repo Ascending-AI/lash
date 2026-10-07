@@ -1049,7 +1049,6 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("SELECT run FROM lash_session_run_inputs") => "run-binding-read",
         q if q.starts_with("INSERT INTO lash_session_runs") => "run-open",
         q if q.starts_with("INSERT INTO lash_session_run_inputs") => "run-input-bind",
-        q if q.starts_with("UPDATE lash_session_runs SET admission_json") => "run-admission-write",
         q if q.starts_with("UPDATE lash_session_meta") => "session-meta-touch",
         q if q.starts_with("LOCK TABLE lash_blobs") => "blob-table-lock",
         q if q.starts_with("SELECT checkpoint_ref FROM lash_session_revisions") => {

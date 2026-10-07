@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::sync::MutexExt as _;
-use lash_durable::domain::TurnTerminal;
+use lash_core_store::store::RunTerminalKind;
 use lash_durable_test::{Cut, SimNodes};
 use lash_sansio::SessionId;
 
@@ -97,7 +97,7 @@ impl Workload for TurnCase {
             return vec!["the turn was never seeded".to_owned()];
         };
         match turn_end(nodes, &session).await {
-            Some(end) if end.terminal == TurnTerminal::Answered && end.head_revision.is_some() => {
+            Some(end) if end.kind() == RunTerminalKind::Answered && end.head_revision.is_some() => {
                 Vec::new()
             }
             other => vec![format!(

@@ -45,20 +45,18 @@ use tokio_util::sync::CancellationToken;
 use super::head::{HeadCache, SessionHead};
 use super::{phases, turn_cancel};
 use crate::{
-    ActorContext, AdmittedScope, Backend, Effect, EffectId, HostTurnProtocol, InputId, LlmRequest,
+    ActorContext, AdmittedScope, Backend, Effect, EffectId, HostTurnProtocol, LlmRequest,
     SessionId, TurnId, TurnMachine, TurnMachineConfig, TurnOutcome,
 };
 
 pub use lash_durable::domain::{
-    ModelPin, TurnCancelAnswer, TurnCancelRequest, TurnPhase, TurnRow, TurnTerminal,
+    ModelPin, TurnCancelAnswer, TurnCancelRequest, TurnRow, UnfinishedPhase,
 };
 
 use super::session_close::{
     SESSION_CLOSE_MAIL, SessionCloseError, SessionCloseExit, begin_session_close, run_session_close,
 };
-use super::session_mail::{
-    SessionMailAdmission, SessionMailError, SessionMailRunKind, drain_session_mail,
-};
+use super::session_mail::{SessionMailError, drain_session_mail};
 use super::turn_scope::{TurnChildrenStopError, await_turn_children, continue_scope_ends};
 
 /// What a session's turns run with: the deployment's protocol, model,
@@ -235,18 +233,6 @@ pub struct TurnDone {
 }
 
 impl TurnDone {
-    /// The terminal the outcome commits as.
-    #[must_use]
-    pub fn terminal(&self) -> TurnTerminal {
-        match &self.outcome {
-            Some(TurnOutcome::Finished(_)) => TurnTerminal::Answered,
-            Some(TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })) => {
-                TurnTerminal::Cancelled
-            }
-            _ => TurnTerminal::Failed,
-        }
-    }
-
     /// The run terminal `run`'s commit records: the outcome its turn
     /// committed with, as the store reads every run's end back.
     ///
@@ -254,7 +240,10 @@ impl TurnDone {
     ///
     /// [`TurnError::Exec`] when the outcome ends no run (a frame switch or a
     /// segment boundary, whose follow-on turn the durable path does not run).
-    pub fn run_terminal_cause(&self, run: &TurnId) -> Result<String, TurnError> {
+    pub fn run_terminal_cause(
+        &self,
+        run: &TurnId,
+    ) -> Result<crate::store::RunTerminalCause, TurnError> {
         let outcome = self
             .outcome
             .clone()
@@ -268,7 +257,7 @@ impl TurnDone {
         let commit = crate::store::TurnCommitId::of_physical_turn(run, run).ok_or_else(|| {
             TurnError::Exec(format!("turn {run} is not its own run's physical turn"))
         })?;
-        encode_cause(&crate::store::RunTerminalCause::Committed {
+        Ok(crate::store::RunTerminalCause::Committed {
             commit,
             turn: run.clone(),
             outcome: committed,
@@ -276,21 +265,13 @@ impl TurnDone {
     }
 }
 
-/// The stored run terminal of a cancel the session actor honoured before
-/// the turn committed.
-///
-/// # Errors
-///
-/// [`TurnError::Exec`] when the cause does not encode.
+/// The run terminal of a cancel the session actor honoured before the turn
+/// committed.
+#[must_use]
 pub fn cancelled_cause(
     evidence: crate::runtime::TurnCancellationEvidence,
-) -> Result<String, TurnError> {
-    encode_cause(&crate::store::RunTerminalCause::Cancelled { evidence })
-}
-
-fn encode_cause(cause: &crate::store::RunTerminalCause) -> Result<String, TurnError> {
-    serde_json::to_string(cause)
-        .map_err(|error| TurnError::Exec(format!("the run terminal does not encode: {error}")))
+) -> crate::store::RunTerminalCause {
+    crate::store::RunTerminalCause::Cancelled { evidence }
 }
 
 /// What `turn.commit` writes for a finished turn: the session head's next
@@ -397,28 +378,26 @@ impl SessionActivation {
             // No unfinished turn: the mailbox says what runs next (L3s).
             let drain = drain_session_mail(cx, &mut tx).await?;
             return match drain.admit {
-                Some(admitted) => match SessionMailAdmission::of(&admitted)?.kind {
-                    SessionMailRunKind::Turn => {
-                        admit_turn(cx, &mut tx, admitted).await?;
-                        // The turn's rows are this build's session state:
-                        // from now only a node that decodes it claims the
-                        // session.
-                        tx.stamp_formats(cx.backend().formats().session().clone());
-                        cx.commit(tx, CommitLabel::TURN_ADMIT).await?;
-                        Ok(Pass::Again)
-                    }
-                    // A command run binds nothing: the commit that applies
-                    // it settles its row, and until then every drain hands
-                    // it out again.
-                    SessionMailRunKind::Command | SessionMailRunKind::Operation => {
-                        drop(tx);
-                        self.services.apply_commands(cx, &admitted).await?;
-                        // A command's commit may move the head outside
-                        // `turn.commit`: the next turn loads it again.
-                        heads.evict();
-                        Ok(Pass::Again)
-                    }
-                },
+                Some(admitted) if admitted.admission.is_turn() => {
+                    admit_turn(cx, &mut tx, admitted).await?;
+                    // The turn's rows are this build's session state:
+                    // from now only a node that decodes it claims the
+                    // session.
+                    tx.stamp_formats(cx.backend().formats().session().clone());
+                    cx.commit(tx, CommitLabel::TURN_ADMIT).await?;
+                    Ok(Pass::Again)
+                }
+                // A command run binds nothing: the commit that applies it
+                // settles its row, and until then every drain hands it out
+                // again.
+                Some(admitted) => {
+                    drop(tx);
+                    self.services.apply_commands(cx, &admitted).await?;
+                    // A command's commit may move the head outside
+                    // `turn.commit`: the next turn loads it again.
+                    heads.evict();
+                    Ok(Pass::Again)
+                }
                 None if release => {
                     tx.give_up(Release::Idle);
                     cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
@@ -455,19 +434,19 @@ impl SessionActivation {
             }
             return Ok(Pass::Again);
         }
-        let turn = match row.checkpoint_ref {
-            Some(_) => {
-                self.services
-                    .resume(cx, TurnRestore::new(cx, &row, heads))
-                    .await?
-            }
-            None => {
+        let turn = match row.phase {
+            UnfinishedPhase::Admitted => {
                 let head = heads.head(cx, session).await?;
                 OpenTurn {
                     drive: self.services.start(cx, &row, head).await?,
                     pending: None,
                     row,
                 }
+            }
+            UnfinishedPhase::Model { .. } | UnfinishedPhase::Tools { .. } => {
+                self.services
+                    .resume(cx, TurnRestore::new(cx, &row, heads))
+                    .await?
             }
         };
         match phases::run_phases(cx, self.services.as_ref(), turn, heads).await? {
@@ -661,11 +640,8 @@ async fn park(cx: &ActorContext, reason: &SessionParkReason) -> Result<(), Durab
 pub struct AdmittedInputs {
     /// The run they open.
     pub run: TurnId,
-    /// The inputs, in admission order.
-    pub inputs: Vec<InputId>,
-    /// The admission (base head revision, run spec, plugin revision),
-    /// encoded by its owner.
-    pub admission_json: String,
+    /// What the run's admission took.
+    pub admission: crate::store::RunAdmissionRecord,
 }
 
 /// A turn restored from its rows: the machine, the effect it re-delivers,
@@ -693,8 +669,8 @@ pub struct OpenTurn {
 /// How a phase run ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PhaseExit {
-    /// The turn committed with this terminal.
-    Committed(TurnTerminal),
+    /// The turn committed, ending its run as this kind.
+    Committed(crate::store::RunTerminalKind),
     /// Nothing is runnable: release as `waiting` until `due` or mail.
     Suspended {
         /// The earliest due time.
@@ -808,17 +784,15 @@ pub async fn admit_turn(
     tx.write(DomainWrite::Turn(TurnWrite::Admit {
         session: session.clone(),
         run: inputs.run.clone(),
-        admission_json: inputs.admission_json.clone(),
+        admission: inputs.admission.clone(),
         turn_deadline: None,
     }));
     Ok(TurnRow {
         session,
         run: inputs.run,
-        admission_json: inputs.admission_json,
-        phase: TurnPhase::Admitted,
+        admission: inputs.admission,
+        phase: UnfinishedPhase::Admitted,
         iteration: 0,
-        checkpoint_ref: None,
-        model: None,
         turn_deadline: None,
         written_epoch: cx.epoch(),
         cancel: None,
@@ -872,8 +846,8 @@ impl<'a> TurnRestore<'a> {
     ) -> Result<RestoredTurn, TurnRestoreError> {
         let row = self.row;
         let stored = row
-            .checkpoint_ref
-            .as_deref()
+            .phase
+            .checkpoint()
             .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
         let saved: SavedTurn<HostTurnProtocol> =
             serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
@@ -961,8 +935,7 @@ pub async fn cancel_open_turn(
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {
         session: row.session.clone(),
         run: row.run.clone(),
-        terminal: TurnTerminal::Cancelled,
-        cause_json: Some(cancelled_cause(cause.clone())?),
+        cause: Box::new(cancelled_cause(cause.clone())),
         head_revision: None,
     }));
     Ok(Some(row))

@@ -26,9 +26,7 @@ use std::future::Future;
 use lash_durable::CommitLabel;
 use lash_durable::domain::{DomainWrite, TurnWrite};
 
-use super::session::{
-    TurnCancelRequest, TurnError, TurnRow, TurnTerminal, cancel_evidence, cancelled_cause,
-};
+use super::session::{TurnCancelRequest, TurnError, TurnRow, cancel_evidence, cancelled_cause};
 use crate::{ActorContext, SessionId, TurnCancelMode};
 
 /// The cancel request the session's unfinished turn accepted, as of now.
@@ -95,20 +93,18 @@ pub(super) async fn finalize(
     cx: &ActorContext,
     row: &TurnRow,
     request: &TurnCancelRequest,
-) -> Result<TurnTerminal, TurnError> {
-    let cause = cancelled_cause(cancel_evidence(request))?;
+) -> Result<(), TurnError> {
     let mut tx = cx.begin().await?;
     super::tool_round::cancel_open_round(cx, &mut tx, row).await?;
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {
         session: row.session.clone(),
         run: row.run.clone(),
-        terminal: TurnTerminal::Cancelled,
-        cause_json: Some(cause),
+        cause: Box::new(cancelled_cause(cancel_evidence(request))),
         head_revision: None,
     }));
     // The turn's scope ends with its cancel (L6b): its waits are revoked and
     // its first batch of `Until` children marked; the next pass marks the rest.
     super::turn_scope::end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
     cx.commit(tx, CommitLabel::TURN_CANCEL).await?;
-    Ok(TurnTerminal::Cancelled)
+    Ok(())
 }

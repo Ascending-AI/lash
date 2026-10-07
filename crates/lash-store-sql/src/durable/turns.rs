@@ -8,7 +8,8 @@
 /// The table's unprefixed name: a turn's phase state, 1:1 with its
 /// `session_runs` row while the turn is unfinished. The run row stays the one
 /// admission authority (its one-unfinished-run index); this row carries only
-/// the phase, the encoded checkpoint and the model pin.
+/// the phase with what a restore resumes it from: the encoded checkpoint
+/// and, in the model phase, the model pin (its attempt is `phase_arg`).
 pub const TABLE: &str = "turn_phases";
 
 crate::statements! {
@@ -25,26 +26,25 @@ crate::statements! {
              VALUES (?1, ?2, ?3)";
 
         /// Insert run `?2` of session `?1`'s phase row: phase `?3`, phase argument
-        /// `?4`, iteration `?5`, checkpoint `?6`, model attempt `?7`, pinned
-        /// request `?8`, model deadline `?9`, turn deadline `?10`, written at
-        /// epoch `?11`.
+        /// `?4`, iteration `?5`, checkpoint `?6`, pinned request `?7`, model
+        /// deadline `?8`, turn deadline `?9`, written at epoch `?10`.
         insert_phase = "INSERT INTO turn_phases
-                 (session_id, run, phase, phase_arg, iteration, checkpoint_ref, model_attempt,
+                 (session_id, run, phase, phase_arg, iteration, checkpoint_ref,
                   model_request_ref, model_deadline_ms, turn_deadline_ms, written_epoch)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
         /// Move run `?2` of session `?1` to phase `?3` (argument `?4`) at
-        /// iteration `?5` with checkpoint `?6` and model pin `?7`, `?8`, `?9`,
-        /// at epoch `?10`. No row when the run has no phase row.
+        /// iteration `?5` with checkpoint `?6` and model pin `?7`, `?8`, at
+        /// epoch `?9`. No row when the run has no phase row.
         advance_phase = "UPDATE turn_phases
              SET phase = ?3, phase_arg = ?4, iteration = ?5, checkpoint_ref = ?6,
-                 model_attempt = ?7, model_request_ref = ?8, model_deadline_ms = ?9,
-                 written_epoch = ?10
+                 model_request_ref = ?7, model_deadline_ms = ?8, written_epoch = ?9
              WHERE session_id = ?1 AND run = ?2
              RETURNING run";
 
-        /// End unfinished run `?2` of session `?1` as `?3` with cause `?4` and
-        /// head revision `?5` at `?6`. No row when it is not unfinished.
+        /// End unfinished run `?2` of session `?1` with cause `?4`, whose kind
+        /// is `?3`, and head revision `?5` at `?6`. No row when it is not
+        /// unfinished.
         end_run = "UPDATE session_runs
              SET terminal_kind = ?3, terminal_cause_json = ?4,
                  terminal_head_revision = ?5, terminal_at_ms = ?6
@@ -57,16 +57,16 @@ crate::statements! {
 
         /// Session `?1`'s unfinished turn with its phase row.
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
-                    p.checkpoint_ref, p.model_attempt, p.model_request_ref,
-                    p.model_deadline_ms, p.turn_deadline_ms, p.written_epoch
+                    p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
+                    p.turn_deadline_ms, p.written_epoch
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL
                AND r.terminal_kind IS NULL";
 
-        /// How run `?2` of session `?1` ended: terminal, cause and head
-        /// revision. No row until it ended.
-        ended = "SELECT terminal_kind, terminal_cause_json, terminal_head_revision
+        /// How run `?2` of session `?1` ended: cause and head revision. No
+        /// row until it ended.
+        ended = "SELECT terminal_cause_json, terminal_head_revision
              FROM session_runs
              WHERE session_id = ?1 AND run = ?2 AND terminal_kind IS NOT NULL";
 

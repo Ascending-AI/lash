@@ -10,7 +10,6 @@ use super::head::SessionHead;
 use super::session::{
     AdmittedInputs, OpenTurn, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
 };
-use super::session_mail::{SessionMailAdmission, SessionMailRunKind};
 use crate::runtime::logical_turn::LogicalTurnAdmissions;
 use crate::runtime::turn_driver::{DriveParts, RuntimeDrive};
 use crate::runtime::turn_loop::DurableTurn;
@@ -132,7 +131,6 @@ impl TurnServices for RuntimeTurnServices {
         cx: &ActorContext,
         admitted: &AdmittedInputs,
     ) -> Result<(), TurnError> {
-        let admission = SessionMailAdmission::of(admitted)?;
         let session = SessionId::parse(cx.actor().id())
             .map_err(|error| TurnError::Exec(format!("session actor id: {error}")))?;
         let mut runtime = self.runtimes.open(&session).await?;
@@ -140,7 +138,7 @@ impl TurnServices for RuntimeTurnServices {
             session.clone(),
             "session-command",
         ))?;
-        if admission.kind == SessionMailRunKind::Turn {
+        if admitted.admission.is_turn() {
             return Err(TurnError::Exec(format!(
                 "run {} admits a turn, not a command",
                 admitted.run
@@ -161,8 +159,7 @@ async fn admitted_rows(
     runtime: &LashRuntime,
     row: &TurnRow,
 ) -> Result<LogicalTurnAdmissions, TurnError> {
-    let admission: SessionMailAdmission = serde_json::from_str(&row.admission_json)
-        .map_err(|error| TurnError::Exec(format!("run {} admission: {error}", row.run)))?;
+    let admission = &row.admission;
     let store = runtime.services.store.clone().ok_or_else(|| {
         TurnError::Exec(format!(
             "session {} runs its turns over its store",
@@ -170,8 +167,8 @@ async fn admitted_rows(
         ))
     })?;
     let store_error = |error: crate::StoreError| TurnError::Runtime(error.runtime_error());
-    let mut inputs = Vec::with_capacity(admission.inputs.len());
-    for input in &admission.inputs {
+    let mut inputs = Vec::with_capacity(admission.input_ids().len());
+    for input in admission.input_ids() {
         let read = store
             .pending_turn_input(input)
             .await
@@ -194,7 +191,8 @@ async fn admitted_rows(
             applications: Vec::new(),
         }]
     };
-    let queued = if admission.batches.is_empty() {
+    let taken = admission.batch_ids();
+    let queued = if taken.is_empty() {
         Vec::new()
     } else {
         let batches = store
@@ -202,12 +200,12 @@ async fn admitted_rows(
             .await
             .map_err(store_error)?
             .into_iter()
-            .filter(|batch| admission.batches.contains(&batch.batch_id))
+            .filter(|batch| taken.contains(&batch.batch_id))
             .collect::<Vec<_>>();
-        if batches.len() != admission.batches.len() {
+        if batches.len() != taken.len() {
             return Err(TurnError::Exec(format!(
-                "run {} took batches {:?}, not all of which are queued",
-                row.run, admission.batches
+                "run {} took batches {taken:?}, not all of which are queued",
+                row.run
             )));
         }
         vec![crate::AdmittedQueuedWork {

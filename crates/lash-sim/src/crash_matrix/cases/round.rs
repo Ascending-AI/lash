@@ -10,7 +10,7 @@
 use std::sync::{Arc, Mutex};
 
 use lash_core::sync::MutexExt as _;
-use lash_durable::domain::TurnTerminal;
+use lash_core_store::store::RunTerminalKind;
 use lash_durable_test::{Cut, SimNodes};
 use lash_sansio::SessionId;
 
@@ -64,7 +64,7 @@ impl Workload for RoundCase {
         };
         let mut violations = Vec::new();
         match turn_end(nodes, &session).await {
-            Some(end) if end.terminal == TurnTerminal::Answered => {}
+            Some(end) if end.kind() == RunTerminalKind::Answered => {}
             other => violations.push(format!("the round's turn ended {other:?}")),
         }
         for (call, entries) in world.ledger().of_tool(Tool::Flaky.name()) {

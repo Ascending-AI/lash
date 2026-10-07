@@ -3,7 +3,6 @@
 //! mail drain admits it as the run its source key names.
 
 use lash_core::runtime::durable::session::{TurnError, TurnRow};
-use lash_core::runtime::durable::session_mail::SessionMailAdmission;
 use lash_core::{Message, MessageRole, Part, facade_support::shared_parts};
 use lash_core_execution::Backend;
 use lash_core_execution::{InputItem, PendingTurnInputDraft, TurnInput, TurnInputIngress};
@@ -40,11 +39,9 @@ pub async fn admitted_messages(
     backend: &Backend,
     row: &TurnRow,
 ) -> Result<Vec<Message>, TurnError> {
-    let admission: SessionMailAdmission = serde_json::from_str(&row.admission_json)
-        .map_err(|error| TurnError::Exec(format!("admission: {error}")))?;
     let catalog = backend.session_store_factory();
-    let mut messages = Vec::with_capacity(admission.inputs.len());
-    for input in &admission.inputs {
+    let mut messages = Vec::with_capacity(row.admission.input_ids().len());
+    for input in row.admission.input_ids() {
         let read = catalog
             .pending_turn_input(&row.session, input)
             .await

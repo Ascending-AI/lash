@@ -385,7 +385,8 @@ CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
 -- per (session, run) admitted work ran under, with the exact result of
 -- the run's admission, committed in the admission's own transaction, and the
 -- run's terminal evidence once it has one: the `terminal_*` columns are set
--- together, exactly once. `lash_session_run_inputs` binds each accepted input to the
+-- together, exactly once, and `terminal_kind` is the kind the cause derives,
+-- kept for the indexes and checked against it. `lash_session_run_inputs` binds each accepted input to the
 -- run that executes it. `lash_control_intents` records a session's close; a
 -- `close_session` row outlives its session as the deletion tombstone.
 CREATE TABLE IF NOT EXISTS lash_session_runs (
@@ -397,7 +398,22 @@ CREATE TABLE IF NOT EXISTS lash_session_runs (
     terminal_head_revision BIGINT,
     terminal_at_ms BIGINT,
     PRIMARY KEY (session_id, run),
-    CONSTRAINT ck_session_runs_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
+    CONSTRAINT ck_session_runs_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL)),
+    CONSTRAINT ck_session_runs_terminal_kind CHECK (terminal_kind IS NULL OR terminal_kind = CASE (terminal_cause_json::jsonb ->> 'cause')
+        WHEN 'committed' THEN CASE
+            WHEN (terminal_cause_json::jsonb #> '{outcome,finished}') IS NOT NULL THEN 'answered'
+            WHEN (terminal_cause_json::jsonb #> '{outcome,stopped,cancelled}') IS NOT NULL THEN 'cancelled'
+            ELSE 'failed' END
+        WHEN 'substrate_lost' THEN CASE
+            WHEN jsonb_typeof(terminal_cause_json::jsonb -> 'cancelled_by') = 'string' THEN 'cancelled'
+            ELSE 'failed' END
+        WHEN 'refused' THEN 'failed'
+        WHEN 'commands_applied' THEN 'answered'
+        WHEN 'cancelled' THEN 'cancelled'
+        WHEN 'operator_cancelled' THEN 'cancelled'
+        WHEN 'forked' THEN 'cancelled'
+        WHEN 'session_deleted' THEN 'cancelled'
+        ELSE '' END)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_session_runs_unfinished
@@ -980,25 +996,27 @@ CREATE TABLE IF NOT EXISTS lash_exec_snapshots (
 -- Turn phase state (V0, FIG-5170; then L3): a 1:1 side table of
 -- lash_session_runs while the turn is unfinished. The run row stays the one
 -- admission authority (ux_lash_session_runs_unfinished); this row carries the
--- phase, the encoded TurnCheckpoint and the pinned model call.
+-- phase with what a restore resumes it from: no checkpoint while admitted and
+-- one after, and the pinned model call exactly in the model phase, whose
+-- attempt is phase_arg.
 CREATE TABLE IF NOT EXISTS lash_turn_phases (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
     phase TEXT NOT NULL CONSTRAINT ck_turn_phases_phase
-        CHECK (phase IN ('admitted', 'prepared', 'model', 'tools', 'waiting', 'committing')),
+        CHECK (phase IN ('admitted', 'model', 'tools')),
     phase_arg BIGINT,
     iteration BIGINT NOT NULL,
     checkpoint_ref TEXT,
-    model_attempt BIGINT,
     model_request_ref TEXT,
     model_deadline_ms BIGINT,
     turn_deadline_ms BIGINT,
     written_epoch BIGINT NOT NULL,
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
+    CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
     CONSTRAINT ck_turn_phases_model CHECK (
-        (model_attempt IS NULL) = (model_request_ref IS NULL)
-        AND (model_attempt IS NULL) = (model_deadline_ms IS NULL))
+        (phase = 'model') = (model_request_ref IS NOT NULL)
+        AND (phase = 'model') = (model_deadline_ms IS NOT NULL))
 );
 
 -- Waits, keyed promises and timers (L5, FIG-5173; ADR 0132 §6): one row per

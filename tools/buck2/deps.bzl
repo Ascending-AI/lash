@@ -257,6 +257,7 @@ PACKAGE_DEPS = {
             "async_trait": "//third-party/rust:p0015",
             "futures_util": "//third-party/rust:p0127",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
+            "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "thiserror": "//third-party/rust:p0364",
             "tokio": "//third-party/rust:p0371"

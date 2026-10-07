@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS session_ingress_sequence (
 /// `session_runs` holds one row per `(session, run)` admitted work ran
 /// under, with the exact result of the run's admission (`admission_json`),
 /// committed in the admission's own transaction (FIG-3840, FIG-3927), and the run's terminal evidence once
-/// it has one: all four `terminal_*` columns are set together, exactly once. `session_run_inputs`
+/// it has one: all four `terminal_*` columns are set together, exactly once, and
+/// `terminal_kind` is the kind its cause derives (`RunTerminalCause::kind`),
+/// kept beside it only for the indexes and checked against it. `session_run_inputs`
 /// binds each accepted input to the run that executes it. `control_intents`
 /// records a session's close; a `close_session` row outlives its session as
 /// the deletion tombstone.
@@ -33,7 +35,22 @@ CREATE TABLE IF NOT EXISTS session_runs (
     terminal_head_revision  INTEGER,
     terminal_at_ms          INTEGER,
     PRIMARY KEY (session_id, run),
-    CONSTRAINT ck_session_runs_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
+    CONSTRAINT ck_session_runs_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL)),
+    CONSTRAINT ck_session_runs_terminal_kind CHECK (terminal_kind IS NULL OR terminal_kind = CASE json_extract(terminal_cause_json, '$.cause')
+        WHEN 'committed' THEN CASE
+            WHEN json_type(terminal_cause_json, '$.outcome.finished') IS NOT NULL THEN 'answered'
+            WHEN json_type(terminal_cause_json, '$.outcome.stopped.cancelled') IS NOT NULL THEN 'cancelled'
+            ELSE 'failed' END
+        WHEN 'substrate_lost' THEN CASE
+            WHEN json_type(terminal_cause_json, '$.cancelled_by') = 'text' THEN 'cancelled'
+            ELSE 'failed' END
+        WHEN 'refused' THEN 'failed'
+        WHEN 'commands_applied' THEN 'answered'
+        WHEN 'cancelled' THEN 'cancelled'
+        WHEN 'operator_cancelled' THEN 'cancelled'
+        WHEN 'forked' THEN 'cancelled'
+        WHEN 'session_deleted' THEN 'cancelled'
+        ELSE '' END)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_session_runs_unfinished

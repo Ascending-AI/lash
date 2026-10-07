@@ -22,10 +22,11 @@
 
 use lash_durable::domain::{MailBatchKind, SessionMailWrite, SessionMailbox};
 use lash_durable::{ActorTx, DomainWrite, DurableError};
-use lash_sansio::{BatchId, InputId, SessionId, TurnId};
+use lash_sansio::{SessionId, TurnId};
 
 use super::session::AdmittedInputs;
 use crate::ActorContext;
+use crate::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
 
 /// The mail kind a session's close is appended under; its body is empty.
 pub const SESSION_CLOSE_MAIL: &str = "session.close";
@@ -44,43 +45,6 @@ pub struct SessionMailDrain {
     pub admit: Option<AdmittedInputs>,
     /// A close of the session to begin.
     pub close: Option<SessionCloseRequest>,
-}
-
-/// Which lane a drained run serves.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionMailRunKind {
-    /// A turn: bound inputs or turn batches.
-    Turn,
-    /// One session command, applied by its commit.
-    Command,
-    /// A plugin task's operation run, applied by its commit.
-    Operation,
-}
-
-/// What a drain admitted, as [`AdmittedInputs::admission_json`] carries it.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SessionMailAdmission {
-    /// The lane the run serves.
-    pub kind: SessionMailRunKind,
-    /// The inputs the run took, bound to it.
-    pub inputs: Vec<InputId>,
-    /// The batches the run took: bound to a turn run, open for a command or
-    /// operation run.
-    pub batches: Vec<BatchId>,
-}
-
-impl SessionMailAdmission {
-    /// What `admitted`'s run took, as its drain encoded it.
-    ///
-    /// # Errors
-    ///
-    /// [`SessionMailError::Undecodable`] when the admission does not decode.
-    pub fn of(admitted: &AdmittedInputs) -> Result<Self, SessionMailError> {
-        serde_json::from_str(&admitted.admission_json).map_err(|error| {
-            SessionMailError::Undecodable(format!("run {} admission: {error}", admitted.run))
-        })
-    }
 }
 
 /// Why a drain failed.
@@ -121,30 +85,24 @@ pub async fn drain_session_mail(
         }),
         None => None,
     };
-    let admit = admission(&session, &mailbox)?;
-    if let Some((admitted, bind)) = admit.as_ref()
-        && let Some(bind) = bind
+    let admit = admission(&mailbox)?;
+    // A turn binds what it took; a command or operation run binds nothing.
+    if let Some(admitted) = admit.as_ref()
+        && admitted.admission.is_turn()
     {
         tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
             session: session.clone(),
             run: admitted.run.clone(),
-            inputs: bind.inputs.clone(),
-            batches: bind.batches.clone(),
+            inputs: admitted.admission.input_ids().to_vec(),
+            batches: admitted.admission.batch_ids(),
         }));
     }
     tx.ack_seen();
-    Ok(SessionMailDrain {
-        admit: admit.map(|(admitted, _)| admitted),
-        close,
-    })
+    Ok(SessionMailDrain { admit, close })
 }
 
-/// The run `mailbox` admits next, and what it binds (`None` for a run that
-/// binds nothing).
-fn admission(
-    session: &SessionId,
-    mailbox: &SessionMailbox,
-) -> Result<Option<(AdmittedInputs, Option<SessionMailAdmission>)>, SessionMailError> {
+/// The run `mailbox` admits next, with what its admission took.
+fn admission(mailbox: &SessionMailbox) -> Result<Option<AdmittedInputs>, SessionMailError> {
     if !mailbox.live || mailbox.closing || mailbox.follow_on_owed || mailbox.bound_run.is_some() {
         return Ok(None);
     }
@@ -152,70 +110,52 @@ fn admission(
     if let Some(batch) = head_batch
         && batch.kind != MailBatchKind::Turn
     {
-        let kind = match batch.kind {
-            MailBatchKind::Operation => SessionMailRunKind::Operation,
-            _ => SessionMailRunKind::Command,
+        let admission = match batch.kind {
+            MailBatchKind::Operation => RunAdmissionRecord::Operation {
+                batch: batch.batch.clone(),
+            },
+            _ => RunAdmissionRecord::Command {
+                batch: batch.batch.clone(),
+            },
         };
-        let admission = SessionMailAdmission {
-            kind,
-            inputs: Vec::new(),
-            batches: vec![batch.batch.clone()],
-        };
-        return Ok(Some((
-            admitted(session, run_of(batch.batch.as_str())?, &admission)?,
-            None,
-        )));
+        return Ok(Some(AdmittedInputs {
+            run: run_of(batch.batch.as_str())?,
+            admission,
+        }));
     }
     let head_input = mailbox.inputs.iter().min_by_key(|input| input.enqueue_seq);
     let turn_batch = |batch: &lash_durable::domain::MailBatch| -> Result<_, SessionMailError> {
-        Ok((
-            run_of(batch.batch.as_str())?,
-            SessionMailAdmission {
-                kind: SessionMailRunKind::Turn,
-                inputs: Vec::new(),
-                batches: vec![batch.batch.clone()],
+        Ok(AdmittedInputs {
+            run: run_of(batch.batch.as_str())?,
+            admission: RunAdmissionRecord::Turn {
+                took: AdmittedTurnRows::Batch {
+                    id: batch.batch.clone(),
+                },
             },
-        ))
+        })
     };
-    let chosen = match (head_input, head_batch) {
+    Ok(Some(match (head_input, head_batch) {
         (Some(input), Some(batch)) if batch.enqueue_seq < input.enqueue_seq => turn_batch(batch)?,
         (Some(input), _) => {
             let run = match input.source_key.as_deref().map(TurnId::parse) {
                 Some(Ok(run)) => run,
                 _ => run_of(input.input.as_str())?,
             };
-            (
+            let ids = AdmittedInputIds::new(vec![input.input.clone()])
+                .map_err(|error| SessionMailError::Undecodable(error.to_string()))?;
+            AdmittedInputs {
                 run,
-                SessionMailAdmission {
-                    kind: SessionMailRunKind::Turn,
-                    inputs: vec![input.input.clone()],
-                    batches: Vec::new(),
+                admission: RunAdmissionRecord::Turn {
+                    took: AdmittedTurnRows::Inputs { ids },
                 },
-            )
+            }
         }
         (None, Some(batch)) => turn_batch(batch)?,
         (None, None) => return Ok(None),
-    };
-    let (run, bind) = chosen;
-    Ok(Some((admitted(session, run, &bind)?, Some(bind))))
+    }))
 }
 
 fn run_of(id: &str) -> Result<TurnId, SessionMailError> {
     TurnId::parse(id)
         .map_err(|error| SessionMailError::Undecodable(format!("run id {id}: {error}")))
-}
-
-fn admitted(
-    session: &SessionId,
-    run: TurnId,
-    admission: &SessionMailAdmission,
-) -> Result<AdmittedInputs, SessionMailError> {
-    let admission_json = serde_json::to_string(admission).map_err(|error| {
-        SessionMailError::Undecodable(format!("session {session} admission: {error}"))
-    })?;
-    Ok(AdmittedInputs {
-        run,
-        inputs: admission.inputs.clone(),
-        admission_json,
-    })
 }

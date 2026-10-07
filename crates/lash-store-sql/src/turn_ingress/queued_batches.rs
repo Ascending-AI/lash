@@ -35,6 +35,11 @@ crate::statements! {
              FROM queued_work_batches
              WHERE batch_id = ?1";
 
+        /// The source key batch `?2` of session `?1` was accepted under: the
+        /// turn a run that admits it executes (FIG-3946).
+        select_source_key_by_id = "SELECT source_key FROM queued_work_batches
+             WHERE session_id = ?1 AND batch_id = ?2";
+
         /// The applying commit's original receipt, reached through the command tombstone.
         select_command_completion = "SELECT receipt.turn_id, receipt.result_json
              FROM queued_work_batches AS batch

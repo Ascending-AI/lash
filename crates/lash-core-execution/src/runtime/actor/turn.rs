@@ -6,7 +6,7 @@
 //! makes or the phase transaction that commits it; a restore recomputes the
 //! rest from committed state.
 
-pub use lash_durable::domain::{ModelPin, TurnPhase, TurnRow, TurnTerminal};
+pub use lash_durable::domain::{ModelPin, TurnRow, UnfinishedPhase};
 
 use super::ActorContext;
 

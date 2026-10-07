@@ -6,112 +6,113 @@
 //! unfinished.
 
 use crate::ids::{DurableInstant, Epoch};
+use lash_core_store::store::{RunAdmissionRecord, RunTerminalCause, RunTerminalKind};
 use lash_sansio::{SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
 
 use super::keys::RunSeq;
 
-/// Where a turn is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum TurnPhase {
-    /// Admitted: inputs bound, deadline recorded.
+/// Where an unfinished turn is: each phase carries exactly what a restore
+/// resumes it from. A turn's end is its run's terminal, never a phase.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UnfinishedPhase {
+    /// Admitted: inputs bound, deadline recorded, nothing run yet. A
+    /// restore starts the turn from its admission.
     Admitted,
-    /// Prepared: the prepared context and checkpoint committed.
-    Prepared,
-    /// A model call is in flight under `attempt`, its request pinned.
+    /// A model call is in flight, its request pinned before its first byte.
     Model {
-        /// The attempt, from 1.
-        attempt: u32,
+        /// The pinned call.
+        pin: ModelPin,
+        /// The checkpoint that re-delivers the call, encoded inline by its
+        /// owner.
+        checkpoint: String,
     },
-    /// A tool round is admitted and its bodies may run.
+    /// A tool round or a code cell is admitted and its bodies may run.
     Tools {
         /// The round's run.
         run: RunSeq,
+        /// The checkpoint that re-delivers the round, encoded inline by its
+        /// owner.
+        checkpoint: String,
     },
-    /// Blocked on waits or timers.
-    Waiting,
-    /// Committing the turn.
-    Committing,
-    /// Ended.
-    Terminal(TurnTerminal),
 }
 
-impl TurnPhase {
-    /// The stored spelling and its argument: a tool round's run or a model
-    /// call's attempt. A terminal phase is stored on the turn's run row,
-    /// never as a phase.
+impl UnfinishedPhase {
+    /// The stored spelling and its argument: a model call's attempt or a
+    /// tool round's run.
     #[must_use]
     pub fn stored(&self) -> (&'static str, Option<u64>) {
         match self {
             Self::Admitted => ("admitted", None),
-            Self::Prepared => ("prepared", None),
-            Self::Model { attempt } => ("model", Some(u64::from(*attempt))),
-            Self::Tools { run } => ("tools", Some(run.0)),
-            Self::Waiting => ("waiting", None),
-            Self::Committing => ("committing", None),
-            Self::Terminal(_) => ("terminal", None),
+            Self::Model { pin, .. } => ("model", Some(u64::from(pin.attempt))),
+            Self::Tools { run, .. } => ("tools", Some(run.0)),
         }
     }
 
-    /// A stored phase read back; `None` for anything [`Self::stored`] does
-    /// not write.
+    /// The checkpoint a restore resumes from; `None` while admitted.
     #[must_use]
-    pub fn parse(stored: &str, argument: Option<u64>) -> Option<Self> {
-        Some(match (stored, argument) {
-            ("admitted", None) => Self::Admitted,
-            ("prepared", None) => Self::Prepared,
-            ("model", Some(attempt)) => Self::Model {
-                attempt: u32::try_from(attempt).ok()?,
+    pub fn checkpoint(&self) -> Option<&str> {
+        match self {
+            Self::Admitted => None,
+            Self::Model { checkpoint, .. } | Self::Tools { checkpoint, .. } => Some(checkpoint),
+        }
+    }
+
+    /// The pinned model call; `Some` exactly in the model phase.
+    #[must_use]
+    pub fn model(&self) -> Option<&ModelPin> {
+        match self {
+            Self::Model { pin, .. } => Some(pin),
+            Self::Admitted | Self::Tools { .. } => None,
+        }
+    }
+
+    /// The phase its stored columns name; `None` for anything
+    /// [`Self::stored`] does not write. The DDL refuses those rows too.
+    #[must_use]
+    pub fn parse(
+        stored: &str,
+        argument: Option<u64>,
+        checkpoint: Option<String>,
+        pin: Option<(String, DurableInstant)>,
+    ) -> Option<Self> {
+        Some(match (stored, argument, checkpoint, pin) {
+            ("admitted", None, None, None) => Self::Admitted,
+            ("model", Some(attempt), Some(checkpoint), Some((request_ref, deadline))) => {
+                Self::Model {
+                    pin: ModelPin {
+                        attempt: u32::try_from(attempt).ok()?,
+                        request_ref,
+                        deadline,
+                    },
+                    checkpoint,
+                }
+            }
+            ("tools", Some(run), Some(checkpoint), None) => Self::Tools {
+                run: RunSeq(run),
+                checkpoint,
             },
-            ("tools", Some(run)) => Self::Tools { run: RunSeq(run) },
-            ("waiting", None) => Self::Waiting,
-            ("committing", None) => Self::Committing,
             _ => return None,
         })
     }
 }
 
-impl TurnTerminal {
-    /// The stored spelling.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Answered => "answered",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-        }
-    }
-
-    /// The terminal its stored spelling names.
-    #[must_use]
-    pub fn parse(stored: &str) -> Option<Self> {
-        [Self::Answered, Self::Failed, Self::Cancelled]
-            .into_iter()
-            .find(|terminal| terminal.as_str() == stored)
-    }
-}
-
-/// How a turn ended (L3): its terminal, its typed cause, and the head
+/// How a turn ended (L3): its run's typed terminal cause and the head
 /// revision its commit published.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnEnd {
-    /// The terminal.
-    pub terminal: TurnTerminal,
-    /// Its typed cause, encoded by its owner.
-    pub cause_json: Option<String>,
+    /// Why the run ended.
+    pub cause: RunTerminalCause,
     /// The head revision its commit published; `None` when it published
     /// none (a cancelled turn).
     pub head_revision: Option<u64>,
 }
 
-/// How a turn ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum TurnTerminal {
-    /// It answered.
-    Answered,
-    /// It failed.
-    Failed,
-    /// It was cancelled.
-    Cancelled,
+impl TurnEnd {
+    /// How it ended: its cause's kind, never a second fact.
+    #[must_use]
+    pub fn kind(&self) -> RunTerminalKind {
+        self.cause.kind()
+    }
 }
 
 /// A pinned model request: re-sent byte-identical as the next attempt while
@@ -134,18 +135,12 @@ pub struct TurnRow {
     pub session: SessionId,
     /// The run (the turn's identity).
     pub run: TurnId,
-    /// The admission: bound inputs, base head revision, run spec, plugin
-    /// revision, encoded by its owner.
-    pub admission_json: String,
-    /// The phase.
-    pub phase: TurnPhase,
+    /// What the run's admission took.
+    pub admission: RunAdmissionRecord,
+    /// The phase, with what a restore resumes it from.
+    pub phase: UnfinishedPhase,
     /// The protocol iteration: the model-call ordinal.
     pub iteration: u32,
-    /// The bounded `TurnCheckpoint` (L3a's `SavedTurn`), encoded inline by
-    /// its owner.
-    pub checkpoint_ref: Option<String>,
-    /// The in-flight model call.
-    pub model: Option<ModelPin>,
     /// The host's turn deadline, recorded at admission.
     pub turn_deadline: Option<DurableInstant>,
     /// The epoch of the commit that last wrote the row.
@@ -165,13 +160,12 @@ pub enum TurnWrite {
         session: SessionId,
         /// The run.
         run: TurnId,
-        /// The admission.
-        admission_json: String,
+        /// What the admission took.
+        admission: RunAdmissionRecord,
         /// The host's turn deadline.
         turn_deadline: Option<DurableInstant>,
     },
-    /// Move an unfinished turn to `phase` with its checkpoint and model pin.
-    /// Refused with
+    /// Move an unfinished turn to `phase`. Refused with
     /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
     /// it is not the session's unfinished turn.
     Advance {
@@ -179,14 +173,10 @@ pub enum TurnWrite {
         session: SessionId,
         /// The run.
         run: TurnId,
-        /// The new phase; never [`TurnPhase::Terminal`].
-        phase: TurnPhase,
+        /// The new phase.
+        phase: UnfinishedPhase,
         /// The protocol iteration.
         iteration: u32,
-        /// The checkpoint, encoded inline by its owner.
-        checkpoint_ref: Option<String>,
-        /// The in-flight model call, or `None` once it is done.
-        model: Option<ModelPin>,
     },
     /// End the turn and drop its phase row. Refused with
     /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
@@ -196,10 +186,8 @@ pub enum TurnWrite {
         session: SessionId,
         /// The run.
         run: TurnId,
-        /// How it ended.
-        terminal: TurnTerminal,
-        /// Its typed cause, encoded by its owner.
-        cause_json: Option<String>,
+        /// Why it ended; its kind is the stored terminal.
+        cause: Box<RunTerminalCause>,
         /// The head revision its commit published, if it published one.
         head_revision: Option<u64>,
     },

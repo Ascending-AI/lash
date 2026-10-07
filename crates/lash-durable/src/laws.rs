@@ -591,9 +591,9 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
     store: &dyn DurableStore,
 ) -> LawResult {
     use crate::domain::{
-        DomainWrite, MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnCancelRequest,
-        TurnTerminal, TurnWrite,
+        DomainWrite, MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnCancelRequest, TurnWrite,
     };
+    use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord, RunTerminalCause};
     use lash_sansio::{SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
 
     let id = SessionId::try_from("cancelled-session".to_owned())
@@ -611,7 +611,11 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
     tx.write(DomainWrite::Turn(TurnWrite::Admit {
         session: id.clone(),
         run: run.clone(),
-        admission_json: "{}".to_owned(),
+        admission: RunAdmissionRecord::Turn {
+            took: AdmittedTurnRows::Batch {
+                id: lash_sansio::BatchId::from("cancelled-batch"),
+            },
+        },
         turn_deadline: None,
     }))
     .ack_seen()
@@ -724,8 +728,9 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {
         session: id.clone(),
         run: run.clone(),
-        terminal: TurnTerminal::Cancelled,
-        cause_json: Some("{}".to_owned()),
+        cause: Box::new(RunTerminalCause::OperatorCancelled {
+            intent: lash_core_store::store::ControlIntentId::from_sequence(1),
+        }),
         head_revision: None,
     }))
     .ack_seen()

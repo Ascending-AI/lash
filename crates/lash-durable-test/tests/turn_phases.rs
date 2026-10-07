@@ -46,8 +46,8 @@ use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
     AdmittedInputs, CodeCell, OpenTurn, SessionActivation, SessionParkReason, TurnCancelRequest,
-    TurnCommit, TurnDone, TurnDrive, TurnError, TurnPhase, TurnRestore, TurnRow, TurnServices,
-    request_turn_cancel,
+    TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
+    UnfinishedPhase, request_turn_cancel,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -61,6 +61,7 @@ use lash_core_execution::runtime::actor::round::{
     AdmittedExecution, CompletedCall, MemberBody, MemberPin, PolicyView, RoundTools,
 };
 use lash_core_execution::{ActorContext, Backend};
+use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
 use lash_core_store::tool_run::AttemptOutcome;
 use lash_durable::domain::TurnWrite;
 use lash_durable::runner::Activation;
@@ -1058,16 +1059,21 @@ impl Activation for PoisonFirst {
             tx.write(DomainWrite::Turn(TurnWrite::Admit {
                 session: session(),
                 run: run(),
-                admission_json: "{}".to_owned(),
+                admission: RunAdmissionRecord::Turn {
+                    took: AdmittedTurnRows::Batch {
+                        id: lash_core::BatchId::from("poisoned-batch"),
+                    },
+                },
                 turn_deadline: None,
             }));
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session(),
                 run: run(),
-                phase: TurnPhase::Admitted,
+                phase: UnfinishedPhase::Tools {
+                    run: lash_durable::domain::RunSeq(1),
+                    checkpoint: "not a turn checkpoint".to_owned(),
+                },
                 iteration: 0,
-                checkpoint_ref: Some("not a turn checkpoint".to_owned()),
-                model: None,
             }));
             owned
                 .commit(tx, CommitLabel::TURN_ADMIT)
@@ -1314,11 +1320,20 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     let row = TurnRow {
         session: session(),
         run: run(),
-        admission_json: String::new(),
-        phase: lash_core::runtime::durable::session::TurnPhase::Model { attempt: 1 },
+        admission: RunAdmissionRecord::Turn {
+            took: AdmittedTurnRows::Batch {
+                id: lash_core::BatchId::from("l3-batch"),
+            },
+        },
+        phase: UnfinishedPhase::Model {
+            pin: lash_durable::domain::ModelPin {
+                attempt: 1,
+                request_ref: "pinned".to_owned(),
+                deadline: lash_durable::DurableInstant(i64::MAX),
+            },
+            checkpoint,
+        },
         iteration: 0,
-        checkpoint_ref: Some(checkpoint),
-        model: None,
         turn_deadline: None,
         written_epoch: lash_durable::Epoch(1),
         cancel: None,
@@ -1405,4 +1420,215 @@ async fn a_head_commit_refused_on_a_moved_head_evicts_the_cached_head_and_the_tu
         Dialect::Postgres,
     )
     .await;
+}
+
+/// Send `session` its turn's first input, under source key `run`, claim its
+/// actor on a node of its own and admit run `run` with that input, binding
+/// it the way the session actor's mail drain does. Answers the claim's
+/// epoch.
+async fn admit_running_turn(
+    backend: &Backend,
+    database: &dyn DurableStore,
+    session: &SessionId,
+    run: &TurnId,
+) -> lash_durable::Epoch {
+    use lash_core_execution::{PendingTurnInputDraft, TurnInput, TurnInputIngress};
+    let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
+    lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, session).await;
+    let first = catalog
+        .enqueue_pending_turn_input(
+            PendingTurnInputDraft::new(
+                session.clone(),
+                TurnInputIngress::NextTurn,
+                TurnInput::text("go"),
+            )
+            .with_source_key(run.as_str()),
+        )
+        .await
+        .expect("the turn's input is accepted");
+    let admission = RunAdmissionRecord::Turn {
+        took: AdmittedTurnRows::Inputs {
+            ids: AdmittedInputIds::new(vec![first.input_id.clone()]).unwrap(),
+        },
+    };
+    use lash_durable::domain::{DomainWrite, SessionMailWrite, TurnWrite};
+    let actor = ActorKey::session(session.as_str()).unwrap();
+    let snapshot = database
+        .actor(&actor)
+        .await
+        .unwrap()
+        .expect("the input woke the session");
+    let lease = database
+        .register_node(&lash_durable::NodeSpec {
+            node: lash_durable::NodeId::new(format!("owner-of-{session}")),
+            decodes: vec![snapshot.formats.clone()],
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    let claimed = database.claim(&lease, 1).await.unwrap();
+    assert_eq!(claimed.len(), 1, "the woken session was not claimed");
+    let mut tx = database.begin(&actor, claimed[0].epoch).await.unwrap();
+    tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
+        session: session.clone(),
+        run: run.clone(),
+        inputs: vec![first.input_id],
+        batches: Vec::new(),
+    }));
+    tx.write(DomainWrite::Turn(TurnWrite::Admit {
+        session: session.clone(),
+        run: run.clone(),
+        admission,
+        turn_deadline: None,
+    }));
+    tx.ack_seen();
+    database
+        .commit(tx, CommitLabel::TURN_ADMIT)
+        .await
+        .expect("the turn is admitted");
+    claimed[0].epoch
+}
+
+/// FIG-5221: input a host sends to a running durable turn is admitted as
+/// that turn's active-turn input. The store reads the run's admission, as
+/// the session actor recorded it, to know which turns the run executes.
+async fn input_to_a_running_turn_is_admitted(dialect: Dialect, postgres_url: Option<String>) {
+    use lash_core_execution::{PendingTurnInputDraft, TurnInput, TurnInputIngress, TurnInputState};
+    let keep = Mutex::default();
+    let (stores, database) =
+        dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
+    let backend = Backend::for_testing(stores);
+    admit_running_turn(&backend, database.as_ref(), &session(), &run()).await;
+
+    let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
+    let steered = catalog
+        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
+            session(),
+            TurnInputIngress::active_turn(run(), Default::default()),
+            TurnInput::text("steer"),
+        ))
+        .await
+        .expect("input to the running turn is admitted");
+    assert!(
+        matches!(steered.state, TurnInputState::PendingActive(_))
+            && steered.state.active_turn_id() == Some(&run()),
+        "the steering input waits for the running turn: {steered:?}"
+    );
+}
+
+#[tokio::test]
+async fn input_to_a_running_turn_is_admitted_on_sqlite_memory() {
+    input_to_a_running_turn_is_admitted(Dialect::SqliteMemory, None).await;
+}
+
+#[tokio::test]
+async fn input_to_a_running_turn_is_admitted_on_sqlite_file() {
+    input_to_a_running_turn_is_admitted(Dialect::SqliteFile, None).await;
+}
+
+#[tokio::test]
+async fn input_to_a_running_turn_is_admitted_on_postgres() {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    input_to_a_running_turn_is_admitted(Dialect::Postgres, Some(url)).await;
+}
+
+/// FIG-5221: every kind a session actor's turn ends as is stored from its
+/// typed cause and read back through the host's `terminal_of` without a
+/// decode error: an answer, a failure and a cancel.
+async fn each_turn_terminal_reads_back(dialect: Dialect, postgres_url: Option<String>) {
+    use lash_core::facade_support::{TurnAddress, TurnStop, TurnTerminal, TurnWorkDriver};
+    use lash_core::runtime::durable::session::cancel_evidence;
+    use lash_core_store::store::{RunCommittedOutcome, RunTerminalCause, TurnCommitId};
+    use lash_durable::domain::{DomainWrite, TurnWrite};
+    let keep = Mutex::default();
+    let (stores, database) =
+        dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
+    let backend = Backend::for_testing(stores);
+    let evidence = cancel_evidence(&TurnCancelRequest {
+        session: session(),
+        run: run(),
+        request_id: "cancel".to_owned(),
+        origin: None,
+        reason: Some("the host cancelled".to_owned()),
+        undelivered: TurnCancelUndeliveredInputPolicy::Defer,
+        mode: TurnCancelMode::Immediate,
+    });
+    let committed = |outcome| RunTerminalCause::Committed {
+        commit: TurnCommitId::new(run(), 0),
+        turn: run(),
+        outcome,
+    };
+    let ends = [
+        (
+            "answered",
+            committed(RunCommittedOutcome::Finished(
+                TurnFinish::AssistantMessage {
+                    text: "done".to_owned(),
+                },
+            )),
+            None,
+        ),
+        (
+            "failed",
+            committed(RunCommittedOutcome::Stopped(TurnStop::ToolFailure)),
+            Some(TurnStop::ToolFailure),
+        ),
+        (
+            "cancelled",
+            RunTerminalCause::Cancelled {
+                evidence: evidence.clone(),
+            },
+            Some(TurnStop::Cancelled { evidence }),
+        ),
+    ];
+    for (kind, cause, stop) in ends {
+        let session = SessionId::try_from(format!("terminal-{kind}")).unwrap();
+        let epoch = admit_running_turn(&backend, database.as_ref(), &session, &run()).await;
+        let actor = ActorKey::session(session.as_str()).unwrap();
+        let mut tx = database.begin(&actor, epoch).await.unwrap();
+        tx.write(DomainWrite::Turn(TurnWrite::Terminal {
+            session: session.clone(),
+            run: run(),
+            cause: Box::new(cause.clone()),
+            head_revision: None,
+        }));
+        database
+            .commit(tx, CommitLabel::TURN_COMMIT)
+            .await
+            .unwrap_or_else(|error| panic!("the {kind} terminal commits: {error}"));
+        let end = database.turn_end(&session, &run()).await.unwrap();
+        assert_eq!(
+            end.as_ref().map(|end| (end.kind().as_str(), &end.cause)),
+            Some((kind, &cause)),
+            "the {kind} terminal reads back its cause"
+        );
+        let terminal = TurnWorkDriver::new(backend.clone())
+            .await_terminal(&TurnAddress::new(session.clone(), run()))
+            .await
+            .unwrap_or_else(|error| panic!("the {kind} terminal decodes: {error}"));
+        let TurnTerminal::Committed { stop: read } = terminal;
+        assert_eq!(read, stop, "the host reads the {kind} terminal");
+    }
+}
+
+#[tokio::test]
+async fn each_turn_terminal_reads_back_through_the_host_on_sqlite_memory() {
+    each_turn_terminal_reads_back(Dialect::SqliteMemory, None).await;
+}
+
+#[tokio::test]
+async fn each_turn_terminal_reads_back_through_the_host_on_sqlite_file() {
+    each_turn_terminal_reads_back(Dialect::SqliteFile, None).await;
+}
+
+#[tokio::test]
+async fn each_turn_terminal_reads_back_through_the_host_on_postgres() {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    each_turn_terminal_reads_back(Dialect::Postgres, Some(url)).await;
 }

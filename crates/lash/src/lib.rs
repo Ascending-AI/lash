@@ -656,10 +656,11 @@ pub mod persistence {
     };
     /// A run's admission, what its checkpoints admit, how a commit settles
     /// the rows its run holds, and the session's one unfinished run
-    /// (FIG-3927, FIG-4403).
+    /// (FIG-3927, FIG-4403, FIG-5221).
     pub use lash_core::store::{
-        AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest, IngressRowId,
-        IngressSettlement, RUN_ADMISSION_STEP, RunAdmission, UnfinishedRun,
+        AdmittedHead, AdmittedInputIds, AdmittedTurnRows, CheckpointAdmission,
+        CheckpointAdmissionRequest, EmptyInputAdmission, IngressRowId, IngressSettlement,
+        RUN_ADMISSION_STEP, RunAdmissionRecord, UnfinishedRun,
     };
     /// The multi-session store's catalog and bounded history segments, the
     /// one-session view runtime code holds, and the window loaders (ADR 0112).

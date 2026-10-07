@@ -34,7 +34,7 @@ use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
 use lash_durable::{CommitLabel, DurableError};
 use tokio_util::sync::CancellationToken;
 
-use super::session::{TurnDrive, TurnError, TurnPhase, TurnRow};
+use super::session::{TurnDrive, TurnError, TurnRow, UnfinishedPhase};
 use super::turn_cancel;
 use crate::sansio::PendingToolCall;
 use crate::{ActorContext, EffectId, Response};
@@ -134,10 +134,8 @@ pub(super) async fn run(
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session.clone(),
                 run: row.run.clone(),
-                phase: TurnPhase::Tools { run },
+                phase: UnfinishedPhase::Tools { run, checkpoint },
                 iteration,
-                checkpoint_ref: Some(checkpoint),
-                model: None,
             }));
             let admitted: AdmittedRound = round::admit_round(
                 &mut tx,
@@ -239,7 +237,7 @@ pub(super) async fn cancel_open_round(
     tx: &mut lash_durable::ActorTx,
     row: &TurnRow,
 ) -> Result<(), TurnError> {
-    let TurnPhase::Tools { run } = row.phase else {
+    let UnfinishedPhase::Tools { run, .. } = row.phase else {
         return Ok(());
     };
     let owner = OwnerKey::Turn(row.session.clone(), row.run.clone());

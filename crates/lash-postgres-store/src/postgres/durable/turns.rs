@@ -7,13 +7,14 @@
 
 use std::sync::LazyLock;
 
+use lash_core_execution::store::{RunAdmissionRecord, RunTerminalCause};
 use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
     turn_cancel_undelivered_wire,
 };
 use lash_durable::domain::{
-    DomainRefusal, ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd,
-    TurnPhase, TurnRow, TurnTerminal, TurnWrite,
+    DomainRefusal, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnRow,
+    TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -30,6 +31,14 @@ fn refuse<T>(refusal: DomainRefusal) -> Result<T, DurableError> {
     Err(DurableError::Domain(refusal))
 }
 
+/// A store codec's refusal, as the durable port reports it.
+fn encoding(error: &lash_core_execution::StoreError) -> DurableError {
+    DurableError::Store(lash_durable::StoreFailure {
+        kind: lash_durable::StoreFailureKind::Corrupt,
+        message: error.to_string(),
+    })
+}
+
 pub(super) async fn apply(
     tx: &mut PgConnection,
     commit: &Committing<'_>,
@@ -39,7 +48,7 @@ pub(super) async fn apply(
         TurnWrite::Admit {
             session,
             run,
-            admission_json,
+            admission,
             turn_deadline,
         } => {
             let open: Option<String> = sqlx::query_scalar(SQL.open_run.sql())
@@ -55,11 +64,11 @@ pub(super) async fn apply(
             sqlx::query(SQL.insert_run.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
-                .bind(admission_json)
+                .bind(admission.to_stored().map_err(|error| encoding(&error))?)
                 .execute(&mut *tx)
                 .await
                 .map_err(sqlx_failure)?;
-            let (phase, argument) = TurnPhase::Admitted.stored();
+            let (phase, argument) = UnfinishedPhase::Admitted.stored();
             sqlx::query(SQL.insert_phase.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
@@ -67,7 +76,6 @@ pub(super) async fn apply(
                 .bind(argument.map(integer::<i64>).transpose()?)
                 .bind(0_i64)
                 .bind(Option::<String>::None)
-                .bind(Option::<i64>::None)
                 .bind(Option::<String>::None)
                 .bind(Option::<i64>::None)
                 .bind(turn_deadline.map(|deadline| deadline.0))
@@ -82,20 +90,18 @@ pub(super) async fn apply(
             run,
             phase,
             iteration,
-            checkpoint_ref,
-            model,
         } => {
-            let (phase, argument) = phase.stored();
+            let (stored, argument) = phase.stored();
+            let pin = phase.model();
             let advanced: Option<String> = sqlx::query_scalar(SQL.advance_phase.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
-                .bind(phase)
+                .bind(stored)
                 .bind(argument.map(integer::<i64>).transpose()?)
                 .bind(i64::from(*iteration))
-                .bind(checkpoint_ref.as_deref())
-                .bind(model.as_ref().map(|pin| i64::from(pin.attempt)))
-                .bind(model.as_ref().map(|pin| pin.request_ref.as_str()))
-                .bind(model.as_ref().map(|pin| pin.deadline.0))
+                .bind(phase.checkpoint())
+                .bind(pin.map(|pin| pin.request_ref.as_str()))
+                .bind(pin.map(|pin| pin.deadline.0))
                 .bind(commit.epoch.0)
                 .fetch_optional(&mut *tx)
                 .await
@@ -111,15 +117,14 @@ pub(super) async fn apply(
         TurnWrite::Terminal {
             session,
             run,
-            terminal,
-            cause_json,
+            cause,
             head_revision,
         } => {
             let ended: Option<String> = sqlx::query_scalar(SQL.end_run.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
-                .bind(terminal.as_str())
-                .bind(cause_json.as_deref().unwrap_or("null"))
+                .bind(cause.kind().as_str())
+                .bind(cause.to_stored().map_err(|error| encoding(&error))?)
                 .bind(head_revision.map(integer::<i64>).transpose()?)
                 .bind(commit.now.0)
                 .fetch_optional(&mut *tx)
@@ -301,15 +306,13 @@ pub(super) async fn turn_end(
     else {
         return Ok(None);
     };
-    let terminal: String = row.try_get(0).map_err(sqlx_failure)?;
-    let cause_json: Option<String> = row.try_get(1).map_err(sqlx_failure)?;
-    let head_revision: Option<i64> = row.try_get(2).map_err(sqlx_failure)?;
-    let terminal =
-        TurnTerminal::parse(&terminal).ok_or_else(|| corrupt("turn terminal", &terminal))?;
+    let cause: String = row.try_get(0).map_err(sqlx_failure)?;
+    let head_revision: Option<i64> = row.try_get(1).map_err(sqlx_failure)?;
+    let cause = RunTerminalCause::from_stored(&cause).map_err(|error| encoding(&error))?;
+    let head_revision = head_revision.map(integer::<u64>).transpose()?;
     Ok(Some(TurnEnd {
-        terminal,
-        cause_json: cause_json.filter(|cause| cause != "null"),
-        head_revision: head_revision.map(integer::<u64>).transpose()?,
+        cause,
+        head_revision,
     }))
 }
 
@@ -328,37 +331,189 @@ pub(super) async fn turn(
     let decode = |error: sqlx::Error| sqlx_failure(error);
     let run: String = row.try_get(0).map_err(decode)?;
     let run = TurnId::try_from(run.clone()).map_err(|_| corrupt("turn id", &run))?;
-    let phase: String = row.try_get(2).map_err(decode)?;
+    let stored_phase: String = row.try_get(2).map_err(decode)?;
     let argument: Option<i64> = row.try_get(3).map_err(decode)?;
     let argument = argument.map(integer::<u64>).transpose()?;
-    let phase = TurnPhase::parse(&phase, argument).ok_or_else(|| corrupt("turn phase", &phase))?;
-    let attempt: Option<i64> = row.try_get(6).map_err(decode)?;
-    let request: Option<String> = row.try_get(7).map_err(decode)?;
-    let deadline: Option<i64> = row.try_get(8).map_err(decode)?;
-    let model = match (attempt, request, deadline) {
-        (Some(attempt), Some(request_ref), Some(deadline)) => Some(ModelPin {
-            attempt: integer::<u32>(attempt)?,
-            request_ref,
-            deadline: DurableInstant(deadline),
-        }),
-        _ => None,
-    };
+    let checkpoint: Option<String> = row.try_get(5).map_err(decode)?;
+    let request: Option<String> = row.try_get(6).map_err(decode)?;
+    let deadline: Option<i64> = row.try_get(7).map_err(decode)?;
+    let pin = request.zip(deadline.map(DurableInstant));
+    let phase = UnfinishedPhase::parse(&stored_phase, argument, checkpoint, pin)
+        .ok_or_else(|| corrupt("turn phase", &stored_phase))?;
     let iteration: i64 = row.try_get(4).map_err(decode)?;
-    let turn_deadline: Option<i64> = row.try_get(9).map_err(decode)?;
-    let written_epoch = Epoch(row.try_get(10).map_err(decode)?);
-    let admission_json = row.try_get(1).map_err(decode)?;
-    let checkpoint_ref = row.try_get(5).map_err(decode)?;
+    let iteration = integer::<u32>(iteration)?;
+    let turn_deadline: Option<i64> = row.try_get(8).map_err(decode)?;
+    let written_epoch = Epoch(row.try_get(9).map_err(decode)?);
+    let admission: String = row.try_get(1).map_err(decode)?;
+    let admission =
+        RunAdmissionRecord::from_stored(&admission).map_err(|error| encoding(&error))?;
     let cancel = cancel_of(tx, session, &run).await?;
     Ok(Some(TurnRow {
         session: session.clone(),
         run,
-        admission_json,
+        admission,
         phase,
-        iteration: integer::<u32>(iteration)?,
-        checkpoint_ref,
-        model,
+        iteration,
         turn_deadline: turn_deadline.map(DurableInstant),
         written_epoch,
         cancel,
     }))
+}
+
+/// The storage laws of a turn's stored forms (FIG-5221) on PostgreSQL: the
+/// DDL itself refuses a phase row without what its phase restores from, and
+/// a run terminal whose kind its cause does not derive.
+#[cfg(test)]
+mod ddl_tests {
+    use sqlx::Connection as _;
+
+    use crate::PostgresStorage;
+    use crate::testing::IsolatedDatabase;
+
+    async fn connection() -> Option<(IsolatedDatabase, sqlx::PgConnection)> {
+        let Some(database_url) = crate::postgres_test_support::database_url() else {
+            eprintln!("skipping the DDL laws: database URL is not set");
+            return None;
+        };
+        let database = IsolatedDatabase::create(&database_url).await;
+        PostgresStorage::connect(database.url())
+            .await
+            .expect("provision the isolated store");
+        let connection = sqlx::PgConnection::connect(database.url())
+            .await
+            .expect("connect to the isolated store");
+        Some((database, connection))
+    }
+
+    /// Whether `result` is a CHECK constraint's refusal.
+    fn refused<T: std::fmt::Debug>(result: Result<T, sqlx::Error>) -> bool {
+        match result {
+            Err(error) => error
+                .as_database_error()
+                .and_then(|error| error.code())
+                .is_some_and(|code| code == "23514"),
+            Ok(_) => false,
+        }
+    }
+
+    async fn phase(
+        connection: &mut sqlx::PgConnection,
+        run: &str,
+        phase: &str,
+        argument: Option<i64>,
+        checkpoint: Option<&str>,
+        pin: Option<(&str, i64)>,
+    ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO lash_turn_phases (session_id, run, phase, phase_arg, iteration,
+                 checkpoint_ref, model_request_ref, model_deadline_ms, written_epoch)
+             VALUES ('s', $1, $2, $3, 0, $4, $5, $6, 1)",
+        )
+        .bind(run)
+        .bind(phase)
+        .bind(argument)
+        .bind(checkpoint)
+        .bind(pin.map(|(request, _)| request))
+        .bind(pin.map(|(_, deadline)| deadline))
+        .execute(connection)
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_ddl_refuses_a_model_phase_without_its_pin() {
+        let Some((_database, mut conn)) = connection().await else {
+            return;
+        };
+        assert!(refused(
+            phase(&mut conn, "unpinned", "model", Some(1), Some("{}"), None).await
+        ));
+        assert!(refused(
+            phase(
+                &mut conn,
+                "tools-pinned",
+                "tools",
+                Some(1),
+                Some("{}"),
+                Some(("r", 5))
+            )
+            .await
+        ));
+        phase(
+            &mut conn,
+            "pinned",
+            "model",
+            Some(1),
+            Some("{}"),
+            Some(("r", 5)),
+        )
+        .await
+        .expect("a pinned model phase is stored");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_ddl_refuses_a_non_admitted_phase_without_a_checkpoint() {
+        let Some((_database, mut conn)) = connection().await else {
+            return;
+        };
+        assert!(refused(
+            phase(&mut conn, "model", "model", Some(1), None, Some(("r", 5))).await
+        ));
+        assert!(refused(
+            phase(&mut conn, "tools", "tools", Some(1), None, None).await
+        ));
+        assert!(refused(
+            phase(
+                &mut conn,
+                "admitted-checkpoint",
+                "admitted",
+                None,
+                Some("{}"),
+                None
+            )
+            .await
+        ));
+        phase(&mut conn, "admitted", "admitted", None, None, None)
+            .await
+            .expect("an admitted phase");
+        phase(&mut conn, "tools-ok", "tools", Some(1), Some("{}"), None)
+            .await
+            .expect("a tools phase");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_ddl_refuses_a_terminal_kind_its_cause_does_not_derive() {
+        let Some((_database, mut conn)) = connection().await else {
+            return;
+        };
+        let mut end = async |run: &str, kind: &str, cause: &str| {
+            sqlx::query(
+                "INSERT INTO lash_session_runs (session_id, run, admission_json, terminal_kind,
+                     terminal_cause_json, terminal_head_revision, terminal_at_ms)
+                 VALUES ('s', $1, NULL, $2, $3, NULL, 1)",
+            )
+            .bind(run)
+            .bind(kind)
+            .bind(cause)
+            .execute(&mut conn)
+            .await
+        };
+        let cancelled = r#"{"cause":"operator_cancelled","intent":1}"#;
+        let lost = r#"{"cause":"substrate_lost","cancelled_by":null}"#;
+        let refused_cause = r#"{"cause":"refused","code":"x","message":"m"}"#;
+        assert!(refused(end("a", "answered", cancelled).await));
+        assert!(refused(end("b", "cancelled", lost).await));
+        assert!(refused(end("c", "answered", refused_cause).await));
+        assert!(refused(
+            end("d", "cancelled", r#"{"cause":"unknown"}"#).await
+        ));
+        end("e", "cancelled", cancelled)
+            .await
+            .expect("a cancelled cause ends cancelled");
+        end("f", "failed", lost)
+            .await
+            .expect("an unclaimed loss fails");
+        end("g", "answered", r#"{"cause":"commands_applied"}"#)
+            .await
+            .expect("applied commands answer");
+    }
 }

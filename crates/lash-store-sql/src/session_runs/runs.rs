@@ -17,12 +17,6 @@ crate::statements! {
         select_admission = "SELECT admission_json FROM session_runs
              WHERE session_id = ?1 AND run = ?2";
 
-        /// Record the admission in the same transaction as its row bindings.
-        write_admission = "UPDATE session_runs
-             SET admission_json = ?3
-             WHERE session_id = ?1 AND run = ?2 AND admission_json IS NULL";
-
-
         /// The one admitted run of session `?1` without terminal evidence,
         /// with its recorded admission.
         select_unfinished = "SELECT run, admission_json FROM session_runs

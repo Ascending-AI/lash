@@ -10,9 +10,9 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    RunAdmission, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause, RunTerminalWriteDecision,
-    RunTurns, UnfinishedRun, decide_run_terminal_write, run_binding_conflict, stored_intent_kind,
-    stored_intent_state,
+    RunAdmissionRecord, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause,
+    RunTerminalWriteDecision, RunTurns, UnfinishedRun, decide_run_terminal_write,
+    run_binding_conflict, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
@@ -210,10 +210,7 @@ async fn release_run_rows_conn(
         .map_err(store_sqlx_error)?;
     // What the run let go of is the session's to admit again.
     crate::durable::wake_session_tx(conn, session_id, false, at_ms).await?;
-    let ended = RunTurns::new(
-        run,
-        run_admission_conn(conn, session_id, run).await?.as_ref(),
-    );
+    let ended = run_turns_conn(conn, session_id, run).await?;
     let open_rows = sqlx::query(sql.pending_inputs_postgres.select_pending_active.sql())
         .bind(session_id.as_str())
         .fetch_all(&mut *conn)
@@ -487,14 +484,6 @@ pub(crate) async fn cancel_run_batch_tx(
     Ok(())
 }
 
-/// Decode a run's recorded admission (`session_runs.admission_json`).
-pub(crate) fn decode_run_admission(json: &str) -> Result<RunAdmission, StoreError> {
-    serde_json::from_str(json).map_err(|error| StoreError::StoredDataCorrupt {
-        record_kind: "RunAdmission",
-        message: error.to_string(),
-    })
-}
-
 /// The session's unfinished run, with the head its admission recorded,
 /// read on `conn`.
 pub(crate) async fn unfinished_run_conn(
@@ -508,10 +497,9 @@ pub(crate) async fn unfinished_run_conn(
             .await
             .map_err(store_sqlx_error)?;
     row.map(|(run, json)| {
-        let admission = decode_run_admission(&json)?;
         Ok(UnfinishedRun {
             run: TurnId::parse(run)?,
-            head: admission.head,
+            head: RunAdmissionRecord::from_stored(&json)?.head(),
         })
     })
     .transpose()
@@ -559,8 +547,9 @@ pub(crate) async fn unfinished_run_turns_conn(
     let Some(unfinished) = unfinished_run_conn(conn, session_id).await? else {
         return Ok(None);
     };
-    let admission = run_admission_conn(conn, session_id, &unfinished.run).await?;
-    Ok(Some(RunTurns::new(&unfinished.run, admission.as_ref())))
+    run_turns_conn(conn, session_id, &unfinished.run)
+        .await
+        .map(Some)
 }
 
 /// `run`'s recorded admission, read on `conn`: `None` for a run with no
@@ -569,7 +558,7 @@ pub(crate) async fn run_admission_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
     run: &TurnId,
-) -> Result<Option<RunAdmission>, StoreError> {
+) -> Result<Option<RunAdmissionRecord>, StoreError> {
     let json: Option<Option<String>> =
         sqlx::query_scalar(session_runs_sql().runs.select_admission.sql())
             .bind(session_id.as_str())
@@ -578,8 +567,47 @@ pub(crate) async fn run_admission_conn(
             .await
             .map_err(store_sqlx_error)?;
     json.flatten()
-        .map(|json| decode_run_admission(&json))
+        .map(|json| RunAdmissionRecord::from_stored(&json))
         .transpose()
+}
+
+/// The turns `run` executes ([`RunTurns`]), read on `conn`: its own physical
+/// turns and the turns its recorded admission's rows were accepted under.
+pub(crate) async fn run_turns_conn(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+    run: &TurnId,
+) -> Result<RunTurns, StoreError> {
+    let Some(admission) = run_admission_conn(conn, session_id, run).await? else {
+        return Ok(RunTurns::new(run, Vec::new()));
+    };
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let rows = admission
+        .input_ids()
+        .iter()
+        .map(|input| {
+            (
+                sql.pending_inputs.select_source_key_by_id.sql(),
+                input.to_string(),
+            )
+        })
+        .chain(admission.batch_ids().into_iter().map(|batch| {
+            (
+                sql.queued_batches.select_source_key_by_id.sql(),
+                batch.to_string(),
+            )
+        }));
+    let mut members = Vec::new();
+    for (statement, id) in rows {
+        let key: Option<Option<String>> = sqlx::query_scalar(statement)
+            .bind(session_id.as_str())
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(store_sqlx_error)?;
+        members.extend(key.flatten());
+    }
+    Ok(RunTurns::new(run, members))
 }
 
 /// The queued-work batches `run`'s recorded admission took, read on `conn`:
@@ -589,18 +617,12 @@ pub(crate) async fn admitted_batches_conn(
     session_id: &SessionId,
     run: &TurnId,
 ) -> Result<Vec<String>, StoreError> {
-    let Some(admission) = run_admission_conn(conn, session_id, run).await? else {
-        return Ok(Vec::new());
-    };
-    Ok(admission
-        .queued
-        .iter()
-        .flat_map(|queued| {
-            queued
-                .batches
-                .iter()
-                .map(|batch| batch.batch_id.to_string())
-        })
+    Ok(run_admission_conn(conn, session_id, run)
+        .await?
+        .map(|admission| admission.batch_ids())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|batch| batch.to_string())
         .collect())
 }
 

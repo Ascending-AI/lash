@@ -19,7 +19,6 @@ use lash_core::runtime::durable::session::{
     AdmittedInputs, CodeCell, OpenTurn, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
     TurnRow, TurnServices,
 };
-use lash_core::runtime::durable::session_mail::SessionMailAdmission;
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
     DriverAction, DriverContextView, Effect, ExecResponse, LlmOutputPart, LlmRequest, LlmResponse,
@@ -157,11 +156,9 @@ pub fn session_of_admission(rendered: &str) -> Option<SessionId> {
 /// The messages `row`'s turn starts with: one user message per input its
 /// admission took, read back from the session's store.
 async fn admitted_messages(backend: &Backend, row: &TurnRow) -> Result<Vec<Message>, TurnError> {
-    let admission: SessionMailAdmission = serde_json::from_str(&row.admission_json)
-        .map_err(|error| TurnError::Exec(format!("the turn's admission: {error}")))?;
     let catalog = backend.session_store_factory();
-    let mut messages = Vec::with_capacity(admission.inputs.len());
-    for input in &admission.inputs {
+    let mut messages = Vec::with_capacity(row.admission.input_ids().len());
+    for input in row.admission.input_ids() {
         let read = catalog
             .pending_turn_input(&row.session, input)
             .await

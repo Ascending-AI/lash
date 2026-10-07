@@ -26,7 +26,7 @@ use lash_durable::domain::{RunSeq, SessionCommitWrite, TurnWrite};
 
 use super::head::HeadCache;
 use super::session::{
-    CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnPhase, TurnServices,
+    CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnServices, UnfinishedPhase,
 };
 use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
@@ -69,10 +69,7 @@ pub async fn run_phases(
     let run = row.run.clone();
     // The model call in flight as the rows left it: a re-delivered call is
     // its next attempt, under its recorded deadline.
-    let mut model = match row.phase {
-        TurnPhase::Model { .. } => row.model.clone().map(|pin| (row.iteration, pin)),
-        _ => None,
-    };
+    let mut model = row.phase.model().map(|pin| (row.iteration, pin.clone()));
     let mut outcome = None;
     // A settled round's presentation, committed with the turn's next commit.
     let mut carry: Option<DomainWrite> = None;
@@ -116,12 +113,11 @@ pub async fn run_phases(
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
-                        phase: TurnPhase::Model {
-                            attempt: pin.attempt,
+                        phase: UnfinishedPhase::Model {
+                            pin: pin.clone(),
+                            checkpoint: encode_saved(&saved)?,
                         },
                         iteration: current,
-                        checkpoint_ref: Some(encode_saved(&saved)?),
-                        model: Some(pin.clone()),
                     }));
                     cx.commit(tx, label).await?;
                 }
@@ -152,8 +148,9 @@ pub async fn run_phases(
                 // re-delivers the cell, which resumes from its own latest
                 // snapshot, never the model call; the cell its row already
                 // names commits nothing again.
-                let phase = TurnPhase::Tools { run: RunSeq(id.0) };
-                if row.phase != phase || carry.is_some() {
+                let cell = RunSeq(id.0);
+                let named = matches!(row.phase, UnfinishedPhase::Tools { run, .. } if run == cell);
+                if !named || carry.is_some() {
                     let mut tx = cx.begin().await?;
                     if let Some(present) = carry.take() {
                         tx.write(present);
@@ -161,10 +158,11 @@ pub async fn run_phases(
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
-                        phase,
+                        phase: UnfinishedPhase::Tools {
+                            run: cell,
+                            checkpoint: encode_checkpoint(drive.machine())?,
+                        },
                         iteration: iteration(drive.machine()),
-                        checkpoint_ref: Some(encode_checkpoint(drive.machine())?),
-                        model: None,
                     }));
                     cx.commit(tx, CommitLabel::MODEL_DONE).await?;
                 }
@@ -210,8 +208,8 @@ pub async fn run_phases(
                     protocol_iteration,
                     outcome: outcome.take(),
                 };
-                let terminal = done.terminal();
-                let cause_json = done.run_terminal_cause(&run)?;
+                let cause = done.run_terminal_cause(&run)?;
+                let kind = cause.kind();
                 let commit = drive
                     .finish(cx, done, heads.head(cx, &session).await?)
                     .await?;
@@ -227,8 +225,7 @@ pub async fn run_phases(
                 tx.write(DomainWrite::Turn(TurnWrite::Terminal {
                     session: session.clone(),
                     run: run.clone(),
-                    terminal,
-                    cause_json: Some(cause_json),
+                    cause: Box::new(cause),
                     head_revision: Some(commit.expected_head.saturating_add(1)),
                 }));
                 // The turn's scope ends with its commit (L6b): its waits are
@@ -239,7 +236,7 @@ pub async fn run_phases(
                 drive.committed().await;
                 // The commit moved the head: the next turn loads it again.
                 heads.evict();
-                return Ok(PhaseExit::Committed(terminal));
+                return Ok(PhaseExit::Committed(kind));
             }
             local => {
                 if let Effect::Emit(SessionStreamEvent::TurnOutcome { outcome: ended }) = &local {
