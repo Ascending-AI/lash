@@ -153,7 +153,11 @@ The execution record splits into a start and an outcome.
   performs that write in the transaction that records its outcome. Its effect
   is exactly once. A tool's plugin-state resolutions are such an effect: they
   ride its outcome record and publish into the resident namespace only from
-  that committed record (FIG-5266).
+  that committed record (FIG-5266). The namespace is the member's owner's:
+  the session's for a round member or a code cell's call, the process's for
+  an engine process's tool step, which a resumed activation rebuilds from
+  its step outcome rows. A cell's snapshot that prunes a settled call's
+  record carries its resolutions (FIG-5268).
 - **Group commit.** Finished members commit in batches, one transaction per
   batch.
 

@@ -247,8 +247,7 @@ impl ProcessSteps for NoSteps {
 
     fn body(
         &self,
-
-        _cx: &lash_core_execution::ActorContext,
+        _runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,

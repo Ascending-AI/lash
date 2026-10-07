@@ -1353,8 +1353,7 @@ impl ProcessSteps for HangingSteps {
 
     fn body(
         &self,
-
-        _cx: &lash_core_execution::ActorContext,
+        _runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &crate::ProcessRecord,
         _step: &crate::StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,

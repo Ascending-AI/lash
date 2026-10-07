@@ -140,6 +140,19 @@ reduce: the second reduces only once the first's outcome committed and
 published, against that committed value, so no member reads another's
 uncommitted state.
 
+The namespace a member's resolutions publish into is its owner's. A turn's
+round members and a code cell's calls change the session's namespaces. An
+engine process's tool steps change the process's own: they run on the
+process's plugin session, which one activation of its actor holds, and the
+step lifecycle publishes each committed `x_outcome`'s resolutions into it. A
+new activation builds the session again and publishes every committed step
+outcome's resolutions into it from the rows before any step runs on it. A
+`SessionTurn` process has no steps; its child turn's tools change the child
+session's namespaces. A code cell's quiet point prunes the records no
+snapshot can reach again; the snapshot that prunes a settled call's
+`x_outcome` carries its resolutions in its ledger, and a resumed cell
+publishes them before it runs.
+
 **Hook composition.** For one admitted call: argument transforms, provider
 preparation, then every before-check on one immutable prepared call. Checks
 reduce by AbortRun > Deny/Cancel > CachedSuccess > Allow, ties broken by

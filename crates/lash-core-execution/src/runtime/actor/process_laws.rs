@@ -457,8 +457,7 @@ impl ProcessSteps for LawSteps {
 
     fn body(
         &self,
-
-        _cx: &crate::ActorContext,
+        _runtime: &std::sync::Arc<crate::runtime::process::StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
         execution: &AdmittedExecution,

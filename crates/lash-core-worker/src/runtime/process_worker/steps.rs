@@ -6,8 +6,11 @@
 //!   runtime builds from the environment its start captured. The tool's
 //!   declaration pins the step's policy and its limit within the tool
 //!   ceiling, and its body runs through the round tools a turn's round runs
-//!   on, owned by the process. A store-local effect commits with the step's
-//!   outcome. The step's payload is the call's `ToolCallOutput`.
+//!   on, owned by the process. The activation's first tool step builds
+//!   those tools ([`StepRuntime::tools`]) and its later steps share them, so
+//!   each reduces against the process's committed plugin state. A
+//!   store-local effect commits with the step's outcome. The step's payload
+//!   is the call's `ToolCallOutput`.
 //! - **Engine steps** run through the [`EngineSteps`](crate::EngineSteps)
 //!   the registration of the process's engine declares, under the pinned
 //!   `Repeatable` policy. A registration that declares none, or not this
@@ -20,7 +23,7 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
-    ProcessSteps, StepAdmission, StepRefusal, engine_step_policy, tool_step_output,
+    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, engine_step_policy, tool_step_output,
     tool_step_resolved, tool_step_wait,
 };
 use lash_core_execution::tool_run::CompletionSource;
@@ -52,10 +55,11 @@ impl DurableProcessWorker {
         self.runtime(process).await?.step_catalog()
     }
 
-    /// The tool step `execution` of `process`, which runs `step`.
+    /// The tool step `execution` of `process`, which runs `step` on
+    /// `runtime`'s step tools.
     async fn tool_step(
         &self,
-        cx: ActorContext,
+        runtime: Arc<StepRuntime>,
         process: ProcessRecord,
         step: StepRequest,
         execution: AdmittedExecution,
@@ -64,13 +68,16 @@ impl DurableProcessWorker {
         let StepRequest::Tool { tool, input, .. } = step else {
             return SettledOutput::Interrupted.into();
         };
-        let step = match self.runtime(&process).await {
-            Ok(runtime) => runtime.step_tools(cx, &process),
-            Err(error) => Err(error),
-        };
-        let step = match step {
+        let built = runtime
+            .tools(|| async {
+                self.runtime(&process)
+                    .await?
+                    .step_tools(runtime.cx().clone(), &process)
+            })
+            .await;
+        let step = match built {
             Ok(step) => step,
-            // The runtime did not build: the tool never ran, and its
+            // The tools did not build: the tool never ran, and its
             // admission stands, so the step is answered as one that may
             // have taken effect, never run again under `Once`.
             Err(error) => {
@@ -199,13 +206,13 @@ impl ProcessSteps for WorkerSteps {
 
     fn body(
         &self,
-        cx: &ActorContext,
+        runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
         execution: &AdmittedExecution,
     ) -> MemberBody {
         let worker = self.0.clone();
-        let cx = cx.clone();
+        let runtime = Arc::clone(runtime);
         let process = process.clone();
         let step = step.clone();
         let execution = execution.clone();
@@ -213,10 +220,14 @@ impl ProcessSteps for WorkerSteps {
             Box::pin(async move {
                 match step {
                     StepRequest::Tool { .. } => {
-                        worker.tool_step(cx, process, step, execution, token).await
+                        worker
+                            .tool_step(runtime, process, step, execution, token)
+                            .await
                     }
                     StepRequest::Engine { .. } => {
-                        worker.engine_step(cx, process, step, token).await
+                        worker
+                            .engine_step(runtime.cx().clone(), process, step, token)
+                            .await
                     }
                 }
             })

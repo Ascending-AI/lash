@@ -331,6 +331,26 @@ impl CellMembers {
         }
     }
 
+    /// Publish `state`, plugin-state resolutions of the cell's calls whose
+    /// outcomes committed, into the session's resident namespaces: a call's
+    /// once its lifecycle saw it commit, or those a resumed cell's
+    /// snapshot carries for the calls whose records it pruned. A resolution
+    /// a namespace already holds applies once.
+    ///
+    /// # Errors
+    ///
+    /// A resolution a namespace's frontier refuses.
+    pub fn publish_committed_state(
+        &self,
+        state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.tools
+            .context
+            .dispatch()
+            .plugins
+            .publish_committed_state(state)
+    }
+
     fn member(&self, execution: &AdmittedExecution) -> Option<CellMember> {
         self.calls.lock_recover().get(execution.call()).cloned()
     }
@@ -397,10 +417,6 @@ impl MemberBodies for CellMembers {
         &self,
         state: &[crate::plugin::StateResolution],
     ) -> Result<(), crate::RuntimeEffectControllerError> {
-        self.tools
-            .context
-            .dispatch()
-            .plugins
-            .publish_committed_state(state)
+        self.publish_committed_state(state)
     }
 }

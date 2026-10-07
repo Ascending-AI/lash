@@ -814,6 +814,16 @@ async fn execute_code_in_worker_scope(
                 }
             }
         }
+        // What the calls whose records the snapshot pruned changed is
+        // published again before the cell runs (ADR 0132 §5).
+        if let Err(error) = members.publish_committed_state(&resumed.from.ledger.state) {
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailureKind::Host,
+                format!("the cell's committed plugin state does not publish: {error}"),
+            );
+        }
     }
     snapshots
         .bind_members(Arc::clone(&members) as _, members.policies())

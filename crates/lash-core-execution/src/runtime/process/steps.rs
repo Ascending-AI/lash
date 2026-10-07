@@ -12,18 +12,36 @@
 //! step that may park has its completion wait pinned with its admission
 //! and settles from that wait's resolution. The host supplies every half
 //! through [`ProcessSteps`]; there is no default.
+//!
+//! **Plugin state.** An engine process's plugin namespaces are the process
+//! owner's: its tool steps run on the process's own plugin session, which
+//! one activation of its actor holds ([`StepRuntime`]). A tool step's
+//! resolutions ride its `x_outcome`, and the lifecycle publishes them into
+//! that session from the committed record only, as a round member's
+//! (ADR 0132 §5). A new activation builds the session again, and its
+//! lifecycle publishes every committed step outcome's resolutions into it
+//! from the rows before any step runs on it. A `SessionTurn` process has no
+//! steps: its child turn's tools change the child session's namespaces.
+
+use std::future::Future;
+use std::sync::{Arc, Mutex};
 
 use lash_core_store::tool_run::CompletionSource;
+use lash_core_store::tool_run::StateResolution;
+use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 
 use super::engine_state::StepRequest;
 use crate::runtime::actor::round::{
-    AdmittedExecution, Material, MemberBody, MemberResult, SettledOutput, decode_completed,
+    AdmittedExecution, Material, MemberBody, MemberResult, RoundTools, SettledOutput,
+    decode_completed,
 };
 use crate::runtime::actor::waits::{Resolution, WaitDeadline};
-use crate::{ActorContext, ProcessId, ProcessRecord};
+use crate::{
+    ActorContext, PluginError, ProcessId, ProcessRecord, RuntimeEffectControllerError, ToolCatalog,
+};
 
 /// The policy every engine step is admitted under: `Repeatable`, so a crash
 /// before its outcome commits runs the body again from the same input, at
@@ -84,6 +102,121 @@ pub enum StepRefusal {
     Engine(#[from] super::engine_state::EngineStepRefusal),
 }
 
+/// The tools a process's tool steps run: the catalog they resolve against,
+/// and the round tools that pin a catalog tool's policy and limit and run
+/// its body through the tool dispatch a turn's round runs on, on the
+/// process's own plugin session.
+pub struct ProcessStepTools {
+    /// The process's own plugin session's catalog.
+    pub catalog: Arc<ToolCatalog>,
+    /// The round tools over it, owned by the process.
+    pub tools: Arc<dyn RoundTools>,
+}
+
+/// Why an activation's step tools are not there.
+#[derive(Debug, thiserror::Error)]
+pub enum StepToolsError {
+    /// The host did not build them.
+    #[error(transparent)]
+    Build(#[from] PluginError),
+    /// Their namespaces refuse a resolution the process's committed step
+    /// outcomes carry.
+    #[error(transparent)]
+    State(#[from] RuntimeEffectControllerError),
+}
+
+/// What one activation of a process's actor runs its steps under: the
+/// actor's claimed context, and the process's step tools, whose plugin
+/// session holds the process's namespaces for as long as the activation
+/// does.
+///
+/// The first tool step that runs builds the tools; every later step of
+/// the activation runs on the same ones, so a step reduces against what the
+/// steps before it committed, and two concurrent steps that change one
+/// namespace compose as a round's members do. The lifecycle publishes each
+/// committed outcome's resolutions here ([`publish_state`](Self::publish_state));
+/// those committed before the tools are built publish into them before any
+/// step runs on them.
+pub struct StepRuntime {
+    cx: ActorContext,
+    tools: tokio::sync::OnceCell<Arc<ProcessStepTools>>,
+    resident: Mutex<Resident>,
+}
+
+/// Where a committed resolution publishes.
+enum Resident {
+    /// No step built the tools yet: the resolutions they publish once one
+    /// does, in commit order.
+    Unbuilt(Vec<StateResolution>),
+    /// The tools' plugin session.
+    Built(Arc<dyn RoundTools>),
+}
+
+impl StepRuntime {
+    /// The runtime of one activation that claimed its actor as `cx`.
+    #[must_use]
+    pub fn new(cx: ActorContext) -> Self {
+        Self {
+            cx,
+            tools: tokio::sync::OnceCell::new(),
+            resident: Mutex::new(Resident::Unbuilt(Vec::new())),
+        }
+    }
+
+    /// The process actor's claimed context, which step bodies run under.
+    #[must_use]
+    pub fn cx(&self) -> &ActorContext {
+        &self.cx
+    }
+
+    /// The activation's step tools: built by `build` the first time, with
+    /// every resolution committed so far published into them before any
+    /// step runs on them.
+    ///
+    /// # Errors
+    ///
+    /// [`StepToolsError`]: `build` failed, or the tools' namespaces refuse a
+    /// committed resolution. The next step builds them again.
+    pub async fn tools<F, Fut>(&self, build: F) -> Result<Arc<ProcessStepTools>, StepToolsError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<ProcessStepTools, PluginError>>,
+    {
+        self.tools
+            .get_or_try_init(|| async {
+                let tools = Arc::new(build().await?);
+                let mut resident = self.resident.lock_recover();
+                if let Resident::Unbuilt(committed) = &*resident {
+                    tools.tools.publish_state(committed)?;
+                }
+                *resident = Resident::Built(Arc::clone(&tools.tools));
+                Ok(tools)
+            })
+            .await
+            .cloned()
+    }
+
+    /// Publish `state`, the resolutions a step's committed outcome carries,
+    /// into the process's namespaces; held until the tools are built when
+    /// no step built them yet.
+    ///
+    /// # Errors
+    ///
+    /// A resolution a namespace's frontier refuses.
+    pub fn publish_state(
+        &self,
+        state: &[StateResolution],
+    ) -> Result<(), RuntimeEffectControllerError> {
+        match &mut *self.resident.lock_recover() {
+            Resident::Unbuilt(committed) => {
+                committed.extend_from_slice(state);
+                Ok(())
+            }
+            Resident::Built(tools) => tools.publish_state(state),
+        }
+    }
+}
+
 /// The host's half of a process step: the catalog tool's declaration and
 /// body, or the engine body its registration declares
 /// ([`ProcessEngineRegistry::engine_steps`](super::ProcessEngineRegistry::engine_steps)).
@@ -121,8 +254,8 @@ pub trait ProcessSteps: Send + Sync {
     }
 
     /// The body of `execution`, an attempt of the admitted `step` of
-    /// `process`, which runs under `cx`, the process actor's claimed
-    /// context. It runs only after its admission (or its retry's start)
+    /// `process`, which runs under `runtime`, the process actor's
+    /// activation. It runs only after its admission (or its retry's start)
     /// committed, under its limit and the cancel token it is handed; a
     /// store-local effect it answers commits with its outcome. A step
     /// admitted with a wait parks by answering `Waiting` on the wait its
@@ -131,7 +264,7 @@ pub trait ProcessSteps: Send + Sync {
     /// [`ExecutionDraft::pinned_wait`]: crate::runtime::actor::round::ExecutionDraft::pinned_wait
     fn body(
         &self,
-        cx: &ActorContext,
+        runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
         execution: &AdmittedExecution,

@@ -83,7 +83,8 @@ pub mod session_manager;
 #[cfg(not(feature = "testing"))]
 mod session_manager;
 #[doc(hidden)]
-pub use process_runtime::{ProcessRuntimeContext, ProcessRuntimePorts, ProcessStepTools};
+pub use lash_core_execution::runtime::process::ProcessStepTools;
+pub use process_runtime::{ProcessRuntimeContext, ProcessRuntimePorts};
 #[doc(hidden)]
 pub use session_manager::RuntimeSessionServices;
 mod session_ops;

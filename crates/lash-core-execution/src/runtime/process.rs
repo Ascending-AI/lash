@@ -133,7 +133,9 @@ pub use start_staging::{
     StagedRegistration, StartStaging, is_start_operation, register_process_start,
     stage_process_start, stage_store_local_start, start_operation_journal,
 };
-pub use steps::{ProcessSteps, StepAdmission, StepRefusal};
+pub use steps::{
+    ProcessStepTools, ProcessSteps, StepAdmission, StepRefusal, StepRuntime, StepToolsError,
+};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
 pub use validation::{

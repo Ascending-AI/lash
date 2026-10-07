@@ -31,7 +31,17 @@
 //!   committed state holds the value the call's committed outcome carries,
 //!   and a zombie's change, which never committed, is nowhere in it. In a
 //!   round of two members, a member never observes the other's state before
-//!   the other's outcome committed.
+//!   the other's outcome committed. The same holds for a code cell's
+//!   members (FIG-5268): a cell member's change cut at any of its cell's
+//!   commits, its outcome's or the quiet point that prunes its records
+//!   after it, is the committed value after resume, and a member of a
+//!   `Promise.all` never observes the other's change before it committed.
+//! - **Process plugin state (FIG-5268):** a host engine's tool steps run on
+//!   the process's own plugin session through the core's node. A step's
+//!   change cut at its `step.outcome` is what the process's next step sees
+//!   after resume, the value of the step's committed outcome; and of two
+//!   concurrent steps, one never observes the other's change before it
+//!   committed.
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -112,11 +122,18 @@ enum Turn {
     /// One step of two members: [`STATE_SET`], and [`STATE_OBSERVE`]
     /// looking for its value.
     StatePair,
+    /// One cell of one [`STATE_SET`] call.
+    StateCell,
+    /// One cell of a `Promise.all` of [`STATE_SET`] and [`STATE_OBSERVE`].
+    StatePairCell,
 }
 
 impl Turn {
     fn code(self) -> bool {
-        matches!(self, Self::LimitCell | Self::CellIdentity)
+        matches!(
+            self,
+            Self::LimitCell | Self::CellIdentity | Self::StateCell | Self::StatePairCell
+        )
     }
 
     fn script(self) -> Vec<LlmResponse> {
@@ -172,6 +189,13 @@ impl Turn {
                 served::call("call-a", STATE_SET, serde_json::json!({ "label": "A" })),
                 served::call("call-b", STATE_OBSERVE, serde_json::json!({ "label": "B" })),
             ])],
+            Self::StateCell => vec![served::cell(&format!(
+                "const c = await tools.{STATE_SET}({{ label: \"C\" }});\nprint(c);"
+            ))],
+            Self::StatePairCell => vec![served::cell(&format!(
+                "const both = await Promise.all([tools.{STATE_SET}({{ label: \"A\" }}), \
+                 tools.{STATE_OBSERVE}({{ label: \"B\" }})]);\nprint(both);"
+            ))],
             Self::CellIdentity => vec![
                 served::cell(&format!("await {};", call("cell-one"))),
                 served::cell(&format!(
@@ -201,12 +225,24 @@ impl Turn {
             ),
             Self::Activity => (vec![ACTIVITY.to_owned()], Vec::new()),
             Self::State => (vec!["T".to_owned()], Vec::new()),
-            Self::StatePair => (vec!["A".to_owned(), "B".to_owned()], Vec::new()),
+            Self::StateCell => (vec!["C".to_owned()], Vec::new()),
+            Self::StatePair | Self::StatePairCell => {
+                (vec!["A".to_owned(), "B".to_owned()], Vec::new())
+            }
         }
     }
 
     fn changes_state(self) -> bool {
-        matches!(self, Self::State | Self::StatePair)
+        matches!(
+            self,
+            Self::State | Self::StatePair | Self::StateCell | Self::StatePairCell
+        )
+    }
+
+    /// Whether the turn makes one state change, whose value the model must
+    /// be shown alone.
+    fn one_change(self) -> bool {
+        matches!(self, Self::State | Self::StateCell)
     }
 
     /// The refusal the model must be shown: after `counted` calls, `rest`
@@ -215,7 +251,12 @@ impl Turn {
         let (counted, requested) = match self {
             Self::LimitStep => (0, LIMIT + 1),
             Self::LimitCell => (LIMIT, 1),
-            Self::CellIdentity | Self::Activity | Self::State | Self::StatePair => return None,
+            Self::CellIdentity
+            | Self::Activity
+            | Self::State
+            | Self::StatePair
+            | Self::StateCell
+            | Self::StatePairCell => return None,
         };
         let exceeded = lash::ToolCallLimitExceeded {
             scope: lash::ToolCallLimitScope::Cell,
@@ -229,7 +270,12 @@ impl Turn {
     fn max_tool_calls(self) -> usize {
         match self {
             Self::LimitStep | Self::LimitCell => LIMIT,
-            Self::CellIdentity | Self::Activity | Self::State | Self::StatePair => 64,
+            Self::CellIdentity
+            | Self::Activity
+            | Self::State
+            | Self::StatePair
+            | Self::StateCell
+            | Self::StatePairCell => 64,
         }
     }
 }
@@ -248,7 +294,8 @@ fn refusal_in(text: &str) -> Option<String> {
 struct World {
     entries: Mutex<BTreeMap<String, Vec<lash_core::ToolCallId>>>,
     /// What each [`STATE_OBSERVE`] entry saw of the other member's value,
-    /// and whether any `round.outcome` had committed when it saw it.
+    /// and whether any member's outcome (`round.outcome` or `step.outcome`)
+    /// had committed when it saw it.
     observations: Mutex<Vec<(Option<serde_json::Value>, bool)>>,
     /// The deployment, whose trace an observation reads.
     nodes: OnceLock<Weak<SimNodes>>,
@@ -269,15 +316,18 @@ impl World {
         format!("{label}-{}", seen.len())
     }
 
-    /// Whether a `round.outcome` write has committed by now: read from the
-    /// trace at once, without yielding.
+    /// Whether a member's outcome write (`round.outcome`, or a process
+    /// step's `step.outcome`) has committed by now: read from the trace at
+    /// once, without yielding.
     fn outcome_committed(&self) -> bool {
         self.nodes
             .get()
             .and_then(Weak::upgrade)
             .is_some_and(|nodes| {
                 nodes.script().trace().iter().any(|write| {
-                    write.point.label == CommitLabel::ROUND_OUTCOME && write.committed()
+                    [CommitLabel::ROUND_OUTCOME, CommitLabel::STEP_OUTCOME]
+                        .contains(&write.point.label)
+                        && write.committed()
                 })
             })
     }
@@ -415,6 +465,7 @@ impl lash_core::ToolProvider for StateTools {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let label = call.args["label"].as_str().unwrap_or_default().to_owned();
         let value = self.world.enter(&label, call.context.call_id());
+        let mut answer = serde_json::json!({ "value": value });
         if call.name() == STATE_OBSERVE {
             // Look for the other member's value while it runs, and note
             // whether its outcome had committed by the time it showed.
@@ -427,13 +478,14 @@ impl lash_core::ToolProvider for StateTools {
                 tokio::task::yield_now().await;
             }
             let committed = self.world.outcome_committed();
+            answer["seen"] = seen.clone().unwrap_or_default();
             self.world
                 .observations
                 .lock_recover()
                 .push((seen, committed));
         }
         lash_core::ToolAttemptOutcome::Done {
-            result: lash_core::ToolOutcomeDone::ok(serde_json::json!({ "value": value }))
+            result: lash_core::ToolOutcomeDone::ok(answer)
                 .with_state(lash::plugins::StateCommands::new().set(STATE_KEY, value.into())),
             intents: lash_core::ToolIntents::default(),
         }
@@ -607,15 +659,7 @@ impl Crash {
     /// committed outcome, the one the model was shown, and no other; and no
     /// member saw the other's value before an outcome committed.
     async fn state_laws(&self) -> Vec<String> {
-        let mut violations = Vec::new();
-        for (seen, committed) in self.world.observations.lock_recover().iter() {
-            if seen.is_some() && !committed {
-                violations.push(format!(
-                    "a member observed the other member's state {seen:?} before its outcome \
-                     committed"
-                ));
-            }
-        }
+        let mut violations = observation_laws(&self.world);
         let shown = self
             .scripts
             .requests(INPUT)
@@ -633,7 +677,7 @@ impl Crash {
                  was shown ({shown:?})"
             )),
         }
-        if self.turn == Turn::State && shown.len() != 1 {
+        if self.turn.one_change() && shown.len() != 1 {
             violations.push(format!("the model was shown {shown:?}, not one value"));
         }
         violations
@@ -790,7 +834,7 @@ impl Crash {
 fn shown_values(request: &str) -> BTreeSet<String> {
     let request = request.replace("\\\"", "\"");
     let mut shown = BTreeSet::new();
-    for label in ["T", "A", "B"] {
+    for label in ["T", "A", "B", "C"] {
         let marker = format!("\"{label}-");
         let mut rest = request.as_str();
         while let Some(at) = rest.find(&marker) {
@@ -912,6 +956,442 @@ impl Scenario for Crash {
 
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
         self.laws(nodes, cut).await
+    }
+}
+
+/// No [`STATE_OBSERVE`] entry saw another member's value before any
+/// member's outcome committed.
+fn observation_laws(world: &World) -> Vec<String> {
+    world
+        .observations
+        .lock_recover()
+        .iter()
+        .filter(|(seen, committed)| seen.is_some() && !committed)
+        .map(|(seen, _)| {
+            format!(
+                "a member observed the other member's state {seen:?} before its outcome committed"
+            )
+        })
+        .collect()
+}
+
+/// The engine of the process scenarios.
+const STATE_ENGINE: &str = "crash-state-engine";
+
+/// Which steps the process scenario's engine asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Steps {
+    /// [`STATE_SET`] `P`, then, once it settled, [`STATE_OBSERVE`] `Q`.
+    Sequence,
+    /// [`STATE_SET`] `A` and [`STATE_OBSERVE`] `B` at once.
+    Pair,
+}
+
+/// The first string under `key` in `value`, depth first, looking into
+/// strings that encode JSON too.
+fn find_text(value: &serde_json::Value, key: &str) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => map
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| map.values().find_map(|value| find_text(value, key))),
+        serde_json::Value::Array(items) => items.iter().find_map(|item| find_text(item, key)),
+        serde_json::Value::String(text) => serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .filter(|parsed| parsed.is_object() || parsed.is_array())
+            .and_then(|parsed| find_text(&parsed, key)),
+        _ => None,
+    }
+}
+
+/// A step's tool output, as its payload carries it.
+fn step_answer(
+    outcome: &lash_core_execution::runtime::actor::round::SettledOutput,
+) -> serde_json::Value {
+    outcome
+        .payload()
+        .and_then(|payload| serde_json::from_str(payload).ok())
+        .unwrap_or_default()
+}
+
+/// The engine: its steps per [`Steps`], then a terminal carrying the value
+/// the [`STATE_SET`] step's outcome set (`set`) and what the
+/// [`STATE_OBSERVE`] step saw (`seen`). Its state is the settled steps'
+/// answers so far, by step.
+struct StateEngine {
+    steps: Steps,
+}
+
+fn tool_step(step: &str, tool: &str, label: &str) -> lash_core_execution::StepRequest {
+    lash_core_execution::StepRequest::Tool {
+        step: lash_core_execution::StepName(step.to_owned()),
+        tool: lash_sansio::ToolId::new(format!("tool:{tool}")),
+        input: serde_json::json!({ "label": label }),
+    }
+}
+
+fn engine_failure(error: impl std::fmt::Display) -> lash_core_execution::ProcessInfraError {
+    lash_core_execution::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::ProcessEngine for StateEngine {
+    fn kind(&self) -> &'static str {
+        STATE_ENGINE
+    }
+
+    fn state_format(&self) -> lash_core_execution::EngineStateFormat {
+        lash_core_execution::EngineStateFormat {
+            kind: STATE_ENGINE.to_owned(),
+            version: 0,
+        }
+    }
+
+    fn cancel_grace(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn program_identity(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Option<lash_core_execution::ExecutableGeneration> {
+        None
+    }
+
+    fn creation_config(
+        &self,
+        _env_spec: &lash_core_execution::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, lash_core_execution::PluginError> {
+        Ok(None)
+    }
+
+    fn advance(
+        &self,
+        state: lash_core_execution::EngineState,
+        event: lash_core_execution::EngineEvent,
+    ) -> Result<
+        (
+            lash_core_execution::EngineState,
+            lash_core_execution::EngineAction,
+        ),
+        lash_core_execution::ProcessInfraError,
+    > {
+        use lash_core_execution::{EngineAction, EngineEvent};
+        let mut settled: BTreeMap<String, serde_json::Value> = if state.bytes.is_empty() {
+            BTreeMap::new()
+        } else {
+            serde_json::from_slice(&state.bytes).map_err(engine_failure)?
+        };
+        let action = match event {
+            EngineEvent::Started { .. } => EngineAction::Steps(match self.steps {
+                Steps::Sequence => vec![tool_step("set", STATE_SET, "P")],
+                Steps::Pair => vec![
+                    tool_step("set", STATE_SET, "A"),
+                    tool_step("observe", STATE_OBSERVE, "B"),
+                ],
+            }),
+            EngineEvent::StepSettled { step, outcome } => {
+                settled.insert(step.0.clone(), step_answer(&outcome));
+                match (self.steps, step.0.as_str()) {
+                    (Steps::Sequence, "set") => {
+                        EngineAction::Steps(vec![tool_step("observe", STATE_OBSERVE, "Q")])
+                    }
+                    _ if settled.len() == 2 => EngineAction::Terminal(
+                        lash_core_execution::ProcessOutcome::from_tool_output(
+                            lash_core_execution::ToolCallOutput::success(serde_json::json!({
+                                "set": settled.get("set").and_then(|answer| find_text(answer, "value")),
+                                "seen": settled.get("observe").and_then(|answer| find_text(answer, "seen")),
+                            })),
+                        ),
+                    ),
+                    _ => EngineAction::Idle,
+                }
+            }
+            EngineEvent::Cancelled { origin, .. } => {
+                EngineAction::Terminal(lash_core_execution::ProcessOutcome::from_tool_output(
+                    lash_core_execution::ToolCallOutput::cancelled(
+                        lash_core_execution::ToolCancellation::runtime("cancelled")
+                            .with_origin(origin),
+                    ),
+                ))
+            }
+            _ => EngineAction::Idle,
+        };
+        let state = lash_core_execution::EngineState {
+            format: self.state_format(),
+            bytes: serde_json::to_vec(&settled).map_err(engine_failure)?,
+        };
+        Ok((state, action))
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Vec<lash_core_execution::ArtifactName>, lash_core_execution::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &lash_core_execution::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &lash_core_execution::ReferrerClaim,
+        artifact_ref: &str,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        Err(lash_core_execution::PluginError::Session(format!(
+            "the state engine stores no artifact `{artifact_ref}`"
+        )))
+    }
+
+    async fn resolve(
+        &self,
+        _reference: &lash_core_execution::ProcessDefinitionRef,
+    ) -> Result<
+        lash_core_execution::ProcessDefinitionResolution,
+        lash_core_execution::ProcessDefinitionRefusal,
+    > {
+        Ok(lash_core_execution::ProcessDefinitionResolution::new(
+            lash_core_execution::ProcessSignature::Unknown,
+            Vec::new(),
+        ))
+    }
+}
+
+/// The environment the process's start captures: the core's plugins at
+/// their defaults, and the standard protocol's builtin renderer.
+fn process_environment() -> lash_core_execution::ProcessExecutionEnvSpec {
+    let mut environment = lash_core_execution::ProcessExecutionEnvSpec::new(
+        lash_core_execution::AdmittedPluginConfig::default(),
+        lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(16)),
+    );
+    environment.render = Some(lash_core::RecordedRender {
+        renderer_id: lash::render::ToolOutputRendererSlot::default()
+            .0
+            .id()
+            .to_owned(),
+        params: serde_json::to_value(lash::render::ResolvedStandardRenderConfig {
+            defaults: lash::render::ToolRenderParams::default(),
+            per_tool: BTreeMap::new(),
+        })
+        .expect("the render config encodes"),
+    });
+    environment
+}
+
+/// The process scenario on one dialect, fresh for every matrix cell: a
+/// host starts one process of [`StateEngine`] through the core's process
+/// API, and the simulated nodes run what the core's node runs.
+struct ProcessCrash {
+    steps: Steps,
+    dialect: Dialect,
+    postgres_url: Option<String>,
+    world: Arc<World>,
+    tripwire: Arc<Tripwire>,
+    backend: Mutex<Option<lash::Backend>>,
+    core: Mutex<Option<lash::LashCore>>,
+    process: Mutex<Option<lash_core_execution::ProcessId>>,
+    keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
+}
+
+impl ProcessCrash {
+    fn new(steps: Steps, dialect: Dialect, postgres_url: Option<String>) -> Self {
+        Self {
+            steps,
+            dialect,
+            postgres_url,
+            world: Arc::default(),
+            tripwire: Arc::default(),
+            backend: Mutex::default(),
+            core: Mutex::default(),
+            process: Mutex::default(),
+            keep: Mutex::default(),
+        }
+    }
+
+    fn backend(&self) -> lash::Backend {
+        self.backend
+            .lock_recover()
+            .clone()
+            .expect("the database is built first")
+    }
+
+    /// The deployment's core: it serves no node of its own, the simulated
+    /// nodes run its actors.
+    fn core(&self) -> lash::LashCore {
+        let backend = self.backend();
+        self.core
+            .lock_recover()
+            .get_or_insert_with(|| {
+                lash::LashCore::standard_builder(backend)
+                    .serve_sessions(false)
+                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .plugin(Arc::new(StatePlugin {
+                        world: Arc::clone(&self.world),
+                    }))
+                    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                        "process-state-deployment",
+                        "process-state-boot",
+                    ))
+                    .expect("the core builds")
+            })
+            .clone()
+    }
+
+    fn process(&self) -> Option<lash_core_execution::ProcessId> {
+        self.process.lock_recover().clone()
+    }
+
+    fn actor(process: &lash_core_execution::ProcessId) -> ActorKey {
+        ActorKey::process(process.as_str()).expect("a process actor key")
+    }
+
+    /// The process's answer: what its [`STATE_SET`] step set and what its
+    /// [`STATE_OBSERVE`] step saw.
+    async fn answer(
+        &self,
+        process: &lash_core_execution::ProcessId,
+    ) -> Result<(Option<String>, Option<String>), String> {
+        let terminal = self
+            .backend()
+            .process_registry()
+            .get_process(process)
+            .await
+            .map_err(|error| format!("read the process: {error}"))?
+            .and_then(|record| record.terminal().cloned())
+            .ok_or("the process holds no terminal")?;
+        let answer = serde_json::to_value(terminal.into_await_output())
+            .map_err(|error| format!("the terminal encodes: {error}"))?;
+        Ok((find_text(&answer, "set"), find_text(&answer, "seen")))
+    }
+}
+
+#[async_trait::async_trait]
+impl Scenario for ProcessCrash {
+    async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) = dialect::open(
+            self.dialect,
+            self.postgres_url.as_deref(),
+            clock,
+            &self.keep,
+        )
+        .await;
+        *self.backend.lock_recover() = Some(served::backend_with(
+            stores,
+            vec![Arc::new(StateEngine { steps: self.steps })],
+        ));
+        database
+    }
+
+    fn config(&self) -> SimNodesConfig {
+        SimNodesConfig {
+            lease: LeaseConfig::default(),
+            decodes: self.backend().formats().decodes(),
+            max_active: 4,
+        }
+    }
+
+    fn activation(&self) -> Arc<dyn Activation> {
+        // What the core's own node runs: its sessions, and its processes on
+        // its durable process worker.
+        lash::testing::node_activation(&self.core(), Arc::clone(&self.tripwire) as _)
+            .expect("the core's node activation")
+            .1
+    }
+
+    async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        let _ = self.world.nodes.set(Arc::downgrade(nodes));
+        // The host is outside the deployment under test: its start is uncut.
+        let core = self.core();
+        let env_ref = core
+            .host_artifacts()
+            .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_environment())
+            .await
+            .map_err(|error| format!("publish the environment: {error}"))?;
+        let request = lash_core::ProcessStartRequest::new(
+            lash_core::ProcessInput::Engine {
+                kind: STATE_ENGINE.to_owned(),
+                payload: serde_json::Value::Null,
+            },
+            lash_core::ProcessOriginator::host(),
+            lash_core::LifetimeDecision::Detached,
+        )
+        .with_env_ref(env_ref);
+        let process = core
+            .processes()
+            .start(request, core.effect_host())
+            .await
+            .map(|receipt| receipt.process_id)
+            .map_err(|error| format!("start the process: {error}"))?;
+        *self.process.lock_recover() = Some(process);
+        // A starts and claims first, B once A is settled, so the matrix
+        // cuts the uncut run's writes by node.
+        nodes.start("a");
+        nodes.quiesce().await;
+        nodes.start("b");
+        Ok(())
+    }
+
+    fn actors(&self) -> Vec<ActorKey> {
+        self.process()
+            .as_ref()
+            .map(Self::actor)
+            .into_iter()
+            .collect()
+    }
+
+    async fn done(&self, nodes: &SimNodes) -> bool {
+        let Some(process) = self.process() else {
+            return false;
+        };
+        matches!(
+            nodes.database().actor(&Self::actor(&process)).await,
+            Ok(Some(snapshot)) if snapshot.state == ActorState::Terminal
+        )
+    }
+
+    async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
+        let Some(process) = self.process() else {
+            return vec!["nothing was started".to_owned()];
+        };
+        let trace = nodes.script().trace();
+        let mut violations = observation_laws(&self.world);
+        let terminals = trace
+            .iter()
+            .filter(|write| write.point.label == CommitLabel::PROCESS_TERMINAL && write.committed())
+            .count();
+        if terminals != 1 {
+            violations.push(format!("the process committed {terminals} terminals"));
+        }
+        match self.answer(&process).await {
+            Err(error) => violations.push(error),
+            Ok((None, _)) => violations.push("the set step's outcome set nothing".to_owned()),
+            // The next step sees exactly the value the set step's committed
+            // outcome carries.
+            Ok((set, seen)) if self.steps == Steps::Sequence && seen != set => violations.push(
+                format!("the next step saw {seen:?}, not the committed value {set:?}"),
+            ),
+            // A concurrent step sees the committed value or nothing.
+            Ok((set, Some(seen))) if self.steps == Steps::Pair && Some(&seen) != set.as_ref() => {
+                violations.push(format!(
+                    "the concurrent step saw {seen:?}, not the committed value {set:?}"
+                ));
+            }
+            Ok(_) => {}
+        }
+        if let Some(cut) = cut {
+            violations.extend(zombie_laws(cut, &trace));
+        }
+        if !violations.is_empty() {
+            violations.push(format!("body entries: {:?}", self.world.entries()));
+        }
+        violations
     }
 }
 
@@ -1084,8 +1564,99 @@ async fn a_member_never_observes_another_members_uncommitted_state(tier: Tier) {
     prove_at(Turn::StatePair, tier, &[CommitLabel::ROUND_OUTCOME]).await;
 }
 
+/// A code cell member's plugin-state change, cut at any commit of its cell
+/// (its admission, its outcome, or the quiet point that prunes its records
+/// once it settled), or at a next `model.start` that never landed, which
+/// delivers the ended cell again from its snapshot, is the session's
+/// committed value once the turn resumes: the value of the call's committed
+/// outcome, the one the model was shown (FIG-5268).
+async fn a_cell_members_state_change_survives_a_cut_after_its_outcome(tier: Tier) {
+    prove_at(
+        Turn::StateCell,
+        tier,
+        &[
+            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::CELL_SNAPSHOT,
+        ],
+    )
+    .await;
+    prove_under(
+        Turn::StateCell,
+        tier,
+        &[CommitLabel::MODEL_START],
+        &[Fault::FailBefore, Fault::Abort],
+    )
+    .await;
+}
+
+/// Of a cell's two concurrent members, one never observes the other's
+/// state before the other's outcome committed, however the cell is cut
+/// (FIG-5268).
+async fn a_cell_member_never_observes_another_members_uncommitted_state(tier: Tier) {
+    prove_at(Turn::StatePairCell, tier, &[CommitLabel::ROUND_OUTCOME]).await;
+}
+
+/// Cut `steps` on `tier` at every write of its uncut run labelled
+/// `step.outcome`, under every fault.
+async fn prove_process(steps: Steps, tier: Tier) {
+    let (dialect, postgres_url) = match tier {
+        Tier::SqliteMemory => (Dialect::SqliteMemory, None),
+        Tier::SqliteFile => (Dialect::SqliteFile, None),
+        Tier::Postgres => {
+            let Some(url) = dialect::postgres_url() else {
+                eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+                return;
+            };
+            (Dialect::Postgres, Some(url))
+        }
+    };
+    let report = Matrix::new()
+        .labels(&[CommitLabel::STEP_OUTCOME])
+        .faults(&[
+            Fault::FailBefore,
+            Fault::AckHidden,
+            Fault::Zombie,
+            Fault::Abort,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run(|| ProcessCrash::new(steps, dialect, postgres_url.clone()))
+        .await;
+    eprintln!(
+        "{steps:?} on {dialect:?}: {} cells over {:?}",
+        report.cells.len(),
+        report.labels()
+    );
+    report.assert_held();
+    assert!(
+        report.labels().contains(&CommitLabel::STEP_OUTCOME),
+        "{steps:?}: the matrix never cut {}",
+        CommitLabel::STEP_OUTCOME
+    );
+}
+
+/// A process's tool step changes the process's plugin state; cut at its
+/// `step.outcome`, before or after the commit, its acknowledgement or its
+/// owner lost, the process's next step sees the value the step's committed
+/// outcome carries once it resumes (FIG-5268).
+async fn a_process_steps_state_change_cut_at_its_outcome_is_visible_to_its_next_step(tier: Tier) {
+    prove_process(Steps::Sequence, tier).await;
+}
+
+/// Of a process's two concurrent tool steps, one never observes the
+/// other's state before the other's outcome committed, however the steps
+/// are cut (FIG-5268).
+async fn a_process_step_never_observes_another_steps_uncommitted_state(tier: Tier) {
+    prove_process(Steps::Pair, tier).await;
+}
+
 tiered_laws!(
     current_thread:
+    a_process_steps_state_change_cut_at_its_outcome_is_visible_to_its_next_step,
+    a_process_step_never_observes_another_steps_uncommitted_state,
+    a_cell_members_state_change_survives_a_cut_after_its_outcome,
+    a_cell_member_never_observes_another_members_uncommitted_state,
     a_tool_state_change_cut_at_its_outcome_is_the_committed_value_after_resume,
     a_zombie_members_state_change_commits_nothing,
     a_member_never_observes_another_members_uncommitted_state,

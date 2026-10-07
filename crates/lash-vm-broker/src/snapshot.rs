@@ -21,6 +21,13 @@
 //! own, and the execution's end settles every member still open, so no
 //! member outlives the snapshot that records it.
 //!
+//! A quiet point deletes the records no snapshot can reach again. A
+//! settled member's plugin-state resolutions ride its `x_outcome`, and its
+//! lifecycle publishes them from that committed record (ADR 0132 §5); once
+//! a quiet point prunes the record, its ledger carries them
+//! ([`BrokerLedger::state`]), so the snapshot that drops the record holds
+//! what it changed, and a restore publishes them again.
+//!
 //! Owned by L7 (FIG-5177); L7b (FIG-5198) takes the lashlang-process half.
 
 use std::collections::BTreeMap;
@@ -32,6 +39,7 @@ use lash_core_execution::runtime::actor::round::{
     self, AdmittedExecution, PolicyView, RoundDraft, RoundError,
 };
 use lash_core_execution::runtime::actor::waits::{self, PinnedKey, WaitRef, WaitSpec};
+use lash_core_store::tool_run::StateResolution;
 use lash_durable::domain::{
     AdmittedId, ExecKey, Ordinal, RunRecordWrite, RunSeq, SnapshotRev, SnapshotWrite,
 };
@@ -127,6 +135,11 @@ pub struct BrokerLedger {
     pub grants: BTreeMap<String, HandleGrant>,
     /// The operation the VM stands on.
     pub pending: Option<PendingOperation>,
+    /// The plugin-state resolutions of the settled members whose records a
+    /// quiet point pruned, in commit order: what they changed, which a
+    /// restore publishes before the execution runs again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state: Vec<StateResolution>,
 }
 
 /// The members map as a list of entries: its keys are not strings, so a
@@ -349,6 +362,18 @@ impl DurableSnapshotStore {
     }
 }
 
+/// The oldest run a snapshot of `ledger` can reach: that of an open member
+/// or of the pending operation, or the next admission's.
+fn reachable_from(ledger: &BrokerLedger) -> u64 {
+    ledger
+        .operations
+        .keys()
+        .map(|operation| operation.run)
+        .chain(ledger.pending.as_ref().map(|pending| pending.run))
+        .min()
+        .unwrap_or(ledger.next_admission)
+}
+
 fn refused(error: impl std::fmt::Display) -> QuietPointRefusal {
     QuietPointRefusal(error.to_string())
 }
@@ -379,6 +404,23 @@ impl SnapshotStore for DurableSnapshotStore {
                     .recovery(&operation.admitted(&self.exec))
                     .is_none_or(|recovery| !matches!(recovery, round::Recovery::Settled(_)))
             });
+        }
+        // Records no snapshot can reach again go: every run before the
+        // oldest one an open member or the pending operation is in. What
+        // their settled members changed stays, in the ledger.
+        let oldest = reachable_from(&checkpoint.ledger);
+        if oldest > 0 {
+            let folded = members.fold().await.map_err(round_refused)?;
+            for view in folded.rounds() {
+                for member in view.members() {
+                    if view.id_of(member).run.0 < oldest && member.outcome().is_some() {
+                        checkpoint
+                            .ledger
+                            .state
+                            .extend_from_slice(member.committed_state());
+                    }
+                }
+            }
         }
         let expected = self.revision().await?;
         let mut tx = self.cx.begin().await.map_err(refused)?;
@@ -424,16 +466,6 @@ impl SnapshotStore for DurableSnapshotStore {
             }
             pinned.push((wait, key));
         }
-        // Records no snapshot can reach again go: every run before the
-        // oldest one an open member or the pending operation is in.
-        let ledger = &checkpoint.ledger;
-        let oldest = ledger
-            .operations
-            .keys()
-            .map(|operation| operation.run)
-            .chain(ledger.pending.as_ref().map(|pending| pending.run))
-            .min()
-            .unwrap_or(ledger.next_admission);
         if oldest > 0 {
             tx.write(DomainWrite::RunRecord(RunRecordWrite::Prune {
                 owner: self.exec.owner(),

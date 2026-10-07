@@ -16,7 +16,10 @@
 //! With none, the steps run their admitted-execution lifecycle
 //! ([`Lifecycle`], shared with a round's members): bodies run, retries are
 //! recorded and started, parked steps race their waits, and outcomes
-//! commit (`step.outcome`). While a body runs the actor stays owned; once
+//! commit (`step.outcome`). A committed outcome's plugin-state resolutions
+//! publish into the process's namespaces, which the activation's
+//! [`StepRuntime`] holds; a new activation's lifecycle publishes them again
+//! from the rows. While a body runs the actor stays owned; once
 //! only parked waits and retry dues are left, it releases as `waiting`
 //! until its earliest due time, holding nothing. The activation adds only
 //! the engine-event adapter: a step whose call the fold settled is handed
@@ -68,7 +71,7 @@ use crate::runtime::actor::waits::{self, Resolution, WaitDeadline, WaitKind, Wai
 use crate::runtime::process::engine_state::{
     EngineAction, EngineEvent, EngineState, HostWaitKind, StepRequest,
 };
-use crate::runtime::process::steps::{ProcessSteps, StepRefusal};
+use crate::runtime::process::steps::{ProcessSteps, StepRefusal, StepRuntime};
 use crate::{
     ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
     ProcessRecord, ProcessSignal, ToolCallId,
@@ -187,7 +190,7 @@ impl Activation for ProcessActivation {
         let steps_cx = self.steps_context(&owned, &process);
         let bodies = Arc::new(StepBodies {
             steps: Arc::clone(&self.steps),
-            cx: steps_cx.clone(),
+            runtime: Arc::new(StepRuntime::new(steps_cx.clone())),
             seen: Mutex::default(),
         });
         let mut live = Live {
@@ -1175,8 +1178,10 @@ fn steps_failure(error: RoundError) -> DurableError {
 /// the last pass read them.
 pub(super) struct StepBodies {
     steps: Arc<dyn ProcessSteps>,
-    /// The context step bodies run under: the process actor's claimed one.
-    cx: ActorContext,
+    /// What step bodies run under: the process actor's claimed context, and
+    /// the process's namespaces, which this activation's committed step
+    /// outcomes publish into.
+    runtime: Arc<StepRuntime>,
     seen: Mutex<SeenSteps>,
 }
 
@@ -1219,7 +1224,7 @@ fn unknown_step() -> SettledOutput {
 impl MemberBodies for StepBodies {
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {
         match self.step(execution.call()) {
-            Some((record, step)) => self.steps.body(&self.cx, &record, &step, execution),
+            Some((record, step)) => self.steps.body(&self.runtime, &record, &step, execution),
             // The lifecycle runs only admitted steps; a body for any other
             // is never asked for. Answer as a stop rather than run anything.
             None => Box::new(|_| Box::pin(async { unknown_step().into() })),
@@ -1238,6 +1243,13 @@ impl MemberBodies for StepBodies {
                 .resolved(&record, &step, execution, parked, resolution),
             None => unknown_step(),
         }
+    }
+
+    fn publish_state(
+        &self,
+        state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.runtime.publish_state(state)
     }
 }
 
