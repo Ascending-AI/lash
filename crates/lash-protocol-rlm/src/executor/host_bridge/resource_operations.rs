@@ -144,8 +144,8 @@ impl HostBridge<'_> {
         call_site: Option<lashlang::LashlangExecutionCallSite>,
     ) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
-        let command = commands.issue()?;
-        let prepared = match self
+        let command = commands.issue(self.performing()?.ordinal)?;
+        let prepared = self
             .prepare_resource_operation(
                 lashlang::ResourceOperation {
                     operation,
@@ -156,14 +156,7 @@ impl HostBridge<'_> {
                 command.ordinal,
                 None,
             )
-            .await
-        {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                commands.skipped(&command)?;
-                return Err(error);
-            }
-        };
+            .await?;
         match prepared {
             PreparedOperation::Runtime(operation) => {
                 let in_flight = commands.enter(command, CommandShape::Value).await?;
@@ -235,7 +228,7 @@ impl HostBridge<'_> {
             settled_value_after,
         } = batch;
         let commands = self.commands()?;
-        let command = commands.issue()?;
+        let command = commands.issue(self.performing()?.ordinal)?;
         let in_flight = commands.enter(command, CommandShape::Aggregate).await?;
         let leaf_key = |index| {
             format!(

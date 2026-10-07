@@ -72,8 +72,9 @@ async fn execute_owned_code(
     code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
     let clean_code = clean_model_code(&request.code);
-    // The cell's run (FIG-3586): every command it issues is keyed by its
-    // issue ordinal under the cell's own replay key. A cell is durable through
+    // The cell's run (FIG-3586): every command it issues is keyed by the
+    // ordinal its broker admitted it under, inside the cell's own replay
+    // key. A cell is durable through
     // its snapshot (ADR 0132 §8): one with a committed snapshot under its
     // execution resumes from it, with the envelope its last quiet point
     // committed, and never runs its earlier code again.
@@ -117,10 +118,7 @@ async fn execute_owned_code(
     if resumed.is_none() && opened.is_ok() {
         ctx.actor_context().probe().vm_program_entered(&exec);
     }
-    let cell = Arc::new(match &resumed {
-        Some(resumed) => cell_run::CellRun::open_at(&ctx, resumed.envelope.ordinals.clone()),
-        None => opened,
-    });
+    let cell = Arc::new(opened);
     // Boxed: the cell's outputs are recorded under the same context after the
     // cell, and an unboxed context held across the cell would size every
     // caller's future.
@@ -832,10 +830,10 @@ async fn execute_code_in_worker_scope(
     // What each quiet point commits beside the VM: the cell's envelope, every
     // parent ledger a resumed cell runs on with.
     let envelope = || -> Result<Option<lash_vm_protocol::EncodedPayload>, String> {
-        let cell = cell.as_ref().as_ref().map_err(|error| error.to_string())?;
+        // A cell with no opener has no execution to resume under.
+        cell.as_ref().as_ref().map_err(|error| error.to_string())?;
         cell_segment::CellSegmentState::at_quiet_point(
             &ctx,
-            cell,
             &host,
             code,
             linked.clone(),
@@ -863,6 +861,7 @@ async fn execute_code_in_worker_scope(
     // (L4, FIG-5174), its admission takes `Once`: a crash inside it is
     // `Interrupted`, never a second run.
     let admissions = lash_lashlang_runtime::RunAdmissions {
+        cx: ctx.actor_context(),
         opener: identities.opener().clone(),
         limit: lash_lashlang_runtime::run_operation_limit(ctx.actor_context()),
         policy: &|_, _| None,
@@ -892,7 +891,7 @@ async fn execute_code_in_worker_scope(
         snapshots,
         admissions: &admissions,
         boundary: &|| false,
-        hand_over: Some(host.hand_over_gate()),
+        performing: Some(host.performing_gate()),
         providers,
     }
     .run()

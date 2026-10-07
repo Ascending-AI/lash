@@ -26,15 +26,14 @@ mod resource_operations;
 
 pub(super) struct HostBridge<'run> {
     ctx: RuntimeExecutionContext<'run>,
-    /// The cell's replay run — the identities it mints, its issue-ordinal
-    /// mint and its recorded frontier — or the reason this execution has no
-    /// logical opener to mint under.
+    /// The cell's replay run — the identities it mints and its command
+    /// keys — or the reason this execution has no logical opener to mint
+    /// under.
     cell: Arc<Result<CellRun, LashlangCellOpener>>,
     prints: Arc<Mutex<Vec<FlowValue>>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
     calls: Mutex<Vec<(usize, lash_core::ExecutedCall)>>,
     next_tool_index: Mutex<usize>,
-    sleep_deadlines: Mutex<BTreeMap<u64, u64>>,
     lashlang_execution_trace: Option<LashlangExecutionTrace>,
     host_environment: lashlang::LashlangHostEnvironment,
     deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
@@ -47,10 +46,10 @@ pub(super) struct HostBridge<'run> {
     /// instead of the guest catching the cancellation as a rejected call. A
     /// replay divergence ends it the same way (FIG-3586).
     cancellation: ExecutionCancellation,
-    /// Whether the operation being performed is one the cell's run is parked
-    /// on (FIG-4739): only then may its wait be handed to the Run's successor
-    /// segment, which resumes the cell from the state it parked in.
-    hand_over: Arc<lash_lashlang_runtime::HandOverGate>,
+    /// The admitted operation the cell's broker is performing: the ordinal
+    /// its commands are named by, the cell's one ordinal authority, and the
+    /// waits its quiet point pinned.
+    performing: lash_lashlang_runtime::PerformingGate,
 }
 
 /// The host-side ledgers of a cell that a segment boundary inside it hands
@@ -61,7 +60,6 @@ pub(super) struct CellHostLedgers {
     pub printed_images: Vec<AttachmentRef>,
     pub calls: Vec<(usize, lash_core::ExecutedCall)>,
     pub next_tool_index: usize,
-    pub sleep_deadlines: BTreeMap<u64, u64>,
 }
 
 pub(super) struct HostBridgeConfig<'run> {
@@ -90,7 +88,6 @@ impl<'run> HostBridge<'run> {
             printed_images: Mutex::new(config.ledgers.printed_images),
             calls: Mutex::new(config.ledgers.calls),
             next_tool_index: Mutex::new(config.ledgers.next_tool_index),
-            sleep_deadlines: Mutex::new(config.ledgers.sleep_deadlines),
             lashlang_execution_trace: config.lashlang_execution_trace,
             host_environment: config.host_environment,
             deferred_execution_grants: config.deferred_execution_grants,
@@ -98,13 +95,20 @@ impl<'run> HostBridge<'run> {
             artifact_store: config.artifact_store,
             workers: config.workers,
             cancellation: ExecutionCancellation::new(),
-            hand_over: Arc::new(lash_lashlang_runtime::HandOverGate::new()),
+            performing: lash_lashlang_runtime::PerformingGate::new(),
         }
     }
 
-    /// The gate the cell's run reports a parked operation through.
-    pub(super) fn hand_over_gate(&self) -> &lash_lashlang_runtime::HandOverGate {
-        &self.hand_over
+    /// The gate the cell's broker names the operation it performs through.
+    pub(super) fn performing_gate(&self) -> &lash_lashlang_runtime::PerformingGate {
+        &self.performing
+    }
+
+    /// The admitted operation the broker is performing.
+    fn performing(&self) -> Result<lash_lashlang_runtime::Performing, ExecutionHostError> {
+        self.performing.current().ok_or_else(|| {
+            ExecutionHostError::new("a cell's command reached its host outside its admission")
+        })
     }
 
     /// The ledgers a segment boundary inside the cell hands over.
@@ -113,7 +117,6 @@ impl<'run> HostBridge<'run> {
             printed_images: self.printed_images.lock_recover().clone(),
             calls: self.calls.lock_recover().clone(),
             next_tool_index: *self.next_tool_index.lock_recover(),
-            sleep_deadlines: self.sleep_deadlines.lock_recover().clone(),
         }
     }
 
@@ -517,23 +520,14 @@ impl HostBridge<'_> {
     /// ends on the state it parked in, which issues the await again.
     async fn await_handle(&self, handle: FlowValue) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
-        let command = commands.issue()?;
-        let handle = match handle_to_json(&handle) {
-            Ok(handle) => handle,
-            Err(error) => {
-                commands.skipped(&command)?;
-                return Err(error);
-            }
-        };
+        let command = commands.issue(self.performing()?.ordinal)?;
+        let handle = handle_to_json(&handle)?;
         let index = self.next_index();
         let call_id = self.cell()?.identities().call_id(command.ordinal);
         let in_flight = commands.enter(command, CommandShape::AwaitHandle).await?;
         // The await's process command journals under the command's key, as
         // a child of the command's own invocation.
-        let command_ctx = in_flight
-            .ctx
-            .under_command(&in_flight.command.key)
-            .with_transferable_waits(self.hand_over.parked() && self.ctx.turn_hands_over());
+        let command_ctx = in_flight.ctx.under_command(&in_flight.command.key);
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             command_ctx.await_tool_handle(call_id.clone(), handle).await
@@ -558,16 +552,19 @@ impl HostBridge<'_> {
         Ok(())
     }
 
+    /// Sleeps until the deadline the sleep was admitted with: its quiet
+    /// point pinned the timer, and a restored cell races that same timer, so
+    /// a crash never restarts the sleep's whole duration (ADR 0132 §6).
     async fn sleep(&self, sleep: Sleep) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
-        let command = commands.issue()?;
+        let performing = self.performing()?;
+        let command = commands.issue(performing.ordinal)?;
         let call_site = sleep.call_site;
-        let spec = match process_sleep(sleep.kind, &sleep.value) {
-            Ok(spec) => spec,
-            Err(error) => {
-                commands.skipped(&command)?;
-                return Err(error);
-            }
+        let spec = process_sleep(sleep.kind, &sleep.value)?;
+        let [timer] = performing.waits.as_slice() else {
+            return Err(ExecutionHostError::new(
+                "a cell's sleep was admitted without its timer",
+            ));
         };
         let in_flight = commands.enter(command, CommandShape::Sleep).await?;
         if let Some(trace) = &self.lashlang_execution_trace
@@ -583,60 +580,8 @@ impl HostBridge<'_> {
                 },
             );
         }
-        let transferable = self.hand_over.parked() && self.ctx.turn_hands_over();
-        let command_ctx = in_flight.ctx.clone().with_transferable_waits(transferable);
-        let spec = if transferable {
-            let retained = self
-                .sleep_deadlines
-                .lock_recover()
-                .get(&in_flight.command.ordinal)
-                .copied();
-            let deadline_ms = match retained {
-                Some(deadline) => deadline,
-                None => {
-                    let deadline = match spec {
-                        lash_core::SleepSpec::Until { deadline_ms } => deadline_ms,
-                        lash_core::SleepSpec::For { duration_ms } => {
-                            let now = command_ctx
-                                .journaled_language_runtime_value(
-                                    format!("{}:sleep-clock", in_flight.command.key.as_str()),
-                                    "now".into(),
-                                )
-                                .await
-                                .map_err(|error| {
-                                    commands.journal_error(&in_flight, error, |error| {
-                                        ExecutionHostError::new(error.to_string())
-                                    })
-                                })?;
-                            now.as_u64()
-                                .ok_or_else(|| {
-                                    ExecutionHostError::new("sleep clock returned a non-timestamp")
-                                })?
-                                .saturating_add(duration_ms)
-                        }
-                    };
-                    self.sleep_deadlines
-                        .lock_recover()
-                        .insert(in_flight.command.ordinal, deadline);
-                    deadline
-                }
-            };
-            lash_core::SleepSpec::Until { deadline_ms }
-        } else {
-            spec
-        };
-        let slept = command_ctx
-            .sleep_command(&in_flight.command.key, spec)
-            .await;
-        if matches!(&slept, Err(error) if error.code == lash_core::RuntimeErrorCode::TurnWaitHandedOver)
-        {
-            commands.hand_over(&in_flight)?;
-            return Ok(AbilityOutcome::HandedOver);
-        }
+        let slept = lash_core::waits::sleep_until_timer(&in_flight.ctx, *timer).await;
         commands.finish(&in_flight)?;
-        self.sleep_deadlines
-            .lock_recover()
-            .remove(&in_flight.command.ordinal);
         slept.map_err(|error| {
             commands.journal_error(&in_flight, error, |error| {
                 ExecutionHostError::new(error.to_string())
@@ -654,12 +599,9 @@ impl HostBridge<'_> {
         Ok(AbilityOutcome::Value(FlowValue::Null))
     }
 
-    /// An ability a cell may not use: it holds its ordinal — the recorded run
-    /// held one there too — and is refused before it reaches the host.
+    /// An ability a cell may not use: its broker admitted it under its own
+    /// ordinal, and it is refused before it reaches the host.
     fn refused_in_cell(&self, message: &'static str) -> Result<AbilityOutcome, ExecutionHostError> {
-        let commands = self.commands()?;
-        let command = commands.issue()?;
-        commands.skipped(&command)?;
         Err(ExecutionHostError::new(message))
     }
 

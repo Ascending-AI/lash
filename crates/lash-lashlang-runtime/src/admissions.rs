@@ -9,7 +9,13 @@ use crate::OperationAdmissions;
 /// operation, its policy what the host declares for it (`Once` when it
 /// declares none) and its limit the run's. A wait (an await, a sleep, a
 /// signal wait) is admitted as no execution: a restore performs it again.
+/// A sleep pins its timer with its admission, due at the absolute deadline
+/// it was admitted with, so a restore races that timer and never sleeps
+/// its whole duration again (ADR 0132 §6).
 pub struct RunAdmissions<'a> {
+    /// The actor whose store clock dates a sleep's deadline, and whose
+    /// execution scope revokes its timer.
+    pub cx: &'a lash_core::ActorContext,
     /// The run that owns every operation's material.
     pub opener: lash_core::EffectOpener,
     /// The limit every execution is admitted under.
@@ -22,12 +28,28 @@ pub struct RunAdmissions<'a> {
         &'a (dyn Fn() -> Result<Option<lash_vm_protocol::EncodedPayload>, String> + Send + Sync),
 }
 
+#[async_trait::async_trait]
 impl OperationAdmissions for RunAdmissions<'_> {
-    fn admission(
+    async fn admission(
         &self,
         call: &lash_sansio::ToolCallId,
         request: &OperationRequest,
     ) -> Result<Admission, String> {
+        if let OperationRequest::Sleep(sleep) = request {
+            // A sleep its host refuses (its value is no duration or
+            // deadline) pins nothing: the host answers the guest the
+            // refusal.
+            let Ok(spec) = crate::bridge::process_sleep(sleep.kind, &sleep.value) else {
+                return Ok(Admission::default());
+            };
+            let timer = lash_core::waits::timer(self.cx, spec)
+                .await
+                .map_err(|error| error.to_string())?;
+            return Ok(Admission {
+                draft: None,
+                waits: vec![timer],
+            });
+        }
         if lash_vm_broker::waits_only(request) {
             return Ok(Admission::default());
         }

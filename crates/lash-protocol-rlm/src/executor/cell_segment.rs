@@ -7,7 +7,7 @@
 //! cell from that snapshot, so the resumed cell issues the operation it
 //! stopped on again and runs on as if it had never stopped.
 //!
-//! The envelope holds the command ordinals and the started children. A cell
+//! The envelope holds the started children. A cell
 //! owns more than a process body does, and all of it is plain data:
 //! its prints and printed images,
 //! the calls it made, the tool calls it counts against `max_tool_calls`, and
@@ -41,9 +41,6 @@ pub(super) struct CellSegmentState {
     /// The digest of the cell's source: a snapshot under the cell's
     /// execution holds this source's state.
     pub code: String,
-    /// The run's issue-ordinal state. The command the cell stopped on has
-    /// returned its ordinal, so the resumed cell issues it under the same key.
-    pub ordinals: lash_lashlang_runtime::LashlangRunOrdinals,
     /// The session's projected bindings as the cell recorded them.
     pub projected_bindings: BTreeMap<String, crate::projection::bindings::RecordedProjection>,
     /// The host environment the cell linked against.
@@ -79,12 +76,10 @@ impl CellSegmentState {
         Ok(state)
     }
 
-    /// The envelope of `cell` now: what its parent holds of it at a quiet
+    /// The cell's envelope now: what its parent holds of it at a quiet
     /// point.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn at_quiet_point(
         ctx: &RuntimeExecutionContext<'_>,
-        cell: &super::cell_run::CellRun,
         host: &super::host_bridge::HostBridge<'_>,
         code: &str,
         linked: (
@@ -98,7 +93,6 @@ impl CellSegmentState {
         let (projected_bindings, cell_bindings, host_environment) = linked;
         Self {
             code: Self::code_digest(code),
-            ordinals: cell.ordinals(),
             projected_bindings,
             host_environment,
             cell_bindings,

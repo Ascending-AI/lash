@@ -1,13 +1,13 @@
-//! The run of one code cell (FIG-3586): the identities it mints and its
-//! issue-ordinal mint, and the execution its snapshot is filed under.
+//! The run of one code cell (FIG-3586): the identities it mints and the
+//! execution its snapshot is filed under.
 //!
-//! Every command the cell issues is keyed by its issue ordinal under the
-//! cell's own replay key, never the call site that issued it. A cell resumes
-//! from its snapshot (ADR 0132 §8), with the ordinals its last quiet point
-//! committed, and never runs its earlier code again.
+//! Every command the cell issues is keyed by the issue ordinal its broker
+//! admitted it under, inside the cell's own replay key, never the call site
+//! that issued it. A cell resumes from its snapshot (ADR 0132 §8), whose
+//! ledger holds the admissions, and never runs its earlier code again.
 
 use lash_core::RuntimeExecutionContext;
-use lash_lashlang_runtime::{LashlangHostIdentities, LashlangReplayRun, LashlangRunOrdinals};
+use lash_lashlang_runtime::{LashlangHostIdentities, LashlangReplayRun};
 use lash_sansio::sync::MutexExt;
 
 /// Why a cell has no logical opener to mint identities under.
@@ -58,14 +58,6 @@ impl CellRun {
     /// scope claim and a separately read pin. The address must name that same
     /// scope; a disagreement is refused rather than resolved.
     pub(super) fn open(ctx: &RuntimeExecutionContext<'_>) -> Result<Self, LashlangCellOpener> {
-        Self::open_at(ctx, LashlangRunOrdinals::start())
-    }
-
-    /// Open a cell under its admitted physical invocation.
-    pub(super) fn open_at(
-        ctx: &RuntimeExecutionContext<'_>,
-        ordinals: LashlangRunOrdinals,
-    ) -> Result<Self, LashlangCellOpener> {
         let admitted_scope = ctx.admitted_scope();
         let address = ctx
             .parent_invocation()
@@ -80,7 +72,7 @@ impl CellRun {
         let opener = lash_core::EffectOpener::for_scope(&admitted_scope)
             .map_err(LashlangCellOpener::Scope)?;
         let identities = LashlangHostIdentities::cell(opener, address.replay_key.clone());
-        let run = LashlangReplayRun::new(identities.namespace(), ordinals);
+        let run = LashlangReplayRun::new(identities.namespace());
         Ok(Self {
             identities,
             run,
@@ -90,11 +82,6 @@ impl CellRun {
 
     pub(super) fn identities(&self) -> &LashlangHostIdentities {
         &self.identities
-    }
-
-    /// The ordinal state a segment boundary inside the cell hands over.
-    pub(super) fn ordinals(&self) -> LashlangRunOrdinals {
-        self.run.ordinals()
     }
 
     /// Records the linked module the cell ran, for the seal's attribution.

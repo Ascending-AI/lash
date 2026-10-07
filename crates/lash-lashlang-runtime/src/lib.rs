@@ -10,7 +10,7 @@ pub use aggregate::{
     BridgeAggregateLeaf, host_lifetime_failure_message, is_tool_call_limit_failure,
     settle_bridge_aggregate, timer_duration_ms, tool_call_limit_failure,
 };
-pub use worker_execution::{HandOverGate, OperationAdmissions, WorkerRun};
+pub use worker_execution::{OperationAdmissions, Performing, PerformingGate, WorkerRun};
 mod error;
 pub use error::{
     LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError, ProcessHostOp,
@@ -27,9 +27,9 @@ mod replay_commands;
 pub use replay_commands::{CommandInFlight, ReplayCommands, retype_replay_mismatch};
 mod replay_run;
 pub use replay_run::{
-    CommandShape, DispatchedOrdinalsDigest, IssuedCommand, LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
+    CommandShape, IssuedCommand, LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
     LASHLANG_REPLAY_KEY_GRAMMAR_VERSION, LashlangReplayNamespace, LashlangReplayRun,
-    LashlangRunOrdinals, ReplayDivergence, RunSeal, SealAttribution, lashlang_cell_generation,
+    SealAttribution, lashlang_cell_generation,
 };
 mod language_trace_host;
 pub use language_trace_host::{LanguageTraceHost, trace_failure};

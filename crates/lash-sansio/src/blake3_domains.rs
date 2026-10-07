@@ -117,6 +117,7 @@ pub(crate) const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
     "lash-usage-ledger-request/v1",
     "lash-workflow-node/v2",
     "lash-workflow-source/v3",
+    "lashlang-dispatched-ordinals/v1",
     "lashlang-process-start/v2",
     "lashlang-process-start/v3",
 ];

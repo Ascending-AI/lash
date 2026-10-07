@@ -233,6 +233,7 @@ pub(super) async fn execute_with_projected(
         lash_vm_broker::ExecKey::Process(process_id.clone()),
     );
     let admissions = lash_lashlang_runtime::RunAdmissions {
+        cx: &cx,
         opener: lash_core::EffectOpener::process(process_id),
         limit: lash_lashlang_runtime::run_operation_limit(&cx),
         policy: &|_, _| None,
@@ -262,7 +263,7 @@ pub(super) async fn execute_with_projected(
         snapshots: &snapshots,
         admissions: &admissions,
         boundary: &|| false,
-        hand_over: None,
+        performing: None,
         providers: lashlang::testing::projection::test_catalog(),
     }
     .run()

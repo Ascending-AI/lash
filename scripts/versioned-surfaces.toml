@@ -204,3 +204,7 @@ reason = "FIG-3607: a process id is minted by the registrar, never derived"
 [[retired_hash_domain]]
 name = "lash-protocol-materialization/v1"
 reason = "FIG-4379: session config is owner-namespaced and the protocol materialization format is deleted"
+
+[[retired_hash_domain]]
+name = "lashlang-dispatched-ordinals/v1"
+reason = "FIG-5224: a cell names its commands by the broker's admitted ordinal; the host keeps no ordinal state and seals no run"

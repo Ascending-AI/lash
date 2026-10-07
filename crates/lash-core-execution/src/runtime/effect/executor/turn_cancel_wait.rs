@@ -77,15 +77,6 @@ impl TurnCancelWait {
         }
     }
 
-    /// Whether the wait may be handed to the Run's successor segment
-    /// (FIG-4739). Only a wait that observes its turn can be: the hand-over
-    /// is the turn's.
-    #[must_use]
-    pub fn transferable(mut self, transferable: bool) -> Self {
-        self.transferable = transferable && self.observed_scope.is_some();
-        self
-    }
-
     /// The cooperative cancellation the wait races, for callers that carry
     /// the trio whole and still need the token alone.
     pub fn cancellation(&self) -> &CancellationToken {

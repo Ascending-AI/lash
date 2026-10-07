@@ -194,6 +194,7 @@ async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried
         lash_vm_broker::ExecKey::Process(process_id.clone()),
     );
     let admissions = crate::RunAdmissions {
+        cx: &cx,
         opener: lash_core::EffectOpener::process(process_id.clone()),
         limit: crate::run_operation_limit(&cx),
         policy: &|_, _| None,
@@ -221,7 +222,7 @@ async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried
         snapshots: &snapshots,
         admissions: &admissions,
         boundary: &|| false,
-        hand_over: None,
+        performing: None,
         providers: lashlang::ProjectionCatalog::new(),
     }
     .run()

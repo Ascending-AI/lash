@@ -66,7 +66,7 @@ struct Parent {
 
 #[async_trait::async_trait]
 impl ParentEffects for Parent {
-    fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
+    async fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
         Ok(Admission {
             draft: matches!(operation.kind, AdmittedKind::Invoke(_)).then(|| {
                 lash_vm_broker::testing::operation_draft(

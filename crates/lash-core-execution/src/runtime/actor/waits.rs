@@ -42,6 +42,8 @@ use crate::{Backend, ExecutionScope, ProcessId, ProcessOutcome};
 pub use lash_core_effect::Resolution;
 pub use lash_durable::domain::{ResolveAnswer, WaitId, WaitKind};
 
+pub use super::wait_effects::{race_timer, sleep_until_timer, timer};
+
 /// How many times a resolve or a due settlement tries a contended
 /// transaction.
 const RESOLVE_ATTEMPTS: usize = 3;

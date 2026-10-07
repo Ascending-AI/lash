@@ -1,29 +1,22 @@
-//! One lashlang run's command ordinals (FIG-3586).
+//! One lashlang run's command keys (FIG-3586).
 //!
 //! A code cell runs its program. Every command that leaves the VM through
 //! `ExecutionHost::perform` and reaches the effect host — a resource
-//! operation, a whole aggregate, a sleep, an await of a handle — takes the
-//! next **issue ordinal** of the run, and every journal row the command
-//! writes lives under that ordinal's key. Nothing a compiler produces
-//! reaches a key.
-//!
-//! A run starts fresh. A process body resumes from its snapshot, fed its operations' outcomes by operation id
-//! (ADR 0132 §8; FIG-5198).
+//! operation, a whole aggregate, a sleep, an await of a handle — is named
+//! by the **issue ordinal** its broker admitted it under, and every journal
+//! row the command writes lives under that ordinal's key. The broker's
+//! admission is the only ordinal authority (ADR 0132 §8): the run keeps no
+//! counter of its own, so a cell restored onto an operation that settled,
+//! was interrupted or runs again names its next command by the next
+//! admission. Nothing a compiler produces reaches a key.
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_LASHLANG_CELL_GENERATION_DOMAIN_VERSION, lashlang_cell_generation))
 const LASH_LASHLANG_CELL_GENERATION_DOMAIN_VERSION: &str = "lash-lashlang-cell-generation/v1";
 
-/// version_surface = "coexist"
-/// version_guard(items(LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION, hash))
-const LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION: &str = "lashlang-dispatched-ordinals/v1";
-
-use std::sync::Mutex;
-
 use lash_core::{
     CommandReplayKey, RecordedKeyRange, RuntimeEffectControllerError, RuntimeErrorCode,
 };
-use lash_sansio::sync::MutexExt;
 
 /// The replay-key grammar every lashlang run mints (FIG-3586).
 ///
@@ -197,66 +190,10 @@ pub enum CommandShape {
     AwaitHandle,
 }
 
-/// A running hash of the ordinals a run dispatched, in dispatch order.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct DispatchedOrdinalsDigest(String);
-
-impl DispatchedOrdinalsDigest {
-    fn hash(preimage: &[u8]) -> Self {
-        Self(lash_sansio::core_support::blake3_domain_hash_hex(
-            LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION,
-            preimage,
-        ))
-    }
-
-    /// The digest of a run that has dispatched nothing yet.
-    pub fn empty() -> Self {
-        Self::hash(&[])
-    }
-
-    fn extend(&self, ordinal: u64) -> Self {
-        let mut preimage = Vec::with_capacity(self.0.len() + 8);
-        preimage.extend_from_slice(self.0.as_bytes());
-        preimage.extend_from_slice(&ordinal.to_be_bytes());
-        Self::hash(&preimage)
-    }
-
-    /// The digest's text, as the seal envelope carries it.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// The part of a run's ordinal state a cell segment carries to its next
-/// run. A fresh cell starts from [`Self::start`].
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct LashlangRunOrdinals {
-    /// The ordinal the next command takes.
-    pub next: u64,
-    /// The running digest of the ordinals dispatched so far.
-    pub dispatched: DispatchedOrdinalsDigest,
-}
-
-impl LashlangRunOrdinals {
-    /// A run that has issued nothing.
-    pub fn start() -> Self {
-        Self {
-            next: 0,
-            dispatched: DispatchedOrdinalsDigest::empty(),
-        }
-    }
-}
-
-/// One run's ordinal mint and dispatch record.
+/// One run's command keys, under its namespace.
 #[derive(Debug)]
 pub struct LashlangReplayRun {
     namespace: LashlangReplayNamespace,
-    state: Mutex<RunState>,
-}
-
-#[derive(Debug)]
-struct RunState {
-    ordinals: LashlangRunOrdinals,
 }
 
 /// One command's issue: its ordinal and key.
@@ -264,44 +201,6 @@ struct RunState {
 pub struct IssuedCommand {
     pub ordinal: u64,
     pub key: CommandReplayKey,
-}
-
-/// A run's refusal to replay, before anything was dispatched.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReplayDivergence {
-    namespace: String,
-    ordinal: Option<u64>,
-    reason: String,
-}
-
-impl ReplayDivergence {
-    fn at(namespace: &LashlangReplayNamespace, ordinal: Option<u64>, reason: String) -> Self {
-        Self {
-            namespace: namespace.as_str().to_string(),
-            ordinal,
-            reason,
-        }
-    }
-
-    /// The typed refusal, attributed to the recorded seal's producer when
-    /// the run has one.
-    pub fn into_error(self, attribution: &SealAttribution) -> RuntimeEffectControllerError {
-        let at = match self.ordinal {
-            Some(ordinal) => format!("at issue ordinal {ordinal}"),
-            None => "at its seal".to_string(),
-        };
-        RuntimeEffectControllerError::new(
-            RuntimeErrorCode::LashlangCellReplayDivergence,
-            format!(
-                "lashlang run `{}` diverged from its journal {at}: {}; {}. Nothing was \
-                 dispatched: redeploy the build that wrote the journal, cancel the turn, or \
-                 fork it from before this command",
-                self.namespace,
-                self.reason,
-                attribution.describe()
-            ),
-        )
-    }
 }
 
 /// Who wrote the journal a run is replaying, as its recorded seal says, and
@@ -328,13 +227,9 @@ impl SealAttribution {
 }
 
 impl LashlangReplayRun {
-    /// A run over `namespace`, continuing from `ordinals` (a fresh run passes
-    /// [`LashlangRunOrdinals::start`]).
-    pub fn new(namespace: LashlangReplayNamespace, ordinals: LashlangRunOrdinals) -> Self {
-        Self {
-            namespace,
-            state: Mutex::new(RunState { ordinals }),
-        }
+    /// A run over `namespace`.
+    pub fn new(namespace: LashlangReplayNamespace) -> Self {
+        Self { namespace }
     }
 
     /// The run's namespace.
@@ -342,17 +237,11 @@ impl LashlangReplayRun {
         &self.namespace
     }
 
-    /// The ordinal state to hand over at a segment boundary.
-    pub fn ordinals(&self) -> LashlangRunOrdinals {
-        self.state.lock_recover().ordinals.clone()
-    }
-
-    /// Mints the next command's ordinal and key. Called once for every
-    /// command that leaves the VM, before anything else happens to it, so a
-    /// refusal or a pre-dispatch failure still holds its ordinal.
-    pub fn issue(&self) -> Result<IssuedCommand, RuntimeEffectControllerError> {
-        let mut state = self.state.lock_recover();
-        let ordinal = state.ordinals.next;
+    /// The command its broker admitted at `ordinal`, with its key. Called
+    /// once for every command that leaves the VM, before anything else
+    /// happens to it, so a refusal or a pre-dispatch failure still holds its
+    /// ordinal.
+    pub fn issue(&self, ordinal: u64) -> Result<IssuedCommand, RuntimeEffectControllerError> {
         if ordinal > MAX_ORDINAL {
             return Err(RuntimeEffectControllerError::new(
                 RuntimeErrorCode::LashlangCellReplayDivergence,
@@ -363,51 +252,10 @@ impl LashlangReplayRun {
                 ),
             ));
         }
-        state.ordinals.next = ordinal + 1;
         Ok(IssuedCommand {
             ordinal,
             key: self.namespace.command(ordinal),
         })
-    }
-
-    /// Closes `command`: `wrote` says whether it wrote the journal. A written
-    /// command joins the run's dispatched digest.
-    pub fn finish(&self, command: &IssuedCommand, wrote: bool) {
-        if wrote {
-            let mut state = self.state.lock_recover();
-            state.ordinals.dispatched = state.ordinals.dispatched.extend(command.ordinal);
-        }
-    }
-
-    /// Returns `command` to the mint: its host left it open for the segment
-    /// that resumes the run, which issues it again under the same ordinal and
-    /// key. Only the run's last issued command can be handed over, and it
-    /// joins no dispatched digest here: the segment that completes it records
-    /// it.
-    pub fn hand_over(&self, command: &IssuedCommand) -> Result<(), ReplayDivergence> {
-        let mut state = self.state.lock_recover();
-        if state.ordinals.next != command.ordinal + 1 {
-            return Err(ReplayDivergence::at(
-                &self.namespace,
-                Some(command.ordinal),
-                format!(
-                    "this command was handed over after the run issued ordinal {}",
-                    state.ordinals.next.saturating_sub(1)
-                ),
-            ));
-        }
-        state.ordinals.next = command.ordinal;
-        Ok(())
-    }
-
-    /// The seal this run writes as its last nested effect.
-    pub fn seal(&self) -> RunSeal {
-        let state = self.state.lock_recover();
-        RunSeal {
-            key: self.namespace.seal(),
-            issued_count: state.ordinals.next,
-            dispatched_ordinals_digest: state.ordinals.dispatched.clone(),
-        }
     }
 
     /// Who is running the journal's run, for a refusal's message.
@@ -419,26 +267,12 @@ impl LashlangReplayRun {
     }
 }
 
-/// A run's seal: the count of commands it issued and the digest of those it
-/// dispatched, at the namespace's closing key.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RunSeal {
-    pub key: String,
-    pub issued_count: u64,
-    pub dispatched_ordinals_digest: DispatchedOrdinalsDigest,
-}
-
 impl lash_core::store::DurableRecord for LashlangReplayNamespace {
     const SURFACE: lash_core::store::SurfaceFormat =
         lash_core::surface_format!(crate::replay_run::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION);
 }
 
 impl lash_core::store::DurableRecord for CommandShape {
-    const SURFACE: lash_core::store::SurfaceFormat =
-        lash_core::surface_format!(crate::replay_run::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION);
-}
-
-impl lash_core::store::DurableRecord for DispatchedOrdinalsDigest {
     const SURFACE: lash_core::store::SurfaceFormat =
         lash_core::surface_format!(crate::replay_run::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION);
 }

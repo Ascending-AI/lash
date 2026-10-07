@@ -44,7 +44,9 @@ pub struct Admission {
     /// limit. `None` for an operation whose body only reads committed state
     /// (a wait on pinned rows), which a restore performs again.
     pub draft: Option<ExecutionDraft>,
-    /// The waits it pins, in the same transaction.
+    /// The waits it pins, in the same transaction: a sleep's timer, with
+    /// the absolute deadline it was admitted with. A restore races these
+    /// same rows; it never mints them again.
     pub waits: Vec<WaitSpec>,
 }
 
@@ -89,8 +91,9 @@ pub trait ParentEffects: Send + Sync {
     fn park_declined(&self, _reason: &str) {}
 
     /// What admitting `operation` records with the snapshot of the VM that
-    /// issued it. Called before anything of it is committed or performed.
-    fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault>;
+    /// issued it. Called before anything of it is committed or performed;
+    /// awaited, because a timer's deadline is read from the store's clock.
+    async fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault>;
 
     /// The host's own state for the execution at this quiet point, opaque to
     /// the broker: it commits with the VM's snapshot, and a restore hands it
@@ -100,9 +103,11 @@ pub trait ParentEffects: Send + Sync {
     }
 
     /// Performs `operation`, whose admission committed, over the waits its
-    /// quiet point pinned: its body runs. Called once per admission, and
-    /// again on restore only for a `Repeatable` body that never answered or
-    /// an operation admitted as no execution.
+    /// quiet point pinned: its body runs, naming its calls by `operation`'s
+    /// admission (`operation.run`), the execution's one ordinal authority.
+    /// Called once per admission, and again on restore only for a
+    /// `Repeatable` body that never answered or an operation admitted as no
+    /// execution, over the same pinned waits.
     async fn perform(
         &self,
         operation: &AdmittedOperation,

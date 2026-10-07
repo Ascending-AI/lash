@@ -56,6 +56,29 @@ lash_rust_unit_test(
 )
 
 lash_rust_integration_test(
+    name = "cell_restore_laws__test",
+    crate_features = [],
+    crate_name = "cell_restore_laws",
+    crate_root = "tests/cell_restore_laws.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "cell_restore_laws", "//crates/lash-durable-test:cell_restore_laws__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "child_turn_crash_proof__test",
     crate_features = [],
     crate_name = "child_turn_crash_proof",

@@ -15,7 +15,6 @@ mod process_local;
 
 mod language_runtime;
 mod plugin_state;
-pub use language_runtime::RUN_SEAL_OPERATION;
 use plugin_state::record_plugin_state;
 mod served_only;
 pub use served_only::ServedOnly;

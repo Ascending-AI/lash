@@ -6,7 +6,7 @@ use lash_durable::CommitLabel;
 use lash_durable::domain::{ScopeKey, WaitKind};
 
 use super::ActorContext;
-use super::waits::{self, RaceWinner, WaitDeadline, WaitSpec};
+use super::waits::{self, RaceWinner, WaitDeadline, WaitRef, WaitSpec};
 use crate::{RuntimeErrorCode, SleepSpec};
 
 impl ActorContext {
@@ -42,31 +42,9 @@ impl ActorContext {
         &self,
         spec: SleepSpec,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        let now = self
-            .backend()
-            .durable()
-            .now()
-            .await
-            .map_err(durable_refusal)?;
-        let until = match spec {
-            SleepSpec::For { duration_ms } => {
-                now.after_millis(i64::try_from(duration_ms).unwrap_or(i64::MAX))
-            }
-            SleepSpec::Until { deadline_ms } => {
-                lash_durable::DurableInstant(i64::try_from(deadline_ms).unwrap_or(i64::MAX))
-            }
-        };
+        let spec = timer(self, spec).await?;
         let mut tx = self.begin().await.map_err(durable_refusal)?;
-        let (timer, _) = waits::pin(
-            &mut tx,
-            WaitSpec {
-                kind: WaitKind::Timer,
-                scope: waits::wait_scope(self),
-                target_process: None,
-                deadline: Some(WaitDeadline::at_instant(until)),
-            },
-        )
-        .map_err(|refusal| {
+        let (timer, _) = waits::pin(&mut tx, spec).map_err(|refusal| {
             crate::RuntimeEffectControllerError::new(
                 RuntimeErrorCode::InvalidAwaitEventWaitIdentity,
                 refusal.to_string(),
@@ -75,15 +53,9 @@ impl ActorContext {
         self.commit(tx, CommitLabel::WAIT_MINT)
             .await
             .map_err(durable_refusal)?;
-        match waits::race(self, &[timer]).await.map_err(durable_refusal)? {
-            RaceWinner::Resolved { .. } | RaceWinner::TimedOut(_) => {
-                Ok(crate::RuntimeEffectOutcome::Sleep)
-            }
-            RaceWinner::Cancelled => Err(crate::RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RuntimeEffectSleepCancelled,
-                "the sleep's awaiter was cancelled",
-            )),
-        }
+        race_timer(self, timer)
+            .await
+            .map(|()| crate::RuntimeEffectOutcome::Sleep)
     }
 
     /// Revoke a session's waits: its session scope and every scope of the
@@ -155,6 +127,95 @@ impl ActorContext {
             .map(|_| ())
             .map_err(revoke_refusal)
     }
+}
+
+/// The timer wait a durable sleep of `spec` pins under `cx`: due at the
+/// sleep's end, dated on the store's clock now and never again, and revoked
+/// with `cx`'s execution. A caller that pins it with a snapshot (a code
+/// cell's quiet point) races the same row after a restore.
+///
+/// # Errors
+///
+/// The store's refusal to read its clock.
+pub async fn timer(
+    cx: &ActorContext,
+    spec: SleepSpec,
+) -> Result<WaitSpec, crate::RuntimeEffectControllerError> {
+    let until = match spec {
+        SleepSpec::For { duration_ms } => cx
+            .backend()
+            .durable()
+            .now()
+            .await
+            .map_err(durable_refusal)?
+            .after_millis(i64::try_from(duration_ms).unwrap_or(i64::MAX)),
+        SleepSpec::Until { deadline_ms } => {
+            lash_durable::DurableInstant(i64::try_from(deadline_ms).unwrap_or(i64::MAX))
+        }
+    };
+    Ok(WaitSpec {
+        kind: WaitKind::Timer,
+        scope: waits::wait_scope(cx),
+        target_process: None,
+        deadline: Some(WaitDeadline::at_instant(until)),
+    })
+}
+
+/// Races the pinned timer `timer` against `cx`'s cancel mail: the sleep
+/// ends at the deadline the timer was pinned with, however often it is
+/// raced again.
+///
+/// # Errors
+///
+/// `RuntimeEffectSleepCancelled` when the awaiter was cancelled first, or
+/// the store's refusal.
+pub async fn race_timer(
+    cx: &ActorContext,
+    timer: WaitRef,
+) -> Result<(), crate::RuntimeEffectControllerError> {
+    match waits::race(cx, &[timer]).await.map_err(durable_refusal)? {
+        RaceWinner::Resolved { .. } | RaceWinner::TimedOut(_) => Ok(()),
+        RaceWinner::Cancelled => Err(crate::RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RuntimeEffectSleepCancelled,
+            "the sleep's awaiter was cancelled",
+        )),
+    }
+}
+
+/// Sleeps `ctx`'s execution until the deadline of `timer`, the timer wait a
+/// code cell's quiet point pinned with its sleep's admission (ADR 0132 §6,
+/// §8): a restored cell races the same row, so its sleep keeps the deadline
+/// it was admitted with.
+///
+/// # Errors
+///
+/// The race's refusal. A retryable one is recorded as the execution's
+/// nested error, and a sleep its turn's cancellation won marks the turn
+/// cancelled.
+pub async fn sleep_until_timer(
+    ctx: &crate::RuntimeExecutionContext<'_>,
+    timer: WaitRef,
+) -> Result<(), crate::RuntimeEffectControllerError> {
+    race_timer(ctx.actor_context(), timer)
+        .await
+        .inspect_err(|error| {
+            // A retryable sleep failure is the host asking for redelivery,
+            // not a guest-visible sleep result. Raise it at the handler
+            // boundary so the guest cannot swallow it into a terminal
+            // process failure (FIG-3149).
+            if error.code.is_retryable() {
+                ctx.record_nested_effect_error(error.clone());
+            }
+            // A sleep that lost to the turn's cancellation gate is a
+            // recorded outcome: the turn is cancelled from here on.
+            if error.code == RuntimeErrorCode::RuntimeEffectSleepCancelled
+                && ctx
+                    .turn_cancel_wait(tokio_util::sync::CancellationToken::new())
+                    .observes_turn_cancel()
+            {
+                ctx.note_turn_cancelled();
+            }
+        })
 }
 
 fn durable_refusal(error: lash_durable::DurableError) -> crate::RuntimeEffectControllerError {

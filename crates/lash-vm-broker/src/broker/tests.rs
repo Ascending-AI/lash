@@ -106,7 +106,7 @@ impl ParentEffects for Host {
         })
     }
 
-    fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
+    async fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
         let name = operation_name(operation);
         let wait = matches!(name.as_str(), "await" | "sleep" | "control");
         Ok(Admission {
@@ -701,8 +701,11 @@ async fn an_oversized_effect_result_stays_recorded_and_is_a_typed_run_limit() {
         }
         #[async_trait::async_trait]
         impl ParentEffects for Oversized<'_> {
-            fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
-                self.host.admission(operation)
+            async fn admission(
+                &self,
+                operation: &AdmittedOperation,
+            ) -> Result<Admission, ParentFault> {
+                self.host.admission(operation).await
             }
             async fn perform(
                 &self,

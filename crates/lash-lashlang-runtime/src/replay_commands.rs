@@ -1,7 +1,7 @@
 //! The command protocol the cell bridge follows for every command that
-//! leaves the VM toward the effect host (FIG-3586): mint the ordinal, issue
-//! its effects through a context whose journal writes ask the command's
-//! guard, and close it.
+//! leaves the VM toward the effect host (FIG-3586): name it by the ordinal
+//! its broker admitted it under, issue its effects through a context whose
+//! journal writes ask the command's guard, and close it.
 //!
 //! A refusal at any step stops the run: the refusal becomes the execution's
 //! nested error — so the cell's turn parks instead of committing — and the
@@ -36,12 +36,11 @@ pub struct ReplayCommands<'a, 'run> {
 }
 
 impl<'run> ReplayCommands<'_, 'run> {
-    /// Mints the next command's issue ordinal. Every command that leaves the
-    /// VM toward the effect host takes one here, before anything else can
-    /// fail, so a command refused in the bridge still holds its place and
-    /// every later command keeps its key.
-    pub fn issue(&self) -> Result<IssuedCommand, ExecutionHostError> {
-        self.run.issue().map_err(|error| self.stop(error))
+    /// Names the command its broker admitted at `ordinal` (ADR 0132 §8).
+    /// Every command that leaves the VM toward the effect host is named
+    /// here, before anything else can fail.
+    pub fn issue(&self, ordinal: u64) -> Result<IssuedCommand, ExecutionHostError> {
+        self.run.issue(ordinal).map_err(|error| self.stop(error))
     }
 
     /// Admits `command` to the host as a `shape` and hands back the context
@@ -90,28 +89,18 @@ impl<'run> ReplayCommands<'_, 'run> {
                 &self.attribution(),
             )));
         }
-        self.run
-            .finish(&in_flight.command, in_flight.guard.touched());
         Ok(())
     }
 
     /// Leaves a command open for the segment that resumes the run: the wait
-    /// it issued was handed over, so the run stops on it and its successor
-    /// issues it again under the same ordinal. A replay mismatch its effects
-    /// met stops the run here, as [`Self::finish`] would.
+    /// it issued was handed over, so the run stops on it and its broker
+    /// issues it again under the same admission. A replay mismatch its
+    /// effects met stops the run here, as [`Self::finish`] would.
     pub fn hand_over(&self, in_flight: &CommandInFlight<'_>) -> Result<(), ExecutionHostError> {
-        if let Some(refusal) = in_flight.guard.tripped() {
-            return Err(self.stop(refusal));
+        match in_flight.guard.tripped() {
+            Some(refusal) => Err(self.stop(refusal)),
+            None => Ok(()),
         }
-        self.run
-            .hand_over(&in_flight.command)
-            .map_err(|divergence| self.stop(divergence.into_error(&self.attribution())))
-    }
-
-    /// Closes a command that never reached the host: it failed in the bridge.
-    pub fn skipped(&self, command: &IssuedCommand) -> Result<(), ExecutionHostError> {
-        self.run.finish(command, false);
-        Ok(())
     }
 
     /// A journal error one of a command's effects returned directly. A replay
@@ -152,37 +141,6 @@ impl<'run> ReplayCommands<'_, 'run> {
         self.ctx.record_nested_runtime_effect_error(error);
         self.cancellation.cancel();
         ExecutionHostError::new(message)
-    }
-
-    /// Journals the run's seal as its last nested effect: the count of
-    /// commands it issued and the digest of those it wrote, with `producer`
-    /// served back for attribution. Nothing is written after a nested error:
-    /// the run aborts and journals nothing more.
-    pub async fn seal(&self, producer: serde_json::Value) {
-        if self.ctx.has_nested_effect_error() {
-            return;
-        }
-        let seal = self.run.seal();
-        let facts = format!(
-            "issued={}:dispatched={}",
-            seal.issued_count,
-            seal.dispatched_ordinals_digest.as_str()
-        );
-        if let Err(error) = self
-            .ctx
-            .journal_run_seal(seal.key.clone(), facts, producer)
-            .await
-        {
-            if error.code.is_replay_mismatch() {
-                self.ctx.replace_nested_effect_error(retype_replay_mismatch(
-                    error,
-                    &seal.key,
-                    &self.attribution(),
-                ));
-            } else {
-                self.ctx.record_nested_runtime_effect_error(error);
-            }
-        }
     }
 }
 

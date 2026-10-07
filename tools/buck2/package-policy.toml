@@ -52,13 +52,13 @@ tags = ["hermetic-postgres"]
 # V0's vertical crash proof (FIG-5170), L3's turn phases (FIG-5172) and the
 # trigger start proof (FIG-5175) run their matrices on SQLite memory, SQLite
 # file and PostgreSQL, and L11's drain by release (FIG-5187) on SQLite memory
-# and PostgreSQL; the tool-semantics laws (FIG-5210) run on all three tiers,
-# and the pool-width laws (FIG-5237) on PostgreSQL. Each PostgreSQL leg gets
-# a server of its own.
+# and PostgreSQL; the tool-semantics laws (FIG-5210) and the cell restore
+# laws (FIG-5224) run on all three tiers, and the pool-width laws (FIG-5237)
+# on PostgreSQL. Each PostgreSQL leg gets a server of its own.
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
-targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width"]
+targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws"]
 tags = ["hermetic-postgres"]
 
 # The lash-postgres-workers runbook's harness (FIG-5199) owns its PostgreSQL server, so a

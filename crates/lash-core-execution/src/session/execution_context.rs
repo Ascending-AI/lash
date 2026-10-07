@@ -89,13 +89,6 @@ pub struct RuntimeExecutionContext<'run> {
     token_is_lent_stop: bool,
     turn_cancel: RecordedTurnCancel,
     pub(super) observe_turn_cancel: bool,
-    /// Whether a durable wait this context issues may be handed to the Run's
-    /// successor segment (FIG-4739): set by a code cell for an operation its
-    /// run is parked on, whose state is captured, and never otherwise.
-    transferable_waits: bool,
-    /// Whether the turn this context executes for may end at a segment
-    /// boundary inside the execution (FIG-4739).
-    turn_hands_over: bool,
     /// Set when a transferable wait this context issued was handed over,
     /// shared with every context derived from this one.
     wait_handed_over: Arc<std::sync::atomic::AtomicBool>,
@@ -345,37 +338,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             .into_language_runtime_value()
     }
 
-    /// Journals a replayed language run's seal at `key` (FIG-3586): the
-    /// run's facts ride in `facts` and so in the envelope, and `producer` is
-    /// the outcome — served back on replay, so the answer names who wrote the
-    /// journal, never who is replaying it.
-    pub async fn journal_run_seal(
-        &self,
-        key: String,
-        facts: String,
-        producer: serde_json::Value,
-    ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
-        // A redrive may carry different turn metadata. The cell address and
-        // causal parent identify its seal, just as they identify its outputs.
-        let invocation = self.deferred_resolution_invocation(&key);
-        self.dispatch
-            .effect_controller
-            .vm_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::LanguageRuntimeValue {
-                        operation: format!(
-                            "{}:{facts}",
-                            crate::runtime::effect::RUN_SEAL_OPERATION
-                        ),
-                    },
-                ),
-                crate::RuntimeEffectLocalExecutor::run_seal(producer),
-            )
-            .await?
-            .into_language_runtime_value()
-    }
-
     /// Journals the link-scoped deferred-resolution decision without inheriting
     /// the live caller attribution. The admitted parent address supplies the
     /// durable identity; attribution and descriptive parent labels are not part
@@ -473,8 +435,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             token_is_lent_stop: self.token_is_lent_stop,
             turn_cancel: self.turn_cancel.clone(),
             observe_turn_cancel: self.observe_turn_cancel,
-            transferable_waits: self.transferable_waits,
-            turn_hands_over: self.turn_hands_over,
             wait_handed_over: Arc::clone(&self.wait_handed_over),
             run_cancelled_call: Arc::clone(&self.run_cancelled_call),
             turn_cancel_scope: self.turn_cancel_scope.clone(),
@@ -772,35 +732,9 @@ impl<'run> RuntimeExecutionContext<'run> {
                     .effect_controller
                     .turn_cancel_wait(cancellation),
             }
-            .transferable(self.transferable_waits)
         } else {
             crate::runtime::TurnCancelWait::unobserved(cancellation)
         }
-    }
-
-    /// Marks the durable waits this context issues as ones the Run's
-    /// successor segment may take over (FIG-4739). A wait handed over answers
-    /// [`TurnWaitHandedOver`](crate::RuntimeErrorCode::TurnWaitHandedOver)
-    /// and stays open: the caller must hold captured state that issues the
-    /// wait again.
-    pub fn with_transferable_waits(mut self, transferable: bool) -> Self {
-        self.transferable_waits = transferable;
-        self
-    }
-
-    /// Says whether the turn this context executes for may end at a segment
-    /// boundary inside the execution (FIG-4739): its engine moves turns off a
-    /// draining build, and the turn has a shift to recover its continuation.
-    /// Only such an execution marks a wait transferable.
-    pub fn with_turn_hand_over(mut self, hands_over: bool) -> Self {
-        self.turn_hands_over = hands_over;
-        self
-    }
-
-    /// Whether the turn this context executes for may end at a segment
-    /// boundary inside the execution.
-    pub fn turn_hands_over(&self) -> bool {
-        self.turn_hands_over
     }
 
     /// Records that a transferable wait this context issued was handed to
@@ -1174,91 +1108,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             other => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
                 format!("expected signal outcome, got {other:?}"),
-            )),
-        }
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
-    )]
-    fn command_sleep_invocation(
-        &self,
-        command: &crate::CommandReplayKey,
-    ) -> crate::RuntimeEffectInvocation {
-        crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                self.dispatch.effect_controller.execution_scope().clone(),
-                command.sleep(),
-            )
-            .expect("a command sleep uses the already admitted controller scope"),
-            self.effect_attribution(),
-            command.sleep(),
-        )
-        .with_caused_by(
-            self.parent_invocation
-                .as_ref()
-                .and_then(crate::RuntimeInvocation::causal_ref),
-        )
-    }
-
-    /// Sleeps under the command key a replayed language program issued the
-    /// sleep at (FIG-3586), through the effect-host seam so cancellation and
-    /// replay semantics remain durable. The intent is journaled at
-    /// [`CommandReplayKey::sleep`](crate::CommandReplayKey::sleep).
-    pub async fn sleep_command(
-        &self,
-        command: &crate::CommandReplayKey,
-        spec: crate::SleepSpec,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        let cancellation = self.cancellation_token.clone().unwrap_or_default();
-        let invocation = self.command_sleep_invocation(command);
-        let command = crate::RuntimeEffectCommand::Sleep { spec };
-        let outcome = self
-            .dispatch
-            .effect_controller
-            .wait_effect(
-                crate::RuntimeEffectEnvelope::new(invocation, command),
-                crate::RuntimeEffectLocalExecutor::sleep_under(
-                    &self.turn_cancel_wait(cancellation.clone()),
-                    std::sync::Arc::clone(&self.dispatch.clock),
-                ),
-            )
-            .await;
-        let outcome = match outcome {
-            Ok(outcome) => outcome,
-            Err(error) => {
-                // A retryable sleep failure is the host asking for redelivery,
-                // not a guest-visible sleep result. Raise it at the handler
-                // boundary so the guest cannot swallow it into a terminal
-                // process failure (FIG-3149).
-                if error.code.is_retryable() {
-                    self.record_nested_effect_error(error.clone());
-                }
-                // A sleep that lost to the turn's cancellation gate is a
-                // recorded outcome: the turn is cancelled from here on.
-                if error.code == crate::RuntimeErrorCode::RuntimeEffectSleepCancelled
-                    && self
-                        .turn_cancel_wait(CancellationToken::new())
-                        .observes_turn_cancel()
-                {
-                    self.note_turn_cancelled();
-                }
-                return Err(error);
-            }
-        };
-        match outcome {
-            crate::RuntimeEffectOutcome::Sleep => {
-                // A process's cancellation reaches its sleep only as the
-                // engine's recorded race of the timer against the process's
-                // cancel fact, reported as `RuntimeEffectSleepCancelled`
-                // (FIG-3673); a live read here could answer differently on
-                // redrive.
-                Ok(())
-            }
-            other => Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                format!("expected sleep outcome, got {}", other.kind().as_str()),
             )),
         }
     }

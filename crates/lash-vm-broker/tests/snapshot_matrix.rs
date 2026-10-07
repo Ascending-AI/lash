@@ -403,7 +403,7 @@ fn tool(operation: &AdmittedOperation) -> String {
 
 #[async_trait::async_trait]
 impl ParentEffects for LawHost {
-    fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
+    async fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
         let tool = tool(operation);
         let policy = if tool == "read" {
             lash_sansio::ExecutionPolicy::repeatable(

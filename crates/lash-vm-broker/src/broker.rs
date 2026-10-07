@@ -854,7 +854,7 @@ impl Session<'_, '_> {
                 Err(failure) => Some(SessionEnd::Lost(failure)),
             };
         }
-        let admission = match broker.effects.admission(&operation) {
+        let admission = match broker.effects.admission(&operation).await {
             Ok(admission) => admission,
             Err(fault) => return Some(SessionEnd::Lost(BrokerFailure::Parent { fault })),
         };

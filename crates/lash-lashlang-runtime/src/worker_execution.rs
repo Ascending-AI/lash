@@ -32,10 +32,10 @@ pub struct WorkerRun<'a, H> {
     /// What admitting each operation the run blocks on records.
     pub admissions: &'a dyn OperationAdmissions,
     pub boundary: &'a (dyn Fn() -> bool + Send + Sync),
-    /// The gate a foreground run's host reads while it performs an operation
-    /// the run is parked on: its state is committed, so the host may leave a
-    /// wait open beyond this activation ([`lashlang::AbilityOutcome::HandedOver`]).
-    pub hand_over: Option<&'a HandOverGate>,
+    /// Where a foreground run's host reads the admitted operation it is
+    /// performing: the ordinal its calls are named by and the waits its
+    /// quiet point pinned.
+    pub performing: Option<&'a PerformingGate>,
     /// The providers that answer the run's projection reads, on this node
     /// (ADR 0132 §9).
     pub providers: lashlang::ProjectionCatalog,
@@ -43,6 +43,7 @@ pub struct WorkerRun<'a, H> {
 
 /// What admitting an operation a run blocks on records: decided by the host
 /// that performs it, which knows its tool and policy.
+#[async_trait::async_trait]
 pub trait OperationAdmissions: Send + Sync {
     /// The admission of `call`, the command `request` takes: its execution
     /// (none for a wait the host performs again on restore) and its waits.
@@ -50,7 +51,7 @@ pub trait OperationAdmissions: Send + Sync {
     /// # Errors
     ///
     /// Why the operation cannot be admitted; the run stops.
-    fn admission(
+    async fn admission(
         &self,
         call: &lash_sansio::ToolCallId,
         request: &OperationRequest,
@@ -67,22 +68,46 @@ pub trait OperationAdmissions: Send + Sync {
     }
 }
 
-/// Whether the operation a foreground run's host is performing is one the
-/// run parked on, so its state is committed and a wait can be left open
-/// beyond this activation.
-#[derive(Debug, Default)]
-pub struct HandOverGate {
-    parked: std::sync::atomic::AtomicBool,
+/// The admitted operation a run's host is performing, as the broker
+/// admitted it (ADR 0132 §8). The broker's admission is the run's one
+/// ordinal authority: the host names the operation's calls by it and keeps
+/// no counter of its own, so a cell restored onto a settled, interrupted or
+/// re-run operation never names its next call by an earlier one's ordinal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Performing {
+    /// The operation's admission: the issue ordinal its calls' ids derive
+    /// from.
+    pub ordinal: u64,
+    /// The waits its quiet point pinned (a sleep's timer), the same rows on
+    /// every restore.
+    pub waits: Vec<WaitRef>,
 }
 
-impl HandOverGate {
+/// Where the broker's parent tells a run's host which admitted operation it
+/// is performing, for the length of the host's `perform`.
+#[derive(Debug, Default)]
+pub struct PerformingGate {
+    current: std::sync::Mutex<Option<Performing>>,
+}
+
+impl PerformingGate {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Whether the operation being performed may be handed over.
-    pub fn parked(&self) -> bool {
-        self.parked.load(std::sync::atomic::Ordering::SeqCst)
+    /// The operation being performed, if the host is performing one.
+    pub fn current(&self) -> Option<Performing> {
+        self.current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn set(&self, performing: Option<Performing>) {
+        *self
+            .current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = performing;
     }
 }
 
@@ -92,7 +117,7 @@ struct Effects<'a, H> {
     context: &'a AdmittedContext,
     admissions: &'a dyn OperationAdmissions,
     boundary: &'a (dyn Fn() -> bool + Send + Sync),
-    hand_over: Option<&'a HandOverGate>,
+    performing: Option<&'a PerformingGate>,
 }
 
 impl<H> Effects<'_, H> {
@@ -128,12 +153,13 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
             payload: request.payload.clone(),
         })
     }
-    fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
+    async fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
         self.admissions
             .admission(
                 &operation.command_id(self.context),
                 &self.request(operation)?,
             )
+            .await
             .map_err(ParentFault)
     }
     fn host_state(&self) -> Result<Option<EncodedPayload>, ParentFault> {
@@ -142,24 +168,22 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
     async fn perform(
         &self,
         operation: &AdmittedOperation,
-        _waits: &[(WaitRef, Option<PinnedKey>)],
+        waits: &[(WaitRef, Option<PinnedKey>)],
     ) -> Result<Performed, ParentFault> {
         let request = self
             .projections
             .materialize_operation(self.request(operation)?)
             .await
             .map_err(ParentFault)?;
-        // An operation the run blocks on was parked first: its state is
-        // committed, so the host may leave a wait open beyond the activation.
-        let parked =
-            matches!(&operation.kind, AdmittedKind::Control { kind, .. } if kind.parkable());
-        if let Some(gate) = self.hand_over.filter(|_| parked) {
-            gate.parked.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(gate) = self.performing {
+            gate.set(Some(Performing {
+                ordinal: operation.run,
+                waits: waits.iter().map(|(wait, _)| *wait).collect(),
+            }));
         }
         let result = self.host.perform(request).await;
-        if let Some(gate) = self.hand_over {
-            gate.parked
-                .store(false, std::sync::atomic::Ordering::SeqCst);
+        if let Some(gate) = self.performing {
+            gate.set(None);
         }
         let outcome = if self.host.is_cancelled() {
             EffectOutcome::Cancelled
@@ -275,7 +299,7 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
             context: &context,
             admissions: self.admissions,
             boundary: self.boundary,
-            hand_over: self.hand_over,
+            performing: self.performing,
         };
         let broker = Broker {
             context: &context,

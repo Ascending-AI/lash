@@ -334,7 +334,7 @@ async fn vm_run(
         snapshots: &quiet_points,
         admissions: &NoAdmissions,
         boundary: &boundary,
-        hand_over: None,
+        performing: None,
         providers: lashlang::ProjectionCatalog::of_backend(run.projection_providers.as_deref()),
     }
     .run()
@@ -455,8 +455,9 @@ impl lash_vm_broker::SnapshotStore for HeldQuietPoints {
 /// admits the steps the engine asks for, and a wait is the engine's action.
 struct NoAdmissions;
 
+#[async_trait::async_trait]
 impl crate::OperationAdmissions for NoAdmissions {
-    fn admission(
+    async fn admission(
         &self,
         _call: &lash_sansio::ToolCallId,
         _request: &lash_vm_broker::OperationRequest,
