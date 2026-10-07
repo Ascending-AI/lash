@@ -108,7 +108,10 @@ pub enum SessionMailWrite {
     /// Bind `inputs` and `batches` to `run`: each must still be open and
     /// unbound, or the commit is refused with
     /// [`DomainRefusal::SessionMailMoved`](super::DomainRefusal::SessionMailMoved).
-    /// The bound rows name `run` as the owner that took them.
+    /// The bound rows name `run` as the owner that took them. An input
+    /// already bound to `run` stays bound: a running run's phases bind the
+    /// steering input its checkpoints delivered with each phase that
+    /// records the delivery.
     Admit {
         /// The session.
         session: SessionId,

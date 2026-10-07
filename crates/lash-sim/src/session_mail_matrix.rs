@@ -17,7 +17,7 @@ use lash_core::durable_port::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, LeaseConfig,
     Release, StateRevision,
 };
-use lash_core::runtime::durable::session_mail::drain_session_mail;
+use lash_core::runtime::durable::session_mail::{OneInputPerRun, drain_session_mail};
 use lash_core::{
     ActorContext, AdmittedScope, Backend, CancellationToken, InputId, PendingTurnInputDraft,
     PendingTurnInputReadStatus, SessionId, StoreSet, TurnId, TurnInput, TurnInputIngress,
@@ -102,7 +102,7 @@ impl Activation for SessionDrain {
                 }
             };
             let woken = tx.woken();
-            let Ok(drain) = drain_session_mail(&cx, &mut tx).await else {
+            let Ok(drain) = drain_session_mail(&cx, &mut tx, &OneInputPerRun).await else {
                 owned.wait_for_mail().await;
                 continue;
             };

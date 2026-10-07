@@ -144,6 +144,21 @@ impl LashRuntime {
         max_context_tokens_of(&self.state)
     }
 
+    /// The host's queued-work batching over this session's model: the
+    /// policy its next idle admission of next-turn input composes under
+    /// (ADR 0101 §5.2). `None` for a session that selects no model, whose
+    /// run is refused whatever it takes.
+    pub(in crate::runtime) fn input_admission(
+        &self,
+    ) -> Option<crate::runtime::durable::session_mail::InputAdmission> {
+        let max_context_tokens = self.max_context_tokens().ok()?;
+        let batching = &self.host.core.durability.queued_work_batching;
+        Some(crate::runtime::durable::session_mail::InputAdmission {
+            max_inputs: batching.max_turn_input_admission(),
+            policy: batching.admission_policy(max_context_tokens),
+        })
+    }
+
     /// Install explicitly unstable internal instrumentation for this runtime.
     #[doc(hidden)]
     pub fn set_turn_phase_probe(&mut self, probe: Arc<dyn RuntimeTurnPhaseProbe>) {

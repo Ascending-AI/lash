@@ -26,7 +26,9 @@ use lash_core::durable_port::{
     ActorKey, ActorTx, CommitLabel, DurableError, DurableStore, FormatSet, NodeId, NodeLease,
     NodeSpec,
 };
-use lash_core::runtime::durable::session_mail::{SessionMailDrain, drain_session_mail};
+use lash_core::runtime::durable::session_mail::{
+    OneInputPerRun, SessionMailDrain, drain_session_mail,
+};
 use lash_core::{
     ActorContext, AdmittedScope, Backend, DeliveryPolicy, PendingTurnInputDraft,
     PendingTurnInputReadStatus, SessionId, StoreSet, TurnInput, TurnInputIngress,
@@ -108,7 +110,7 @@ async fn claim_and_drain(backend: &Backend, lease: &NodeLease, actor: &ActorKey)
         tokio_util::sync::CancellationToken::new(),
         Arc::new(lash_core::durable_port::NoProbe),
     );
-    let drain = drain_session_mail(&cx, &mut tx)
+    let drain = drain_session_mail(&cx, &mut tx, &OneInputPerRun)
         .await
         .expect("drain the session mail");
     Claimer { tx, drain }

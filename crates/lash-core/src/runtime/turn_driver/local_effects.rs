@@ -248,9 +248,6 @@ pub(super) fn turn_effect_executor(
         pending_queued: driver.pending_queued.clone(),
         pending_turn_inputs: driver.pending_turn_inputs.clone(),
         pending_checkpoint_turn_inputs: driver.pending_checkpoint_turn_inputs.clone(),
-        // Work this executor withholds from a terminal checkpoint travels
-        // back on the journalled admitted set, not on the driver copy.
-        withheld_terminal_work: Default::default(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
         protocol_reply: Default::default(),
         opener_state: driver.opener_state.clone(),

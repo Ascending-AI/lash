@@ -29,7 +29,7 @@
 
 use lash_durable::CommitLabel;
 use lash_durable::DomainWrite;
-use lash_durable::domain::{RunSeq, SessionCommitWrite, TurnWrite};
+use lash_durable::domain::{RunSeq, SessionCommitWrite, SessionMailWrite, TurnWrite};
 
 use super::head::HeadCache;
 use super::session::{
@@ -41,7 +41,7 @@ use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel};
 use crate::{ActorContext, Effect, HostTurnProtocol, SessionStreamEvent, TurnMachine};
-use lash_sansio::SavedTurn;
+use lash_sansio::{SavedTurn, SessionId, TurnId};
 use std::sync::Arc;
 
 /// The phase checkpoint of `drive` as it stands: its machine's checkpoint
@@ -58,9 +58,31 @@ fn encode_phase(
     let checkpoint = PhaseCheckpoint {
         saved,
         plugin_state: drive.plugin_state()?,
+        delivered: drive.delivered_inputs(),
     };
     serde_json::to_string(&checkpoint)
         .map_err(|error| TurnError::Exec(format!("the turn checkpoint does not encode: {error}")))
+}
+
+/// The bind of the steering input `drive`'s checkpoints delivered to its
+/// run, written in every phase commit that records the delivery (ADR 0132
+/// §4): the first binds the rows, and a later one finds them bound to the
+/// run already. A row no longer open refuses the commit, which the turn
+/// then recomputes without it.
+fn bind_delivered(drive: &dyn TurnDrive, session: &SessionId, run: &TurnId) -> Option<DomainWrite> {
+    let inputs = drive
+        .delivered_inputs()
+        .iter()
+        .flat_map(crate::AdmittedTurnInputs::input_ids)
+        .collect::<Vec<_>>();
+    (!inputs.is_empty()).then(|| {
+        DomainWrite::SessionMail(SessionMailWrite::Admit {
+            session: session.clone(),
+            run: run.clone(),
+            inputs,
+            batches: Vec::new(),
+        })
+    })
 }
 
 fn iteration(machine: &TurnMachine) -> u32 {
@@ -174,6 +196,9 @@ pub async fn run_phases(
                     for record in records {
                         tx.write(record);
                     }
+                    if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
+                        tx.write(bind);
+                    }
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
@@ -218,6 +243,9 @@ pub async fn run_phases(
                 if !named || carry.is_some() {
                     if let Some(present) = carry.take() {
                         tx.write(present);
+                    }
+                    if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
+                        tx.write(bind);
                     }
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
@@ -290,6 +318,11 @@ pub async fn run_phases(
                     .await?;
                 if let Some(present) = carry.take() {
                     tx.write(present);
+                }
+                // The commit settles what the turn's checkpoints delivered:
+                // bound to the run first, as the settlement requires.
+                if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
+                    tx.write(bind);
                 }
                 tx.write(DomainWrite::SessionCommit(SessionCommitWrite {
                     session: session.clone(),

@@ -2,30 +2,6 @@ use super::*;
 use crate::ActorContext;
 use crate::TurnId;
 
-/// Work admitted at a terminal checkpoint and withheld from that
-/// checkpoint's delivery.
-///
-/// FIG-3157: a terminal finish ends the turn. The committed finish is the
-/// turn's answer, so a delivery admitted at `BeforeCompletion` never extends
-/// it — it starts a follow-on physical turn inside the same logical run,
-/// carrying the admitted work as that turn's input. The rows stay bound to
-/// the run throughout (FIG-3927).
-#[derive(Clone, Default)]
-pub(in crate::runtime) struct WithheldTerminalWork {
-    pub(in crate::runtime) queued: Vec<crate::AdmittedQueuedWork>,
-    pub(in crate::runtime) turn_inputs: Vec<crate::AdmittedTurnInputs>,
-}
-
-impl WithheldTerminalWork {
-    pub(in crate::runtime) fn is_empty(&self) -> bool {
-        self.queued.is_empty() && self.turn_inputs.is_empty()
-    }
-
-    pub(in crate::runtime) fn take_if_any(&mut self) -> Option<Self> {
-        (!self.is_empty()).then(|| std::mem::take(self))
-    }
-}
-
 /// The rows one turn executes, each admitted to the turn's run (FIG-3927):
 /// what the run's admission bound.
 pub(super) struct LogicalTurnAdmissions {
@@ -51,7 +27,6 @@ impl LashRuntime {
         scoped_effect_controller: &ActorContext,
         turn_id: &TurnId,
         admissions: &LogicalTurnAdmissions,
-        announce_queued_work: bool,
         tool_restore: Option<crate::ToolRestoreReport>,
     ) {
         let mut cursor =
@@ -68,11 +43,6 @@ impl LashRuntime {
                     event: crate::TurnEvent::ToolRestoreReported { report },
                 },
             );
-        }
-        if !announce_queued_work {
-            // Work withheld from a terminal checkpoint already announced its
-            // start at the boundary that admitted it (FIG-3157).
-            return;
         }
         for queued in &admissions.queued {
             let work = queued.materialize_queued_checkpoint_work();

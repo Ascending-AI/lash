@@ -52,11 +52,10 @@
 //! either fits the model window or names an irreducibly oversized row, and the
 //! provider stays the authority on everything in between.
 //!
-//! The selection a policy returns is journaled by the claim itself: the durable
-//! rows carry the resulting claim id, and redriving an interrupted claim
-//! restores that exact composition without consulting the policy again. A host
-//! may therefore change or replace its policy without forking in-flight
-//! history.
+//! The selection a policy returns is committed with the run's admission: the
+//! bound rows name the run, and resuming an interrupted run restores that
+//! exact composition without consulting the policy again. A host may
+//! therefore change or replace its policy without forking in-flight history.
 
 use std::sync::Arc;
 
@@ -213,16 +212,16 @@ pub trait QueuedDrainPolicy: std::fmt::Debug + Send + Sync {
     ///
     /// # Where this runs
     ///
-    /// Inside the store's claim critical section — an open Postgres
-    /// transaction, or SQLite's blocking connection closure — behind the
-    /// session lease fence, with the claim about to commit. An implementation
+    /// In the session actor's mail drain, inside its owner transaction, with
+    /// the run's admission about to commit (`turn.admit`). An implementation
     /// must therefore be:
     ///
     /// * **deterministic** for a given request, since the answer is committed
-    ///   with the claim and redriving that claim never asks again;
+    ///   with the run's admission and resuming that run never asks again;
     /// * **non-blocking**: no I/O, no locks, no async, no store calls. A slow
-    ///   selection holds a database transaction open for every session.
-    /// * **panic-free**: a panic here unwinds the claim, not just the turn.
+    ///   selection holds the session's admission for every input behind it.
+    /// * **panic-free**: a panic here unwinds the session's activation, not
+    ///   just the turn.
     ///
     /// Exact host-named selections do not call this at all: the host already
     /// chose the composition.

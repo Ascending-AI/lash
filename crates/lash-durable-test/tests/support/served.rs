@@ -318,7 +318,15 @@ impl World {
         builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
     ) -> Option<Self> {
         let scripts = Arc::new(Scripts::default());
-        Self::serving(tier, engines, model(Arc::clone(&scripts)), scripts, builder).await
+        Self::serving(
+            tier,
+            engines,
+            model(Arc::clone(&scripts)),
+            scripts,
+            lash::QueuedWorkBatchingConfig::new(1),
+            builder,
+        )
+        .await
     }
 
     /// [`World::with_engines`] whose sessions are served by `model`, a law's
@@ -329,7 +337,26 @@ impl World {
         model: ProviderHandle,
         builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
     ) -> Option<Self> {
-        Self::serving(tier, engines, model, Arc::default(), builder).await
+        Self::serving(
+            tier,
+            engines,
+            model,
+            Arc::default(),
+            lash::QueuedWorkBatchingConfig::new(1),
+            builder,
+        )
+        .await
+    }
+
+    /// [`World::with_model`] whose core drains its queued work under
+    /// `batching`, the host's batching policy, rather than one row a run.
+    pub async fn with_batching(
+        tier: Tier,
+        batching: lash::QueuedWorkBatchingConfig,
+        model: ProviderHandle,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) -> Option<Self> {
+        Self::serving(tier, Vec::new(), model, Arc::default(), batching, builder).await
     }
 
     async fn serving(
@@ -337,6 +364,7 @@ impl World {
         engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
         model: ProviderHandle,
         scripts: Arc<Scripts>,
+        batching: lash::QueuedWorkBatchingConfig,
         builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
     ) -> Option<Self> {
         let Some((stores, keep)) = stores(tier).await else {
@@ -346,7 +374,7 @@ impl World {
         let backend = backend_with(stores, engines);
         let core = builder(&backend)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .queued_work_batching(batching)
             .serve_test_llm_profile(model, metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "tool-semantics-deployment",

@@ -61,14 +61,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) pending_queued: Vec<crate::AdmittedQueuedWork>,
     pub(super) pending_turn_inputs: Vec<crate::AdmittedTurnInputs>,
     pub(super) pending_checkpoint_turn_inputs: Option<crate::AdmittedTurnInputs>,
-    /// FIG-3157: work admitted at a terminal checkpoint and withheld from its
-    /// delivery, so the committed finish stays this turn's answer. It is never
-    /// settled as this turn's completed work. A finished turn's logical run
-    /// executes it in a follow-on turn. When this turn is cancelled that
-    /// follow-on never runs: the final commit hands withheld turn input to the
-    /// cancellation's undelivered disposition (FIG-3531) and releases withheld
-    /// wakes (FIG-3543).
-    pub(super) withheld_terminal_work: super::logical_turn::WithheldTerminalWork,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     /// Names the reply the protocol driver materialized, for the boundary's
     /// terminal materialization to recognize by identity.

@@ -1,5 +1,6 @@
 //! Queued withdrawal and running cancellation through the facade (ADR 0039,
-//! ADR 0101 A2), ported from the L9c and L9e laws retired with their host.
+//! ADR 0101 A2), ported from the L9c and L9e laws retired with their host;
+//! and the host's drain policy over queued input (ADR 0101 §5.2, FIG-5293).
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 #[path = "support/served.rs"]
@@ -212,11 +213,121 @@ async fn cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_on
     world.shutdown().await;
 }
 
+const BUSY: &str = "hold the session while the queue fills";
+const COALESCED: [&str; 3] = ["coalesced one", "coalesced two", "coalesced three"];
+
+/// The provider holds its first request until the law releases it, answers
+/// every request in prose, and keeps every request it was asked, rendered.
+#[derive(Default)]
+struct GatedModel {
+    requests: std::sync::Mutex<Vec<String>>,
+    started: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl GatedModel {
+    fn provider(self: &Arc<Self>) -> lash_core::facade_support::ProviderHandle {
+        let model = Arc::clone(self);
+        lash_core::testing::TestProvider::builder()
+            .kind("coalescing-gated-model")
+            .complete(move |request: lash_core::llm::types::LlmRequest| {
+                let model = Arc::clone(&model);
+                async move {
+                    let rendered = format!("{:?}", request.messages);
+                    let first = {
+                        let mut requests = model.requests.lock().unwrap();
+                        requests.push(rendered);
+                        requests.len() == 1
+                    };
+                    if first {
+                        model.started.notify_one();
+                        model.release.notified().await;
+                    }
+                    Ok(served::text(&request, "answered"))
+                }
+            })
+            .build()
+            .into_handle()
+    }
+}
+
+/// With `DrainMode::All` installed, the inputs queued behind a running turn
+/// are admitted together, as one run under the first one's id, whose
+/// opening request renders each of them in order; the model is asked once
+/// for them all.
+async fn a_coalescing_drain_admits_the_queued_inputs_as_one_run(tier: Tier) {
+    let model = Arc::new(GatedModel::default());
+    let Some(world) = World::with_batching(
+        tier,
+        lash::QueuedWorkBatchingConfig::new(1).with_drain_mode(lash::DrainMode::All),
+        model.provider(),
+        |backend| lash::LashCore::standard_builder(backend.clone()),
+    )
+    .await
+    else {
+        return;
+    };
+    let session = world.session("coalescing-drain", served::spec(8)).await;
+    tokio::time::timeout(WATCHDOG, async {
+        let running = session
+            .send(lash::TurnInput::text(BUSY))
+            .await
+            .expect("send the busy input");
+        model.started.notified().await;
+        let mut queued = Vec::new();
+        for (index, text) in COALESCED.iter().enumerate() {
+            let id = lash::TurnId::try_from(format!("coalesced-{index}")).expect("a host id");
+            queued.push(
+                session
+                    .send(lash::TurnInput::text(*text))
+                    .id(id)
+                    .await
+                    .expect("queue an input"),
+            );
+        }
+        model.release.notify_one();
+        running.output().await.expect("the busy run answers");
+        let head = queued[0].id().expect("the host named the run").clone();
+        for handle in queued {
+            let input = handle.input_id().clone();
+            let output = handle
+                .output()
+                .await
+                .expect("every coalesced input settles");
+            assert_eq!(output.status(), lash::TurnStatus::Answered);
+            assert_eq!(
+                session.attach(input).run().await.expect("read the binding"),
+                Some(head.clone()),
+                "every queued input is bound to the first one's run"
+            );
+        }
+        let requests = model.requests.lock().unwrap().clone();
+        assert_eq!(
+            requests.len(),
+            2,
+            "the queued inputs share one model call: {requests:?}"
+        );
+        let opening = &requests[1];
+        let at: Vec<usize> = COALESCED
+            .iter()
+            .map(|text| opening.find(text).expect("the run renders every input"))
+            .collect();
+        assert!(
+            at.windows(2).all(|pair| pair[0] < pair[1]),
+            "the run renders its inputs in queue order: {opening}"
+        );
+    })
+    .await
+    .expect("deadlock watchdog: the coalesced run never settled");
+    world.shutdown().await;
+}
+
 tiered_laws!(
     withdraw_while_queued_vs_cancel_while_running,
     cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one,
     coalesced_inputs_commit_distinct_user_rows,
     host_input_ids_correlate_new_queued_and_steering_rows,
+    a_coalescing_drain_admits_the_queued_inputs_as_one_run,
 );
 
 /// FIG-5288: a coalesced opening retains every input's own row and application,

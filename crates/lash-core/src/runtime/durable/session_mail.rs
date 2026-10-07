@@ -17,20 +17,67 @@
 //!    an operation run for a plugin task, which binds nothing (the commit
 //!    that applies it settles it, predicated on the row still being open);
 //! 3. otherwise the turn lane's head, the earlier of the head open input
-//!    and the head open turn batch, alone (the default drain policy takes
-//!    the head alone, so each input is its own run).
+//!    and the head open turn batch. A head input takes with it the inputs
+//!    behind it that the host's installed drain policy selects
+//!    ([`InputBatching`]), among those that share its run spec and lie
+//!    before the earliest open turn batch (ADR 0101 §5.2); the default
+//!    policy takes the head alone, so each input is its own run.
 //!
 //! The owner mails its own session too: a frame switch's `turn.commit`
 //! mails the switch's task as a next-turn input ([`follow_on_mail`]), so the
 //! follow-on is ordinary mail the session's next drain admits (ADR 0101 §3).
 
-use lash_durable::domain::{MailBatchKind, SessionMailWrite, SessionMailbox};
+use lash_durable::domain::{MailBatchKind, MailInput, SessionMailWrite, SessionMailbox};
 use lash_durable::{ActorTx, DomainWrite, DurableError};
 use lash_sansio::{SessionId, TurnId};
 
 use super::session::AdmittedInputs;
 use crate::ActorContext;
 use crate::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
+
+/// How many next-turn inputs one run takes: the host's queued-work batching
+/// (ADR 0101 §5.2), which the drain asks only when more than one input is
+/// eligible to run together.
+#[async_trait::async_trait]
+pub trait InputBatching: Send + Sync {
+    /// The admission policy `session`'s next run composes its next-turn
+    /// input under, and the most inputs it offers that policy; `None` takes
+    /// the head input alone.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionMailError`] when the policy cannot be read.
+    async fn input_admission(
+        &self,
+        cx: &ActorContext,
+        session: &SessionId,
+    ) -> Result<Option<InputAdmission>, SessionMailError>;
+}
+
+/// The policy an idle admission of next-turn input composes under.
+#[derive(Clone, Debug)]
+pub struct InputAdmission {
+    /// The most inputs one admission offers the drain policy.
+    pub max_inputs: usize,
+    /// The policy that selects how many of them run together.
+    pub policy: crate::TurnLaneAdmissionPolicy,
+}
+
+/// [`InputBatching`] that takes the head input alone: Lash's default drain,
+/// for an activation that installs no host policy.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OneInputPerRun;
+
+#[async_trait::async_trait]
+impl InputBatching for OneInputPerRun {
+    async fn input_admission(
+        &self,
+        _cx: &ActorContext,
+        _session: &SessionId,
+    ) -> Result<Option<InputAdmission>, SessionMailError> {
+        Ok(None)
+    }
+}
 
 /// The mail kind a session's close is appended under; its body is empty.
 pub const SESSION_CLOSE_MAIL: &str = "session.close";
@@ -60,10 +107,14 @@ pub enum SessionMailError {
     /// A mailbox row does not decode.
     #[error("session mail does not decode: {0}")]
     Undecodable(String),
+    /// The host's input batching could not be read.
+    #[error("the session's input batching: {0}")]
+    Batching(String),
 }
 
 /// Drain the session's mailbox on `tx`, binding what it admits under the
-/// epoch, and return what the activation must do. The whole mailbox is
+/// epoch, and return what the activation must do. A run of next-turn input
+/// takes as many inputs as `batching` selects. The whole mailbox is
 /// acknowledged: what it signalled is now in the drain's answer or still
 /// open in its table for the next drain.
 ///
@@ -73,6 +124,7 @@ pub enum SessionMailError {
 pub async fn drain_session_mail(
     cx: &ActorContext,
     tx: &mut ActorTx,
+    batching: &dyn InputBatching,
 ) -> Result<SessionMailDrain, SessionMailError> {
     let session = SessionId::parse(cx.actor().id())
         .map_err(|error| SessionMailError::Undecodable(format!("session actor id: {error}")))?;
@@ -89,7 +141,18 @@ pub async fn drain_session_mail(
         }),
         None => None,
     };
-    let admit = admission(&mailbox)?;
+    let admit = match admission(&mailbox)? {
+        Some(Head::Run(admitted)) => Some(admitted),
+        Some(Head::Input { run, inputs }) => Some(AdmittedInputs {
+            run,
+            admission: RunAdmissionRecord::Turn {
+                took: AdmittedTurnRows::Inputs {
+                    ids: composed_inputs(cx, tx, &session, inputs, batching).await?,
+                },
+            },
+        }),
+        None => None,
+    };
     // A turn binds what it took; a command or operation run binds nothing.
     if let Some(admitted) = admit.as_ref()
         && admitted.admission.is_turn()
@@ -105,8 +168,66 @@ pub async fn drain_session_mail(
     Ok(SessionMailDrain { admit, close })
 }
 
+/// What a mailbox admits next: a run whose admission is decided, or the
+/// head input with the inputs that may run with it, which the host's drain
+/// policy composes.
+enum Head {
+    Run(AdmittedInputs),
+    Input {
+        /// The run the head input opens.
+        run: TurnId,
+        /// The head input and the open inputs that may share its run, in
+        /// ingress order: those of its run spec, before the earliest open
+        /// turn batch, which a composition never passes (ADR 0101 §5.2).
+        inputs: Vec<MailInput>,
+    },
+}
+
+/// The inputs of `inputs` the run takes: the head alone, unless the host's
+/// policy selects more of them.
+async fn composed_inputs(
+    cx: &ActorContext,
+    tx: &ActorTx,
+    session: &SessionId,
+    inputs: Vec<MailInput>,
+    batching: &dyn InputBatching,
+) -> Result<AdmittedInputIds, SessionMailError> {
+    let undecodable = |error: crate::StoreError| SessionMailError::Undecodable(error.to_string());
+    let head = inputs.first().map(|input| vec![input.input.clone()]);
+    let mut ids = head.unwrap_or_default();
+    if inputs.len() > 1
+        && let Some(InputAdmission { max_inputs, policy }) =
+            batching.input_admission(cx, session).await?
+    {
+        // The policy weighs each input's payload and age, which the mailbox
+        // does not carry: the session's pending rows do.
+        let mut pending = cx
+            .backend()
+            .session_store_factory()
+            .list_pending_turn_inputs(session)
+            .await
+            .map_err(undecodable)?
+            .into_iter()
+            .map(|read| (read.input.input_id.clone(), read.input))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let rows = inputs
+            .iter()
+            .take(max_inputs.max(1))
+            .map_while(|input| pending.remove(&input.input))
+            .collect::<Vec<_>>();
+        let now = u64::try_from(tx.opened_at().0).unwrap_or(0);
+        if let Some(composed) =
+            crate::store::plan_next_turn_input_admission(session, rows, max_inputs, &policy, now)
+            && !composed.inputs.is_empty()
+        {
+            ids = composed.input_ids();
+        }
+    }
+    AdmittedInputIds::new(ids).map_err(|error| SessionMailError::Undecodable(error.to_string()))
+}
+
 /// The run `mailbox` admits next, with what its admission took.
-fn admission(mailbox: &SessionMailbox) -> Result<Option<AdmittedInputs>, SessionMailError> {
+fn admission(mailbox: &SessionMailbox) -> Result<Option<Head>, SessionMailError> {
     if !mailbox.live || mailbox.closing || mailbox.bound_run.is_some() {
         return Ok(None);
     }
@@ -122,10 +243,10 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<AdmittedInputs>, Session
                 batch: batch.batch.clone(),
             },
         };
-        return Ok(Some(AdmittedInputs {
+        return Ok(Some(Head::Run(AdmittedInputs {
             run: run_of(batch.batch.as_str())?,
             admission,
-        }));
+        })));
     }
     let head_input = mailbox.inputs.iter().min_by_key(|input| input.enqueue_seq);
     let turn_batch = |batch: &lash_durable::domain::MailBatch| -> Result<_, SessionMailError> {
@@ -139,21 +260,31 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<AdmittedInputs>, Session
         })
     };
     Ok(Some(match (head_input, head_batch) {
-        (Some(input), Some(batch)) if batch.enqueue_seq < input.enqueue_seq => turn_batch(batch)?,
-        (Some(input), _) => {
-            let run = input
-                .run()
-                .ok_or_else(|| SessionMailError::Undecodable(format!("run id {}", input.input)))?;
-            let ids = AdmittedInputIds::new(vec![input.input.clone()])
-                .map_err(|error| SessionMailError::Undecodable(error.to_string()))?;
-            AdmittedInputs {
-                run,
-                admission: RunAdmissionRecord::Turn {
-                    took: AdmittedTurnRows::Inputs { ids },
-                },
-            }
+        (Some(input), Some(batch)) if batch.enqueue_seq < input.enqueue_seq => {
+            Head::Run(turn_batch(batch)?)
         }
-        (None, Some(batch)) => turn_batch(batch)?,
+        (Some(head), batch) => {
+            let run = head
+                .run()
+                .ok_or_else(|| SessionMailError::Undecodable(format!("run id {}", head.input)))?;
+            let stop = batch.map(|batch| batch.enqueue_seq);
+            let mut inputs = mailbox
+                .inputs
+                .iter()
+                .filter(|input| input.enqueue_seq >= head.enqueue_seq)
+                .collect::<Vec<_>>();
+            inputs.sort_by_key(|input| input.enqueue_seq);
+            let inputs = inputs
+                .into_iter()
+                .take_while(|input| {
+                    input.run_spec_hash == head.run_spec_hash
+                        && stop.is_none_or(|stop| input.enqueue_seq < stop)
+                })
+                .cloned()
+                .collect();
+            Head::Input { run, inputs }
+        }
+        (None, Some(batch)) => Head::Run(turn_batch(batch)?),
         (None, None) => return Ok(None),
     }))
 }

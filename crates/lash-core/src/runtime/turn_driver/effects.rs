@@ -75,39 +75,6 @@ fn drop_held_rows<C: AdmittedRows>(
     overlapping
 }
 
-/// Whether an incoming queued-work admission names a batch this turn already
-/// executes, which marks it as a replay of the turn's own work rather than new
-/// work.
-fn shares_queued_batches(
-    pending: &[crate::AdmittedQueuedWork],
-    incoming: &crate::AdmittedQueuedWork,
-) -> bool {
-    pending.iter().any(|pending| {
-        pending.batches.iter().any(|pending_batch| {
-            incoming
-                .batches
-                .iter()
-                .any(|incoming_batch| incoming_batch.batch_id == pending_batch.batch_id)
-        })
-    })
-}
-
-/// Whether an incoming turn-input admission names a row this turn already
-/// executes.
-fn shares_turn_input_rows(
-    pending: &[crate::AdmittedTurnInputs],
-    incoming: &crate::AdmittedTurnInputs,
-) -> bool {
-    pending.iter().any(|pending| {
-        pending.inputs.iter().any(|pending_input| {
-            incoming
-                .inputs
-                .iter()
-                .any(|incoming_input| incoming_input.input_id == pending_input.input_id)
-        })
-    })
-}
-
 fn merge_queued_admission(
     pending: &mut Vec<crate::AdmittedQueuedWork>,
     mut incoming: crate::AdmittedQueuedWork,
@@ -144,16 +111,13 @@ struct TurnAdmissionSlots<'a> {
     pending_queued: &'a mut Vec<crate::AdmittedQueuedWork>,
     pending_turn_inputs: &'a mut Vec<crate::AdmittedTurnInputs>,
     pending_checkpoint_turn_inputs: &'a mut Option<crate::AdmittedTurnInputs>,
-    withheld_terminal_work: &'a mut crate::runtime::logical_turn::WithheldTerminalWork,
 }
 
-/// Folds a checkpoint's recorded admitted set into the turn's rows by the
-/// rule the step body applied when it admitted them: at a terminal
-/// checkpoint, a row this turn does not already shift is withheld work, not
-/// this turn's to settle.
+/// Folds a checkpoint's recorded admitted set into the turn's rows. A row
+/// the turn already executes is a replay of its own work: only rows no set
+/// of the turn covers are new work for the pending checkpoint slot.
 fn absorb_checkpoint_admissions(
     slots: TurnAdmissionSlots<'_>,
-    checkpoint: CheckpointKind,
     queued_work: Vec<crate::AdmittedQueuedWork>,
     turn_inputs: Option<crate::AdmittedTurnInputs>,
 ) -> Result<(), RuntimeError> {
@@ -161,38 +125,14 @@ fn absorb_checkpoint_admissions(
         pending_queued,
         pending_turn_inputs,
         pending_checkpoint_turn_inputs,
-        withheld_terminal_work,
     } = slots;
-    let withholds_admitted_work = matches!(checkpoint, CheckpointKind::BeforeCompletion);
     for queued in queued_work {
-        if withholds_admitted_work && !shares_queued_batches(pending_queued, &queued) {
-            merge_queued_admission(&mut withheld_terminal_work.queued, queued);
-        } else {
-            merge_queued_admission(pending_queued, queued);
-        }
+        merge_queued_admission(pending_queued, queued);
     }
     if let Some(mut admitted) = turn_inputs {
-        if withholds_admitted_work
-            && !shares_turn_input_rows(pending_turn_inputs, &admitted)
-            && !pending_checkpoint_turn_inputs
-                .as_ref()
-                .is_some_and(|pending| {
-                    shares_turn_input_rows(std::slice::from_ref(pending), &admitted)
-                })
-        {
-            drop_held_rows(&withheld_terminal_work.turn_inputs, &mut admitted);
-            if !admitted.inputs.is_empty() {
-                withheld_terminal_work.turn_inputs.push(admitted);
-            }
-        } else {
-            // A replayed checkpoint outcome can re-deliver rows this turn
-            // already executes — the withheld rows a follow-on turn was admitted
-            // with are carried by the journaled admitted set. Only rows no
-            // shift covers are new work for the pending checkpoint slot.
-            drop_held_rows(pending_turn_inputs, &mut admitted);
-            if !admitted.inputs.is_empty() {
-                merge_pending_checkpoint_turn_inputs(pending_checkpoint_turn_inputs, admitted)?;
-            }
+        drop_held_rows(pending_turn_inputs, &mut admitted);
+        if !admitted.inputs.is_empty() {
+            merge_pending_checkpoint_turn_inputs(pending_checkpoint_turn_inputs, admitted)?;
         }
     }
     Ok(())
@@ -206,15 +146,18 @@ impl RuntimeTurnDriver<'_> {
         checkpoint: CheckpointKind,
         event_tx: &TurnObserver,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        // A turn here runs under no admitted run, so it admits nothing at
-        // its checkpoints: a run's checkpoint admission is the session
-        // actor's (L3).
+        // A store that did not answer the admission is this attempt's
+        // fault, never the checkpoint's outcome: the turn stops uncommitted
+        // and the session's next pass recomputes it from its last phase.
+        let admission = self.steering_admission(checkpoint).await.map_err(|fault| {
+            RuntimeEffectControllerError::from(fault).retryable_uncommitted_derivation()
+        })?;
         let result = self
             .run_checkpoint(
                 messages,
                 protocol_iteration,
                 checkpoint,
-                crate::store::CheckpointAdmission::default(),
+                admission,
                 event_tx,
             )
             .await
@@ -229,21 +172,59 @@ impl RuntimeTurnDriver<'_> {
                 session_contributions,
                 // A checkpoint outcome is a self-contained snapshot of the
                 // rows the turn holds. Replay must never reconstruct it from
-                // mutations to the driver's resident sets. Work withheld from
-                // a terminal checkpoint (FIG-3157) is part of it: replay
-                // routes it back by the same rule that withheld it.
-                queued_work: self
-                    .pending_queued
-                    .iter()
-                    .chain(self.withheld_terminal_work.queued.iter())
-                    .cloned()
-                    .collect(),
-                turn_inputs: self
-                    .pending_checkpoint_turn_inputs
-                    .clone()
-                    .or_else(|| self.withheld_terminal_work.turn_inputs.last().cloned()),
+                // mutations to the driver's resident sets.
+                queued_work: self.pending_queued.clone(),
+                turn_inputs: self.pending_checkpoint_turn_inputs.clone(),
                 incorporation: self.opener_state.ledger_snapshot(),
             }),
+        })
+    }
+
+    /// The steering input `checkpoint` admits to this turn (ADR 0101 §5.1):
+    /// the session's open rows addressed to it whose boundary the
+    /// checkpoint reaches, in ingress order. Nothing binds here. The rows
+    /// bind to the run in the phase commit that records their delivery
+    /// (ADR 0132 §4), so a crash before it leaves them open, and the
+    /// checkpoint the resumed turn recomputes admits them again.
+    ///
+    /// The terminal checkpoint admits nothing: the committed finish is the
+    /// turn's answer, and input addressed to the turn is the session's next
+    /// run once the turn ends (ADR 0101 §3, §5.1).
+    async fn steering_admission(
+        &self,
+        checkpoint: CheckpointKind,
+    ) -> Result<crate::store::CheckpointAdmission, RuntimeError> {
+        /// The most steering inputs one checkpoint delivers.
+        const MAX_CHECKPOINT_INPUTS: usize = 64;
+        if checkpoint != CheckpointKind::AfterWork {
+            return Ok(crate::store::CheckpointAdmission::default());
+        }
+        let mut rows = self
+            .scoped_effect_controller
+            .backend()
+            .session_store_factory()
+            .list_pending_turn_inputs(&self.session_id)
+            .await
+            .map_err(crate::runtime::runtime_error_from_store_commit)?
+            .into_iter()
+            .filter(|read| {
+                matches!(read.status, crate::PendingTurnInputReadStatus::Open)
+                    && read.input.state.kind() == crate::TurnInputStateKind::PendingActive
+                    && read.input.state.active_turn_id() == Some(&self.turn_id)
+                    && read.input.ingress().admits_checkpoint(checkpoint)
+            })
+            .map(|read| read.input)
+            .collect::<Vec<_>>();
+        rows.sort_by_key(|input| input.enqueue_seq);
+        rows.truncate(MAX_CHECKPOINT_INPUTS);
+        Ok(crate::store::CheckpointAdmission {
+            inputs: crate::store::plan_checkpoint_input_admission(
+                &self.session_id,
+                &self.turn_id,
+                checkpoint,
+                rows,
+            ),
+            queued: None,
         })
     }
 
@@ -278,7 +259,7 @@ impl RuntimeTurnDriver<'_> {
         // in before the result is read, so a checkpoint that admitted work
         // and then failed hands that work to the failure path on the live
         // pass and on every replay alike.
-        self.absorb_checkpoint_admissions(checkpoint, queued_work, turn_inputs)
+        self.absorb_checkpoint_admissions(queued_work, turn_inputs)
             .map_err(RuntimeEffectControllerError::from)?;
         // A failed checkpoint is part of the checkpoint's own recorded
         // outcome: the journal holds it, and every redrive replays it. It is
@@ -302,7 +283,6 @@ impl RuntimeTurnDriver<'_> {
 
     fn absorb_checkpoint_admissions(
         &mut self,
-        checkpoint: CheckpointKind,
         queued_work: Vec<crate::AdmittedQueuedWork>,
         turn_inputs: Option<crate::AdmittedTurnInputs>,
     ) -> Result<(), RuntimeError> {
@@ -311,9 +291,7 @@ impl RuntimeTurnDriver<'_> {
                 pending_queued: &mut self.pending_queued,
                 pending_turn_inputs: &mut self.pending_turn_inputs,
                 pending_checkpoint_turn_inputs: &mut self.pending_checkpoint_turn_inputs,
-                withheld_terminal_work: &mut self.withheld_terminal_work,
             },
-            checkpoint,
             queued_work,
             turn_inputs,
         )
@@ -426,37 +404,12 @@ impl RuntimeTurnDriver<'_> {
             self.pending_checkpoint_turn_inputs.is_none(),
             "checkpoint admissions must be resolved before another checkpoint runs"
         );
-        // FIG-3157: a terminal finish ends the turn, so work admitted at this
-        // boundary never extends it. It is withheld from the delivery and
-        // starts a follow-on turn inside the same logical run instead. The
-        // boundary that admitted it is still the boundary it reports.
-        let withholds_admitted_work = matches!(checkpoint, CheckpointKind::BeforeCompletion);
+        // Steering input reaches a work checkpoint only: the terminal
+        // checkpoint admits nothing, and the committed finish stays the
+        // turn's answer (FIG-5293).
         if let Some(mut admitted) = turn_input_admission {
-            let already_delivered = drop_held_rows(&self.pending_turn_inputs, &mut admitted);
-            // Rows this turn already executes are a replay of its own work, not
-            // new input: they settle with the turn rather than starting a
-            // turn of their own.
-            if withholds_admitted_work
-                && already_delivered.is_empty()
-                && !admitted.inputs.is_empty()
-            {
-                drop_held_rows(&self.withheld_terminal_work.turn_inputs, &mut admitted);
-                // The row was accepted at this boundary; only the turn that
-                // renders it moves. Applications are recorded by that turn.
-                let accepted_turn_inputs = admitted.accepted_turn_inputs();
-                self.withheld_terminal_work.turn_inputs.push(admitted);
-                if !accepted_turn_inputs.is_empty() {
-                    self.turn_observations.observe(
-                        event_tx,
-                        crate::engine::ObservedEvent::Session(
-                            SessionStreamEvent::InjectedTurnInputAccepted {
-                                inputs: accepted_turn_inputs,
-                                checkpoint,
-                            },
-                        ),
-                    );
-                }
-            } else if !admitted.inputs.is_empty() {
+            drop_held_rows(&self.pending_turn_inputs, &mut admitted);
+            if !admitted.inputs.is_empty() {
                 let materialized = admitted
                     .materialize_checkpoint_turn_input(
                         &self.turn_id,
@@ -479,12 +432,8 @@ impl RuntimeTurnDriver<'_> {
                 &queued,
                 materialized.turn_causes.clone(),
             );
-            if withholds_admitted_work && !shares_queued_batches(&self.pending_queued, &queued) {
-                merge_queued_admission(&mut self.withheld_terminal_work.queued, queued);
-            } else {
-                turn_causes.extend(materialized.turn_causes);
-                merge_queued_admission(&mut self.pending_queued, queued);
-            }
+            turn_causes.extend(materialized.turn_causes);
+            merge_queued_admission(&mut self.pending_queued, queued);
         }
         let plugins = Arc::clone(self.session.plugins());
         let applied = plugins

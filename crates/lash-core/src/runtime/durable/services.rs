@@ -11,6 +11,7 @@ use super::head::SessionHead;
 use super::session::{
     AdmittedInputs, OpenTurn, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
 };
+use super::session_mail::{InputAdmission, InputBatching, SessionMailError};
 use crate::runtime::logical_turn::LogicalTurnAdmissions;
 use crate::runtime::turn_driver::{DriveParts, RuntimeDrive};
 use crate::runtime::turn_loop::DurableTurn;
@@ -152,16 +153,13 @@ impl RuntimeTurnServices {
         let turn = runtime
             .prepare_durable_turn(&controller, &row.run, admissions, &observer)
             .await?;
-        // Preparation records the messages each admitted input produced.
-        // Freeze settlement only after that evidence exists (FIG-5288).
+        // The turn's commit settles its inputs from the driver once it
+        // finishes: those its run took, with the application evidence
+        // preparation recorded (FIG-5288), and those its checkpoints
+        // delivered (FIG-5293).
         let settlement = crate::store::IngressSettlement {
             run: row.run.clone(),
-            completed_inputs: turn
-                .driver
-                .pending_turn_inputs
-                .iter()
-                .map(crate::AdmittedTurnInputs::completion)
-                .collect(),
+            completed_inputs: Vec::new(),
             completed_batches: turn
                 .driver
                 .pending_queued
@@ -246,6 +244,10 @@ impl TurnServices for RuntimeTurnServices {
         Ok(())
     }
 
+    fn input_batching(&self) -> &dyn InputBatching {
+        self
+    }
+
     async fn announce_head(&self, cx: &ActorContext, session: &SessionId) {
         announce_head(
             cx.backend(),
@@ -254,6 +256,24 @@ impl TurnServices for RuntimeTurnServices {
             session,
         )
         .await;
+    }
+}
+
+/// The host's batching, as the session's runtime holds it, over the
+/// session's model.
+#[async_trait::async_trait]
+impl InputBatching for RuntimeTurnServices {
+    async fn input_admission(
+        &self,
+        _cx: &ActorContext,
+        session: &SessionId,
+    ) -> Result<Option<InputAdmission>, SessionMailError> {
+        let runtime = self
+            .runtimes
+            .open(session)
+            .await
+            .map_err(|error| SessionMailError::Batching(error.to_string()))?;
+        Ok(runtime.input_admission())
     }
 }
 

@@ -94,9 +94,14 @@ impl RuntimeDrive {
         let RestoredTurn {
             machine,
             plugin_state,
+            delivered,
             pending,
             row,
         } = restore.restore(config).await?;
+        // The steering input the turn's checkpoints delivered before its
+        // last phase committed is bound to its run; the turn's commit
+        // settles it with the rows its run took.
+        driver.pending_turn_inputs.extend(delivered);
         // The plugin state the turn's last phase committed, the pending
         // checkpoint-callback decisions of an admitted call among it,
         // replaces what preparing the turn again published: nothing that
@@ -299,6 +304,20 @@ impl TurnDrive for RuntimeDrive {
             .map_err(runtime)
     }
 
+    fn delivered_inputs(&self) -> Vec<crate::AdmittedTurnInputs> {
+        self.driver
+            .pending_turn_inputs
+            .iter()
+            .filter(|admitted| {
+                matches!(
+                    admitted.mode,
+                    crate::TurnInputAdmissionMode::ActiveTurn { .. }
+                )
+            })
+            .cloned()
+            .collect()
+    }
+
     fn plugin_state(&self) -> Result<Option<crate::PluginState>, TurnError> {
         self.driver
             .session
@@ -395,10 +414,17 @@ impl TurnDrive for RuntimeDrive {
                 .filter(|_| observed)
                 .map(|finished| finished.finalized(driver.turn_pipeline.state().to_snapshot())),
         };
-        if !self.settlement.completed_inputs.is_empty()
-            || !self.settlement.completed_batches.is_empty()
-        {
-            commit.ingress = Some(self.settlement.clone());
+        // The commit settles every input the turn executed, with the
+        // application evidence its delivery recorded: those its run took and
+        // those its checkpoints delivered.
+        let mut settlement = self.settlement.clone();
+        settlement.completed_inputs = driver
+            .pending_turn_inputs
+            .iter()
+            .map(crate::AdmittedTurnInputs::completion)
+            .collect();
+        if !settlement.completed_inputs.is_empty() || !settlement.completed_batches.is_empty() {
+            commit.ingress = Some(settlement);
         }
         Ok(TurnCommit {
             expected_head: commit.expected_head_revision,

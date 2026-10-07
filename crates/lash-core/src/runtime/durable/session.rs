@@ -56,7 +56,7 @@ pub use lash_durable::domain::{
 use super::session_close::{
     SESSION_CLOSE_MAIL, SessionCloseError, SessionCloseExit, begin_session_close, run_session_close,
 };
-use super::session_mail::{SessionMailError, drain_session_mail};
+use super::session_mail::{InputBatching, OneInputPerRun, SessionMailError, drain_session_mail};
 use super::turn_scope::{TurnChildrenStopError, await_turn_children, continue_scope_ends};
 
 /// What a session's turns run with: the deployment's protocol, model,
@@ -108,6 +108,13 @@ pub trait TurnServices: Send + Sync {
         cx: &ActorContext,
         admitted: &AdmittedInputs,
     ) -> Result<(), TurnError>;
+
+    /// How many next-turn inputs one of the session's runs takes: the
+    /// host's installed queued-work batching. The default takes each input
+    /// as its own run.
+    fn input_batching(&self) -> &dyn InputBatching {
+        &OneInputPerRun
+    }
 
     /// Before each of `cx`'s passes over `session`: announce its committed
     /// head when this node has not published it, should the owner that
@@ -176,6 +183,14 @@ pub trait TurnDrive: Send {
             request,
             records: Vec::new(),
         }))
+    }
+
+    /// The steering input the turn's checkpoints delivered, with its
+    /// application evidence (ADR 0101 §5.1). Every phase commits it with its
+    /// checkpoint and binds it to the turn's run, so a resumed turn settles
+    /// it with its commit and no checkpoint delivers it again.
+    fn delivered_inputs(&self) -> Vec<crate::AdmittedTurnInputs> {
+        Vec::new()
     }
 
     /// The plugin state the turn has published: every namespace with its
@@ -430,7 +445,7 @@ impl SessionActivation {
         let open = cx.durable_reads()?.turn(session).await?;
         let Some(row) = open else {
             // No unfinished turn: the mailbox says what runs next (L3s).
-            let drain = drain_session_mail(cx, &mut tx).await?;
+            let drain = drain_session_mail(cx, &mut tx, self.services.input_batching()).await?;
             return match drain.admit {
                 Some(admitted) if admitted.admission.is_turn() => {
                     admit_turn(cx, &mut tx, admitted).await?;
@@ -724,10 +739,11 @@ pub struct ComposedCall {
     pub records: Vec<DomainWrite>,
 }
 
-/// What a phase row's checkpoint holds: the machine's saved turn, and the
+/// What a phase row's checkpoint holds: the machine's saved turn, the
 /// plugin state the turn had published when the phase committed, which a
-/// resume reinstalls before it restores the machine. Encoded by the phase
-/// runner, its owner.
+/// resume reinstalls before it restores the machine, and the steering input
+/// its checkpoints delivered, which the phase bound to the run. Encoded by
+/// the phase runner, its owner.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhaseCheckpoint {
@@ -737,6 +753,10 @@ pub struct PhaseCheckpoint {
     /// plugins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_state: Option<crate::PluginState>,
+    /// The steering input the turn's checkpoints delivered, with its
+    /// application evidence ([`TurnDrive::delivered_inputs`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delivered: Vec<crate::AdmittedTurnInputs>,
 }
 
 /// A turn restored from its rows: the machine, the effect it re-delivers,
@@ -747,6 +767,9 @@ pub struct RestoredTurn {
     /// The plugin state the turn's last phase committed, which the resumed
     /// drive reinstalls.
     pub plugin_state: Option<crate::PluginState>,
+    /// The steering input the turn's checkpoints delivered before its last
+    /// phase committed, which the resumed drive settles with its commit.
+    pub delivered: Vec<crate::AdmittedTurnInputs>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
     pub pending: Option<Effect>,
     /// The turn's row.
@@ -951,6 +974,7 @@ impl<'a> TurnRestore<'a> {
         let PhaseCheckpoint {
             saved,
             plugin_state,
+            delivered,
         } = serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
             run: row.run.clone(),
             reason: error.to_string(),
@@ -973,6 +997,7 @@ impl<'a> TurnRestore<'a> {
         Ok(RestoredTurn {
             machine,
             plugin_state,
+            delivered,
             pending,
             row: row.clone(),
         })

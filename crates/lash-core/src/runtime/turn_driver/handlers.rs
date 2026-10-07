@@ -248,12 +248,9 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
             Err(err) => {
-                // A failed checkpoint delivers nothing and starts no follow-on
-                // turn. What it admitted stays bound to the run, which never
-                // settles it as delivered: the run's terminal write hands it
-                // back open at its own position (FIG-3927 §2.4).
+                // A failed checkpoint delivers nothing. What it admitted was
+                // never bound: it stays open session mail.
                 self.pending_checkpoint_turn_inputs = None;
-                drop(self.withheld_terminal_work.take_if_any());
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
             }
         }

@@ -40,11 +40,14 @@ crate::statements! {
              WHERE session_id = ?1 AND admitted_run IS NULL AND terminal_cause IS NULL
              ORDER BY enqueue_seq";
 
-        /// Bind input `?2` of session `?1` to run `?3`, its admitting owner;
-        /// no row when it is no longer open and unbound.
+        /// Bind input `?2` of session `?1` to run `?3`, its admitting owner,
+        /// or keep it bound there: a running run's every phase rebinds the
+        /// steering input its checkpoints delivered. No row when it is no
+        /// longer open, or another run holds it.
         bind_input = "UPDATE pending_turn_inputs
              SET admitted_run = ?3, admitted_by = ?3
-             WHERE session_id = ?1 AND input_id = ?2 AND admitted_run IS NULL
+             WHERE session_id = ?1 AND input_id = ?2
+               AND (admitted_run IS NULL OR admitted_run = ?3)
                AND state IN ('deferred_next_turn', 'pending_active')
              RETURNING input_id";
 

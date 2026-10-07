@@ -48,7 +48,6 @@ impl LashRuntime {
             controller,
             run,
             &admissions,
-            true,
             self.tool_restore_report.take(),
         );
         let turn_context = crate::TurnContext::default();
@@ -337,7 +336,6 @@ impl LashRuntime {
             pending_queued: admissions.queued,
             pending_turn_inputs: admissions.turn_inputs,
             pending_checkpoint_turn_inputs: None,
-            withheld_terminal_work: Default::default(),
             turn_phase_probe: self.turn_phase_probe.clone(),
             protocol_reply: Default::default(),
             opener_state: crate::session::OpenerState::default(),
