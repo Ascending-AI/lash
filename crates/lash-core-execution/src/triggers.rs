@@ -32,9 +32,9 @@ use router::{project_trigger_actor, project_trigger_draft, project_trigger_owner
 pub use start::{TriggerDeliveryStartRows, TriggerStartRows, TriggerSubscriptionFence};
 pub use store_support::{
     PreparedTriggerCommand, TriggerMutationPreparation, decode_trigger_delivery,
-    decode_trigger_mutation_receipt_json, decode_trigger_occurrence_json,
-    decode_trigger_subscription_json, encode_trigger_row, prepare_trigger_command,
-    stored_trigger_receipt, trigger_mutation_records,
+    decode_trigger_delivery_outcome, decode_trigger_mutation_receipt_json,
+    decode_trigger_occurrence_json, decode_trigger_subscription_json, encode_trigger_row,
+    prepare_trigger_command, stored_trigger_receipt, trigger_mutation_records,
 };
 pub use subscription_changes::{TriggerSubscriptionChange, TriggerSubscriptionChangeCursor};
 
@@ -1111,11 +1111,21 @@ pub enum TriggerOccurrencePlan {
 pub struct TriggerDeliveryReservation {
     pub occurrence: TriggerOccurrenceRecord,
     pub subscription: TriggerSubscriptionRecord,
-    /// The process this delivery started: registered and bound in the
-    /// transaction that recorded the delivery (ADR 0132 §12), so a delivery
-    /// is never unbound.
-    pub process_id: ProcessId,
+    /// The disposition recorded with the occurrence: its started process or
+    /// its terminal refusal (ADR 0132 §12).
+    pub outcome: TriggerDeliveryEmitOutcome,
     pub created_at_ms: u64,
+}
+
+impl TriggerDeliveryReservation {
+    /// The process this delivery started, absent for a refused delivery.
+    #[must_use]
+    pub fn process_id(&self) -> Option<&ProcessId> {
+        match &self.outcome {
+            TriggerDeliveryEmitOutcome::Started { process_id } => Some(process_id),
+            TriggerDeliveryEmitOutcome::Failed { .. } => None,
+        }
+    }
 }
 
 /// Stable identity used by store implementors during delivery retention.

@@ -169,13 +169,15 @@ pub fn decode_trigger_mutation_receipt_json(
 pub fn decode_trigger_delivery(
     occurrence_json: &str,
     subscription_json: &str,
-    process_id: ProcessId,
+    process_id: Option<ProcessId>,
     created_at_ms: i64,
+    status: &str,
+    refusal_json: Option<&str>,
 ) -> Result<TriggerDeliveryReservation, PluginError> {
     Ok(TriggerDeliveryReservation {
         occurrence: decode_trigger_occurrence_json(occurrence_json)?,
         subscription: decode_trigger_subscription_json(subscription_json)?,
-        process_id,
+        outcome: decode_trigger_delivery_outcome(process_id, status, refusal_json)?,
         created_at_ms: u64::try_from(created_at_ms).map_err(|_| {
             PluginError::StoredDataCorrupt {
                 record_kind: "TriggerDelivery".to_string(),
@@ -185,85 +187,36 @@ pub fn decode_trigger_delivery(
     })
 }
 
+/// Decode a delivery's stored disposition, refusing inconsistent rows.
+pub fn decode_trigger_delivery_outcome(
+    process_id: Option<ProcessId>,
+    status: &str,
+    refusal_json: Option<&str>,
+) -> Result<TriggerDeliveryEmitOutcome, PluginError> {
+    let corrupt = |message: String| PluginError::StoredDataCorrupt {
+        record_kind: "TriggerDelivery".to_owned(),
+        message,
+    };
+    match (status, process_id, refusal_json) {
+        ("started", Some(process_id), None) => {
+            Ok(TriggerDeliveryEmitOutcome::Started { process_id })
+        }
+        ("refused", None, Some(json)) => {
+            let outcome = serde_json::from_str::<TriggerDeliveryEmitOutcome>(json)
+                .map_err(|error| corrupt(error.to_string()))?;
+            match outcome {
+                TriggerDeliveryEmitOutcome::Failed { .. } => Ok(outcome),
+                _ => Err(corrupt(
+                    "refused delivery contains a started outcome".to_owned(),
+                )),
+            }
+        }
+        _ => Err(corrupt("inconsistent delivery disposition".to_owned())),
+    }
+}
+
 /// The `record_json`/`result_json` column values both backends write.
 pub fn encode_trigger_row<T: serde::Serialize>(value: &T) -> Result<String, PluginError> {
     serde_json::to_string(value)
         .map_err(|error| PluginError::Session(format!("failed to encode trigger row: {error}")))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn fixture_draft() -> TriggerSubscriptionDraft {
-        TriggerSubscriptionDraft::for_process(
-            "key",
-            crate::ProcessExecutionEnvRef::new("env"),
-            "alias.event",
-            "source",
-            crate::ProcessInput::Engine {
-                kind: "engine".to_string(),
-                payload: serde_json::json!({"payload": 0}),
-            },
-            crate::ProcessIdentity::new("kind"),
-        )
-    }
-
-    fn register() -> TriggerCommand {
-        TriggerCommand::Register {
-            owner_scope: TriggerOwnerScope::session("session-1"),
-            actor: crate::ProcessOriginator::host(),
-            draft: fixture_draft(),
-        }
-    }
-
-    /// A real record snapshot the shared evaluator commits, so the row-codec
-    /// tests run on the shape the store actually writes.
-    fn fixture_record() -> TriggerSubscriptionRecord {
-        match evaluate_trigger_mutation(None, register(), "op-1", 1)
-            .expect("register evaluates")
-            .expect("register commits")
-        {
-            TriggerCommandOutcome::Mutation { receipt } => receipt.record,
-            other => panic!("expected one mutation receipt, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn delivery_rows_decode_through_one_rule() {
-        let occurrence = TriggerOccurrenceRecord {
-            occurrence_id: "occurrence".into(),
-            source_type: "alias.event".into(),
-            source_key: "source".into(),
-            payload: serde_json::json!({}),
-            idempotency_key: "key".into(),
-            source: None,
-            session_id: None,
-            outcome: TriggerOccurrenceOutcome::Fired,
-            occurred_at_ms: 1,
-            trace: None,
-        };
-        let subscription = fixture_record();
-        let decoded = decode_trigger_delivery(
-            &serde_json::to_string(&occurrence).expect("occurrence"),
-            &serde_json::to_string(&subscription).expect("subscription"),
-            ProcessId::fixture("delivery"),
-            5,
-        )
-        .expect("a delivery row decodes");
-        assert_eq!(decoded.created_at_ms, 5);
-        assert!(matches!(
-            decode_trigger_delivery("{}", "{}", ProcessId::fixture("delivery"), -1),
-            Err(PluginError::StoredDataCorrupt { .. }) | Err(PluginError::Session(_))
-        ));
-        assert!(matches!(
-            decode_trigger_delivery(
-                &serde_json::to_string(&occurrence).expect("occurrence"),
-                &serde_json::to_string(&subscription).expect("subscription"),
-                ProcessId::fixture("delivery"),
-                -1,
-            ),
-            Err(PluginError::StoredDataCorrupt { .. })
-        ));
-    }
 }

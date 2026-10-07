@@ -724,7 +724,13 @@ CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
         CONSTRAINT lash_trigger_deliveries_occurrence_outcome_kind_check
         CHECK (occurrence_outcome_kind = 'fired'),
     subscription_id TEXT NOT NULL,
-    process_id TEXT NOT NULL,
+    process_id TEXT,
+    status TEXT NOT NULL,
+    refusal_json TEXT,
+    CONSTRAINT ck_trigger_deliveries_disposition CHECK (
+        (status = 'started' AND process_id IS NOT NULL AND refusal_json IS NULL)
+        OR (status = 'refused' AND process_id IS NULL AND refusal_json IS NOT NULL)
+    ),
     subscription_incarnation TEXT NOT NULL,
     subscription_revision BIGINT NOT NULL,
     subscription_snapshot_json TEXT NOT NULL,

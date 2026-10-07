@@ -1,6 +1,6 @@
 //! The trigger store's tables: subscriptions, occurrences and the tombstones
-//! of reclaimed ones, the deliveries an occurrence recorded (each bound to the
-//! process its start registered in the same transaction) and mutation
+//! of reclaimed ones, the deliveries an occurrence recorded (each started or
+//! refused in the same transaction) and mutation
 //! receipts. They are
 //! provisioned in the deployment's one database, versioned by
 //! `lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION`.
@@ -84,11 +84,17 @@ CREATE TABLE IF NOT EXISTS trigger_deliveries (
     occurrence_id    TEXT NOT NULL,
     occurrence_outcome_kind TEXT NOT NULL DEFAULT 'fired' CHECK (occurrence_outcome_kind = 'fired'),
     subscription_id  TEXT NOT NULL,
-    process_id       TEXT NOT NULL,
+    process_id TEXT,
+    status TEXT NOT NULL,
+    refusal_json TEXT,
     subscription_incarnation TEXT NOT NULL,
     subscription_revision INTEGER NOT NULL,
     subscription_snapshot_json TEXT NOT NULL,
     created_at_ms    INTEGER NOT NULL,
+    CONSTRAINT ck_trigger_deliveries_disposition CHECK (
+        (status = 'started' AND process_id IS NOT NULL AND refusal_json IS NULL)
+        OR (status = 'refused' AND process_id IS NULL AND refusal_json IS NOT NULL)
+    ),
     PRIMARY KEY (occurrence_id, subscription_id),
     FOREIGN KEY (occurrence_id, occurrence_outcome_kind) REFERENCES trigger_occurrences(occurrence_id, outcome_kind) ON DELETE CASCADE
 );

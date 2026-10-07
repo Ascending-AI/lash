@@ -333,7 +333,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     .await;
 
     let reservation = &ingress.reservations[0];
-    let process_id = reservation.process_id.clone();
+    let process_id = reservation.process_id().expect("delivery started").clone();
     let report = store
         .reconcile_trigger_retention(
             &[crate::TriggerDeliveryRetentionCandidate {
@@ -1739,7 +1739,7 @@ async fn matched_occurrence_waits_for_terminal_deliveries(stores: TriggerStores)
     );
 
     let reservation = &ingress.reservations[0];
-    let process_id = reservation.process_id.clone();
+    let process_id = reservation.process_id().expect("delivery started").clone();
     let terminal_delivery = crate::TriggerDeliveryRetentionCandidate {
         occurrence_id: ingress.occurrence.occurrence_id.clone(),
         subscription_id: reservation.subscription.subscription_id.clone(),

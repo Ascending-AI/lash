@@ -528,7 +528,7 @@ async fn dropped_trigger_occurrences_cannot_be_reclaimed_or_have_deliveries() {
         .is_err(),
         "dropped rows cannot arm reclamation"
     );
-    assert!(sqlx::query("INSERT INTO lash_trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation, subscription_revision, subscription_snapshot_json, created_at_ms, process_id) VALUES ($1, 'sub', 'incarnation', 1, '{}', 0, 'process')").bind(&record.occurrence_id).execute(storage.pool()).await.is_err(), "dropped rows cannot reserve a delivery");
+    assert!(sqlx::query("INSERT INTO lash_trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation, subscription_revision, subscription_snapshot_json, created_at_ms, process_id, status) VALUES ($1, 'sub', 'incarnation', 1, '{}', 0, 'process', 'started')").bind(&record.occurrence_id).execute(storage.pool()).await.is_err(), "dropped rows cannot reserve a delivery");
     assert!(
         sqlx::query("UPDATE lash_trigger_occurrences SET outcome_kind = 'unknown'")
             .execute(storage.pool())

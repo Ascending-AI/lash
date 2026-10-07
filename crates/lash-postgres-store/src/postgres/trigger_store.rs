@@ -131,6 +131,7 @@ lash_store_sql::statements! {
                    AND NOT EXISTS (
                        SELECT 1 FROM trigger_deliveries AS delivery
                        WHERE delivery.occurrence_id = occurrence.occurrence_id
+                       AND delivery.status = 'started'
                    )
                  RETURNING occurrence.occurrence_id
              )
@@ -145,6 +146,7 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                    SELECT 1 FROM trigger_deliveries AS delivery
                    WHERE delivery.occurrence_id = occurrence.occurrence_id
+                       AND delivery.status = 'started'
                )";
 
         /// The reclamation sweep's scope proof and its worklist, from one
@@ -195,6 +197,7 @@ lash_store_sql::statements! {
                    AND NOT EXISTS (
                        SELECT 1 FROM trigger_deliveries AS delivery
                        WHERE delivery.occurrence_id = occurrence.occurrence_id
+                       AND delivery.status = 'started'
                    )
                  RETURNING occurrence.occurrence_id
              )
@@ -1316,7 +1319,13 @@ async fn postgres_delivery_snapshots(
                 occurrence: occurrence.clone(),
                 subscription:
                     lash_core_execution::facade_support::decode_trigger_subscription_json(&json)?,
-                process_id: crate::stored_process_id(&row.get::<String, _>(0))?,
+                outcome: lash_core_execution::facade_support::decode_trigger_delivery_outcome(
+                    row.get::<Option<String>, _>(0)
+                        .map(|id| crate::stored_process_id(&id))
+                        .transpose()?,
+                    &row.get::<String, _>(3),
+                    row.get::<Option<String>, _>(4).as_deref(),
+                )?,
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
             })
         })
@@ -1345,8 +1354,12 @@ async fn list_deliveries_with(
             lash_core_execution::facade_support::decode_trigger_delivery(
                 &occurrence_json,
                 &subscription_json,
-                crate::stored_process_id(&row.get::<String, _>(0))?,
+                row.get::<Option<String>, _>(0)
+                    .map(|id| crate::stored_process_id(&id))
+                    .transpose()?,
                 row.get(1),
+                &row.get::<String, _>(4),
+                row.get::<Option<String>, _>(5).as_deref(),
             )
         })
         .collect()

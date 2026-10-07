@@ -107,7 +107,14 @@ async fn apply(
         .await
         .map_err(plugin_sqlx_error)?;
     let fired = occurrence.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired;
-    if fired && rows.deliveries.is_empty() {
+    if fired
+        && rows.deliveries.iter().all(|delivery| {
+            matches!(
+                delivery,
+                lash_core_execution::facade_support::TriggerDeliveryStartRows::Refused { .. }
+            )
+        })
+    {
         sqlx::query(sql.occurrence.arm_reclaimable.sql())
             .bind(&occurrence.occurrence_id)
             .bind(i64::try_from(occurrence.occurred_at_ms).unwrap_or(i64::MAX))
@@ -117,50 +124,65 @@ async fn apply(
     }
     let mut processes = Vec::with_capacity(rows.deliveries.len());
     for delivery in rows.deliveries {
-        let lash_core_execution::facade_support::TriggerDeliveryStartRows {
-            subscription,
-            registration,
-            observers,
-            process_id,
-        } = delivery;
-        let refused = |reason: String| {
-            Applied::Refused(DomainRefusal::TriggerStartRefused {
-                occurrence: occurrence_id.to_owned(),
-                reason,
-            })
+        let refusal_json = match &delivery {
+            lash_core_execution::facade_support::TriggerDeliveryStartRows::Refused { .. } => Some(
+                lash_core_execution::facade_support::encode_trigger_row(&delivery.outcome())?,
+            ),
+            _ => None,
         };
-        let record = match crate::process_registry::registration::apply_registration_tx(
-            tx,
-            registration,
-            observers,
-            process_id,
-            false,
-            now_ms,
-            fleet,
-        )
-        .await
-        {
-            Ok(crate::process_registry::registration::AppliedRegistration::Created(record)) => {
-                record
+        let (subscription, process_id, status) = match delivery {
+            lash_core_execution::facade_support::TriggerDeliveryStartRows::Refused {
+                subscription,
+                ..
+            } => (subscription, None, "refused"),
+            lash_core_execution::facade_support::TriggerDeliveryStartRows::Started {
+                subscription,
+                registration,
+                observers,
+                process_id,
+            } => {
+                let refused = |reason: String| {
+                    Applied::Refused(DomainRefusal::TriggerStartRefused {
+                        occurrence: occurrence_id.to_owned(),
+                        reason,
+                    })
+                };
+                let record = match crate::process_registry::registration::apply_registration_tx(
+                    tx,
+                    *registration,
+                    observers,
+                    process_id,
+                    false,
+                    now_ms,
+                    fleet,
+                )
+                .await
+                {
+                    Ok(crate::process_registry::registration::AppliedRegistration::Created(
+                        record,
+                    )) => record,
+                    Ok(
+                        crate::process_registry::registration::AppliedRegistration::Retained {
+                            record,
+                            ..
+                        }
+                        | crate::process_registry::registration::AppliedRegistration::LostRace {
+                            winner: record,
+                            ..
+                        },
+                    ) => {
+                        return Err(refused(format!(
+                            "process `{}` already holds the start key of the delivery to `{}`",
+                            record.id, subscription.subscription_id
+                        )));
+                    }
+                    Err(PluginError::StoreUnavailable { fault }) => {
+                        return Err(Applied::Failed(PluginError::StoreUnavailable { fault }));
+                    }
+                    Err(error) => return Err(refused(error.to_string())),
+                };
+                (subscription, Some(record.id), "started")
             }
-            Ok(
-                crate::process_registry::registration::AppliedRegistration::Retained {
-                    record, ..
-                }
-                | crate::process_registry::registration::AppliedRegistration::LostRace {
-                    winner: record,
-                    ..
-                },
-            ) => {
-                return Err(refused(format!(
-                    "process `{}` already holds the start key of the delivery to `{}`",
-                    record.id, subscription.subscription_id
-                )));
-            }
-            Err(PluginError::StoreUnavailable { fault }) => {
-                return Err(Applied::Failed(PluginError::StoreUnavailable { fault }));
-            }
-            Err(error) => return Err(refused(error.to_string())),
         };
         let sql_revision =
             plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
@@ -173,11 +195,19 @@ async fn apply(
                 &subscription,
             )?)
             .bind(occurrence.occurred_at_ms as i64)
-            .bind(record.id.as_str())
+            .bind(
+                process_id
+                    .as_ref()
+                    .map(lash_core_execution::ProcessId::as_str),
+            )
+            .bind(status)
+            .bind(refusal_json)
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
-        processes.push(record.id);
+        if let Some(process_id) = process_id {
+            processes.push(process_id);
+        }
     }
     Ok(TriggerStartAnswer { processes })
 }

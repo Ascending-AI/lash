@@ -128,6 +128,7 @@ lash_store_sql::statements! {
                    SELECT 1 FROM trigger_deliveries
                    WHERE trigger_deliveries.occurrence_id =
                          trigger_occurrences.occurrence_id
+                     AND trigger_deliveries.status = 'started'
                )";
 
         /// Only fired occurrences participate in delivery retention.
@@ -137,6 +138,7 @@ lash_store_sql::statements! {
                    SELECT 1 FROM trigger_deliveries
                    WHERE trigger_deliveries.occurrence_id =
                          trigger_occurrences.occurrence_id
+                     AND trigger_deliveries.status = 'started'
                )";
 
         arm_reclaimable_for_candidates = "UPDATE trigger_occurrences
@@ -147,6 +149,7 @@ lash_store_sql::statements! {
                    SELECT 1 FROM trigger_deliveries
                    WHERE trigger_deliveries.occurrence_id =
                          trigger_occurrences.occurrence_id
+                     AND trigger_deliveries.status = 'started'
                )
                AND occurrence_id IN (
                    SELECT DISTINCT json_extract(candidate.value, '$.occurrence_id')
@@ -205,6 +208,7 @@ lash_store_sql::statements! {
                    SELECT 1 FROM trigger_deliveries
                    WHERE trigger_deliveries.occurrence_id =
                          trigger_occurrences.occurrence_id
+                     AND trigger_deliveries.status = 'started'
                )";
 
         /// Reclaim occurrence `?1` if it is still eligible at cutoff `?2`.
@@ -219,6 +223,7 @@ lash_store_sql::statements! {
                    SELECT 1 FROM trigger_deliveries
                    WHERE trigger_deliveries.occurrence_id =
                          trigger_occurrences.occurrence_id
+                     AND trigger_deliveries.status = 'started'
                )";
 
         /// Tombstone, at `?2`, every audit row [`prune_non_fired`] deletes
@@ -478,23 +483,35 @@ impl SqliteTriggerStore {
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             Ok((
-                                crate::sql_process_id(0, row.get::<_, String>(0)?)?,
+                                row.get::<_, Option<String>>(0)?
+                                    .map(|id| crate::sql_process_id(0, id))
+                                    .transpose()?,
                                 row.get::<_, i64>(1)?,
                                 row.get::<_, String>(2)?,
                                 row.get::<_, String>(3)?,
+                                row.get::<_, String>(4)?,
+                                row.get::<_, Option<String>>(5)?,
                             ))
                         })
                         .map_err(process_sqlite_error)?;
                     let mut deliveries = Vec::new();
                     for row in rows {
-                        let (process_id, created_at_ms, occurrence_json, subscription_json) =
-                            row.map_err(process_sqlite_error)?;
+                        let (
+                            process_id,
+                            created_at_ms,
+                            occurrence_json,
+                            subscription_json,
+                            status,
+                            refusal_json,
+                        ) = row.map_err(process_sqlite_error)?;
                         deliveries.push(
                             lash_core_execution::facade_support::decode_trigger_delivery(
                                 &occurrence_json,
                                 &subscription_json,
                                 process_id,
                                 created_at_ms,
+                                &status,
+                                refusal_json.as_deref(),
                             )?,
                         );
                     }
@@ -1457,21 +1474,30 @@ fn sqlite_delivery_snapshots(
     let rows = stmt
         .query_map(params![occurrence.occurrence_id.as_str()], |row| {
             Ok((
-                crate::sql_process_id(0, row.get::<_, String>(0)?)?,
+                row.get::<_, Option<String>>(0)?
+                    .map(|id| crate::sql_process_id(0, id))
+                    .transpose()?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })
         .map_err(process_sqlite_error)?;
     let mut reservations = Vec::new();
     for row in rows {
-        let (process_id, created_at_ms, snapshot_json) = row.map_err(process_sqlite_error)?;
+        let (process_id, created_at_ms, snapshot_json, status, refusal_json) =
+            row.map_err(process_sqlite_error)?;
         reservations.push(lash_core_execution::TriggerDeliveryReservation {
             occurrence: occurrence.clone(),
             subscription: lash_core_execution::facade_support::decode_trigger_subscription_json(
                 &snapshot_json,
             )?,
-            process_id,
+            outcome: lash_core_execution::facade_support::decode_trigger_delivery_outcome(
+                process_id,
+                &status,
+                refusal_json.as_deref(),
+            )?,
             created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", created_at_ms)?,
         });
     }

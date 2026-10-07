@@ -80,7 +80,14 @@ fn apply(
     )
     .map_err(process_sqlite_error)?;
     let fired = occurrence.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired;
-    if fired && rows.deliveries.is_empty() {
+    if fired
+        && rows.deliveries.iter().all(|delivery| {
+            matches!(
+                delivery,
+                lash_core_execution::facade_support::TriggerDeliveryStartRows::Refused { .. }
+            )
+        })
+    {
         crate::conn::cached_execute(
             tx,
             sql.occurrence.arm_reclaimable.sql(),
@@ -93,42 +100,56 @@ fn apply(
     }
     let mut processes = Vec::with_capacity(rows.deliveries.len());
     for delivery in rows.deliveries {
-        let lash_core_execution::facade_support::TriggerDeliveryStartRows {
-            subscription,
-            registration,
-            observers,
-            process_id,
-        } = delivery;
-        let registered = match SqliteProcessRegistry::apply_registration_conn(
-            tx,
-            registration,
-            observers,
-            process_id,
-            false,
-            now_ms,
-            fleet,
-        ) {
-            Ok(registered) if registered.is_created() => registered.record,
-            Ok(existing) => {
-                return refused(DomainRefusal::TriggerStartRefused {
-                    occurrence: occurrence_id.to_owned(),
-                    reason: format!(
-                        "process `{}` already holds the start key of the delivery to `{}`",
-                        existing.record.id, subscription.subscription_id
-                    ),
-                });
-            }
-            Err(lash_core_execution::PluginError::StoreUnavailable { fault }) => {
-                return Ok(Err(DurableError::Store(StoreFailure {
-                    kind: StoreFailureKind::Unavailable,
-                    message: fault.to_string(),
-                })));
-            }
-            Err(error) => {
-                return refused(DomainRefusal::TriggerStartRefused {
-                    occurrence: occurrence_id.to_owned(),
-                    reason: error.to_string(),
-                });
+        let refusal_json = match &delivery {
+            lash_core_execution::facade_support::TriggerDeliveryStartRows::Refused { .. } => Some(
+                lash_core_execution::facade_support::encode_trigger_row(&delivery.outcome())?,
+            ),
+            _ => None,
+        };
+        let (subscription, process_id, status) = match delivery {
+            lash_core_execution::facade_support::TriggerDeliveryStartRows::Refused {
+                subscription,
+                ..
+            } => (subscription, None, "refused"),
+            lash_core_execution::facade_support::TriggerDeliveryStartRows::Started {
+                subscription,
+                registration,
+                observers,
+                process_id,
+            } => {
+                let registered = match SqliteProcessRegistry::apply_registration_conn(
+                    tx,
+                    *registration,
+                    observers,
+                    process_id,
+                    false,
+                    now_ms,
+                    fleet,
+                ) {
+                    Ok(registered) if registered.is_created() => registered.record,
+                    Ok(existing) => {
+                        return refused(DomainRefusal::TriggerStartRefused {
+                            occurrence: occurrence_id.to_owned(),
+                            reason: format!(
+                                "process `{}` already holds the start key of the delivery to `{}`",
+                                existing.record.id, subscription.subscription_id
+                            ),
+                        });
+                    }
+                    Err(lash_core_execution::PluginError::StoreUnavailable { fault }) => {
+                        return Ok(Err(DurableError::Store(StoreFailure {
+                            kind: StoreFailureKind::Unavailable,
+                            message: fault.to_string(),
+                        })));
+                    }
+                    Err(error) => {
+                        return refused(DomainRefusal::TriggerStartRefused {
+                            occurrence: occurrence_id.to_owned(),
+                            reason: error.to_string(),
+                        });
+                    }
+                };
+                (subscription, Some(registered.id), "started")
             }
         };
         let sql_revision =
@@ -143,11 +164,17 @@ fn apply(
                 sql_revision,
                 lash_core_execution::facade_support::encode_trigger_row(&subscription)?,
                 occurrence.occurred_at_ms as i64,
-                registered.id.as_str(),
+                process_id
+                    .as_ref()
+                    .map(lash_core_execution::ProcessId::as_str),
+                status,
+                refusal_json,
             ],
         )
         .map_err(process_sqlite_error)?;
-        processes.push(registered.id);
+        if let Some(process_id) = process_id {
+            processes.push(process_id);
+        }
     }
     Ok(Ok(TriggerStartAnswer { processes }))
 }

@@ -3,13 +3,11 @@ use serde::{Deserialize, Serialize};
 
 /// How one delivery of an emitted occurrence ended.
 ///
-/// The statement is the delivery's settled one, identical on the first
-/// emission and on every replay of it: a replayed emission finds the
-/// occurrence and its delivery already recorded and starts the same process
-/// under the same journal key, so it reports `Started` as the first did
-/// (FIG-4272). Whether a call coalesced onto an occurrence the store already
-/// held is the call's own fact, reported beside the report by
-/// [`crate::StoreRealization`].
+/// The delivery's settled disposition is recorded with its occurrence.
+/// Every held emission returns that first disposition, including the code,
+/// diagnostic and typed value mismatch of a refusal (FIG-5236).
+/// Whether a call coalesced onto a held occurrence is the call's own fact,
+/// reported beside the report by [`crate::StoreRealization`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum TriggerDeliveryEmitOutcome {

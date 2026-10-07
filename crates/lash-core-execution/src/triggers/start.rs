@@ -4,8 +4,9 @@
 //! hands the store these rows, encoded, inside one `trigger.start` mailbox
 //! commit. The store records the occurrence, checks that the subscriptions
 //! it matches are still the planned ones, registers each prepared process
-//! with its actor ready and records each delivery bound to it. A crash before
-//! the commit leaves nothing; after it, each delivery has its one process.
+//! with its actor ready and records each started binding or terminal refusal.
+//! A crash before the commit leaves nothing; after it, each delivery has its
+//! first disposition.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +23,7 @@ pub struct TriggerStartRows {
     /// Every enabled subscription the plan matched, started or refused: the
     /// commit refuses when the store matches any other set.
     pub planned: Vec<TriggerSubscriptionFence>,
-    /// The deliveries that start, in delivery order.
+    /// Every started or refused delivery, in delivery order.
     pub deliveries: Vec<TriggerDeliveryStartRows>,
 }
 
@@ -47,16 +48,54 @@ impl TriggerSubscriptionFence {
     }
 }
 
-/// One delivery's start: the subscription snapshot it is reserved against
-/// and the registration of the process it starts, its id minted. The
-/// process is registered at the commit's own instant.
+/// One delivery's disposition: the subscription snapshot and either the
+/// prepared process registration or the terminal refusal that prevents it.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TriggerDeliveryStartRows {
-    pub subscription: TriggerSubscriptionRecord,
-    pub registration: ProcessRegistration,
-    pub observers: Vec<SessionId>,
-    pub process_id: ProcessId,
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum TriggerDeliveryStartRows {
+    Started {
+        subscription: TriggerSubscriptionRecord,
+        registration: Box<ProcessRegistration>,
+        observers: Vec<SessionId>,
+        process_id: ProcessId,
+    },
+    Refused {
+        subscription: TriggerSubscriptionRecord,
+        code: crate::RuntimeErrorCode,
+        reason: String,
+        value_mismatch: Option<Box<lash_sansio::ValueMismatch>>,
+    },
+}
+
+impl TriggerDeliveryStartRows {
+    /// The subscription snapshot this disposition belongs to.
+    #[must_use]
+    pub fn subscription(&self) -> &TriggerSubscriptionRecord {
+        match self {
+            Self::Started { subscription, .. } | Self::Refused { subscription, .. } => subscription,
+        }
+    }
+
+    /// The durable receipt of this delivery.
+    #[must_use]
+    pub fn outcome(&self) -> super::TriggerDeliveryEmitOutcome {
+        match self {
+            Self::Started { process_id, .. } => super::TriggerDeliveryEmitOutcome::Started {
+                process_id: process_id.clone(),
+            },
+            Self::Refused {
+                code,
+                reason,
+                value_mismatch,
+                ..
+            } => super::TriggerDeliveryEmitOutcome::Failed {
+                code: code.clone(),
+                reason: reason.clone(),
+                value_mismatch: value_mismatch.clone(),
+            },
+        }
+    }
 }
 
 impl TriggerStartRows {
@@ -118,7 +157,17 @@ impl TriggerStartRows {
         match committed {
             Ok(commit) => match commit.answers.as_slice() {
                 [lash_durable::MailAnswer::StartTrigger(answer)]
-                    if answer.processes.len() == self.deliveries.len() =>
+                    if answer.processes
+                        == self
+                            .deliveries
+                            .iter()
+                            .filter_map(|delivery| match delivery {
+                                TriggerDeliveryStartRows::Started { process_id, .. } => {
+                                    Some(process_id.clone())
+                                }
+                                TriggerDeliveryStartRows::Refused { .. } => None,
+                            })
+                            .collect::<Vec<_>>() =>
                 {
                     Ok(Some(answer.processes.clone()))
                 }
@@ -136,6 +185,20 @@ impl TriggerStartRows {
             }
             Err(error) => Err(start_failure(error)),
         }
+    }
+
+    /// The same row set used to build fresh and held emission receipts.
+    #[must_use]
+    pub fn reservations(&self) -> Vec<super::TriggerDeliveryReservation> {
+        self.deliveries
+            .iter()
+            .map(|delivery| super::TriggerDeliveryReservation {
+                occurrence: self.occurrence.clone(),
+                subscription: delivery.subscription().clone(),
+                outcome: delivery.outcome(),
+                created_at_ms: self.occurrence.occurred_at_ms,
+            })
+            .collect()
     }
 
     /// Whether `matched`, the enabled subscriptions the store matches the

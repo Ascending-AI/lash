@@ -650,7 +650,10 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
         .await
         .expect("ingest occurrence");
     assert_eq!(ingress.reservations.len(), 1);
-    let process_id = ingress.reservations[0].process_id.clone();
+    let process_id = ingress.reservations[0]
+        .process_id()
+        .expect("delivery started")
+        .clone();
     handles
         .registry
         .complete_process(
@@ -947,8 +950,14 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
         .expect("ingest second occurrence");
     assert_eq!(first.reservations.len(), 1);
     assert_eq!(second.reservations.len(), 1);
-    let pruned_id = first.reservations[0].process_id.clone();
-    let live_id = second.reservations[0].process_id.clone();
+    let pruned_id = first.reservations[0]
+        .process_id()
+        .expect("delivery started")
+        .clone();
+    let live_id = second.reservations[0]
+        .process_id()
+        .expect("delivery started")
+        .clone();
 
     handles
         .registry
@@ -1018,7 +1027,10 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
         .await
         .expect("ingest occurrence");
     assert_eq!(ingress.reservations.len(), 1);
-    let process_id = ingress.reservations[0].process_id.clone();
+    let process_id = ingress.reservations[0]
+        .process_id()
+        .expect("delivery started")
+        .clone();
     handles
         .registry
         .complete_process(
@@ -1194,7 +1206,7 @@ async fn the_narrow_delivery_worklist_agrees_with_the_delivery_table(
         .await
         .expect("list deliveries")
         .into_iter()
-        .map(|delivery| delivery.process_id)
+        .filter_map(|delivery| delivery.process_id().cloned())
         .collect::<Vec<_>>();
     from_table.sort();
     from_table.dedup();

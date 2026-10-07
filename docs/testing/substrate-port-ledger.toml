@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1562 rows over 848 files, 3909 laws.
-# By class: mechanical 163, semantic 111, delete 839, replace 449.
-# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 77, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 8, L9t 30, I0 49.
-# By status: todo 408, ported 87, deleted 1067.
+# 1564 rows over 849 files, 3911 laws.
+# By class: mechanical 163, semantic 111, delete 841, replace 449.
+# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 8, L9t 30, I0 49.
+# By status: todo 408, ported 87, deleted 1069.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -25001,3 +25001,27 @@ laws = [
 disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry/parent_end.rs::terminal_completion_atomically_retains_parent_end_plan"
 status = "deleted"
 note = "deleted by FIG-5222: it wrote its row through record_parent_end, which is deleted"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
+test = "an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery"
+area = "triggers"
+needs = ["process"]
+class = "delete"
+lane = "L9d"
+laws = ["an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery"]
+disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::an_unavailable_route_records_nothing_before_a_successful_retry"
+status = "deleted"
+note = "FIG-5236 deletes the old contract that a refused delivery has no row or retry receipt; an_unavailable_route_records_nothing_before_a_successful_retry preserves transient retry; a_held_occurrence_keeps_its_revoked_route_refusal and held_emissions_preserve_refusals_on_sqlite_memory pin durable refusals."
+
+[[row]]
+path = "crates/lash-core-execution/src/triggers/store_support.rs"
+test = "*"
+area = "triggers"
+needs = ["process"]
+class = "delete"
+lane = "L9d"
+laws = ["delivery_rows_decode_through_one_rule"]
+disposition = "covered-by:crates/lash-durable-test/tests/trigger_start_proof.rs::held_emissions_preserve_refusals_on_sqlite_memory"
+status = "deleted"
+note = "FIG-5236 replaces the always-bound decoder API with a typed disposition; production store laws now prove receipt decoding through emission and held reads."

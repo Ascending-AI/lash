@@ -146,7 +146,7 @@ impl Workload for TriggerCase {
         }
         let bound: BTreeSet<_> = deliveries
             .iter()
-            .map(|delivery| delivery.process_id.clone())
+            .filter_map(|delivery| delivery.process_id().cloned())
             .collect();
         let keys: BTreeSet<_> = deliveries.iter().map(trigger_delivery_start_key).collect();
         let started: BTreeSet<_> = backend
@@ -178,13 +178,17 @@ impl Workload for TriggerCase {
                 .get_process_by_start_key(&key)
                 .await
             {
-                Ok(Some(record)) if record.id == delivery.process_id => {}
+                Ok(Some(record)) if Some(&record.id) == delivery.process_id() => {}
                 other => violations.push(format!(
                     "the start key of the delivery to `{}` holds {other:?}",
                     delivery.subscription.subscription_key
                 )),
             }
-            match outcome(world, &delivery.process_id).await {
+            let Some(process_id) = delivery.process_id() else {
+                violations.push("a delivery was refused".to_owned());
+                continue;
+            };
+            match outcome(world, process_id).await {
                 Some(end) if find(&end, "ended") == Some(&json!(true)) => {}
                 other => violations.push(format!(
                     "the process started for `{}` did not end with its success: {other:?}",
@@ -219,7 +223,9 @@ async fn delivered(world: &World, source_key: &str) -> Vec<lash_core_execution::
             .await
             .unwrap_or_default()
         {
-            processes.push(delivery.process_id);
+            if let Some(process_id) = delivery.process_id() {
+                processes.push(process_id.clone());
+            }
         }
     }
     processes

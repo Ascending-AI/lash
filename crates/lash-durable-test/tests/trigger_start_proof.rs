@@ -547,7 +547,7 @@ impl Scenario for Proof {
         }
         let bound: BTreeSet<_> = deliveries
             .iter()
-            .map(|delivery| delivery.process_id.clone())
+            .filter_map(|delivery| delivery.process_id().cloned())
             .collect();
         let registered: BTreeSet<_> = processes(&backend)
             .await
@@ -566,7 +566,7 @@ impl Scenario for Proof {
                 .get_process_by_start_key(&key)
                 .await
             {
-                Ok(Some(record)) if record.id == delivery.process_id => {}
+                Ok(Some(record)) if Some(&record.id) == delivery.process_id() => {}
                 other => violations.push(format!(
                     "S1: the start key of the delivery to `{}` holds {other:?}",
                     delivery.subscription.subscription_key
@@ -662,4 +662,130 @@ async fn an_occurrence_starts_each_delivery_once_at_every_cut_on_postgres() {
         return;
     };
     prove(Dialect::Postgres, Some(url)).await;
+}
+
+/// FIG-5236: a held occurrence preserves every delivery's first disposition,
+/// including payload refusals alongside a start and when all deliveries refuse.
+async fn refusal_receipts_are_stable(dialect: Dialect, postgres_url: Option<String>) {
+    let proof = Proof::new(dialect, postgres_url);
+    proof.database(SimClock::new()).await;
+    let backend = proof.backend();
+    let env_ref =
+        lash_core_execution::testing::process_execution_env_fixture(&*backend.process_env_store())
+            .await;
+    let triggers = backend.trigger_store();
+    let router = TriggerRouter::new(
+        Arc::clone(&triggers),
+        lash_core_execution::ProcessWorkWiring::without_process_work(backend.process_registry()),
+    )
+    .with_process_artifacts(backend.process_env_store(), Proof::engines());
+    let cx = ActorContext::detached(backend.clone());
+    for (case, starts) in [("all-refused", false), ("mixed", true)] {
+        for (key, accepts) in [("first", starts), ("second", false)] {
+            let schema = if accepts {
+                lash_core_execution::JsonSchema::any()
+            } else {
+                lash_core_execution::JsonSchema::admit(serde_json::json!({"type": "string"}))
+                    .expect("a string payload schema")
+            };
+            triggers
+                .execute_command(
+                    &format!("refusal-register-{case}-{key}"),
+                    lash_core_execution::TriggerCommand::Register {
+                        owner_scope: lash_core_execution::TriggerOwnerScope::host("proof").unwrap(),
+                        actor: lash_core_execution::ProcessOriginator::host_scoped("proof"),
+                        draft: lash_core_execution::TriggerSubscriptionDraft::for_process(
+                            format!("refusal/{case}/{key}"),
+                            env_ref.clone(),
+                            SOURCE_TYPE,
+                            case,
+                            lash_core_execution::ProcessInput::Engine {
+                                kind: KIND.to_owned(),
+                                payload: serde_json::json!({"key": key}),
+                            },
+                            lash_core_execution::ProcessIdentity::labelled(KIND, Some(key)),
+                        )
+                        .with_payload_schema(schema),
+                    },
+                )
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let request = TriggerOccurrenceRequest::new(
+            SOURCE_TYPE,
+            case,
+            serde_json::json!({"proof": true}),
+            format!("refusal-{case}"),
+        );
+        let first = router.emit(request.clone(), &cx).await.unwrap();
+        assert_eq!(first.deliveries.len(), 2);
+        assert_eq!(first.started_process_ids().len(), usize::from(starts));
+        for delivery in &first.deliveries {
+            if let TriggerDeliveryEmitOutcome::Failed { value_mismatch, .. } = &delivery.outcome {
+                assert!(
+                    value_mismatch.is_some(),
+                    "the typed mismatch survives the receipt"
+                );
+            }
+        }
+        let again = router.emit(request.clone(), &cx).await.unwrap();
+        assert_eq!(
+            again, first,
+            "{case}: a held emission preserves every disposition"
+        );
+        if !starts {
+            let recorded_request = TriggerOccurrenceRequest::new(
+                SOURCE_TYPE,
+                case,
+                serde_json::json!({"proof": true}),
+                "recorded-all-refused",
+            );
+            let error = router
+                .emit_recorded(recorded_request.clone(), &cx)
+                .await
+                .unwrap_err();
+            let again_error = router
+                .emit_recorded(recorded_request, &cx)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                serde_json::to_value(again_error).unwrap(),
+                serde_json::to_value(error).unwrap(),
+                "an all-refused occurrence stays refused"
+            );
+        }
+        let held = triggers
+            .list_deliveries_by_occurrence_id(&first.occurrence_id)
+            .await
+            .unwrap();
+        assert_eq!(held.len(), 2, "both dispositions are durable");
+    }
+    assert_eq!(
+        processes(&backend).await.len(),
+        1,
+        "only the accepted delivery starts"
+    );
+}
+
+#[tokio::test]
+async fn held_emissions_preserve_refusals_on_sqlite_memory() {
+    refusal_receipts_are_stable(Dialect::SqliteMemory, None).await;
+}
+
+#[tokio::test]
+async fn held_emissions_preserve_refusals_on_sqlite_file() {
+    refusal_receipts_are_stable(Dialect::SqliteFile, None).await;
+}
+
+#[tokio::test]
+async fn held_emissions_preserve_refusals_on_postgres() {
+    let Some(url) = std::env::var("LASH_POSTGRES_DATABASE_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+    else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    refusal_receipts_are_stable(Dialect::Postgres, Some(url)).await;
 }

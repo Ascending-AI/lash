@@ -1025,7 +1025,10 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     }
     assert_process_change_feed(
         handles.processes.as_ref(),
-        &expected.trigger_delivery.process_id,
+        expected
+            .trigger_delivery
+            .process_id()
+            .expect("delivery started"),
     )
     .await;
 

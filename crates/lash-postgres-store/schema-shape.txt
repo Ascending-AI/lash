@@ -466,7 +466,9 @@ table lash_trigger_deliveries
   column created_at_ms bigint not-null
   column occurrence_id text not-null
   column occurrence_outcome_kind text not-null default
-  column process_id text not-null
+  column process_id text nullable
+  column refusal_json text nullable
+  column status text not-null
   column subscription_id text not-null
   column subscription_incarnation text not-null
   column subscription_revision bigint not-null

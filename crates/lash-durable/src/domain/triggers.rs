@@ -1,5 +1,5 @@
 //! Trigger starts (L6, FIG-5175): an occurrence recorded with every
-//! delivery it fires, each bound to the process it starts, in one mailbox
+//! delivery it fires, each bound to a started process or terminal refusal, in one mailbox
 //! transaction (ADR 0132 §12).
 //!
 //! The start's owner prepares every delivery's process before the
@@ -7,8 +7,8 @@
 //! against and the prepared registrations as `start_json`. The store decodes
 //! it, refuses when the occurrence or its subscriptions moved since the plan,
 //! and otherwise writes the occurrence, the process rows, their actors ready
-//! and the bound deliveries together: a crash before the commit leaves
-//! nothing, and after it each delivery has exactly its one process.
+//! and every delivery's disposition together: a crash before the commit
+//! leaves nothing, and after it each delivery keeps its first disposition.
 
 use lash_sansio::ProcessId;
 

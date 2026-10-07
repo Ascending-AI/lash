@@ -232,7 +232,7 @@ mod tests {
             panic!("the occurrence holds one delivery: {held:?}");
         };
         assert_eq!(held.subscription.source_capture, captured_provider_source());
-        assert_eq!(&held.process_id, process_id);
+        assert_eq!(held.process_id(), Some(process_id));
         assert_eq!(
             restorer.calls(),
             1,
@@ -241,100 +241,93 @@ mod tests {
         assert_eq!(world.processes().await.len(), 1);
     }
 
-    /// FIG-4090: an unavailable route fails the emission before anything
-    /// commits, so a retry starts the delivery's one process; a revoked
-    /// route refuses the delivery for good: the occurrence is recorded with
-    /// no delivery for it, and no emission of it starts a process.
+    /// FIG-4090: an unavailable route records nothing, so a retry can start.
     #[tokio::test]
-    async fn an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery() {
-        for (refusal, retryable) in [
-            (
-                TriggerRouteRefusal::Unavailable {
-                    provider_id: "ui-provider".to_string(),
-                    message: "connect timeout".to_string(),
-                },
-                true,
-            ),
-            (
-                TriggerRouteRefusal::Revoked {
-                    provider_id: "ui-provider".to_string(),
-                    message: "grant withdrawn".to_string(),
-                },
-                false,
-            ),
-        ] {
-            let world = router_world().await;
-            let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
-            register(
-                world.store.as_ref(),
-                "route-register",
-                trigger_process_draft(&source_key, "route", world.env_ref.clone())
-                    .with_source_capture(captured_provider_source()),
-            )
-            .await;
-            let request = pressed(&source_key, "route-occurrence");
-
-            let refused = router_with_restorer(&world, StubRestorer::new(Some(refusal.clone())))
+    async fn an_unavailable_route_records_nothing_before_a_successful_retry() {
+        let world = router_world().await;
+        let source_key = empty_trigger_source_key("ui.button.pressed").unwrap();
+        register(
+            world.store.as_ref(),
+            "unavailable-register",
+            trigger_process_draft(&source_key, "unavailable", world.env_ref.clone())
+                .with_source_capture(captured_provider_source()),
+        )
+        .await;
+        let request = pressed(&source_key, "unavailable-occurrence");
+        let refusal = TriggerRouteRefusal::Unavailable {
+            provider_id: "ui-provider".to_string(),
+            message: "connect timeout".to_string(),
+        };
+        assert!(
+            router_with_restorer(&world, StubRestorer::new(Some(refusal)))
                 .emit(request.clone(), &world.emitter())
-                .await;
-            let occurrences = world
+                .await
+                .is_err()
+        );
+        assert!(
+            world
                 .store
                 .list_occurrences(TriggerOccurrenceFilter::default())
                 .await
-                .expect("list occurrences");
-            if retryable {
-                assert!(refused.is_err(), "{refusal:?} fails the emission");
-                assert!(occurrences.is_empty(), "{refusal:?} records nothing");
-            } else {
-                let report = refused.expect("a revoked route refuses only its delivery");
-                assert!(
-                    matches!(
-                        report.deliveries.as_slice(),
-                        [TriggerDeliveryEmitReceipt {
-                            outcome: TriggerDeliveryEmitOutcome::Failed { .. },
-                            ..
-                        }]
-                    ),
-                    "{report:?}"
-                );
-                assert_eq!(occurrences.len(), 1, "the occurrence is recorded");
-            }
-            assert!(
-                world
-                    .store
-                    .list_deliveries()
-                    .await
-                    .expect("list deliveries")
-                    .is_empty(),
-                "{refusal:?} reserves no delivery"
-            );
-            assert!(
-                world.processes().await.is_empty(),
-                "{refusal:?} starts no process"
-            );
+                .unwrap()
+                .is_empty()
+        );
+        assert!(world.store.list_deliveries().await.unwrap().is_empty());
+        assert!(world.processes().await.is_empty());
+        let started = router_with_restorer(&world, StubRestorer::new(None))
+            .emit(request, &world.emitter())
+            .await
+            .unwrap();
+        assert_eq!(started.started_process_ids().len(), 1);
+        assert_eq!(world.processes().await.len(), 1);
+    }
 
-            let restored = router_with_restorer(&world, StubRestorer::new(None))
-                .emit(request, &world.emitter())
+    /// FIG-5236: a revoked route stays refused, even when the route later works.
+    #[tokio::test]
+    async fn a_held_occurrence_keeps_its_revoked_route_refusal() {
+        let world = router_world().await;
+        let source_key = empty_trigger_source_key("ui.button.pressed").unwrap();
+        register(
+            world.store.as_ref(),
+            "revoked-register",
+            trigger_process_draft(&source_key, "revoked", world.env_ref.clone())
+                .with_source_capture(captured_provider_source()),
+        )
+        .await;
+        let request = pressed(&source_key, "revoked-occurrence");
+        let router = router_with_restorer(
+            &world,
+            StubRestorer::new(Some(TriggerRouteRefusal::Revoked {
+                provider_id: "ui-provider".to_string(),
+                message: "grant withdrawn".to_string(),
+            })),
+        );
+        let first = router
+            .emit(request.clone(), &world.emitter())
+            .await
+            .unwrap();
+        assert!(matches!(
+            first.deliveries.as_slice(),
+            [TriggerDeliveryEmitReceipt {
+                outcome: TriggerDeliveryEmitOutcome::Failed { .. },
+                ..
+            }]
+        ));
+        let restored = router_with_restorer(&world, StubRestorer::new(None));
+        assert_eq!(
+            restored
+                .emit(request.clone(), &world.emitter())
                 .await
-                .expect("the emission runs again");
-            let processes = world.processes().await;
-            if retryable {
-                assert_eq!(restored.started_process_ids().len(), 1, "{restored:?}");
-                assert_eq!(
-                    processes
-                        .iter()
-                        .map(|record| &record.id)
-                        .collect::<Vec<_>>(),
-                    restored.started_process_ids().iter().collect::<Vec<_>>(),
-                    "the retry started the delivery's one process"
-                );
-            } else {
-                assert!(
-                    restored.deliveries.is_empty(),
-                    "the refused delivery holds nothing: {restored:?}"
-                );
-                assert!(processes.is_empty(), "nothing starts the refused delivery");
-            }
-        }
+                .unwrap(),
+            first
+        );
+        assert!(
+            restored
+                .emit_recorded(request, &world.emitter())
+                .await
+                .is_err()
+        );
+        assert_eq!(world.store.list_deliveries().await.unwrap().len(), 1);
+        assert!(world.processes().await.is_empty());
     }
 }

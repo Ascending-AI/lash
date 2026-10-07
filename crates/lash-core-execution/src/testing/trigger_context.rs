@@ -77,9 +77,9 @@ pub async fn record_trigger_occurrence(
                 .await?;
             let anchor = prepared.trace().anchor().clone();
             let (registration, observers, process_id, _, _) = prepared.into_commit(anchor);
-            deliveries.push(crate::triggers::TriggerDeliveryStartRows {
+            deliveries.push(crate::triggers::TriggerDeliveryStartRows::Started {
                 subscription: subscription.clone(),
-                registration,
+                registration: Box::new(registration),
                 observers,
                 process_id,
             });
@@ -95,24 +95,11 @@ pub async fn record_trigger_occurrence(
         let committed = durable
             .commit_mail(rows.mail_tx()?, lash_durable::CommitLabel::TRIGGER_START)
             .await;
-        let Some(processes) = rows.answer(committed)? else {
+        let Some(_) = rows.answer(committed)? else {
             continue;
         };
-        let crate::triggers::TriggerStartRows {
-            occurrence,
-            deliveries,
-            ..
-        } = rows;
-        let mut reservations = deliveries
-            .into_iter()
-            .zip(processes)
-            .map(|(delivery, process_id)| crate::TriggerDeliveryReservation {
-                occurrence: occurrence.clone(),
-                subscription: delivery.subscription,
-                process_id,
-                created_at_ms: occurrence.occurred_at_ms,
-            })
-            .collect::<Vec<_>>();
+        let mut reservations = rows.reservations();
+        let occurrence = rows.occurrence;
         crate::facade_support::sort_trigger_delivery_reservations(&mut reservations);
         return Ok(crate::TriggerIngressReceipt {
             occurrence,

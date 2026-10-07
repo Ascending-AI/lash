@@ -467,12 +467,9 @@ impl TriggerRouter {
     /// declaration fails with that typed refusal (FIG-4513).
     ///
     /// A delivery refused before its start committed carries no such
-    /// statement: its reason is a live error string. Reporting that inside a
-    /// successful outcome would both call a failure a success and put
-    /// redrive-varying bytes on the wire, so a refused delivery fails the
-    /// whole declaration instead — the caller turns the error into the
-    /// intent's own refusal, which is where a command that did not happen
-    /// belongs.
+    /// statement: every refused delivery keeps its first recorded reason.
+    /// A refused delivery fails the whole declaration; the caller carries it
+    /// as the intent's refusal.
     pub async fn emit_recorded(
         &self,
         request: TriggerOccurrenceRequest,
@@ -633,15 +630,18 @@ impl TriggerRouter {
                 }) => {
                     let (registration, observers, process_id, _, _) =
                         registration.into_commit(staging.anchor());
-                    deliveries.push(TriggerDeliveryStartRows {
+                    deliveries.push(TriggerDeliveryStartRows::Started {
                         subscription: start.subscription.clone(),
-                        registration,
+                        registration: Box::new(registration),
                         observers,
                         process_id,
                     });
-                    staged.push(Ok(staging));
+                    staged.push(Some(staging));
                 }
-                Err(refusal) => staged.push(Err(refusal)),
+                Err(refusal) => {
+                    deliveries.push(refused_delivery(start.subscription.clone(), refusal));
+                    staged.push(None);
+                }
             }
         }
         let rows = TriggerStartRows {
@@ -658,7 +658,7 @@ impl TriggerRouter {
             // the emission plans again or fails.
             unstarted => {
                 for (start, staging) in starts.iter().zip(staged) {
-                    if let Ok(staging) = staging {
+                    if let Some(staging) = staging {
                         staging
                             .abandon(&start.stores(self, &engines, registry.as_ref()))
                             .await?;
@@ -668,43 +668,37 @@ impl TriggerRouter {
             }
         };
         let mut processes = processes.into_iter();
-        let mut receipts = Vec::with_capacity(starts.len());
         for (start, staging) in starts.iter().zip(staged) {
-            let outcome = match staging {
-                Ok(staging) => {
-                    let process_id = processes.next().ok_or_else(|| {
-                        PluginError::Session(format!(
-                            "trigger occurrence `{}` started fewer processes than deliveries",
-                            occurrence.occurrence_id
-                        ))
-                    })?;
-                    // The row and its binding committed: what the start
-                    // staged is held under its record now.
-                    let record = registry.get_process(&process_id).await?.ok_or_else(|| {
+            if let Some(staging) = staging {
+                let process_id = processes.next().ok_or_else(|| {
+                    PluginError::Session(format!(
+                        "trigger occurrence `{}` started fewer processes than deliveries",
+                        occurrence.occurrence_id
+                    ))
+                })?;
+                // The row and its binding committed: what the start
+                // staged is held under its record now.
+                let record = registry.get_process(&process_id).await?.ok_or_else(|| {
                         PluginError::Session(format!(
                             "trigger delivery process `{process_id}` is missing after its start committed"
                         ))
                     })?;
-                    staging
-                        .adopt(
-                            &start.stores(self, &engines, registry.as_ref()),
-                            Ok(crate::ProcessRegistrationReceipt::created(record)),
-                        )
-                        .await?;
-                    TriggerDeliveryEmitOutcome::Started { process_id }
-                }
-                Err(refusal) => refused_delivery(refusal),
-            };
-            receipts.push(TriggerDeliveryEmitReceipt {
-                occurrence_id: occurrence.occurrence_id.clone(),
-                subscription_id: start.subscription.subscription_id.clone(),
-                outcome,
-            });
+                staging
+                    .adopt(
+                        &start.stores(self, &engines, registry.as_ref()),
+                        Ok(crate::ProcessRegistrationReceipt::created(record)),
+                    )
+                    .await?;
+            }
         }
-        Ok(Some(TriggerEmitReport::new(
-            occurrence.occurrence_id,
-            receipts,
-        )))
+        Ok(Some(
+            held_emission(TriggerIngressReceipt {
+                occurrence,
+                reservations: rows.reservations(),
+                realization: crate::StoreRealization::Realized,
+            })
+            .0,
+        ))
     }
 
     /// Give up the starts an emission prepared before it stopped short of
@@ -729,21 +723,25 @@ impl TriggerRouter {
 }
 
 /// The outcome of a delivery refused before its start committed.
-fn refused_delivery(refusal: PluginError) -> TriggerDeliveryEmitOutcome {
+fn refused_delivery(
+    subscription: TriggerSubscriptionRecord,
+    refusal: PluginError,
+) -> TriggerDeliveryStartRows {
     let error = crate::RuntimeEffectControllerError::from(refusal);
     let value_mismatch = match &error.cause {
         Some(crate::RuntimeErrorCause::ValueMismatch { source, .. }) => Some(source.clone()),
         _ => None,
     };
-    TriggerDeliveryEmitOutcome::Failed {
+    TriggerDeliveryStartRows::Refused {
+        subscription,
         code: error.code,
         reason: error.message,
         value_mismatch,
     }
 }
 
-/// The report of an occurrence the store already holds: each delivery it
-/// holds, bound to its process.
+/// Build the emission report from the committed delivery row set, whether
+/// this call recorded it or found the occurrence held.
 fn held_emission(receipt: TriggerIngressReceipt) -> (TriggerEmitReport, crate::StoreRealization) {
     let TriggerIngressReceipt {
         occurrence,
@@ -755,9 +753,7 @@ fn held_emission(receipt: TriggerIngressReceipt) -> (TriggerEmitReport, crate::S
         .map(|reservation| TriggerDeliveryEmitReceipt {
             occurrence_id: reservation.occurrence.occurrence_id,
             subscription_id: reservation.subscription.subscription_id,
-            outcome: TriggerDeliveryEmitOutcome::Started {
-                process_id: reservation.process_id,
-            },
+            outcome: reservation.outcome,
         })
         .collect();
     (

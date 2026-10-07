@@ -371,6 +371,7 @@ pub mod facade_support {
     pub use crate::triggers::TriggerSubscriptionFence;
     pub use crate::triggers::TriggerTarget;
     pub use crate::triggers::decode_trigger_delivery;
+    pub use crate::triggers::decode_trigger_delivery_outcome;
     pub use crate::triggers::decode_trigger_mutation_receipt_json;
     pub use crate::triggers::decode_trigger_occurrence_json;
     pub use crate::triggers::decode_trigger_subscription_json;
