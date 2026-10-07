@@ -480,6 +480,18 @@ mod tests {
         metrics
             .runtime_tuning
             .record_pool_acquire_wait(wait, "success");
+        metrics.runtime_tuning.record_durable_commit(
+            "round.outcome",
+            "success",
+            DurableCommitCost {
+                acquire_wait: wait,
+                transaction_duration: wait,
+                sql_statements: 7,
+                returned_bytes: 89,
+                lock_statement_elapsed: wait,
+                group_commit_members: 3,
+            },
+        );
         metrics
             .runtime_tuning
             .record_runtime_commit_budgeted_size(42, "admitted");
@@ -527,7 +539,7 @@ mod tests {
             .collect::<Vec<_>>();
         expected.sort_unstable_by_key(|entry| entry.0);
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 16);
+        assert_eq!(actual.len(), 22);
         let isolated = second.get_finished_metrics().expect("second export");
         let names = isolated
             .iter()
