@@ -128,7 +128,8 @@ Configuration is read from `.env` or the process environment:
   `max_events_per_session` (2048), `max_age_ms` (120000), `max_sessions`
   (4096) and `max_retained_bytes` (67108864). `postgresql` takes
   `lash::postgres::PostgresLiveReplayConfig`: `schema` (`lash_live_replay`),
-  `publish_tick_ms` (5), `publish_concurrency` (4), `max_batch_events` (1024),
+  `schema_mode` (`install`; `verify_only` runs no DDL and refuses tables that
+  differ from `crates/lash/postgres-live-replay-schema.sql`), `publish_tick_ms` (5), `publish_concurrency` (4), `max_batch_events` (1024),
   `max_events_per_session` (2048), `max_age_ms` (120000),
   `max_bytes_per_session` (8388608), `cleanup_interval_ms` (30000),
   `cleanup_jitter_ms` (10000), `listener_backoff_initial_ms` (100),

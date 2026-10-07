@@ -1,6 +1,7 @@
 //! The store's tables, its incarnation, and the SQL it runs.
 //!
-//! Three tables live in the configured schema:
+//! Three tables live in the configured schema, created by the published
+//! `postgres-live-replay-schema.sql`:
 //!
 //! - `live_replay_incarnation`, logged: the one row naming the history the
 //!   unlogged tables hold, and the position watermark of forgotten sessions.
@@ -20,6 +21,7 @@ use lash_sansio::SessionId;
 use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
 use super::codec::Doorbell;
+use super::schema_shape::{self, PostgresLiveReplaySchemaReport, SCHEMA_DDL};
 
 /// The incarnation the store's cursors name, and the position a session
 /// with no head starts from.
@@ -254,68 +256,61 @@ pub(super) fn db_error(context: &'static str) -> impl Fn(sqlx::Error) -> LiveRep
     move |error| store_error(context, error)
 }
 
-/// Create the schema and tables when absent. Replicas starting together
+/// The advisory lock key of the store's tables in `schema`: installs take it
+/// exclusively and verifications shared, each for its transaction.
+fn lock_key(schema: &str) -> String {
+    format!("lash_live_replay:{schema}")
+}
+
+/// Create the schema and its tables when absent, by executing the published
+/// DDL verbatim under `schema`, then verify them: a table an older build left
+/// behind is not repaired, and its drift refuses. Replicas starting together
 /// take turns through a transaction-scoped advisory lock.
-pub(super) async fn install(pool: &PgPool, schema: &str) -> Result<(), LiveReplayStoreError> {
+pub(super) async fn install(
+    pool: &PgPool,
+    schema: &str,
+) -> Result<PostgresLiveReplaySchemaReport, LiveReplayStoreError> {
     let mut tx = pool.begin().await.map_err(db_error("install"))?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
-        .bind(format!("lash_live_replay:{schema}"))
+        .bind(lock_key(schema))
         .execute(&mut *tx)
         .await
         .map_err(db_error("install lock"))?;
-    let ddl = [
+    for statement in [
         format!("CREATE SCHEMA IF NOT EXISTS \"{schema}\""),
-        format!(
-            "CREATE TABLE IF NOT EXISTS \"{schema}\".live_replay_incarnation ( \
-               singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton), \
-               incarnation_id text NOT NULL, \
-               watermark bigint NOT NULL, \
-               rotations bigint NOT NULL, \
-               rotated_at timestamptz NOT NULL)"
-        ),
-        format!(
-            "CREATE UNLOGGED TABLE IF NOT EXISTS \"{schema}\".live_replay_head ( \
-               session_id text PRIMARY KEY, \
-               tail_position bigint NOT NULL, \
-               floor_position bigint NOT NULL, \
-               first_retained bigint NOT NULL, \
-               retained_events bigint NOT NULL, \
-               retained_bytes bigint NOT NULL, \
-               touched_at timestamptz NOT NULL)"
-        ),
-        format!(
-            "CREATE UNLOGGED TABLE IF NOT EXISTS \"{schema}\".live_replay_log ( \
-               session_id text NOT NULL, \
-               position bigint NOT NULL, \
-               revision bigint NOT NULL, \
-               turn_id text, \
-               activity_id text, \
-               activity_key text, \
-               activity_first bigint, \
-               activity_last bigint, \
-               payload bytea NOT NULL, \
-               bytes bigint NOT NULL, \
-               published_at timestamptz NOT NULL, \
-               PRIMARY KEY (session_id, position))"
-        ),
-        format!(
-            "CREATE UNIQUE INDEX IF NOT EXISTS live_replay_log_activity \
-             ON \"{schema}\".live_replay_log (session_id, activity_id) \
-             WHERE activity_key IS NULL AND activity_id IS NOT NULL"
-        ),
-        format!(
-            "CREATE UNIQUE INDEX IF NOT EXISTS live_replay_log_span \
-             ON \"{schema}\".live_replay_log (session_id, activity_key, activity_first) \
-             WHERE activity_key IS NOT NULL"
-        ),
-    ];
-    for statement in ddl {
+        format!("SET LOCAL search_path TO \"{schema}\""),
+    ] {
         sqlx::query(&statement)
             .execute(&mut *tx)
             .await
             .map_err(db_error("install"))?;
     }
-    tx.commit().await.map_err(db_error("install commit"))
+    sqlx::raw_sql(SCHEMA_DDL)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error("install"))?;
+    let report = schema_shape::verify(&mut tx, schema).await?;
+    tx.commit().await.map_err(db_error("install commit"))?;
+    Ok(report)
+}
+
+/// Check the tables in `schema` against the published artifact, running no
+/// DDL. An install in progress finishes first.
+pub(super) async fn verify(
+    pool: &PgPool,
+    schema: &str,
+) -> Result<PostgresLiveReplaySchemaReport, LiveReplayStoreError> {
+    let mut tx = pool.begin().await.map_err(db_error("verify schema"))?;
+    sqlx::query("SELECT pg_advisory_xact_lock_shared(hashtext($1))")
+        .bind(lock_key(schema))
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error("verify schema lock"))?;
+    let report = schema_shape::verify(&mut tx, schema).await?;
+    tx.commit()
+        .await
+        .map_err(db_error("verify schema commit"))?;
+    Ok(report)
 }
 
 /// The incarnation the unlogged tables hold, rotating it first when their

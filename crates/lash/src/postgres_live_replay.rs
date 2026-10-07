@@ -21,6 +21,11 @@
 //! - **Retention.** Count, age and bytes per session, judged by database
 //!   time; a periodic jittered pass reclaims expired rows and forgets idle
 //!   sessions.
+//! - **Schema.** The tables come from the published
+//!   `postgres-live-replay-schema.sql`, which the store executes in its
+//!   `install` schema mode and a host applies itself for the `verify_only`
+//!   mode (FIG-5220). Every connect checks them against the generated shape
+//!   artifact and refuses on drift.
 //!
 //! [`current_cursor`](LiveReplayStore::current_cursor) is synchronous, so
 //! each replica keeps a mirror of every session's head, merged from its own
@@ -49,9 +54,13 @@ mod listener;
 mod mirror;
 mod publisher;
 mod schema;
+mod schema_shape;
 mod subscription;
 
-pub use config::{PostgresLiveReplayConfig, PostgresLiveReplayConfigError};
+pub use config::{
+    PostgresLiveReplayConfig, PostgresLiveReplayConfigError, PostgresLiveReplaySchemaMode,
+};
+pub use schema_shape::{PostgresLiveReplaySchemaFinding, PostgresLiveReplaySchemaReport};
 
 use codec::Doorbell;
 use mirror::Mirror;
@@ -68,6 +77,10 @@ pub enum PostgresLiveReplayError {
     /// The database refused the connection, the tables or the listener.
     #[error(transparent)]
     Database(#[from] LiveReplayStoreError),
+    /// The store's tables differ from the published artifact; nothing was
+    /// repaired.
+    #[error("the postgres live replay tables refuse: {0}")]
+    SchemaDrift(PostgresLiveReplaySchemaReport),
 }
 
 /// The live replay store every replica of a host shares through one
@@ -229,9 +242,11 @@ impl Shared {
 }
 
 impl PostgresLiveReplayStore {
-    /// Connect to `database_url`, create the store's tables when absent,
-    /// confirm the listener, and start the replica's publisher and cleanup.
-    /// Out-of-range configuration is refused before anything connects.
+    /// Connect to `database_url`, create the store's tables when absent (in
+    /// the `install` schema mode), refuse when they differ from the published
+    /// artifact, confirm the listener, and start the replica's publisher and
+    /// cleanup. Out-of-range configuration is refused before anything
+    /// connects.
     pub async fn connect(
         database_url: &str,
         config: PostgresLiveReplayConfig,
@@ -250,7 +265,15 @@ impl PostgresLiveReplayStore {
             .connect(database_url)
             .await
             .map_err(db_error("connect"))?;
-        schema::install(&pool, &config.schema).await?;
+        let report = match config.schema_mode {
+            PostgresLiveReplaySchemaMode::Install => schema::install(&pool, &config.schema).await?,
+            PostgresLiveReplaySchemaMode::VerifyOnly => {
+                schema::verify(&pool, &config.schema).await?
+            }
+        };
+        if !report.is_conformant() {
+            return Err(PostgresLiveReplayError::SchemaDrift(report));
+        }
         let sql = Statements::new(&config.schema);
         let incarnation = schema::ensure_incarnation(&pool, &sql).await?;
         let shared = Arc::new(Shared {
@@ -284,6 +307,37 @@ impl PostgresLiveReplayStore {
         })?
         .map_err(|_| LiveReplayStoreError::Closed)?;
         Ok(store)
+    }
+
+    /// The DDL that provisions the store's tables, committed verbatim as
+    /// `crates/lash/postgres-live-replay-schema.sql`.
+    ///
+    /// The `install` schema mode executes these bytes. A host that owns its
+    /// migrations vendors them rather than transcribing them, applies them
+    /// into the configured `schema` (they are schema-unqualified and
+    /// provision into whichever schema `search_path` resolves), and runs the
+    /// store in the `verify_only` mode. Every statement is creation-only and
+    /// idempotent.
+    pub fn schema_ddl() -> &'static str {
+        schema_shape::SCHEMA_DDL
+    }
+
+    /// The structure [`schema_ddl`](Self::schema_ddl) produces and every
+    /// connect checks, committed as the generated
+    /// `crates/lash/postgres-live-replay-schema-shape.txt`.
+    pub fn schema_shape() -> &'static str {
+        schema_shape::SHAPE_ARTIFACT
+    }
+
+    /// The check every connect runs, without connecting a store: a host's
+    /// migration CI gates on it. It runs no DDL and never fails on drift;
+    /// read [`PostgresLiveReplaySchemaReport::is_conformant`] and render the
+    /// report for its findings.
+    pub async fn verify_schema(
+        pool: &sqlx::PgPool,
+        schema: &str,
+    ) -> Result<PostgresLiveReplaySchemaReport, LiveReplayStoreError> {
+        schema::verify(pool, schema).await
     }
 
     /// The configuration this store runs with.

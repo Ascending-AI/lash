@@ -103,6 +103,50 @@ the dropped table stays dropped and the missing seed stays missing.
    `lashctl migrate` or the host-applied artifact — never a runtime open that
    repairs.
 
+## The live replay store's schema
+
+`lash::postgres::PostgresLiveReplayStore` keeps its three tables in its own
+configured `schema` (default `lash_live_replay`), separate from the store schema
+above, and follows the same contract (FIG-5220):
+
+- `PostgresLiveReplayStore::schema_ddl()` / the committed
+  `crates/lash/postgres-live-replay-schema.sql` is the artifact. It is
+  creation-only, idempotent and schema-unqualified: the host's migration creates
+  the configured schema, sets `search_path` to it and applies the file verbatim.
+  It seeds no rows; the store mints its incarnation row itself.
+- `PostgresLiveReplayConfig::schema_mode` picks who provisions. `install` (the
+  default) creates the schema and tables when absent by executing those same
+  bytes, and needs `CREATE` on the database. `verify_only` runs no DDL: the host
+  applied the artifact.
+- Every connect, in either mode, checks the tables against the generated
+  `crates/lash/postgres-live-replay-schema-shape.txt` (persistence, columns by
+  name with type and nullability, unique guards by key column set and predicate)
+  and refuses with `PostgresLiveReplayError::SchemaDrift`, naming each missing,
+  differing or extra object. Nothing is created or repaired on refusal; in
+  particular `install` never alters a table an older build left in another shape.
+- `PostgresLiveReplayStore::verify_schema(&pool, schema)` is the same check
+  without connecting a store, for the host's migrate → verify → deploy gate.
+- **Runtime role.** `USAGE` on the live replay schema and `SELECT, INSERT, UPDATE,
+  DELETE, TRUNCATE` on its tables. `TRUNCATE` is needed because the store rotates
+  its incarnation by truncating the unlogged tables when crash recovery or a
+  failover lost them.
+- **Upgrading across a shape change.** The tables hold only the replay window,
+  so drop the live replay schema (`DROP SCHEMA ... CASCADE`) and re-apply this
+  build's artifact; open cursors then gap and observers resnapshot.
+
+| Item | Objective gate | Evidence |
+|---|---|---|
+| Artifact matches the shape | an `install` connect provisions exactly the committed shape | `schema::the_install_mode_provisions_exactly_the_committed_shape` |
+| Verify-only, no DDL | connects and serves under a role whose `CREATE TABLE` is refused | `schema::a_host_provisioned_schema_serves_verify_only_under_a_role_without_ddl_privileges` |
+| Missing or drifted schema refused | refused by name; the schema stays absent and the dropped guard stays dropped | `schema::verify_only_refuses_a_missing_or_drifted_schema_without_repair` |
+| Stale table refused by `install` | a table missing a column refuses instead of being altered | `schema::install_refuses_a_stale_table_without_repair` |
+
+The live replay evidence is the `live_replay` suite of `lash-internal-postgres-store`:
+
+```sh
+kiln test //crates/lash-postgres-store:live_replay__test --test_arg=schema::
+```
+
 ## Scorecard
 
 | Item | Objective gate | Evidence |

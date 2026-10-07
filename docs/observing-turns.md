@@ -16,7 +16,11 @@ configured live replay store's property: the in-memory default holds one
 process's, and a shared store holds every process's. Lash ships one shared
 store, `lash::postgres::PostgresLiveReplayStore` (the `postgres` feature):
 every replica connected to one PostgreSQL database sees every replica's
-events, with the same window, cursors and gaps as the in-memory store.
+events, with the same window, cursors and gaps as the in-memory store. Its
+tables come from the published `crates/lash/postgres-live-replay-schema.sql`:
+the store creates them itself by default, or a host applies the file and runs
+the store with `schema_mode: verify_only`, which runs no DDL and refuses tables
+that differ (see the [host-provisioned schema runbook](../runbooks/host-provisioned-schema/runbook.md)).
 
 `CheckpointRecorded { protocol_iteration }` marks an accepted checkpoint on the
 turn's lane. Every non-retracted delta before the marker belongs to the

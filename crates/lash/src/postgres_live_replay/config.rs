@@ -23,6 +23,9 @@ pub struct PostgresLiveReplayConfig {
     /// one database are independent. Default `lash_live_replay`: a lowercase
     /// identifier of at most 48 characters.
     pub schema: String,
+    /// Whether the store creates its tables or only checks them. Default
+    /// `install`.
+    pub schema_mode: PostgresLiveReplaySchemaMode,
     /// How long a replica gathers publications, across all its sessions,
     /// before it writes them in one transaction with one notification.
     /// Default 5 ms; 0 writes whatever is queued at once. At most 1 s.
@@ -86,6 +89,7 @@ impl Default for PostgresLiveReplayConfig {
     fn default() -> Self {
         Self {
             schema: "lash_live_replay".to_string(),
+            schema_mode: PostgresLiveReplaySchemaMode::Install,
             publish_tick: Duration::from_millis(5),
             publish_concurrency: 4,
             max_batch_events: 1024,
@@ -102,6 +106,22 @@ impl Default for PostgresLiveReplayConfig {
             pool_idle_timeout: Duration::from_secs(600),
         }
     }
+}
+
+/// How the store treats its tables at connect. Either way it then checks them
+/// against the published artifact and refuses to start on drift.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PostgresLiveReplaySchemaMode {
+    /// Create the schema and its tables when absent, by executing
+    /// [`PostgresLiveReplayStore::schema_ddl`](super::PostgresLiveReplayStore::schema_ddl)
+    /// verbatim. Needs `CREATE` on the database.
+    #[default]
+    Install,
+    /// Run no DDL: the host applied the published artifact into `schema`
+    /// with its own migration tooling. Tables that are absent or differ
+    /// refuse the connect and are left as they are.
+    VerifyOnly,
 }
 
 /// A configuration value outside its documented range.
@@ -325,6 +345,13 @@ mod tests {
         assert_eq!(
             parsed.max_events_per_session, 2048,
             "absent fields keep their defaults"
+        );
+        let host_provisioned: PostgresLiveReplayConfig =
+            serde_json::from_str(r#"{"schema_mode": "verify_only"}"#)
+                .expect("the documented schema mode parses");
+        assert_eq!(
+            host_provisioned.schema_mode,
+            PostgresLiveReplaySchemaMode::VerifyOnly
         );
     }
 }

@@ -25,6 +25,8 @@ use lash_sansio::SessionId;
 
 #[path = "live_replay/bench.rs"]
 mod bench;
+#[path = "live_replay/schema.rs"]
+mod schema;
 
 /// A fresh schema's configuration: a short tick so laws run quickly, and a
 /// small pool so many stores fit the server's connection limit.

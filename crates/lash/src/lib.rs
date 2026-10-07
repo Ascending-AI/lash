@@ -1295,7 +1295,8 @@ pub mod postgres {
     /// PostgreSQL database (FIG-5101).
     pub use crate::postgres_live_replay::{
         PostgresLiveReplayConfig, PostgresLiveReplayConfigError, PostgresLiveReplayError,
-        PostgresLiveReplayStore,
+        PostgresLiveReplaySchemaFinding, PostgresLiveReplaySchemaMode,
+        PostgresLiveReplaySchemaReport, PostgresLiveReplayStore,
     };
 }
 
