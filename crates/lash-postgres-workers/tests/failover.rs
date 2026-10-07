@@ -8,15 +8,17 @@
 //! - **the work finishes on another node**: the store holds no unfinished
 //!   turn and exactly one `turn.commit` committed, or the process holds its
 //!   terminal, and the survivor did the work after the fault;
-//! - **every zombie commit is refused**: a commit a fenced owner attempts
-//!   after its reap is refused with `OwnershipLost`, and the store holds only
-//!   the new owner's outcome (its `written_epoch`);
+//! - **no zombie commits**: the store holds only the new owner's outcome
+//!   (its `written_epoch`), and nothing the old owner wrote after the fault;
 //! - **no `Once` body ran twice**: the witness ledger holds at most one
 //!   `entered` row per `Once` call.
 //!
-//! A killed node cannot commit at all; the partition case is the one whose
-//! zombie lives and tries. Each case prints a `case=` line with what it
-//! measured; the failover cases check the failover bound of L8 (FIG-5178).
+//! A killed node cannot commit at all, and a partitioned node stops itself,
+//! dropping its activations, before its lease lapses, so no case's zombie
+//! lives to try; the epoch fence that refuses one that does is proven in
+//! process by `lash-durable-test`'s fencing laws. Each case prints a `case=`
+//! line with what it measured; the failover cases check the failover bound
+//! of L8 (FIG-5178).
 
 // Test code: the harness reads its environment and panics on a broken law.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -496,11 +498,12 @@ fn find<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 }
 
 /// Partition: one node's heartbeat is held while its `Once` body keeps
-/// running. Its lease lapses, the other node reaps it and finishes the turn
-/// with the operation `Interrupted`; when the body returns, the zombie's
-/// commit of its outcome is refused and nothing it wrote is visible.
+/// running. The node stops itself, dropping the body, within
+/// `self_stop_after` and one poll of its last renewal, before its lease
+/// lapses; the other node reaps it and finishes the turn with the operation
+/// `Interrupted`, and the body is never entered again (FIG-5178).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_node_whose_heartbeat_is_held_is_reaped_and_its_late_commit_is_refused() {
+async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses() {
     let mut cluster = Cluster::start(&NODES, Notifier::AfterCommit, Hold::StepUntilRelease).await;
     cluster.admit_turn().await;
     let entered = cluster
@@ -529,6 +532,32 @@ async fn a_node_whose_heartbeat_is_held_is_reaped_and_its_late_commit_is_refused
         .map(|entry| entry.at)
         .expect("the zombie registered");
     let lease = lease();
+    // The runner reports its stop only once every activation it ran is
+    // dropped, the held body among them.
+    let stopped = cluster
+        .wait_after(
+            Some(partitioned),
+            lease.self_stop_after + STEP,
+            "the zombie stops itself",
+            |entry| entry.node == zombie && matches!(entry.event, Event::Stopped { .. }),
+        )
+        .await;
+    assert_eq!(
+        stopped.event,
+        Event::Stopped {
+            why: "unrenewed".to_owned()
+        },
+        "the zombie stopped"
+    );
+    let served = stopped.at.saturating_duration_since(last_renewed);
+    assert!(
+        served <= lease.self_stop_after + lease.claim_poll,
+        "the zombie served {} ms past its last renewal, past self_stop_after ({} ms) and one poll ({} ms)",
+        ms(served),
+        ms(lease.self_stop_after),
+        ms(lease.claim_poll),
+    );
+    cluster.exited(&zombie, STEP).await;
     let reap = cluster
         .wait_after(
             Some(partitioned),
@@ -539,45 +568,21 @@ async fn a_node_whose_heartbeat_is_held_is_reaped_and_its_late_commit_is_refused
         .await;
     let finisher = turn_finished(&cluster).await;
     assert_eq!(finisher, survivor, "the turn finished on {finisher}");
-
-    // The body still runs on the zombie; now let it return.
-    cluster.nemesis("release", None).await;
-    let released = Instant::now();
-    cluster
-        .wait_after(Some(released), STEP, "the zombie's body returns", |entry| {
-            entry.node == zombie && is_body(entry, TOOL, "returned")
-        })
-        .await;
-    // Its owner transaction is fenced: refused at its open, which reads the
-    // actor's epoch, or at its commit, which reads it again under lock.
-    let refused = cluster
-        .wait_after(
-            Some(released),
-            STEP,
-            "the zombie's write is refused",
-            |entry| {
-                entry.node == zombie
-                    && matches!(&entry.event,
-                    Event::Commit { outcome, .. } | Event::BeginRefused { outcome, .. }
-                        if outcome == "ownership_lost")
-            },
-        )
-        .await;
     let late: Vec<Entry> = cluster
         .reports()
         .into_iter()
-        .filter(|entry| entry.node == zombie && entry.at >= released)
+        .filter(|entry| entry.node == zombie && entry.at >= partitioned)
         .filter(
             |entry| matches!(&entry.event, Event::Commit { outcome, .. } if outcome == "committed"),
         )
         .collect();
     assert!(
         late.is_empty(),
-        "the zombie committed after its reap: {late:?}"
+        "the zombie committed while partitioned: {late:?}"
     );
 
-    // Nothing the zombie wrote after its reap is visible: the operation's
-    // one outcome is the survivor's `Interrupted`.
+    // The operation's one outcome is the survivor's `Interrupted`, and the
+    // dropped body neither returned nor ran again.
     let (recovery, epoch) = cell_outcome(&cluster).await;
     assert_eq!(
         recovery,
@@ -595,26 +600,9 @@ async fn a_node_whose_heartbeat_is_held_is_reaped_and_its_late_commit_is_refused
             .iter()
             .map(|effect| (effect.phase.as_str(), effect.node.as_str()))
             .collect::<Vec<_>>(),
-        vec![("entered", zombie.as_str()), ("returned", zombie.as_str())],
-        "ext.write ran once, on the zombie"
+        vec![("entered", zombie.as_str())],
+        "ext.write ran once, on the zombie, and was dropped there"
     );
-
-    // Let the heartbeat through: the zombie learns it was reaped and stops.
-    cluster.send(&zombie, Command::UnblockHeartbeat).await;
-    let stopped = cluster
-        .wait_after(Some(refused.at), STEP, "the zombie stops", |entry| {
-            entry.node == zombie && matches!(entry.event, Event::Stopped { .. })
-        })
-        .await;
-    assert_eq!(
-        stopped.event,
-        Event::Stopped {
-            why: "lease_lost".to_owned()
-        },
-        "the zombie stopped"
-    );
-    cluster.exited(&zombie, STEP).await;
-    let served = refused.at.saturating_duration_since(last_renewed);
     eprintln!(
         "case=partition zombie={zombie} survivor={survivor} reap_after_partition_ms={} \
          zombie_served_past_last_renewal_ms={} self_stop_after_ms={} outcome=interrupted",

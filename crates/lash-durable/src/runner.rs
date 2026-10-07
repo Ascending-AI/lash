@@ -6,6 +6,11 @@
 //! it: a node that lost its lease keeps nothing, and a reaped node's actors
 //! are already fenced by their bumped epochs.
 //!
+//! No store call holds the runner: each one races the host's stop and the
+//! self-stop deadline (`self_stop_after` past the last renewal), so a node
+//! whose heartbeat hangs still stops itself, and drops its activations,
+//! before anyone may reap it.
+//!
 //! All of its time is the injected [`Clock`]'s, so a simulated deployment
 //! runs the same loop on virtual time.
 //!
@@ -32,6 +37,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
 
@@ -470,18 +476,14 @@ impl Runner {
         let mut adopt = false;
         tokio::pin!(stop);
         let stopped = 'serve: loop {
-            let mut next = next_heartbeat.min(next_reap).min(next_claim);
+            let unrenewed = last_renewed + settings.self_stop_after;
+            let mut next = next_heartbeat.min(next_reap).min(next_claim).min(unrenewed);
             if feed.is_some() {
                 next = next.min(next_watch);
             }
             tokio::select! {
                 biased;
-                () = &mut stop => {
-                    active.abort_all();
-                    while active.join_next().await.is_some() {}
-                    self.store.release_node(&lease).await?;
-                    break Stopped::Requested;
-                }
+                () = &mut stop => break Stopped::Requested,
                 Some(_) = active.join_next(), if !active.is_empty() => continue,
                 signal = next_signal(&mut feed) => match signal {
                     Signal::Ready => {
@@ -511,22 +513,31 @@ impl Runner {
             let now = self.clock.now();
             if now >= next_heartbeat {
                 next_heartbeat = now + settings.heartbeat_every;
-                match self.store.heartbeat(&lease).await {
-                    Ok(HeartbeatOutcome::Renewed { .. }) => last_renewed = now,
-                    Ok(HeartbeatOutcome::Reaped) | Err(DurableError::NodeLeaseLost { .. }) => {
+                let beat = self.store.heartbeat(&lease);
+                match self.bounded(&mut stop, unrenewed, beat).await {
+                    Ok(Ok(HeartbeatOutcome::Renewed { .. })) => last_renewed = now,
+                    Ok(Ok(HeartbeatOutcome::Reaped) | Err(DurableError::NodeLeaseLost { .. })) => {
                         break Stopped::LeaseLost;
                     }
-                    Err(_) => {}
+                    Ok(Err(_)) => {}
+                    Err(stopped) => break stopped,
                 }
             }
-            if self.clock.now().saturating_duration_since(last_renewed) >= settings.self_stop_after
-            {
+            // Only a heartbeat renews, so the rest of the tick runs under
+            // one deadline.
+            let unrenewed = last_renewed + settings.self_stop_after;
+            if self.clock.now() >= unrenewed {
                 break Stopped::Unrenewed;
             }
             if now >= next_reap {
                 next_reap = now + settings.reap_every;
-                if let Err(DurableError::NodeLeaseLost { .. }) = self.store.reap(&lease).await {
-                    break Stopped::LeaseLost;
+                match self
+                    .bounded(&mut stop, unrenewed, self.store.reap(&lease))
+                    .await
+                {
+                    Ok(Err(DurableError::NodeLeaseLost { .. })) => break Stopped::LeaseLost,
+                    Ok(_) => {}
+                    Err(stopped) => break stopped,
                 }
             }
             if let (Some(signals), Some(session)) =
@@ -534,7 +545,10 @@ impl Runner {
                 && now >= next_watch
             {
                 next_watch = now + settings.claim_poll;
-                let probed = signals.liveness().await;
+                let probed = match self.bounded(&mut stop, unrenewed, signals.liveness()).await {
+                    Ok(probed) => probed,
+                    Err(stopped) => break stopped,
+                };
                 let released = match probed {
                     // An observation that spans a lost listener session is
                     // stale: the outage may have dropped every boot's lock.
@@ -544,24 +558,32 @@ impl Runner {
                     _ => Vec::new(),
                 };
                 for boot in released {
-                    match signals.reap_released(&lease, &boot).await {
-                        Ok(reaped) if !reaped.is_empty() => next_claim = now,
-                        Err(DurableError::NodeLeaseLost { .. }) => {
+                    let reap = signals.reap_released(&lease, &boot);
+                    match self.bounded(&mut stop, unrenewed, reap).await {
+                        Ok(Ok(reaped)) if !reaped.is_empty() => next_claim = now,
+                        Ok(Err(DurableError::NodeLeaseLost { .. })) => {
                             break 'serve Stopped::LeaseLost;
                         }
-                        Ok(_) | Err(_) => {}
+                        Ok(Ok(_) | Err(_)) => {}
+                        Err(stopped) => break 'serve stopped,
                     }
                 }
             }
             if now >= next_claim {
                 next_claim = now + settings.claim_poll;
                 let claimed = if adopt {
-                    self.store.owned(&lease).await.map(|owned| {
-                        owned
-                            .into_iter()
-                            .filter(|claimed| !self.hints.running(&claimed.actor))
-                            .collect()
-                    })
+                    match self
+                        .bounded(&mut stop, unrenewed, self.store.owned(&lease))
+                        .await
+                    {
+                        Ok(owned) => owned.map(|owned| {
+                            owned
+                                .into_iter()
+                                .filter(|claimed| !self.hints.running(&claimed.actor))
+                                .collect()
+                        }),
+                        Err(stopped) => break stopped,
+                    }
                 } else {
                     let room = self
                         .config
@@ -571,7 +593,13 @@ impl Runner {
                     if room == 0 {
                         continue;
                     }
-                    self.store.claim(&lease, room).await
+                    match self
+                        .bounded(&mut stop, unrenewed, self.store.claim(&lease, room))
+                        .await
+                    {
+                        Ok(claimed) => claimed,
+                        Err(stopped) => break stopped,
+                    }
                 };
                 match claimed {
                     Ok(claimed) => {
@@ -597,9 +625,30 @@ impl Runner {
         };
         active.abort_all();
         while active.join_next().await.is_some() {}
+        if stopped == Stopped::Requested {
+            self.store.release_node(&lease).await?;
+        }
         publisher.abort_all();
         drop(feed);
         Ok(stopped)
+    }
+
+    /// `call`'s answer, unless the host's `stop` or the self-stop deadline
+    /// `unrenewed` comes first: then why the node stops instead. A call that
+    /// hangs (a held lock, a dead connection's TCP wait, a pool's acquire
+    /// timeout) never holds the node past either.
+    async fn bounded<T>(
+        &self,
+        stop: &mut (impl Future<Output = ()> + Unpin),
+        unrenewed: Instant,
+        call: impl Future<Output = T>,
+    ) -> Result<T, Stopped> {
+        tokio::select! {
+            biased;
+            () = stop => Err(Stopped::Requested),
+            () = self.clock.sleep_until(unrenewed) => Err(Stopped::Unrenewed),
+            answer = call => Ok(answer),
+        }
     }
 
     fn activate(&self, active: &mut JoinSet<()>, claimed: Claimed) {

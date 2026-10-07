@@ -284,10 +284,12 @@ impl Drop for SimNodes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::script::Fault;
     use crate::testing::{FORMATS, actor, sqlite};
     use lash_durable::runner::Owned;
     use lash_durable::{Epoch, MailKind, MailSeq};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     const ACK: CommitLabel = CommitLabel::new("t.ack");
 
@@ -338,24 +340,20 @@ mod tests {
         panic!("not reached; {}", nodes.script().rendered_trace());
     }
 
-    /// A restarted node keeps nothing it held in memory: its old boot's
-    /// activations are dropped, the new boot takes the actor under a bumped
-    /// epoch, and only what the database committed survives, so no
-    /// acknowledged mail is delivered again.
-    #[tokio::test]
-    async fn a_restarted_node_keeps_only_what_the_database_has() {
+    /// A deployment of `hold` on one node, `a`, under `script`, holding
+    /// actor `one` hot.
+    async fn holding(script: Script, hold: &Arc<Hold>) -> SimNodes {
         let clock = SimClock::new();
-        let hold = Arc::new(Hold::default());
         let nodes = SimNodes::new(
             sqlite(Arc::clone(&clock)).await,
             clock,
-            Script::new(),
+            script,
             SimNodesConfig {
                 lease: LeaseConfig::default(),
                 decodes: vec![FormatSet::new(FORMATS)],
                 max_active: 4,
             },
-            Arc::clone(&hold) as Arc<dyn Activation>,
+            Arc::clone(hold) as Arc<dyn Activation>,
         );
         nodes.start("a");
         let mut create = MailTx::new();
@@ -367,6 +365,99 @@ mod tests {
             .await
             .unwrap();
         step_until(&nodes, || hold.acked.lock_recover().len() == 1).await;
+        nodes
+    }
+
+    /// The first heartbeat answers a minute after it commits: a heartbeat
+    /// that hangs.
+    fn hung_heartbeat() -> Script {
+        let script = Script::new();
+        script.cut_on(
+            "a",
+            CommitLabel::HEARTBEAT,
+            1,
+            Fault::DelayedAck(Duration::from_secs(60)),
+        );
+        script
+    }
+
+    /// A node whose heartbeat hangs stops itself at `self_stop_after` past
+    /// its last renewal (its registration here), and its activations stop
+    /// with it, though the heartbeat has not returned (FIG-5178).
+    #[tokio::test]
+    async fn a_hung_heartbeat_still_self_stops_at_self_stop_after() {
+        let hold = Arc::new(Hold::default());
+        let nodes = holding(hung_heartbeat(), &hold).await;
+        let self_stop_after = u64::try_from(
+            LeaseConfig::default()
+                .settings()
+                .self_stop_after
+                .as_millis(),
+        )
+        .unwrap();
+        while nodes.serving("a") && nodes.clock().logical_ms() <= 3 * self_stop_after {
+            if nodes.step().await.is_none() {
+                break;
+            }
+        }
+        let at = nodes.clock().logical_ms();
+        assert!(
+            !nodes.serving("a"),
+            "still serving {at} ms after its last renewal"
+        );
+        assert!(
+            at <= self_stop_after,
+            "stopped {at} ms after its last renewal, past self_stop_after ({self_stop_after} ms)"
+        );
+        assert_eq!(nodes.stopped("a").await, Some(Ok(Stopped::Unrenewed)));
+        assert_eq!(
+            hold.live.load(Ordering::SeqCst),
+            0,
+            "its activation stopped with it"
+        );
+    }
+
+    /// A node asked to stop while its heartbeat hangs stops at once: the
+    /// stop is heard during the heartbeat, not after it (FIG-5178).
+    #[tokio::test]
+    async fn a_node_asked_to_stop_while_its_heartbeat_hangs_stops_at_once() {
+        let hold = Arc::new(Hold::default());
+        let nodes = holding(hung_heartbeat(), &hold).await;
+        let heartbeat_every = u64::try_from(
+            LeaseConfig::default()
+                .settings()
+                .heartbeat_every
+                .as_millis(),
+        )
+        .unwrap();
+        while nodes.clock().logical_ms() <= heartbeat_every {
+            nodes.step().await;
+        }
+        let asked = nodes.clock().logical_ms();
+        nodes.stop("a");
+        for _ in 0..8 {
+            if !nodes.serving("a") {
+                break;
+            }
+            nodes.quiesce().await;
+        }
+        assert_eq!(
+            nodes.clock().logical_ms(),
+            asked,
+            "time moved before it stopped"
+        );
+        assert_eq!(nodes.stopped("a").await, Some(Ok(Stopped::Requested)));
+        assert_eq!(hold.live.load(Ordering::SeqCst), 0);
+    }
+
+    /// A restarted node keeps nothing it held in memory: its old boot's
+    /// activations are dropped, the new boot takes the actor under a bumped
+    /// epoch, and only what the database committed survives, so no
+    /// acknowledged mail is delivered again.
+    #[tokio::test]
+    async fn a_restarted_node_keeps_only_what_the_database_has() {
+        let hold = Arc::new(Hold::default());
+        let nodes = holding(Script::new(), &hold).await;
         let before = nodes
             .database()
             .actor(&actor("one"))

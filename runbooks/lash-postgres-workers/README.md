@@ -8,9 +8,9 @@ points, and shows for each case that:
 - **the work finishes on another node**: the store holds no unfinished turn
   and exactly one `turn.commit` committed (or the process holds its
   terminal), done by the survivor after the fault;
-- **every zombie commit is refused**: a fenced owner's write after its reap
-  is refused with `OwnershipLost`, and the store holds only the new owner's
-  outcome, written under the new owner's epoch;
+- **no zombie commits**: the store holds only the new owner's outcome,
+  written under the new owner's epoch, and nothing the old owner wrote after
+  the fault;
 - **no `Once` body ran twice**: the witness ledger holds at most one
   `entered` row per `Once` call.
 
@@ -75,13 +75,15 @@ Measured on the pool in FIG-5199's final run (all seven in one invocation on the
 | `a_turn_killed_mid_model_call_without_the_liveness_lock_finishes_within_the_lease_bound` | the same kill with `poll-only` (no listener, no lock) | reap by lease within `ttl` + `reap_every`; the rest as above | detected 15 963 ms after the kill, claimed 169 ms after the reap |
 | `a_once_step_killed_mid_body_settles_interrupted_on_another_node` | kill -9 inside `ext.write`'s body, after its witness entry | the started `Once` settles `Interrupted` under the survivor's epoch; its body is never entered again; one `turn.commit` on the survivor | detected 258 ms after the kill; one `entered` row, on the victim; outcome under epoch 3 |
 | `a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state` | kill -9 of the node that ran the process up to its pinned wait | the deadline fires on the survivor, which runs the step after it once; the terminal carries the engine state's full count (7 transitions); the feed holds `before` and `after` once each, in order; the start key still names the process, and a second start under it answers the same process | the victim had already released the waiting process as `waiting` in this run (ADR 0132 §6; in earlier runs it still owned it); either way the survivor took it and ended it 4 199 ms after the kill (deadline 4 s) |
-| `a_node_whose_heartbeat_is_held_is_reaped_and_its_late_commit_is_refused` | partition: the node's heartbeats are held while its `ext.write` body keeps running | reap by lease; the survivor finishes the turn with the operation `Interrupted`; when the body returns, the zombie's write is refused `OwnershipLost` and nothing it wrote is visible; the zombie stops `lease_lost` once its heartbeat gets through | reaped 15 954 ms after the hold; zombie fenced at its transaction's open, 16 833 ms after its last lease extension; see [findings](#findings) |
+| `a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses` | partition: the node's heartbeats are held while its `ext.write` body is running | the zombie stops `unrenewed`, its activations (the body among them) dropped, within `self_stop_after` + `claim_poll` of its last lease extension (asserted); the survivor reaps it and finishes the turn with the operation `Interrupted`; the zombie commits nothing while partitioned, and the body is never entered again | stopped 10 005 ms after its last lease extension (bound 10 250 ms), reaped through its liveness lock 9 999 ms after the hold (FIG-5178's run); see [findings](#findings), item 1 |
 | `a_cleanly_stopped_node_hands_its_turn_over_at_once` | `stop` while the node holds the first model call | the node releases its actors and stops `requested`; no reap; the survivor claims within a claim poll and finishes | released 2 ms after the request, claimed 7 ms after the release (up to 156 ms in earlier runs: the survivor's next claim poll) |
 | `a_postgres_restart_strands_no_work_and_reaps_no_node` | fast shutdown of the server for about 3 s while a model call is in flight | no node reaped, no node stopped; the turn finishes with `ext.write` run once and `Completed` | outage 3 141 ms; the turn finished on the node that held it, 2 862 ms after the server was back. In an earlier run the held call was re-sent once by the same owner (attempt 2) after its commit failed during the outage: a pinned model call may be re-sent, only `Once` bodies may not |
 
 A killed node cannot commit: in the kill cases the zombie law holds because
 the process is gone, and the store shows the outcome under the survivor's
-epoch. The partition case is the one whose zombie lives and tries.
+epoch. A partitioned node stops itself before its lease lapses, so it never
+tries either; the epoch fence that refuses a zombie that does is proven in
+process by `lash-durable-test`'s fencing laws.
 
 ### Failover bound (L8, FIG-5178)
 
@@ -96,16 +98,17 @@ The cases assert these with one second of slack for a loaded action.
 
 ## Findings
 
-1. **A heartbeat that does not return stops the runner's loop** (owner: L8,
-   FIG-5178). The runner awaits the heartbeat inline in its loop, so while one
-   heartbeat call hangs the node neither stops itself at `self_stop_after`
-   (10 s) nor polls its stop future, and its activations keep running past its
-   lease. In the partition case the zombie kept serving 16.8 s past its
-   last lease extension and stopped only when its heartbeat was let through.
-   Safety held: the epoch fence refused its late write. A real partition has
-   the same shape: an established connection to an unreachable server waits
-   for TCP, and a new one waits up to the pool's `acquire_timeout` (30 s).
-   Repro: the partition case.
+1. **A heartbeat that does not return stopped the runner's loop** (fixed in
+   FIG-5178). The runner awaited the heartbeat inline in its loop, so while one
+   heartbeat call hung the node neither stopped itself at `self_stop_after`
+   (10 s) nor polled its stop future, and its activations kept running past
+   its lease: the zombie served 16.8 s past its last lease extension, and the
+   epoch fence refused its late write. A real partition has the same shape: an
+   established connection to an unreachable server waits for TCP, and a new
+   one waits up to the pool's `acquire_timeout` (30 s). Now every store call
+   the runner makes races its stop and the self-stop deadline, and the
+   partition case asserts the zombie stops within `self_stop_after` +
+   `claim_poll`.
 2. **A boot no other node saw alive is reaped by its lease, not its lock.** A
    watcher reaps only a boot whose lock it saw held and then free, so that a
    server restart (which drops every lock) reaps nobody. A node killed before
@@ -174,7 +177,7 @@ the law elsewhere that now carries the property.
 | Recovery law 2, logical-effect identity (one commit per key, retries send identical bytes) | the `Once` law of every case; identical re-sent bytes: `a_turn_of_two_model_calls_resumes_at_every_label_without_replay` (`turn_phases`) |
 | Recovery law 3, causal identity | every witness row names its call and its node; the cases check each against the store's run records |
 | Recovery law 4, replay equivalence | deleted: Restate mechanics (it compared a replay with the original run); its property is the `Once` law and the zombie law here |
-| Law 5, fencing (deferred there for want of an external authority token) | the zombie law: `a_node_whose_heartbeat_is_held_is_reaped_and_its_late_commit_is_refused`, judged from the store's `written_epoch` and the refused write |
+| Law 5, fencing (deferred there for want of an external authority token) | the zombie law: `a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses`, judged from the store's `written_epoch` and the zombie's empty commit record after the partition; the refusal of a zombie that does write is `lash-durable-test`'s fencing laws |
 | Witness ledgers (separate database, insert-only role, database clock) | `witness.sql`: `witness_effects`, `witness_model_attempts`, `witness_nemesis`. Submissions, acknowledgements, client terminals and provider receipts were Restate ingress and HTTP output: deleted: Restate mechanics; the store's own terminal rows replace them |
 | `tests.rs` checker fixtures (legal histories, one fixture per rule, property tests) | deleted with the checkers: the laws here are direct assertions over one case's rows, with nothing to fixture |
 

@@ -146,9 +146,8 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         Arc::new(WorkerSteps::new(witness)),
         Arc::new(NoProbe),
     );
-    // The commands are read on a task of their own: the runner polls its
-    // stop future only between its own steps, and the partition holds it
-    // inside one.
+    // The commands are read on a task of their own: a heartbeat hold or
+    // release must reach the store whatever the runner awaits.
     let (stopping, stop) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(commands(store, stopping));
     let stop = async move {
