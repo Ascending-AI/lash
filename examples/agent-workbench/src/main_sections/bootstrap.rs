@@ -186,13 +186,25 @@ pub(crate) fn configure_workbench_plugins(
 }
 
 /// The `LASH_RLM_CHANNEL` value the workbench's RLM protocol factory is built
-/// with.
-fn workbench_rlm_channel() -> AnyhowResult<lash::rlm::RlmChannel> {
-    match std::env::var("LASH_RLM_CHANNEL") {
-        Ok(value) => value.parse().map_err(anyhow::Error::msg),
-        Err(std::env::VarError::NotPresent) => Ok(lash::rlm::RlmChannel::Cell),
-        Err(error) => Err(error.into()),
+/// with. Relay (FIG-4441) runs on the native tool channel only, so that is
+/// its default, and relay on the cell channel refuses to boot.
+fn workbench_rlm_channel(
+    policy: lash::rlm::RlmExecutionPolicy,
+) -> AnyhowResult<lash::rlm::RlmChannel> {
+    let channel = match std::env::var("LASH_RLM_CHANNEL") {
+        Ok(value) => value.parse().map_err(anyhow::Error::msg)?,
+        Err(std::env::VarError::NotPresent) if policy.is_relay() => {
+            lash::rlm::RlmChannel::NativeTool
+        }
+        Err(std::env::VarError::NotPresent) => lash::rlm::RlmChannel::Cell,
+        Err(error) => return Err(error.into()),
+    };
+    if policy.is_relay() && channel == lash::rlm::RlmChannel::Cell {
+        return Err(anyhow!(
+            "agent-workbench: {AGENT_WORKBENCH_RLM_POLICY_ENV}=relay runs on the native channel; unset LASH_RLM_CHANNEL or set it to `native`"
+        ));
     }
+    Ok(channel)
 }
 
 /// Refuse a broken deployment before any session can admit a turn. Starting
@@ -242,6 +254,7 @@ struct WorkbenchCorePlugins {
 async fn workbench_core_builder(
     host_backend: lash::Backend,
     rlm_channel: lash::rlm::RlmChannel,
+    rlm_policy: lash::rlm::RlmExecutionPolicy,
     context_window_tokens: usize,
     plugins: WorkbenchCorePlugins,
 ) -> AnyhowResult<lash::LashCoreBuilder> {
@@ -273,8 +286,7 @@ async fn workbench_core_builder(
             {
                 rlm_config.continue_as_soft_warn_tokens = Some(warn_tokens);
             }
-            rlm_config =
-                rlm_config.with_execution_policy(rlm_policy_from(|name| std::env::var(name))?);
+            rlm_config = rlm_config.with_execution_policy(rlm_policy);
             let factory = lash::rlm::RlmProtocolPluginFactory::new(
                 rlm_config,
                 std::sync::Arc::new(lash::rlm::TypescriptDialect),
@@ -335,7 +347,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let tool_fixture = crate::e2e_tools::Fixture::from_env("AGENT_WORKBENCH_TOOL_FIXTURE")?;
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
-    let rlm_channel = workbench_rlm_channel()?;
+    let rlm_policy = rlm_policy_from(|name| std::env::var(name))?;
+    let rlm_channel = workbench_rlm_channel(rlm_policy)?;
     validate_provider_credentials(dev_provider_scenario, &api_key)?;
 
     let addr: SocketAddr = std::env::var("AGENT_WORKBENCH_ADDR")
@@ -577,19 +590,25 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //     )))
     //     .trace_context(TraceContext::default());
     // host_trigger_route_restorer is the host's Arc<dyn lash::triggers::TriggerRouteRestorer>.
-    let core = workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins)
-        .await?
-        .trace_runtime(tracing)
-        .trace_sink(Arc::clone(&trace_sink))
-        .trace_level(TraceLevel::Extended)
-        .llm_profiles(Arc::new(WorkbenchLlmProfiles {
-            provider: provider.clone(),
-        }))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "agent-workbench",
-            process_incarnation_id(),
-        ))
-        .context("build Lash core")?;
+    let core = workbench_core_builder(
+        host_backend,
+        rlm_channel,
+        rlm_policy,
+        context_window_tokens,
+        plugins,
+    )
+    .await?
+    .trace_runtime(tracing)
+    .trace_sink(Arc::clone(&trace_sink))
+    .trace_level(TraceLevel::Extended)
+    .llm_profiles(Arc::new(WorkbenchLlmProfiles {
+        provider: provider.clone(),
+    }))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "agent-workbench",
+        process_incarnation_id(),
+    ))
+    .context("build Lash core")?;
     let shutdown_core = core.clone();
     // A stalled obligation is the durable, operator-actionable face of what
     // the removed worker-fault channel reported: a delivery the relay refused

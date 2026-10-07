@@ -119,12 +119,15 @@ fn standard_iterations(model: &str) -> Vec<LlmRequest> {
 
 async fn captured_rlm_iterations() -> Vec<LlmRequest> {
     captured_rlm_requests(
+        lash_protocol_rlm::RlmChannel::Cell,
         lash_protocol_rlm::RlmExecutionPolicy::Chronological,
-        &[
+        [
             "let value = 1;\nprint(value);",
             "value = value + 1;\nprint(value);",
             "finish(value);",
-        ],
+        ]
+        .map(|cell| text_reply(&format!("<typescript>\n{cell}\n</typescript>")))
+        .into(),
         Arc::new(|session: &lash::LashSession| {
             session
                 .send(lash::TurnInput::text("increment a bound value twice"))
@@ -135,17 +138,29 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
 }
 
 /// Four relay steps of one turn: an empty start, a first commit, an append
-/// and a rewrite of the first entry.
+/// and a rewrite of the first entry; the fourth step answers.
 async fn captured_relay_steps() -> Vec<LlmRequest> {
+    let mut replies = [
+        r#"await control.next({ context: ["a", "b"] });"#,
+        r#"await control.next({ context: [...context, "c"] });"#,
+        r#"await control.next({ context: ["x", ...context.slice(1)] });"#,
+    ]
+    .map(|program| lash_core::LlmResponse {
+        parts: vec![lash_core::LlmOutputPart::ToolCall {
+            call_id: "call-step".to_string(),
+            tool_name: lash_protocol_rlm::NATIVE_EXECUTE_TOOL_NAME.to_string(),
+            input_json: json!({ "code": program }).to_string(),
+            replay: None,
+        }],
+        response_metadata: Default::default(),
+        ..lash_core::LlmResponse::default()
+    })
+    .to_vec();
+    replies.push(text_reply("done"));
     captured_rlm_requests(
+        lash_protocol_rlm::RlmChannel::NativeTool,
         lash_protocol_rlm::RlmExecutionPolicy::Relay,
-        &[
-            r#"await control.next({ context: ["a", "b"] });"#,
-            r#"await control.next({ context: [...context, "c"] });"#,
-            r#"await control.next({ context: ["x", ...context.slice(1)] });"#,
-            r#"await control.send_user_output({ text: "done" });
-await control.next({ context, final: true });"#,
-        ],
+        replies,
         Arc::new(|session: &lash::LashSession| {
             Ok(session.send(lash::TurnInput::text("edit the context")))
         }),
@@ -153,22 +168,29 @@ await control.next({ context, final: true });"#,
     .await
 }
 
-/// Every request one scripted RLM turn under `policy` makes; the model
-/// answers the `cells` in order.
+fn text_reply(text: &str) -> lash_core::LlmResponse {
+    lash_core::LlmResponse {
+        parts: vec![lash_core::LlmOutputPart::Text {
+            text: text.to_string(),
+            response_meta: None,
+        }],
+        response_metadata: Default::default(),
+        ..lash_core::LlmResponse::default()
+    }
+}
+
+/// Every request one scripted RLM turn on `channel` under `policy` makes;
+/// the model answers with `replies` in order.
 async fn captured_rlm_requests(
+    channel: lash_protocol_rlm::RlmChannel,
     policy: lash_protocol_rlm::RlmExecutionPolicy,
-    cells: &[&str],
+    replies: Vec<lash_core::LlmResponse>,
     build: crate::backend::SimTurnBuild,
 ) -> Vec<LlmRequest> {
     use std::collections::VecDeque;
 
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let responses = Arc::new(tokio::sync::Mutex::new(
-        cells
-            .iter()
-            .map(|cell| format!("<typescript>\n{cell}\n</typescript>"))
-            .collect::<VecDeque<_>>(),
-    ));
+    let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from(replies)));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("cache-regression-rlm")
         .complete({
@@ -178,19 +200,11 @@ async fn captured_rlm_requests(
                 let responses = Arc::clone(&responses);
                 async move {
                     captures.lock_recover().push(request);
-                    let text = responses
+                    Ok(responses
                         .lock()
                         .await
                         .pop_front()
-                        .expect("RLM response script");
-                    Ok(lash_core::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::Text {
-                            text,
-                            response_meta: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..lash_core::LlmResponse::default()
-                    })
+                        .expect("RLM response script"))
                 }
             }
         })
@@ -202,7 +216,7 @@ async fn captured_rlm_requests(
     let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .channel(channel)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build()
@@ -718,21 +732,6 @@ fn sorted_paths(paths: &[&str]) -> Vec<String> {
     paths
 }
 
-/// `request` with one tool on the wire, so the body carries the provider's
-/// tool marker too.
-fn with_wire_tool(request: &LlmRequest) -> LlmRequest {
-    let mut request = request.clone();
-    request.tools = Arc::new(vec![lash_core::llm::types::LlmToolSpec {
-        name: "probe".to_string(),
-        description: "Probe".to_string(),
-        input_schema: lash_sansio::SchemaContract::admit(json!({"type": "object"}))
-            .expect("valid declared schema"),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
-    }]);
-    request
-}
-
 fn anthropic_body(request: &LlmRequest) -> Value {
     lash_provider_anthropic::testing::serialize_request(request, CacheRetention::Short)
         .expect("Anthropic request")
@@ -748,30 +747,40 @@ fn chat_anthropic_dialect_body(
     .expect("OpenAI-compatible Chat request")
 }
 
+/// Each relay request's context entries, read from its context message
+/// (the constant header, then one `[i]` block per entry).
 fn relay_request_contexts(requests: &[LlmRequest]) -> Vec<Vec<String>> {
     requests
         .iter()
-        .map(|request| match request.messages.as_slice() {
-            [context, _harness] => context
+        .map(|request| {
+            let [context, _step] = request.messages.as_slice() else {
+                panic!("a relay request is a context message and a step message");
+            };
+            context
                 .blocks
                 .iter()
-                .filter_map(|block| match block {
-                    LlmContentBlock::Text { text, .. } => Some(text.to_string()),
+                .skip(1)
+                .enumerate()
+                .filter_map(|(index, block)| match block {
+                    LlmContentBlock::Text { text, .. } => text
+                        .strip_prefix(&format!("[{index}] "))
+                        .map(str::to_string),
                     _ => None,
                 })
-                .collect(),
-            _ => Vec::new(),
+                .collect()
         })
         .collect()
 }
 
-/// On the Anthropic wire a relay step marks the system prompt, the last
-/// context block unchanged since the previous commit, the end of the context
-/// and the end of the harness; its two user messages merge into one. With no
-/// unchanged prefix the first context marker is absent, and over the
-/// four-marker limit the earliest message marker goes.
+/// On the Anthropic wire a relay step marks the system prompt, the
+/// `execute_code` tool, the last context block unchanged since the previous
+/// commit and the end of the context (the header when the context is empty);
+/// its two user messages merge into one, whose first block is the header. The
+/// step message is new every step and carries no marker. With no unchanged
+/// prefix the first context marker is absent, so a request never needs more
+/// than the four markers the wire allows.
 #[tokio::test]
-async fn relay_anthropic_body_marks_system_unchanged_prefix_context_end_and_harness() {
+async fn relay_anthropic_body_marks_system_tool_unchanged_prefix_and_context_end() {
     let requests = captured_relay_steps().await;
     assert_eq!(
         relay_request_contexts(&requests),
@@ -783,42 +792,19 @@ async fn relay_anthropic_body_marks_system_unchanged_prefix_context_end_and_harn
         ]
     );
     let markers = |request: &LlmRequest| cache_marker_paths(&anthropic_body(request));
-    // An empty context: only the harness.
+    // An empty context: its end is the header.
     assert_eq!(
         markers(&requests[0]),
-        sorted_paths(&[".system[0]", ".messages[0].content[0]"])
+        sorted_paths(&[".system[0]", ".tools[0]", ".messages[0].content[0]"])
     );
     // The first commit: nothing was unchanged.
     assert_eq!(
         markers(&requests[1]),
-        sorted_paths(&[
-            ".system[0]",
-            ".messages[0].content[1]",
-            ".messages[0].content[2]"
-        ])
+        sorted_paths(&[".system[0]", ".tools[0]", ".messages[0].content[2]"])
     );
-    // An append: the old end (`b`), the new end (`c`), the harness.
+    // An append: the old end (`b`) and the new end (`c`).
     assert_eq!(
         markers(&requests[2]),
-        sorted_paths(&[
-            ".system[0]",
-            ".messages[0].content[1]",
-            ".messages[0].content[2]",
-            ".messages[0].content[3]"
-        ])
-    );
-    // A rewrite of entry 0: nothing unchanged.
-    assert_eq!(
-        markers(&requests[3]),
-        sorted_paths(&[
-            ".system[0]",
-            ".messages[0].content[2]",
-            ".messages[0].content[3]"
-        ])
-    );
-    // System, tool and three message markers: the earliest message marker goes.
-    assert_eq!(
-        markers(&with_wire_tool(&requests[2])),
         sorted_paths(&[
             ".system[0]",
             ".tools[0]",
@@ -826,14 +812,19 @@ async fn relay_anthropic_body_marks_system_unchanged_prefix_context_end_and_harn
             ".messages[0].content[3]"
         ])
     );
+    // A rewrite of entry 0: nothing unchanged.
+    assert_eq!(
+        markers(&requests[3]),
+        sorted_paths(&[".system[0]", ".tools[0]", ".messages[0].content[3]"])
+    );
 }
 
 /// On an OpenAI-compatible chat route with the Anthropic cache dialect
 /// (OpenRouter's Claude models) a relay step carries the same markers on its
-/// system, context and harness messages, and over the limit the earliest
-/// message marker is dropped and reported.
+/// system message, its tool and its context message, and none on its step
+/// message; every requested message marker is emitted.
 #[tokio::test]
-async fn relay_chat_anthropic_dialect_body_marks_system_unchanged_prefix_context_end_and_harness() {
+async fn relay_chat_anthropic_dialect_body_marks_system_tool_unchanged_prefix_and_context_end() {
     let requests = captured_relay_steps().await;
     let markers = |request: &LlmRequest| {
         let (body, report) = chat_anthropic_dialect_body(request);
@@ -847,7 +838,11 @@ async fn relay_chat_anthropic_dialect_body_marks_system_unchanged_prefix_context
     assert_eq!(
         markers(&requests[0]),
         (
-            sorted_paths(&[".messages[0].content[0]", ".messages[1].content[0]"]),
+            sorted_paths(&[
+                ".messages[0].content[0]",
+                ".tools[0]",
+                ".messages[1].content[0]"
+            ]),
             1,
             1,
             0
@@ -858,11 +853,11 @@ async fn relay_chat_anthropic_dialect_body_marks_system_unchanged_prefix_context
         (
             sorted_paths(&[
                 ".messages[0].content[0]",
-                ".messages[1].content[1]",
-                ".messages[2].content[0]"
+                ".tools[0]",
+                ".messages[1].content[2]"
             ]),
-            2,
-            2,
+            1,
+            1,
             0
         )
     );
@@ -871,12 +866,12 @@ async fn relay_chat_anthropic_dialect_body_marks_system_unchanged_prefix_context
         (
             sorted_paths(&[
                 ".messages[0].content[0]",
-                ".messages[1].content[1]",
+                ".tools[0]",
                 ".messages[1].content[2]",
-                ".messages[2].content[0]"
+                ".messages[1].content[3]"
             ]),
-            3,
-            3,
+            2,
+            2,
             0
         )
     );
@@ -885,26 +880,12 @@ async fn relay_chat_anthropic_dialect_body_marks_system_unchanged_prefix_context
         (
             sorted_paths(&[
                 ".messages[0].content[0]",
-                ".messages[1].content[2]",
-                ".messages[2].content[0]"
-            ]),
-            2,
-            2,
-            0
-        )
-    );
-    assert_eq!(
-        markers(&with_wire_tool(&requests[2])),
-        (
-            sorted_paths(&[
-                ".messages[0].content[0]",
                 ".tools[0]",
-                ".messages[1].content[2]",
-                ".messages[2].content[0]"
+                ".messages[1].content[3]"
             ]),
-            3,
-            2,
-            1
+            1,
+            1,
+            0
         )
     );
 }

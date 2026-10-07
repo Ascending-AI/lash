@@ -1,21 +1,47 @@
-//! Relay's two control tools. Both are recorded calls like any other: the
-//! driver reads their arguments from the step's call records, so the tools
-//! themselves only validate and acknowledge.
+//! Relay's control tool, `control.next`. It is a recorded call like any
+//! other: the driver reads its arguments from the step's call records, so the
+//! tool itself only validates and acknowledges.
 
-use lash_core::{ToolCall, ToolDefinition, ToolOutcome};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use lash_core::{ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use serde_json::{Value, json};
 
-use super::{NEXT_TOOL, RelayNext, SEND_USER_OUTPUT_TOOL};
+use super::{NEXT_TOOL, RelayNext, RelaySettings};
+
+/// A relay session's control tools: `next` alone. A relay session has no
+/// `continue_as` (its context is its own to rewrite) and no `read_output`
+/// (nothing it printed outlives its step).
+pub(crate) struct RelayControlToolsProvider {
+    pub(crate) settings: RelaySettings,
+}
+
+#[async_trait]
+impl ToolProvider for RelayControlToolsProvider {
+    fn tool_manifests(&self) -> Vec<ToolManifest> {
+        vec![next_tool_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+        (name == NEXT_TOOL).then(|| Arc::new(next_tool_definition().contract()))
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        match call.name() {
+            NEXT_TOOL => execute_next(&call, self.settings.context_budget_chars).into(),
+            other => ToolOutcome::err_fmt(format_args!("Unknown tool: {other}")).into(),
+        }
+    }
+}
 
 #[expect(clippy::expect_used, reason = "the tool declares fixed valid schemas")]
-pub(crate) fn next_tool_definition(cell_noun: &str) -> ToolDefinition {
+fn next_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:next",
         NEXT_TOOL,
-        format!(
-            "End this step and hand the next one its baton. `context` becomes your whole working memory in the next prompt, one block per entry; `vars` rebuilds the next step's top-level variables; everything else is wiped. `final: true` ends the turn. Terminal action: the last call in the {cell_noun}. Nothing commits unless the {cell_noun} finishes without error right after it."
-        ),
+        "End this step and hand the next one its baton. `context` becomes your whole working memory in the next request, one block per entry; `vars` rebuilds the next step's top-level variables; everything else is wiped. The last call in the program: nothing commits unless the program finishes without error right after it.",
         json!({
             "type": "object",
             "properties": {
@@ -28,10 +54,6 @@ pub(crate) fn next_tool_definition(cell_noun: &str) -> ToolDefinition {
                     "type": "object",
                     "additionalProperties": true,
                     "description": "Plain values the next step finds as top-level variables."
-                },
-                "final": {
-                    "type": "boolean",
-                    "description": "End the turn once this step commits."
                 }
             },
             "required": ["context"],
@@ -43,10 +65,9 @@ pub(crate) fn next_tool_definition(cell_noun: &str) -> ToolDefinition {
                 "ok": {"type": "boolean"},
                 "context_entries": {"type": "integer", "minimum": 0},
                 "context_chars": {"type": "integer", "minimum": 0},
-                "vars": {"type": "array", "items": {"type": "string"}},
-                "final": {"type": "boolean"}
+                "vars": {"type": "array", "items": {"type": "string"}}
             },
-            "required": ["ok", "context_entries", "context_chars", "vars", "final"],
+            "required": ["ok", "context_entries", "context_chars", "vars"],
             "additionalProperties": false,
         }),
     )
@@ -57,33 +78,8 @@ pub(crate) fn next_tool_definition(cell_noun: &str) -> ToolDefinition {
     .with_tool_binding(ToolBinding::new(["control"], NEXT_TOOL))
 }
 
-#[expect(clippy::expect_used, reason = "the tool declares fixed valid schemas")]
-pub(crate) fn send_user_output_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw(
-        "tool:send_user_output",
-        SEND_USER_OUTPUT_TOOL,
-        "Send text to the user. It is delivered only when this step commits; a step that fails or never calls `control.next` sends nothing.",
-        json!({
-            "type": "object",
-            "properties": {
-                "text": {"type": "string", "description": "What the user reads."}
-            },
-            "required": ["text"],
-            "additionalProperties": false,
-        }),
-        json!({
-            "type": "object",
-            "properties": {"buffered": {"type": "boolean"}},
-            "required": ["buffered"],
-            "additionalProperties": false,
-        }),
-    )
-    .expect("valid declared tool schemas")
-    .with_tool_binding(ToolBinding::new(["control"], SEND_USER_OUTPUT_TOOL))
-}
-
 /// `control.next`: validate the baton. The commit is the driver's.
-pub(crate) fn execute_next(call: &ToolCall<'_>, budget_chars: usize) -> ToolOutcome {
+fn execute_next(call: &ToolCall<'_>, budget_chars: usize) -> ToolOutcome {
     match RelayNext::from_args(call.args, budget_chars) {
         Ok(next) => {
             let mut vars = next.vars.keys().cloned().collect::<Vec<_>>();
@@ -93,20 +89,8 @@ pub(crate) fn execute_next(call: &ToolCall<'_>, budget_chars: usize) -> ToolOutc
                 "context_entries": next.context.len(),
                 "context_chars": super::context_chars(&next.context),
                 "vars": vars,
-                "final": next.final_turn,
             }))
         }
         Err(error) => ToolOutcome::err(Value::String(format!("next refused: {error}"))),
-    }
-}
-
-/// `control.send_user_output`: acknowledge. Delivery is the driver's, at
-/// commit.
-pub(crate) fn execute_send_user_output(call: &ToolCall<'_>) -> ToolOutcome {
-    match call.args.get("text") {
-        Some(Value::String(text)) if !text.trim().is_empty() => {
-            ToolOutcome::ok(json!({ "buffered": true }))
-        }
-        _ => ToolOutcome::err(json!("send_user_output needs `text`, a non-empty string")),
     }
 }

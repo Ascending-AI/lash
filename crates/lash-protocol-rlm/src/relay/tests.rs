@@ -4,18 +4,17 @@ use super::*;
 use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
 
 /// The baton carries only what the next step can be rebuilt from: a context
-/// of strings within budget, plain vars that do not shadow a harness binding,
-/// and a boolean `final`. The context travels in the seed under `context`.
+/// of strings within budget and plain vars that do not shadow a harness
+/// binding. The context travels in the seed under `context`.
 #[test]
 fn next_admits_only_a_baton_the_next_step_can_be_rebuilt_from() {
     let budget = 20;
     let next = RelayNext::from_args(
-        &json!({ "context": ["a", "bc"], "vars": { "n": 1 }, "final": true }),
+        &json!({ "context": ["a", "bc"], "vars": { "n": 1 } }),
         budget,
     )
     .expect("a valid baton");
     assert_eq!(next.context, ["a", "bc"]);
-    assert!(next.final_turn);
     let seed = next.seed_body();
     assert_eq!(seed.globals[CONTEXT_VAR], json!(["a", "bc"]));
     assert_eq!(seed.globals["n"], json!(1));
@@ -36,10 +35,6 @@ fn next_admits_only_a_baton_the_next_step_can_be_rebuilt_from() {
         (
             json!({ "context": [], "vars": { "transcript": [] } }),
             "vars cannot carry `transcript`",
-        ),
-        (
-            json!({ "context": [], "final": "yes" }),
-            "final must be a boolean",
         ),
         (
             json!({ "context": ["x".repeat(21)] }),
@@ -80,9 +75,11 @@ fn protocol_record(event: RlmProtocolEvent) -> lash_core::SessionHistoryRecord {
 }
 
 /// Found in the first live relay run: once a step committed, the turn's
-/// user message vanished from every later harness message, because the
+/// user message vanished from every later step message, because the
 /// step's own seed ended the input run and a host note on the user channel
-/// after it started a new one. Only an earlier turn's records end the run.
+/// after it started a new one. Only an earlier turn's records end the run,
+/// and a host's note (a user-role message with no origin) is a note, never
+/// the user's request.
 #[test]
 fn the_turns_input_survives_its_own_steps_in_the_view() {
     let turn = lash_sansio::TurnId::from("turn-2");
@@ -126,13 +123,8 @@ fn the_turns_input_survives_its_own_steps_in_the_view() {
         .iter()
         .map(|&index| view.transcript[index].text.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(
-        input,
-        [
-            "what is the vault code?",
-            "Context budget: prepared 1 message(s)"
-        ]
-    );
+    assert_eq!(input, ["what is the vault code?"]);
+    assert_eq!(view.host_notes, ["Context budget: prepared 1 message(s)"]);
     assert!(view.last_step_committed);
     assert_eq!(view.committed.expect("a commit").context, ["listed"]);
 }

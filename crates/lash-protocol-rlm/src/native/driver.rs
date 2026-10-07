@@ -42,11 +42,16 @@ use crate::protocol::stall::{ExtractionCounts, ExtractionDiagnostic};
 #[derive(Clone)]
 pub struct NativeDriver {
     dialect: Arc<SessionDialect>,
+    /// A relay session's settings (FIG-4441); `None` for chronological.
+    relay: Option<crate::relay::RelaySettings>,
 }
 
 impl NativeDriver {
-    pub(crate) fn with_dialect(dialect: Arc<SessionDialect>) -> Self {
-        Self { dialect }
+    pub(crate) fn with_dialect(
+        dialect: Arc<SessionDialect>,
+        relay: Option<crate::relay::RelaySettings>,
+    ) -> Self {
+        Self { dialect, relay }
     }
 }
 
@@ -124,11 +129,15 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 replay: part.reasoning_meta().cloned(),
             })
             .collect::<Vec<_>>();
-        actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
-            protocol_iteration: ctx.protocol_iteration(),
-            content: prose.clone(),
-        }));
         let action = super::tool::normalize(&parts);
+        // A relay reply's prose is the user's answer only when it carries no
+        // call; beside a call it is dropped (FIG-4441).
+        if self.relay.is_none() || matches!(action, super::tool::NativeAction::ProseOnly) {
+            actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
+                protocol_iteration: ctx.protocol_iteration(),
+                content: prose.clone(),
+            }));
+        }
         if matches!(action, super::tool::NativeAction::ProseOnly) && prose.trim().is_empty() {
             actions.push(DriverAction::Emit(make_error_event(
                 TurnFailureKind::LlmProvider,
@@ -174,7 +183,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             );
             let mut durable = Vec::new();
             let mut retry = Vec::new();
-            if prose_only {
+            // A cut-off relay answer is not delivered, and it is no reply:
+            // only the note asking for a shorter one is kept.
+            if prose_only && self.relay.is_none() {
                 retry.push(conversation_event(
                     internal_assistant_prose_message_for_turn(
                         ctx.turn_id(),
@@ -187,6 +198,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         &reasoning,
                     ),
                 ));
+            }
+            if prose_only {
                 retry.push(conversation_event(Message {
                     id: rlm_message_id(
                         ctx.turn_id(),
@@ -236,7 +249,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 format!("execute_{}", self.dialect.language_id())
             }
             super::tool::NativeAction::Malformed { decision, .. } => decision.to_string(),
-            super::tool::NativeAction::ProseOnly => if termination.prose_ends_turn() {
+            super::tool::NativeAction::ProseOnly => if self.prose_ends_turn(&termination) {
                 "prose_only"
             } else {
                 "request_finish"
@@ -276,7 +289,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
             }
             super::tool::NativeAction::ProseOnly => {
-                if termination.prose_ends_turn() {
+                if self.prose_ends_turn(&termination) {
                     if !reasoning.is_empty() {
                         actions.push(DriverAction::AppendEvents(vec![conversation_event(
                             internal_assistant_prose_message_for_turn(
@@ -343,7 +356,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 };
                 state.code = code.clone();
                 state.reasoning = reasoning;
-                state.assistant_parts = parts;
+                state.assistant_parts = match self.relay {
+                    // Text beside a relay call is never kept (FIG-4441).
+                    Some(_) => parts
+                        .into_iter()
+                        .filter(|part| part.kind() != lash_core::PartKind::Prose)
+                        .collect(),
+                    None => parts,
+                };
                 actions.push(DriverAction::Emit(SessionStreamEvent::Message {
                     text: code.clone(),
                     kind: lash_core::session_model::StreamMessageKind::Code,
@@ -392,6 +412,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             return vec![DriverAction::FinishCancelled {
                 evidence: evidence.clone(),
             }];
+        }
+        if let Some(relay) = self.relay {
+            return relay_commit::relay_exec_result(&ctx, state, result, relay);
         }
 
         // The retention history records in place of a terminal value too
@@ -551,6 +574,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         actions
     }
 }
+
+impl NativeDriver {
+    /// Whether a reply with no call ends the turn as its answer: always under
+    /// relay (FIG-4441), and otherwise as the turn's termination says.
+    fn prose_ends_turn(&self, termination: &lash_rlm_types::RlmTermination) -> bool {
+        self.relay.is_some() || termination.prose_ends_turn()
+    }
+}
+
+mod relay_commit;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AttemptProgress {

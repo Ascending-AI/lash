@@ -105,7 +105,6 @@ pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
         )),
-        relay: None,
     }
 }
 

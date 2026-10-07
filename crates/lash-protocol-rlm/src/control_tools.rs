@@ -13,55 +13,28 @@ pub(crate) struct RlmControlToolsProvider {
     /// The dialect this session's model writes, so the `continue_as` doc shows
     /// a call it can actually make.
     pub(crate) vocabulary: crate::dialect::DialectPromptVocabulary,
-    /// A relay session's settings (FIG-4441). A relay session's control tools
-    /// are `next` and `send_user_output`; a chronological session's are
-    /// `continue_as` and `read_output`.
-    pub(crate) relay: Option<crate::relay::RelaySettings>,
 }
 
 #[async_trait]
 impl ToolProvider for RlmControlToolsProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
-        match self.relay {
-            Some(_) => vec![
-                crate::relay::next_tool_definition(self.vocabulary.cell_noun).manifest(),
-                crate::relay::send_user_output_tool_definition().manifest(),
-            ],
-            None => vec![
-                continue_as_tool_definition_for(self.vocabulary).manifest(),
-                read_output_tool_definition().manifest(),
-            ],
-        }
+        vec![
+            continue_as_tool_definition_for(self.vocabulary).manifest(),
+            read_output_tool_definition().manifest(),
+        ]
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        match (name, self.relay) {
-            (crate::relay::NEXT_TOOL, Some(_)) => Some(Arc::new(
-                crate::relay::next_tool_definition(self.vocabulary.cell_noun).contract(),
-            )),
-            (crate::relay::SEND_USER_OUTPUT_TOOL, Some(_)) => Some(Arc::new(
-                crate::relay::send_user_output_tool_definition().contract(),
-            )),
-            ("continue_as", None) => Some(Arc::new(
+        match name {
+            "continue_as" => Some(Arc::new(
                 continue_as_tool_definition_for(self.vocabulary).contract(),
             )),
-            ("read_output", None) => Some(Arc::new(read_output_tool_definition().contract())),
+            "read_output" => Some(Arc::new(read_output_tool_definition().contract())),
             _ => None,
         }
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if let Some(relay) = self.relay {
-            return match call.name() {
-                crate::relay::NEXT_TOOL => {
-                    crate::relay::tools::execute_next(&call, relay.context_budget_chars).into()
-                }
-                crate::relay::SEND_USER_OUTPUT_TOOL => {
-                    crate::relay::tools::execute_send_user_output(&call).into()
-                }
-                _ => ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into(),
-            };
-        }
         if call.name() == "read_output" {
             return read_output(call).await;
         }
@@ -590,7 +563,6 @@ mod tests {
             vocabulary: crate::dialect::Dialect::prompt_vocabulary(
                 &crate::dialect::TypescriptDialect,
             ),
-            relay: None,
         };
 
         let args = json!({
@@ -653,7 +625,6 @@ mod tests {
             vocabulary: crate::dialect::Dialect::prompt_vocabulary(
                 &crate::dialect::TypescriptDialect,
             ),
-            relay: None,
         };
         let args = json!({ "task": "continue deterministically" });
         let manager = Arc::new(BatonManager::default());
@@ -678,7 +649,6 @@ mod tests {
             vocabulary: crate::dialect::Dialect::prompt_vocabulary(
                 &crate::dialect::TypescriptDialect,
             ),
-            relay: None,
         };
         let args = json!({ "task": "same task" });
         let manager = Arc::new(BatonManager::default());
@@ -722,7 +692,6 @@ mod tests {
             vocabulary: crate::dialect::Dialect::prompt_vocabulary(
                 &crate::dialect::TypescriptDialect,
             ),
-            relay: None,
         };
 
         let args = json!({
@@ -797,7 +766,6 @@ mod tests {
             vocabulary: crate::dialect::Dialect::prompt_vocabulary(
                 &crate::dialect::TypescriptDialect,
             ),
-            relay: None,
         };
 
         let args = json!({

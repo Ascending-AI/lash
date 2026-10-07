@@ -833,7 +833,7 @@ impl DialectSession {
     }
 
     /// The variables the session holds, by name and a value-free summary
-    /// (kind and size), for a relay harness message (FIG-4441).
+    /// (kind and size), for a relay step message (FIG-4441).
     pub(crate) fn relay_left_variables(&self, exclude: &BTreeSet<String>) -> Vec<(String, String)> {
         let mut out = self
             .state
@@ -888,13 +888,13 @@ fn flow_value_summary(value: &lashlang::Value) -> String {
         Value::Null | Value::Undefined => "null".to_string(),
         Value::Bool(_) => "boolean".to_string(),
         Value::Number(_) => "number".to_string(),
-        Value::String(text) => format!("string ({} chars)", text.to_string().chars().count()),
+        Value::String(text) => format!("string, {} chars", text.to_string().chars().count()),
         Value::Image(_) => "image".to_string(),
         Value::Resource(_) => "resource".to_string(),
         Value::Tuple(items) | Value::List(items) => {
-            format!("array ({} items)", items.iter().count())
+            format!("array, {} items", items.iter().count())
         }
-        Value::Record(record) => format!("record ({} keys)", record.len()),
+        Value::Record(record) => format!("record, {} keys", record.len()),
         Value::Projected(_) => "read-only value".to_string(),
         Value::Ref(_) => "value".to_string(),
     }

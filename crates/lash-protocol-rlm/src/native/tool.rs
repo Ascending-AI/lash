@@ -5,28 +5,38 @@ use lash_core::{LlmOutputPart, Part, PartKind};
 /// The sole provider-native RLM tool. Termination remains inside its program.
 pub const NATIVE_EXECUTE_TOOL_NAME: &str = "execute_code";
 
+/// The `execute_code` spec. A relay session (FIG-4441) sends the same tool,
+/// described as what it is there: one step whose REPL does not persist.
 #[expect(
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub(super) fn tool_spec(dialect: &SessionDialect) -> LlmToolSpec {
+pub(super) fn tool_spec(dialect: &SessionDialect, relay: bool) -> LlmToolSpec {
+    let language = dialect.language_id();
+    let (description, code) = if relay {
+        (
+            format!(
+                "Run one {language} program as this step. End it with `await control.next({{ context, vars }})`: only what that call passes survives the step."
+            ),
+            format!("{language} program for this step"),
+        )
+    } else {
+        (
+            format!("Execute {language} in the persistent session"),
+            format!("{language} program to execute in the persistent session"),
+        )
+    };
     let definition = lash_core::ToolDefinition::raw(
         "rlm:execute_code",
         NATIVE_EXECUTE_TOOL_NAME,
-        format!(
-            "Execute {} in the persistent session",
-            dialect.language_id()
-        ),
-        serde_json::json!({"type":"object","properties":{"code":{"type":"string","description":format!("{} program to execute in the persistent session", dialect.language_id())}},"required":["code"],"additionalProperties":false}),
+        description.clone(),
+        serde_json::json!({"type":"object","properties":{"code":{"type":"string","description":code}},"required":["code"],"additionalProperties":false}),
         serde_json::json!({"type":"string"}),
     ).expect("valid declared tool schemas");
     let contract = definition.contract();
     LlmToolSpec {
         name: NATIVE_EXECUTE_TOOL_NAME.to_string(),
-        description: format!(
-            "Execute {} in the persistent session",
-            dialect.language_id()
-        ),
+        description,
         input_schema: contract.input_schema,
         output_schema: contract.output_schema,
     }

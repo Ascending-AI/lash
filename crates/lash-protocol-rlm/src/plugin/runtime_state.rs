@@ -12,7 +12,7 @@ pub(crate) struct RlmRuntimeState {
     dialect: Arc<SessionDialect>,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
     execution: tokio::sync::Mutex<DialectSession>,
-    /// A relay session (FIG-4441) starts every cell on a fresh REPL rebuilt
+    /// A relay session (FIG-4441) starts every program on a fresh REPL rebuilt
     /// from its last committed baton.
     relay: bool,
 }
@@ -245,8 +245,8 @@ impl RlmRuntimeState {
             .await
     }
 
-    /// The relay bound-variables render: the variables the last cell left,
-    /// by name and summary, which the relay harness compares with the vars
+    /// The relay bound-variables render: the variables the last program left,
+    /// by name and summary, which the relay step message compares with the vars
     /// the last commit kept.
     async fn relay_left_variables(&self) -> Result<Arc<str>, SessionError> {
         let mut exclude = self.protected_projected_binding_names().await;

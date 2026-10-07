@@ -17,9 +17,11 @@ pub(super) fn register_native_plugin(
     let catalog_dialect = Arc::clone(&dialect);
     let discovery = config.discovery.clone();
     let discovery_dialect = Arc::clone(&dialect);
+    let relay = crate::relay::RelaySettings::of(&config);
     let runtime_state = Arc::new(
         RlmRuntimeState::new(Arc::clone(&dialect))
-            .map_err(|err| PluginError::Session(err.to_string()))?,
+            .map_err(|err| PluginError::Session(err.to_string()))?
+            .with_relay(relay.is_some()),
     );
     let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
     let protocol_session = Arc::new(RlmProtocolSession::new(
@@ -35,11 +37,19 @@ pub(super) fn register_native_plugin(
             config,
             dialect: Arc::clone(&dialect),
         }))?;
-    reg.tools()
-        .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
-            vocabulary: dialect.prompt_vocabulary(),
-            relay: None,
-        }))?;
+    match relay {
+        Some(settings) => {
+            reg.tools()
+                .provider(Arc::new(crate::relay::RelayControlToolsProvider {
+                    settings,
+                }))?
+        }
+        None => reg
+            .tools()
+            .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
+                vocabulary: dialect.prompt_vocabulary(),
+            }))?,
+    }
     reg.tools().provider(Arc::new(
         lash_lashlang_runtime::register_trigger_tool_provider(
             dialect.worker_service().clone(),
@@ -176,9 +186,9 @@ impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
                 max_output_chars: self.config.max_output_chars,
                 max_budget_tokens: self.config.continue_as_soft_warn_tokens,
                 prompt_features: self.config.prompt_features,
-                relay: None,
             },
             Arc::clone(&self.dialect),
+            crate::relay::RelaySettings::of(&self.config),
         )
     }
 }

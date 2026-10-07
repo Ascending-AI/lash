@@ -1401,7 +1401,6 @@ fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
             );
             config.protocol_driver = Arc::new(crate::protocol::RlmDriver::with_dialect(
                 Arc::clone(&dialect),
-                None,
             ));
             let mut machine = TurnMachine::new(config, Vec::new(), Default::default(), 0);
             let initial = drain(&mut machine);

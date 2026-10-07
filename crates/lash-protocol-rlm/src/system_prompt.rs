@@ -184,10 +184,7 @@ pub(crate) fn render_system_prompt(
         let mut execution = Vec::new();
         if !prompt.omit_builtin_execution {
             if behaviour.execution_policy.is_relay() {
-                push_text(
-                    &mut execution,
-                    &crate::relay::relay_execution_prose(dialect.cell_tags()),
-                );
+                push_text(&mut execution, &crate::relay::relay_execution_prose());
             } else {
                 push_text(&mut execution, &prose);
             }

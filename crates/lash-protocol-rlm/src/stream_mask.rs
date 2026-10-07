@@ -23,7 +23,6 @@ use crate::dialect::SessionDialect;
 pub fn register_stream_mask(
     reg: &mut PluginRegistrar,
     dialect: Arc<SessionDialect>,
-    relay: bool,
 ) -> Result<(), PluginError> {
     // One provider stream's scan. Only phase 1 touches it: the stream hook
     // fills it and the stream-finished hook hands its end state to the
@@ -38,12 +37,7 @@ pub fn register_stream_mask(
             let state = Arc::clone(&stream_state);
             Box::pin(async move {
                 let mut detector = state.lock_recover();
-                let mut transform = detector.process_chunk(&ctx.chunk);
-                // A relay step's prose never streams to the user (FIG-4441).
-                if relay {
-                    transform.chunk.clear();
-                }
-                Ok(transform)
+                Ok(detector.process_chunk(&ctx.chunk))
             })
         }),
     )?;

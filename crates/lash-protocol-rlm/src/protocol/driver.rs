@@ -53,8 +53,6 @@ use crate::driver_state::{
 #[derive(Clone)]
 pub struct RlmDriver {
     dialect: Arc<SessionDialect>,
-    /// A relay session's settings (FIG-4441); `None` for chronological.
-    relay: Option<crate::relay::RelaySettings>,
 }
 
 impl RlmDriver {
@@ -65,15 +63,11 @@ impl RlmDriver {
                 dialect,
                 lash_lashlang_runtime::LashlangSurface::default(),
             )),
-            relay: None,
         }
     }
 
-    pub(crate) fn with_dialect(
-        dialect: Arc<SessionDialect>,
-        relay: Option<crate::relay::RelaySettings>,
-    ) -> Self {
-        Self { dialect, relay }
+    pub(crate) fn with_dialect(dialect: Arc<SessionDialect>) -> Self {
+        Self { dialect }
     }
 
     /// The repair for a provider tool call on a request that declared no
@@ -249,11 +243,6 @@ const MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES: usize = 64 * 1024;
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
     fn project_visible_assistant_prose(&self, text: &str) -> String {
-        // A relay step's prose is never user output: only committed
-        // `send_user_output` calls are (FIG-4441).
-        if self.relay.is_some() {
-            return String::new();
-        }
         super::cell::project_visible_assistant_prose_with_tags(text, self.dialect.cell_tags())
     }
 
@@ -353,12 +342,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             },
             tags,
         );
-        if self.relay.is_none() {
-            actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
-                protocol_iteration: ctx.protocol_iteration(),
-                content: visible_prose.clone(),
-            }));
-        }
+        actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
+            protocol_iteration: ctx.protocol_iteration(),
+            content: visible_prose.clone(),
+        }));
 
         if assistant_text.trim().is_empty()
             && reasoning.iter().all(|part| part.text.trim().is_empty())
@@ -388,28 +375,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 .output_token_cap
                 .map(std::num::NonZeroUsize::get),
         };
-        let classified = match self.relay {
-            Some(_) => relay_commit::classify_relay_reply(
-                self.dialect.as_ref(),
-                &attempt,
-                extraction,
-                terminal_reason,
-                &visible_prose,
-            ),
-            None => self.classify_reply(
-                &attempt,
-                extraction,
-                terminal_reason,
-                &termination,
-                ReplyProjections {
-                    assistant_text: &assistant_text,
-                    visible_prose: &visible_prose,
-                    visible_assistant_text: &visible_assistant_text,
-                    reasoning: &reasoning,
-                },
-            ),
-        };
-        let cell = match classified {
+        let cell = match self.classify_reply(
+            &attempt,
+            extraction,
+            terminal_reason,
+            &termination,
+            ReplyProjections {
+                assistant_text: &assistant_text,
+                visible_prose: &visible_prose,
+                visible_assistant_text: &visible_assistant_text,
+                reasoning: &reasoning,
+            },
+        ) {
             ReplyClass::Cell(cell) => cell,
             ReplyClass::Repair(prompt) => {
                 if let Err(err) = self.stall_retry_epilogue(
@@ -493,16 +470,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Err(err) => return invalid_driver_state_actions(err),
         };
         state.code = cell.code.clone();
-        // A relay step keeps no prose or reasoning: neither is user output,
-        // and the next step sees only its baton (FIG-4441).
-        if self.relay.is_none() {
-            state.reasoning = reasoning;
-            state.assistant_parts = vec![lash_core::Part::text(
-                rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "prose"),
-                cell.prose.clone(),
-                None,
-            )];
-        }
+        state.reasoning = reasoning;
+        state.assistant_parts = vec![lash_core::Part::text(
+            rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "prose"),
+            cell.prose.clone(),
+            None,
+        )];
 
         // Emit the raw cell source as a `Message` with kind `code` so the
         // CLI can reveal it in the full-expand view (Alt+O) above the tool
@@ -553,9 +526,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             return vec![DriverAction::FinishCancelled {
                 evidence: evidence.clone(),
             }];
-        }
-        if let Some(relay) = self.relay {
-            return relay_commit::relay_exec_result(&ctx, state, result, relay);
         }
 
         // The retention history records in place of a terminal value too
@@ -1304,8 +1274,6 @@ fn llm_extraction_payload(
 ) -> Value {
     ExtractionDiagnostic::new(turn_id, reply_fingerprint, decision, termination, counts).payload()
 }
-
-mod relay_commit;
 
 #[cfg(test)]
 mod classification_tests;

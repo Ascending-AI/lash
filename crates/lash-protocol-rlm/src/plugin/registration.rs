@@ -22,8 +22,7 @@ pub(super) fn register_rlm_protocol_plugin(
     let discovery_dialect = Arc::clone(&dialect);
     let runtime_state = Arc::new(
         RlmRuntimeState::new(Arc::clone(&dialect))
-            .map_err(|err| PluginError::Session(err.to_string()))?
-            .with_relay(config.execution_policy.is_relay()),
+            .map_err(|err| PluginError::Session(err.to_string()))?,
     );
     let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
     let protocol_session = Arc::new(RlmProtocolSession::new(
@@ -39,9 +38,7 @@ pub(super) fn register_rlm_protocol_plugin(
     reg.output()
         .assistant_prose_projector(Arc::new(RlmAssistantProseProjector {
             dialect: Arc::clone(&dialect),
-            relay: config.execution_policy.is_relay(),
         }))?;
-    let relay = crate::relay::RelaySettings::of(&config);
     reg.protocol().protocol_driver(Arc::new(RlmProtocolDriver {
         config,
         dialect: Arc::clone(&dialect),
@@ -49,7 +46,6 @@ pub(super) fn register_rlm_protocol_plugin(
     reg.tools()
         .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
             vocabulary: dialect.prompt_vocabulary(),
-            relay,
         }))?;
     // `triggers.register` is a leaf tool now (FIG-3116): it validates the
     // registration and declares the intent; the subscription installs at
@@ -94,6 +90,6 @@ pub(super) fn register_rlm_protocol_plugin(
         }),
     )?;
 
-    stream_mask::register_stream_mask(reg, dialect, relay.is_some())?;
+    stream_mask::register_stream_mask(reg, dialect)?;
     Ok(())
 }

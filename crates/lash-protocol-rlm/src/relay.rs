@@ -1,24 +1,28 @@
 //! Relay (FIG-4441): an RLM execution policy in which each step hands the
 //! next only the baton it passes to `control.next`.
 //!
-//! Contract:
-//! - **The baton is the committed call.** A step commits when its cell runs
-//!   without error and its last host call is a successful `control.next`.
-//!   The driver then appends the step's trajectory entry, one `RlmSeed` event
+//! Relay runs on the native channel: its one provider tool is
+//! `execute_code`, and a reply's shape says what it is.
+//! - **A work step is an `execute_code` call** whose program ends with
+//!   `await control.next({ context, vars })`. It commits when the program
+//!   runs without error and its last host call is a successful `next`. The
+//!   driver then appends the step's trajectory entry and one `RlmSeed` event
 //!   carrying the call's `vars` with its `context` under the reserved global
-//!   [`CONTEXT_VAR`], and the step's buffered `control.send_user_output`
-//!   texts as assistant messages with ids `{turn}.{step}.{n}`. There is no
-//!   other record: the next step's prompt context and REPL globals are read
-//!   from the last seed in the frame.
-//! - **Nothing else survives a step.** Every relay cell starts on a fresh REPL
-//!   rebuilt from the last seed's globals plus [`TRANSCRIPT_VAR`], so a step
-//!   that throws, never calls `next` or is refused leaves no state behind. The
-//!   attempt record (its trajectory entry, with the calls it made) still
-//!   persists, and the next harness message lists those calls as receipts.
-//! - **Prompt.** `[system]` + one user message holding the committed context,
-//!   one content block per entry, the last one a cache breakpoint + the
-//!   harness message ([`harness`]). Nothing is appended automatically: not the
-//!   model's code, not tool output, not the user's message.
+//!   [`CONTEXT_VAR`]. There is no other record: the next step's prompt context
+//!   and REPL globals are read from the last seed in the frame.
+//! - **A reply with no tool call is the answer.** It is the turn's reply and
+//!   ends the turn; the context stays as last committed. Text beside a tool
+//!   call is never delivered.
+//! - **Nothing else survives a step.** Every relay program starts on a fresh
+//!   REPL rebuilt from the last seed's globals plus [`TRANSCRIPT_VAR`], so a
+//!   step that throws, never calls `next` or is refused leaves no state
+//!   behind. The attempt record (its trajectory entry, with the calls it made)
+//!   still persists, and the next step message lists those calls as receipts.
+//! - **Prompt.** `[system + execute_code]` + one user message holding the
+//!   committed context under a constant header, one `[i]`-numbered block per
+//!   entry + the step message ([`harness`]). Nothing is appended
+//!   automatically: not the model's code, not tool output, not the user's
+//!   message.
 
 mod harness;
 pub(crate) mod tools;
@@ -27,7 +31,7 @@ pub(crate) mod tools;
 mod tests;
 
 pub(crate) use harness::{LeftVariable, LeftVariables, RelayHarnessInput, build_relay_messages};
-pub(crate) use tools::{next_tool_definition, send_user_output_tool_definition};
+pub(crate) use tools::RelayControlToolsProvider;
 
 use std::fmt::Write as _;
 
@@ -44,8 +48,9 @@ pub(crate) const CONTEXT_VAR: &str = "context";
 pub(crate) const TRANSCRIPT_VAR: &str = "transcript";
 /// The `control.next` tool's manifest name.
 pub(crate) const NEXT_TOOL: &str = "next";
-/// The `control.send_user_output` tool's manifest name.
-pub(crate) const SEND_USER_OUTPUT_TOOL: &str = "send_user_output";
+/// The id suffix of the note that says why an executed step did not commit;
+/// the next step message shows it as the last step's status.
+pub(crate) const NOT_COMMITTED_NOTE: &str = "relay_not_committed";
 /// Characters per token for the relay context budget, which is configured in
 /// tokens.
 const CHARS_PER_TOKEN: usize = 4;
@@ -59,7 +64,7 @@ pub(crate) struct RelaySettings {
     /// context budget (`continue_as_soft_warn_tokens`) at four characters per
     /// token.
     pub(crate) context_budget_chars: usize,
-    /// How much of a step's printed output the harness message shows.
+    /// How much of a step's printed output the step message shows.
     pub(crate) max_output_chars: usize,
 }
 
@@ -82,7 +87,6 @@ impl RelaySettings {
 pub(crate) struct RelayNext {
     pub(crate) context: Vec<String>,
     pub(crate) vars: serde_json::Map<String, Value>,
-    pub(crate) final_turn: bool,
 }
 
 impl RelayNext {
@@ -138,24 +142,13 @@ impl RelayNext {
                 ));
             }
         }
-        let final_turn = match args.get("final") {
-            None | Some(Value::Null) => false,
-            Some(Value::Bool(value)) => *value,
-            Some(other) => {
-                return Err(format!("final must be a boolean, got {}", json_kind(other)));
-            }
-        };
         let size = context_chars(&context);
         if size > budget_chars {
             return Err(format!(
                 "context is {size} characters, over the {budget_chars}-character budget; drop or shorten entries and call next again"
             ));
         }
-        Ok(Self {
-            context,
-            vars,
-            final_turn,
-        })
+        Ok(Self { context, vars })
     }
 
     /// The seed event body this call commits: its vars, with the context under
@@ -230,7 +223,7 @@ impl RelayBaton {
     }
 }
 
-/// One committed user input or delivered output.
+/// One committed user input or delivered reply.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TranscriptEntry {
     pub(crate) role: &'static str,
@@ -243,20 +236,30 @@ pub(crate) struct TranscriptEntry {
 pub(crate) struct RelayView {
     /// The last committed baton; `None` for a session that never committed.
     pub(crate) committed: Option<RelayBaton>,
-    /// The baton committed before it, for the cache cost of the last edit.
+    /// The baton committed before it, for the unchanged context prefix.
     pub(crate) previous: Option<RelayBaton>,
-    /// The committed user inputs and delivered outputs, in order.
+    /// The committed user inputs and delivered replies, in order.
     pub(crate) transcript: Vec<TranscriptEntry>,
     /// The current turn's input: the last contiguous run of user messages.
     pub(crate) turn_input: Vec<usize>,
+    /// The reply that answered the turn before the current one, when the
+    /// transcript holds one right before this turn's input.
+    pub(crate) last_reply: Option<usize>,
+    /// User-role messages a host injected into this turn's request (no
+    /// origin): runtime notes, never the user's words.
+    pub(crate) host_notes: Vec<String>,
     /// The current turn's last step, if it ran one.
     pub(crate) last_step: Option<RlmTrajectoryEntry>,
     /// Whether the last step committed.
     pub(crate) last_step_committed: bool,
+    /// Why the last step did not commit, when a relay rule refused it (a
+    /// step that threw says why in its own outcome).
+    pub(crate) last_step_refusal: Option<String>,
     /// Steps of the current turn after its last commit: they ran, and
     /// committed nothing.
     pub(crate) uncommitted: Vec<RlmTrajectoryEntry>,
-    /// Protocol feedback written after the current turn's last step.
+    /// Protocol feedback written after the current turn's last step: repair
+    /// copy for a malformed call, an output-limit retry.
     pub(crate) feedback: Vec<String>,
 }
 
@@ -264,9 +267,8 @@ impl RelayView {
     /// Read `projection` for the turn `turn_id`.
     ///
     /// The turn's input is the last run of user input messages (origin
-    /// `TurnInput`, or none for input a host executes in hand). Only the
-    /// protocol records of an earlier turn end a run: this turn's own steps,
-    /// seeds, outputs and notes interleave with its input in the view, and a
+    /// `TurnInput`). Only an earlier turn's records end a run: its steps and
+    /// its reply. A user-role message with no origin is a host's note, and a
     /// user-role message another plugin wrote is not user input.
     pub(crate) fn read(
         projection: &ChronologicalProjection,
@@ -274,15 +276,23 @@ impl RelayView {
     ) -> Result<Self, lash_core::StoredDataCorruption> {
         let step_prefix = format!("lashlang_step_{turn_id}_");
         let feedback_prefix = format!("m_rlm_{turn_id}_");
-        let output_prefix = format!("{turn_id}.");
         let mut view = Self::default();
         let mut input_open = false;
         for entry in projection.entries() {
             match &entry.payload {
-                ChronologicalPayload::Message(message) => match message.role {
-                    lash_core::MessageRole::User if is_user_input(message.origin.as_ref()) => {
+                ChronologicalPayload::Message(message) => match (message.role, &message.origin) {
+                    (
+                        lash_core::MessageRole::User,
+                        Some(lash_core::MessageOrigin::TurnInput { .. }),
+                    ) => {
                         if !input_open {
                             view.turn_input.clear();
+                            view.host_notes.clear();
+                            view.last_reply = view
+                                .transcript
+                                .len()
+                                .checked_sub(1)
+                                .filter(|&index| view.transcript[index].role == "assistant");
                             input_open = true;
                         }
                         view.turn_input.push(view.transcript.len());
@@ -292,23 +302,30 @@ impl RelayView {
                             text: message_text(&message.parts),
                         });
                     }
-                    lash_core::MessageRole::Assistant
-                        if crate::projection::is_rlm_protocol_output(message.origin.as_ref()) =>
-                    {
-                        if turn_id.is_empty() || !message.id.starts_with(&output_prefix) {
-                            input_open = false;
-                        }
+                    (lash_core::MessageRole::User, None) => {
+                        view.host_notes.push(message_text(&message.parts));
+                    }
+                    (
+                        lash_core::MessageRole::Assistant,
+                        Some(lash_core::MessageOrigin::TurnOutput { .. }),
+                    ) => {
+                        input_open = false;
                         view.transcript.push(TranscriptEntry {
                             role: "assistant",
                             id: message.id.clone(),
                             text: message_text(&message.parts),
                         });
                     }
-                    lash_core::MessageRole::System
-                        if crate::projection::is_rlm_protocol_output(message.origin.as_ref())
+                    (lash_core::MessageRole::System, origin)
+                        if crate::projection::is_rlm_protocol_output(origin.as_ref())
                             && message.id.starts_with(&feedback_prefix) =>
                     {
-                        view.feedback.push(message_text(&message.parts));
+                        let text = message_text(&message.parts);
+                        if message.id.ends_with(NOT_COMMITTED_NOTE) {
+                            view.last_step_refusal = Some(text);
+                        } else {
+                            view.feedback.push(text);
+                        }
                     }
                     _ => {}
                 },
@@ -326,10 +343,19 @@ impl RelayView {
                             if step.id.starts_with(&step_prefix) {
                                 view.feedback.clear();
                                 view.last_step_committed = false;
+                                view.last_step_refusal = None;
                                 view.uncommitted.push(step.clone());
                                 view.last_step = Some(step);
                             } else {
                                 input_open = false;
+                            }
+                        }
+                        Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) => {
+                            // A malformed `execute_code` call's repair copy.
+                            if let Some(text) =
+                                crate::native::transport::repair_copy(diagnostic, turn_id)
+                            {
+                                view.feedback.push(text);
                             }
                         }
                         _ => {}
@@ -349,15 +375,6 @@ impl RelayView {
             .unwrap_or_default()
             .step_globals(&self.transcript)
     }
-}
-
-/// Whether a user-role message is user input rather than another plugin's
-/// message on the user channel.
-fn is_user_input(origin: Option<&lash_core::MessageOrigin>) -> bool {
-    matches!(
-        origin,
-        None | Some(lash_core::MessageOrigin::TurnInput { .. })
-    )
 }
 
 fn message_text(parts: &[lash_core::Part]) -> String {
@@ -391,18 +408,18 @@ pub(crate) fn json_kind(value: &Value) -> &'static str {
     }
 }
 
-/// A value's kind and size, without its contents: `string (12 chars)`.
+/// A value's kind and size, without its contents: `string, 12 chars`.
 pub(crate) fn json_summary(value: &Value) -> String {
     let mut out = json_kind(value).to_string();
     match value {
         Value::String(text) => {
-            let _ = write!(out, " ({} chars)", text.chars().count());
+            let _ = write!(out, ", {} chars", text.chars().count());
         }
         Value::Array(items) => {
-            let _ = write!(out, " ({} items)", items.len());
+            let _ = write!(out, ", {} items", items.len());
         }
         Value::Object(fields) => {
-            let _ = write!(out, " ({} keys)", fields.len());
+            let _ = write!(out, ", {} keys", fields.len());
         }
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
@@ -410,46 +427,46 @@ pub(crate) fn json_summary(value: &Value) -> String {
 }
 
 /// The execution prose a relay session's system prompt carries in place of
-/// the chronological one: how a step runs, what survives it and how it ends.
-/// It is authored for the TypeScript cell channel, the only one relay runs on.
-pub(crate) fn relay_execution_prose(tags: crate::dialect::CellTags) -> String {
-    let open = tags.open;
-    let close = tags.close;
+/// the chronological one: the two reply shapes, what survives a step, the
+/// commit rule and how to keep context. It is authored for TypeScript on the
+/// native channel, the only one relay runs on.
+pub(crate) fn relay_execution_prose() -> String {
     format!(
-        r#"You work in steps. Each response is one step: optional prose, then exactly one program between `{open}` and `{close}` on their own lines. Call tools as `await module.operation({{ ... }})`, only those listed under **Tools**. Prose outside the program is never shown to anyone.
+        r#"You work in steps. Every response is one of two shapes:
+
+- **Work:** call `{tool}` once, with a program that ends with `await control.next({{ context, vars }})`. Call tools inside it as `await module.operation({{ ... }})`, only those listed under **Tools**. Text you write beside the call is discarded.
+- **Answer:** reply in plain text, with no tool call. That text is your answer to the user and ends the turn. Ask a question or say you are blocked the same way.
 
 ### What survives a step
 
-Nothing carries from one step to the next except what you pass to `control.next`:
+Only what you pass to `control.next`:
 
-- `await control.next({{ context, vars, final }})` ends the step and must be the last call in the {noun}.
-- `context: string[]` becomes your entire working memory. The next request shows it right after this system prompt, one block per entry, exactly as you passed it. Your code, its output, tool results and the user's message are not kept unless you write what matters into `context`.
-- `vars` (default `{{}}`) is a record of plain values that the next step finds as top-level variables. Every other variable is wiped. Functions cannot be carried: redefine helpers when you need them.
-- `final: true` ends the turn once the step commits. Send the user the answer in that same step.
-- Each step starts with `context` bound to your current context, so edit it with code: `await control.next({{ context: [...context, "port is 8080 (config.toml)"] }})`. `transcript` holds the committed user messages and outputs (`{{ role, id, text }}`), for when you need an old one.
-- `await control.send_user_output({{ text }})` sends text to the user. It is delivered only if the step commits. A turn must send the user something before it ends. To ask the user a question or tell them you are blocked, send it and end the turn with `final: true`; their reply arrives as the next turn.
+- `context: string[]` is your whole working memory. The next request shows it right after this system prompt, one numbered entry per block. Your code, its output, tool results and the user's message are gone unless you write what matters into `context`.
+- `vars` (default `{{}}`) is a record of plain values the next step finds as top-level variables. Every other variable is wiped. Functions cannot be carried: redefine helpers when you need them.
+- Each program starts with `context` bound to your current context, so edit it with code: `[...context, "port is 8080 (config.toml)"]`. `transcript` holds the committed user messages and your answers (`{{ role, id, text }}`).
+
+An answer changes neither: the next turn starts from the context your last step committed, and its first step shows your answer as `<last_reply>`.
 
 ### Commit
 
-A step commits only when its program runs without error and its last call is a successful `control.next`. A step that throws, never calls `next`, or passes a context over its budget commits nothing: no context, no vars, no output. The tool calls it made did happen, though: the harness message lists them, so check their results instead of repeating them.
+A step commits only when its program runs without error and its last call is a successful `control.next`. Otherwise nothing commits: no context, no vars. The tool calls it made did happen, though: the next step message lists them under `<receipts>`, so check their results instead of repeating them.
 
-### The harness message
+### The step message
 
-The last message of every request is the harness message: the user's message for this turn, your last step's code, printed output (`console.log(value)`, truncated) and error, the effects of steps that did not commit, which vars your last commit kept and which variables it dropped, and the context's size against its budget.
+The last message of every request: this turn's `<user_request>`, your last step (its code, printed output from `console.log(value)`, truncated, its calls, whether it committed), the size of your memory and the vars kept or dropped, and runtime notes.
 
 ### Keeping context
 
-Put stable facts first and append by default (`[...context, note]`): an unchanged prefix stays in the provider cache. When much of it is stale, rewrite it in one go rather than a little every step. Tidy up when the harness says `cache: cold`. Record what you learned and what is left to do; anything you leave out is gone.
+Put stable facts first and append by default (`[...context, note]`): an unchanged prefix stays in the provider cache. When much of it is stale, rewrite it in one go rather than a little every step, and tidy up when the step message says `cache: cold`. Record what you learned and what is left to do; anything you leave out is gone.
 
 `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes and generators are not supported. A failed tool call throws an `Error` whose `cause` is `{{ code, details }}`.
 
-### Example step
+### Example work step
 
-{open}
+```typescript
 const total = 2 + 3;
-await control.send_user_output({{ text: `2 + 3 = ${{total}}` }});
-await control.next({{ context: [...context, `answered 2 + 3 = ${{total}}`], final: true }});
-{close}"#,
-        noun = "program",
+await control.next({{ context: [...context, `2 + 3 = ${{total}}`] }});
+```"#,
+        tool = crate::native::NATIVE_EXECUTE_TOOL_NAME,
     )
 }

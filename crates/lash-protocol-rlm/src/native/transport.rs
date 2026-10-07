@@ -125,6 +125,22 @@ fn decode(event: &lash_core::ProtocolEvent) -> Result<Option<Transport>, DecodeE
     decode_payload(diagnostic.payload).map(Some)
 }
 
+/// The repair copy a native repair envelope for `turn_id` carries, or `None`
+/// for any other diagnostic. An envelope that does not decode carries none.
+pub(crate) fn repair_copy(diagnostic: RlmDiagnosticEvent, turn_id: &str) -> Option<String> {
+    if diagnostic.phase != PHASE {
+        return None;
+    }
+    match decode_payload(diagnostic.payload) {
+        Ok(Transport::Repair {
+            turn_id: repaired,
+            text,
+            ..
+        }) if repaired.as_ref() == turn_id => Some(text),
+        _ => None,
+    }
+}
+
 pub(crate) fn decode_payload(payload: serde_json::Value) -> Result<Transport, DecodeError> {
     #[derive(serde::Deserialize)]
     struct Version {

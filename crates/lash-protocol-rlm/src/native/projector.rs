@@ -2,7 +2,7 @@ use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn
 use crate::dialect::SessionDialect;
 use crate::driver::{RlmPreambleConfig, final_answer_format_prompt, required_output_block};
 use crate::rlm_support::{decode_rlm_options, effective_budget_tokens};
-use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
+use lash_core::llm::types::{LlmMessage, LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
     LlmRequest, ProjectorContext, ProtocolBuildInput, TurnDriverConfig, TurnDriverPreamble,
@@ -12,22 +12,28 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     input: ProtocolBuildInput,
     config: RlmPreambleConfig,
     dialect: Arc<SessionDialect>,
+    relay: Option<crate::relay::RelaySettings>,
 ) -> TurnDriverPreamble {
     let tool_catalog = input.tool_catalog.as_ref();
     let tool_names = tool_catalog.tool_names();
     TurnDriverPreamble {
         config: TurnDriverConfig {
-            protocol: Arc::new(super::driver::NativeDriver::with_dialect(Arc::clone(
-                &dialect,
-            ))),
+            protocol: Arc::new(super::driver::NativeDriver::with_dialect(
+                Arc::clone(&dialect),
+                relay,
+            )),
             projector: Arc::new(NativeContextProjector {
                 prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
                 max_budget_tokens: config.max_budget_tokens,
                 dialect: Arc::clone(&dialect),
+                relay,
             }),
         },
-        tool_specs: Arc::new(vec![super::tool::tool_spec(dialect.as_ref())]),
+        tool_specs: Arc::new(vec![super::tool::tool_spec(
+            dialect.as_ref(),
+            relay.is_some(),
+        )]),
         tool_names,
         writer_formats: input.writer_formats,
     }
@@ -38,17 +44,90 @@ struct NativeContextProjector {
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
     dialect: Arc<SessionDialect>,
+    /// A relay session's settings (FIG-4441); `None` for chronological.
+    relay: Option<crate::relay::RelaySettings>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
-    #[expect(
-        clippy::expect_used,
-        reason = "recorded turn options are validated by the plugin at session open; decode_rlm_options only errs on options that validation already refused"
-    )]
     fn project(
         &self,
         ctx: ProjectorContext<'_>,
     ) -> Result<Arc<LlmRequest>, lash_core::StoredDataCorruption> {
+        let messages = match self.relay {
+            Some(relay) => self.relay_messages(&ctx, relay)?,
+            None => self.chronological_messages(&ctx)?,
+        };
+
+        let mut generation = ctx.config.generation.clone();
+        // Both channels execute complete programs. A host's text stop must
+        // not truncate a program argument or change the paired sampling cohort.
+        generation.suppress_stop_sequences_for_protocol();
+
+        Ok(Arc::new(LlmRequest {
+            model: ctx.config.model.clone(),
+            instructions: (!ctx.environment.system_prompt.trim().is_empty())
+                .then(|| Arc::from(ctx.environment.system_prompt.trim())),
+            messages,
+            resolved_stored: Default::default(),
+            tools: Arc::new(vec![super::tool::tool_spec(
+                self.dialect.as_ref(),
+                self.relay.is_some(),
+            )]),
+            tool_choice: LlmToolChoice::Auto,
+            attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
+            scope: LlmRequestScope::new(
+                ctx.config.session_id.clone(),
+                ctx.config.agent_frame_id.clone(),
+                format!(
+                    "{}:sansio:rlm:{}",
+                    ctx.config.session_id, ctx.protocol_iteration
+                ),
+            ),
+            output_spec: None,
+            stream_events: None,
+            generation,
+            provider_trace: None,
+        }))
+    }
+}
+
+impl NativeContextProjector {
+    /// A relay step's messages (FIG-4441): the committed context and the
+    /// step message, read from the turn view alone.
+    fn relay_messages(
+        &self,
+        ctx: &ProjectorContext<'_>,
+        relay: crate::relay::RelaySettings,
+    ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
+        let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
+            ctx.events,
+            ctx.messages,
+        );
+        let view = crate::relay::RelayView::read(&projection, ctx.config.turn_id.as_ref())?;
+        Ok(crate::relay::build_relay_messages(
+            crate::relay::RelayHarnessInput {
+                view: &view,
+                settings: relay,
+                step: ctx.protocol_iteration + 1,
+                turn_causes: ctx.turn_causes,
+                left_variables: ctx
+                    .environment
+                    .projector_turn_inputs
+                    .bound_variables_prompt
+                    .as_deref(),
+                prompt_usage: ctx.environment.projector_turn_inputs.prompt_usage.as_ref(),
+            },
+        ))
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "recorded turn options are validated by the plugin at session open; decode_rlm_options only errs on options that validation already refused"
+    )]
+    fn chronological_messages(
+        &self,
+        ctx: &ProjectorContext<'_>,
+    ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
         let options = decode_rlm_options(&ctx.config.termination)
             .expect("RLM turn options are validated before prompt projection");
         let termination = options.effective_termination();
@@ -73,50 +152,19 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             .as_deref()
             .unwrap_or("");
 
-        let mut messages = Vec::new();
-        messages.extend(build_rlm_history_messages_from_turn(
-            RlmHistoryRenderInput {
-                images: self.prompt_features.images,
-                dialect: self.dialect.as_ref(),
-                events: ctx.events,
-                turn_messages: ctx.messages,
-                turn_causes: ctx.turn_causes,
-                max_output_chars: self.max_output_chars,
-                protocol_iteration: ctx.protocol_iteration + 1,
-                finalization: &finalization,
-                required_output: required_output.as_deref(),
-                final_answer_format: final_answer_format.as_deref(),
-                budget_suffix: budget_suffix.as_deref(),
-                bound_variables: bound_variables_prompt,
-            },
-        )?);
-
-        let mut generation = ctx.config.generation.clone();
-        // Both channels execute complete programs. A host's text stop must
-        // not truncate a program argument or change the paired sampling cohort.
-        generation.suppress_stop_sequences_for_protocol();
-
-        Ok(Arc::new(LlmRequest {
-            model: ctx.config.model.clone(),
-            instructions: (!ctx.environment.system_prompt.trim().is_empty())
-                .then(|| Arc::from(ctx.environment.system_prompt.trim())),
-            messages,
-            resolved_stored: Default::default(),
-            tools: Arc::new(vec![super::tool::tool_spec(self.dialect.as_ref())]),
-            tool_choice: LlmToolChoice::Auto,
-            attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
-            scope: LlmRequestScope::new(
-                ctx.config.session_id.clone(),
-                ctx.config.agent_frame_id.clone(),
-                format!(
-                    "{}:sansio:rlm:{}",
-                    ctx.config.session_id, ctx.protocol_iteration
-                ),
-            ),
-            output_spec: None,
-            stream_events: None,
-            generation,
-            provider_trace: None,
-        }))
+        build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images: self.prompt_features.images,
+            dialect: self.dialect.as_ref(),
+            events: ctx.events,
+            turn_messages: ctx.messages,
+            turn_causes: ctx.turn_causes,
+            max_output_chars: self.max_output_chars,
+            protocol_iteration: ctx.protocol_iteration + 1,
+            finalization: &finalization,
+            required_output: required_output.as_deref(),
+            final_answer_format: final_answer_format.as_deref(),
+            budget_suffix: budget_suffix.as_deref(),
+            bound_variables: bound_variables_prompt,
+        })
     }
 }
