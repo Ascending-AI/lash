@@ -45453,6 +45453,7 @@
           "clippy_label": "//crates/lash-sim:crash_matrix__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-sim:crash_matrix__test",
+          "shard_count": 4,
           "tags": []
         },
         {

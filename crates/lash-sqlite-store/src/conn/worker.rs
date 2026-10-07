@@ -103,6 +103,24 @@ impl Connection {
             .map_err(tokio_rusqlite::Error::Error)
     }
 
+    /// [`Self::call`], blocking the caller's thread until the connection
+    /// thread answers.
+    #[cfg(feature = "testing")]
+    pub(super) fn call_inline<T, F>(&self, work: F) -> tokio_rusqlite::Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut rusqlite::Connection) -> rusqlite::Result<T> + Send + 'static,
+    {
+        let (answer, result) = mpsc::sync_channel(1);
+        self.send(Command::Call(Box::new(move |connection| {
+            let _ = answer.send(work(connection));
+        })))?;
+        result
+            .recv()
+            .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)?
+            .map_err(tokio_rusqlite::Error::Error)
+    }
+
     pub(super) async fn close(self) -> tokio_rusqlite::Result<()> {
         let (answer, result) = oneshot::channel();
         if self.send(Command::Close(answer)).is_err() {

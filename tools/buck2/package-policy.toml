@@ -358,6 +358,15 @@ compile_data = [
   "//crates/lash-sqlite-store:package_files",
 ]
 
+# The crash matrix (FIG-5184) cuts every case at every commit label, mode and
+# seed; whole, its ten cases ran past the 300 s bound on four test threads.
+# The shards keep every cell and spread the cases over separate actions.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["test"]
+targets = ["crash_matrix"]
+shards = 4
+
 # Its completeness gates read the real store trait definitions with
 # `include_str!`.
 [[rule]]

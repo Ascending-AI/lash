@@ -12,7 +12,7 @@
 //!
 //! Every process answers its cancel with its terminal. A counter makes every
 //! committed state distinct. The step bodies write their entries to the
-//! world's ledger before anything else.
+//! world's ledger before anything else, then take [`BODY`] of virtual time.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,6 +49,9 @@ pub const AWAIT_MS: u64 = 1_000;
 pub const KEY_MS: u64 = 30_000;
 /// The pinned key's name.
 const KEY: &str = "answer";
+/// How long a step body runs once it entered: a host that watches the
+/// ledger acts while the body still runs.
+pub const BODY: Duration = Duration::from_millis(50);
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
     ProcessInfraError::new(lash_core_execution::PluginError::Session(error.to_string()))
@@ -261,7 +264,8 @@ fn policy(tool: &ToolId) -> ExecutionPolicy {
     }
 }
 
-/// The engine's steps: each body notes its entry and completes.
+/// The engine's steps: each body notes its entry, runs [`BODY`] and
+/// completes.
 pub struct SimSteps {
     world: Arc<World>,
 }
@@ -311,6 +315,7 @@ impl ProcessSteps for SimSteps {
                         admitted,
                     },
                 );
+                world.sleep(BODY).await;
                 let output = json!({ "ok": true }).to_string();
                 match MaterialPayload::new(
                     MaterialOwner::Process {

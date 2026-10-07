@@ -64,7 +64,7 @@ impl SqliteStore {
             clock,
             lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
-            None,
+            crate::testing::ConnectionHooks::default(),
         )
         .await
     }
@@ -134,7 +134,7 @@ impl SqliteStore {
             clock,
             lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
-            None,
+            crate::testing::ConnectionHooks::default(),
         )
         .await
     }
@@ -159,7 +159,7 @@ impl SqliteStore {
             StoreOptions::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
             writable,
-            None,
+            crate::testing::ConnectionHooks::default(),
         )
         .await
         .map_err(sqlite_async_error)?;
@@ -177,11 +177,13 @@ impl SqliteStore {
         options: StoreOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
         writable: lash_core_execution::compat::VersionRange,
-        #[cfg(feature = "testing")] pauses: Option<crate::testing::SqlitePauses>,
+        #[cfg(feature = "testing")] hooks: crate::testing::ConnectionHooks,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
+        let inline_calls = hooks.inline_calls;
+        #[cfg(feature = "testing")]
         let conn =
-            SqliteConnection::open_with_pauses(core.target(), options.connection_policy, pauses)
+            SqliteConnection::open_with_hooks(core.target(), options.connection_policy, hooks)
                 .await?;
         #[cfg(not(feature = "testing"))]
         let conn =
@@ -189,7 +191,10 @@ impl SqliteStore {
         crate::schema::ensure_versioned_schema_with_writable(&conn, writable).await?;
         let mut readers = Vec::with_capacity(options.connection_policy.read_connections.get());
         for _ in 0..options.connection_policy.read_connections.get() {
-            readers.push(SqliteConnection::open_readonly(core.target()).await?);
+            let reader = SqliteConnection::open_readonly(core.target()).await?;
+            #[cfg(feature = "testing")]
+            let reader = reader.with_inline_calls(inline_calls);
+            readers.push(reader);
         }
         Ok(Self {
             conn,

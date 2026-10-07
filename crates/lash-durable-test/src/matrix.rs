@@ -89,10 +89,6 @@ pub struct MatrixReport {
     /// The uncut run's writes.
     pub baseline: Vec<Write>,
     pub cells: Vec<Cell>,
-    /// Cuts no re-run reached at a point some fresh uncut run did not reach
-    /// either (see [`Matrix::reruns`]): not cells, since the run does not
-    /// reach them reliably.
-    pub unstable: Vec<(CutPoint, Fault)>,
 }
 
 impl MatrixReport {
@@ -144,7 +140,6 @@ pub struct Matrix {
     horizon_ms: u64,
     labels: Option<Vec<CommitLabel>>,
     across_nodes: bool,
-    reruns: usize,
 }
 
 impl Default for Matrix {
@@ -170,7 +165,6 @@ impl Matrix {
             horizon_ms: 600_000,
             labels: None,
             across_nodes: false,
-            reruns: 0,
         }
     }
 
@@ -197,22 +191,6 @@ impl Matrix {
         self
     }
 
-    /// Run a cell whose re-run never reached its write again, up to `reruns`
-    /// more times. A scenario whose store set has ports beside the durable
-    /// store (a process registry, a session catalog) is only as
-    /// deterministic as those ports' calls, which the deployment's
-    /// quiescence does not see: a re-run may then take another order up to
-    /// the cut. Each re-run is a fresh run. When none reaches the write,
-    /// the matrix records `reruns` fresh uncut runs (once per matrix): if
-    /// one of them does not reach the point either, the point is not part
-    /// of the run's every ordering, and the cut is reported
-    /// [`MatrixReport::unstable`] instead of as a cell; otherwise the cell
-    /// fails as unreached.
-    pub fn reruns(mut self, reruns: usize) -> Self {
-        self.reruns = reruns;
-        self
-    }
-
     /// Give each run this much virtual time to finish.
     pub fn horizon(mut self, horizon: Duration) -> Self {
         self.horizon_ms = horizon.as_millis() as u64;
@@ -230,8 +208,6 @@ impl Matrix {
             baseline.trace
         );
         let mut cells = Vec::new();
-        let mut unstable = Vec::new();
-        let mut uncut_points: Option<Vec<Vec<CutPoint>>> = None;
         for point in cut_points(&baseline.writes, self.across_nodes)
             .into_iter()
             .filter(|point| {
@@ -246,30 +222,7 @@ impl Matrix {
                 .copied()
                 .filter(|fault| applies(point.kind, *fault))
             {
-                let mut run = self.run_one(&make(), Some((&point, fault))).await;
-                for _ in 0..self.reruns {
-                    if run.verdict != Verdict::Unreached {
-                        break;
-                    }
-                    run = self.run_one(&make(), Some((&point, fault))).await;
-                }
-                if run.verdict == Verdict::Unreached && self.reruns > 0 {
-                    if uncut_points.is_none() {
-                        let mut runs = Vec::new();
-                        for _ in 0..self.reruns {
-                            let uncut = self.run_one(&make(), None).await;
-                            runs.push(cut_points(&uncut.writes, self.across_nodes));
-                        }
-                        uncut_points = Some(runs);
-                    }
-                    if uncut_points
-                        .as_ref()
-                        .is_some_and(|runs| runs.iter().any(|points| !points.contains(&point)))
-                    {
-                        unstable.push((point.clone(), fault));
-                        continue;
-                    }
-                }
+                let run = self.run_one(&make(), Some((&point, fault))).await;
                 cells.push(Cell {
                     point: point.clone(),
                     fault,
@@ -281,7 +234,6 @@ impl Matrix {
         MatrixReport {
             baseline: baseline.writes,
             cells,
-            unstable,
         }
     }
 

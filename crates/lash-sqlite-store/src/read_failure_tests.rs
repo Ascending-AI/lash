@@ -299,7 +299,10 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
             StoreOptions::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
             lash_core_execution::FleetFormat::writable(),
-            Some(pauses.clone()),
+            crate::testing::ConnectionHooks {
+                pauses: Some(pauses.clone()),
+                inline_calls: false,
+            },
         )
         .await
         .expect("open store with a read seam"),

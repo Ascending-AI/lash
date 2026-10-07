@@ -153,20 +153,6 @@ pub const MODES: [Fault; 8] = [
 /// The virtual time a cell may take before the matrix calls it stalled.
 const HORIZON: Duration = Duration::from_secs(600);
 
-/// How often a cell whose re-run did not reach its cut runs again, and how
-/// many fresh uncut runs decide whether its point is reached reliably: the
-/// registry and catalog calls of a run are outside the deployment's
-/// quiescence, so two runs of one seed may order concurrent actors
-/// differently, and take a little more or less virtual time, before the
-/// cut.
-const RERUNS: usize = 4;
-
-/// Held by every matrix run of one test binary, so its cases run one at a
-/// time: a run's registry and catalog calls go to SQLite connection threads
-/// outside the deployment's quiescence, and cases run side by side starve
-/// those threads until a re-run leaves its recorded path before its cut.
-static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 /// The seeds a sweep runs: `LASH_CRASH_MATRIX_SEEDS` of them (default 2),
 /// from 0.
 #[must_use]
@@ -215,11 +201,9 @@ pub async fn run_case(case: Case, seed: u64, modes: &[Fault]) -> CaseReport {
 
 /// [`run_case`] over `dialect`.
 pub async fn run_case_on(case: Case, seed: u64, modes: &[Fault], dialect: &Dialect) -> CaseReport {
-    let _serial = SERIAL.lock().await;
     let report = Matrix::new()
         .faults(modes)
         .horizon(HORIZON)
-        .reruns(RERUNS)
         .run(|| Deployment::new(case, seed, dialect.clone()))
         .await;
     CaseReport { case, seed, report }
@@ -238,7 +222,7 @@ pub async fn assert_case_on(case: Case, dialect: &Dialect) -> Vec<(u64, usize)> 
         let run = run_case_on(case, seed, &MODES, dialect).await;
         let labels = run.report.labels();
         eprintln!(
-            "crash matrix {} seed {seed}: {} cells over {} labels ({}), {} unstable cuts",
+            "crash matrix {} seed {seed}: {} cells over {} labels ({})",
             case.name(),
             run.report.cells.len(),
             labels.len(),
@@ -247,14 +231,7 @@ pub async fn assert_case_on(case: Case, dialect: &Dialect) -> Vec<(u64, usize)> 
                 .map(|label| label.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
-            run.report.unstable.len()
         );
-        for (point, fault) in &run.report.unstable {
-            eprintln!(
-                "crash matrix {} seed {seed}: {point} {fault} is unstable: some uncut run does not reach it",
-                case.name()
-            );
-        }
         // A cell an open finding explains is reported, not failed; every
         // other cell must hold.
         let mut held = run.report.clone();

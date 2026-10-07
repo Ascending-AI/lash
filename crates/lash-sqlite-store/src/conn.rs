@@ -512,6 +512,8 @@ pub(crate) struct SqliteConnection {
     fence: Arc<WriterFence>,
     #[cfg(feature = "testing")]
     pauses: Option<crate::testing::SqlitePauses>,
+    #[cfg(feature = "testing")]
+    inline_calls: bool,
 }
 
 impl SqliteConnection {
@@ -544,18 +546,26 @@ impl SqliteConnection {
             target,
             policy,
             #[cfg(feature = "testing")]
-            None,
+            crate::testing::ConnectionHooks::default(),
         )
         .await
     }
 
     #[cfg(feature = "testing")]
-    pub(crate) async fn open_with_pauses(
+    pub(crate) async fn open_with_hooks(
         target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
-        pauses: Option<crate::testing::SqlitePauses>,
+        hooks: crate::testing::ConnectionHooks,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_configured(target, policy, pauses).await
+        Self::open_configured(target, policy, hooks).await
+    }
+
+    /// This connection, running each call to its answer before its caller
+    /// goes on when `inline_calls` is set.
+    #[cfg(feature = "testing")]
+    pub(crate) fn with_inline_calls(mut self, inline_calls: bool) -> Self {
+        self.inline_calls = inline_calls;
+        self
     }
 
     /// One open path for every target: a `memdb` database answers the WAL
@@ -564,7 +574,7 @@ impl SqliteConnection {
     async fn open_configured(
         target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
-        #[cfg(feature = "testing")] pauses: Option<crate::testing::SqlitePauses>,
+        #[cfg(feature = "testing")] hooks: crate::testing::ConnectionHooks,
     ) -> tokio_rusqlite::Result<Self> {
         let gate = write_gate(target);
         let reads = read_gate(target);
@@ -592,7 +602,9 @@ impl SqliteConnection {
             read_gate: reads,
             fence: WriterFence::new(),
             #[cfg(feature = "testing")]
-            pauses,
+            pauses: hooks.pauses,
+            #[cfg(feature = "testing")]
+            inline_calls: hooks.inline_calls,
         })
     }
 
@@ -625,6 +637,8 @@ impl SqliteConnection {
             fence: WriterFence::new(),
             #[cfg(feature = "testing")]
             pauses: None,
+            #[cfg(feature = "testing")]
+            inline_calls: false,
         })
     }
 
@@ -687,6 +701,20 @@ impl SqliteConnection {
         closed
     }
 
+    /// Run `f` on the connection thread; with inline calls, to its answer
+    /// before the caller goes on.
+    async fn run<T, F>(&self, f: F) -> tokio_rusqlite::Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> rusqlite::Result<T> + Send + 'static,
+    {
+        #[cfg(feature = "testing")]
+        if self.inline_calls {
+            return self.inner.call_inline(f);
+        }
+        self.inner.call(f).await
+    }
+
     /// The closure returns `rusqlite::Result<T>`; this method flattens tokio-rusqlite's
     /// wrapper so callers handle a single `rusqlite::Error`.
     /// Use for single statements, read queries, and `execute_batch`.
@@ -697,14 +725,13 @@ impl SqliteConnection {
     {
         let read_gate = Arc::clone(&self.read_gate);
         flatten(
-            self.inner
-                .call(move |c| {
-                    let _read_gate = read_gate
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    Ok(f(c))
-                })
-                .await,
+            self.run(move |c| {
+                let _read_gate = read_gate
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                Ok(f(c))
+            })
+            .await,
         )
     }
 
@@ -725,17 +752,16 @@ impl SqliteConnection {
     {
         let read_gate = Arc::clone(&self.read_gate);
         flatten(
-            self.inner
-                .call(move |c| {
-                    let _read_gate = read_gate
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let tx = c.transaction_with_behavior(TransactionBehavior::Deferred)?;
-                    let value = f(&tx)?;
-                    tx.rollback()?;
-                    Ok(Ok(value))
-                })
-                .await,
+            self.run(move |c| {
+                let _read_gate = read_gate
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let tx = c.transaction_with_behavior(TransactionBehavior::Deferred)?;
+                let value = f(&tx)?;
+                tx.rollback()?;
+                Ok(Ok(value))
+            })
+            .await,
         )
     }
 
@@ -769,20 +795,19 @@ impl SqliteConnection {
         let write_gate = Arc::clone(&self.write_gate);
         let read_gate = Arc::clone(&self.read_gate);
         let fleet = flatten(
-            self.inner
-                .call(move |c| {
-                    let _read_gate = read_gate
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let _write_gate = write_gate
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                    let fleet = f(&tx)?;
-                    tx.commit()?;
-                    Ok(Ok(fleet))
-                })
-                .await,
+            self.run(move |c| {
+                let _read_gate = read_gate
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _write_gate = write_gate
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                let fleet = f(&tx)?;
+                tx.commit()?;
+                Ok(Ok(fleet))
+            })
+            .await,
         )?;
         let armed = ArmedFence { writable };
         if *self.fence.armed.get_or_init(|| armed) != armed {
@@ -831,58 +856,57 @@ impl SqliteConnection {
         #[cfg(feature = "testing")]
         let pauses = self.pauses.clone();
         flatten(
-            self.inner
-                .call(move |c| {
-                    let _read_gate = read_gate
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    #[cfg(feature = "perf-witness")]
-                    let waiting_since = Instant::now();
-                    let write_gate = write_gate
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    #[cfg(feature = "perf-witness")]
-                    let wait = waiting_since.elapsed();
-                    #[cfg(feature = "perf-witness")]
-                    let holding_since = Instant::now();
-                    let result = (|| {
-                        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                        let fleet = fence.check(&tx)?;
-                        #[cfg(feature = "testing")]
-                        if let Some(pauses) = pauses.as_ref() {
-                            pauses.reach_after_fence();
-                        }
-                        let tx = FencedTx {
-                            tx,
-                            fleet,
-                            writable: fence.writable(),
-                        };
-                        let outcome = f(&tx)?;
-                        let value = match outcome {
-                            TxOutcome::Commit(value) => {
-                                tx.tx.commit()?;
-                                value
-                            }
-                            TxOutcome::Rollback(value) => {
-                                tx.tx.rollback()?;
-                                value
-                            }
-                        };
-                        Ok(Ok(value))
-                    })();
-                    #[cfg(feature = "perf-witness")]
-                    let hold = holding_since.elapsed();
-                    drop(write_gate);
-                    #[cfg(feature = "perf-witness")]
-                    record_gate_timing(wait, hold);
-                    if result.is_ok()
-                        && let Some(checkpoint) = &checkpoint
-                    {
-                        checkpoint.commits.fetch_add(1, Ordering::Release);
+            self.run(move |c| {
+                let _read_gate = read_gate
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                #[cfg(feature = "perf-witness")]
+                let waiting_since = Instant::now();
+                let write_gate = write_gate
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                #[cfg(feature = "perf-witness")]
+                let wait = waiting_since.elapsed();
+                #[cfg(feature = "perf-witness")]
+                let holding_since = Instant::now();
+                let result = (|| {
+                    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                    let fleet = fence.check(&tx)?;
+                    #[cfg(feature = "testing")]
+                    if let Some(pauses) = pauses.as_ref() {
+                        pauses.reach_after_fence();
                     }
-                    result
-                })
-                .await,
+                    let tx = FencedTx {
+                        tx,
+                        fleet,
+                        writable: fence.writable(),
+                    };
+                    let outcome = f(&tx)?;
+                    let value = match outcome {
+                        TxOutcome::Commit(value) => {
+                            tx.tx.commit()?;
+                            value
+                        }
+                        TxOutcome::Rollback(value) => {
+                            tx.tx.rollback()?;
+                            value
+                        }
+                    };
+                    Ok(Ok(value))
+                })();
+                #[cfg(feature = "perf-witness")]
+                let hold = holding_since.elapsed();
+                drop(write_gate);
+                #[cfg(feature = "perf-witness")]
+                record_gate_timing(wait, hold);
+                if result.is_ok()
+                    && let Some(checkpoint) = &checkpoint
+                {
+                    checkpoint.commits.fetch_add(1, Ordering::Release);
+                }
+                result
+            })
+            .await,
         )
     }
 }

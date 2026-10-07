@@ -442,3 +442,12 @@ impl SqlitePauses {
         }
     }
 }
+
+/// The test-only hooks installed on a connection at open.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ConnectionHooks {
+    pub(crate) pauses: Option<SqlitePauses>,
+    /// Run every call to its answer before its caller goes on
+    /// ([`crate::SqliteStoreSetOptions::inline_calls`]).
+    pub(crate) inline_calls: bool,
+}

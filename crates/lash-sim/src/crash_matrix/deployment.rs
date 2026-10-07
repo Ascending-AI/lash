@@ -189,13 +189,20 @@ pub fn isolated_url(keep: &Keep) -> Option<String> {
 }
 
 /// The backend of a deployment over a fresh SQLite memory store set on
-/// `clock`, and the store set's durable store.
+/// `clock`, and the store set's durable store. Each store call runs to its
+/// answer before its caller goes on, so the deployment's one runtime thread
+/// sees its calls finish in the order it issued them, and its clock never
+/// moves while one is pending.
 ///
 /// # Errors
 ///
 /// The store set does not open or the backend does not assemble.
 pub async fn sqlite(clock: Arc<SimClock>) -> Result<(Backend, Arc<dyn DurableStore>), String> {
-    let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
+    let options = lash_sqlite_store::SqliteStoreSetOptions {
+        inline_calls: true,
+        ..lash_sqlite_store::SqliteStoreSetOptions::memory()
+    };
+    let stores = lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(options, clock)
         .await
         .map_err(|error| error.to_string())?;
     let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());

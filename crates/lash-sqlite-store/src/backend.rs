@@ -39,6 +39,14 @@ pub struct SqliteStoreSetOptions {
     /// every session store its factory opens.
     #[cfg(feature = "testing")]
     pub pauses: Option<crate::testing::SqlitePauses>,
+    /// Run every call of the store set's connections to its answer before
+    /// its caller goes on, blocking the caller's thread as an in-process
+    /// database would. A simulation on one runtime thread then sees each
+    /// store call finish in the order it issued them, before its virtual
+    /// clock can move. Never combine with `pauses`: a paused call would
+    /// block its caller's thread.
+    #[cfg(feature = "testing")]
+    pub inline_calls: bool,
     /// Observes, pauses, crashes or fails the open-time migration at each of
     /// its steps.
     #[cfg(feature = "testing")]
@@ -202,7 +210,10 @@ impl SqliteStoreSet {
                 Arc::clone(&clock),
                 lash_core_execution::FleetFormat::writable(),
                 #[cfg(feature = "testing")]
-                options.pauses.clone(),
+                crate::testing::ConnectionHooks {
+                    pauses: options.pauses.clone(),
+                    inline_calls: options.inline_calls,
+                },
             )
             .await?,
         );

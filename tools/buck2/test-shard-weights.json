@@ -801,6 +801,19 @@
     "tool_catalog::tests::rlm_catalog_rejects_members_without_tool_binding": 30,
     "tool_catalog::tests::typescript_tool_prose_is_rendered_verbatim": 49
   },
+  "//crates/lash-sim:crash_matrix__test": {
+    "a_code_cell_cut_at_every_label_resumes_from_its_snapshot": 5327,
+    "a_code_cell_killed_in_its_body_cut_at_every_label_settles_interrupted": 9786,
+    "a_drained_node_cut_at_every_label_releases_its_actors_to_the_next_once": 35807,
+    "a_process_cut_at_every_label_resolves_waits_and_cascades_once": 41652,
+    "a_process_signalled_and_cancelled_cut_at_every_label_ends_once": 6502,
+    "a_session_close_cut_at_every_label_ends_at_its_tombstone": 16794,
+    "a_tool_round_cut_at_every_label_runs_no_once_body_twice": 24642,
+    "a_trigger_occurrence_cut_at_every_label_starts_each_delivery_once": 4901,
+    "a_turn_cancel_cut_at_every_label_ends_the_turn_once": 4734,
+    "a_turn_cut_at_every_label_commits_once": 5088,
+    "every_emitted_commit_label_is_cut_by_some_case": 423
+  },
   "//crates/lash-typescript:test262_full__test": {
     "corpus_partition_00": 58324,
     "corpus_partition_01": 10490,
