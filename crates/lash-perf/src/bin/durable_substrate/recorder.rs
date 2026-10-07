@@ -385,6 +385,20 @@ impl DurableReads for RecordingStore {
     ) -> Result<Vec<ParkEventRow>, DurableError> {
         self.inner.park_events(after, limit).await
     }
+
+    async fn prompt_snapshot(
+        &self,
+        call: &lash_durable::domain::PromptCallKey,
+    ) -> Result<Option<lash_durable::domain::PromptSnapshotRow>, DurableError> {
+        self.inner.prompt_snapshot(call).await
+    }
+
+    async fn prompt_texts(
+        &self,
+        hashes: &[String],
+    ) -> Result<Vec<lash_durable::domain::PromptText>, DurableError> {
+        self.inner.prompt_texts(hashes).await
+    }
 }
 
 /// A store set whose durable store is a [`RecordingStore`]; every other

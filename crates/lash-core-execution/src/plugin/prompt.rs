@@ -49,6 +49,16 @@ impl SectionText {
         Self::Text(text.into())
     }
 
+    /// The canonical form: empty text is an omission. Any other text is
+    /// kept byte for byte.
+    #[must_use]
+    pub fn normalized(self) -> Self {
+        match self {
+            Self::Text(text) if text.is_empty() => Self::Omit,
+            other => other,
+        }
+    }
+
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Self::Text(text) => Some(text),
@@ -136,9 +146,14 @@ pub enum PromptCompositionError {
     /// The call's final section text exceeds the total limit.
     #[error("the prompt's sections total {bytes} bytes, above the limit of {limit}")]
     TotalTooLarge { bytes: u64, limit: u32 },
-    /// Rendering outlasted the call's render budget.
+    /// Rendering outlasted the call's render budget. A render still running
+    /// then finishes unseen.
     #[error("prompt rendering outlasted its {budget_ms} ms budget")]
     BudgetExceeded { budget_ms: u32 },
+    /// The render pool's queue of `capacity` renders is full, or the pool
+    /// dropped a render without running it.
+    #[error("the prompt render pool cannot take this call's renders (capacity {capacity})")]
+    RenderersBusy { capacity: u32 },
 }
 
 /// A section a plugin registers: its local key, where it goes when the host
@@ -766,6 +781,22 @@ impl ComposedSection {
     }
 }
 
+/// Run one renderer or wrapper: its output normalized, its refusal or
+/// panic attributed to `site`.
+fn run_site(
+    site: &dyn Fn() -> Box<PromptRenderSite>,
+    render: impl FnOnce() -> Result<SectionText, PromptRenderError>,
+) -> Result<SectionText, PromptCompositionError> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(render)) {
+        Ok(Ok(text)) => Ok(text.normalized()),
+        Ok(Err(error)) => Err(PromptCompositionError::Render {
+            site: site(),
+            error,
+        }),
+        Err(_) => Err(PromptCompositionError::Panicked { site: site() }),
+    }
+}
+
 impl ResolvedPromptComposition {
     pub fn record(&self) -> &ResolvedPromptPlan {
         &self.record
@@ -774,7 +805,8 @@ impl ResolvedPromptComposition {
     /// Compose the section at `index` over `cut`: the base renderer, then
     /// each wrapper in chain order, each over the previous output. For base
     /// `R` and wrappers `A` then `B`, the final text is `B(A(R))`. Every
-    /// output is held to the per-section limit.
+    /// output is normalized ([`SectionText::normalized`]) and held to the
+    /// per-section limit; a refusal or panic is attributed to its site.
     ///
     /// # Errors
     ///
@@ -809,13 +841,11 @@ impl ResolvedPromptComposition {
                 owner: resolved.owner.clone(),
             })
         };
-        let base = renderers
-            .base
-            .render(&cut.input_for(&resolved.owner.plugin))
-            .map_err(|error| PromptCompositionError::Render {
-                site: base_site(),
-                error,
-            })?;
+        let base = run_site(&base_site, || {
+            renderers
+                .base
+                .render(&cut.input_for(&resolved.owner.plugin))
+        })?;
         within(&base_site, &base)?;
         let target = PromptWrapTarget {
             section: &resolved.section,
@@ -832,12 +862,10 @@ impl ResolvedPromptComposition {
                     ordinal: wrap.ordinal,
                 })
             };
-            value = wrapper
-                .wrap(&cut.input_for(&wrap.owner.plugin), target, value)
-                .map_err(|error| PromptCompositionError::Render {
-                    site: site(),
-                    error,
-                })?;
+            let previous = value;
+            value = run_site(&site, move || {
+                wrapper.wrap(&cut.input_for(&wrap.owner.plugin), target, previous)
+            })?;
             within(&site, &value)?;
             wraps.push((wrap.wrap.clone(), value.clone()));
         }
@@ -858,6 +886,13 @@ impl super::PluginRegistrar {
         PromptRegistrations { reg: self }
     }
 }
+
+mod composer;
+
+pub use composer::{
+    ComposedPrompt, LoadedPromptSnapshot, PROMPT_SECTION_SEPARATOR, PromptRenderPool,
+    PromptSnapshotLoadError, load_prompt_snapshot,
+};
 
 #[cfg(test)]
 mod tests;

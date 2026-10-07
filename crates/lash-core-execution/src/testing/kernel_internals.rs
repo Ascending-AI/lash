@@ -282,3 +282,28 @@ pub async fn complete_tool_output(
         .await
         .map(|result| result.completed.model_return)
 }
+
+/// One plugin's prompt registrations, as its `register` makes them.
+pub type PromptRegistration =
+    Box<dyn Fn(&mut crate::plugin::PluginRegistrar) -> Result<(), PluginError>>;
+
+/// The prompt catalog of `plugins`, each registered under its id at behavior
+/// revision one, in order, as a session build registers them.
+pub fn prompt_catalog(
+    plugins: Vec<(&'static str, PromptRegistration)>,
+) -> Result<crate::plugin::prompt::PromptCatalog, PluginError> {
+    let mut contributions = crate::plugin::PluginContributions::default();
+    for (id, register) in plugins {
+        let mut reg =
+            crate::plugin::PluginRegistrar::new(crate::store::plugin_writers::PluginRevision::new(
+                id,
+                crate::plugin::BehaviorRevision::ONE,
+            ));
+        reg.contributions = contributions;
+        register(&mut reg)?;
+        contributions = reg.contributions;
+    }
+    Ok(crate::plugin::prompt::PromptCatalog::new(
+        contributions.prompt,
+    ))
+}

@@ -49,6 +49,8 @@ pub fn validate_session_id(session_id: &SessionId) -> Result<(), StoreError> {
     Default,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Hash,
     serde::Serialize,
     serde::Deserialize,

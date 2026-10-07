@@ -842,10 +842,11 @@ pub mod plugins {
     };
     /// A session's registered sections and the one-call composition the
     /// runtime resolves from them: the cut it builds from committed state,
-    /// the resolved plan and each section's composed chain.
+    /// the resolved plan, each section's composed chain, the bounded pool
+    /// renders run on and the composed prompt with its snapshot.
     pub use lash_core::plugin::prompt::{
-        ComposedSection, PromptCatalog, PromptCut, PromptCutParts, PromptSectionInfo,
-        ResolvedPromptComposition,
+        ComposedPrompt, ComposedSection, PromptCatalog, PromptCut, PromptCutParts,
+        PromptRenderPool, PromptSectionInfo, ResolvedPromptComposition,
     };
     /// The tool hook phases (ADR 0128): argument transforms, before-checks
     /// over the prepared call, result transforms, and after-checks over the

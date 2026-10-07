@@ -81,6 +81,10 @@ law!(
     |store, _advance| { laws::a_session_close_moves_one_step_at_a_time(store) }
 );
 law!(
+    prompt_snapshot_roots_survive_phase_pruning_until_released,
+    |store, _advance| { laws::prompt_snapshot_roots_survive_phase_pruning_until_released(store) }
+);
+law!(
     a_node_claims_only_actors_whose_formats_it_decodes,
     |store, _advance| { laws::a_node_claims_only_actors_whose_formats_it_decodes(store) }
 );

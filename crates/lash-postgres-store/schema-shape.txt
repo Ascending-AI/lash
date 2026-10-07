@@ -289,6 +289,25 @@ table lash_processes
   column written_epoch bigint nullable
   unique (start_key) where start_key is not null
   primary-key (process_id)
+table lash_prompt_snapshot_texts
+  column call_ordinal bigint not-null
+  column hash text not-null
+  column run text not-null
+  column session_id text not-null
+  primary-key (session_id, run, call_ordinal, hash)
+  foreign-key (hash) references lash_prompt_texts (hash) on delete no action
+  foreign-key (session_id, run, call_ordinal) references lash_prompt_snapshots (session_id, run, call_ordinal) on delete no action
+table lash_prompt_snapshots
+  column call_ordinal bigint not-null
+  column run text not-null
+  column session_id text not-null
+  column snapshot text not-null
+  column written_epoch bigint not-null
+  primary-key (session_id, run, call_ordinal)
+table lash_prompt_texts
+  column hash text not-null
+  column text text not-null
+  primary-key (hash)
 table lash_queued_work_batches
   column admitted_by text nullable
   column admitted_run text nullable

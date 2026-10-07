@@ -62,6 +62,7 @@ use crate::support::store_sqlx_error;
 
 mod park_events;
 pub(crate) mod processes;
+mod prompts;
 #[path = "../durable_replay.rs"]
 mod replay;
 mod run_records;
@@ -813,6 +814,7 @@ async fn apply_domain(
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write).await,
         DomainWrite::ParkEvent(write) => park_events::apply(tx, committing, write).await,
         DomainWrite::SessionMail(write) => session_mail::apply(tx, committing, write).await,
+        DomainWrite::Prompt(write) => prompts::apply(tx, committing, write).await,
     }
 }
 
@@ -1445,6 +1447,26 @@ impl DurableReads for PostgresDurableStore {
     ) -> Result<Vec<ParkEventRow>, DurableError> {
         self.within(CommitCapacity::Work, async {
             park_events::read(&mut *self.reader().await?, after, limit).await
+        })
+        .await
+    }
+
+    async fn prompt_snapshot(
+        &self,
+        call: &lash_durable::domain::PromptCallKey,
+    ) -> Result<Option<lash_durable::domain::PromptSnapshotRow>, DurableError> {
+        self.within(CommitCapacity::Work, async {
+            prompts::snapshot(&mut *self.reader().await?, call).await
+        })
+        .await
+    }
+
+    async fn prompt_texts(
+        &self,
+        hashes: &[String],
+    ) -> Result<Vec<lash_durable::domain::PromptText>, DurableError> {
+        self.within(CommitCapacity::Work, async {
+            prompts::texts(&mut *self.reader().await?, hashes).await
         })
         .await
     }

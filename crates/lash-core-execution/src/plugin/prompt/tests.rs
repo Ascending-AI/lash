@@ -2,6 +2,8 @@ use super::*;
 use crate::plugin::registrar::PluginContributions;
 use lash_sansio::sync::MutexExt;
 
+mod composer;
+
 type Register = Box<dyn Fn(&mut PluginRegistrar) -> Result<(), PluginError>>;
 
 /// Register `plugins` in order, as a session build does.

@@ -136,6 +136,12 @@ DROP TABLE IF EXISTS lash_park_events CASCADE;
 
 DROP TABLE IF EXISTS lash_exec_snapshots CASCADE;
 
+DROP TABLE IF EXISTS lash_prompt_snapshots CASCADE;
+
+DROP TABLE IF EXISTS lash_prompt_texts CASCADE;
+
+DROP TABLE IF EXISTS lash_prompt_snapshot_texts CASCADE;
+
 DROP TABLE IF EXISTS lash_turn_phases CASCADE;
 
 DROP TABLE IF EXISTS lash_waits CASCADE;

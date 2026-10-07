@@ -5,10 +5,12 @@
 Accepted. The contract of §1 to §5 is on main (FIG-5254):
 `lash-core-store/src/prompt_sections.rs` holds the recorded vocabulary, and
 `lash-core-execution/src/plugin/prompt.rs` holds the registration, resolution
-and chain contract. The rest is open work this decision depends on:
+and chain contract. The composer, its limits and the content-shared snapshot
+storage of §5 and §7 are on main too (FIG-5256):
+`lash-core-execution/src/plugin/prompt/composer.rs` and the durable `prompts`
+domain. The rest is open work this decision depends on:
 
 - FIG-5255: §6 admission at `model.start`;
-- FIG-5256: the composer, its limits and content-shared snapshot storage;
 - FIG-5257: the protocols' sections;
 - FIG-5258: tools, MCP, add-on plugins and the workbench;
 - FIG-5259: exact provider bodies for every call kind;
@@ -118,6 +120,23 @@ snapshot depends on no earlier snapshot, and nothing recomposes a request
 from it. Both records change in place until the 1.0 cut. A snapshot that
 states another version does not decode.
 
+`PromptCatalog::compose` produces both records. It renders each section's
+base text and then its wrapper chain, assembles each placement's final texts
+in plan order joined by a blank line, and normalizes: empty text is an
+omission, and any other text is kept byte for byte. A placement with no text
+carries nothing.
+
+The snapshot is stored as an audit root, one per admitted call
+(`PromptWrite::Record`, tables `prompt_snapshots`, `prompt_texts` and
+`prompt_snapshot_texts` in both dialects' baseline). Each text is stored once
+by content address, however many calls share it. A call records once; a
+second record is refused (`DomainRefusal::PromptCallRecorded`). Ending a turn,
+which prunes its phase rows, leaves its roots. Only the explicit retention,
+`PromptWrite::Release` for a turn or a whole session, removes roots, and a
+text goes with the last root that names it. `load_prompt_snapshot` reads a
+root back with every text verified against its address and calls no
+renderer.
+
 ### 6. When composition runs
 
 A prompt is composed before every new model call, including after each tool
@@ -145,6 +164,15 @@ returns `SectionText::Omit`.
 - a 2 s render budget.
 
 The host configures them in the plan. Oversize is refused, never truncated.
+
+Renders run on a bounded worker pool (`PromptRenderPool`), off the caller's
+scheduler. A full queue refuses the call (`RenderersBusy`) rather than
+growing. When the budget passes, the call fails with `BudgetExceeded`; renders
+of that call still queued never start, and one still running finishes into a
+dropped result. The pool cannot stop native code that never returns: a
+renderer that hangs holds its worker. Results are assembled in plan order,
+never in completion order, and the first failure in plan order is the one
+reported.
 
 ### 8. Compaction and direct calls
 

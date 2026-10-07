@@ -36,6 +36,7 @@ use crate::conn::{FencedTx, SqliteConnection, TxOutcome, cached_execute};
 
 mod park_events;
 pub(crate) mod processes;
+mod prompts;
 mod run_records;
 mod session_close;
 mod session_mail;
@@ -48,6 +49,7 @@ mod waits;
 // The domain tables I0 creates in the durable core database (FIG-5194);
 // each domain's own lane adds its tables beside them.
 pub(crate) use park_events::TABLES as PARK_EVENTS_TABLES;
+pub(crate) use prompts::TABLES as PROMPT_SNAPSHOTS_TABLES;
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
 pub(crate) use session_close::TABLES as SESSION_CLOSE_TABLES;
 pub(crate) use snapshots::TABLES as EXEC_SNAPSHOTS_TABLES;
@@ -594,6 +596,7 @@ fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWr
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write),
         DomainWrite::ParkEvent(write) => park_events::apply(tx, committing, write),
         DomainWrite::SessionMail(write) => session_mail::apply(tx, committing, write),
+        DomainWrite::Prompt(write) => prompts::apply(tx, committing, write),
     }
 }
 
@@ -1208,6 +1211,22 @@ impl DurableReads for SqliteDurableStore {
     ) -> Result<Vec<ParkEventRow>, DurableError> {
         self.read(move |tx| park_events::read(tx, after, limit))
             .await
+    }
+
+    async fn prompt_snapshot(
+        &self,
+        call: &lash_durable::domain::PromptCallKey,
+    ) -> Result<Option<lash_durable::domain::PromptSnapshotRow>, DurableError> {
+        let call = call.clone();
+        self.read(move |tx| prompts::snapshot(tx, &call)).await
+    }
+
+    async fn prompt_texts(
+        &self,
+        hashes: &[String],
+    ) -> Result<Vec<lash_durable::domain::PromptText>, DurableError> {
+        let hashes = hashes.to_vec();
+        self.read(move |tx| prompts::texts(tx, &hashes)).await
     }
 }
 

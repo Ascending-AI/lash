@@ -1,0 +1,244 @@
+//! SNAPSHOT (FIG-5256): an admitted call's prompt snapshot reads back from
+//! the store with every base, wrapper and final text byte for byte, and no
+//! renderer or wrapper runs to produce it. Unchanged text is shared across
+//! calls.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use lash_durable::domain::PromptCallKey;
+use lash_durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
+
+use crate::plugin::prompt::{
+    CommittedPluginNamespace, ComposedPrompt, OfferedTools, ProjectedHistoryStats, PromptCall,
+    PromptCatalog, PromptCut, PromptCutParts, PromptInput, PromptModel, PromptPlacement,
+    PromptPlan, PromptPurpose, PromptRenderError, PromptRenderPool, PromptSectionId,
+    PromptSectionKey, PromptSectionSpec, PromptTextRef, PromptWrapKey, PromptWrapSpec,
+    PromptWrapTarget, SectionText, load_prompt_snapshot,
+};
+use crate::{PromptRegistration, SessionId};
+
+const SESSION: &str = "prompt-snapshot";
+
+fn key(local: &str) -> PromptSectionKey {
+    PromptSectionKey::new(local).expect("valid section key")
+}
+
+fn cut(call: u32, note: &str) -> Arc<PromptCut> {
+    Arc::new(PromptCut::new(PromptCutParts {
+        call: PromptCall {
+            session_id: SessionId::from(SESSION),
+            frame: None,
+            run: None,
+            turn: None,
+            iteration: 0,
+            call,
+            purpose: PromptPurpose::Turn,
+        },
+        config: crate::AdmittedPluginConfig::default(),
+        session: None,
+        offered: OfferedTools::default(),
+        model: PromptModel::default(),
+        history: ProjectedHistoryStats::default(),
+        namespaces: BTreeMap::from([(
+            "memory".to_string(),
+            CommittedPluginNamespace::new(
+                u64::from(call),
+                BTreeMap::from([("note".to_string(), serde_json::json!(note))]),
+            ),
+        )]),
+    }))
+}
+
+/// A protocol intro, a memory note and a memory wrapper over the intro,
+/// each counting its runs in `runs`.
+fn catalog(runs: &Arc<AtomicUsize>) -> PromptCatalog {
+    let intro = {
+        let runs = Arc::clone(runs);
+        Arc::new(
+            move |_: &PromptInput<'_>| -> Result<SectionText, PromptRenderError> {
+                runs.fetch_add(1, Ordering::SeqCst);
+                Ok(SectionText::text("protocol intro"))
+            },
+        )
+    };
+    let note = {
+        let runs = Arc::clone(runs);
+        Arc::new(
+            move |input: &PromptInput<'_>| -> Result<SectionText, PromptRenderError> {
+                runs.fetch_add(1, Ordering::SeqCst);
+                let note = input.state().get_as::<String>("note")?.unwrap_or_default();
+                Ok(SectionText::Text(format!("note: {note}")))
+            },
+        )
+    };
+    let wrap = {
+        let runs = Arc::clone(runs);
+        Arc::new(
+            move |_: &PromptInput<'_>,
+                  _: PromptWrapTarget<'_>,
+                  previous: SectionText|
+                  -> Result<SectionText, PromptRenderError> {
+                runs.fetch_add(1, Ordering::SeqCst);
+                Ok(SectionText::Text(format!(
+                    "{} (with memory)",
+                    previous.as_text().unwrap_or_default()
+                )))
+            },
+        )
+    };
+    let plugins: Vec<(&'static str, PromptRegistration)> = vec![
+        (
+            "lash.protocol",
+            Box::new(move |reg| {
+                reg.prompt().section(
+                    PromptSectionSpec::new(key("intro"), PromptPlacement::InitialInstructions),
+                    intro.clone(),
+                )
+            }),
+        ),
+        (
+            "memory",
+            Box::new(move |reg| {
+                reg.prompt().section(
+                    PromptSectionSpec::new(key("note"), PromptPlacement::CurrentContext),
+                    note.clone(),
+                )?;
+                reg.prompt().wrap(
+                    PromptWrapSpec::new(
+                        PromptWrapKey::new("intro").expect("valid wrap key"),
+                        PromptSectionId::new("lash.protocol", key("intro")),
+                    ),
+                    wrap.clone(),
+                )
+            }),
+        ),
+    ];
+    crate::prompt_catalog(plugins).expect("the catalog registers")
+}
+
+fn call_key(call: u32) -> PromptCallKey {
+    PromptCallKey {
+        session: SessionId::from(SESSION),
+        run: lash_sansio::TurnId::from("prompt-turn"),
+        call,
+    }
+}
+
+#[tokio::test]
+async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_renderer() {
+    let runs = Arc::new(AtomicUsize::new(0));
+    let catalog = catalog(&runs);
+    let pool = PromptRenderPool::shared();
+    let mut composed = Vec::<ComposedPrompt>::new();
+    for (call, note) in [(1, "first"), (2, "second")] {
+        composed.push(
+            catalog
+                .compose(
+                    &PromptPlan::default(),
+                    &PromptPurpose::Turn,
+                    cut(call, note),
+                    pool,
+                )
+                .await
+                .expect("the call composes"),
+        );
+    }
+    assert_eq!(runs.load(Ordering::SeqCst), 6, "three renders per call");
+
+    let stores = crate::support::sqlite_memory_store_set().await;
+    let durable = stores.durable_store();
+    let formats = FormatSet::new("prompt-snapshot-formats");
+    let actor = ActorKey::session(SESSION).expect("a session actor key");
+    let mut create = MailTx::new();
+    create.create_actor(actor.clone(), formats.clone());
+    lash_durable::DurableStore::commit_mail(&durable, create, CommitLabel::new("law.create"))
+        .await
+        .expect("create the session actor");
+    let node = lash_durable::DurableStore::register_node(
+        &durable,
+        &NodeSpec {
+            node: NodeId::new("prompt-owner"),
+            decodes: vec![formats],
+            ttl_millis: 15_000,
+        },
+    )
+    .await
+    .expect("register the owner");
+    let claimed = lash_durable::DurableStore::claim(&durable, &node, 1)
+        .await
+        .expect("claim the session");
+    let mut tx = lash_durable::DurableStore::begin(&durable, &actor, claimed[0].epoch)
+        .await
+        .expect("begin the admission");
+    for (call, prompt) in (1..).zip(&composed) {
+        tx.write(prompt.record(call_key(call)).expect("the snapshot encodes"));
+    }
+    lash_durable::DurableStore::commit(&durable, tx, CommitLabel::new("model.start"))
+        .await
+        .expect("admit both calls");
+
+    // A second runtime over the same store reads the snapshots back.
+    let reader = stores.reopen().await.expect("reopen").durable_store();
+    for (call, prompt) in (1..).zip(&composed) {
+        let loaded = load_prompt_snapshot(&reader, &call_key(call))
+            .await
+            .expect("the snapshot loads")
+            .expect("the admitted call has a snapshot");
+        assert_eq!(loaded.snapshot, prompt.snapshot);
+        assert_eq!(loaded.texts, prompt.texts);
+        let finals = |placement| {
+            loaded
+                .snapshot
+                .sections
+                .iter()
+                .filter(|section| section.placement == placement)
+                .filter_map(|section| loaded.text(&section.value))
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        };
+        assert_eq!(
+            Some(finals(PromptPlacement::InitialInstructions)),
+            prompt.initial_instructions
+        );
+        assert_eq!(
+            Some(finals(PromptPlacement::CurrentContext)),
+            prompt.current_context
+        );
+        let intro = &loaded.snapshot.sections[0];
+        assert_eq!(loaded.text(&intro.base), Some("protocol intro"));
+        assert_eq!(
+            loaded.text(&intro.wraps[0].output),
+            Some("protocol intro (with memory)")
+        );
+    }
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        6,
+        "reading a snapshot back runs no renderer or wrapper"
+    );
+
+    let shared = PromptTextRef::of("protocol intro (with memory)")
+        .blob
+        .as_str()
+        .to_owned();
+    for call in [1, 2] {
+        let row = lash_durable::DurableReads::prompt_snapshot(&reader, &call_key(call))
+            .await
+            .expect("read the root")
+            .expect("the root is retained");
+        assert!(
+            row.texts.contains(&shared),
+            "call {call} roots the unchanged text"
+        );
+    }
+    assert_eq!(
+        lash_durable::DurableReads::prompt_texts(&reader, std::slice::from_ref(&shared))
+            .await
+            .expect("read the shared text")
+            .len(),
+        1,
+        "the unchanged text is stored once"
+    );
+}

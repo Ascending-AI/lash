@@ -993,6 +993,38 @@ CREATE TABLE IF NOT EXISTS lash_exec_snapshots (
     written_epoch BIGINT NOT NULL
 );
 
+-- Prompt snapshots (P2, FIG-5256; ADR 0133 §5): one audit root per admitted
+-- model call, section text stored once by content address, and an edge from
+-- each root to every text it references. Ending a turn leaves its roots; only
+-- an explicit release removes them, and a text goes with its last edge.
+CREATE TABLE IF NOT EXISTS lash_prompt_snapshots (
+    session_id TEXT NOT NULL,
+    run TEXT NOT NULL,
+    call_ordinal BIGINT NOT NULL CONSTRAINT ck_lash_prompt_snapshots_call
+        CHECK (call_ordinal BETWEEN 0 AND 4294967295),
+    snapshot TEXT NOT NULL,
+    written_epoch BIGINT NOT NULL,
+    PRIMARY KEY (session_id, run, call_ordinal)
+);
+
+CREATE TABLE IF NOT EXISTS lash_prompt_texts (
+    hash TEXT PRIMARY KEY,
+    text TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS lash_prompt_snapshot_texts (
+    session_id TEXT NOT NULL,
+    run TEXT NOT NULL,
+    call_ordinal BIGINT NOT NULL,
+    hash TEXT NOT NULL REFERENCES lash_prompt_texts(hash),
+    PRIMARY KEY (session_id, run, call_ordinal, hash),
+    FOREIGN KEY (session_id, run, call_ordinal)
+        REFERENCES lash_prompt_snapshots(session_id, run, call_ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lash_prompt_snapshot_texts_hash
+    ON lash_prompt_snapshot_texts (hash);
+
 -- Turn phase state (V0, FIG-5170; then L3): a 1:1 side table of
 -- lash_session_runs while the turn is unfinished. The run row stays the one
 -- admission authority (ux_lash_session_runs_unfinished); this row carries the

@@ -29,6 +29,7 @@
 mod keys;
 pub mod park_events;
 pub mod processes;
+pub mod prompts;
 pub mod run_records;
 pub mod session_close;
 pub mod session_mail;
@@ -43,6 +44,7 @@ pub use processes::{
     CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite, RedriveAnswer,
     RedriveRequest, SIGNAL_MAIL,
 };
+pub use prompts::{PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite};
 pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
 pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
 pub use session_mail::{
@@ -93,6 +95,9 @@ pub enum DomainWrite {
     ParkEvent(ParkEventWrite),
     /// L3s: the session's admission of its mail.
     SessionMail(SessionMailWrite),
+    /// P2 (FIG-5256): a model call's prompt snapshot root and its shared
+    /// text, and the explicit retention that releases them.
+    Prompt(PromptWrite),
 }
 
 /// One conditional non-owner write inside a [`MailTx`](crate::MailTx).
@@ -321,6 +326,12 @@ pub enum DomainRefusal {
         /// The session.
         session: SessionId,
     },
+    /// A prompt record named a call that already has its snapshot.
+    #[error("call {} of turn {} in session {} already has a prompt snapshot", call.call, call.run, call.session)]
+    PromptCallRecorded {
+        /// The call.
+        call: PromptCallKey,
+    },
 }
 
 /// The owner's and operators' reads of domain rows, unfenced.
@@ -395,4 +406,14 @@ pub trait DurableReads: Send + Sync {
         after: Option<ParkEventSeq>,
         limit: usize,
     ) -> Result<Vec<ParkEventRow>, DurableError>;
+
+    /// P2: `call`'s prompt snapshot, while its root is retained.
+    async fn prompt_snapshot(
+        &self,
+        call: &PromptCallKey,
+    ) -> Result<Option<PromptSnapshotRow>, DurableError>;
+
+    /// P2: the stored texts among `hashes`, in `hashes` order; a hash no
+    /// root retains is absent.
+    async fn prompt_texts(&self, hashes: &[String]) -> Result<Vec<PromptText>, DurableError>;
 }
