@@ -50,7 +50,7 @@ fn runtime_feedback_composition_identity_includes_instruction_authority() {
 
 /// S14 F2: a physical-turn trace parent never becomes a tool's durable owner.
 #[test]
-fn tool_receipt_owner_stays_on_the_admitted_run_across_physical_turns() {
+fn tool_scope_owner_stays_on_the_admitted_run_across_physical_turns() {
     use lash_trace::{
         DurableTraceScope, TraceAnchor, TraceCause, TraceScopeId, TraceScopeOwner, TraceToolOwner,
     };
@@ -79,19 +79,6 @@ fn tool_receipt_owner_stays_on_the_admitted_run_across_physical_turns() {
         scopes.push(scope.scope);
     }
     assert_eq!(scopes[0], scopes[1]);
-    let request = crate::store::ToolRequestReceipt {
-        owner,
-        request_key: call_id.to_string(),
-        payload_digest: "digest".into(),
-        payload: serde_json::Value::Null,
-        scope: None,
-        context: Default::default(),
-        requested_at_ms: 2,
-    };
-    assert_eq!(
-        request.owner_key().unwrap(),
-        serde_json::to_string(&opener.admitted_scope().scope()).unwrap()
-    );
     let parent = DurableTraceScope {
         scope: TraceScopeId::admission(TraceScopeOwner::TriggerOccurrence {
             occurrence_id: "occurrence".into(),

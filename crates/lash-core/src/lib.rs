@@ -135,8 +135,7 @@ pub mod facade_support {
     /// The shift-tracing seam a durable substrate implements against (the trace runtime,
     /// a step's issue and its standing), public in every feature variant.
     pub use lash_core_execution::trace::{
-        JournalFrontier, LiveStep, RunRecordObserver, StepIssue, TraceBoundaryReceipt,
-        TraceRuntime, TraceStanding,
+        JournalFrontier, LiveStep, StepIssue, TraceBoundaryReceipt, TraceRuntime, TraceStanding,
     };
     pub use lash_core_ids::operational_metrics::StoreObserver;
     pub use lash_core_llm::core_internal::ProviderCompletionSideband;
@@ -733,7 +732,7 @@ pub use runtime::{
     RegistryScopeClose, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
     ResolvedProcessDefinition, ResolvedRun, RetainedRevision, Retention, RunAggregateWakePolicy,
     RunDefinition, RunDefinitionRefusal, RunDefinitions, RunOptionsOwner, RunOverrides,
-    RunRecordStep, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
+    RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
     RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
@@ -836,9 +835,7 @@ pub use tool_provider::{
 };
 #[doc(hidden)]
 pub mod core_internal {
-    pub use crate::runtime::{
-        ProcessRuntimeContext, ProcessRuntimePorts, RuntimeSessionServices, realize_tool_intents,
-    };
+    pub use crate::runtime::{ProcessRuntimeContext, ProcessRuntimePorts, RuntimeSessionServices};
     pub use lash_core_execution::core_internal::{
         RuntimeEffectLocalRunner, RuntimeExecutionContextRuntimeOps, StartKeyDerivation,
         attach_process_invocation_correlation, clear_process_invocation_correlation,

@@ -1,10 +1,10 @@
 //! The invocation that owns a logical Run serves calls from every cell.
-//! Requests carry values; the borrowed coordinator and issued X bodies stay
-//! on the owner's stack until Closing.
+//! Requests carry values; the Run and its running calls stay on the owner's
+//! stack until it closes.
 
 use std::sync::Arc;
 
-use futures_util::future::{Either, select};
+use futures_util::future::Either;
 mod mailbox;
 use mailbox::{Reply, Sender, channel, reply};
 
@@ -15,13 +15,13 @@ use crate::session::tool_execution::{
     ToolAggregateConsumer, ToolAggregateRequest, ToolRunAggregateCursor, ToolRunAggregatePoll,
 };
 use crate::tool_dispatch::{ProductionToolHandlers, SingletonRunError};
-use crate::tool_run::{RunCutRefusal, SegmentOrdinal};
+use crate::tool_run::RunCutRefusal;
 
 #[derive(Clone)]
 pub(super) struct ToolRunChannel(Sender<Request>);
 
 /// A request channel to the invocation's stack-owned tool Run.
-/// It carries no controller, coordinator or issued attempt future.
+/// It carries no controller, Run or running call.
 #[derive(Clone)]
 pub struct ToolRunOwner(
     ToolRunChannel,
@@ -128,12 +128,13 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    /// Drive a logical owner beside its program. The program explicitly closes
-    /// at logical termination or captures at handover. Dropping this frame on
-    /// worker loss leaves unfinished journal work to engine recovery.
+    /// Drive a logical owner beside its program: its calls run in memory
+    /// beside it, each to its own end. The program explicitly closes at
+    /// logical termination. Dropping this frame on worker loss drops every
+    /// unfinished call; the admitted execution that ran the program owns
+    /// its recovery (ADR 0132 §5, §8).
     pub fn drive_tool_run<F, Fut>(
         &self,
-        materials: Option<Arc<dyn crate::store::ToolMaterialStore>>,
         program: F,
     ) -> impl std::future::Future<Output = Result<Fut::Output, RuntimeEffectControllerError>>
     where
@@ -141,7 +142,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         Fut: std::future::Future,
     {
         Box::pin(async move {
-            let materials = materials.or_else(|| self.tool_material_store());
             let owner = self
                 .logical_run()
                 .map(|address| {
@@ -155,12 +155,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                     )
                 })?;
             let state = self.opener_state();
-            let segment = self
-                .process_event_context()
-                .and_then(|context| context.execution_write_authority.segment())
-                .unwrap_or(SegmentOrdinal(0));
             let scoped = self.dispatch.effect_controller.clone();
-            let available = self.dispatch.plugins.tool_run_revisions();
             let claim = super::execution_context::execution_claim_of(scoped.execution_scope())
                 .map_err(RuntimeEffectControllerError::from)?;
             let environment = if let Some(environment) = self.inherited_process_execution_env_ref()
@@ -174,91 +169,80 @@ impl<'run> RuntimeExecutionContext<'run> {
             } else {
                 None
             };
-            let handlers = Arc::new(ProductionToolHandlers::new(
-                self.clone(),
-                materials.clone(),
-                environment.clone(),
-            ));
+            let handlers = Arc::new(ProductionToolHandlers::new(self.clone(), environment));
             let mut run = state
-                .open_run(&scoped, owner, segment, available)
-                .map_err(SingletonRunError::into_controller_error)?
-                .with_admitted_environment(environment);
-            let bodies = run.bodies();
+                .open_run(
+                    scoped.execution_scope().clone(),
+                    Arc::clone(&self.dispatch.clock),
+                )
+                .map_err(SingletonRunError::into_controller_error)?;
             let (send, mut receive) = channel();
             let mut context = self.clone();
             context.tool_run = Some(ToolRunChannel(send));
-            // Scoped controllers keep this owner and its program on one task.
-            // Heap the program and coordinator futures so nested child turns
-            // do not retain their largest polling states in the owner's frame.
+            // Heap the program so nested child turns do not retain their
+            // largest polling states in the owner's frame.
             let mut future = Box::pin(program(context));
             let mut closed = false;
-            bodies
-                .beside(Box::pin(async {
-                    loop {
-                        // Bodies of issued X progress beside the program and
-                        // every request; their results are awaited only inside
-                        // coordinator frames, so replay registers its command
-                        // prefix before awaiting any unfinished X.
-                        let event = select(future.as_mut(), Box::pin(receive.recv())).await;
-                        match event {
-                            Either::Left((output, _)) => break Ok(output),
-                            Either::Right((
-                                Some(Request::Admit {
-                                    request,
-                                    parent,
-                                    environment,
-                                    attribution,
-                                    reply,
-                                }),
-                                _,
-                            )) => {
-                                let result = Box::pin(handlers.admit_aggregate(
-                                    &mut run,
-                                    request,
-                                    parent.map(|parent| *parent),
-                                    *environment,
-                                    *attribution,
-                                ))
-                                .await;
-                                let _ = reply.send(result);
-                            }
-                            Either::Right((
-                                Some(Request::Consume {
-                                    cursor,
-                                    consumer,
-                                    wait,
-                                    host_control,
-                                    reply,
-                                }),
-                                _,
-                            )) => {
-                                let result = Box::pin(handlers.consume_aggregate(
-                                    &mut run,
-                                    cursor,
-                                    consumer,
-                                    wait,
-                                    host_control,
-                                ))
-                                .await;
-                                let _ = reply.send(result);
-                            }
-                            Either::Right((Some(Request::Close(reply)), _)) => {
-                                let result = if closed {
-                                    Ok(())
-                                } else {
-                                    Box::pin(run.close()).await
-                                };
-                                closed = result.is_ok();
-                                if result.is_ok() {
-                                    state.finish_run();
-                                }
-                                let _ = reply.send(result);
-                            }
-                            Either::Right((None, _)) => break Err(owner_gone()),
-                        }
+            loop {
+                // Calls progress beside the program and every request.
+                let event = tokio::select! {
+                    output = future.as_mut() => Either::Left(output),
+                    request = receive.recv() => Either::Right(request),
+                    () = run.next_end() => continue,
+                };
+                match event {
+                    Either::Left(output) => break Ok(output),
+                    Either::Right(Some(Request::Admit {
+                        request,
+                        parent,
+                        environment,
+                        attribution,
+                        reply,
+                    })) => {
+                        let result = Box::pin(handlers.admit_aggregate(
+                            &mut run,
+                            &owner,
+                            request,
+                            parent.map(|parent| *parent),
+                            *environment,
+                            *attribution,
+                        ))
+                        .await;
+                        let _ = reply.send(result);
                     }
-                }))
-                .await
+                    Either::Right(Some(Request::Consume {
+                        cursor,
+                        consumer,
+                        wait,
+                        host_control,
+                        reply,
+                    })) => {
+                        let result = Box::pin(handlers.consume_aggregate(
+                            &mut run,
+                            &owner,
+                            cursor,
+                            consumer,
+                            wait,
+                            host_control,
+                        ))
+                        .await;
+                        let _ = reply.send(result);
+                    }
+                    Either::Right(Some(Request::Close(reply))) => {
+                        let result = if closed {
+                            Ok(())
+                        } else {
+                            Box::pin(run.close()).await
+                        };
+                        closed = result.is_ok();
+                        if result.is_ok() {
+                            state.finish_run();
+                        }
+                        let _ = reply.send(result);
+                    }
+                    Either::Right(None) => break Err(owner_gone()),
+                }
+            }
         })
     }
 }

@@ -75,10 +75,15 @@ mod records;
 mod rounds;
 mod runner;
 mod store_local;
+mod tools;
 
 pub use fold::{MemberState, RoundMember, RoundView, fold};
-pub use rounds::{admit_round, present, settle_retry, start_retry};
+pub use rounds::{admit_round, present, presentation, settle_retry, start_retry};
 pub use runner::{MemberBodies, MemberBody, MemberResult, RoundEnd, RoundError, RoundRunner};
+pub use tools::{
+    CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools, call_draft,
+    completed_material, decode_completed, request_material, require_admitted, settle_cancelled,
+};
 
 use records::{OutcomeBody, append, encode, first_start};
 

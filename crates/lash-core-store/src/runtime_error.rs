@@ -1119,10 +1119,8 @@ impl RuntimeError {
             RuntimeErrorCause::SourceRefused { .. }
             | RuntimeErrorCause::ToolRunCutRefused { .. }
             | RuntimeErrorCause::ToolRunIsolationRefused { .. }
-            | RuntimeErrorCause::ToolRunDrift { .. }
             | RuntimeErrorCause::ToolRunControl { .. }
             | RuntimeErrorCause::ToolRunAdmissionRefused { .. }
-            | RuntimeErrorCause::ToolRunRecordRefused { .. }
             | RuntimeErrorCause::MaterialRefused { .. }
             | RuntimeErrorCause::ProviderFailure { .. }
             | RuntimeErrorCause::VmWorker { .. }

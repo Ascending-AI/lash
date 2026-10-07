@@ -5,8 +5,8 @@ use tracing::Instrument as _;
 use super::ToolDispatchContext;
 
 /// The dispatch fields intent realization reads, carried without the rest of
-/// a [`ToolDispatchContext`] so a realization that runs outside the Run's own
-/// invocation (ADR 0130) can supply them from its request.
+/// a [`ToolDispatchContext`]: a final realizes its intents in place, inside
+/// the admitted execution that runs its call (ADR 0132 §5).
 pub struct IntentRealizationContext<'run> {
     pub effect_controller: crate::ActorContext,
     pub owner: crate::ExecutionOwner,

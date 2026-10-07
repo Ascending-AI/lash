@@ -549,17 +549,6 @@ table lash_session_terminal_changes
   column recorded_at_ms bigint not-null
   column session_id text not-null
   primary-key (change_seq)
-table lash_tool_call_receipts
-  column completed_at_ms bigint nullable
-  column completion_json text nullable
-  column owner_key text not-null
-  column payload_digest text not-null
-  column request_json text not-null
-  column request_key text not-null
-  column requested_at_ms bigint not-null
-  column retired_at_ms bigint nullable
-  column session_id text nullable
-  primary-key (request_key)
 table lash_tool_intent_retired_owners
   column owner text not-null
   primary-key (owner)

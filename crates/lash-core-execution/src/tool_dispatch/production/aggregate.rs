@@ -1,25 +1,21 @@
+//! An aggregate's admission into the in-memory Run and its consumption.
 use super::*;
 use crate::session::tool_execution::{
-    ToolAggregateConsumer, ToolRunAggregateCursor, ToolRunAggregatePoll,
+    ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply, ToolInvocationReply,
+    ToolRunAggregateCursor, ToolRunAggregatePoll,
 };
-use crate::session::tool_execution::{
-    ToolAggregateLeaf, ToolAggregateLeafReply, ToolInvocationReply,
-};
+use crate::tool_dispatch::call_run::{Answer, CallEnd, Consumer, Leaf, ToolRun};
 
-#[derive(Clone, Serialize, Deserialize)]
-struct RefusedInput {
+/// A call refused before the aggregate formed: its reply is its typed
+/// failure.
+#[derive(Clone)]
+pub(super) struct RefusedInput {
     pending: crate::sansio::PendingToolCall,
     failure: crate::ToolFailure,
 }
 
-fn refused_reply(input: &serde_json::Value) -> Result<ToolAggregateLeafReply, SingletonRunError> {
-    let RefusedInput { pending, failure } =
-        serde_json::from_value(input.clone()).map_err(|error| {
-            crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RecordEncodingFailed,
-                error.to_string(),
-            )
-        })?;
+fn refused_reply(input: &RefusedInput) -> ToolAggregateLeafReply {
+    let RefusedInput { pending, failure } = input.clone();
     let output = ToolCallOutput::failure(failure);
     let record = ToolCallRecord {
         call_id: pending.call_id.clone(),
@@ -39,63 +35,36 @@ fn refused_reply(input: &serde_json::Value) -> Result<ToolAggregateLeafReply, Si
         intent_outcomes: Vec::new(),
         replay: pending.replay,
     }));
-    Ok(ToolAggregateLeafReply::Tool(Box::new(reply)))
+    ToolAggregateLeafReply::Tool(Box::new(reply))
 }
 
-fn validate_request(
-    tool: &crate::ToolId,
-    arguments: &serde_json::Value,
-    invocation: &crate::session::tool_execution::ToolInvocation,
-) -> Result<(), SingletonRunError> {
-    let drift = if tool != &invocation.tool_id {
-        Some(SingletonDrift::ToolName)
-    } else if arguments != &invocation.args {
-        Some(SingletonDrift::Arguments)
-    } else {
-        None
-    };
-    match drift {
-        Some(drift) => Err(SingletonRunError::Drift {
-            call_id: invocation.id.clone(),
-            drift,
-        }),
-        None => Ok(()),
-    }
+fn drift(invocation: &crate::session::tool_execution::ToolInvocation) -> SingletonRunError {
+    crate::RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::RuntimeToolRunShape,
+        format!(
+            "call {} appears twice in one aggregate with different requests",
+            invocation.id
+        ),
+    )
+    .into()
+}
+
+fn encoding(message: String) -> SingletonRunError {
+    crate::RuntimeEffectControllerError::new(crate::RuntimeErrorCode::RecordEncodingFailed, message)
+        .into()
 }
 
 impl<'run> ProductionToolHandlers<'run> {
-    /// One tool leaf's recorded preparation and the definition it is admitted
-    /// under: its recorded preparation's, a replayed cell's recorded binding,
+    /// The definition a tool leaf is admitted under: its recorded binding,
     /// its grant's, or the catalog's.
-    fn leaf_definition(
+    pub(super) fn leaf_definition(
         &self,
-        run: &RunCoordinator<'_>,
         invocation: &crate::session::tool_execution::ToolInvocation,
-    ) -> Result<(Option<Prepared>, Option<crate::ToolDefinition>), SingletonRunError> {
-        let recorded: Option<Prepared> = run
-            .prepared_value(&invocation.id)?
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|error| {
-                crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RecordEncodingFailed,
-                    error.to_string(),
-                )
-            })?;
-        if let Some(prepared) = &recorded {
-            validate_request(
-                &prepared.call.tool_id,
-                prepared
-                    .original_args
-                    .as_ref()
-                    .unwrap_or(&prepared.call.args),
-                invocation,
-            )?;
-        }
-        let definition = recorded
-            .as_ref()
-            .map(|prepared| prepared.input.definition.clone())
-            .or_else(|| invocation.recorded_binding.as_deref().cloned())
+    ) -> Option<crate::ToolDefinition> {
+        invocation
+            .recorded_binding
+            .as_deref()
+            .cloned()
             .or_else(|| {
                 invocation
                     .execution_grant
@@ -115,13 +84,98 @@ impl<'run> ProductionToolHandlers<'run> {
                         manifest: entry.manifest.clone(),
                         contract: entry.contract.as_ref().clone(),
                     })
-            });
-        Ok((recorded, definition))
+            })
     }
 
+    /// The call `invocation` runs as, its input registered with these
+    /// handlers.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a leaf's admission reads its owner's frame, parent, environment and attribution"
+    )]
+    pub(super) async fn admit_leaf(
+        &self,
+        owner: &crate::EffectOpener,
+        invocation: &crate::session::tool_execution::ToolInvocation,
+        definition: crate::ToolDefinition,
+        parent: Option<crate::RuntimeInvocation>,
+        environment_spec: &crate::ProcessExecutionEnvSpec,
+        attribution: &crate::session::ToolObservationAttribution,
+        environment: &mut Option<crate::ProcessExecutionEnvRef>,
+    ) -> Result<SingletonToolCall, SingletonRunError> {
+        let source = invocation
+            .execution_grant
+            .as_deref()
+            .and_then(|grant| grant.source_id.as_deref());
+        let binding = self
+            .context
+            .dispatch()
+            .plugins
+            .tool_run_binding(&invocation.tool_id, source)
+            .map_err(crate::RuntimeEffectControllerError::from)?;
+        if let Some(grant) = &invocation.execution_grant {
+            self.context
+                .dispatch()
+                .plugins
+                .validate_tool_owner(&grant.owner)
+                .map_err(crate::RuntimeEffectControllerError::from)?;
+        }
+        let environment = match environment {
+            Some(reference) => reference.clone(),
+            None => {
+                let context = self
+                    .context
+                    .clone()
+                    .with_execution_env_spec(environment_spec.clone());
+                let claim = crate::session::execution_claim_of(
+                    context.dispatch().effect_controller.execution_scope(),
+                )
+                .map_err(crate::RuntimeEffectControllerError::from)?;
+                let reference = context
+                    .captured_process_execution_env_ref(&claim)
+                    .await
+                    .map_err(crate::RuntimeEffectControllerError::from)?;
+                *environment = Some(reference.clone());
+                reference
+            }
+        };
+        let mut attribution = attribution.clone();
+        if invocation.issuing_language_node_id.is_some() {
+            attribution.issuing_node_id = invocation.issuing_language_node_id.clone();
+        }
+        self.calls.lock_recover().insert(
+            invocation.id.clone(),
+            CallInput {
+                attribution,
+                definition: definition.clone(),
+                pending: invocation.pending.clone(),
+                grant: invocation.execution_grant.clone(),
+                parent,
+                binding: binding.clone(),
+                environment: environment.clone(),
+                render: environment_spec.render.clone(),
+            },
+        );
+        Ok(SingletonToolCall {
+            owner: owner.clone(),
+            call_id: invocation.id.clone(),
+            tool_name: definition.manifest.name,
+            arguments: invocation.args.clone(),
+            declaration: definition.manifest.declaration,
+            binding,
+            available: self.context.dispatch().plugins.tool_run_revisions(),
+            cancel: ExternalCancelPolicy::CancelExternalWork,
+            environment: Some(environment),
+        })
+    }
+
+    /// Form one aggregate of `request` in `run`: its new calls start at
+    /// once, each on its own, and its refused calls answer their typed
+    /// failure. One refused member of a round refuses every member with it.
     pub(crate) async fn admit_aggregate<'owner>(
         self: &Arc<Self>,
-        run: &mut RunCoordinator<'owner>,
+        run: &mut ToolRun<'owner>,
+        owner: &crate::EffectOpener,
         request: ToolAggregateRequest,
         parent: Option<crate::RuntimeInvocation>,
         environment_spec: crate::ProcessExecutionEnvSpec,
@@ -140,10 +194,17 @@ impl<'run> ProductionToolHandlers<'run> {
             BTreeMap::<crate::ToolCallId, &crate::session::tool_execution::ToolInvocation>::new();
         for leaf in &leaves {
             if let ToolAggregateLeaf::Tool(invocation) = leaf {
-                if let Some(original) = requested.get(&invocation.id) {
-                    validate_request(&original.tool_id, &original.args, invocation)?;
-                } else {
-                    requested.insert(invocation.id.clone(), invocation);
+                match requested.get(&invocation.id) {
+                    Some(original)
+                        if original.tool_id != invocation.tool_id
+                            || original.args != invocation.args =>
+                    {
+                        return Err(drift(invocation));
+                    }
+                    Some(_) => {}
+                    None => {
+                        requested.insert(invocation.id.clone(), invocation);
+                    }
                 }
             }
         }
@@ -160,50 +221,34 @@ impl<'run> ProductionToolHandlers<'run> {
                     .map_or_else(|| key.clone(), str::to_owned),
             }
         };
-        let requested = leaves
-            .iter()
-            .filter_map(|leaf| match leaf {
-                ToolAggregateLeaf::Tool(invocation) if !run.contains_call(&invocation.id) => {
-                    Some(&invocation.id)
-                }
-                _ => None,
-            })
-            .collect::<std::collections::BTreeSet<_>>()
-            .len();
-        run.admit_capacity(&capacity, requested, self.context.max_tool_calls())
+        let new_calls = requested
+            .keys()
+            .filter(|call_id| !run.contains_call(call_id))
+            .cloned()
+            .collect();
+        run.admit_capacity(&capacity, new_calls, self.context.max_tool_calls())
             .map_err(crate::RuntimeEffectControllerError::max_tool_calls_exceeded)?;
-        let mut plan = AggregatePlan {
-            key: key.clone(),
-            leaves: Vec::new(),
-            operands: Vec::new(),
-        };
-        let recorded_plan = run.aggregate_plan(&key).ok();
-        let mut calls = Vec::new();
-        let mut positions = Vec::new();
-        let mut invocations = BTreeMap::new();
-        let mut captured_environment = self.environment.clone();
-        let mut resolved = Vec::new();
-        for leaf in &leaves {
-            if let ToolAggregateLeaf::Tool(invocation) = leaf {
-                resolved.push((invocation, self.leaf_definition(run, invocation)?));
-            }
-        }
-        // K1: the request's new members are admitted together, before any of
+
+        // The request's new members are admitted together, before any of
         // them prepares or starts. An isolated member is admitted only bound
-        // to a registered process by its provider (D04). One refused member
+        // to a registered process by its provider. One refused member
         // settles every member with its typed refusal: no body, hook or
         // process runs for any of them.
+        let mut definitions = BTreeMap::new();
         let mut bound = Vec::new();
-        let mut admitted = Vec::with_capacity(resolved.len());
-        for (invocation, (recorded, definition)) in &resolved {
-            let Some(definition) = definition.as_ref().filter(|_| {
-                recorded_plan.is_none() && recorded.is_none() && !run.contains_call(&invocation.id)
-            }) else {
-                admitted.push(None);
+        let mut admitted = Vec::new();
+        for leaf in &leaves {
+            let ToolAggregateLeaf::Tool(invocation) = leaf else {
                 continue;
             };
+            if run.contains_call(&invocation.id) || definitions.contains_key(&invocation.id) {
+                continue;
+            }
+            let definition = self.leaf_definition(invocation);
             let mut isolation_bound = false;
-            if definition.manifest.declaration.isolated {
+            if let Some(definition) = &definition
+                && definition.manifest.declaration.isolated
+            {
                 let source = invocation
                     .execution_grant
                     .as_deref()
@@ -215,7 +260,7 @@ impl<'run> ProductionToolHandlers<'run> {
                     .tool_run_binding(&invocation.tool_id, source)
                     .map_err(crate::RuntimeEffectControllerError::from)?;
                 if let Some(start) = self.bind_isolated(
-                    run.owner(),
+                    owner,
                     &invocation.id,
                     &definition.manifest.id,
                     &invocation.args,
@@ -225,36 +270,58 @@ impl<'run> ProductionToolHandlers<'run> {
                     isolation_bound = true;
                 }
             }
-            admitted.push(Some((&definition.manifest, isolation_bound)));
+            admitted.push((invocation.id.clone(), isolation_bound));
+            definitions.insert(invocation.id.clone(), definition);
         }
-        let round_refusal = super::super::admit_tool_round(admitted).err();
+        let round_refusal =
+            super::super::admit_tool_round(admitted.iter().map(|(call_id, isolation_bound)| {
+                definitions
+                    .get(call_id)
+                    .and_then(Option::as_ref)
+                    .map(|definition| (&definition.manifest, *isolation_bound))
+            }))
+            .err();
         if round_refusal.is_none() {
             self.isolated.lock_recover().extend(bound);
         }
-        let mut resolved = resolved
-            .into_iter()
-            .map(|(_, resolved)| resolved)
-            .collect::<Vec<_>>()
-            .into_iter();
-        let mut members = 0_usize;
+
+        let mut plan_leaves: Vec<Leaf> = Vec::new();
+        let mut operand_leaves: Vec<usize> = Vec::new();
+        let mut positions: Vec<Option<usize>> = Vec::new();
+        let mut cursor_calls = BTreeMap::new();
+        let mut refused = BTreeMap::new();
+        let mut call_leaves = BTreeMap::<crate::ToolCallId, usize>::new();
+        let mut calls = Vec::new();
+        let mut environment = self.environment.clone();
+        let settled_value = |plan_leaves: &mut Vec<Leaf>,
+                             operand_leaves: &mut Vec<usize>,
+                             positions: &mut Vec<Option<usize>>| {
+            plan_leaves.push(Leaf::Settled { fulfilled: true });
+            operand_leaves.push(plan_leaves.len() - 1);
+            positions.push(None);
+        };
         for (position, leaf) in leaves.into_iter().enumerate() {
             if settled_value_after == Some(position) {
-                plan.leaves.push(AggregateLeaf::Settled { fulfilled: true });
-                positions.push(None);
+                settled_value(&mut plan_leaves, &mut operand_leaves, &mut positions);
             }
             match leaf {
                 ToolAggregateLeaf::Settled { fulfilled } => {
-                    plan.leaves.push(AggregateLeaf::Settled { fulfilled })
+                    plan_leaves.push(Leaf::Settled { fulfilled });
+                    operand_leaves.push(plan_leaves.len() - 1);
                 }
                 ToolAggregateLeaf::Timer { duration_ms } => {
-                    plan.leaves.push(AggregateLeaf::Timer { duration_ms })
+                    plan_leaves.push(Leaf::Timer { duration_ms });
+                    operand_leaves.push(plan_leaves.len() - 1);
                 }
                 ToolAggregateLeaf::Tool(invocation) => {
-                    let (recorded, definition) = resolved.next().ok_or_else(|| {
-                        crate::tool_run::RunEventRefusal::AggregateShape { key: key.clone() }
-                    })?;
-                    let member = members;
-                    members += 1;
+                    if let Some(leaf) = call_leaves.get(&invocation.id) {
+                        // An alias of a call this aggregate already reads.
+                        operand_leaves.push(*leaf);
+                        cursor_calls.insert(position, invocation.id.clone());
+                        positions.push(Some(position));
+                        continue;
+                    }
+                    let definition = definitions.get(&invocation.id).cloned().flatten();
                     let pending = invocation.pending.as_deref().cloned().unwrap_or_else(|| {
                         crate::sansio::PendingToolCall {
                             call_id: invocation.id.clone(),
@@ -264,534 +331,269 @@ impl<'run> ProductionToolHandlers<'run> {
                             replay: None,
                         }
                     });
-                    let refused = recorded_plan
-                        .as_ref()
-                        .and_then(|plan| {
-                            plan.operands
-                                .get(positions.len())
-                                .and_then(|leaf| plan.leaves.get(*leaf as usize))
-                        })
-                        .filter(|leaf| matches!(leaf, AggregateLeaf::Refused { .. }));
-                    if definition.is_none() || refused.is_some() || round_refusal.is_some() {
-                        let input = match refused {
-                            Some(AggregateLeaf::Refused { input }) => {
-                                let recorded: RefusedInput = serde_json::from_value(input.clone())
-                                    .map_err(|error| {
-                                        crate::RuntimeEffectControllerError::new(
-                                            crate::RuntimeErrorCode::RecordEncodingFailed,
-                                            error.to_string(),
-                                        )
-                                    })?;
-                                if serde_json::to_value(&recorded.pending).map_err(|error| {
-                                    crate::RuntimeEffectControllerError::new(
-                                        crate::RuntimeErrorCode::RecordEncodingFailed,
-                                        error.to_string(),
-                                    )
-                                })? != serde_json::to_value(&pending).map_err(|error| {
-                                    crate::RuntimeEffectControllerError::new(
-                                        crate::RuntimeErrorCode::RecordEncodingFailed,
-                                        error.to_string(),
-                                    )
-                                })? {
-                                    return Err(crate::tool_run::RunEventRefusal::AggregateShape {
-                                        key,
-                                    }
-                                    .into());
-                                }
-                                input.clone()
+                    let known = run.contains_call(&invocation.id);
+                    if !known && (definition.is_none() || round_refusal.is_some()) {
+                        let member = calls.len();
+                        let failure = match (&definition, &round_refusal) {
+                            (Some(_), Some(refusal)) => {
+                                refusal.failure_for(member, &pending.tool_name)
                             }
-                            _ => serde_json::to_value(RefusedInput {
-                                failure: match (&definition, &round_refusal) {
-                                    (Some(_), Some(refusal)) => {
-                                        refusal.failure_for(member, &pending.tool_name)
-                                    }
-                                    _ => crate::ToolFailure::runtime(
-                                        crate::ToolFailureClass::InvalidRequest,
-                                        "tool_unavailable",
-                                        "Tool is unavailable in this session",
-                                    ),
-                                },
-                                pending,
-                            })
-                            .map_err(|error| {
-                                crate::RuntimeEffectControllerError::new(
-                                    crate::RuntimeErrorCode::RecordEncodingFailed,
-                                    error.to_string(),
-                                )
-                            })?,
+                            _ => crate::ToolFailure::runtime(
+                                crate::ToolFailureClass::InvalidRequest,
+                                "tool_unavailable",
+                                "Tool is unavailable in this session",
+                            ),
                         };
-                        plan.leaves.push(AggregateLeaf::Refused { input });
+                        plan_leaves.push(Leaf::Settled { fulfilled: false });
+                        operand_leaves.push(plan_leaves.len() - 1);
+                        refused.insert(operand_leaves.len() - 1, RefusedInput { pending, failure });
                         positions.push(Some(position));
                         continue;
                     }
-                    let Some(definition) = definition else {
-                        unreachable!("the unavailable source was recorded above")
-                    };
-                    let source = invocation
-                        .execution_grant
-                        .as_deref()
-                        .and_then(|grant| grant.source_id.as_deref());
-                    let binding = match &recorded {
-                        Some(prepared) => prepared.input.binding.clone(),
-                        None => self
-                            .context
-                            .dispatch()
-                            .plugins
-                            .tool_run_binding(&invocation.tool_id, source)
-                            .map_err(crate::RuntimeEffectControllerError::from)?,
-                    };
-                    binding
-                        .require_available(&self.context.dispatch().plugins.tool_run_revisions())
-                        .map_err(|cause| AdmissionRefusal::BindingUnavailable {
-                            member: position as u32,
-                            cause: Box::new(cause),
-                        })?;
-                    if let Some(grant) = &invocation.execution_grant {
-                        self.context
-                            .dispatch()
-                            .plugins
-                            .validate_tool_owner(&grant.owner)
-                            .map_err(crate::RuntimeEffectControllerError::from)?;
+                    if !known && let Some(definition) = definition {
+                        calls.push(
+                            self.admit_leaf(
+                                owner,
+                                &invocation,
+                                definition,
+                                parent.clone(),
+                                &environment_spec,
+                                &attribution,
+                                &mut environment,
+                            )
+                            .await?,
+                        );
                     }
-                    let environment = match &recorded {
-                        Some(prepared) => prepared.input.environment.clone(),
-                        None => match &captured_environment {
-                            Some(reference) => reference.clone(),
-                            None => {
-                                let context = self
-                                    .context
-                                    .clone()
-                                    .with_execution_env_spec(environment_spec.clone());
-                                let claim = crate::session::execution_claim_of(
-                                    context.dispatch().effect_controller.execution_scope(),
-                                )
-                                .map_err(crate::RuntimeEffectControllerError::from)?;
-                                let reference = context
-                                    .captured_process_execution_env_ref(&claim)
-                                    .await
-                                    .map_err(crate::RuntimeEffectControllerError::from)?;
-                                captured_environment = Some(reference.clone());
-                                reference
-                            }
-                        },
-                    };
-                    let input = CallInput {
-                        attribution: {
-                            let mut attribution = attribution.clone();
-                            if invocation.issuing_language_node_id.is_some() {
-                                attribution.issuing_node_id =
-                                    invocation.issuing_language_node_id.clone();
-                            }
-                            attribution
-                        },
-                        definition: definition.clone(),
-                        pending: invocation.pending.clone(),
-                        grant: invocation.execution_grant.clone(),
-                        parent: parent.clone(),
-                        binding: binding.clone(),
-                        environment: environment.clone(),
-                        render: recorded
-                            .as_ref()
-                            .and_then(|prepared| prepared.input.render.clone())
-                            .or_else(|| environment_spec.render.clone()),
-                    };
-                    self.calls
-                        .lock_recover()
-                        .insert(invocation.id.clone(), input);
-                    if !run.contains_call(&invocation.id) {
-                        calls.push(SingletonToolCall {
-                            owner: run.owner().clone(),
-                            segment: run.segment(),
-                            call_id: invocation.id.clone(),
-                            tool_name: definition.manifest.name,
-                            arguments: invocation.args.clone(),
-                            declaration: definition.manifest.declaration,
-                            binding,
-                            available: self.context.dispatch().plugins.tool_run_revisions(),
-                            cancel: ExternalCancelPolicy::CancelExternalWork,
-                            environment: Some(environment),
-                        });
-                    }
-                    plan.leaves.push(AggregateLeaf::Call {
-                        call_id: invocation.id.clone(),
-                    });
-                    invocations.insert(position, invocation.id);
+                    plan_leaves.push(Leaf::Call(invocation.id.clone()));
+                    operand_leaves.push(plan_leaves.len() - 1);
+                    call_leaves.insert(invocation.id.clone(), plan_leaves.len() - 1);
+                    cursor_calls.insert(position, invocation.id.clone());
                 }
             }
             positions.push(Some(position));
         }
         if settled_value_after == Some(positions.len()) {
-            plan.leaves.push(AggregateLeaf::Settled { fulfilled: true });
-            positions.push(None);
+            settled_value(&mut plan_leaves, &mut operand_leaves, &mut positions);
         }
-        let mut unique = Vec::new();
-        let mut seen = BTreeMap::new();
-        for leaf in std::mem::take(&mut plan.leaves) {
-            let alias = match &leaf {
-                AggregateLeaf::Call { call_id } => seen.get(call_id).copied(),
-                _ => None,
-            };
-            let index = match alias {
-                Some(index) => index,
-                None => {
-                    let index = unique.len() as u32;
-                    if let AggregateLeaf::Call { call_id } = &leaf {
-                        seen.insert(call_id.clone(), index);
-                    }
-                    unique.push(leaf);
-                    index
-                }
-            };
-            plan.operands.push(index);
-        }
-        plan.leaves = unique;
-        let mut admitted = std::collections::BTreeSet::new();
-        calls.retain(|call| admitted.insert(call.call_id.clone()));
-        run.start_aggregate(
-            &plan,
-            &calls,
-            capacity,
-            self.clone(),
-            ExecutionPolicy::Once,
-            self.context.dispatch().clock.as_ref(),
-        )
-        .await?;
-        for call in &calls {
-            let prepared = self
-                .prepared
-                .lock_recover()
-                .get(&call.call_id)
-                .cloned()
-                .ok_or_else(|| {
-                    crate::RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::EffectReplayDivergence,
-                        "the observed call has no accepted preparation",
-                    )
-                })?;
-            self.context
-                .with_tool_observation_attribution(&prepared.input.attribution)
-                .emit_tool_call_started(
-                    call.call_id.as_str(),
-                    &ToolCallIds::of(&prepared.call),
-                    &prepared.call.tool_name,
-                    prepared.call.args.clone(),
-                    crate::TurnActivityId::new(format!("tool:{}", call.call_id)),
-                )
-                .await;
-        }
-        for leaf in &plan.leaves {
-            if let AggregateLeaf::Refused { input } = leaf {
-                let ToolAggregateLeafReply::Tool(reply) = refused_reply(input)? else {
-                    unreachable!("a refused tool is a tool reply")
-                };
-                if let Some(completed) = &reply.completed {
-                    self.context
-                        .with_tool_observation_attribution(&attribution)
-                        .report_undispatched_tool_call(completed, completed.call_id.as_str())
-                        .await;
-                }
+        for input in refused.values() {
+            if let ToolAggregateLeafReply::Tool(reply) = refused_reply(input)
+                && let Some(completed) = &reply.completed
+            {
+                self.context
+                    .with_tool_observation_attribution(&attribution)
+                    .report_undispatched_tool_call(completed, completed.call_id.as_str())
+                    .await;
             }
         }
+        self.refused.lock_recover().insert(key.clone(), refused);
+        for call in calls {
+            run.start(
+                call,
+                Arc::clone(self) as Arc<dyn SingletonToolHandlers + 'owner>,
+            )?;
+        }
+        run.form(key.clone(), plan_leaves, operand_leaves)?;
         Ok(ToolRunAggregateCursor {
-            owner: run.owner().clone(),
+            owner: owner.clone(),
             key,
             positions,
-            calls: invocations,
+            calls: cursor_calls,
         })
     }
 
+    /// What the machine or a consumer is answered with for `call_id`, ended
+    /// as `end`.
+    ///
+    /// # Errors
+    ///
+    /// A capture or presentation that does not decode.
+    pub(crate) fn completed_call(
+        &self,
+        call_id: &crate::ToolCallId,
+        end: &CallEnd,
+    ) -> Result<crate::sansio::CompletedToolCall, SingletonRunError> {
+        let prepared = self
+            .prepared
+            .lock_recover()
+            .get(call_id)
+            .cloned()
+            .ok_or_else(|| encoding(format!("call {call_id} has no admitted preparation")))?;
+        let (output, model_return, intent_outcomes) = match end {
+            // An isolated final presents the descriptor of the process it
+            // started; no ordinary body produced an output.
+            CallEnd::Final {
+                capture: SingletonCapture::Isolated { .. },
+                presentation,
+                ..
+            } => {
+                let output = ToolCallOutput::success(
+                    decode::<serde_json::Value>(presentation).map_err(encoding)?,
+                );
+                let model_return =
+                    crate::ModelToolReturn::from_output(prepared.call.tool_name.clone(), &output);
+                (output, model_return, Vec::new())
+            }
+            CallEnd::Final {
+                capture,
+                presentation,
+                ..
+            } => {
+                let presented: Presented = decode(presentation).map_err(encoding)?;
+                let captured: Captured = decode(
+                    capture
+                        .output()
+                        .ok_or_else(|| encoding("the final has no capture".to_owned()))?,
+                )
+                .map_err(encoding)?;
+                let mut output = captured.output;
+                super::super::attempt_coordinator::project_recorded_intent_outcomes(
+                    &mut output,
+                    &presented.intent_outcomes,
+                );
+                // The realized declarations are reported after the presented
+                // value; a declared start's launch receipt is host-facing only.
+                let mut model_return = presented.presentation.model_return;
+                model_return.parts.extend(
+                    super::super::pending_resolver::model_visible_outcomes(
+                        &captured.intents,
+                        &presented.intent_outcomes,
+                    )
+                    .iter()
+                    .map(|outcome| crate::ModelToolReturnPart::text(outcome.model_addendum())),
+                );
+                (output, model_return, presented.intent_outcomes)
+            }
+            CallEnd::Withheld { decision, cause } => {
+                let output = super::observations::terminal_output(decision, cause.as_ref(), None)
+                    .map_err(encoding)?;
+                let model_return =
+                    crate::ModelToolReturn::from_output(prepared.call.tool_name.clone(), &output);
+                (output, model_return, Vec::new())
+            }
+        };
+        Ok(crate::sansio::CompletedToolCall {
+            call_id: call_id.clone(),
+            provider_call_id: prepared.call.provider_call_id,
+            tool_name: prepared.call.tool_name,
+            args: prepared.call.args,
+            output,
+            model_return,
+            intent_outcomes,
+            replay: prepared.call.replay,
+        })
+    }
+
+    fn tool_reply(
+        &self,
+        call_id: &crate::ToolCallId,
+        end: &CallEnd,
+    ) -> Result<ToolAggregateLeafReply, SingletonRunError> {
+        let completed = self.completed_call(call_id, end)?;
+        let record = ToolCallRecord {
+            call_id: completed.call_id.clone(),
+            provider_call_id: completed.provider_call_id.clone(),
+            tool: completed.tool_name.clone(),
+            args: completed.args.clone(),
+            output: completed.output.clone(),
+        };
+        let mut reply = ToolInvocationReply::from_output(record.output.clone()).with_record(record);
+        reply.completed = Some(Box::new(completed));
+        Ok(ToolAggregateLeafReply::Tool(Box::new(reply)))
+    }
+
+    /// Take `consumer`'s answer from the aggregate `cursor` names: at once,
+    /// or once it has one when `wait`.
     pub(crate) async fn consume_aggregate(
         &self,
-        run: &mut RunCoordinator<'_>,
+        run: &mut ToolRun<'_>,
+        owner: &crate::EffectOpener,
         cursor: ToolRunAggregateCursor,
         consumer: ToolAggregateConsumer,
         wait: bool,
         host_control: bool,
     ) -> Result<ToolRunAggregatePoll, SingletonRunError> {
-        if &cursor.owner != run.owner() {
-            return Err(crate::tool_run::RunEventRefusal::ForeignOwner.into());
+        if &cursor.owner != owner {
+            return Err(encoding(format!(
+                "aggregate {} belongs to another Run",
+                cursor.key
+            )));
         }
         let ToolRunAggregateCursor {
             key,
             positions,
-            calls: invocations,
+            calls,
             ..
         } = cursor;
-        let plan = run.aggregate_plan(&key)?;
-        if positions.len() != plan.operands.len() || invocations.iter().any(|(position, id)| !positions.iter().enumerate().any(|(operand, slot)| slot == &Some(*position) && matches!(&plan.leaves[plan.operands[operand] as usize], AggregateLeaf::Call { call_id } if call_id == id))) { return Err(crate::tool_run::RunEventRefusal::AggregateShape { key }.into()); }
         let mode = match consumer {
-            ToolAggregateConsumer::All => AggregateConsumer::All,
-            ToolAggregateConsumer::AllSettled => AggregateConsumer::AllSettled,
-            ToolAggregateConsumer::Race => AggregateConsumer::Race,
-            ToolAggregateConsumer::Any => AggregateConsumer::Any,
+            ToolAggregateConsumer::All => Consumer::All,
+            ToolAggregateConsumer::AllSettled => Consumer::AllSettled,
+            ToolAggregateConsumer::Race => Consumer::Race,
+            ToolAggregateConsumer::Any => Consumer::Any,
         };
-        let outcome = loop {
-            let outcome = run
-                .consume_aggregate_with_control(&key, mode, host_control)
-                .await?;
-            if !matches!(outcome, RunAggregateOutcome::Pending) {
-                break outcome;
+        let answer = if wait {
+            run.consume(&key, mode, host_control).await?
+        } else {
+            match run.answer(&key, mode, host_control)? {
+                Some(answer) => answer,
+                None => return Ok(ToolRunAggregatePoll::Pending),
             }
-            if !wait {
-                return Ok(ToolRunAggregatePoll::Pending);
-            }
-            if plan.leaves.is_empty() {
-                run.await_empty_aggregate().await?;
-            }
-            run.await_one_deferred().await?;
         };
-        let reply = |operand: usize,
-                     terminal: Option<SingletonTerminal>|
-         -> Result<Option<ToolAggregateLeafReply>, SingletonRunError> {
+        let refused = self
+            .refused
+            .lock_recover()
+            .get(&key)
+            .cloned()
+            .unwrap_or_default();
+        let reply = |operand: usize| -> Result<Option<ToolAggregateLeafReply>, SingletonRunError> {
             let Some(position) = positions[operand] else {
                 return Ok(None);
             };
-            let Some(call_id) = invocations.get(&position) else {
-                return match &plan.leaves[plan.operands[operand] as usize] {
-                    AggregateLeaf::Refused { input } => refused_reply(input).map(Some),
-                    AggregateLeaf::Timer { .. } => Ok(Some(ToolAggregateLeafReply::Timer)),
-                    _ => Ok(None),
-                };
+            if let Some(input) = refused.get(&operand) {
+                return Ok(Some(refused_reply(input)));
+            }
+            let Some(call_id) = calls.get(&position) else {
+                return Ok(match run.leaf(&key, operand)? {
+                    Some(Leaf::Timer { .. }) => Some(ToolAggregateLeafReply::Timer),
+                    _ => None,
+                });
             };
-            let terminal = terminal.ok_or_else(|| {
-                crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                    "an aggregate tool has no terminal",
-                )
-            })?;
-            let output = match terminal {
-                SingletonTerminal::Final {
-                    presentation,
-                    capture,
-                    ..
-                } => {
-                    let encoding = |message: String| {
-                        crate::RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RecordEncodingFailed,
-                            message,
-                        )
-                    };
-                    let prepared = self
-                        .prepared
-                        .lock_recover()
-                        .get(call_id)
-                        .cloned()
-                        .ok_or_else(|| {
-                            crate::RuntimeEffectControllerError::new(
-                                crate::RuntimeErrorCode::EffectReplayDivergence,
-                                "a presented call has no admission",
-                            )
-                        })?;
-                    // An isolated final presents the descriptor of the process
-                    // it started; no ordinary body produced an output.
-                    let (output, model_return, intent_outcomes) =
-                        if matches!(capture, SingletonCapture::Isolated { .. }) {
-                            let output = ToolCallOutput::success(
-                                decode::<serde_json::Value>(&presentation).map_err(encoding)?,
-                            );
-                            let model_return = crate::ModelToolReturn::from_output(
-                                prepared.call.tool_name.clone(),
-                                &output,
-                            );
-                            (output, model_return, Vec::new())
-                        } else {
-                            let presented: Presented = decode(&presentation).map_err(encoding)?;
-                            let captured: Captured =
-                                decode(capture.output().ok_or_else(|| {
-                                    encoding("the final has no capture".to_owned())
-                                })?)
-                                .map_err(encoding)?;
-                            let mut output = captured.output;
-                            super::super::attempt_coordinator::project_recorded_intent_outcomes(
-                                &mut output,
-                                &presented.intent_outcomes,
-                            );
-                            // V retains the realized declarations separately from
-                            // presentation. Report them after the presented value
-                            // when the consumer builds its model-facing return; a
-                            // declared start's launch receipt is host-facing only.
-                            let mut model_return = presented.presentation.model_return;
-                            model_return.parts.extend(
-                                super::super::pending_resolver::model_visible_outcomes(
-                                    &captured.intents,
-                                    &presented.intent_outcomes,
-                                )
-                                .iter()
-                                .map(|outcome| {
-                                    crate::ModelToolReturnPart::text(outcome.model_addendum())
-                                }),
-                            );
-                            (output, model_return, presented.intent_outcomes)
-                        };
-                    let record = ToolCallRecord {
-                        call_id: call_id.clone(),
-                        provider_call_id: prepared.call.provider_call_id.clone(),
-                        tool: prepared.call.tool_name.clone(),
-                        args: prepared.call.args.clone(),
-                        output,
-                    };
-                    let mut reply = ToolInvocationReply::from_output(record.output.clone())
-                        .with_record(record.clone());
-                    reply.completed = Some(Box::new(crate::sansio::CompletedToolCall {
-                        call_id: record.call_id,
-                        provider_call_id: record.provider_call_id,
-                        tool_name: record.tool,
-                        args: record.args,
-                        output: record.output,
-                        model_return,
-                        intent_outcomes,
-                        replay: prepared.call.replay,
-                    }));
-                    reply
-                }
-                SingletonTerminal::Withheld { decision } => {
-                    let recorded_cause = run.withheld_cause(call_id);
-                    let output = match recorded_cause
-                        .as_ref()
-                        .map(|cause| (cause.error_type.as_str(), &cause.payload))
-                    {
-                        Some(("tool_failure", payload)) => ToolCallOutput::failure(
-                            serde_json::from_value(payload.clone()).map_err(|error| {
-                                crate::RuntimeEffectControllerError::new(
-                                    crate::RuntimeErrorCode::RecordEncodingFailed,
-                                    error.to_string(),
-                                )
-                            })?,
-                        ),
-                        Some(("tool_cancellation", payload)) => ToolCallOutput::cancelled(
-                            serde_json::from_value(payload.clone()).map_err(|error| {
-                                crate::RuntimeEffectControllerError::new(
-                                    crate::RuntimeErrorCode::RecordEncodingFailed,
-                                    error.to_string(),
-                                )
-                            })?,
-                        ),
-                        Some(("plugin_abort", _)) => {
-                            let (callback, cause) =
-                                run.withheld_verdict(call_id).ok_or_else(|| {
-                                    crate::RuntimeEffectControllerError::new(
-                                        crate::RuntimeErrorCode::EffectReplayDivergence,
-                                        "the abort has no recorded cause",
-                                    )
-                                })?;
-                            let abort: crate::plugin::PluginAbort =
-                                serde_json::from_value(cause.payload).map_err(|error| {
-                                    crate::RuntimeEffectControllerError::new(
-                                        crate::RuntimeErrorCode::RecordEncodingFailed,
-                                        error.to_string(),
-                                    )
-                                })?;
-                            let mut failure = crate::ToolFailure::runtime(
-                                crate::ToolFailureClass::Execution,
-                                abort.code.clone(),
-                                abort.message.clone(),
-                            );
-                            failure.source = crate::ToolFailureSource::Plugin;
-                            ToolCallOutput::failure(failure).with_control(
-                                crate::ToolControl::AbortRun {
-                                    code: abort.failure_code(&callback.owner.plugin),
-                                    message: abort.message,
-                                },
-                            )
-                        }
-                        _ => match decision {
-                            CallDecision::Cancelled => {
-                                ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
-                                    "the owning Run cancelled the call",
-                                ))
-                            }
-                            _ => ToolCallOutput::failure(crate::ToolFailure::runtime(
-                                crate::ToolFailureClass::InvalidRequest,
-                                "tool_call_denied",
-                                "a recorded tool check denied the call",
-                            )),
-                        },
-                    };
-                    let prepared = self
-                        .prepared
-                        .lock_recover()
-                        .get(call_id)
-                        .cloned()
-                        .ok_or_else(|| {
-                            crate::RuntimeEffectControllerError::new(
-                                crate::RuntimeErrorCode::EffectReplayDivergence,
-                                "a withheld call has no recorded preparation",
-                            )
-                        })?;
-                    let record = ToolCallRecord {
-                        call_id: call_id.clone(),
-                        provider_call_id: prepared.call.provider_call_id,
-                        tool: prepared.call.tool_name,
-                        args: prepared.call.args,
-                        output,
-                    };
-                    let mut reply = ToolInvocationReply::from_output(record.output.clone())
-                        .with_record(record.clone());
-                    reply.completed = Some(Box::new(crate::sansio::CompletedToolCall {
-                        model_return: crate::ModelToolReturn::from_output(
-                            record.tool.clone(),
-                            &record.output,
-                        ),
-                        call_id: record.call_id,
-                        provider_call_id: record.provider_call_id,
-                        tool_name: record.tool,
-                        args: record.args,
-                        output: record.output,
-                        intent_outcomes: Vec::new(),
-                        replay: prepared.call.replay,
-                    }));
-                    reply
-                }
-                SingletonTerminal::Deferred { .. } => {
-                    return Err(crate::RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                        "a Deferred descriptor is not a result",
-                    )
-                    .into());
-                }
-            };
-            Ok(Some(ToolAggregateLeafReply::Tool(Box::new(output))))
+            let end = run
+                .end(call_id)?
+                .ok_or_else(|| encoding(format!("call {call_id} has not ended")))?;
+            self.tool_reply(call_id, end).map(Some)
         };
-        let all = |terminals: Vec<Option<SingletonTerminal>>| -> Result<Vec<Option<ToolAggregateLeafReply>>, SingletonRunError> {
-            terminals.into_iter().enumerate().filter(|(operand, _)| positions[*operand].is_some()).map(|(operand, terminal)| reply(operand, terminal)).collect()
+        let all = || -> Result<Vec<Option<ToolAggregateLeafReply>>, SingletonRunError> {
+            (0..positions.len())
+                .filter(|operand| positions[*operand].is_some())
+                .map(reply)
+                .collect()
         };
         let settlement_order = run
-            .aggregate_settlement_order(&key)?
+            .settlement_order(&key)?
             .into_iter()
             .filter_map(|operand| positions[operand])
             .collect();
-        let outcome = match outcome {
-            RunAggregateOutcome::Selected {
-                operand,
-                reply: terminal,
-                ..
-            } => match positions[operand as usize] {
+        let outcome = match answer {
+            Answer::Selected(operand) => match positions[operand] {
                 Some(leaf) => ToolAggregateOutcome::Selected {
                     leaf,
-                    reply: reply(operand as usize, terminal)?,
+                    reply: reply(operand)?,
                 },
                 None => ToolAggregateOutcome::SettledValue,
             },
-            RunAggregateOutcome::AllResults(terminals) => {
-                ToolAggregateOutcome::AllResults(all(terminals)?)
+            Answer::All => ToolAggregateOutcome::AllResults(all()?),
+            Answer::Exhausted => ToolAggregateOutcome::ExhaustedRejections(all()?),
+            Answer::HostControl { call_id, decision } => {
+                let cause = match run.end(&call_id)? {
+                    Some(CallEnd::Withheld { cause, .. }) => {
+                        cause.as_ref().map(|cause| Box::new(cause.verdict.clone()))
+                    }
+                    _ => None,
+                };
+                return Err(crate::tool_dispatch::call_run::run_control(
+                    call_id, &decision, cause,
+                ));
             }
-            RunAggregateOutcome::ExhaustedRejections(terminals) => {
-                ToolAggregateOutcome::ExhaustedRejections(all(terminals)?)
-            }
-            RunAggregateOutcome::HostControl { call_id, decision } => {
-                let mut error = crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeToolRunAwaitCancelled,
-                    format!("tool {call_id}: {decision:?}"),
-                );
-                error.cause = Some(crate::RuntimeErrorCause::ToolRunControl {
-                    cause: run.withheld_cause(&call_id).map(Box::new),
-                    call_id: Box::new(call_id),
-                    aborted: decision == CallDecision::Aborted,
-                });
-                error.journaled = true;
-                return Err(error.into());
-            }
-            RunAggregateOutcome::Pending => unreachable!("awaited until an observable result"),
         };
         Ok(ToolRunAggregatePoll::Ready {
             outcome,

@@ -9,6 +9,7 @@ pub use observations::RuntimeExecutionTracing;
 pub(crate) use observations::ToolObservationAttribution;
 mod referrers;
 mod tool_completion;
+pub(crate) use tool_completion::ToolCallStart;
 mod trigger_scope;
 pub(crate) use referrers::execution_claim_of;
 use trigger_scope::missing_process_execution_error;
@@ -151,10 +152,11 @@ pub struct RuntimeExecutionContext<'run> {
     /// [`OpenerState`](crate::session::OpenerState): the opener's owner hands
     /// one state to every phase context it builds.
     pub(crate) opener_run: Arc<std::sync::Mutex<crate::session::OpenerRunRegistry>>,
-    /// Retained request receipts used to commit each call's logical terminal.
+    /// The trace scope each call this execution traced the start of opened,
+    /// for its completion.
     pub(crate) tool_requests: Arc<
         std::sync::Mutex<
-            std::collections::BTreeMap<crate::ToolCallId, crate::store::ToolRequestReceipt>,
+            std::collections::BTreeMap<crate::ToolCallId, tool_completion::TracedToolCall>,
         >,
     >,
     /// The latest `max_tool_calls` refusal this execution met, kept typed for

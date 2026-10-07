@@ -346,7 +346,7 @@ mod panic_tests {
             ))
             .expect("plugin session");
         let dispatch = Arc::new(super::ToolDispatchContext {
-            tool_receipts: None,
+            fleet_format: crate::FleetFormat::current(),
             plugins,
             tools: Arc::new(ConstructionPanicTool),
             tool_registry: None,

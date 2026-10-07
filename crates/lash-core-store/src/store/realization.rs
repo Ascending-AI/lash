@@ -43,7 +43,6 @@ mod tests {
     use super::*;
     use crate::SessionId;
     use crate::session_graph::RealizedNodeTimestamp;
-    use crate::store::{StoreTransition, ToolCompletionReceipt, ToolRequestReceipt};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     async fn commit_runtime_state_verified(
@@ -69,29 +68,6 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SessionCommitStore for FacadeTestStore {
-        async fn tool_request_receipt(
-            &self,
-            _: &str,
-        ) -> Result<Option<ToolRequestReceipt>, StoreError> {
-            Ok(None)
-        }
-        async fn record_tool_request(
-            &self,
-            _: &ToolRequestReceipt,
-        ) -> Result<StoreTransition<ToolRequestReceipt>, StoreError> {
-            Err(StoreError::Backend(
-                "fixture does not retain tool requests".into(),
-            ))
-        }
-        async fn record_tool_completion(
-            &self,
-            _: &ToolCompletionReceipt,
-        ) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError> {
-            Err(StoreError::Backend(
-                "fixture does not retain tool completions".into(),
-            ))
-        }
-
         async fn read_session_state_version(
             &self,
             _session_id: &SessionId,

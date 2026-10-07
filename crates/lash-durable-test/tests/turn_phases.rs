@@ -39,6 +39,7 @@ use lash_core::runtime::durable::session::{
     AdmittedInputs, CodeCell, SessionActivation, TurnCancelRequest, TurnCommit, TurnDone,
     TurnDrive, TurnError, TurnRow, TurnServices, admit_mail, request_turn_cancel,
 };
+use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
 use lash_core::{
     DriverAction, DriverContextView, Effect, ExecResponse, Message, MessageRole, Part,
@@ -46,7 +47,11 @@ use lash_core::{
     facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
+use lash_core_execution::runtime::actor::round::{
+    AdmittedExecution, CompletedCall, MemberBody, MemberPin, PolicyView, RoundTools,
+};
 use lash_core_execution::{ActorContext, Backend};
+use lash_core_store::tool_run::AttemptOutcome;
 use lash_durable::domain::ExecKey;
 use lash_durable::runner::Activation;
 use lash_durable::{
@@ -422,6 +427,10 @@ impl TurnDrive for L3Drive {
         Ok(())
     }
 
+    fn tools(&mut self) -> Arc<dyn RoundTools> {
+        Arc::new(NoTools)
+    }
+
     async fn restart_live_stream(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
         let mut seen = self.services.seen.lock_recover();
         let next = seen.calls.last().map_or(0, |call| call.attempt);
@@ -448,6 +457,32 @@ impl TurnDrive for L3Drive {
         SessionHead::load(&self.services.backend(), &session(), commit_budget())
             .await?
             .commit(&self.run, done)
+    }
+}
+
+/// The L3 scenario's catalog: its protocol never calls a tool.
+struct NoTools;
+
+impl RoundTools for NoTools {
+    fn pin(&self, _call: &PendingToolCall, _now_ms: u64) -> MemberPin {
+        unreachable!("the L3 scenario calls no tool")
+    }
+
+    fn policies(&self) -> PolicyView {
+        PolicyView::default()
+    }
+
+    fn body(&self, _call: &PendingToolCall, _execution: &AdmittedExecution) -> MemberBody {
+        unreachable!("the L3 scenario calls no tool")
+    }
+
+    fn completed(
+        &self,
+        _call: &PendingToolCall,
+        _outcome: &AttemptOutcome,
+        _material: Option<&str>,
+    ) -> CompletedCall {
+        unreachable!("the L3 scenario calls no tool")
     }
 }
 

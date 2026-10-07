@@ -1,9 +1,8 @@
-//! K6 ownership shared by every phase of one turn. A borrowed coordinator
-//! never crosses a phase boundary.
+//! K6 ownership shared by every phase of one turn. A Run never crosses a
+//! phase boundary.
 
 use super::*;
-use crate::tool_dispatch::{RunCoordinator, SingletonRunError};
-use crate::tool_run::SegmentOrdinal;
+use crate::tool_dispatch::{SingletonRunError, ToolRun};
 
 impl OpenerState {
     /// The opener state a physical boundary carries.
@@ -40,17 +39,15 @@ impl OpenerState {
     /// `InvocationFailed` while another frame holds the Run open.
     pub fn open_run<'a>(
         &self,
-        scoped: &'a crate::ActorContext,
-        owner: crate::EffectOpener,
-        segment: SegmentOrdinal,
-        available: Vec<crate::store::plugin_writers::PluginRevision>,
-    ) -> Result<RunCoordinator<'a>, SingletonRunError> {
+        scope: crate::ExecutionScope,
+        clock: Arc<dyn crate::Clock>,
+    ) -> Result<ToolRun<'a>, SingletonRunError> {
         let mut registry = self.run_state.lock_recover();
         if registry.active_run {
             return Err(crate::tool_run::RunCutRefusal::InvocationFailed.into());
         }
         registry.active_run = true;
-        Ok(RunCoordinator::open(scoped, owner, segment, available))
+        Ok(ToolRun::new(scope, clock))
     }
 
     pub fn holds_tool_run(&self) -> bool {

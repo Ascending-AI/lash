@@ -36,7 +36,7 @@ pub(crate) fn execute_code_with_channel_and_bounds_with_trigger_resolver(
         }
         let owner = ctx.clone();
         match owner
-            .drive_tool_run(None, |ctx| async move {
+            .drive_tool_run(|ctx| async move {
                 let closing = ctx.clone();
                 let mut response = Box::pin(execute_owned_code(
                     dialect,

@@ -1,52 +1,31 @@
-//! Detailed tool facts attached to their accepted Run observation records.
+//! The facts an admitted call's observations carry.
 use super::*;
 
 impl ProductionToolHandlers<'_> {
+    /// Observe an admitted call's start live, under its own trace scope,
+    /// from the request its admission prepared.
     pub(super) fn started_observation(
         &self,
         request: &SingletonPreparedRequest,
-    ) -> Result<Option<serde_json::Value>, String> {
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
         let prepared: Prepared =
-            serde_json::from_value(request.prepared.clone()).map_err(|error| error.to_string())?;
+            serde_json::from_value(request.prepared.clone()).map_err(|error| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RecordEncodingFailed,
+                    error.to_string(),
+                )
+            })?;
+        let start = crate::session::ToolCallStart {
+            call_id: &prepared.call.call_id,
+            provider_call_id: prepared.call.provider_call_id.as_deref(),
+            tool: &prepared.call.tool_name,
+            args: &prepared.call.args,
+        };
         self.context
             .with_tool_observation_attribution(&prepared.input.attribution)
-            .recorded_tool_observation(lash_trace::TraceEvent::ToolCallStarted {
-                call_id: prepared.call.call_id,
-                provider_call_id: prepared.call.provider_call_id,
-                name: prepared.call.tool_name,
-                args: prepared.call.args,
-                issuing_node_id: None,
-            })
+            .trace_tool_call_started(start, self.context.dispatch().clock.timestamp_ms())
     }
 
-    pub(super) fn completed_observation(
-        &self,
-        call_id: &crate::ToolCallId,
-        decision: &CallDecision,
-        cause: Option<&AttributedVerdict<HookCause>>,
-        capture: Option<&SingletonCapture>,
-        presentation: Option<&str>,
-    ) -> Result<Option<serde_json::Value>, String> {
-        let record = self.observed_record(call_id, decision, cause, capture, presentation)?;
-        let prepared = self
-            .prepared
-            .lock_recover()
-            .get(call_id)
-            .cloned()
-            .ok_or("the observed call has no admitted preparation")?;
-        self.context
-            .with_tool_observation_attribution(&prepared.input.attribution)
-            .recorded_tool_observation(lash_trace::TraceEvent::ToolCallCompleted {
-                call_id: call_id.clone(),
-                provider_call_id: record.provider_call_id,
-                name: record.tool,
-                args: record.args,
-                output: crate::trace::trace_tool_call_output(&record.output),
-                duration_ms: 0,
-                issuing_node_id: None,
-                attempts: None,
-            })
-    }
     pub(super) fn observed_record(
         &self,
         call_id: &crate::ToolCallId,

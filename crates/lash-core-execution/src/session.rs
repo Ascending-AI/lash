@@ -14,7 +14,7 @@ use crate::tool_dispatch::ToolDispatchContext;
 use crate::{RuntimeServices, ToolProvider};
 
 mod execution_context;
-pub(crate) use execution_context::ToolObservationAttribution;
+pub(crate) use execution_context::{ToolCallStart, ToolObservationAttribution};
 mod opener_run;
 mod process_handles;
 mod settlement_incorporation;
@@ -815,7 +815,11 @@ impl Session {
     ) -> Result<RuntimeExecutionContext<'run>, crate::PluginError> {
         let tool_surface = self.active_tool_surface_entry()?;
         let dispatch = Arc::new(ToolDispatchContext {
-            tool_receipts: self.history_store().map(|store| store.store().clone()),
+            fleet_format: self
+                .history_store()
+                .map_or_else(crate::FleetFormat::current, |store| {
+                    store.store().fleet_format()
+                }),
             plugins: Arc::clone(self.plugins()),
             tools: tool_surface.tools(),
             tool_registry: Some(tool_surface.tool_registry()),

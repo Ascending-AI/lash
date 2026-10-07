@@ -59,17 +59,14 @@ For example, a protocol plugin reports compile/link evidence as
 `program_step`, and every backend uses the neutral `lash.store.pool.*`
 instruments through its `StoreObserver`.
 
-The `record_run_record` boundary observes accepted A/X/D/V records.
-Admission grants the accepted
-receipt. A withheld decision grants its terminal receipt; a final grants its
-terminal only after its protected presentation is recorded. Deferred stays
-pending. Folding a retained prefix after replay or handover reconstructs the
-call without another export: SQL first writers grant the emission permits.
-The receipt owner is a Turn, Run, Process or Operation, independent of route.
-Scope retirement marks wait and tool receipts together for the retention sweep.
+A tool call runs in memory inside the admitted execution that makes it
+durable (ADR 0132 §5), and nothing replays it. Its start and completion
+are live observations under the call's tool trace scope: each execution
+that reaches the call observes it once. No store receipt grants tool
+transitions any more; the transition-class `lash.tool_intent.*` counters
+have no first writer until the substrate's trace lane gives them one.
 
-Scalar commands and undispatched protocol calls retain their original requests
-before completing them. Process tool scopes retain their process parent.
+Process tool scopes retain their process parent.
 Deferred `AwaitToolCompletions` uses the same durable wait request and resolution
 receipts as other engine waits. The SQL commit wrapper owns the Live permit
 for its physical budget validation and histogram observation.

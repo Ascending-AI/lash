@@ -430,6 +430,13 @@ fn open_attempt<'m>(
             Err(FoldRefusal::SecondFinal(call.clone()))
         }
         MemberState::Started { start: open, .. } if open.0 == start => Ok(member),
+        // A call whose retry is due may end without its next attempt: a
+        // cancel or a veto settles it at the attempt that failed.
+        MemberState::RetryDue { start: failed, .. }
+            if failed.0 == start && row.kind == RunRecordKind::XOutcome =>
+        {
+            Ok(member)
+        }
         MemberState::Started { .. } | MemberState::RetryDue { .. } | MemberState::Final { .. } => {
             Err(out_of_order(row))
         }

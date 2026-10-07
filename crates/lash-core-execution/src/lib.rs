@@ -812,7 +812,7 @@ pub use runtime::{
     RegistryScopeClose, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
     ResolvedProcessDefinition, ResolvedRun, RetainedRevision, Retention, RunAggregateWakePolicy,
     RunDefinition, RunDefinitionRefusal, RunDefinitions, RunOptionsOwner, RunOverrides,
-    RunRecordStep, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
+    RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
     RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,

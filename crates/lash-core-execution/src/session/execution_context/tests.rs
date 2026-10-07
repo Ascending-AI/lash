@@ -89,7 +89,7 @@ fn test_execution_context_with_env_store(
         ))
         .expect("plugin session");
     let dispatch = Arc::new(ToolDispatchContext {
-        tool_receipts: None,
+        fleet_format: crate::FleetFormat::current(),
         plugins,
         tools: Arc::new(NoopTools),
         tool_registry: None,

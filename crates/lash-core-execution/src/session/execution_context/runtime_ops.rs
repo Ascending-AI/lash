@@ -27,25 +27,6 @@ impl RuntimeExecutionContext<'_> {
             .unwrap_or_default();
         body(Some(stop)).await
     }
-
-    /// Called only by the body of a Run record. Its decision captures the
-    /// authoritative gate answer, including on a cold owner's first retry;
-    /// the context's previously materialized fact cannot discover that stop.
-    pub(crate) async fn run_cancel_requested_in_recorded_step(
-        &self,
-    ) -> Result<bool, crate::RuntimeError> {
-        if self.turn_cancel.is_observed() {
-            return Ok(true);
-        }
-        // A turn answered from its gate above; the stop it lends is never
-        // authority. A process has no turn gate: its own lent stop, which only
-        // its accepted cancel fires, is captured by this same recorded
-        // decision, and replay consumes the record instead of the live stop.
-        Ok(self
-            .cancellation_token
-            .as_ref()
-            .is_some_and(CancellationToken::is_cancelled))
-    }
 }
 
 pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {

@@ -39,15 +39,6 @@ pub enum DeclaredStartObligationRefusal {
     NoConsumerHold,
 }
 
-/// What a recorded admission names differently from the call replaying it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub enum SingletonDrift {
-    CallId,
-    ToolName,
-    Arguments,
-    IsolationBinding,
-}
-
 /// Why a Run's frame cannot proceed: an earlier frame of its invocation
 /// failed.
 #[derive(

@@ -160,6 +160,10 @@ pub trait TurnDrive: Send {
     /// sent.
     async fn restart_live_stream(&mut self, cx: &ActorContext) -> Result<(), TurnError>;
 
+    /// The tools the turn's rounds run: the turn's catalog, which pins each
+    /// call at admission and gives each member its body (L4, FIG-5174).
+    fn tools(&mut self) -> Arc<dyn lash_core_execution::runtime::actor::round::RoundTools>;
+
     /// Run the code cell `exec` of effect `id` from its latest snapshot, or
     /// from the start, to its end, and answer the machine. `with` are the
     /// turn's rows that commit with the cell's first commit.

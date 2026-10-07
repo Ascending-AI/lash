@@ -24,10 +24,6 @@ pub enum RuntimeErrorCause {
     ToolRunIsolationRefused {
         refusal: Box<crate::tool_run::IsolatedStartRefusal>,
     },
-    ToolRunDrift {
-        call_id: Box<lash_sansio::ToolCallId>,
-        drift: Box<crate::tool_run::SingletonDrift>,
-    },
     ToolRunControl {
         call_id: Box<lash_sansio::ToolCallId>,
         aborted: bool,
@@ -35,10 +31,6 @@ pub enum RuntimeErrorCause {
     },
     ToolRunAdmissionRefused {
         refusal: Box<crate::tool_run::AdmissionRefusal>,
-    },
-    /// A Run record breaks the Run's event contract.
-    ToolRunRecordRefused {
-        refusal: Box<crate::tool_run::RunEventRefusal>,
     },
     /// Recorded material could not be read. This cause grants no body retry.
     MaterialRefused {

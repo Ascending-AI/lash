@@ -65,9 +65,6 @@ pub enum MaterialRole {
     CheckContributions,
     /// Presentation bytes distinct from the output (V).
     Presentation,
-    /// A final's intent-realization receipt, owned by the Run's schedule
-    /// record that selected it (ADR 0130).
-    RealizationReceipt,
 }
 
 /// Where the bytes live.

@@ -68,10 +68,6 @@ impl LashCoreBuilder {
         if let Some(context) = self.trace_context.take() {
             core.tracing = core.tracing.clone().with_base_context(context);
         }
-        core.tracing = core
-            .tracing
-            .clone()
-            .with_tool_receipts(core.backend().stores());
         if let Some(termination) = self.termination.take() {
             core.control.termination = termination;
         }

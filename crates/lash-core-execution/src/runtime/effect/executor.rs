@@ -30,7 +30,7 @@ pub use control::{
     AwaitEventKey, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectJournalIdentity, EffectJournalRetirement, EffectRetirementGate,
     ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDriveStep, RecordedKeyFence,
-    RefusedWriteRange, Resolution, ResolveOutcome, RunRecordStep, SegmentProgress, ServedOnlyRange,
+    RefusedWriteRange, Resolution, ResolveOutcome, SegmentProgress, ServedOnlyRange,
 };
 pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::admitted_scope::AdmittedScope;

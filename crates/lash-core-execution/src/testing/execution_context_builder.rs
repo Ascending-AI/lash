@@ -533,7 +533,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
                     _ => None,
                 });
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
-            tool_receipts: None,
+            fleet_format: crate::FleetFormat::current(),
             process_engines: self.process_engines,
             plugins,
             tools: self.provider,

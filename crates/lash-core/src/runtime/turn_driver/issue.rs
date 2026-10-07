@@ -36,7 +36,6 @@ pub(crate) async fn issue_effect(
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::PluginCallbacks { .. } => cx.shift_effect(envelope, local).await,
         RuntimeEffectCommand::ToolAttempt { .. }
-        | RuntimeEffectCommand::RestoreRunMaterial { .. }
         | RuntimeEffectCommand::PresentToolResult { .. }
         | RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::IngestTriggerOccurrence { .. }

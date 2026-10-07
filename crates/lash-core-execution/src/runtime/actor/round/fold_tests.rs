@@ -240,3 +240,21 @@ fn a_retried_attempt_takes_the_next_ordinal_only_after_its_retry() {
         })
     );
 }
+
+/// A call whose retry is due may end without its next attempt: a turn
+/// cancel or a current `Once`'s veto records its final at the failed
+/// attempt, and the rows still fold.
+#[test]
+fn a_call_whose_retry_is_due_ends_at_its_failed_attempt() {
+    let mut tx = opened();
+    let members = admitted(&mut tx, vec![draft("a", "repeats", repeatable())]);
+    settle_retry(&mut tx, &members[0], failed().into(), DurableInstant(50)).unwrap();
+    let due = fold(&rows(&tx), &PolicyView::default()).unwrap();
+    let view = due.round(RUN).unwrap();
+    let execution = view.execution(&view.members()[0]);
+    settle(&mut tx, &execution, failed(), None).unwrap();
+    assert_eq!(
+        recoveries(&fold(&rows(&tx), &PolicyView::default()).unwrap()),
+        vec![Recovery::Settled(failed())]
+    );
+}

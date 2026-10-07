@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1202 rows over 727 files, 3372 laws.
-# By class: mechanical 142, semantic 99, delete 646, replace 315.
-# By lane: L1b 11, L3 16, L4 7, L5 2, L6b 9, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 475, ported 42, deleted 685.
+# 1214 rows over 728 files, 3384 laws.
+# By class: mechanical 143, semantic 99, delete 657, replace 315.
+# By lane: L1b 11, L3 16, L4 19, L5 2, L6b 9, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 475, ported 43, deleted 696.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -18728,9 +18728,9 @@ needs = ["round"]
 class = "delete"
 lane = "L5"
 laws = ["neutral tool receipts are first writers and retire with their scope"]
-disposition = "covered-by:crates/lash-sim/tests/cross_backend_store_differential/surface_sweep.rs::tool_receipt_sweep_retains_only_committed_first_writers"
+disposition = "subject-deleted"
 status = "deleted"
-note = "its retirement leg called WaitReceiptStore::retire_observation_receipts, deleted with lash_wait_receipts (L5, FIG-5173); the first-writer receipt law is the sweep's; L4 drops the tool receipts"
+note = "its retirement leg called WaitReceiptStore::retire_observation_receipts, deleted with lash_wait_receipts (L5, FIG-5173); L4 (FIG-5174) deleted lash_tool_call_receipts and the sweep that pinned their first writers"
 
 [[row]]
 path = "crates/lash-core-effect/src/await_event_identity.rs"
@@ -19559,3 +19559,171 @@ laws = [
 disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while_a_process_lives"
 status = "deleted"
 note = "the close deletes nothing while a process of the session is non-terminal, then deletes the session"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "the_singleton_route_is_four_records_and_its_codec_is_pinned"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "the_singleton_route_is_four_records_and_its_codec_is_pinned",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L4 (FIG-5174) deleted the Run journal (RunLedger, RunEvent, RunRecord): a call's admission, attempt, decision and presentation run in memory between its round member's x_start and x_outcome rows"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "the_ledger_refuses_gaps_and_appends_from_other_segments"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "the_ledger_refuses_gaps_and_appends_from_other_segments",
+]
+disposition = "covered-by:crates/lash-core-execution/src/runtime/actor/round/fold_tests.rs::a_gap_in_a_runs_ordinals_is_refused"
+status = "deleted"
+note = "L4 (FIG-5174) deleted RunLedger; run_records rows keep the no-gap rule through the fold, and no segment appends to a Run"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "l05_check_cancellation_cannot_be_recorded_as_run_control"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "l05_check_cancellation_cannot_be_recorded_as_run_control",
+]
+disposition = "covered-by:crates/lash-core-execution/src/tool_dispatch/call_run/tests.rs::a_check_cancel_rejects_its_operand_and_an_abort_is_run_control"
+status = "deleted"
+note = "L4 (FIG-5174) deleted the Run journal; the in-memory Run answers a check's cancel as its operand's rejection and only the Run's cancel or an AbortRun as control"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "k3_decision_ranks_are_dense_in_fold_order"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "k3_decision_ranks_are_dense_in_fold_order",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L4 (FIG-5174) deleted the journal's declaration ranks: a final realizes its declarations in place before it is presented, with no recorded rank to order"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "cancellation_during_backoff_starts_no_next_attempt"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "cancellation_during_backoff_starts_no_next_attempt",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/round_crash_matrix.rs::a_cancel_during_a_retry_backoff_starts_no_next_attempt"
+status = "deleted"
+note = "L4 (FIG-5174) deleted RunLedger's retry schedule; a round's retry due is a run_records row and its cancel law runs on the round substrate"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "protected_drain_is_transitive_across_intent_free_ranks"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "protected_drain_is_transitive_across_intent_free_ranks",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L4 (FIG-5174) deleted the journal's protected drain: declarations realize in place inside the call, so nothing is left to drain across ranks"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "a_declared_start_drains_inside_its_declarations_under_one_key"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "a_declared_start_drains_inside_its_declarations_under_one_key",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L4 (FIG-5174) deleted the journal's start events; in memory a withheld call never reaches its launch, and a final launches and discharges its start before it is presented (call_run::present)"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "check_decisions_follow_their_records_and_abort_run_stops_admission"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "check_decisions_follow_their_records_and_abort_run_stops_admission",
+]
+disposition = "covered-by:crates/lash-core-execution/src/tool_dispatch/call_run/tests.rs::an_aborted_run_admits_nothing_more"
+status = "deleted"
+note = "L4 (FIG-5174) deleted the Run journal; the in-memory Run refuses every start and aggregate after a check's AbortRun"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "receipts_name_the_logical_call_and_permits_come_from_records"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "receipts_name_the_logical_call_and_permits_come_from_records",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L4 (FIG-5174) deleted the Run-record receipts and their observation permits with lash_tool_call_receipts"
+
+[[row]]
+path = "crates/lash-core-store/src/tool_run/tests.rs"
+test = "capacity_holds_a_round_whole_until_every_member_is_presented"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "capacity_holds_a_round_whole_until_every_member_is_presented",
+]
+disposition = "covered-by:crates/lash-core-execution/src/tool_dispatch/call_run/tests.rs::capacity_holds_a_round_whole_until_every_member_is_presented"
+status = "deleted"
+note = "L4 (FIG-5174) deleted RunLedger's capacity count; the in-memory Run holds a process round whole until every member ended"
+
+[[row]]
+path = "crates/lash-sim/tests/cross_backend_store_differential/surface_sweep.rs"
+test = "tool_receipt_sweep_retains_only_committed_first_writers"
+area = "tool-rounds"
+needs = ["round"]
+class = "delete"
+lane = "L4"
+laws = [
+  "tool_receipt_sweep_retains_only_committed_first_writers",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L4 (FIG-5174) deleted lash_tool_call_receipts and the store-trait methods that wrote them; unadmitted calls' traces are live observations"
+
+[[row]]
+path = "crates/lash-sim/tests/cross_backend_store_differential/surface_sweep.rs"
+test = "*"
+area = "store-conformance"
+needs = ["round"]
+class = "mechanical"
+lane = "L4"
+laws = [
+  "every remaining store-trait surface step agrees across backends",
+]
+disposition = "port"
+status = "ported"
+note = "L4 (FIG-5174) deleted the tool-receipt step and its sweep (their own row); the rest runs on the stores alone, with no host"

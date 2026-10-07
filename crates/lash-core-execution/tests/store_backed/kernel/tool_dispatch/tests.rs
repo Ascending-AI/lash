@@ -111,7 +111,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
     let tools = plugins.tools();
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
-        tool_receipts: None,
+        fleet_format: lash_core_execution::FleetFormat::current(),
         plugins,
         tools,
         tool_registry: None,

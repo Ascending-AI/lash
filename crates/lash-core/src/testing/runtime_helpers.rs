@@ -821,9 +821,6 @@ impl crate::ToolProvider for EmptyTools {
 }
 
 /// The plugin host a [`TestRuntime`] builds over `plugins` and `tools`.
-/// Intent realization rebuilds the declaring session's composition on the
-/// deployment's worker (ADR 0130), so a worker that realizes the runtime's
-/// intents is built over this same host.
 pub fn test_runtime_plugin_host(
     mut plugins: Vec<Arc<dyn crate::PluginFactory>>,
     tools: Arc<dyn crate::ToolProvider>,

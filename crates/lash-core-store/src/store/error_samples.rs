@@ -83,7 +83,6 @@ store_error_samples! {
             "sampled",
         )),
     },
-    ToolRequestConflict { .. } => StoreError::ToolRequestConflict { owner: lash_trace::TraceToolOwner::Turn { session_id: session(), turn_id: "turn".into() }, request_key: "tool-request".into() },
     PreparedProcessRegistrationStale { .. } => StoreError::PreparedProcessRegistrationStale { process_id: crate::process_id_for_test("prepared-process") },
     PreparedRunAdmissionStale { .. } => StoreError::PreparedRunAdmissionStale { session_id: session(), run: crate::TurnId::from("stale-run") },
     Contended => StoreError::Contended,

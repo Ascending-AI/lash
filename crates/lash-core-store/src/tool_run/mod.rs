@@ -1,13 +1,11 @@
 //! The tool-execution Run contract every worker of the tool end state builds
 //! against (FIG-4867, pinned seams K1-K4 and K6-K10).
 //!
-//! Every ordinary tool body becomes one recorded attempt in its logical
-//! Run's opener journal; the Run owns admission, retries, the final-or-cancel
-//! decision, protected drain, presentation and incorporation. These modules
-//! are the target types and pure transitions of that contract, with codec
-//! and refusal witnesses. They are expansion interfaces: each names the
-//! ticket that wires it into production and the consumers it serves, and no
-//! production route reads them until that ticket lands. The design,
+//! A tool call runs in memory inside the admitted execution that makes it
+//! durable (ADR 0132 §5): a turn round member's run records, or a code
+//! cell's snapshot. These modules are the shared types of that contract: a
+//! call's admission and declaration, its hook verdicts, the material its
+//! records name, its attempt outcomes and its decision. The design,
 //! ownership and identity rules are in `docs/architecture/tool-run-contract.md`.
 //!
 //! | Seam | Module | Implementing owner |
@@ -16,9 +14,8 @@
 //! | K1/K3/K10 tool hook contract | [`tool_hooks`] | FIG-1399, wired by FIG-4875/4877/4878 |
 //! | K2 material references | [`material`] | FIG-4876 |
 //! | K2/K6 retained bundles and leases | [`retention`] | FIG-4889 |
-//! | K3/K9 Run events and retry schedule | [`run_event`] | FIG-4877, FIG-4879, FIG-4880 |
+//! | K3 attempt outcomes and call decisions | [`run_event`] | FIG-4877, FIG-5174 |
 //! | K4 source seal | [`source_seal`] | FIG-4883 |
-//! | K7 receipts and permits | [`receipt`] | FIG-4830 |
 //! | K8 operation Run | [`operation`] | FIG-4888 |
 //! | K10 state commands | [`state_command`] | FIG-4878 |
 //!
@@ -26,10 +23,8 @@
 //! lives beside the process model in `lash-core-execution`.
 
 pub mod admission;
-pub mod aggregate;
 pub mod material;
 pub mod operation;
-pub mod receipt;
 pub mod refusal;
 pub mod retention;
 pub mod run_event;
@@ -42,22 +37,16 @@ pub use admission::{
     CapacityScope, DeclarationRefusal, ExecutionPolicy, ExternalCancelPolicy, OutcomeShape,
     PresentationBinding, RoundAdmission, RuntimeCallPolicy, ToolDeclaration,
 };
-pub use aggregate::{AggregateConsumer, AggregateLeaf, AggregatePlan};
 pub use material::{
     InvalidMaterialDigest, MaterialDigest, MaterialEntry, MaterialLocation, MaterialOwner,
     MaterialPayload, MaterialRef, MaterialRefusal, MaterialRole,
 };
 pub use operation::{OperationRun, RunInputKind};
-pub use receipt::{BusinessReceipt, LogicalTerminal, ObservationPermit, ObservedFact};
-pub use refusal::{
-    DeclaredStartObligationRefusal, IsolatedStartRefusal, RunCutRefusal, SingletonDrift,
-};
+pub use refusal::{DeclaredStartObligationRefusal, IsolatedStartRefusal, RunCutRefusal};
 pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{
     AttemptOrdinal, AttemptOutcome, AvailableEvidence, CallDecision, CompletionSource,
-    KnownFailure, KnownFailureReason, LimitCause, PendingStart, RealizationKey, ResultSource,
-    RunAttemptEntry, RunEvent, RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger,
-    RunLifecycle, RunRecord, RunTraceFacts, SegmentOrdinal,
+    KnownFailure, KnownFailureReason, LimitCause, PendingStart, ResultSource, SegmentOrdinal,
 };
 pub use source_seal::{
     SealOutcome, SealRefusal, SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal,

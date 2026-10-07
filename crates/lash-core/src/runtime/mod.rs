@@ -73,9 +73,6 @@ mod plugin_namespace_tests;
 use lash_core_store::queued_drain_policy;
 mod plugin_transition;
 mod process_runtime;
-mod realization_runtime;
-#[doc(hidden)]
-pub use realization_runtime::realize_tool_intents;
 mod run_start;
 pub mod scenario_contracts;
 mod session_administration;
@@ -220,8 +217,8 @@ pub use effect::{
     ProcessCommand, ProcessDriveStep, ProcessEffectOutcome, ProcessListSelection,
     ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedKeyFence,
     RecordedKeyRange, RecordedKeys, RefusedWriteRange, Resolution, ResolveOutcome,
-    RunAggregateWakePolicy, RunRecordStep, RuntimeAssistantResponseHooksOutcome,
-    RuntimeAttribution, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RunAggregateWakePolicy, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
+    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,

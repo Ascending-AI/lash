@@ -232,11 +232,6 @@ impl std::error::Error for StoreFault {}
 pub enum StoreError {
     #[error("prepared registration for process {process_id} is stale")]
     PreparedProcessRegistrationStale { process_id: crate::ProcessId },
-    #[error("tool request {request_key} of {owner:?} conflicts with its retained request")]
-    ToolRequestConflict {
-        owner: lash_trace::TraceToolOwner,
-        request_key: String,
-    },
     #[error("prepared run admission for {run} of {session_id} is stale")]
     PreparedRunAdmissionStale {
         session_id: crate::SessionId,
@@ -1046,8 +1041,7 @@ impl StoreError {
             | Self::Backend(_)
             | Self::SessionHeadOwned { .. }
             | Self::UnfinishedRunConflict { .. } => true,
-            Self::ToolRequestConflict { .. }
-            | Self::ExecutionStateCaptureFailed { .. }
+            Self::ExecutionStateCaptureFailed { .. }
             | Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
             | Self::CommitByteBudgetExceeded { .. }
@@ -1208,8 +1202,7 @@ impl StoreError {
             Self::QueuedWorkRowExceedsContextWindow { .. } => {
                 Code::QueuedWorkRowExceedsContextWindow
             }
-            Self::ToolRequestConflict { .. }
-            | Self::PendingTurnInputSourceKeyConflict { .. }
+            Self::PendingTurnInputSourceKeyConflict { .. }
             | Self::QueuedWorkSourceKeyConflict { .. }
             | Self::PendingTurnInputIdConflict { .. }
             | Self::PendingTurnInputBatchDuplicate { .. }
@@ -1357,7 +1350,6 @@ impl StoreError {
         match self {
             Self::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
             Self::TurnOutcomeMaterializationRefused { .. } => "TurnOutcomeMaterializationRefused",
-            Self::ToolRequestConflict { .. } => "ToolRequestConflict",
             Self::PreparedProcessRegistrationStale { .. } => "PreparedProcessRegistrationStale",
             Self::PreparedRunAdmissionStale { .. } => "PreparedRunAdmissionStale",
             Self::Contended => "Contended",

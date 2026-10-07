@@ -636,10 +636,7 @@ pub mod persistence {
         SettleOutcome,
         session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
-    pub use lash_core::store::{
-        PreparedRunAdmission, StoreTransition, ToolCompletionReceipt, ToolRequestReceipt,
-        TurnTraceReceipt,
-    };
+    pub use lash_core::store::{PreparedRunAdmission, StoreTransition, TurnTraceReceipt};
     /// Artifact ownership supplied to protocol engines and effect controllers.
     pub use lash_core::{
         ArtifactName, ArtifactReferrer, FrameEnvironmentId, ReferrerClaim, ResolvedArtifactCleanup,
@@ -923,18 +920,18 @@ pub mod plugins {
         ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunGuard,
         ProcessEngineRuntimeContext,
     };
-    /// Engine-extension contracts for Run-owned admission, attempts, aggregates
-    /// and continuation. Effect hosts implement these recorded transitions;
-    /// hosts submit work through session handles.
+    /// Engine-extension contracts for a tool call's admission, attempts,
+    /// decision and presentation, and for a Run's aggregates. A call runs in
+    /// memory inside the admitted execution that makes it durable; hosts
+    /// submit work through session handles.
     pub use lash_core::tool_dispatch::{
-        BeforeCheckReply, DecidedCall, DeclaredStartObligation, DeclaredStartObligationRefusal,
-        IntentRealizationContext, IsolatedProcessDescriptor, IsolatedStartRefusal,
-        IsolatedToolStart, IssuedRealization, RealizationDispatch, RealizationPayload,
-        RealizationReceipt, RealizationRequest, RecordedIsolatedStart, RunAggregateOutcome,
-        RunBodies, RunCoordinator, RunCutRefusal, SingletonAttempt, SingletonBodyOutcome,
-        SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonPresentationError,
-        SingletonRunError, SingletonStart, SingletonTerminal, SingletonToolCall,
-        SingletonToolHandlers, StartLaunch, ToolRealizer,
+        AdmittedToolCall, Answer as ToolRunAnswer, AttemptEnd, BeforeCheckReply, CallEnd,
+        Consumer as ToolRunConsumer, DeclaredStartObligation, DeclaredStartObligationRefusal,
+        IntentRealizationContext, IsolatedBinding, IsolatedProcessDescriptor, IsolatedStartRefusal,
+        IsolatedToolStart, Leaf as ToolRunLeaf, RealizationReceipt, RunCutRefusal,
+        SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest,
+        SingletonPresentationError, SingletonRunError, SingletonToolCall, SingletonToolHandlers,
+        StartLaunch, ToolRun, run_call,
     };
     /// A source seal's typed refusal, distinct from engine admission refusal.
     pub use lash_core::tool_run::SealRefusal as SourceSealRefusal;
@@ -943,23 +940,20 @@ pub mod plugins {
     pub use lash_core::tool_run::run_event::AttemptOutcome as RunAttemptOutcome;
     pub use lash_core::tool_run::run_event::{
         AvailableEvidence, CallDecision, CompletionSource, KnownFailure, KnownFailureReason,
-        PendingStart, RealizationKey, ResultSource, RunAttemptEntry, RunEvent, RunEventOrdinal,
-        RunEventRefusal, RunJournalEntry, RunLedger, RunRecord, RunTraceFacts,
+        PendingStart, ResultSource,
     };
     pub use lash_core::tool_run::{
         AdmissionRefusal as ToolRunAdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound,
-        AfterCheckVerdict, AggregateConsumer, AggregateLeaf, AggregatePlan, AttributedVerdict,
-        BeforeCheckVerdict, BeforeSelection, CapacityScope, RoundAdmission, RunLifecycle,
-        RuntimeCallPolicy, SegmentOrdinal,
+        AfterCheckVerdict, AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CapacityScope,
+        RoundAdmission, RuntimeCallPolicy, SegmentOrdinal,
     };
     /// Recorded Run data needed by engine extensions and effect-host journals.
     pub use lash_core::tool_run::{
-        BusinessReceipt, CheckRecord, InvalidMaterialDigest, LogicalTerminal, MaterialBundle,
-        MaterialDigest, MaterialEntry, MaterialHolder, MaterialLocation, MaterialOwner,
-        MaterialPayload, MaterialRef, MaterialRefusal, MaterialRetentionError, MaterialRole,
-        ObservationPermit, ObservedFact, OperationRun, RetainedBundle, RunInputKind, SealOutcome,
-        SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal, SourceSeal,
-        SourceSubscription,
+        CheckRecord, InvalidMaterialDigest, MaterialBundle, MaterialDigest, MaterialEntry,
+        MaterialHolder, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
+        MaterialRefusal, MaterialRetentionError, MaterialRole, OperationRun, RetainedBundle,
+        RunInputKind, SealOutcome, SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal,
+        SourceSeal, SourceSubscription,
     };
     /// A session's recorded plugin configuration and the owner contract that
     /// creates and changes it (FIG-4379): each installed plugin registers the
@@ -1217,14 +1211,7 @@ pub mod durability {
         RuntimeSubject, SegmentProgress, ToolAttemptLaunch, TriggerLocalExecution,
     };
     /// Durable group and journal values returned by effect-host implementors.
-    pub use lash_core::runtime::{
-        JournalReplay, ProcessDriveStep, RecordedKeyRange, RunRecordStep,
-    };
-    pub use lash_core::tool_dispatch::{
-        RunAttemptBody, RunAttemptHandle, RunAttemptStep, RunRetryTimer, RunSelectKey,
-        RunSelectValue, RunSelectable, RunSourceWake, RunStartPrepareStep, RunStartPrepared,
-        RunStepHandle, SelectKey,
-    };
+    pub use lash_core::runtime::{JournalReplay, ProcessDriveStep, RecordedKeyRange};
     pub use lash_core::{
         facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
         facade_support::TerminationPolicy,

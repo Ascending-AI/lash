@@ -159,7 +159,6 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::AdmitShift
                 | RuntimeEffectKind::TransitionPlugins
                 | RuntimeEffectKind::RecoverFollowOn
-                | RuntimeEffectKind::RestoreRunMaterial
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::ResolveConfigTransaction
                 | RuntimeEffectKind::CloseRunScope

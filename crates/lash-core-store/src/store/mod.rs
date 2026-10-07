@@ -71,12 +71,10 @@ mod session_config_views;
 mod session_view;
 mod shift_fence;
 pub mod tool_material;
-mod tool_receipts;
 pub use session_config_views::{
     execution_session_config_from_state, persisted_session_config_from_state,
     recorded_session_policy_from_state, root_snapshot_config_from_state,
 };
-pub use tool_receipts::{ToolCompletionReceipt, ToolRequestReceipt, require_tool_request_matches};
 mod lease_owner;
 pub mod session_delete;
 mod session_fault;
@@ -699,23 +697,6 @@ fn validate_window_session(
 /// must fail instead of persisting a checkpoint that hydrates to `None`.
 #[async_trait::async_trait]
 pub trait SessionCommitStore: Send + Sync {
-    /// Read the accepted request when a Run restores only its suffix.
-    /// A retained receipt carries identity and original facts, never a permit.
-    async fn tool_request_receipt(
-        &self,
-        request_key: &str,
-    ) -> Result<Option<ToolRequestReceipt>, StoreError>;
-    /// Retain the first sealed request. The disposition is issued after commit.
-    async fn record_tool_request(
-        &self,
-        request: &ToolRequestReceipt,
-    ) -> Result<StoreTransition<ToolRequestReceipt>, StoreError>;
-    /// Retain the first result under the request's digest; never rewrite a terminal.
-    async fn record_tool_completion(
-        &self,
-        completion: &ToolCompletionReceipt,
-    ) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError>;
-
     /// The session's physical session-state generation marker. A legacy
     /// absent marker reads as [`OLDEST_SUPPORTED_SESSION_STATE_VERSION`].
     async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError>;

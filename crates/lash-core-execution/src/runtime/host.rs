@@ -304,8 +304,7 @@ impl RuntimeHostConfig {
                 scope_close: Arc::new(crate::engine::NoScopeClose),
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },
-            tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock))
-                .with_tool_receipts(backend.stores()),
+            tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             clock,
         }
@@ -340,7 +339,6 @@ impl RuntimeHostConfig {
             .process_engines
             .clone()
             .with_artifact_ports(ArtifactReferrerPorts::of_backend(&backend));
-        config.tracing = config.tracing.with_tool_receipts(backend.stores());
         Self { backend, ..config }
     }
 

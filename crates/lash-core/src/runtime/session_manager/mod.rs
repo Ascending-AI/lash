@@ -84,10 +84,6 @@ pub(in crate::runtime) struct CurrentSession {
 #[derive(Clone)]
 pub(in crate::runtime) enum CurrentOwner {
     Session(Box<CurrentSession>),
-    Realization {
-        owner: crate::ExecutionOwner,
-        environment: Box<crate::ProcessExecutionEnvSpec>,
-    },
     Process {
         process_id: crate::ProcessId,
         /// The environment the process captured at its start: its starter's
@@ -125,7 +121,7 @@ impl CurrentOwnerCapability {
                 .as_ref()
                 .map(|store| store.fleet_format())
                 .unwrap_or_else(crate::FleetFormat::current),
-            CurrentOwner::Process { .. } | CurrentOwner::Realization { .. } => self
+            CurrentOwner::Process { .. } => self
                 .host
                 .process_registry()
                 .map(|registry| registry.fleet_format())
@@ -141,7 +137,6 @@ impl CurrentOwnerCapability {
             CurrentOwner::Process { process_id, .. } => {
                 crate::RuntimeOwner::Process(process_id.clone())
             }
-            CurrentOwner::Realization { owner, .. } => owner.runtime_owner(),
         }
     }
 
@@ -149,7 +144,7 @@ impl CurrentOwnerCapability {
     pub(in crate::runtime) fn session(&self) -> Option<&CurrentSession> {
         match &self.owner {
             CurrentOwner::Session(session) => Some(session.as_ref()),
-            CurrentOwner::Process { .. } | CurrentOwner::Realization { .. } => None,
+            CurrentOwner::Process { .. } => None,
         }
     }
 
@@ -161,9 +156,6 @@ impl CurrentOwnerCapability {
     ) -> Result<&CurrentSession, crate::PluginError> {
         match &self.owner {
             CurrentOwner::Session(session) => Ok(session.as_ref()),
-            CurrentOwner::Realization { .. } => Err(crate::PluginError::Session(format!(
-                "a tool realization has no session state for `{operation}`"
-            ))),
             CurrentOwner::Process { process_id, .. } => {
                 Err(crate::PluginError::NotASessionRuntime {
                     operation: operation.to_string(),
@@ -220,7 +212,6 @@ impl CurrentOwnerCapability {
                     agent_frame_id,
                 })
             }
-            CurrentOwner::Realization { owner, .. } => Ok(owner.clone()),
             CurrentOwner::Process { process_id, .. } => Ok(crate::ExecutionOwner::Process {
                 process_id: process_id.clone(),
             }),
@@ -239,8 +230,7 @@ impl CurrentOwnerCapability {
                     &self.policy,
                 ),
             ),
-            CurrentOwner::Process { environment, .. }
-            | CurrentOwner::Realization { environment, .. } => Ok(environment.as_ref().clone()),
+            CurrentOwner::Process { environment, .. } => Ok(environment.as_ref().clone()),
         }
     }
 }
@@ -256,16 +246,6 @@ struct DirectCompletionCapability;
 /// What a process runtime's services are built from.
 pub(in crate::runtime) struct ProcessServicesPorts {
     pub(in crate::runtime) process_id: crate::ProcessId,
-    /// The environment the process captured at its start; its policy is
-    /// the process runtime's policy.
-    pub(in crate::runtime) environment: crate::ProcessExecutionEnvSpec,
-    pub(in crate::runtime) host: RuntimeHost,
-    pub(in crate::runtime) plugins: Arc<crate::PluginSession>,
-    pub(in crate::runtime) runtime_lease_owner: crate::LeaseOwnerIdentity,
-    pub(in crate::runtime) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
-}
-
-pub(in crate::runtime) struct RealizationServicesPorts {
     /// The environment the process captured at its start; its policy is
     /// the process runtime's policy.
     pub(in crate::runtime) environment: crate::ProcessExecutionEnvSpec,
@@ -568,43 +548,6 @@ impl RuntimeSessionServices {
                 policy: environment.policy.clone(),
                 owner: CurrentOwner::Process {
                     process_id,
-                    environment: Box::new(environment),
-                },
-                host,
-                plugins,
-                runtime_lease_owner,
-                runtime_lease_executor_id: uuid::Uuid::new_v4().to_string(),
-                turn_phase_probe,
-            },
-            processes: ProcessCapability {
-                sync_needed: Arc::new(AtomicBool::new(false)),
-            },
-            direct: DirectCompletionCapability,
-            direct_replay_ordinals: Arc::new(std::sync::Mutex::new(
-                std::collections::BTreeMap::new(),
-            )),
-            direct_unkeyed_in_flight: Arc::new(std::sync::Mutex::new(
-                std::collections::BTreeSet::new(),
-            )),
-        }
-    }
-
-    pub(in crate::runtime) fn for_realization(
-        owner: crate::ExecutionOwner,
-        ports: RealizationServicesPorts,
-    ) -> Self {
-        let RealizationServicesPorts {
-            environment,
-            host,
-            plugins,
-            runtime_lease_owner,
-            turn_phase_probe,
-        } = ports;
-        Self {
-            current: CurrentOwnerCapability {
-                policy: environment.policy.clone(),
-                owner: CurrentOwner::Realization {
-                    owner,
                     environment: Box::new(environment),
                 },
                 host,

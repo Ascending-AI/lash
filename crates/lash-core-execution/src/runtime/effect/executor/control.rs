@@ -23,17 +23,6 @@ pub type ProcessDriveStep<'step> = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<(), crate::PluginError>> + Send + 'step>,
 >;
 
-/// One record of a logical Run, for [`ActorContext::record_run_record`]:
-/// the future that produces the record and the canonical material it owns,
-/// or a fault that ends the attempt unrecorded.
-pub type RunRecordStep<'step> = std::pin::Pin<
-    Box<
-        dyn std::future::Future<Output = Result<lash_core_store::tool_run::RunJournalEntry, String>>
-            + Send
-            + 'step,
-    >,
->;
-
 #[cfg(test)]
 #[path = "control/journal_identity_tests.rs"]
 mod journal_identity_tests;

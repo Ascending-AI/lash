@@ -91,7 +91,7 @@ impl RuntimeTurnDriver<'_> {
             .with_tracing(self.execution_tracing(0))
             .with_turn_hand_over(false);
         let result = context
-            .drive_tool_run(None, |owned| {
+            .drive_tool_run(|owned| {
                 self.tool_run_owner = owned.tool_run_owner();
                 async {
                     let effect_loop: EffectLoop<'_> =

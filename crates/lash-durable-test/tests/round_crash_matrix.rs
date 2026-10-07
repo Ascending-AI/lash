@@ -597,11 +597,13 @@ fn round_laws(
                     violations.push(format!("NR-3: {call} wrote {writes:?}"));
                 }
             }
-            Tool::Failing => {
-                if !matches!(outcome, AttemptOutcome::Failed(_)) {
-                    violations.push(format!("{call} settled {outcome:?}"));
-                }
-            }
+            Tool::Failing => match outcome {
+                AttemptOutcome::Failed(_) => {}
+                // A cancel in the backoff ends the call before its next
+                // attempt.
+                AttemptOutcome::Cancelled { .. } if cancelled => {}
+                other => violations.push(format!("{call} settled {other:?}")),
+            },
             Tool::Quick => {
                 if view_member.starts().len() != 1 {
                     violations.push(format!(
@@ -930,13 +932,10 @@ async fn a_turn_cancel_ends_unfinished_members_as_cancelled() {
 
 /// Member cancel during a backoff: a cancel that lands while a `Repeatable`
 /// call waits out its retry starts no next attempt, and records the call
-/// `Cancelled` at once rather than at the retry's due time.
-///
-/// Red on the durable path: the runner settles a `RetryDue` member with an
-/// `x_outcome` on the failed attempt's start, which the fold's
-/// `open_attempt` refuses as `OutOfOrder`, so the round never settles.
+/// `Cancelled` at once rather than at the retry's due time. The failed
+/// attempt is the call's last: the cancel settles it on that attempt's own
+/// start, and no next ordinal is opened.
 #[tokio::test]
-#[ignore = "blocked: L4 (FIG-5174) settles a member cancelled in its retry backoff with a record the fold refuses"]
 async fn a_cancel_during_a_retry_backoff_starts_no_next_attempt() {
     let members = vec![Member {
         call: call("call-f"),

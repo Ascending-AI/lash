@@ -9,7 +9,6 @@ use crate::{
     ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry,
 };
 use lash_core::core_internal::{ProcessRuntimeContext, ProcessRuntimePorts};
-mod realization;
 use lash_core_execution::runtime::effect::ProcessRunner;
 
 /// Deployment-local configuration for rebuilding durable process executions.

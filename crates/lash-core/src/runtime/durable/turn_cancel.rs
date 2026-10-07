@@ -14,8 +14,9 @@
 //! Honouring it stops the turn's in-memory work and leaves the rest to the
 //! next activation pass, which finds the request on the row and
 //! [`finalize`]s the turn: its `Cancelled` terminal in one `turn.cancel`
-//! commit. A crash anywhere in between leaves the request on the row, so the
-//! next owner finalizes the turn the same way, before it starts any new work.
+//! commit, which also settles a tool round's unfinished members `Cancelled`.
+//! A crash anywhere in between leaves the request on the row, so the next
+//! owner finalizes the turn the same way, before it starts any new work.
 
 use std::future::Future;
 
@@ -84,6 +85,7 @@ pub(super) async fn finalize(
     let cause = serde_json::to_string(&cancel_evidence(request))
         .map_err(|error| TurnError::Exec(format!("the cancel cause does not encode: {error}")))?;
     let mut tx = cx.begin().await?;
+    super::tool_round::cancel_open_round(cx, &mut tx, row).await?;
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {
         session: row.session.clone(),
         run: row.run.clone(),

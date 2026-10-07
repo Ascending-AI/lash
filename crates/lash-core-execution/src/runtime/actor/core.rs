@@ -86,7 +86,6 @@ pub(super) struct Inner {
     cancel: CancellationToken,
     probe: Arc<dyn DurableProbe>,
     dues: Dues,
-    run_records: crate::trace::RunRecordObserver,
 }
 
 impl std::fmt::Debug for ActorContext {
@@ -127,7 +126,6 @@ impl ActorContext {
                 cancel,
                 probe,
                 dues: Dues::new(),
-                run_records: crate::trace::RunRecordObserver::default(),
             }),
             scope: Scope::new(admitted),
         }
@@ -155,7 +153,6 @@ impl ActorContext {
                 cancel,
                 probe,
                 dues: Dues::new(),
-                run_records: crate::trace::RunRecordObserver::default(),
             }),
             scope: Scope::new(admitted),
         }
@@ -181,7 +178,6 @@ impl ActorContext {
                 cancel: CancellationToken::new(),
                 probe: Arc::new(lash_durable::NoProbe),
                 dues: Dues::new(),
-                run_records: crate::trace::RunRecordObserver::default(),
             }),
             scope: Scope::new(AdmittedScope::runtime_operation("unavailable")),
         }
@@ -354,13 +350,6 @@ impl ActorContext {
             .backend
             .as_ref()
             .map(Backend::projection_providers)
-    }
-
-    /// The scope-bound observer of the Run records this context's tool
-    /// rounds record, for their traces.
-    #[must_use]
-    pub fn run_record_observer(&self) -> &crate::trace::RunRecordObserver {
-        &self.inner.run_records
     }
 
     /// This context executing under `admitted` instead, with fresh

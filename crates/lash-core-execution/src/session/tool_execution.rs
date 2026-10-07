@@ -479,9 +479,8 @@ impl RuntimeExecutionContext<'_> {
         let requested_at_ms = self.dispatch.clock.timestamp_ms();
         let preparation = prepare_tool_call_with_context(context.dispatch.as_ref(), pending).await;
         if let ToolPreparationOutcome::Completed(outcome) = &preparation
-            && let Err(error) = context
-                .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
-                .await
+            && let Err(error) =
+                context.trace_tool_call_started((&outcome.record).into(), requested_at_ms)
         {
             context.record_nested_effect_error(error);
         }
@@ -507,9 +506,8 @@ impl RuntimeExecutionContext<'_> {
             crate::ToolOutcome::failure(failure),
         )
         .await;
-        if let Err(error) = context
-            .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
-            .await
+        if let Err(error) =
+            context.trace_tool_call_started((&outcome.record).into(), requested_at_ms)
         {
             context.record_nested_effect_error(error);
         }
@@ -535,9 +533,8 @@ impl RuntimeExecutionContext<'_> {
         )
         .await;
         if let ToolPreparationOutcome::Completed(outcome) = &preparation
-            && let Err(error) = context
-                .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
-                .await
+            && let Err(error) =
+                context.trace_tool_call_started((&outcome.record).into(), requested_at_ms)
         {
             context.record_nested_effect_error(error);
         }
@@ -666,14 +663,8 @@ impl RuntimeExecutionContext<'_> {
                 args: outcome.record.args.clone(),
                 output: output.clone(),
             };
-            this.emit_tool_call_completed(
-                call_key,
-                &record,
-                &attempts,
-                duration_ms,
-                &outcome.intent_outcomes,
-            )
-            .await;
+            this.emit_tool_call_completed(call_key, &record, &attempts, duration_ms)
+                .await;
             Ok(CompletedProtocolToolCall {
                 completed: crate::sansio::CompletedToolCall {
                     call_id: ids.call_id,
@@ -702,14 +693,8 @@ impl RuntimeExecutionContext<'_> {
         record: &ToolCallRecord,
         attempts: &[lash_trace::TraceRetryAttempt],
         duration_ms: u64,
-        intent_outcomes: &[crate::ToolIntentExecutionOutcome],
     ) {
-        if let Err(error) = self
-            .emit_tool_call_completed_trace(record, attempts, intent_outcomes)
-            .await
-        {
-            self.record_nested_effect_error(error);
-        }
+        self.trace_tool_call_completed(record, attempts);
         self.emit_tool_call_completed_activity(call_key, record, duration_ms);
     }
 
@@ -804,10 +789,9 @@ impl RuntimeExecutionContext<'_> {
             output: completed.output.clone(),
         };
         // The protocol supplied this original call identity and refused it
-        // before dispatch. Retain that fact before notifying observers.
-        if let Err(error) = self
-            .retain_unadmitted_tool_request(&record, self.dispatch.clock.timestamp_ms())
-            .await
+        // before dispatch.
+        if let Err(error) =
+            self.trace_tool_call_started((&record).into(), self.dispatch.clock.timestamp_ms())
         {
             self.record_nested_effect_error(error);
             return;
@@ -826,7 +810,7 @@ impl RuntimeExecutionContext<'_> {
         // The call completed host-side; no measured window exists on this
         // path, so the observation reports 0 rather than a live clock read
         // made long after the work ran (FIG-3696).
-        self.emit_tool_call_completed(call_key, &record, &[], 0, &completed.intent_outcomes)
+        self.emit_tool_call_completed(call_key, &record, &[], 0)
             .await;
     }
 

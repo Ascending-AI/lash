@@ -42,7 +42,7 @@ use lash_core::runtime::durable::session::{
     AdmittedInputs, CodeCell, SessionActivation, TurnCommit, TurnDone, TurnDrive, TurnError,
     TurnRow, TurnServices, admit_mail,
 };
-use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
+use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
     DriverAction, DriverContextView, Effect, ExecResponse, Message, MessageRole, Part,
     ProtocolTurnOptions, TurnMachine, TurnMachineConfig, facade_support::TurnFinish,
@@ -50,7 +50,8 @@ use lash_core::{
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core_execution::runtime::actor::round::{
-    self, BodyOutput, ExecutionDraft, PolicyView, Recovery,
+    self, AdmittedExecution, BodyOutput, CompletedCall, ExecutionDraft, MemberBody, MemberPin,
+    PolicyView, Recovery, RoundTools,
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::effect_opener::EffectOpener;
@@ -439,6 +440,10 @@ impl V0Services {
 impl TurnDrive for V0Drive {
     fn machine(&mut self) -> &mut TurnMachine {
         &mut self.machine
+    }
+
+    fn tools(&mut self) -> Arc<dyn RoundTools> {
+        Arc::new(NoTools)
     }
 
     async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
@@ -1191,4 +1196,30 @@ async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_postgres() {
         return;
     };
     cold_resume(Dialect::Postgres, Some(url)).await;
+}
+
+/// The scenario's model calls no tool: its work runs in a code cell.
+struct NoTools;
+
+impl RoundTools for NoTools {
+    fn pin(&self, _call: &PendingToolCall, _now_ms: u64) -> MemberPin {
+        unreachable!("the vertical scenario calls no tool")
+    }
+
+    fn policies(&self) -> PolicyView {
+        PolicyView::default()
+    }
+
+    fn body(&self, _call: &PendingToolCall, _execution: &AdmittedExecution) -> MemberBody {
+        unreachable!("the vertical scenario calls no tool")
+    }
+
+    fn completed(
+        &self,
+        _call: &PendingToolCall,
+        _outcome: &AttemptOutcome,
+        _material: Option<&str>,
+    ) -> CompletedCall {
+        unreachable!("the vertical scenario calls no tool")
+    }
 }

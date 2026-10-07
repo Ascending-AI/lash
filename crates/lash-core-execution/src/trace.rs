@@ -37,9 +37,7 @@ pub fn composition_schema_serialization_count() -> usize {
 
 mod boundary;
 pub use boundary::TraceBoundaryReceipt;
-pub(crate) mod run_receipts;
 mod runtime;
-pub use run_receipts::RunRecordObserver;
 pub use runtime::{
     JournalFrontier, LiveStep, StepIssue, TraceEmitter, TraceRuntime, TraceStanding,
     tool_trace_scope,

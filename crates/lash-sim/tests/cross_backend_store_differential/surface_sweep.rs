@@ -55,7 +55,6 @@ pub(super) struct SurfaceScratch {
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SurfaceMethod {
     RefusedRootAdmission,
-    ToolReceipts,
     LoadSession,
     ListPendingTurnInputs,
     /// [`IngressStore::pending_turn_input`]: the keyed point read of the
@@ -230,7 +229,6 @@ impl SurfaceMethod {
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::RefusedRootAdmission => "surface:refused_root_admission",
-            Self::ToolReceipts => "surface:tool_receipts",
             Self::LoadSession => "surface:load_session",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
             Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
@@ -516,7 +514,6 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
                 owner: "surface-sweep-owner",
             },
             surface(SurfaceMethod::RefusedRootAdmission),
-            surface(SurfaceMethod::ToolReceipts),
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::AdmitSessionState),
             surface(SurfaceMethod::LoadKnownNode),
@@ -967,7 +964,6 @@ impl BackendRunner {
                 "selection_changed_without_writes".to_owned()
             }
 
-            SurfaceMethod::ToolReceipts => tool_receipt_law(store.as_ref(), &session_id).await?,
             SurfaceMethod::LoadSession => {
                 format!(
                     "present={}",
@@ -1976,130 +1972,4 @@ impl BackendRunner {
             lash_core::store::ControlIntentId::from_sequence(UNKNOWN_INTENT_SEQUENCE)
         }
     }
-}
-
-async fn tool_receipt_law(
-    store: &dyn RuntimeStore,
-    session_id: &SessionId,
-) -> Result<String, StoreError> {
-    let owners = [
-        lash::tracing::TraceToolOwner::Turn {
-            session_id: session_id.clone(),
-            turn_id: "receipt-turn".into(),
-        },
-        lash::tracing::TraceToolOwner::Operation {
-            session_id: session_id.clone(),
-            operation_id: "receipt-operation".into(),
-        },
-        lash::tracing::TraceToolOwner::Process {
-            process_id: lash_sansio::ProcessId::fixture("receipt-process"),
-        },
-    ];
-    for (index, owner) in owners.into_iter().enumerate() {
-        let request = lash_core::store::ToolRequestReceipt {
-            owner,
-            request_key: format!("{session_id}:receipt-tool:{index}"),
-            payload_digest: "first-digest".into(),
-            payload: serde_json::json!({"prepared": "first"}),
-            scope: None,
-            context: Default::default(),
-            requested_at_ms: 7,
-        };
-        if store
-            .tool_request_receipt(&request.request_key)
-            .await?
-            .is_some()
-        {
-            return Err(StoreError::Backend(
-                "unaccepted request lookup law failed".into(),
-            ));
-        }
-        let first = store.record_tool_request(&request).await?;
-        if store.tool_request_receipt(&request.request_key).await? != Some(first.record.clone()) {
-            return Err(StoreError::Backend(
-                "accepted request lookup law failed".into(),
-            ));
-        }
-        let mut retry = request.clone();
-        retry.requested_at_ms = 99;
-        let reused = store.record_tool_request(&retry).await?;
-        if !first.changed
-            || reused.changed
-            || reused.record != first.record
-            || reused.permit().is_some()
-        {
-            return Err(StoreError::Backend(
-                "request first-writer law failed".into(),
-            ));
-        }
-        retry.owner = lash::tracing::TraceToolOwner::Process {
-            process_id: lash_sansio::ProcessId::fixture("another-owner"),
-        };
-        if !matches!(
-            store.record_tool_request(&retry).await,
-            Err(StoreError::ToolRequestConflict { .. })
-        ) {
-            return Err(StoreError::Backend("owner conflict law failed".into()));
-        }
-        retry.owner = request.owner.clone();
-        retry.payload_digest = "conflicting-digest".into();
-        if !matches!(
-            store.record_tool_request(&retry).await,
-            Err(StoreError::ToolRequestConflict { .. })
-        ) {
-            return Err(StoreError::Backend("request conflict law failed".into()));
-        }
-        let completion = lash_core::store::ToolCompletionReceipt {
-            owner: request.owner.clone(),
-            request_key: request.request_key.clone(),
-            payload_digest: request.payload_digest.clone(),
-            result: serde_json::json!({"output":"first"}),
-            intent_outcomes: serde_json::json!([]),
-            completed_at_ms: 11,
-        };
-        let completed = store.record_tool_completion(&completion).await?;
-        let mut retry = completion;
-        retry.completed_at_ms = 101;
-        retry.result = serde_json::json!({"output":"later"});
-        let reused = store.record_tool_completion(&retry).await?;
-        if !completed.changed
-            || reused.changed
-            || reused.record != completed.record
-            || reused.permit().is_some()
-        {
-            return Err(StoreError::Backend(
-                "completion first-writer law failed".into(),
-            ));
-        }
-    }
-    Ok("request=first completion=first conflicts=typed permits=one".into())
-}
-
-#[tokio::test]
-async fn tool_receipt_sweep_retains_only_committed_first_writers() {
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("SQLite memory");
-    let session_id = SessionId::fixture("tool-receipt-sweep");
-    let request = SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: session_id.clone(),
-        relation: SessionRelation::Root,
-        config: lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        )
-        .into(),
-        head: SessionCreationHead::Config,
-    };
-    let store = admit_test_session(stores.session_store_factory(), &request)
-        .await
-        .expect("admit sweep session");
-    assert_eq!(
-        tool_receipt_law(store.as_ref(), &session_id)
-            .await
-            .expect("actual sweep drivers"),
-        "request=first completion=first conflicts=typed permits=one"
-    );
 }

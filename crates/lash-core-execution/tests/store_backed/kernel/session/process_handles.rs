@@ -133,7 +133,7 @@ mod tests {
         ));
         let policy = Arc::new(DenyProcessAwaitAttachments::default());
         let dispatch = Arc::new(ToolDispatchContext {
-            tool_receipts: None,
+            fleet_format: lash_core_execution::FleetFormat::current(),
             plugins,
             tools: provider,
             tool_registry: None,
@@ -318,7 +318,7 @@ mod tests {
                 .with_process_registry(Arc::clone(&registry)),
         );
         let dispatch = Arc::new(ToolDispatchContext {
-            tool_receipts: None,
+            fleet_format: lash_core_execution::FleetFormat::current(),
             plugins,
             tools: provider,
             tool_registry: None,
@@ -490,7 +490,7 @@ mod tests {
             .await
             .expect("register hidden process");
         let dispatch = Arc::new(ToolDispatchContext {
-            tool_receipts: None,
+            fleet_format: lash_core_execution::FleetFormat::current(),
             plugins,
             tools: provider,
             tool_registry: None,

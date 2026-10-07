@@ -66,7 +66,7 @@ pub use effect::{
     PresentationBinding, ProcessCommand, ProcessDriveStep, ProcessEffectOutcome,
     ProcessListSelection, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
     RecordedKeyFence, RecordedKeyRange, RecordedKeys, RefusedWriteRange, Resolution,
-    ResolveOutcome, RunAggregateWakePolicy, RunRecordStep, RuntimeAssistantResponseHooksOutcome,
+    ResolveOutcome, RunAggregateWakePolicy, RuntimeAssistantResponseHooksOutcome,
     RuntimeAttribution, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,

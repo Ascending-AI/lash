@@ -23,19 +23,6 @@ pub(crate) use crate::trigger_schema::TRIGGER_SCHEMA;
 /// in the same transaction. Component blobs are shared and have no
 /// component-side cascade.
 pub(crate) const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS tool_call_receipts (
-    request_key TEXT PRIMARY KEY,
-    session_id TEXT,
-    owner_key TEXT NOT NULL,
-    payload_digest TEXT NOT NULL,
-    requested_at_ms INTEGER NOT NULL,
-    request_json TEXT NOT NULL,
-    completion_json TEXT,
-    completed_at_ms INTEGER,
-    retired_at_ms INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_tool_call_receipts_retention ON tool_call_receipts(session_id, completed_at_ms);
-
 CREATE TABLE IF NOT EXISTS worker_recovery (
     scope_id TEXT PRIMARY KEY,
     revision INTEGER NOT NULL,

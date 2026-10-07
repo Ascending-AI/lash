@@ -70,9 +70,6 @@ macro_rules! runtime_store_operations {
                 [catalog] fn delete_session(&self, session_id: &SessionId) -> MaintenanceResult<SessionBlobReclaimReport>;
             }
             SessionCommitStore {
-                [catalog] fn tool_request_receipt(&self, request_key: &str) -> Result<Option<ToolRequestReceipt>, StoreError>;
-                [catalog] fn record_tool_request(&self, request: &ToolRequestReceipt) -> Result<StoreTransition<ToolRequestReceipt>, StoreError>;
-                [catalog] fn record_tool_completion(&self, completion: &ToolCompletionReceipt) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError>;
                 [session] fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError>;
                 [carried fence] fn admit_session_state(&self, fence: &ShiftFence) -> Result<SessionStateAdmission, StoreError>;
                 [session] fn load_session_head_meta(&self, session_id: &SessionId) -> Result<Option<SessionHeadMeta>, StoreError>;

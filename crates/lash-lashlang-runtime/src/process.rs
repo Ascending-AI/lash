@@ -402,7 +402,7 @@ async fn run_lashlang_process_scoped(
     }
     let owner = ctx.clone();
     owner
-        .drive_tool_run(None, |ctx| async move {
+        .drive_tool_run(|ctx| async move {
             let ordinals = ReplayOrdinals::restore(segment_state.as_ref());
             let run = crate::LashlangReplayRun::new(
                 identities.namespace(),

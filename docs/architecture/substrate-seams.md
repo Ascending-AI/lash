@@ -20,7 +20,7 @@ L13 = FIG-5193.
 | S1 `ActorContext` is the one effect context | `lash-core-execution/src/runtime/actor/` | One concrete context per activation. No engine trait, no controller trait, no default bodies. Each `RuntimeEffectCommand` group has its own method; the caller picks it (`lash-core/src/runtime/turn_driver/issue.rs`). | `core.rs`: actor, epoch, clock, cancel, probe, `begin`/`commit`, `note_due`, `backend`, scopes, ordinals, `unavailable` (testing), `detached` | per group, see [the variant classification](#execute_effect-variant-classification) |
 | S2 commit labels, config, dues, dispatch, replay probe | `lash-durable/src/{labels,durable_config,dues,dispatch,probe}.rs`, `lash-durable-test/src/tripwire.rs` | Every label the lanes emit is in `CommitLabel::ALL`; a lane that needs a new label adds it here in its own lane. `DurableConfig` is one validated struct whose field docs name their owners. A `waiting` release uses the minimum due. `ActorDispatch` routes by actor kind. `DurableProbe` has no default bodies. | all of it, with self-tests (`Tripwire` counts each event kind) | the session activation V0, the process activation L6 |
 | S3 turn phases and the restore entry | `lash-core/src/runtime/durable/{session,session_mail}.rs` | Load rows, `restore_turn` (exactly one `restore_from_checkpoint`), re-deliver the pending effect, `run_phases`. Nothing re-executes orchestration to reach a recorded outcome. `drain_session_mail` runs first on every claim. | types | V0 then L3 (activation, admit, restore, phases), L3 (`request_turn_cancel`), L3s (`drain_session_mail`) |
-| S4 admitted executions and tool rounds | `lash-core-execution/src/runtime/actor/round.rs` | No body starts before `admit`'s commit; the fold calls no producer; a started `Once` without an outcome folds to `Interrupted`; a `Repeatable` reruns at its ordinal; `(owner, run, ordinal)` is the second fence. | types | V0 (`admit`, `run_body`, `settle`, `fold`, the run-record family), L4 (rounds, retries, sources, realization, `tool_effect`) |
+| S4 admitted executions and tool rounds | `lash-core-execution/src/runtime/actor/round.rs` | No body starts before `admit`'s commit; the fold calls no producer; a started `Once` without an outcome folds to `Interrupted`; a `Repeatable` reruns at its ordinal; `(owner, run, ordinal)` is the second fence. | types | V0 (`admit`, `run_body`, `settle`, `fold`, the run-record family), L4 (rounds, retries, member cancel, `RoundTools`, in-place `tool_effect`) |
 | S5 waits and completion keys | `lash-core-execution/src/runtime/actor/waits.rs`, `lash-durable/src/domain/waits.rs` | The deadline is written once at minting; the first resolution wins; host resolve refuses every kind but `tool_completion` and `custom` with `ReservedKind` and writes nothing; a resolution locks the wait row, then the actor row (an owner commit fences its actor row first, so a deadlock between them aborts one, which retries); every await races the awaiter's own `cancel` mail; a durable backend without secrets is refused (S9). | types, `CompletionKeySecrets` accessors | filled by L5 (`waits.rs`, `wait_effects.rs`, `lash_waits` in both dialects); the await-event methods L5 kept for their callers are L3's, L4's and L6's (see [left for owners](#left-for-owners)) |
 | S6 host process engines are state machines | `lash-core-execution/src/runtime/process/{engine,engine_state}.rs`, `lash-core-execution/src/runtime/actor/process.rs` | `advance(state, event) -> (state, action)`; the new state and its action's admission commit in one `process.advance` transaction. Cancel is delivered once within the grace; at `grace_until` lash forces the terminal. No `run`, no `await_terminal`, no effect controller on the run context, no default bodies. | the trait and its types | L6 (every engine's `advance`, `end_scope`, the process activation, `process_effect`) |
 | S7 VM snapshots and broker admission | `lash-vm-broker/src/snapshot.rs`, `lash-core-execution/src/runtime/actor/vm.rs`, `lash-durable/src/domain/{keys,snapshots}.rs` | The snapshot revision, its broker ledger, `admit` + `x_start` for every operation since the last snapshot and new waits commit in one `cell.snapshot+admit` transaction; restore injects saved outcomes by `OperationId`; nothing re-dispatches. | types; `SnapshotStore` replaces `CheckpointStore` | none: V0 and L7 filled them |
@@ -63,10 +63,9 @@ L13 = FIG-5193.
 | | `BeginSessionClose` | deleted (L6b): a deletion is session mail, and the close is the session actor's closing state (`runtime/durable/session_close.rs`), one labelled transaction per step |
 | `shift_effect` (L3s) | `AdmitShift`, `DrawRunStart`, `AcceptTurnInput`, `TransitionPlugins`, `PluginCallbacks` | phase-transaction write in the session mail drain (`turn.accept`, `turn.admit`) |
 | | `ObserveDrainMark` | deleted: drain is a release at a committed phase (L11) |
-| `tool_effect` (L4) | `ToolAttempt` | admitted execution |
-| | `PresentToolResult` | phase-transaction write (`round.present+model.start`) |
+| `tool_effect` (L4) | `ToolAttempt`, `PresentToolResult` | run in place, recorded nowhere: inside the admitted execution that runs the call (a round member between its `x_start` and `x_outcome`, or a code cell up to its next snapshot); a round's presentation record commits in `round.present+model.start` |
 | | `RestoreRunMaterial` | deleted: the fold reads committed records (S4) |
-| | `Trigger`, `IngestTriggerOccurrence`, `AdmitTriggerDelivery` | store-local effect of the call's settled outcome (`StoreLocalEffect::TriggerCreate`/`TriggerDelete`) |
+| | `Trigger`, `IngestTriggerOccurrence`, `AdmitTriggerDelivery` | run in place until fig-5174-pending makes them store-local effects of the call's settled outcome (`StoreLocalEffect::TriggerCreate`/`TriggerDelete`, F3) |
 | `wait_effect` (L5) | `AwaitEvent`, `Sleep` | phase-transaction write: a pinned wait row or timer, raced against cancel mail |
 | | `PeekAwaitEvent` | read of a wait row, recorded nowhere |
 | `process_effect` (L6) | `Process` (start, signal, await, cancel) | store-local effect (start, signal), wait (await), mail (cancel) |
@@ -101,7 +100,6 @@ Code the fold made unreachable, or nearly, that an owning lane is about to rewri
 - **L4:** the journal guard and owner-step gate in `runtime/actor/journal.rs`. (L4 deleted the generation-cut plumbing and the Run transfer.)
 - **L6 and L7b:** the `with_turn_hand_over(false)` plumbing (4 sites) and segment handover as process state; the process run-context builder (`process_runners/mod.rs`) and the capability items only it read (`session_runtime_store`, `execution_owner`, `turn_phase_probe`), kept under `#[expect(dead_code)]` for the advance-driven engine drive; `ProcessEngineRunContext` without effect accessors, and the lashlang run path (`run_lashlang_process`, which takes the context it will run under).
 - **L3, L4 and L6:** the await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, `prepare_completion_key`, `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`, and `completion_host_key`), kept by L5 in `runtime/actor/await_event_legacy.rs`. Each reaches `port_pending`, whose arm names the lane by wait identity: the plugin task cancel signal L3 (turn control's waits are deleted: a turn cancel is session mail), tool completion and custom L4, process signals L6. They are deleted with their callers' ports; no wait row serves a recomputable key.
-- **V0:** `RunRecordObserver::bind`, kept for `record_run_record`.
 - At the L10a rebase I0 ported every file that still named the deleted seam, deleted `replay_read_gate.rs` (its subject was replay paths) and the pending list, and dropped Rule 7's Restate exclusion; L10a itself removed `RecordedJournal` and `read_recorded_journal`.
 
 ## Table ownership
@@ -126,7 +124,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 
 Generated from the tree with `scripts/check-substrate-todos.py`'s scanner; each lane removes its rows as it fills them.
 
-Counts: L3 1, L3s 5, L4 14, L6 1 (21 in all).
+Counts: L3 1, L3s 5, L4 1, L6 1 (8 in all).
 
 ### V0 (FIG-5170)
 
@@ -152,22 +150,7 @@ None: V0 filled its stubs. It re-tagged the journal-era ones its path never reac
 
 | Where | Function | Stub |
 |---|---|---|
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `admit_round` | admit a tool round inside model.done |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `arm_run_source` | arm a Run source as a pinned wait |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `attach_run_process_terminal` | attach a process-terminal source as a process_terminal wait |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `attach_run_realization` | read a realization from its call's committed outcome |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `await_run_sources` | race Run sources through waits::race |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `cancel_run_source` | cancel a Run source, first resolution wins |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `issue_run_realization` | realize an intent as a store-local effect of its call's outcome |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `present` | present a round in declared order from its committed records |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `record_run_record` | record a Run record as a run_records row |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `select_run_sources` | select the first completed Run source |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_attempt` | start a Run attempt through admit, run_body and settle |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_prepare` | start a declared-start preparation as an admitted execution |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_record` | start a Run record as an admitted execution |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_retry` | record a retry with its due time and register the due source |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `tool_effect` | run a tool-round effect as an admitted execution or a round write |
-| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the tool completion keys' port to L5's pin, race and resolve_host |
+| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the tool completion keys' port to L5's pin, race and resolve_host (fig-5174-pending) |
 
 ### L6 (FIG-5175)
 

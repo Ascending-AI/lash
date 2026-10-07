@@ -175,33 +175,6 @@ impl RuntimeExecutionContext<'_> {
         )
     }
 
-    pub(crate) fn recorded_tool_observation(
-        &self,
-        mut event: lash_trace::TraceEvent,
-    ) -> Result<Option<serde_json::Value>, String> {
-        let Some(tracing) = self
-            .tracing
-            .as_ref()
-            .filter(|tracing| tracing.runtime.is_observed())
-        else {
-            return Ok(None);
-        };
-        match &mut event {
-            lash_trace::TraceEvent::ToolCallStarted {
-                issuing_node_id, ..
-            }
-            | lash_trace::TraceEvent::ToolCallCompleted {
-                issuing_node_id, ..
-            } => {
-                *issuing_node_id = self.issuing_language_node_id.as_deref().map(str::to_owned);
-            }
-            _ => {}
-        }
-        serde_json::to_value((tracing.scope_context.clone(), event))
-            .map(Some)
-            .map_err(|error| error.to_string())
-    }
-
     /// The runtime's shared trace handle, when this execution was given one.
     pub fn trace_runtime(&self) -> Option<&crate::trace::TraceRuntime> {
         self.tracing.as_ref().map(RuntimeExecutionTracing::runtime)

@@ -854,19 +854,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_parent_end_plans_obligation_stalled
     ON lash_parent_end_plans(obligation_id)
     WHERE obligation_state = 'stalled';
 
-CREATE TABLE IF NOT EXISTS lash_tool_call_receipts (
-    request_key TEXT PRIMARY KEY,
-    session_id TEXT,
-    owner_key TEXT NOT NULL,
-    payload_digest TEXT NOT NULL,
-    requested_at_ms BIGINT NOT NULL,
-    request_json TEXT NOT NULL,
-    completion_json TEXT,
-    completed_at_ms BIGINT,
-    retired_at_ms BIGINT
-);
-CREATE INDEX IF NOT EXISTS idx_lash_tool_call_receipts_retention ON lash_tool_call_receipts(session_id, completed_at_ms);
-
 CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     replay_key TEXT PRIMARY KEY,
     owner TEXT NOT NULL,

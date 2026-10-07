@@ -1,241 +1,130 @@
 # Tool-run contract
 
-This is the contract every worker of the tool execution end state (FIG-4864)
-builds against. Every ordinary tool body becomes one recorded attempt in its
-logical Run's opener journal. The Run owns admission, retries, the
-final-or-cancel decision, protected drain, presentation, incorporation,
-aggregates and surviving losers. Long, isolated or independently living work
-is a process admitted before its body runs.
+This is the contract every tool call runs under. A call's admission (A), its
+attempts (X), its decision (D) and its presentation (V) run in memory, inside
+the admitted execution that makes the call durable
+([ADR 0132](../adr/0132-durability-is-state-first-over-the-lash-store.md) §5).
+Nothing is a journal, and no code ever runs again against a recorded history.
+Long, isolated or independently living work is a process admitted before its
+body runs. [ADR 0099](../adr/0099-tool-children-of-effect-groups-are-live-closing-settled.md)
+records ownership and [ADR 0116](../adr/0116-tools-are-opaque.md) defines
+authoring.
 
-The seams below describe the implemented contract. Their types, transitions and
-codec/refusal witnesses share one Run execution path. Production standard,
-RLM, generic aggregate and host operation callers use that path. The normative
-source is the FIG-4864 `tool-final-spec.md`, including binding Q2-Q5 and the
-adopted hook-composition ruling. [ADR 0099](../adr/0099-tool-children-of-effect-groups-are-live-closing-settled.md)
-records ownership and [ADR 0116](../adr/0116-tools-are-opaque.md) defines authoring.
-The historical child/group implementation is not a runtime option.
+## Where a call is durable
 
-The durable mechanics below (the opener journal, physical segment cuts and the
-separate realization invocation) are how the retired Restate engine
-implemented this contract. [ADR 0132](../adr/0132-durability-is-state-first-over-the-lash-store.md)
-§5 owns their end state: Run records are rows keyed by `(owner, run, ordinal)`,
-a started row commits before each body, and the store half of realization
-commits with the tool result. The tool-round lanes carry this document to
-that end state.
+A call has one durable home: the admitted execution that runs it.
+
+- **A turn's tool round** (`runtime/actor/round`, the phase runner's
+  `durable/tool_round.rs`). The round is admitted in `model.done`, with an
+  `x_start` for every member. No body starts before that commit, so a model
+  stream that never committed launches nothing. Each member's attempt runs
+  the call's A, X, D and V in memory between its `x_start` and its
+  `x_outcome`; the outcome's material is the answer the machine is given.
+  A resume folds the round's run records: a started `Once` without an
+  outcome is `Interrupted` and never starts again, and a started `Repeatable`
+  reruns at its ordinal. A retryable failure is a known failure, and its
+  retry due is a row. A turn cancel ends unfinished members as `Cancelled`.
+  The round's `present` record rides the turn's next commit
+  (`round.present+model.start` or `turn.commit`) and answers the members
+  in declared order.
+- **A code cell or a lashlang process** (`tool_dispatch::call_run::ToolRun`).
+  The cell's program forms aggregates over the calls it issues. Every call
+  runs to its own end beside the program, and the cell's snapshot holds
+  what its heap took from them. A cell resumed from its snapshot never asks
+  again for a value its heap holds.
+
+`RuntimeExecutionContext::round_tools` gives a turn's drive its
+`RoundTools`; `drive_tool_run` gives a cell or a process its in-memory
+`ToolRun`.
 
 ## Seams
 
-| Seam | Contract | Pinned in | Witness | Implementing owner | Consumers |
-| --- | --- | --- | --- | --- | --- |
-| K1 | Whole-round admission: owner, call ids, operand aliases, prepared request, three-capability declaration, automatic callback binding, runtime retry/cancel policy, before-check record, reserved capacity | `lash_core_store::tool_run::admission` | codec, refusal | FIG-4875 | FIG-4877, FIG-4879, FIG-4855 |
-| K1/K3/K10 hooks | Tool hook phases, occurrences, verdicts, reducer and selection | `lash_core_store::tool_run::tool_hooks` | codec, reducer permutations | FIG-1399 (API cutover, ADR 0128) | FIG-4875, FIG-4877, FIG-4878 |
-| K2 | Owner-qualified material references and typed retained-result refusals (Q4) | `lash_core_store::tool_run::material` | codec, refusal | FIG-4876 | FIG-4877, FIG-4883, FIG-4739 |
-| K2/K4 retention | Retained bundles and their dependency leases: retain before publication, release, atomic retirement, holder fences | `lash_core_store::tool_run::retention`, `ToolMaterialStore` | codec, store laws (`tool_material_tests!`) | FIG-4889 | FIG-4739, FIG-4890, FIG-4883, FIG-4740 |
-| K3/K9 | Run events with stable ordinals, the sole-active-segment fold, final-or-cancel once, protected drain frontier, reported-retry schedule, `Live`/`Closing`/`Settled` | `lash_core_store::tool_run::run_event` | codec, fold refusals | FIG-4877, FIG-4879, FIG-4880, FIG-4882 | FIG-4881, FIG-4892, FIG-529 |
-| K4 | Immutable `Resolved(ref)`/`Cancelled` source seal, authority, short subscriptions | `lash_core_store::tool_run::source_seal` | codec, refusal, L07/L12 double laws (`durable_wait_source_seal`) | FIG-4883, FIG-4740, FIG-4891 | FIG-4886, FIG-4887 |
-| K5 | Declared start obligation: stable `StartKey`, registration, environment, consumer hold; cancel before/after admission; drained inside a final's declarations by the Run records `StartAdmitted`/`StartLaunched`/`StartDischarged` | `crates/lash-core-execution/src/runtime/process/declared_start.rs`; `lash_core_store::tool_run::run_event` | codec, refusal, fold refusals, L08 double laws over SQLite memory and file reopen (`declared_start_run_drain_on_the_double`) | FIG-4884, FIG-4885 | FIG-4887, FIG-4888 |
-| K6 | RequestCut, Quiescing, Capturable; complete Run transfer bound to its owner | `lash_core_store::tool_run::continuation` | codec, refusal, L10 protocol witness, L09/L16 process laws and journal pins on the double | FIG-4881, FIG-4739, FIG-4890, FIG-4889 | FIG-4891, FIG-4892 |
-| K7 | One accepted and one terminal business receipt per call id; observation permits minted from records | `lash_core_store::tool_run::receipt` | transition | FIG-4830 | FIG-4848, tracing |
-| K8 | Operation Run input kind over the session-operation opener (Q2) | `lash_core_store::tool_run::operation` | codec, identity | FIG-4888, FIG-4893 | host operations |
-| K10 | Callback slots and state authority, command batches, resolutions, applied frontier (Q5) | `lash_core_store::tool_run::state_command` | codec, refusal, frontier | FIG-4878 (FIG-4857 for construction) | FIG-4879, FIG-4880 |
+| Seam | Contract | Pinned in |
+| --- | --- | --- |
+| K1 | Admission: owner, call id, prepared request, three-capability declaration, callback binding, execution policy, before-check record, capacity | `lash_core_store::tool_run::admission`; `tool_dispatch::call_run::AdmittedToolCall::admit` |
+| K1/K3/K10 hooks | Tool hook phases, occurrences, verdicts, reducer and selection | `lash_core_store::tool_run::tool_hooks` |
+| K2 | Owner-qualified material references and typed retained-result refusals | `lash_core_store::tool_run::material` |
+| K3 | A call's attempt outcomes and its one final-or-cancel decision | `lash_core_store::tool_run::run_event` |
+| K4 | Immutable `Resolved(ref)`/`Cancelled` source seal for a Deferred call | `lash_core_store::tool_run::source_seal`, `retention` |
+| K5 | Declared start obligation: stable `StartKey`, environment, consumer hold, cancel policy | `crates/lash-core-execution/src/runtime/process/declared_start.rs` |
+| K8 | Operation Run input kind over the session-operation opener | `lash_core_store::tool_run::operation` |
+| K10 | Callback slots, state authority, command batches, resolutions, applied frontier | `lash_core_store::tool_run::state_command` |
 
-`RunCoordinator::start_round` (and `start_aggregate` for an aggregate)
-records one admission for the whole round,
-then registers independent `RunAttemptEntry` handles in admission order.
-Each X owns its canonical output. A selected Run record folds that X and
-its final decision together, or records retry eligibility and backoff;
-a separate recorded timer wake registers the next ordinal. Served replay
-reconstructs this command prefix before awaiting an older unfinished X.
-The independent Done path costs one A and one X/D/V per member.
+## One call
 
-Admission pins a material reference to the owning plugin namespace at its
-recorded generation. The Run retains one canonical image per namespace
-frontier; body requests share a read-only view of that image. Crash replay
-and reported retries resolve the recorded reference and keep that snapshot.
-Successful X captures hold declared state commands as data. Only the
-selected successful final reduces them, records the P58 resolutions with
-D, and publishes after D is durable. Failed or cancelled candidates
-publish no success commands; replay installs the recorded resolutions
-without executing a body, check or reducer.
+`AdmittedToolCall::admit` validates the declaration, checks the binding
+against the plugin revisions this build executes, binds an isolated call to
+its process, prepares the request once and asks every before-check of that
+one prepared request. `attempt` runs the body once and captures it under the
+admitted declaration, then decides it: the Run's cancel, then every
+after-check. A final realizes its declared intents in place, launches and
+discharges its declared start, and is presented; a withheld call emits its
+stream and is observed. `run_call` loops attempts under the sealed policy,
+backing off between them on the Run's clock; a cancel during the backoff
+ends the call `Cancelled` and starts no next attempt.
 
-`RunCoordinator::start_round` registers issued attempts with the coordinator;
-`progress` accepts one recorded selection at a time. A program effect can
-therefore run after a winner while another body remains unfinished.
-A body proposal is never an acknowledgement. Registered
-retry work retains its existing schedule and a pending Deferred source
-needs no local waiter.
+The declared intents of a final realize in place
+(`SingletonToolHandlers::realize`, `execute_final_tool_intents`) before it is
+presented. There is no separate realization invocation.
 
-A Run never crosses a segment (FIG-5174). A physical boundary carries only
-the opener's incorporation ledger and refuses while the opener's Run is open;
-an owner that resumes reads the run records its commits made durable and
-folds them (`runtime/actor/round`), so no capture, transfer, adoption or
-material carry exists.
+## Aggregates
 
-The state frontier carries each acknowledged publication's receipt by ordinal.
-On recovery, an identical historical receipt remains `AlreadyApplied`.
-A changed receipt at that ordinal yields `FrontierRefusal::ReceiptMismatch`,
-including when its original publisher has already been fenced.
+`ToolRun::form` forms an aggregate over the calls the Run started, its timers
+and the leaves the caller settled itself. A consumer (`race`, `any`, `all`,
+`allSettled`, the list batch) answers from the order leaves settled: leaves
+settled when the aggregate formed (a refused call, a plain operand) come
+first, in source order; dispatched settlements follow in the order they
+ended. `all` reports the first rejection; `any` the first fulfilment, or
+every rejection. A call the Run's cancel or a check's AbortRun ended is host
+control, raised on the caller's host channel and never an operand's
+rejection. A loser keeps running; `close` cancels the Run, discharges every
+unfinished call's external work and drives each to its end.
 
-Each physical process invocation keeps its fixed journal pin. A terminal
-publishes its lifecycle outcome before releasing that pin. A handover persists
-the successor state and accepts its send, registers the successor invocation's
-fixed pin, then releases the predecessor pin. Pending sources add no per-call
-pin or deadline. The process journal logic epoch changes with this command
-prefix; a predecessor journal retains its original generation's drain lane.
+A process holds a round's calls whole until every member ended; a cell
+counts every call it ever made. Past `max_tool_calls` the whole round is
+refused before any member starts.
 
-`RunCoordinator::start_aggregate` records unique leaves, source positions,
-aliases and timer admission time with the round's A. Pending siblings are
-registered before an immediate prefix can answer. Consumer modes remain
-caller policy: `race`, `any`, `all`, `allSettled` and the list batch observe
-the same recorded decisions and timer wakes. `all` reports the first terminal
-rejection; the list batch waits for every leaf and reports the first rejection
-in written order. Duplicate operands execute and consume one unique call.
-An empty race and a pending Deferred source carry no fabricated result.
-A final whose declarations carry intents settles as its recorded realization
-receipt answers: a refused intent presents it as a failure, so it settles as
-a rejection, and no consumer is answered before that receipt is recorded.
+## Binding rulings
 
-`consume_aggregate` exposes only the values selected by that consumer. Losing
-calls remain Live under the Run. `RunBodies` polls issued X bodies beside every
-owner wait — the program, its requests and each coordinator frame — while
-their results are awaited only inside those frames. `drain_protected` records
-presentation and incorporation without consumption; a later consumer records
-its own `Consumed` fact. A consumer that observes every leaf (`allSettled`, the
-list batch) takes each value in its V, and after selection every V the consumer
-is still owed records its consumption; a consumption record follows only for a
-value presented earlier without it. Coordination retains material references, rather than storing another copy of
-the loser's output.
+**Declaration.** The author declares exactly `may_defer`, `intents` and
+`isolated`, as the `ToolDeclaration` on the tool's `ToolManifest`. Admission
+reads it from the manifest the call is admitted under: the catalog's, the
+grant's, or a replayed cell's recorded binding. A round's calls are admitted
+together before any prepares: an invalid declaration, or an isolated
+declaration with no bound process implementation, refuses every member with
+a typed `ToolAdmissionRefusal`. In a turn's round the refused members settle
+at admission, in `model.done`, and no body runs. An outcome the declaration
+does not admit (Deferred without `may_defer`, an undeclared intent kind)
+fails the call with `ToolFailureCause::Declaration` before anything it
+declared is realized. An isolated call is a process from its start, with no
+inline body. There is no per-call timeout, duration, budget or idempotent
+capability. Retry and cancel policy are recorded runtime policy; a stored
+`Repeatable` with a current `Once` does not repeat, and a stored `Once` is
+never upgraded. `ToolCallId` is the external idempotency key.
 
-The aggregate owner supplies its clock. Timer admission records the original
-instant; recovery registers the remaining wait through the engine's durable
-timer facility.
+**Binding.** Admission binds the executable, preparation and presentation
+callbacks as `PluginCallbackIdentity { owner: PluginRevision, key }`. A call
+whose bound plugin revision is unavailable refuses with
+`PluginExecutionRefusal` (`plugin_revision_unavailable`) before any body.
+Presentation binds an optional singleton presenter followed by ordered steps;
+an empty plan is explicit and adopts no callback installed later.
 
-A retry backoff is a durable timer, never a race with an in-memory stop.
-Cancellation during backoff is observed inside D when that timer elapses;
-its latency is bounded by the recorded retry policy's `max_delay_ms`, accepted
-for 1.0. Closing records `Decided Cancelled` for backoff-pending calls in its
-existing Closing step and does not wait for their timers or start another X.
-
-Only `close` ends the logical Run: it records Closing, freezes admission,
-discharges admitted eligible cancellation, accepts every issued X through its
-durable ACK, drains accepted finals and records Settled. Ignore-policy work
-receives no external cancel. Worker loss leaves recovery to the original engine
-journal. Standard, RLM and generic aggregate callers share this recorded selection path
-(FIG-4894/1863/4895).
-
-A Run parked on a source wait hands over through the drain's wake instead: the
-wait answers `TurnWaitHandedOver` live, and an aggregate's caller takes it as
-the hand-over, never as a nested fault of the cell (FIG-5078). Each physical
-turn of a Run owns its cancellation gate, and the turn that ends at a boundary
-seals its own when it commits. The successor's waits race the gate of the
-physical turn running them, and a cancel of the Run, from its send handle or a
-host's `TurnWorkDriver::running_turn`, addresses that same latest physical turn.
-
-The plugin registrar mints every callback key from `CallbackSlot`, so a
-callback slot cannot exist without its key prefix and its state authority.
-
-## Binding rulings the seams encode
-
-**Declaration (Q3).** The author declares exactly `may_defer`, `intents` and
-`isolated`, as the `ToolDeclaration` on the tool's `ToolManifest`
-(`lash_sansio`, re-exported by `tool_run::admission`). Admission records it
-with the manifest the call is admitted under — the catalog's, the grant's, a
-replayed cell's recorded binding or a call's retained Run admission — and
-dispatch reads only that record; no provider hook is consulted after
-admission (FIG-4875). A round's calls are admitted together before any
-prepares: an invalid declaration or an isolated declaration with no bound
-process implementation refuses every member with a typed
-`ToolAdmissionRefusal`. An outcome the record does not admit — Deferred
-without `may_defer`, an undeclared intent kind — fails the call with
-`ToolFailureCause::Declaration` before anything it declared is realized. An isolated call is a process from its start with no inline body,
-so it declares neither `may_defer` nor intents. There is no per-call
-timeout, duration, budget or idempotent capability, and the declaration
-refuses those fields when decoding. Retry and cancel policy are recorded
-runtime policy. Crash recovery is at-least-once under the stable
-`ToolCallId` and attempt ordinal; only a reported retry advances the ordinal.
-`ToolCallId` is the external idempotency key.
-
-**Binding (FIG-4854).** Admission binds the executable, preparation and
-presentation callbacks as `PluginCallbackIdentity { owner: PluginRevision,
-key }`. A resumed call whose bound plugin revision is unavailable refuses
-with `PluginExecutionRefusal` (`plugin_revision_unavailable`) before any
-body, route or identity is chosen.
-
-Presentation binds an optional singleton presenter followed by ordered steps.
-Every entry includes the exact callback key and owning revision. An empty
-plan is explicit and does not adopt callbacks installed later. An owed
-presentation resolves the entire plan before invoking any callback; missing
-keys and changed revisions retain the typed callback refusal. Completed
-presentation replay serves its recorded return without resolving callbacks.
-K1 records this complete binding before attempts; V consumes it after the
-protected decision and declarations. Completed V replay resolves no callback.
-
-**Material (Q4).** A reference carries owner (Run, process or source), role
+**Material.** A reference carries owner (Run, process or source), role
 (prepared request, attempt output, presentation), location (journal-local or
-retained artifact) and a digest. Retention moves bytes, never identity. A
-failed read is a typed `MaterialRefusal` and never re-executes a body.
+retained artifact) and a digest under `lash-tool-material/v1`. Retention
+moves bytes, never identity. A failed read is a typed `MaterialRefusal` and
+never re-executes a body. A round member's outcome names journal-local
+material held by its own run record.
 
-FIG-4876 extends the existing opener dictionary with `MaterialEntry` and
-`MaterialPayload`. A canonical entry owns its text, format and optional
-plugin codec revision. Its BLAKE3 digest under `lash-tool-material/v1`
-covers all of those fields, including owner and role. Coordination stores
-the reference and its position in the original envelope. Cold replay restores
-the original JSON token order and checks owner, integrity, format and codec
-revision before exposing a recorded result. Native UTF-8 needs no plugin
-decoder. A distinct presentation creates material only when its bytes differ
-from bytes already recorded by A or X.
+**Operation.** A tool-bearing host operation is a Run with its own input kind
+over the session-operation opener. Its call ids and start keys keep their
+bytes.
 
-The retained artifact uses the same `MaterialEntry` codec. Moving a reference
-to an artifact changes location alone and preserves its digest. A retired
-entry carries its reference without text. Missing, retired, corrupt,
-wrong-owner, wrong-role, unsupported-format and unavailable-revision reads
-carry `RuntimeErrorCause::MaterialRefused` with the original `MaterialRefusal`
-under terminal `retained_result_refused`; no refusal grants execution authority.
-Resolution stays inside the controller. The status-only drive reply remains
-unchanged.
-
-**Retention (FIG-4889).** Run material resolves from the opener journal and
-costs no artifact transaction. Material a Deferred source seal names is
-retained first: `MaterialBundle` packs the
-payloads into one immutable bundle in the `ToolMaterial` artifact store,
-named by its bytes under `lash-tool-material-bundle/v1`, and
-`ToolMaterialStore::retain_material` writes it together with the holder's
-lease, a `source` referrer edge, in one transaction. Only the
-`RetainedBundle` that returns may be published: a seal refuses an unretained
-result (`UnretainedResult`). A release fences its holder, severs its leases and retires every bundle with
-no lease left, all payloads at once. The holder fence is the identity fence:
-an ended holder cannot republish, reacquire or read, its references refuse
-`Retired`, and a retired bundle refuses `Missing` to every later holder.
-Closing a Run is not garbage collection; only a release ends a lease.
-`RetainedBundle::copy_bytes` reports the measured retained copy.
-
-**Operation (Q2).** A tool-bearing host operation is a Run with its own input
-kind, driven by the session's keyed turn service, over the existing
-session-operation opener. Its call ids and start keys keep their bytes.
-FIG-4888 admits a host's plugin task at the head of the command lane as
-`AdmittedWork::Operation`, under the run `OperationRun::run_id` names
-(`shift-operation:<batch>`), so every admission of the operation, a redrive
-after a crash included, names the same run and the same `LashTurn` key. The
-host command returns once the command row and its ingress obligation are
-durable; the command run stops at a task. The operation run's invocation is
-the journal owner: `own_effect_controller_task` hands the task a proxy of
-that invocation's controller, rescoped to the operation's session-operation
-scope, and serves it `Live`, then `Closing` once the task returned (nothing
-new admitted) until every issued effect settled, then `Settled`. Both the
-pre-run and completion cancel peeks are recorded there, so a replay takes
-the same branches. Hosts use `plugin_operations().start_task` to obtain a
-`RunHandle`, then `events`, `outcome`, `result` and `cancel` on that handle.
-`session.run(id)` and its durable counterpart recover the same stored task
-result. Run close ends the operation opener and retires only its waits;
-session-lifetime processes keep their independent lifetime. Compaction,
-configuration, plugin commands and shift administration remain tool-free:
-their recorded provider calls and head writes do not grant task dispatch.
-
-**State (Q5) and hook policy.** Only before-turn, after-turn, checkpoint and
-after-tool (result check) callbacks on the Run's sequential path may return state commands; every other
-callback is decision-only. Commands are reduced privately, recorded with their
-predecessor, published after durable acceptance, and replayed without running
-a body, hook, reducer or converter. One refusal publishes nothing.
+**State and hook policy.** Only before-turn, after-turn, checkpoint and
+after-tool (result check) callbacks on the Run's sequential path may return
+state commands. A successful final's commands are reduced privately and
+published with its decision; a failed or cancelled candidate publishes none.
+One refusal publishes nothing.
 
 **Hook composition.** For one admitted call: argument transforms, provider
 preparation, then every before-check on one immutable prepared call. Checks
@@ -243,190 +132,34 @@ reduce by AbortRun > Deny/Cancel > CachedSuccess > Allow, ties broken by
 ascending UTF-8 plugin id and then callback key. A cached success is data
 only and still passes the result transforms and after-checks. After-checks
 return only Allow, Deny, Cancel or AbortRun and never replace a result.
-Check cancellation records `CallDecision::CheckCancelled`, with its typed
-cause in the admission or after-check record. It rejects only that operand:
-race may select the rejection, any keeps waiting for success, and a later
-check cancellation never replaces an earlier winner. `CallDecision::Cancelled`
-is reserved for Run control, which aggregates report as `HostControl`.
-AbortRun fails the call and stops the owning logical Run: the fold refuses
-any later admission and retry. Every reply is recorded with its callback, in
-reduction order; a recorded record is served, never re-reduced. Each reply
-is keyed by its occurrence: admission, attempt ordinal, Deferred completion
-of an attempt, or cached.
+A check's cancel is `CallDecision::CheckCancelled`: it rejects only its
+operand. `CallDecision::Cancelled` is the Run's own cancel. AbortRun fails
+the call and stops the Run: it starts no call and forms no aggregate after.
 
-**Run records (K3, FIG-4877).** A Run record is one journaled step of the
-owning handler, `lash:run:{call}:{step}`, holding a `RunJournalEntry`: the
-record and the canonical material it owns, stamped with the effect-journal
-generation. Effect controllers journal it through
-`RuntimeEffectController::record_run_record`; a replay serves it without
-running its step, and every served record passes the `RunLedger` fold and the
-material check before anything acts on it. A singleton is a one-member
-round on the same route; a simple Done call is four records: `admit` (A: the
-prepared request and every before-check), `attempt:1` (X: the body's capture,
-checked against the recorded declaration), the selected schedule record (D:
-the folded X with after-checks and any after-check contributions, or the Run's
-cancellation read once) and `present` (V: presentation bytes distinct from the
-output, consumed and incorporated in the same record). A final that declares adds `declare` between D and V, and V
-then also settles the declarations. A replay whose call drifts from its
-recorded admission (tool name, arguments, owner, or a recorded plugin revision
-this build no longer executes) refuses typed before any body; the recorded
-declaration governs, never the live catalog. Every member of a round has its own independent X record.
-Reported retries follow the recorded dynamic schedule (K9). Selection awaits
-one VM first-completed combinator over every selectable source, then records
-the chosen value in a short decision step. Issue no await on replay that the
-journal cannot resolve. Remaining acknowledgements are queued in pop order
-beside every record wait; a cold owner rebuilds that same order. Source value
-futures are awaited only after selection, never raced individually.
-While the owner awaits a Run step, scoped-controller clones share an in-flight
-token. A concurrent registration refuses at its live site with
-`JournalWriteDuringOwnerStep`. Started concurrent runs are selected outside
-that token; deployment gate watches use a non-journaling ingress resolver.
+**Attempt stream.** The bounded stream a body emits belongs to its attempt's
+capture (`AttemptStreamRecorder`, capped by `ATTEMPT_STREAM_BYTE_BUDGET`
+under a typed `AttemptStreamTruncation`). It is emitted when the call is
+presented or withheld.
 
-Exact acknowledgement pop order is retained across Run journal schedule and
-record waits, including a deferred start's `start:launch` and
-`start:discharge`; this is the scope of the S05 selection-order oracle. An
-unrelated program-effect await, the invocation-ID await during realization
-issuance, or the Run's own source-service calls (arm, attach, subscribe,
-cancel and the Deferred source wait, none a Run record) can drain
-notifications outside that queue. Realization issuance keeps its
-VM-visible send and deterministic invocation-ID notification. If the owner
-reopens before D recorded a choice, selection after either await is a fresh
-decision. Every recorded D remains authoritative on replay.
+**Declared starts (K5).** A final may declare one process start under its
+stable start key, bound to the Run's environment and to a consumer hold that
+carries the call's cancel policy. A keyless start, or one in a Run with no
+environment, is the attempt's typed `StartRefused`. A withheld call never
+reaches its launch. A final launches its start under the key, then
+discharges it: a Run cancel that fired by then cancels the process when its
+policy owes that, and the hold is released, all before it is presented.
+A lost launch registers again under the same key and recovers the same
+process.
 
-**Deferred completion (K4, FIG-4740).** The Run arms a source under the
-logical opener before starting a body admitted to defer. Its Deferred X
-retains the matching source key and leaves the call open without D, rank or
-V. Open sources join the Run's recorded selection (FIG-5135): while the Run
-is Live and no cut is requested, every schedule window subscribes them
-beside its issued bodies, timers and receipts in one engine wait, and
-`await_deferred` runs the same window when sources are all that remain. A
-seal that wins is recorded as the window's D (`SourceSealed`, carrying the
-seal), so a served D stays authoritative; the Run then reads a Resolved
-seal's canonical retained result under the source lease once, in a recorded
-`RestoreRunMaterial` step, and accepts its decision before `drain` presents
-it. A resolved Deferred leaf therefore settles an aggregate while sibling
-bodies still run. Run close releases the source while the owning journal can still replay,
-so a replay serves that payload from the step and never reads the store. The wait always subscribes; pending sources race the
-recorded cancel gate. Its journaled commands follow that gate's recorded
-outcome. A turn Run's gate is its turn-cancel gate; an operation Run's is
-its plugin task's cancel signal, which a host's cancel resolves (FIG-5006).
-When the gate wins, cancellation seals the source first and accepts the
-actual winner; a Resolved winner remains protected through after-checks and
-presentation. A handover preserves the open source. Runtime per-call
-deadlines, timeout results and timer races are absent; body-owned transport
-failures, Run cancellation and Run limits retain their own semantics.
-These calls use the owning handler's admitted journal logic generation.
-
-**Protected drain (K3, FIG-4880).** `lash_core::tool_dispatch::RunCoordinator`
-runs several calls in one logical Run, each admitted as a singleton round.
-`decide` records a call's A, X and D; the fold derives the decision's rank
-from accepted decision order, starting at 1 (`RunLedger::decision_rank`). D
-stores no rank. Attempts and refused records take no rank, and adoption
-rebuilds the same ranks from the acknowledged journal. `drain` then works
-through every decided call in rank order. A final
-whose result declares intents issues them (`declare`) only once every
-committed final ranked below it is seated (`RunLedger::drain_frontier_open`),
-sends intent realization to `LashToolRealization` under the Run/call idempotency
-key and records its durable invocation ID; ADR 0132 §5 owns the end state, in
-which the store half of realization commits with the tool result. That invocation owns
-every nested intent command. The Run selects and adopts its durable receipt
-before presentation, then settles declarations in the presentation and
-incorporation record. A physical cut transfers the invocation ID while
-realization continues; the successor attaches to that exact invocation.
-An intent-free final seats at its decision without waiting, so its seat
-certifies nothing about lower ranks: the frontier is every lower rank, never
-only the one just below (L18), and the fold refuses a declaration issued
-early with `DrainFrontier`. Presentation and incorporation follow rank order,
-so the incorporated calls are a rank prefix. The Run's cancellation is read
-only inside a decision's step: a final decided before it still drains, and a
-call decided after it is cancelled and declares nothing. A Deferred attempt
-takes no rank and no presentation; its descriptor grants neither value nor
-place in the drain. Records are appended one at a time in program order;
-an effect the caller issued before the drain keeps progressing while a
-final's declarations are held. Concurrent attempts and their recorded
-schedule are FIG-4879's.
-
-**Attempt stream (FIG-4880).** The bounded stream a body emits belongs to its
-attempt's capture (X): `SingletonAttempt::stream` is an
-`AttemptStreamRecorder` observation sink, and the capture carries the
-`AttemptStream` it records, with deltas of a block coalesced, shared call
-fields stored once and the bytes capped by `ATTEMPT_STREAM_BYTE_BUDGET` under
-a typed `AttemptStreamTruncation`. The Run emits it after the presentation record is durably accepted
-(`SingletonToolHandlers::emit_stream`); an unacknowledged proposal emits
-nothing, and a replay that serves the presentation emits nothing again.
-A declared presentation refusal records the original result as fallback
-alongside its typed `HookCause`; an invocation fault leaves V uncommitted
-for engine recovery. A lost V acknowledgement may omit the observation. The X capture is the canonical stream owner; V grants its fresh emission permit.
-
-**Declared starts (K5, FIG-4884).** A final may declare one process start.
-Its attempt record owns the start's obligation as material: the body's
-registration under its stable start key, bound by the Run to the Run's
-environment and to a consumer hold, owned by the Run's opener, that carries
-the call's recorded cancel policy, narrowed by the cancel hint of the wait a
-pending call parks on: under `Ignore` the call's cancel never cancels the
-child (ADR 0116 §3.4). A keyless start, or one in a Run that owns
-no environment, is the attempt's typed `StartRefused`; a start the admitted
-declaration does not name is its `UndeclaredIntent` refusal. The start
-drains inside the final's declarations: `declare` admits it with them
-(`StartAdmitted`), then eagerly issues one concurrent `start:prepare` run.
-Inside that run, launch registers under the stable key (`StartLaunched`),
-the authoritative gate is read once, the recorded policy decides cancellation,
-and discharge releases the hold (`StartDischarged`). Its durable result owns
-both events. D folds them at its current
-ordinal before `present` settles the declarations. Serving that result never
-launches, discharges or reads the live gate again. A
-cancellation before the decision is durable withholds the final, so its
-start is never admitted. One after it cannot forbid the start: a lost launch
-registers again under the same key and recovers the same process. The fold
-refuses a start outside its issued declarations, a second launch or
-discharge, a key another start of the Run holds, and settled declarations
-while a start is owed; `RunLedger::owed_starts` names what a successor
-segment owes. Registration arms the process's start obligation, which the
-process outbox delivers. Process-backed Deferred calls retain the same launch
-identity and source through park, redrive and transfer.
-
-**Process-backed Deferred starts (D06, FIG-4887).**
-`SingletonBodyOutcome::DeferredStart` records one K5 obligation in X, with a
-reserved process-terminal source distinct from the external completion key.
-The protected start drain decides cancellation before admission, then records
-`StartAdmitted` and `StartLaunched` under the stable `StartKey`. It arms a K4
-`ProcessTerminal` descriptor using the minted `ProcessId`, and the call stays
-open without a rank. A registrar refusal no retry could change, such as a
-closed starter scope's, records `StartRefused` instead: nothing is registered
-or owed, and the record owns the call's failure capture, which reports the
-refusal as the call's `StartProcess` intent outcome and is the call's
-deferred completion. A pending call's declared start that does not belong to
-its call (another session, call or index; ADR 0116 §3.1) is refused in X,
-before anything of it is admitted, and settles the call the same way. Short terminal registrations retain records at the process
-and receiver indexes; no `ProcessAttach` or terminal-wait invocation runs.
-Delivery acquires the receiver's attachment ownership, retains the canonical
-capture and seals the source through the existing K4 writer. The Run accepts
-that immutable winner before discharging the start's policy and consumer hold.
-Session-owned subagents record `Ignore` for cancellation of their observing turn;
-starter-owned work records `CancelExternalWork`. `processes.await` observes work
-with `Ignore`. Standard rounds use this source path through the shared Run coordinator.
-
-## Field ownership
-
-| Record | Owns | Refers to |
-| --- | --- | --- |
-| A, admission | prepared request material, declaration, binding, policy, before-check record, operand slots, capacity | owner opener |
-| X, attempt | attempt output and captures, or the Deferred source key | attempt ordinal |
-| D, decision | final-or-cancel, after-check record, declarations flag, resolved state batch | X or the cached result |
-| V, presentation | presentation bytes distinct from the output, incorporation | D |
-| Source seal | the resolved result, owned by the source | source key |
-| Run transfer | event prefix, retained material, subscriptions, owed starts and cancels, state frontier, capacity, VM continuation flag | owner opener |
-
-Coordination records hold references, never payload copies. A handover may
-copy material into a retained artifact; that copy is counted, and it is not
-a second canonical owner.
+**Pending calls.** A body that returns Pending needs a completion key armed
+before the attempt. Until tool completion keys are L5 waits
+(fig-5174-pending), no key is armed and a Pending body fails typed
+(`pending_tool_missing_completion_key`).
 
 ## Identity preimages
 
-Stored shapes change in place before the 1.0 cut; identities do not move
-with them. The goldens in
-`crates/lash-core-store/src/tool_run/identity_tests.rs` pin these preimages
-byte for byte (removal row M0201):
+The goldens in `crates/lash-core-store/src/tool_run/identity_tests.rs` pin
+these preimages byte for byte:
 
 - `ToolCallId`: `tc_` plus BLAKE3 under `lash-tool-call-id/v1`, rooted in the
   opener's admission (ADR 0117 §2).
@@ -441,27 +174,13 @@ A change that moves one of these is an identity change, never a shape change.
 
 ## Laws
 
-| Law | Subject | Owners | Tiers |
-| --- | --- | --- | --- |
-| L01 | Independent parallel receipts | FIG-4871, FIG-4879 | Double first; live SDK |
-| L02 | Partial-result and proposal replay | FIG-4871, FIG-4872, FIG-4877, FIG-4879 | Double and live SDK; stores when retained |
-| L03 | Final and cancel choose once | FIG-4871, FIG-4877, FIG-4879, FIG-4880 | Double; live cancellation |
-| L04 | Protected final precedes effects and observations | FIG-4880, FIG-4830 | Double; store tiers for intents |
-| L05 | Aggregate semantics remain distinct | FIG-4879, FIG-4882, FIG-4894, FIG-1863, FIG-4895 | Double; protocol tests |
-| L06 | Losers and program effects keep progressing | FIG-4882, FIG-4881, FIG-4739 | Double; handover stores |
-| L07 | Deferred terminals are immutable | FIG-4883, FIG-4740, FIG-4891 | Double, SQLite memory/file-reopen, PostgreSQL; live transfer |
-| L08 | Declared starts have one recoverable identity | FIG-4884, FIG-4885, FIG-4887, FIG-4888 | Double and all store tiers |
-| L09 | Continuation carries the entire logical Run | FIG-4739, FIG-4890, FIG-4889 | SQLite memory/file-reopen, PostgreSQL, double and live |
-| L10 | Cancelled continuation cannot infect a fresh Run | FIG-4739, FIG-4893; FIG-4867 protocol witness | All store tiers; protocol witness |
-| L11 | Old deployments can drain while transferred sources stay pending | FIG-4891 | Double plus live deployment gate |
-| L12 | Admission, binding and material cannot drift | FIG-4875, FIG-4876, FIG-4855, FIG-4857, FIG-4878, FIG-4889; FIG-4867 codec witnesses | Codec witnesses, double, relevant store tiers |
-| L13 | Retention is bounded without resurrection | FIG-4889, FIG-1509, FIG-4900 | SQLite memory/file-reopen and PostgreSQL |
-| L14 | Receipts and usage describe logical facts | FIG-4830, FIG-4852 | Double and tracing fixtures |
-| L15 | The full cost is counted | FIG-4868, FIG-4876, FIG-4878, FIG-4905 | Controlled double/live measurement |
-| L16 | A physical cut waits for local durability | FIG-4881, FIG-4739, FIG-4890 | Double plus SQLite memory/file-reopen, PostgreSQL and live handover |
-| L17 | Reported retries replay their dynamic schedule | FIG-4879 | Double first; live SDK |
-| L18 | Protected drain is transitive across empty ranks | FIG-4880 | Double; intent store tiers |
-| L19 | Overlapping plugin state never depends on unrecorded work | FIG-4878, FIG-4857 | Double and SQLite memory/file-reopen/PostgreSQL checkpoint tiers; live ACK witness |
-| L20 | Park recovery needs no group catalog | FIG-4892, FIG-4898 | All three store tiers plus double |
-| L21 | Every intermediate command and surface change has a compiling generation closure | FIG-4867, FIG-4870, FIG-4873, FIG-4894, FIG-1863, FIG-4895, FIG-4897 through FIG-4903 | Owning kiln check/test, schema/facade gates; live old-route drain |
-| L22 | Runtime never invents a per-call timeout | FIG-4875, FIG-4740, FIG-4886 | Double, schema/facade witnesses and continuation store tiers |
+| Law | Pinned by |
+| --- | --- |
+| No `Once` body starts twice; a started `Once` without an outcome is `Interrupted` | `lash-durable-test/tests/round_crash_matrix.rs`, `turn_round_crash_matrix.rs` |
+| A model result that never committed launches no tool | `turn_round_crash_matrix.rs` |
+| Members present in declared order whatever order their outcomes commit in | `round_crash_matrix.rs::outcomes_committed_out_of_order_present_in_declared_order` |
+| A cancel during a retry backoff starts no next attempt | `round_crash_matrix.rs::a_cancel_during_a_retry_backoff_starts_no_next_attempt` |
+| A stored `Once` is never upgraded and a current `Once` vetoes a stored repeat | `runtime/actor/round/fold_tests.rs` |
+| A check's cancel is its operand's rejection; an AbortRun is Run control | `tool_dispatch/call_run/tests.rs` |
+| An aborted Run admits nothing more | `tool_dispatch/call_run/tests.rs` |
+| A process holds a round's capacity whole until every member ended | `tool_dispatch/call_run/tests.rs` |

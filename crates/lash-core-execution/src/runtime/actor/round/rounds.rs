@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use lash_durable::domain::{AdmittedId, RunRecordKind};
-use lash_durable::{ActorTx, DurableInstant};
+use lash_durable::{ActorTx, DomainWrite, DurableInstant};
 
 use super::records::{PresentBody, RetryBody, append, encode, start_record};
 use super::{
@@ -33,13 +33,30 @@ pub fn admit_round(tx: &mut ActorTx, round: RoundDraft) -> Result<AdmittedRound,
 /// outcome; a presentation already recorded, or one of a round with an
 /// unsettled member, records nothing.
 pub fn present(tx: &mut ActorTx, round: &AdmittedRound, fold: &RunFold) -> Presentation {
+    let (presentation, record) = presentation(round, fold);
+    if let Some(record) = record {
+        tx.write(record);
+    }
+    presentation
+}
+
+/// A round's presentation from its committed records, in declared order,
+/// and the `present` record to commit with the transaction that hands it
+/// on: none when it is already recorded or a member has no outcome yet.
+/// What [`present`] writes; a phase runner that commits the record with a
+/// later transaction of its own takes it from here.
+#[must_use]
+pub fn presentation(round: &AdmittedRound, fold: &RunFold) -> (Presentation, Option<DomainWrite>) {
     let Some(view) = fold.round(round.run()) else {
-        return Presentation::of(
-            round
-                .members()
-                .iter()
-                .map(|member| (member.call().clone(), None))
-                .collect(),
+        return (
+            Presentation::of(
+                round
+                    .members()
+                    .iter()
+                    .map(|member| (member.call().clone(), None))
+                    .collect(),
+            ),
+            None,
         );
     };
     let entries: Vec<_> = view
@@ -47,8 +64,8 @@ pub fn present(tx: &mut ActorTx, round: &AdmittedRound, fold: &RunFold) -> Prese
         .iter()
         .map(|member| (member.call().clone(), member.outcome().cloned()))
         .collect();
-    if view.presented().is_none() && view.settled() {
-        tx.write(append(
+    let record = (view.presented().is_none() && view.settled()).then(|| {
+        append(
             view.owner(),
             view.run(),
             view.cursor().take(),
@@ -57,9 +74,9 @@ pub fn present(tx: &mut ActorTx, round: &AdmittedRound, fold: &RunFold) -> Prese
             encode(&PresentBody {
                 calls: entries.iter().map(|(call, _)| call.clone()).collect(),
             }),
-        ));
-    }
-    Presentation::of(entries)
+        )
+    });
+    (Presentation::of(entries), record)
 }
 
 /// Record that `failed`, an attempt of a `Repeatable` call, failed with

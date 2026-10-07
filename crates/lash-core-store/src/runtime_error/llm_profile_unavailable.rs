@@ -24,10 +24,8 @@ impl RuntimeErrorCause {
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
             Self::ToolRunCutRefused { .. }
             | Self::ToolRunIsolationRefused { .. }
-            | Self::ToolRunDrift { .. }
             | Self::ToolRunControl { .. }
             | Self::ToolRunAdmissionRefused { .. }
-            | Self::ToolRunRecordRefused { .. }
             | Self::SourceRefused { .. }
             | Self::MaterialRefused { .. }
             | Self::ProviderFailure { .. }

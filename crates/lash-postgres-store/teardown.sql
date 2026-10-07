@@ -100,8 +100,6 @@ DROP TABLE IF EXISTS lash_process_segment_handovers CASCADE;
 
 DROP TABLE IF EXISTS lash_parent_end_plans CASCADE;
 
-DROP TABLE IF EXISTS lash_tool_call_receipts CASCADE;
-
 DROP TABLE IF EXISTS lash_tool_intent_submissions CASCADE;
 
 DROP TABLE IF EXISTS lash_tool_intent_retired_owners CASCADE;

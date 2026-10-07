@@ -16,6 +16,7 @@ use lash_durable::domain::{CellId, ExecKey, RunSeq, SessionCommitWrite, TurnWrit
 use super::session::{
     CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnPhase, TurnServices,
 };
+use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel};
 use crate::{ActorContext, Effect, SessionStreamEvent, TurnMachine};
@@ -54,6 +55,8 @@ pub async fn run_phases(
         _ => None,
     };
     let mut outcome = None;
+    // A settled round's presentation, committed with the turn's next commit.
+    let mut carry: Option<DomainWrite> = None;
     loop {
         let effect = match pending.take() {
             Some(effect) => effect,
@@ -80,7 +83,11 @@ pub async fn run_phases(
                     &request,
                 )?;
                 if let model_call::ModelStart::Send { pin, .. } = &start {
+                    let label = tool_round::model_start_label(&carry);
                     let mut tx = cx.begin().await?;
+                    if let Some(present) = carry.take() {
+                        tx.write(present);
+                    }
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
@@ -91,7 +98,7 @@ pub async fn run_phases(
                         checkpoint_ref: Some(encode_checkpoint(drive.machine())?),
                         model: Some(pin.clone()),
                     }));
-                    cx.commit(tx, CommitLabel::MODEL_START).await?;
+                    cx.commit(tx, label).await?;
                 }
                 // `model` is spent: only the first call after a restore
                 // re-delivers the pinned one, and a later call of the same
@@ -129,9 +136,21 @@ pub async fn run_phases(
                     .exec_cell(cx, id, exec, CodeCell { language, code }, with)
                     .await?;
             }
-            Effect::ToolCalls { .. } | Effect::AwaitToolResults { .. } => {
+            Effect::ToolCalls { id, calls, .. } => {
+                model = None;
+                let checkpoint = encode_checkpoint(drive.machine())?;
+                let current = iteration(drive.machine());
+                match tool_round::run(cx, drive.as_mut(), &row, id, calls, checkpoint, current)
+                    .await?
+                {
+                    RoundExit::Answered(present) => carry = present,
+                    RoundExit::CancelRequested => return Ok(PhaseExit::CancelRequested),
+                }
+            }
+            Effect::AwaitToolResults { .. } => {
                 return Err(TurnError::Exec(
-                    "tool rounds are L4's (FIG-5174) on the durable path".to_owned(),
+                    "a durable turn's checkpoint keeps its round's calls; no dispatch state settles them"
+                        .to_owned(),
                 ));
             }
             Effect::Done {
@@ -152,6 +171,9 @@ pub async fn run_phases(
                     .await?;
                 let terminal = commit.terminal;
                 let mut tx = cx.begin().await?;
+                if let Some(present) = carry.take() {
+                    tx.write(present);
+                }
                 tx.write(DomainWrite::SessionCommit(SessionCommitWrite {
                     session: session.clone(),
                     run: run.clone(),

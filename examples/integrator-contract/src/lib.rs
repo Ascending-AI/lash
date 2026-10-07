@@ -1003,24 +1003,24 @@ impl FleetFormatStore for Integrator {
     }
 }
 
-/// A host's generic aggregate requires only its admitted journal controller.
+/// A host's generic aggregate runs in memory, in its admitted execution.
 pub async fn generic_aggregate_witness(
     scoped: &ActorContext,
 ) -> Result<(), lash::plugins::SingletonRunError> {
-    let plan = lash::plugins::AggregatePlan {
-        key: "integrator-timers".to_owned(),
-        leaves: vec![lash::plugins::AggregateLeaf::Timer { duration_ms: 1 }],
-        operands: vec![0],
-    };
-    let mut run = lash::plugins::RunCoordinator::open(
-        scoped,
-        EffectOpener::session_operation("integrator", "timers"),
-        lash::plugins::SegmentOrdinal(0),
-        Vec::new(),
+    let mut run = lash::plugins::ToolRun::new(
+        scoped.execution_scope().clone(),
+        std::sync::Arc::new(lash::runtime::SystemClock),
     );
-    run.admit_aggregate(&plan, &lash::runtime::SystemClock)
-        .await?;
-    run.consume_aggregate(&plan.key, lash::plugins::AggregateConsumer::Race)
-        .await?;
+    run.form(
+        "integrator-timers".to_owned(),
+        vec![lash::plugins::ToolRunLeaf::Timer { duration_ms: 1 }],
+        vec![0],
+    )?;
+    run.consume(
+        "integrator-timers",
+        lash::plugins::ToolRunConsumer::Race,
+        true,
+    )
+    .await?;
     run.close().await
 }

@@ -40,7 +40,6 @@ struct TraceRuntimeParts {
     level: TraceLevel,
     base_context: TraceContext,
     metrics: TelemetryMetrics,
-    tool_receipts: Option<Arc<dyn crate::StoreSet>>,
 }
 
 impl TraceRuntime {
@@ -54,7 +53,6 @@ impl TraceRuntime {
                 level: TraceLevel::Standard,
                 base_context: TraceContext::default(),
                 metrics: TelemetryMetrics::default(),
-                tool_receipts: None,
             }),
         }
     }
@@ -71,21 +69,6 @@ impl TraceRuntime {
         let parts = Arc::make_mut(&mut self.parts);
         parts.metrics = metrics;
         self
-    }
-
-    /// Binds the deployment's durable logical tool receipts. The factory is
-    /// opened only when a recorded tool fact is observed.
-    #[must_use]
-    pub fn with_tool_receipts(mut self, stores: Arc<dyn crate::StoreSet>) -> Self {
-        Arc::make_mut(&mut self.parts).tool_receipts = Some(stores);
-        self
-    }
-
-    pub(crate) fn tool_receipts(&self) -> Option<Arc<dyn crate::store::SessionCommitStore>> {
-        self.parts.tool_receipts.as_ref().map(|stores| {
-            let store: Arc<dyn crate::store::SessionCommitStore> = stores.session_store_factory();
-            store
-        })
     }
 
     /// The identity-producing scope factory: [`UntracedScopes`] unless the

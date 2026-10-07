@@ -325,11 +325,7 @@ pub(super) async fn prepare_with_provider(
         context.turn_context.clone(),
         pending.call_id.clone(),
         execution_binding,
-        context
-            .tool_receipts
-            .as_ref()
-            .map(|store| store.fleet_format())
-            .unwrap_or_else(crate::FleetFormat::current),
+        context.fleet_format,
     )
     .with_dispatch_catalog(Arc::clone(&context.tool_catalog))
     .with_process_originator(context.process_originator.clone());
