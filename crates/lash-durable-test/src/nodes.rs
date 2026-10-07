@@ -48,6 +48,8 @@ pub struct SimNodes {
     /// The format sets a node decodes when it is not the config's: a node
     /// of another build.
     decodes: Mutex<BTreeMap<String, Vec<FormatSet>>>,
+    /// Whether each node runs its activations ahead of its runner.
+    activations_first: std::sync::atomic::AtomicBool,
 }
 
 impl SimNodes {
@@ -69,6 +71,7 @@ impl SimNodes {
             activation,
             nodes: Arc::default(),
             decodes: Mutex::default(),
+            activations_first: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -104,6 +107,12 @@ impl SimNodes {
         self.kill(node);
         let name: Arc<str> = Arc::from(node);
         let life = NodeLife::new();
+        if self
+            .activations_first
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            life.run_activations_first();
+        }
         let store = Arc::new(FaultStore::new(
             Arc::clone(&self.database),
             Arc::clone(&name),
@@ -136,10 +145,11 @@ impl SimNodes {
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let task_life = Arc::clone(&life);
         let task = tokio::spawn(async move {
+            let run = runner.run(async {
+                let _ = stopped.await;
+            });
             tokio::select! {
-                stopped = runner.run(async {
-                    let _ = stopped.await;
-                }) => Some(stopped),
+                stopped = task_life.runner(run) => Some(stopped),
                 () = task_life.dead() => None,
             }
         });
@@ -182,6 +192,25 @@ impl SimNodes {
         if let Some(sim) = self.nodes.lock_recover().get(node) {
             sim.life.resume();
         }
+    }
+
+    /// Let `node`'s runner, held since its pause, tick again.
+    pub fn release_runner(&self, node: &str) {
+        if let Some(sim) = self.nodes.lock_recover().get(node) {
+            sim.life.release_runner();
+        }
+    }
+
+    /// Run each node's activations ahead of its runner: a pause holds the
+    /// node's runner as well, past its resume, until
+    /// [`Self::release_runner`], and each read yields once before it
+    /// answers, as a write does on a task of its own, so the tasks an
+    /// activation spawns run on while it reads. A resumed node's
+    /// activations, and what they spawn, then run before its runner's next
+    /// tick. Set before the nodes start.
+    pub fn run_activations_first(&self) {
+        self.activations_first
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Ask `node` to stop cleanly: it releases its actors.

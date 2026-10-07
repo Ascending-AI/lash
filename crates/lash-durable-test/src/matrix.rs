@@ -140,6 +140,7 @@ pub struct Matrix {
     horizon_ms: u64,
     labels: Option<Vec<CommitLabel>>,
     across_nodes: bool,
+    activations_first: bool,
 }
 
 impl Default for Matrix {
@@ -165,6 +166,7 @@ impl Matrix {
             horizon_ms: 600_000,
             labels: None,
             across_nodes: false,
+            activations_first: false,
         }
     }
 
@@ -188,6 +190,20 @@ impl Matrix {
     /// come in a re-run.
     pub fn across_nodes(mut self) -> Self {
         self.across_nodes = true;
+        self
+    }
+
+    /// Resume a paused node as soon as none of the scenario's actors is its
+    /// own, and run the activations its held reply wakes, and the tasks
+    /// they spawn, before its runner ticks again
+    /// ([`SimNodes::run_activations_first`]). A resumed process may take
+    /// that order, since its runner ticks on a thread of its own: its
+    /// activations carry on past its self-stop deadline while their actors'
+    /// new owner already runs them. By default a paused node resumes a
+    /// failover after its pause, and its runner may tick on a signal while
+    /// it is paused.
+    pub fn activations_resume_first(mut self) -> Self {
+        self.activations_first = true;
         self
     }
 
@@ -256,25 +272,35 @@ impl Matrix {
             config,
             scenario.activation(),
         ));
+        if self.activations_first {
+            nodes.run_activations_first();
+        }
         let mut violations = Vec::new();
         if let Err(error) = scenario.start(&nodes).await {
             violations.push(format!("the scenario did not start: {error}"));
         }
         let mut paused_at: BTreeMap<String, u64> = BTreeMap::new();
         while violations.is_empty() {
-            let mut resumed = false;
+            let mut resumed = Vec::new();
             for node in nodes.paused() {
                 let since = *paused_at.entry(node.clone()).or_insert(clock.logical_ms());
-                if clock.logical_ms() >= since + failover_ms
+                if (self.activations_first || clock.logical_ms() >= since + failover_ms)
                     && actors_left(&nodes, scenario, &node).await
                 {
                     nodes.resume(&node);
-                    resumed = true;
+                    resumed.push(node);
                 }
             }
-            if resumed {
-                // The resumed node's held write and overdue timers run now.
+            if !resumed.is_empty() {
+                // The resumed node's held write and overdue timers run now;
+                // its runner too, unless its pause held it.
                 nodes.quiesce().await;
+                if self.activations_first {
+                    for node in &resumed {
+                        nodes.release_runner(node);
+                    }
+                    nodes.quiesce().await;
+                }
             }
             if nodes.paused().is_empty() && scenario.done(&nodes).await {
                 break;

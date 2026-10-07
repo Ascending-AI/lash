@@ -28,6 +28,11 @@ pub(crate) struct NodeLife {
     /// Cut off from the database's lease: every heartbeat fails before it
     /// enters the store, while every other call gets through.
     partitioned: AtomicBool,
+    /// A pause holds the node's runner until [`Self::release_runner`], and
+    /// each read yields before it answers.
+    activations_first: AtomicBool,
+    /// The node's runner is not polled, while its activations run on.
+    runner_held: watch::Sender<bool>,
 }
 
 impl NodeLife {
@@ -35,7 +40,43 @@ impl NodeLife {
         Arc::new(Self {
             state: watch::Sender::new(Life::Running),
             partitioned: AtomicBool::new(false),
+            activations_first: AtomicBool::new(false),
+            runner_held: watch::Sender::new(false),
         })
+    }
+
+    pub(crate) fn run_activations_first(&self) {
+        self.activations_first.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the node runs its activations first: see
+    /// [`SimNodes::run_activations_first`](crate::SimNodes::run_activations_first).
+    pub(crate) fn activations_first(&self) -> bool {
+        self.activations_first.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn release_runner(&self) {
+        self.runner_held.send_replace(false);
+    }
+
+    /// Run `runner`, polling it only while it is not held.
+    pub(crate) async fn runner<F: std::future::Future>(&self, runner: F) -> F::Output {
+        if !self.activations_first() {
+            return runner.await;
+        }
+        let mut held = self.runner_held.subscribe();
+        tokio::pin!(runner);
+        loop {
+            if *held.borrow_and_update() {
+                let _ = held.wait_for(|held| !*held).await;
+                continue;
+            }
+            tokio::select! {
+                biased;
+                output = &mut runner => return output,
+                _ = held.changed() => {}
+            }
+        }
     }
 
     pub(crate) fn partition(&self, partitioned: bool) {
@@ -51,13 +92,16 @@ impl NodeLife {
     }
 
     pub(crate) fn pause(&self) {
-        self.state.send_if_modified(|life| {
+        let paused = self.state.send_if_modified(|life| {
             let paused = *life == Life::Running;
             if paused {
                 *life = Life::Paused;
             }
             paused
         });
+        if paused && self.activations_first() {
+            self.runner_held.send_replace(true);
+        }
     }
 
     pub(crate) fn resume(&self) {

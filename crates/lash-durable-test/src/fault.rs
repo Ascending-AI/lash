@@ -153,6 +153,9 @@ impl FaultStore {
     /// One read: a paused or dead node makes none.
     async fn read<T>(&self, read: impl Future<Output = T>) -> T {
         self.life.running().await;
+        if self.life.activations_first() {
+            tokio::task::yield_now().await;
+        }
         self.activity.call(read).await
     }
 

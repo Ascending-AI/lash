@@ -9,6 +9,9 @@
 //!
 //! - No body starts before [`admit`]'s transaction commits: its `x_start` row
 //!   is the authorization.
+//! - No body starts on a node past its lease: an admission acknowledged after
+//!   the node's self-stop deadline may already be another owner's to
+//!   recover, so its body is never entered there (ADR 0132 §3).
 //! - The fold calls no producer: resume folds rows into state.
 //! - A `Once` execution started without an outcome folds to `Interrupted`
 //!   and its body is never entered again; a `Repeatable` one reruns at its
@@ -756,6 +759,9 @@ pub(crate) enum Stop {
     /// The activation stopped: the node is going away, and nothing may be
     /// recorded for it.
     Activation,
+    /// The node's lease lapsed before the body started: it never ran, and
+    /// nothing may be recorded for it on this owner.
+    Lapsed,
 }
 
 /// Run `admitted`'s body under its limit, the context's cancel token and
@@ -767,22 +773,30 @@ pub(crate) enum Stop {
 /// cancelled, the body's token is cancelled and it has the stop grace to
 /// answer; after that it is dropped and the stop is its outcome. A limit
 /// already expired settles at once, without entering the body.
+///
+/// Answers `None` when the node's lease lapsed before the body could start:
+/// the body never runs, and nothing may be recorded for it on this owner.
 pub async fn run_body(
     cx: &ActorContext,
     admitted: &AdmittedExecution,
     body: ToolBody,
-) -> BodyOutput {
+) -> Option<BodyOutput> {
     match run_bounded(cx, admitted, body, &CancellationToken::new()).await {
-        Ok(output) => output,
-        Err(Stop::Limit(cause)) => AttemptOutcome::TimedOut {
-            cause,
-            evidence: AvailableEvidence::default(),
-        }
-        .into(),
-        Err(Stop::Cancelled | Stop::Activation) => AttemptOutcome::Cancelled {
-            evidence: AvailableEvidence::default(),
-        }
-        .into(),
+        Ok(output) => Some(output),
+        Err(Stop::Limit(cause)) => Some(
+            AttemptOutcome::TimedOut {
+                cause,
+                evidence: AvailableEvidence::default(),
+            }
+            .into(),
+        ),
+        Err(Stop::Cancelled | Stop::Activation) => Some(
+            AttemptOutcome::Cancelled {
+                evidence: AvailableEvidence::default(),
+            }
+            .into(),
+        ),
+        Err(Stop::Lapsed) => None,
     }
 }
 
@@ -794,6 +808,12 @@ pub(crate) async fn run_bounded(
     body: ToolBody,
     member_cancel: &CancellationToken,
 ) -> Result<BodyOutput, Stop> {
+    // The admission may have been acknowledged after the node paused past
+    // its self-stop deadline: by then the actor's new owner may have
+    // settled it, so its body never starts here.
+    if !cx.lease_held() {
+        return Err(Stop::Lapsed);
+    }
     let clock = Arc::clone(cx.clock());
     let now = u64::try_from(cx.now().0).unwrap_or(0);
     let limit = admitted.limit();

@@ -16,6 +16,9 @@
 //!   code and emits no committed ordinal again, and a turn restores from
 //!   its checkpoint at most once per interruption.
 //! - **Admission first (S4).** No body starts before its `x_start` commit.
+//! - **Lease first (S4).** No body starts on a node past its lease: under a
+//!   stale-epoch cut, a `Once` the moved owner settles `Interrupted` was
+//!   never entered after its node paused.
 //! - **The fold accepts the persisted records** of every owner that ran a
 //!   body.
 //! - **Every actor reaches a terminal or a durable wait.** At the end no
@@ -46,7 +49,7 @@ pub async fn check(
 ) -> Vec<String> {
     let trace = nodes.script().trace();
     let mut violations = fencing(cut, &trace);
-    violations.extend(once(world, nodes).await);
+    violations.extend(once(world, nodes, stale_pause(cut, &trace)).await);
     violations.extend(no_replay(world, cut, max_restores));
     violations.extend(admission_first(world));
     violations.extend(settled(world, nodes).await);
@@ -105,9 +108,23 @@ pub fn fencing(cut: Option<&Cut>, trace: &[Write]) -> Vec<String> {
     violations
 }
 
+/// When a stale-epoch cut paused its node: the instant of its cut owner
+/// commit. Whatever the node does after it resumes is stamped later, and
+/// runs past its self-stop deadline.
+fn stale_pause(cut: Option<&Cut>, trace: &[Write]) -> Option<u64> {
+    let cut = cut.filter(|cut| cut.fault == Fault::StaleEpoch && cut.kind == WriteKind::Actor)?;
+    trace
+        .iter()
+        .find(|write| {
+            write.node == cut.node && write.point == cut.point && write.cut == Some(cut.fault)
+        })
+        .map(|write| write.at_ms)
+}
+
 /// F2, NR-1, NR-2 and NR-3 over every owner's persisted records, and the
-/// fold that reads them.
-async fn once(world: &World, nodes: &SimNodes) -> Vec<String> {
+/// fold that reads them; with `paused_at`, a stale-epoch cut's pause, the
+/// lease law too.
+async fn once(world: &World, nodes: &SimNodes, paused_at: Option<u64>) -> Vec<String> {
     let mut violations = Vec::new();
     let counts = world.tripwire().counts();
     let ledger = world.ledger().entries();
@@ -168,6 +185,23 @@ async fn once(world: &World, nodes: &SimNodes) -> Vec<String> {
                     "NR-2: {id:?}, started without an outcome, was entered {entered} times"
                 )),
                 _ => {}
+            }
+            // The moved owner interrupts a `Once` its paused node admitted;
+            // a body entered after the pause ran on that node past its lease.
+            if let Some(paused_at) = paused_at
+                && once
+                && matches!(
+                    recovery,
+                    Recovery::Settled(AttemptOutcome::Interrupted) | Recovery::Interrupt
+                )
+                && let Some(entries) = ledger.get(&(id.owner.clone(), execution.call().clone()))
+                && let Some(late) = entries.iter().find(|entry| entry.at_ms > paused_at)
+            {
+                violations.push(format!(
+                    "S4: interrupted {id:?} ({}) was entered at {} ms, after its node paused \
+                     at {paused_at} ms past its lease",
+                    late.tool, late.at_ms
+                ));
             }
         }
     }

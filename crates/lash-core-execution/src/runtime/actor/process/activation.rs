@@ -117,7 +117,7 @@ pub(super) struct Live {
     /// The context step bodies run under; its token is the steps' cancel.
     steps_cx: ActorContext,
     steps_token: CancellationToken,
-    running: JoinSet<(StepName, AdmittedId, BodyOutput)>,
+    running: JoinSet<(StepName, AdmittedId, Option<BodyOutput>)>,
     /// The step each running body's task runs, to release a body whose
     /// task ended without an output.
     tasks: std::collections::HashMap<tokio::task::Id, StepName>,
@@ -274,10 +274,16 @@ impl ProcessActivation {
                     Some(Err(error)) => Some(error.id()),
                     None => None,
                 };
-                if let Some(name) = task.and_then(|task| live.tasks.remove(&task)) {
+                // A step whose body never started because the node's lease
+                // lapsed stays started: this owner is stopping, and the next
+                // one recovers the step from the rows.
+                let lapsed = matches!(&finished, Some(Ok((_, (_, _, None)))));
+                if let Some(name) = task.and_then(|task| live.tasks.remove(&task))
+                    && !lapsed
+                {
                     live.started.remove(&name);
                 }
-                if let Some(Ok((_, (_, id, output)))) = finished {
+                if let Some(Ok((_, (_, id, Some(output))))) = finished {
                     let admitted = fold
                         .admitted(&id)
                         .ok_or_else(|| corrupt("a running process step", "its start has no row"))?;

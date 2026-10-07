@@ -420,7 +420,7 @@ impl RoundRunner {
                 }
                 Some(done) = running.next(), if !running.is_empty() => {
                     in_flight.remove(&done.id);
-                    if matches!(done.result, Err(Stop::Activation)) {
+                    if matches!(done.result, Err(Stop::Activation | Stop::Lapsed)) {
                         return Err(RoundError::Stopped);
                     }
                     finished.insert(done.id, done.result);
@@ -585,7 +585,9 @@ impl RoundRunner {
                 None,
                 None,
             ),
-            Err(Stop::Cancelled | Stop::Activation) => (cancelled_outcome().into(), None, None),
+            Err(Stop::Cancelled | Stop::Activation | Stop::Lapsed) => {
+                (cancelled_outcome().into(), None, None)
+            }
         };
         // A park whose resolver awaits a process waits on its terminal too:
         // the wait is pinned with the park, under the call's own deadline.
