@@ -103,34 +103,43 @@ impl RunTerminalKind {
     }
 }
 
-/// The outcome a run's final physical turn committed with: it finished, or
-/// it stopped. A frame switch or a segment boundary never ends a run (its
-/// run goes on in the next physical turn), so neither has a spelling here. Encoded as the matching
-/// [`TurnOutcome`] variant.
+/// The outcome a run's final physical turn committed with: it finished, it
+/// switched the agent frame (its follow-on task is the session's next turn,
+/// ADR 0101 §3), or it stopped. Encoded as the matching [`TurnOutcome`]
+/// variant; a frame switch's seed nodes are the new frame's committed
+/// history, not its run's answer, so its record leaves them out.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunCommittedOutcome {
     Finished(TurnFinish),
+    AgentFrameSwitch {
+        frame_key: lash_sansio::FrameKey,
+        task: String,
+    },
     Stopped(TurnStop),
 }
 
 impl RunCommittedOutcome {
-    /// The committed outcome `outcome` ends a run with; `None` for a frame
-    /// switch or a segment boundary, which end none.
+    /// The committed outcome `outcome` ends a run with.
     #[must_use]
-    pub fn of_turn_outcome(outcome: &TurnOutcome) -> Option<Self> {
+    pub fn of_turn_outcome(outcome: &TurnOutcome) -> Self {
         match outcome {
-            TurnOutcome::Finished(finish) => Some(Self::Finished(finish.clone())),
-            TurnOutcome::Stopped(stop) => Some(Self::Stopped(stop.clone())),
-            TurnOutcome::AgentFrameSwitch { .. } | TurnOutcome::SegmentBoundary { .. } => None,
+            TurnOutcome::Finished(finish) => Self::Finished(finish.clone()),
+            TurnOutcome::AgentFrameSwitch {
+                frame_key, task, ..
+            } => Self::AgentFrameSwitch {
+                frame_key: frame_key.clone(),
+                task: task.clone(),
+            },
+            TurnOutcome::Stopped(stop) => Self::Stopped(stop.clone()),
         }
     }
 
-    /// Why the turn stopped; `None` when it finished.
+    /// Why the turn stopped; `None` when it finished or switched frames.
     #[must_use]
     pub fn stop(&self) -> Option<&TurnStop> {
         match self {
-            Self::Finished(_) => None,
+            Self::Finished(_) | Self::AgentFrameSwitch { .. } => None,
             Self::Stopped(stop) => Some(stop),
         }
     }
@@ -140,6 +149,11 @@ impl From<RunCommittedOutcome> for TurnOutcome {
     fn from(outcome: RunCommittedOutcome) -> Self {
         match outcome {
             RunCommittedOutcome::Finished(finish) => Self::Finished(finish),
+            RunCommittedOutcome::AgentFrameSwitch { frame_key, task } => Self::AgentFrameSwitch {
+                frame_key,
+                task,
+                initial_nodes: Vec::new(),
+            },
             RunCommittedOutcome::Stopped(stop) => Self::Stopped(stop),
         }
     }

@@ -10,15 +10,12 @@ crate::statements! {
     /// `session_mail` statements both backends issue verbatim.
     pub struct SessionMailStatements @ "durable_session_mail" {
         /// Session `?1`'s standing: whether it has a catalog row, whether it
-        /// was deleted, whether its close began and whether its head owes a
-        /// follow-on.
+        /// was deleted and whether its close began.
         standing = "SELECT
                  (SELECT COUNT(*) FROM session_meta WHERE session_id = ?1),
                  (SELECT COUNT(*) FROM deleted_sessions WHERE session_id = ?1),
                  (SELECT COUNT(*) FROM session_meta
-                     WHERE session_id = ?1 AND closing_intent IS NOT NULL),
-                 (SELECT COUNT(*) FROM session_head
-                     WHERE session_id = ?1 AND pending_follow_on_json IS NOT NULL)";
+                     WHERE session_id = ?1 AND closing_intent IS NOT NULL)";
 
         /// The run session `?1`'s bound, unsettled ingress names, if any.
         bound_run = "SELECT admitted_run FROM pending_turn_inputs

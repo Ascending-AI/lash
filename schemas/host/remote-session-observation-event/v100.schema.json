@@ -11290,24 +11290,6 @@
           "type": "object"
         },
         {
-          "description": "The follow-on the head owes.",
-          "properties": {
-            "follow_on": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "owner": {
-              "const": "follow_on",
-              "type": "string"
-            }
-          },
-          "required": [
-            "owner",
-            "follow_on"
-          ],
-          "type": "object"
-        },
-        {
           "description": "An open session command, the earliest by `enqueue_seq`.",
           "properties": {
             "enqueue_seq": {

@@ -116,21 +116,9 @@ pub struct SessionHeadMeta {
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub checkpoint_ref: Option<BlobRef>,
     pub leaf_node_id: Option<crate::NodeId>,
-    /// The follow-on the head owes, from the `pending_follow_on_json` column
-    /// (ADR 0101 §3). It is not part of [`SessionHeadPayload`].
-    pub pending_follow_on: Option<PendingFollowOn>,
 }
 
 impl SessionHeadMeta {
-    /// Attach the `pending_follow_on_json` column a store read beside the
-    /// payload.
-    ///
-    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
-    pub fn with_pending_follow_on(mut self, pending_follow_on: Option<PendingFollowOn>) -> Self {
-        self.pending_follow_on = pending_follow_on;
-        self
-    }
-
     /// The head a creating admission writes beside the catalog row, in the
     /// same store transaction (FIG-4099): the creator's config at config
     /// revision `0`, and nothing else — no frame, no checkpoint, no leaf, at
@@ -154,7 +142,6 @@ impl SessionHeadMeta {
             current_frame_node_id: None,
             checkpoint_ref: None,
             leaf_node_id: None,
-            pending_follow_on: None,
         }
     }
 
@@ -205,7 +192,6 @@ impl SessionHeadMeta {
             current_frame_node_id,
             checkpoint_ref,
             leaf_node_id,
-            pending_follow_on: None,
         })
     }
 

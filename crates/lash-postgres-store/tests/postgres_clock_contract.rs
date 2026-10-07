@@ -92,7 +92,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         // end of the file.
         (
             RUNTIME_PERSISTENCE_ADMISSION_SOURCE,
-            "async fn follow_on_blocks_admission_tx(",
+            "pub(crate) async fn admit_at_checkpoint_postgres(",
             "// end of admission.rs",
         ),
         // A commit's settlement of the rows its run admitted runs inside the

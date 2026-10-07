@@ -449,15 +449,6 @@ pub enum RuntimeEffectCommand {
     PluginCallbacks {
         phase: crate::plugin::RecordedCallbackPhase,
     },
-    /// Decide a follow-on recovery run before its turn (FIG-4361): whether
-    /// the head still owes `follow_on`, and, from the recovery count
-    /// `attempts` its shift admission recorded, whether it runs under a
-    /// raised count or commits exhausted. The body raises the count; replay
-    /// serves the recorded answer and never reads the head.
-    RecoverFollowOn {
-        follow_on: crate::TurnId,
-        attempts: u32,
-    },
 
     /// Resolve the shape `run` runs under (FIG-3600 S6, FIG-3838): once per
     /// run, keyed by it, so every redrive replays the recorded shape.
@@ -592,7 +583,6 @@ impl RuntimeEffectCommand {
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
-            Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
 
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
@@ -1168,11 +1158,6 @@ pub enum RuntimeEffectOutcome {
     /// one of its callbacks, which publishes none of the slot's commands.
     PluginCallbacks {
         result: Result<Vec<crate::plugin::RecordedTurnContribution>, crate::PluginError>,
-    },
-    /// A follow-on recovery run's recorded decision (FIG-4361), with the
-    /// head its turn runs on (FIG-4380).
-    RecoverFollowOn {
-        answer: Box<crate::store::FollowOnRecoveryAnswer>,
     },
 
     /// The run's recorded shape: its spec resolved against its snapshot

@@ -5058,21 +5058,6 @@
       ],
       "type": "string"
     },
-    "RemoteBoundaryReason": {
-      "description": "Why a physical turn ended at a segment boundary.",
-      "oneOf": [
-        {
-          "const": "journal_budget",
-          "description": "The turn's invocation reached its journal budget.",
-          "type": "string"
-        },
-        {
-          "const": "hand_over",
-          "description": "The build the turn's invocation ran on is draining.",
-          "type": "string"
-        }
-      ]
-    },
     "RemoteCausalRef": {
       "oneOf": [
         {
@@ -10127,23 +10112,6 @@
           "type": "object"
         },
         {
-          "description": "The physical turn ended at a segment boundary of its run, which goes\non in a new invocation. Never a run's final outcome.",
-          "properties": {
-            "reason": {
-              "$ref": "#/$defs/RemoteBoundaryReason"
-            },
-            "type": {
-              "const": "segment_boundary",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "reason"
-          ],
-          "type": "object"
-        },
-        {
           "properties": {
             "stop": {
               "$ref": "#/$defs/RemoteTurnStop"
@@ -11865,24 +11833,6 @@
           "required": [
             "owner",
             "run"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "The follow-on the head owes.",
-          "properties": {
-            "follow_on": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "owner": {
-              "const": "follow_on",
-              "type": "string"
-            }
-          },
-          "required": [
-            "owner",
-            "follow_on"
           ],
           "type": "object"
         },

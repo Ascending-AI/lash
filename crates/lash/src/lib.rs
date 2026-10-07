@@ -568,8 +568,8 @@ pub mod persistence {
     pub use lash_core_store::store::ToolMaterialStore;
     pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
     pub use lash_core_store::store::{
-        DurableRecord, EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow,
-        StoreFault, StoreRefusal, StoredRunTerminal, SurfaceFormat, WriterPin,
+        DurableRecord, EnumerationSource, FrameTransition, ReadWindow, StoreFault, StoreRefusal,
+        StoredRunTerminal, SurfaceFormat, WriterPin,
     };
     pub use lash_core_store::{PersistedNodeIds, surface_format};
     /// The protocol-generic form [`SessionHistoryRecord`] specializes.
@@ -673,15 +673,14 @@ pub mod persistence {
         refresh_session_window,
     };
     pub use lash_core::store::{
-        AppendRequestIdentity, CheckpointComponentDescriptor, FollowOnWork, GraphAppend,
+        AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId, ParkCancelCause,
         ParkEventColumns, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId,
-        ParkReason, ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, RunContinuation,
-        RunOpenerState, RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator,
-        RuntimeTurnCommitStamp, SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta,
-        SessionHeadPayload, SuspendedCell, TurnChange, TurnChangeCursor, TurnChangeKind,
-        TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome, TurnProjectionWatermark,
-        UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
+        ParkReason, ParkReasonCode, ParkReport, PhysicalTurn, RuntimeCommit, RuntimeCommitReceipt,
+        RuntimeStoreDecorator, RuntimeTurnCommitStamp, SemanticBoundaryOperation,
+        SessionCheckpoint, SessionHeadMeta, SessionHeadPayload, TurnChange, TurnChangeCursor,
+        TurnChangeKind, TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome,
+        TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
         validate_turn_commit_outcome_code,
     };
     /// A logical run's durable terminal evidence and the store segment that
@@ -1171,11 +1170,11 @@ pub mod durability {
 
     /// Effect-host inputs, replay projections, and local execution capabilities.
     pub use lash_core::runtime::{
-        BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity,
-        EffectJournalRetirement, EffectRetirementGate, HostStartAdmission, ProcessLocalExecution,
-        ProcessOutcomeObserver, ProcessTurnCancellation, RuntimeAwaitEventOptions,
-        RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-        RuntimeSubject, SegmentProgress, ToolAttemptLaunch, TriggerLocalExecution,
+        CanonicalRuntimeEffectEnvelope, EffectJournalIdentity, EffectJournalRetirement,
+        EffectRetirementGate, HostStartAdmission, ProcessLocalExecution, ProcessOutcomeObserver,
+        ProcessTurnCancellation, RuntimeAwaitEventOptions, RuntimeEffectReplayTrace, RuntimeReplay,
+        RuntimeReplayAttribution, RuntimeSleepOptions, RuntimeSubject, SegmentProgress,
+        ToolAttemptLaunch, TriggerLocalExecution,
     };
     /// Durable group and journal values returned by effect-host implementors.
     pub use lash_core::runtime::{JournalReplay, ProcessDriveStep, RecordedKeyRange};
@@ -1208,7 +1207,6 @@ pub mod runtime {
     pub use lash_core::ServedOnly;
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
     pub use lash_core_store::runtime_error::EffectErrorJournalPolicy;
-    pub use lash_core_store::store::FollowOnRecoveryAnswer;
     pub use lash_core_store::turn_input_vocabulary::RunDefinitions;
     pub use lash_sansio::sansio::{
         ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,

@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1565 rows over 850 files, 3913 laws.
-# By class: mechanical 163, semantic 111, delete 842, replace 449.
-# By lane: L1b 12, L3 19, L3s 57, L4 19, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 8, L9t 30, I0 49.
-# By status: todo 408, ported 87, deleted 1070.
+# 1568 rows over 850 files, 3919 laws.
+# By class: mechanical 163, semantic 111, delete 845, replace 449.
+# By lane: L1b 12, L3 19, L3s 57, L4 19, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 79, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
+# By status: todo 408, ported 87, deleted 1073.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -25040,3 +25040,49 @@ laws = [
 disposition = "covered-by:crates/lash-sim/tests/crash_matrix.rs::a_session_command_cut_at_every_label_settles_once"
 status = "deleted"
 note = "deleted by FIG-5230: both applied a host append's session command off the session actor, which no longer happens (a command commits on the actor's fenced session.command). The crash matrix's command case applies one append and settles a stale one StaleBranch through the actor; session_graph_service_append_tolerates_an_advanced_head and session_graph_service_append_rejects_an_abandoned_branch keep the branch rule"
+# FIG-5232 (L3t): a frame switch mails its follow-on with its commit; the pending follow-on head fact and the segment boundary are deleted.
+
+[[row]]
+path = "crates/lash-core-store/src/store/pending_follow_on.rs"
+test = "s08_continuation_cannot_also_owe_a_frame_task"
+area = "pending-follow-on"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "s08_continuation_cannot_also_owe_a_frame_task",
+  "a_recovery_run_names_its_follow_on_at_any_count",
+  "suffix_shaped_host_runs_keep_their_follow_on_identity",
+  "a_fact_without_its_runs_record_does_not_decode",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/frame_switch_crash_proof.rs::a_frame_switch_killed_at_every_label_runs_one_follow_on_on_sqlite_memory"
+status = "deleted"
+note = "deleted by FIG-5232 with PendingFollowOn: a frame switch's follow-on is one next-turn input its turn.commit mails, keyed by the frame's task run, so there is no head fact, recovery count or continuation to encode; the crash law proves exactly one follow-on at every cut"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/runtime_persistence/suite_and_receipts.rs"
+test = "commit_rejects_follow_on_bytes_over_budget"
+area = "suite-and-receipts"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "commit_rejects_follow_on_bytes_over_budget",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5232: a runtime commit carries no pending follow-on, so the commit budget has no follow-on bytes to count"
+
+[[row]]
+path = "crates/lash-sim/tests/cross_backend_store_differential/surface_sweep.rs"
+test = "pending_follow_on_raise_case"
+area = "store-conformance"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "pending_follow_on_raise_and_clear",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5232 with load_pending_follow_on and raise_pending_follow_on_attempts: the store traits no longer carry the follow-on fact, so the differential case and its two sweep steps went with them"

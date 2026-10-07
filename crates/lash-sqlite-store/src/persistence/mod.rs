@@ -181,5 +181,6 @@ pub(crate) mod session_commit;
 mod session_fault;
 pub(crate) mod turn_cancel;
 mod turn_input;
+pub(crate) use turn_input::enqueue_pending_turn_inputs_conn;
 
 use turn_cancel::*;

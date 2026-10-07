@@ -41,7 +41,7 @@ impl LashRuntime {
             .and_then(|admitted| admitted.inputs.first())
             .and_then(|input| input.run_spec.clone());
         self.materialize_turn_session(controller).await?;
-        self.resolve_turn_config(controller, run, admitted_run_spec.as_ref(), None)
+        self.resolve_turn_config(controller, run, admitted_run_spec.as_ref())
             .await?;
         Self::emit_physical_turn_start(
             observer,

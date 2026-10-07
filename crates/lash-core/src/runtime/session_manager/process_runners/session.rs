@@ -287,11 +287,7 @@ fn process_terminal_state_for_turn(turn: &crate::AssembledTurn) -> crate::Proces
         crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. }) => {
             crate::ProcessStatus::Cancelled
         }
-        // A process's session turn takes no segment boundary: the process
-        // segments itself (FIG-4739).
-        crate::TurnOutcome::SegmentBoundary { .. } | crate::TurnOutcome::Stopped(_) => {
-            crate::ProcessStatus::Failed
-        }
+        crate::TurnOutcome::Stopped(_) => crate::ProcessStatus::Failed,
     }
 }
 
@@ -551,11 +547,6 @@ fn final_value_of_turn(
             crate::ToolFailureClass::Execution,
             "process_session_turn_frame_switch",
             "the child switched agent frames instead of producing a final value",
-        ))),
-        crate::TurnOutcome::SegmentBoundary { .. } => Err(Box::new(crate::ToolFailure::tool(
-            crate::ToolFailureClass::Internal,
-            "process_session_turn_segment_boundary",
-            "the child turn ended at a segment boundary instead of producing a final value",
         ))),
         crate::TurnOutcome::Stopped(_) => Err(Box::new(crate::ToolFailure::tool(
             crate::ToolFailureClass::Internal,

@@ -1383,9 +1383,6 @@ mod classification_tests {
             crate::store::SessionHeadOwner::Run {
                 run: crate::TurnId::from("bound-run"),
             },
-            crate::store::SessionHeadOwner::FollowOn {
-                follow_on: crate::TurnId::from("owed-follow-on"),
-            },
             crate::store::SessionHeadOwner::CommandLane { enqueue_seq: 7 },
         ] {
             let plugin = PluginError::from(crate::StoreError::SessionHeadOwned {

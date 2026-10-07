@@ -206,20 +206,12 @@ pub(crate) fn try_load_session_head_meta_from_conn(
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
                 ))
             },
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((
-        head_json,
-        head_revision,
-        leaf_node_id,
-        checkpoint_ref,
-        pending_follow_on,
-        current_frame_node_id,
-    )) = row
+    let Some((head_json, head_revision, leaf_node_id, checkpoint_ref, current_frame_node_id)) = row
     else {
         return Ok(None);
     };
@@ -232,11 +224,6 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     let head_json = head_json.ok_or_else(|| {
         stored_data_corrupt("SessionHeadMeta", "head pointer names a missing revision")
     })?;
-    let pending_follow_on =
-        lash_core_execution::store::pending_follow_on::decode_pending_follow_on(
-            session_id,
-            pending_follow_on.as_deref(),
-        )?;
     let payload: SessionHeadPayload =
         lash_core_execution::store::decode_versioned_json_record_for_fleet(
             &head_json,
@@ -258,19 +245,16 @@ pub(crate) fn try_load_session_head_meta_from_conn(
         .map(lash_core_execution::FrameNodeId::new)
         .transpose()
         .map_err(|error| stored_data_corrupt("SessionGraph", error))?;
-    Ok(Some(
-        SessionHeadMeta::assemble(
-            session_id,
-            payload,
-            head_revision,
-            checkpoint_ref.map(Into::into),
-            leaf_node_id
-                .map(lash_core_execution::NodeId::parse)
-                .transpose()?,
-            current_frame_node_id,
-        )?
-        .with_pending_follow_on(pending_follow_on),
-    ))
+    Ok(Some(SessionHeadMeta::assemble(
+        session_id,
+        payload,
+        head_revision,
+        checkpoint_ref.map(Into::into),
+        leaf_node_id
+            .map(lash_core_execution::NodeId::parse)
+            .transpose()?,
+        current_frame_node_id,
+    )?))
 }
 
 /// Decode a checkpoint manifest under the store's recorded `F`: the manifest

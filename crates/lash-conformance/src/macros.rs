@@ -92,7 +92,6 @@ macro_rules! runtime_persistence_tests {
             (serves_each_admitted_session_and_refuses_an_unknown_one, "alpha"),
             (commit_rejects_carried_nondefault_node_budget, "root"),
             (commit_rejects_carried_nondefault_byte_budget, "root"),
-            (commit_rejects_follow_on_bytes_over_budget, "root"),
             (commit_rejects_turn_result_bytes_over_budget, "root"),
             (load_hydrates_checkpoint, "hydrated"),
             (checkpoint_restore_rejects_turn_index_without_increment_headroom, "root"),

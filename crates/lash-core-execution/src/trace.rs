@@ -205,7 +205,6 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         | TraceEvent::DurableWaitResolved { .. }
         | TraceEvent::DurableTimerStarted { .. }
         | TraceEvent::DurableTimerResolved { .. }
-        | TraceEvent::DurableSegmentBoundary { .. }
         | TraceEvent::StoreErrorObserved { .. } => set_span(context, None, turn_node),
         TraceEvent::CompactionStarted { .. } | TraceEvent::CompactionCompleted { .. } => {
             set_span(context, None, turn_node.or(session_node));

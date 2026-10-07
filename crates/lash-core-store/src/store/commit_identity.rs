@@ -1215,10 +1215,6 @@ struct RuntimeCommitIntent<'a> {
     /// every other commit's identity.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     undelivered_queue_batches: Vec<&'a crate::BatchId>,
-    /// The follow-on the head owes after this commit (ADR 0101 §3). Absent
-    /// from every commit that leaves the head owing nothing.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pending_follow_on: Option<&'a super::PendingFollowOn>,
     committed_attachment_ids: &'a [crate::AttachmentId],
 }
 
@@ -1272,7 +1268,6 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
                     super::IngressRowId::Input(_) => None,
                 })
                 .collect(),
-            pending_follow_on: commit.pending_follow_on.as_ref(),
             committed_attachment_ids: &commit.committed_attachment_ids,
         }
     }

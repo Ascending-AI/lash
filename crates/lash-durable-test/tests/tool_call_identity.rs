@@ -472,7 +472,6 @@ async fn suspended_tool_keeps_turn_and_history_head_until_resolution(tier: Tier)
         );
         assert_eq!(waiting.current_frame_node_id, before.current_frame_node_id);
         assert_eq!(waiting.config, before.config);
-        assert_eq!(waiting.pending_follow_on, before.pending_follow_on);
         witness.open();
     });
     served::assert_answered("resolved suspended turn", &output);

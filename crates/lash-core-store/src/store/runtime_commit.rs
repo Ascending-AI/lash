@@ -129,12 +129,6 @@ pub struct RuntimeCommit {
     /// Every key must belong to [`Self::applied_commands`].
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub command_outcomes: std::collections::BTreeMap<crate::BatchId, crate::SessionCommandOutcome>,
-    /// The follow-on the head owes once this commit publishes (ADR 0101 §3):
-    /// the value the head holds after the write, not a delta. A frame-switch
-    /// commit writes it, the follow-on's terminal commit clears or replaces
-    /// it, and every other commit carries the head's value unchanged.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending_follow_on: Option<super::PendingFollowOn>,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
     /// turn-owned write-ahead intents before store validation begins. Per ADR
@@ -297,9 +291,6 @@ pub struct TurnTraceReceipt {
 pub enum TurnCommitOutcome {
     Completed,
     FrameSwitch,
-    /// The turn ended at a segment boundary of its run (FIG-4739): the run
-    /// goes on in the continuation the head owes.
-    SegmentBoundary,
     Cancelled,
     Failed(TurnCommitFailureCause),
 }
@@ -329,7 +320,6 @@ impl TurnCommitOutcome {
         match outcome {
             TurnOutcome::Finished(_) => Self::Completed,
             TurnOutcome::AgentFrameSwitch { .. } => Self::FrameSwitch,
-            TurnOutcome::SegmentBoundary { .. } => Self::SegmentBoundary,
             TurnOutcome::Stopped(stop) => match stop {
                 TurnStop::Cancelled { .. } => Self::Cancelled,
                 TurnStop::Incomplete => Self::Failed(TurnCommitFailureCause::Incomplete),
@@ -353,7 +343,6 @@ impl TurnCommitOutcome {
         match self {
             Self::Completed => "completed",
             Self::FrameSwitch => "frame_switch",
-            Self::SegmentBoundary => "segment_boundary",
             Self::Cancelled => "cancelled",
             Self::Failed(TurnCommitFailureCause::Incomplete) => "failed_incomplete",
             Self::Failed(TurnCommitFailureCause::InvalidInput) => "failed_invalid_input",
@@ -412,10 +401,6 @@ pub struct RuntimeCommitReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub trace: Option<Box<TurnTraceReceipt>>,
-    /// The follow-on the head owes after this commit (ADR 0101 §3), so a
-    /// replayed switch commit returns the fact it wrote.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending_follow_on: Option<super::PendingFollowOn>,
     /// Each command batch's outcome, recorded with the applying commit so
     /// later resubmissions answer their own result.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -455,10 +440,6 @@ pub struct RuntimeCommitReceipt {
 /// existed carry no `schema_version` at all and are refused as
 /// [`StoreError::MissingRecordSchemaVersion`], matching the exact-version
 /// refusal every other durable record follows.
-///
-/// Version 2 (FIG-3542) replaces the frame-handoff `enqueued_queue_batches`
-/// with the `pending_follow_on` the commit left on the head. A version-1
-/// receipt is refused, not converted.
 ///
 /// version_guard(
 ///     items(decode_runtime_commit_receipt, ensure_supported_receipt_version),

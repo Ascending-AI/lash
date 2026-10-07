@@ -30,7 +30,6 @@ pub struct QueuedWorkBatchingConfig {
     max_rows: std::num::NonZeroUsize,
     max_pending_age: std::time::Duration,
     max_turn_input_admission: std::num::NonZeroUsize,
-    max_follow_on_recoveries: u32,
     /// `None` selects the documented Lash default,
     /// [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime), so the
     /// configuration stays `const`-constructible.
@@ -49,7 +48,6 @@ impl PartialEq for QueuedWorkBatchingConfig {
             && self.max_rows == other.max_rows
             && self.max_pending_age == other.max_pending_age
             && self.max_turn_input_admission == other.max_turn_input_admission
-            && self.max_follow_on_recoveries == other.max_follow_on_recoveries
             && std::sync::Arc::ptr_eq(&self.drain_policy(), &other.drain_policy())
     }
 }
@@ -96,26 +94,8 @@ impl QueuedWorkBatchingConfig {
                 Self::DEFAULT_MAX_TURN_INPUT_CLAIM,
             )
             .expect("default turn-input admission bound is non-zero"),
-            max_follow_on_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             drain_policy: None,
         }
-    }
-
-    /// Sets how many times a shift may recover a pending follow-on before the
-    /// follow-on commits as a failed turn carrying
-    /// `FollowOnRecoveryExhausted` (ADR 0101 §3). The count is never reset.
-    /// The bound is frozen on the pending follow-on when a logical run's
-    /// first frame switch owes it, so a host with another bound recovers
-    /// that chain under the frozen one (FIG-4361).
-    pub const fn with_max_follow_on_recoveries(mut self, max_follow_on_recoveries: u32) -> Self {
-        self.max_follow_on_recoveries = max_follow_on_recoveries;
-        self
-    }
-
-    /// The pending follow-on recovery bound (default
-    /// [`DEFAULT_MAX_FOLLOW_ON_RECOVERIES`](crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES)).
-    pub const fn max_follow_on_recoveries(&self) -> u32 {
-        self.max_follow_on_recoveries
     }
 
     /// Selects one of the two shipped drain shapes.

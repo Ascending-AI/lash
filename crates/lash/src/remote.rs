@@ -147,9 +147,9 @@ pub mod turn_control {
 /// issues, and causal references.
 pub mod turn_result {
     pub use lash_remote_protocol::turn_result::{
-        RemoteAssistantOutput, RemoteAssistantOutputState, RemoteBoundaryReason, RemoteCausalRef,
-        RemoteOperationOutcome, RemoteParkedTurn, RemoteSendOutcome, RemoteStalledDelivery,
-        RemoteToolCallOutcome, RemoteToolCallOutput, RemoteToolCallRecord, RemoteToolCancellation,
+        RemoteAssistantOutput, RemoteAssistantOutputState, RemoteCausalRef, RemoteOperationOutcome,
+        RemoteParkedTurn, RemoteSendOutcome, RemoteStalledDelivery, RemoteToolCallOutcome,
+        RemoteToolCallOutput, RemoteToolCallRecord, RemoteToolCancellation,
         RemoteToolControlProjection, RemoteToolFailure, RemoteTurnExecutionMetrics,
         RemoteTurnFinish, RemoteTurnIssue, RemoteTurnIssueSeverity, RemoteTurnOutcome,
         RemoteTurnParkReason, RemoteTurnReport, RemoteTurnStatus, RemoteTurnStop,

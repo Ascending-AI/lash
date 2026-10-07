@@ -101,7 +101,6 @@ pub struct RuntimeCommitBudgetMeasurement {
     pub checkpoint_bytes: usize,
     /// Raw UTF-8 byte length of the committed attachment ids.
     pub attachment_referrer_bytes: usize,
-    pub follow_on_bytes: usize,
     /// Persisted JSON encoding of the durable turn result stamp.
     pub turn_result_bytes: usize,
     /// Saturating sum of the budgeted components.
@@ -241,7 +240,6 @@ impl RuntimeCommit {
                 graph_delta_bytes = measurement.graph_delta_bytes,
                 checkpoint_bytes = measurement.checkpoint_bytes,
                 attachment_referrer_bytes = measurement.attachment_referrer_bytes,
-                follow_on_bytes = measurement.follow_on_bytes,
                 turn_result_bytes = measurement.turn_result_bytes,
                 actual = measurement.total_bytes,
                 limit = max_bytes,
@@ -253,7 +251,6 @@ impl RuntimeCommit {
                 graph_delta_bytes: measurement.graph_delta_bytes,
                 checkpoint_bytes: measurement.checkpoint_bytes,
                 attachment_referrer_bytes: measurement.attachment_referrer_bytes,
-                follow_on_bytes: measurement.follow_on_bytes,
                 turn_result_bytes: measurement.turn_result_bytes,
                 total_bytes: measurement.total_bytes,
                 max_bytes,
@@ -270,7 +267,6 @@ impl RuntimeCommit {
             graph_delta_bytes = measurement.graph_delta_bytes,
             checkpoint_bytes = measurement.checkpoint_bytes,
             attachment_referrer_bytes = measurement.attachment_referrer_bytes,
-            follow_on_bytes = measurement.follow_on_bytes,
             turn_result_bytes = measurement.turn_result_bytes,
             actual = measurement.total_bytes,
             limit = max_bytes,
@@ -373,12 +369,6 @@ impl RuntimeCommit {
             .committed_attachment_ids
             .iter()
             .fold(0usize, |total, id| total.saturating_add(id.as_str().len()));
-        let follow_on_bytes = self
-            .pending_follow_on
-            .as_ref()
-            .map(|pending| measure_json(serde_json::to_vec(pending)))
-            .transpose()?
-            .unwrap_or_default();
         let charged_outcomes = self
             .command_outcomes
             .iter()
@@ -395,7 +385,6 @@ impl RuntimeCommit {
             .saturating_add(graph_delta_bytes)
             .saturating_add(checkpoint_bytes)
             .saturating_add(attachment_referrer_bytes)
-            .saturating_add(follow_on_bytes)
             .saturating_add(turn_result_bytes);
         let graph_rows = self.graph.nodes().len();
         let adopted_intent_rows = usize::try_from(self.adopted_intent_rows).unwrap_or(usize::MAX);
@@ -408,7 +397,6 @@ impl RuntimeCommit {
             graph_delta_bytes,
             checkpoint_bytes,
             attachment_referrer_bytes,
-            follow_on_bytes,
             turn_result_bytes,
             total_bytes,
         })
@@ -552,7 +540,6 @@ mod tests {
                 graph_delta_bytes,
                 checkpoint_bytes,
                 attachment_referrer_bytes,
-                follow_on_bytes,
                 turn_result_bytes,
                 total_bytes,
                 max_bytes,
@@ -560,7 +547,6 @@ mod tests {
                 && graph_delta_bytes == expected_graph_bytes
                 && checkpoint_bytes == expected_checkpoint_bytes
                 && attachment_referrer_bytes == expected_attachment_bytes
-                && follow_on_bytes == 0
                 && turn_result_bytes > 0
                 && total_bytes
                     == expected_session_config_bytes
@@ -581,7 +567,6 @@ mod tests {
             graph_delta_bytes: usize::MAX,
             checkpoint_bytes: usize::MAX,
             attachment_referrer_bytes: usize::MAX,
-            follow_on_bytes: usize::MAX,
             turn_result_bytes: usize::MAX,
             total_bytes: usize::MAX,
             max_bytes: usize::MAX,

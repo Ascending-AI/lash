@@ -3302,23 +3302,6 @@
           "type": "object"
         },
         {
-          "description": "The turn ended at a segment boundary of its run, which goes on in a\nnew invocation. `done_reason` is why: `journal_budget` or `hand_over`.",
-          "properties": {
-            "done_reason": {
-              "type": "string"
-            },
-            "status": {
-              "const": "segment_boundary",
-              "type": "string"
-            }
-          },
-          "required": [
-            "status",
-            "done_reason"
-          ],
-          "type": "object"
-        },
-        {
           "description": "The turn was cancelled. Not a failure.",
           "properties": {
             "evidence": {
@@ -4316,37 +4299,6 @@
         "type",
         "duration_ms",
         "status"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "The durable controller requested a quiescent handler-segment handover.",
-      "properties": {
-        "effects_executed": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "journaled_bytes_estimate": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "reason": {
-          "type": "string"
-        },
-        "type": {
-          "const": "durable_segment_boundary",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "reason",
-        "effects_executed"
       ],
       "type": "object"
     },

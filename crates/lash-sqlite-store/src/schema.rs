@@ -50,7 +50,6 @@ CREATE INDEX IF NOT EXISTS idx_session_revisions_checkpoint_ref
 CREATE TABLE IF NOT EXISTS session_head (
     session_id TEXT PRIMARY KEY,
     head_revision INTEGER NOT NULL,
-    pending_follow_on_json TEXT,
     FOREIGN KEY (session_id, head_revision)
         REFERENCES session_revisions(session_id, head_revision)
         DEFERRABLE INITIALLY DEFERRED
@@ -190,7 +189,7 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     turn_id                     TEXT NOT NULL,
     turn_commit_hash            TEXT NOT NULL,
     result_json                 TEXT NOT NULL,
-    outcome_code                TEXT CONSTRAINT ck_runtime_turn_commits_outcome CHECK (outcome_code IN ('completed', 'frame_switch', 'segment_boundary', 'cancelled', 'failed_incomplete', 'failed_invalid_input', 'failed_max_turns', 'failed_tool_failure', 'failed_provider_error', 'failed_context_overflow', 'failed_plugin_abort', 'failed_runtime_error', 'failed_submitted_error', 'failed_tool_error')),
+    outcome_code                TEXT CONSTRAINT ck_runtime_turn_commits_outcome CHECK (outcome_code IN ('completed', 'frame_switch', 'cancelled', 'failed_incomplete', 'failed_invalid_input', 'failed_max_turns', 'failed_tool_failure', 'failed_provider_error', 'failed_context_overflow', 'failed_plugin_abort', 'failed_runtime_error', 'failed_submitted_error', 'failed_tool_error')),
     change_seq INTEGER NOT NULL UNIQUE CONSTRAINT ck_runtime_turn_commits_change_seq CHECK (change_seq > 0),
     committed_at_ms             INTEGER NOT NULL,
     request_identity_hash       TEXT,

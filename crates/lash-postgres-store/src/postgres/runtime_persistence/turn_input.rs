@@ -6,136 +6,13 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         &self,
         batch: lash_core_execution::PendingTurnInputBatch,
     ) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
-        use lash_core_execution::store_backend_support as support;
-        let session_id = batch.session_id();
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        ensure_session_not_closing_tx(&mut tx, session_id).await?;
-        for draft in batch.drafts() {
-            support::validate_turn_input_source_key(draft)?;
-        }
-        // The session's write authority, held to the commit: every ingress
-        // producer takes it before it allocates, so the absences read below
-        // hold and the block allocated below is contiguous (FIG-3842).
-        super::lock_session_history_mutation_tx(&mut tx, session_id).await?;
         let now = self.clock.timestamp_ms();
-        let ids = batch
-            .drafts()
-            .iter()
-            .flat_map(|draft| draft.input.stored_attachment_ids())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        let claim = lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
-        )
-        .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
-        crate::artifact_store::lock_referrer_tx(&mut tx, &claim.referrer())
-            .await
-            .map_err(store_sqlx_error)?;
-        crate::attachments::acquire_attachment_refs_tx(&mut tx, &claim, &ids, now).await?;
-        let sql = crate::turn_ingress::turn_ingress_sql();
-        let mut interned = std::collections::BTreeSet::new();
-        let mut admitted = Vec::with_capacity(batch.drafts().len());
-        for draft in batch.drafts() {
-            let submission_digest = support::turn_input_submission_digest(draft)?;
-            let by_source_key: Option<(String, String)> = match draft.source_key.as_deref() {
-                Some(source_key) => {
-                    sqlx::query_as(sql.pending_inputs.select_id_by_source_key.sql())
-                        .bind(session_id.as_str())
-                        .bind(source_key)
-                        .fetch_optional(&mut **tx)
-                        .await
-                        .map_err(store_sqlx_error)?
-                }
-                None => None,
-            };
-            let by_input_id: Option<(String, String)> =
-                match (&by_source_key, draft.input_id.as_deref()) {
-                    (None, Some(input_id)) => {
-                        sqlx::query_as(sql.pending_inputs.select_session_by_input_id.sql())
-                            .bind(input_id)
-                            .fetch_optional(&mut **tx)
-                            .await
-                            .map_err(store_sqlx_error)?
-                    }
-                    _ => None,
-                };
-            let input_id = match support::decide_turn_input_draft_admission(
-                draft,
-                &submission_digest,
-                by_source_key,
-                by_input_id,
-            )? {
-                support::TurnInputDraftAdmission::Existing { input_id } => input_id,
-                support::TurnInputDraftAdmission::New => {
-                    if let Some(turn_id) = draft.ingress.active_turn_id() {
-                        let evidence =
-                            turn_address_evidence_tx(&mut tx, session_id, turn_id).await?;
-                        support::require_known_turn_address(session_id, turn_id, evidence)?;
-                    }
-                    let enqueue_seq =
-                        super::allocate_ingress_sequence_tx(&mut tx, session_id).await?;
-                    let input_id = match draft.input_id.clone() {
-                        Some(input_id) => input_id,
-                        None => support::derive_pending_turn_input_id(
-                            session_id,
-                            draft.source_key.as_deref(),
-                            now,
-                            u64_from_sql("PendingTurnInput", "enqueue_seq", enqueue_seq)?,
-                        ),
-                    };
-                    let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
-                    let run_spec = admit_run_spec_tx(&mut tx, draft, &mut interned).await?;
-                    sqlx::query(sql.pending_inputs.insert_new.sql())
-                        .bind(enqueue_seq)
-                        .bind(input_id.as_str())
-                        .bind(session_id.as_str())
-                        .bind(&draft.source_key)
-                        .bind(encode_json(&draft.ingress)?)
-                        .bind(state.as_str())
-                        .bind(encode_json(&draft.input)?)
-                        .bind(&submission_digest)
-                        .bind(now as i64)
-                        .bind(run_spec.column())
-                        .bind(
-                            lash_core_execution::store_backend_support::encode_trace_cause(
-                                &draft.trace_cause,
-                            )?,
-                        )
-                        .execute(&mut **tx)
-                        .await
-                        .map_err(|err| {
-                            pending_turn_input_insert_error(err, session_id, &input_id)
-                        })?;
-                    input_id
-                }
-            };
-            if draft.pin {
-                // The pin is written with the acceptance, new or replayed,
-                // so the input is pinned before its run can start.
-                crate::revisions::pin_tx(
-                    &mut tx,
-                    session_id,
-                    &lash_core_execution::Target::Input(input_id.clone()),
-                )
-                .await?;
-            }
-            admitted.push(
-                load_pending_turn_input(&mut tx, session_id, &input_id)
-                    .await?
-                    .ok_or_else(|| {
-                        StoreError::Backend("admitted pending turn input disappeared".to_string())
-                    })?,
-            );
-        }
-        // The rows and the session's wake commit together (ADR 0132 §12): no
-        // crash between them can leave input that nothing will admit.
-        crate::durable::wake_session_tx(&mut tx, session_id, false, now).await?;
+        let admitted = enqueue_pending_turn_inputs_tx(&mut tx, &batch, now).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(admitted)
     }
@@ -443,6 +320,137 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
     }
 }
 
+/// Admit every draft of `batch` in the caller's transaction `tx` at `now`
+/// (FIG-3842): a draft a stored row already answers returns that row, and
+/// every other draft is inserted in request order at the next positions of
+/// the session's ingress sequence, with the session's wake. Any refusal
+/// fails the whole batch; the caller's transaction rolls it back.
+pub(crate) async fn enqueue_pending_turn_inputs_tx(
+    tx: &mut crate::guarded_tx::GuardedTx<'_>,
+    batch: &lash_core_execution::PendingTurnInputBatch,
+    now: u64,
+) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
+    use lash_core_execution::store_backend_support as support;
+    let session_id = batch.session_id();
+    ensure_session_not_deleted_tx(tx, session_id).await?;
+    ensure_session_not_closing_tx(tx, session_id).await?;
+    for draft in batch.drafts() {
+        support::validate_turn_input_source_key(draft)?;
+    }
+    // The session's write authority, held to the commit: every ingress
+    // producer takes it before it allocates, so the absences read below
+    // hold and the block allocated below is contiguous (FIG-3842).
+    super::lock_session_history_mutation_tx(tx, session_id).await?;
+    let ids = batch
+        .drafts()
+        .iter()
+        .flat_map(|draft| draft.input.stored_attachment_ids())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let claim = lash_core_execution::ReferrerClaim::unguarded(
+        lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
+    )
+    .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
+    crate::artifact_store::lock_referrer_tx(tx, &claim.referrer())
+        .await
+        .map_err(store_sqlx_error)?;
+    crate::attachments::acquire_attachment_refs_tx(tx, &claim, &ids, now).await?;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let mut interned = std::collections::BTreeSet::new();
+    let mut admitted = Vec::with_capacity(batch.drafts().len());
+    for draft in batch.drafts() {
+        let submission_digest = support::turn_input_submission_digest(draft)?;
+        let by_source_key: Option<(String, String)> = match draft.source_key.as_deref() {
+            Some(source_key) => sqlx::query_as(sql.pending_inputs.select_id_by_source_key.sql())
+                .bind(session_id.as_str())
+                .bind(source_key)
+                .fetch_optional(&mut ***tx)
+                .await
+                .map_err(store_sqlx_error)?,
+            None => None,
+        };
+        let by_input_id: Option<(String, String)> =
+            match (&by_source_key, draft.input_id.as_deref()) {
+                (None, Some(input_id)) => {
+                    sqlx::query_as(sql.pending_inputs.select_session_by_input_id.sql())
+                        .bind(input_id)
+                        .fetch_optional(&mut ***tx)
+                        .await
+                        .map_err(store_sqlx_error)?
+                }
+                _ => None,
+            };
+        let input_id = match support::decide_turn_input_draft_admission(
+            draft,
+            &submission_digest,
+            by_source_key,
+            by_input_id,
+        )? {
+            support::TurnInputDraftAdmission::Existing { input_id } => input_id,
+            support::TurnInputDraftAdmission::New => {
+                if let Some(turn_id) = draft.ingress.active_turn_id() {
+                    let evidence = turn_address_evidence_tx(tx, session_id, turn_id).await?;
+                    support::require_known_turn_address(session_id, turn_id, evidence)?;
+                }
+                let enqueue_seq = super::allocate_ingress_sequence_tx(tx, session_id).await?;
+                let input_id = match draft.input_id.clone() {
+                    Some(input_id) => input_id,
+                    None => support::derive_pending_turn_input_id(
+                        session_id,
+                        draft.source_key.as_deref(),
+                        now,
+                        u64_from_sql("PendingTurnInput", "enqueue_seq", enqueue_seq)?,
+                    ),
+                };
+                let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
+                let run_spec = admit_run_spec_tx(tx, draft, &mut interned).await?;
+                sqlx::query(sql.pending_inputs.insert_new.sql())
+                    .bind(enqueue_seq)
+                    .bind(input_id.as_str())
+                    .bind(session_id.as_str())
+                    .bind(&draft.source_key)
+                    .bind(encode_json(&draft.ingress)?)
+                    .bind(state.as_str())
+                    .bind(encode_json(&draft.input)?)
+                    .bind(&submission_digest)
+                    .bind(now as i64)
+                    .bind(run_spec.column())
+                    .bind(
+                        lash_core_execution::store_backend_support::encode_trace_cause(
+                            &draft.trace_cause,
+                        )?,
+                    )
+                    .execute(&mut ***tx)
+                    .await
+                    .map_err(|err| pending_turn_input_insert_error(err, session_id, &input_id))?;
+                input_id
+            }
+        };
+        if draft.pin {
+            // The pin is written with the acceptance, new or replayed,
+            // so the input is pinned before its run can start.
+            crate::revisions::pin_tx(
+                tx,
+                session_id,
+                &lash_core_execution::Target::Input(input_id.clone()),
+            )
+            .await?;
+        }
+        admitted.push(
+            load_pending_turn_input(tx, session_id, &input_id)
+                .await?
+                .ok_or_else(|| {
+                    StoreError::Backend("admitted pending turn input disappeared".to_string())
+                })?,
+        );
+    }
+    // The rows and the session's wake commit together (ADR 0132 §12): no
+    // crash between them can leave input that nothing will admit.
+    crate::durable::wake_session_tx(&mut *tx, session_id, false, now).await?;
+    Ok(admitted)
+}
+
 /// Admit `draft`'s run spec inside its enqueue transaction (FIG-3838): refuse
 /// a steering spec that differs from its running turn's, then intern a
 /// non-default spec once per hash and refuse different bytes under an
@@ -510,8 +518,6 @@ async fn admit_run_spec_tx(
 /// The steering verdict over the run kinds no `source_key`-filed input
 /// starts (FIG-3877), read inside the admission transaction:
 ///
-/// * `turn_id` is the follow-on the head owes: it inherits the shape its
-///   fact recorded at the switch.
 /// * `turn_id` is a physical turn of the unfinished queued-headed run: it
 ///   started from no input, so it runs the default spec.
 /// * Otherwise nothing running names `turn_id`: the steering input is a
@@ -522,24 +528,8 @@ async fn check_unsourced_steering_run_spec_tx(
     turn_id: &lash_core_execution::TurnId,
     spec: &lash_core_execution::store_backend_support::RunSpecAdmission,
 ) -> Result<(), StoreError> {
-    use lash_core_execution::store_backend_support as support;
-    // `Some(hash)` is the shape the running run resolved under (`None` =
-    // the default spec); `None` means the evidence did not decide.
-    let mut running: Option<Option<String>> = None;
-    if let Some(owed) = pending_follow_on_tx(tx, &draft.session_id, false)
-        .await?
-        .filter(|owed| owed.is_turn(turn_id))
-    {
-        running = Some(
-            owed.resolved_run
-                .spec
-                .as_ref()
-                .map(|hash| hash.as_str().to_string()),
-        );
-    }
-    if running.is_none()
-        && let Some(unfinished) =
-            crate::session_runs::unfinished_run_conn(tx, &draft.session_id).await?
+    if let Some(unfinished) =
+        crate::session_runs::unfinished_run_conn(tx, &draft.session_id).await?
         && matches!(
             unfinished.head,
             lash_core_execution::store::AdmittedHead::Batch(_)
@@ -548,10 +538,12 @@ async fn check_unsourced_steering_run_spec_tx(
     {
         // A queued-headed run starts from no input, so it runs the default
         // spec.
-        running = Some(None);
-    }
-    if let Some(hash) = running {
-        support::check_running_run_spec(&draft.session_id, turn_id, spec, hash.as_deref())?;
+        lash_core_execution::store_backend_support::check_running_run_spec(
+            &draft.session_id,
+            turn_id,
+            spec,
+            None,
+        )?;
     }
     Ok(())
 }
@@ -578,12 +570,10 @@ async fn turn_address_evidence_tx(
     .await
     .map_err(store_sqlx_error)?;
     let running = crate::session_runs::unfinished_run_turns_conn(tx, session_id).await?;
-    let owed = pending_follow_on_tx(tx, session_id, false).await?;
     Ok(
         lash_core_execution::store_backend_support::turn_address_evidence(
             turn_id,
             running.as_ref(),
-            owed.as_ref(),
             ended,
         ),
     )

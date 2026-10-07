@@ -384,41 +384,6 @@ pub(super) fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCom
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
-    const BYTE_LIMIT: usize = 2_048;
-    let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
-    commit
-        .validate_budget()
-        .expect("the commit without a pending follow-on must fit");
-    commit.pending_follow_on = Some(crate::store::PendingFollowOn {
-        follow_on_turn_id: crate::TurnId::from("oversized:agent-frame:1"),
-        frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "oversized"),
-        owes: crate::store::FollowOnWork::FrameTask {
-            task: "q".repeat(BYTE_LIMIT * 2),
-        },
-        resolved_run: crate::conformance::helpers::default_resolved_run(),
-        chain_depth: 1,
-        attempts: 0,
-    });
-
-    let error = store
-        .commit_runtime_state(commit)
-        .await
-        .expect_err("pending follow-on bytes alone must trip the commit budget");
-    assert!(matches!(
-        error,
-        StoreError::CommitByteBudgetExceeded {
-            follow_on_bytes,
-            max_bytes: BYTE_LIMIT,
-            ..
-        } if follow_on_bytes > BYTE_LIMIT
-    ));
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
@@ -466,7 +431,6 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             actual_head_revision: same_leaf_commit.expected_head_revision,
             requested_ancestor_is_active: true,
             occupied_node_ids: std::collections::HashSet::new(),
-            existing_pending_follow_on: None,
             published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
@@ -503,7 +467,6 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             actual_head_revision: changed_commit.expected_head_revision,
             requested_ancestor_is_active: true,
             occupied_node_ids: std::collections::HashSet::new(),
-            existing_pending_follow_on: None,
             published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,

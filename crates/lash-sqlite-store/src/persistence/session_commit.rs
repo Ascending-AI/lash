@@ -192,25 +192,6 @@ impl SessionCommitStore for SqliteStore {
             .map_err(sqlite_error)?
     }
 
-    async fn raise_pending_follow_on_attempts(
-        &self,
-        session_id: &SessionId,
-        follow_on_turn_id: &lash_core_execution::TurnId,
-    ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
-        let session_id = session_id.clone();
-        let follow_on_turn_id = follow_on_turn_id.clone();
-        self.conn
-            .write_flow(move |tx| {
-                let outcome = raise_pending_follow_on_conn(tx, &session_id, &follow_on_turn_id);
-                Ok(match outcome {
-                    Ok(raised) => TxOutcome::Commit(Ok(raised)),
-                    Err(error) => TxOutcome::Rollback(Err(error)),
-                })
-            })
-            .await
-            .map_err(sqlite_error)?
-    }
-
     async fn load_session_head_meta(
         &self,
         session_id: &SessionId,
@@ -534,30 +515,17 @@ pub(crate) fn apply_runtime_commit_conn(
         published_leaf,
         requested_ancestor_is_active,
         occupied_node_ids,
-        existing_pending_follow_on: existing
-            .as_ref()
-            .and_then(|meta| meta.pending_follow_on.clone()),
     })?;
     // The bound turn owns the head (FIG-4202): a write
-    // outside every run is refused while a run, an owed
-    // follow-on or an open command owns it. A replayed
-    // receipt above answered its first outcome already, and
-    // the plan's own refusals (a follow-on the commit would
-    // drop, a moved head) answer first.
+    // outside every run is refused while a run or an open
+    // command owns it. A replayed receipt above answered its
+    // first outcome already, and the plan's own refusals (a
+    // moved head) answer first.
     if lash_core_execution::store::head_write_needs_ownership(
         commit.is_sessions_own_head_write(),
         existing.as_ref().is_some_and(|head| !head.is_created()),
     ) {
-        let facts = crate::session_runs::head_ownership_facts_conn(
-            tx,
-            &commit.session_id,
-            lash_core_execution::store::follow_on_owning_the_head(
-                existing
-                    .as_ref()
-                    .and_then(|meta| meta.pending_follow_on.as_ref()),
-                commit.pending_follow_on.as_ref(),
-            ),
-        )?;
+        let facts = crate::session_runs::head_ownership_facts_conn(tx, &commit.session_id)?;
         lash_core_execution::store::require_unowned_head(&commit.session_id, facts)?;
     }
     let sql_head_revision = sql_monotonic_counter_value(
@@ -657,9 +625,6 @@ pub(crate) fn apply_runtime_commit_conn(
         params![
             meta.session_id.as_str(),
             sql_head_revision,
-            lash_core_execution::store::pending_follow_on::encode_pending_follow_on(
-                meta.pending_follow_on.as_ref(),
-            )?,
             plan.actual_head_revision() as i64,
         ],
     )
@@ -716,17 +681,15 @@ pub(crate) fn apply_runtime_commit_conn(
         stored_checkpoint.checkpoint_ref,
         stored_checkpoint.manifest,
         now,
-        commit.pending_follow_on.is_some()
-            || tx
-                .query_row(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .family
-                        .has_admissible_work
-                        .sql(),
-                    [commit.session_id.as_str()],
-                    |row| row.get::<_, bool>(0),
-                )
-                .map_err(sqlite_error)?,
+        tx.query_row(
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .has_admissible_work
+                .sql(),
+            [commit.session_id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(sqlite_error)?,
     );
     result.turn_cancel_input_outcome = turn_cancel_input_outcome;
     {

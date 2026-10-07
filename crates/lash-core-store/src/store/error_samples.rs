@@ -50,24 +50,6 @@ store_error_samples! {
         session_id: session(),
         run: turn(),
     },
-    FollowOnPending { .. } => StoreError::FollowOnPending {
-        session_id: session(),
-        follow_on_turn_id: turn(),
-        attempts: 1,
-    },
-    FollowOnFrameNotCurrent { .. } => StoreError::FollowOnFrameNotCurrent {
-        session_id: session(),
-        follow_on_frame_id: "frame".to_string(),
-        current_frame_node_id: None,
-    },
-    FollowOnHeadInvariant { .. } => StoreError::FollowOnHeadInvariant {
-        session_id: session(),
-        reason: "sampled".to_string(),
-    },
-    FollowOnNotPending { .. } => StoreError::FollowOnNotPending {
-        session_id: session(),
-        follow_on_turn_id: turn(),
-    },
     ExecutionStateCaptureFailed { .. } => StoreError::ExecutionStateCaptureFailed {
         message: "sampled".to_string(),
     },
@@ -88,7 +70,6 @@ store_error_samples! {
         graph_delta_bytes: 2,
         checkpoint_bytes: 0,
         attachment_referrer_bytes: 0,
-        follow_on_bytes: 0,
         turn_result_bytes: 0,
         total_bytes: 2,
         max_bytes: 1,

@@ -376,7 +376,6 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
                 head.checkpoint_ref,
                 head.current_frame_node_id,
                 serde_json::to_value(head.config).unwrap(),
-                serde_json::to_value(head.pending_follow_on).unwrap(),
             )
         })
     };

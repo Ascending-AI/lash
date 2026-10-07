@@ -186,13 +186,9 @@ runtime_error_codes! {
         /// write authority was contended. Retrying the same operation unchanged is
         /// safe; reloading or rebasing is not required.
         StoreCommitContended = "store_commit_contended" => Retryable,
-        // the unfinished run or owed follow-on is resumed by a later shift.
-        /// Session work waits for an unfinished run or its owed follow-on.
+        // the unfinished run is resumed by a later shift.
+        /// Session work waits for an unfinished run.
         SessionRunPending = "session_run_pending" => Retryable,
-        // a follow-on owns the session; it runs first, then a redrive finds the head free.
-        /// A pending follow-on owns the session (ADR 0101 §3): the commit or
-        /// frame change is refused until the follow-on's own terminal commit.
-        FollowOnPending = "follow_on_pending" => Redrivable,
         // a newer commit moved the head; a redrive reloads it and re-establishes authority.
         /// The final runtime commit lost the session-head compare-and-swap to a
         /// newer commit. Nothing from the losing commit was published, but the

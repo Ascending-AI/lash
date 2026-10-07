@@ -8,15 +8,14 @@
 //! ([`RuntimeCommit::is_sessions_own_head_write`]). Any other commit is a
 //! writer outside every run (a host-scoped service's write): the store
 //! refuses it, in the commit's own transaction, while a run owns the head
-//! or is owed it, so no such write moves a head a bound run, an owed
-//! follow-on or an open command run was planned against. A host that must move the head
+//! or is owed it, so no such write moves a head a bound run or an open
+//! command run was planned against. A host that must move the head
 //! submits its write as a session command, which the session applies at a
 //! turn boundary.
 //!
 //! The owners, as the transaction reads them:
 //!
 //! - an unfinished run: admitted, with its rows bound and no terminal;
-//! - an owed follow-on on the head (ADR 0101 §3);
 //! - an open session command: a command run applies it at the next
 //!   boundary.
 //!
@@ -37,8 +36,6 @@ use super::StoreError;
 pub enum SessionHeadOwner {
     /// An admitted run without terminal evidence.
     Run { run: TurnId },
-    /// The follow-on the head owes.
-    FollowOn { follow_on: TurnId },
     /// An open session command, the earliest by `enqueue_seq`.
     CommandLane { enqueue_seq: u64 },
 }
@@ -47,7 +44,6 @@ impl std::fmt::Display for SessionHeadOwner {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Run { run } => write!(formatter, "unfinished run `{run}`"),
-            Self::FollowOn { follow_on } => write!(formatter, "owed follow-on `{follow_on}`"),
             Self::CommandLane { enqueue_seq } => {
                 write!(formatter, "the open session command at `{enqueue_seq}`")
             }
@@ -61,8 +57,6 @@ impl std::fmt::Display for SessionHeadOwner {
 pub struct HeadOwnershipFacts {
     /// The session's unfinished run, if one is admitted.
     pub unfinished_run: Option<TurnId>,
-    /// The follow-on the head owes, if any.
-    pub owed_follow_on: Option<TurnId>,
     /// The `enqueue_seq` of the earliest open session command, if any.
     pub open_command: Option<u64>,
 }
@@ -75,33 +69,15 @@ pub fn head_write_needs_ownership(sessions_own: bool, head_exists: bool) -> bool
     !sessions_own && head_exists
 }
 
-/// The follow-on that owns the head against a write outside every run:
-/// the one the head owes (`owed`) while the commit keeps owing it
-/// (`carried`). A commit that settles the follow-on is the follow-on's own,
-/// and the commit plan already refused every other commit that would drop
-/// it (ADR 0101 §3).
-#[must_use]
-pub fn follow_on_owning_the_head(
-    owed: Option<&super::PendingFollowOn>,
-    carried: Option<&super::PendingFollowOn>,
-) -> Option<TurnId> {
-    let owed = owed?;
-    carried
-        .is_some_and(|carried| carried.follow_on_turn_id == owed.follow_on_turn_id)
-        .then(|| owed.follow_on_turn_id.clone())
-}
-
 /// Refuse a head write outside every run while `facts` name an owner of
-/// the head (FIG-4202). A run outranks a follow-on, which outranks the
-/// command lane, so the refusal names the owner a host waits on first.
+/// the head (FIG-4202). A run outranks the command lane, so the refusal
+/// names the owner a host waits on first.
 pub fn require_unowned_head(
     session_id: &SessionId,
     facts: HeadOwnershipFacts,
 ) -> Result<(), StoreError> {
     let owner = if let Some(run) = facts.unfinished_run {
         SessionHeadOwner::Run { run }
-    } else if let Some(follow_on) = facts.owed_follow_on {
-        SessionHeadOwner::FollowOn { follow_on }
     } else if let Some(enqueue_seq) = facts.open_command {
         SessionHeadOwner::CommandLane { enqueue_seq }
     } else {
@@ -123,7 +99,6 @@ mod tests {
             &SessionId::from("s"),
             HeadOwnershipFacts {
                 unfinished_run: Some(TurnId::from("run")),
-                owed_follow_on: Some(TurnId::from("follow-on")),
                 open_command: Some(7),
             },
         )

@@ -59,17 +59,12 @@ impl LashRuntime {
     /// Resolve the shape `run`'s logical turn runs under, as one recorded
     /// step on `controller`, and adopt it as the execution view. `spec` is
     /// the interned spec the run's admitted inputs share, `None` for the
-    /// default spec. `inherited` is the shape a recovered follow-on's parent
-    /// run recorded at the switch (FIG-3877): the first execution re-records
-    /// it under this admission's run verbatim, so the follow-on runs under
-    /// the shape its logical run resolved rather than the session's current
-    /// defaults.
+    /// default spec.
     pub(in crate::runtime) async fn resolve_turn_config(
         &mut self,
         controller: &ActorContext,
         run: &TurnId,
         spec: Option<&crate::RunSpecHash>,
-        inherited: Option<crate::ResolvedRun>,
     ) -> Result<(), RuntimeError> {
         let invocation = RuntimeEffectInvocation::new(
             EffectAddress::new(
@@ -107,14 +102,7 @@ impl LashRuntime {
             run: run.clone(),
             snapshot: crate::store::persisted_session_config_from_state(&self.state),
             spec,
-            inherited,
             termination: self.host.core.control.termination.clone(),
-            follow_on_recoveries: self
-                .host
-                .core
-                .durability
-                .queued_work_batching
-                .max_follow_on_recoveries(),
             protocol_driver: self
                 .session
                 .as_ref()
@@ -199,15 +187,9 @@ struct ResolveTurnConfigRunner {
     run: TurnId,
     snapshot: PersistedSessionConfig,
     spec: Option<RecordedRunSpec>,
-    /// The shape a recovered follow-on inherits from its parent run
-    /// (FIG-3877); present only on the follow-on's own admission.
-    inherited: Option<crate::ResolvedRun>,
     /// This worker's host termination policy, which a run records on its
     /// first resolution (FIG-4389); a replay decodes the record instead.
     termination: crate::runtime::TerminationPolicy,
-    /// This worker's host follow-on recovery bound, recorded with the run
-    /// the same way (FIG-4646).
-    follow_on_recoveries: u32,
     protocol_driver: Option<std::sync::Arc<dyn crate::plugin::ProtocolDriverPlugin>>,
     /// The session's config owners, which judge every namespace a spec's
     /// overrides changed (FIG-4379).
@@ -225,15 +207,14 @@ struct RecordedRunSpec {
 }
 
 impl RecordedRunSpec {
-    /// Resolve this spec against `snapshot` under `termination` and
-    /// `follow_on_recoveries`; `owners` apply the protocol options it states.
+    /// Resolve this spec against `snapshot` under `termination`; `owners`
+    /// apply the protocol options it states.
     /// A fault a redeploy or a retry repairs is marked so it never becomes
     /// the step's recorded outcome.
     async fn resolve(
         self,
         snapshot: &PersistedSessionConfig,
         termination: crate::runtime::TerminationPolicy,
-        follow_on_recoveries: u32,
         owners: &dyn crate::RunOptionsOwner,
     ) -> Result<crate::ResolvedRun, RuntimeEffectControllerError> {
         let repairable = |code: RuntimeErrorCode, message: String| {
@@ -285,7 +266,6 @@ impl RecordedRunSpec {
             snapshot,
             definition,
             termination,
-            follow_on_recoveries,
             self.models.as_ref(),
             owners,
         )
@@ -331,32 +311,19 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
                 ),
             ));
         }
-        let inherited = self.inherited.is_some();
-        let mut resolved = match (self.inherited, self.spec) {
-            // A recovered follow-on re-records the shape its parent run
-            // resolved, verbatim: it does not re-resolve.
-            (Some(inherited), _) => inherited,
-            (None, None) => crate::ResolvedRun::snapshot(
-                self.snapshot,
-                self.termination,
-                self.follow_on_recoveries,
-            ),
-            (None, Some(spec)) => {
+        let mut resolved = match self.spec {
+            None => crate::ResolvedRun::snapshot(self.snapshot, self.termination),
+            Some(spec) => {
                 let owners: &dyn crate::RunOptionsOwner = match self.config_registry.as_deref() {
                     Some(registry) => registry,
                     None => &crate::NoRunOptionsOwner,
                 };
-                spec.resolve(
-                    &self.snapshot,
-                    self.termination,
-                    self.follow_on_recoveries,
-                    owners,
-                )
-                .await?
+                spec.resolve(&self.snapshot, self.termination, owners)
+                    .await?
             }
         };
         // Native execution config is part of this recorded resolution. Cold
-        // adoption never calls a decoder, including for inherited overrides.
+        // adoption never calls a decoder.
         resolved.base.plugin_config = self
             .plugin_host
             .decode_config(&resolved.base.plugin_config)?;
@@ -366,15 +333,14 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
         // An override is judged by the owner of every namespace it changed,
         // as a config command's candidate is: an overlay cannot set what the
         // owner does not admit. The refusal is the run's recorded shape.
-        if !inherited
-            && resolved.resolved.is_some()
+        if resolved.resolved.is_some()
             && let Some(registry) = self.config_registry.as_ref()
         {
             registry
                 .validate_derived(&resolved.base, resolved.config())
                 .map_err(config_fault)?;
         }
-        if !inherited && let Some(driver) = self.protocol_driver {
+        if let Some(driver) = self.protocol_driver {
             let namespace = resolved.config().plugin_config.protocol_turn_options();
             resolved.render = driver
                 .resolve_render(&namespace)

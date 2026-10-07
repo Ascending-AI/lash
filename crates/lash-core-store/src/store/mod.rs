@@ -42,7 +42,6 @@ mod maintenance;
 pub use enumeration::*;
 pub mod obligation;
 mod park;
-pub mod pending_follow_on;
 mod physical_turn;
 mod preflight;
 pub mod queued_work;
@@ -128,8 +127,7 @@ pub use fleet_format::{
 };
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use head_ownership::{
-    HeadOwnershipFacts, SessionHeadOwner, follow_on_owning_the_head, head_write_needs_ownership,
-    require_unowned_head,
+    HeadOwnershipFacts, SessionHeadOwner, head_write_needs_ownership, require_unowned_head,
 };
 pub use history::{
     FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget, HistoryCursor,
@@ -146,11 +144,6 @@ pub use park::{
     EnginePark, ParkCancelCause, ParkEventColumns, ParkEventKind, ParkFeedCursor, ParkFeedEvent,
     ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport, StoreTransition, UnparkCause,
     UnsettledTurnCounts,
-};
-pub use pending_follow_on::{
-    DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnAdmission, FollowOnBlocked, FollowOnRecovery,
-    FollowOnRecoveryAnswer, FollowOnWork, PendingFollowOn, RunContinuation, RunOpenerState,
-    SuspendedCell, follow_on_blocks_admission, validate_follow_on_head_write,
 };
 pub use preflight::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
@@ -348,8 +341,6 @@ impl RuntimeCommit {
             ingress,
             applied_commands,
             command_outcomes,
-            // Carried unchanged from the head; the store refuses a change.
-            pending_follow_on: _,
             adopted_intent_rows,
             committed_attachment_ids,
         } = self;
@@ -498,7 +489,6 @@ impl RuntimeCommit {
             ingress: None,
             applied_commands: None,
             command_outcomes: Default::default(),
-            pending_follow_on: state.pending_follow_on.as_deref().cloned(),
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
         })
@@ -608,7 +598,6 @@ fn persisted_session_state_from_head(
         session_id,
         head_revision,
         config,
-        None,
         crate::SessionGraph::default(),
         None,
         checkpoint,
@@ -754,39 +743,6 @@ pub trait SessionCommitStore: Send + Sync {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError>;
-
-    /// The follow-on the session head owes, if any (ADR 0101 §3): the head's
-    /// `pending_follow_on` as it is committed now.
-    ///
-    /// Shift admission asks this to decide whether the follow-on is the next
-    /// work it admits. It reads one head fact and is not a freshness probe of
-    /// the resident head. Provided: it composes
-    /// [`load_session_head_meta`](Self::load_session_head_meta).
-    async fn load_pending_follow_on(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<PendingFollowOn>, StoreError> {
-        Ok(self
-            .load_session_head_meta(session_id)
-            .await?
-            .and_then(|head| head.pending_follow_on))
-    }
-
-    /// Raise the head's pending follow-on recovery count by one (ADR 0101 §3).
-    ///
-    /// A shift that recovers a pending follow-on calls this before the
-    /// follow-on's first effect. Implementations must, in one transaction,
-    /// refuse with
-    /// [`StoreError::FollowOnNotPending`] unless the head's
-    /// `pending_follow_on_json` names `follow_on_turn_id`, and write the fact
-    /// back with `attempts` raised by one. The head revision does not move:
-    /// the raise changes no other head fact, and nothing ever lowers the count.
-    /// Returns the raised fact.
-    async fn raise_pending_follow_on_attempts(
-        &self,
-        session_id: &SessionId,
-        follow_on_turn_id: &TurnId,
-    ) -> Result<PendingFollowOn, StoreError>;
 
     /// Replace only the pending observer intents of an admitted session.
     ///

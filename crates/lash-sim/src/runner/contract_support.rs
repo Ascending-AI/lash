@@ -402,9 +402,5 @@ pub(super) fn turn_outcome_contract_json(
             "initial_nodes": initial_nodes,
             "task": task,
         }),
-        lash_core::facade_support::TurnOutcome::SegmentBoundary { reason } => json!({
-            "kind": "segment_boundary",
-            "reason": reason,
-        }),
     }
 }

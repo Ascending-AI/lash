@@ -47,9 +47,8 @@ role, origin, and ordered parts; attachment sources stay inside attachment
 parts. Replay routes and response metadata have explicit projections.
 
 The commit intent has distinct completed input and completed queue-batch lists.
-It includes persisted config, including `config_revision`, and includes
-`pending_follow_on` only when the commit leaves that obligation on the head.
-These are typed payload facts, not additional identity families.
+It includes persisted config, including `config_revision`. These are typed
+payload facts, not additional identity families.
 
 Evidence: `crates/lash-core-store/src/store/commit_identity.rs:28`, `:1218`,
 `:1233`, `:1246`, and `crates/lash-core-store/src/store/identity_projection.rs`.

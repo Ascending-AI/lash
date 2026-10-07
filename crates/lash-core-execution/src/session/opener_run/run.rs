@@ -5,33 +5,6 @@ use super::*;
 use crate::tool_dispatch::{SingletonRunError, ToolRun};
 
 impl OpenerState {
-    /// The opener state a physical boundary carries.
-    ///
-    /// # Errors
-    ///
-    /// `InvocationFailed` while a tool Run is open: a boundary never cuts
-    /// one.
-    pub fn boundary_snapshot(
-        &self,
-    ) -> Result<crate::store::RunOpenerState, RuntimeEffectControllerError> {
-        let registry = self.run_state.lock_recover();
-        if registry.active_run {
-            return Err(
-                SingletonRunError::from(crate::tool_run::RunCutRefusal::InvocationFailed)
-                    .into_controller_error(),
-            );
-        }
-        Ok(self.snapshot_with_registry(&registry))
-    }
-
-    /// The opener a continuation of `_owner` carried.
-    pub fn from_snapshot_for(
-        snapshot: crate::store::RunOpenerState,
-        _owner: &crate::EffectOpener,
-    ) -> Result<Self, RuntimeEffectControllerError> {
-        Self::from_snapshot(snapshot)
-    }
-
     /// Open the opener's logical Run before admitting work.
     ///
     /// # Errors

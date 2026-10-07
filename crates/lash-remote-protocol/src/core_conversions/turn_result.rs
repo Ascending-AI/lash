@@ -129,16 +129,6 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
                     task,
                 }
             }
-            lash_core::facade_support::TurnOutcome::SegmentBoundary { reason } => {
-                Self::SegmentBoundary {
-                    reason: match reason {
-                        lash_core::BoundaryReason::JournalBudget => {
-                            RemoteBoundaryReason::JournalBudget
-                        }
-                        lash_core::BoundaryReason::HandOver => RemoteBoundaryReason::HandOver,
-                    },
-                }
-            }
             lash_core::facade_support::TurnOutcome::Stopped(stop) => {
                 Self::Stopped { stop: stop.into() }
             }

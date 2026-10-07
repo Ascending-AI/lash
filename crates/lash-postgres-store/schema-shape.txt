@@ -366,7 +366,6 @@ table lash_session_close
   primary-key (session_id)
 table lash_session_head
   column head_revision bigint not-null
-  column pending_follow_on_json text nullable
   column session_id text not-null
   primary-key (session_id)
   foreign-key (session_id, head_revision) references lash_session_revisions (session_id, head_revision) on delete no action deferrable initially deferred

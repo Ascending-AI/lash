@@ -125,27 +125,12 @@ lash_store_sql::statements! {
 
         /// The published head of `?1`, row-locked.
         select_meta_for_update = "SELECT revision.head_json, head.head_revision, revision.leaf_node_id, revision.checkpoint_ref,
-                head.pending_follow_on_json, leaf.frame_node_id
+                leaf.frame_node_id
          FROM session_head AS head LEFT JOIN session_revisions AS revision
                  ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
              LEFT JOIN graph_nodes AS leaf
              ON leaf.node_id = revision.leaf_node_id
          WHERE head.session_id = ?1 FOR UPDATE OF head";
-
-        /// The follow-on `?1`'s head owes (ADR 0101 §3), row-locked: every
-        /// claim reads it inside its transaction, and the lock orders the read
-        /// against a head commit or a recovery raise.
-        select_pending_follow_on_for_share = "SELECT pending_follow_on_json FROM session_head
-         WHERE session_id = ?1 FOR SHARE";
-
-        /// The follow-on `?1`'s head owes, row-locked for the recovery raise
-        /// and the commit that decides against it.
-        select_pending_follow_on_for_update = "SELECT pending_follow_on_json FROM session_head
-         WHERE session_id = ?1 FOR UPDATE";
-
-        raise_pending_follow_on = "UPDATE session_head SET pending_follow_on_json = ?2
-         WHERE session_id = ?1
-           AND (pending_follow_on_json::jsonb ->> 'follow_on_turn_id') = ?3";
 
         /// The published revision of `?1` under the commit's row lock: the
         /// authority the head verdict decides over.
@@ -154,15 +139,14 @@ lash_store_sql::statements! {
              WHERE session_id = ?1
              FOR UPDATE";
 
-        /// Publish the new revision over `?4`, after recording its row.
+        /// Publish the new revision over `?3`, after recording its row.
         /// The session advisory lock also serializes the first publication.
         upsert_cas = "INSERT INTO session_head
-             (session_id, head_revision, pending_follow_on_json)
-             VALUES (?1, ?2, ?3)
+             (session_id, head_revision)
+             VALUES (?1, ?2)
              ON CONFLICT (session_id) DO UPDATE SET
-                head_revision = EXCLUDED.head_revision,
-                pending_follow_on_json = EXCLUDED.pending_follow_on_json
-             WHERE session_head.head_revision = ?4";
+                head_revision = EXCLUDED.head_revision
+             WHERE session_head.head_revision = ?3";
 
         insert_fork = "INSERT INTO session_head (session_id, head_revision) VALUES (?1, 0)";
 

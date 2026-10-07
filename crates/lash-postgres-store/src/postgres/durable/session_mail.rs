@@ -20,11 +20,11 @@ fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
     })
 }
 
-/// Session `session`'s standing: `(live, closing, follow_on_owed)`.
+/// Session `session`'s standing: `(live, closing)`.
 pub(super) async fn standing(
     tx: &mut PgConnection,
     session: &SessionId,
-) -> Result<(bool, bool, bool), DurableError> {
+) -> Result<(bool, bool), DurableError> {
     let row = sqlx::query(SQL.session_mail.standing.sql())
         .bind(session.as_str())
         .fetch_one(&mut *tx)
@@ -33,8 +33,7 @@ pub(super) async fn standing(
     let meta: i64 = get(&row, 0)?;
     let deleted: i64 = get(&row, 1)?;
     let closing: i64 = get(&row, 2)?;
-    let follow_on: i64 = get(&row, 3)?;
-    Ok((meta > 0 && deleted == 0, closing > 0, follow_on > 0))
+    Ok((meta > 0 && deleted == 0, closing > 0))
 }
 
 /// The session's open mail, read in one snapshot.
@@ -42,11 +41,10 @@ pub(super) async fn read(
     tx: &mut PgConnection,
     session: &SessionId,
 ) -> Result<SessionMailbox, DurableError> {
-    let (live, closing, follow_on_owed) = standing(tx, session).await?;
+    let (live, closing) = standing(tx, session).await?;
     let mut mailbox = SessionMailbox {
         live,
         closing,
-        follow_on_owed,
         ..SessionMailbox::default()
     };
     if !mailbox.live {
@@ -176,18 +174,66 @@ pub(super) async fn settle_held(
     Ok(())
 }
 
-/// Bind the admitted mail to its run, each row still open and unbound.
+/// Apply the owner's session-mail write: bind admitted mail to its run, or
+/// mail the session its own next-turn input.
 pub(super) async fn apply(
-    tx: &mut PgConnection,
-    _commit: &Committing<'_>,
+    tx: &mut super::Tx,
+    commit: &Committing<'_>,
     write: &SessionMailWrite,
 ) -> Result<(), DurableError> {
-    let SessionMailWrite::Admit {
-        session,
-        run,
-        inputs,
-        batches,
-    } = write;
+    match write {
+        SessionMailWrite::Admit {
+            session,
+            run,
+            inputs,
+            batches,
+        } => admit(tx, session, run, inputs, batches).await,
+        SessionMailWrite::Enqueue {
+            session,
+            draft_json,
+        } => enqueue(tx, commit, session, draft_json).await,
+    }
+}
+
+/// Insert the owner's input as any producer's acceptance does, with the
+/// session's wake, in the owner commit. A closing or gone session takes no
+/// mail: its close settles what it holds, and the write inserts nothing.
+async fn enqueue(
+    tx: &mut super::Tx,
+    commit: &Committing<'_>,
+    session: &SessionId,
+    draft_json: &str,
+) -> Result<(), DurableError> {
+    let refused = |reason: String| {
+        DurableError::Domain(DomainRefusal::SessionMailRefused {
+            session: session.clone(),
+            reason,
+        })
+    };
+    let (live, closing) = standing(tx, session).await?;
+    if !live || closing {
+        return Ok(());
+    }
+    let draft: lash_core_execution::PendingTurnInputDraft =
+        serde_json::from_str(draft_json).map_err(|error| undecodable("owner input", error))?;
+    let batch = lash_core_execution::PendingTurnInputBatch::new(session.clone(), vec![draft])
+        .map_err(|error| refused(error.to_string()))?;
+    let now = u64::try_from(commit.now.0).unwrap_or(0);
+    match crate::runtime_persistence::enqueue_pending_turn_inputs_tx(tx, &batch, now).await {
+        Ok(_) => Ok(()),
+        Err(error @ lash_core_execution::StoreError::Contended) => Err(super::store_failure(error)),
+        Err(error) => Err(refused(error.to_string())),
+    }
+}
+
+/// Bind the admitted mail to its run, each row still open and unbound.
+async fn admit(
+    tx: &mut PgConnection,
+    session: &SessionId,
+    run: &TurnId,
+    inputs: &[InputId],
+    batches: &[BatchId],
+) -> Result<(), DurableError> {
     let moved = |item: &str| {
         DurableError::Domain(DomainRefusal::SessionMailMoved {
             session: session.clone(),

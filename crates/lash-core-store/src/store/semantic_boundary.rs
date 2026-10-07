@@ -113,7 +113,6 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         ingress: _,                  // refused present by validation
         applied_commands: _,         // refused present by validation
         command_outcomes: _,         // refused present by validation
-        pending_follow_on: _,        // head fact carried unchanged; the store refuses a change
         adopted_intent_rows: _,      // refused non-zero by validation
         committed_attachment_ids: _, // refused non-empty by validation
     } = commit;

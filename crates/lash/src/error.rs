@@ -481,9 +481,6 @@ mod tests {
             lash_core::store::SessionHeadOwner::Run {
                 run: lash_core::TurnId::from("bound-run"),
             },
-            lash_core::store::SessionHeadOwner::FollowOn {
-                follow_on: lash_core::TurnId::from("owed-follow-on"),
-            },
             lash_core::store::SessionHeadOwner::CommandLane { enqueue_seq: 7 },
         ] {
             let plugin = PluginError::from(StoreError::SessionHeadOwned {
@@ -693,7 +690,6 @@ mod tests {
                 graph_delta_bytes: 2,
                 checkpoint_bytes: 3,
                 attachment_referrer_bytes: 5,
-                follow_on_bytes: 0,
                 turn_result_bytes: 0,
                 total_bytes: 10,
                 max_bytes: 9,

@@ -76,12 +76,9 @@ macro_rules! runtime_store_operations {
                 [session] fn retain_admission_base(&self, session_id: &SessionId, base: &SessionHeadRef) -> Result<(), StoreError>;
                 [session] fn committed_turn_exists(&self, session_id: &SessionId, turn_id: &crate::TurnId) -> Result<bool, StoreError>;
                 [carried commit] fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError>;
-                [session] fn raise_pending_follow_on_attempts(&self, session_id: &SessionId, follow_on_turn_id: &crate::TurnId) -> Result<PendingFollowOn, StoreError>;
                 [session] fn settle_observer_intents(&self, session_id: &SessionId, remaining: Vec<crate::SessionObserverIntent>) -> Result<(), StoreError>;
                 [session] fn load_session_meta(&self, session_id: &SessionId) -> Result<Option<SessionMeta>, StoreError>;
                 [session] fn load_session_meta_for_commit(&self, session_id: &SessionId) -> Result<Option<SessionMeta>, StoreError>;
-                provided:
-                [session] fn load_pending_follow_on(&self, session_id: &SessionId) -> Result<Option<PendingFollowOn>, StoreError>;
             }
             SessionHistoryStore {
                 [session] fn load_session_window(&self, session_id: &SessionId, selector: WindowSelector) -> Result<Option<SessionWindowRead>, StoreError>;

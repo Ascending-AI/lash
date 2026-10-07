@@ -115,21 +115,17 @@ pub enum TurnAddressEvidence {
 }
 
 /// What the session records about `turn_id`: `running` names the
-/// unfinished run's turns, if a run is unfinished; `owed_follow_on` is the
-/// follow-on turn the head owes, if any; `ended` is whether the turn's final
-/// commit or its run's terminal evidence is recorded.
+/// unfinished run's turns, if a run is unfinished; `ended` is whether the
+/// turn's final commit or its run's terminal evidence is recorded.
 #[must_use]
 pub fn turn_address_evidence(
     turn_id: &TurnId,
     running: Option<&crate::store::RunTurns>,
-    owed_follow_on: Option<&crate::store::PendingFollowOn>,
     ended: bool,
 ) -> TurnAddressEvidence {
     if ended {
         TurnAddressEvidence::Ended
-    } else if running.is_some_and(|turns| turns.contains(turn_id))
-        || owed_follow_on.is_some_and(|owed| owed.is_turn(turn_id))
-    {
+    } else if running.is_some_and(|turns| turns.contains(turn_id)) {
         TurnAddressEvidence::Running
     } else {
         TurnAddressEvidence::Unknown

@@ -663,9 +663,9 @@ pub use lash_core_execution::runtime::{ArtifactReferrerPorts, ReferrerAcquisitio
 pub use runtime::{
     AbandonEvidence, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
     AdmittedTurnInputs, Ancestry, AssistantResponseHookEvents, AssistantResponsePlan,
-    AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity, BindingId, BoundaryReason,
-    CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
-    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredProcessIdentity,
+    AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity, BindingId, CapabilityRef,
+    CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock, ClockWallTime,
+    CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredProcessIdentity,
     DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
     DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork, EffectAddress,
     EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate, EngineAction,

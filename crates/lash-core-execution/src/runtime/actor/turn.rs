@@ -16,7 +16,7 @@ impl ActorContext {
     /// (a `Repeatable` model call pinned by `model.start`),
     /// `AssistantResponseHooks`, `Direct`, `SyncExecutionEnvironment`,
     /// `Checkpoint`, `ResolveTurnConfig`, `RecordCompactionBase`,
-    /// `RenderCompactionPrompt`, `RecoverFollowOn` and `TraceBoundary`, each a
+    /// `RenderCompactionPrompt` and `TraceBoundary`, each a
     /// write inside the turn's phase transactions or recomputed from committed
     /// state, so each runs in place. Any other command is refused.
     ///
@@ -38,7 +38,6 @@ impl ActorContext {
             | crate::RuntimeEffectCommand::ResolveTurnConfig { .. }
             | crate::RuntimeEffectCommand::RecordCompactionBase { .. }
             | crate::RuntimeEffectCommand::RenderCompactionPrompt { .. }
-            | crate::RuntimeEffectCommand::RecoverFollowOn { .. }
             | crate::RuntimeEffectCommand::TraceBoundary { .. } => {
                 local.run_in_place(envelope).await
             }

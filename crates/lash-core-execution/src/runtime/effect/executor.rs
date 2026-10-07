@@ -26,10 +26,10 @@ pub use turn_cancel_wait::{ProcessTurnCancellation, TurnCancelWait};
 
 pub use await_event_support::await_event_scope_not_retirable;
 pub use control::{
-    AwaitEventKey, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
-    EffectJournalIdentity, EffectJournalRetirement, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, JournalReplay, ProcessDriveStep, RecordedKeyFence, RefusedWriteRange,
-    Resolution, ResolveOutcome, SegmentProgress, ServedOnlyRange,
+    AwaitEventKey, AwaitEventWaitIdentity, CommandJournalGuard, EffectJournalIdentity,
+    EffectJournalRetirement, EffectRetirementGate, ExecutionScope, ExternalCompletionError,
+    JournalReplay, ProcessDriveStep, RecordedKeyFence, RefusedWriteRange, Resolution,
+    ResolveOutcome, SegmentProgress, ServedOnlyRange,
 };
 pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::admitted_scope::AdmittedScope;

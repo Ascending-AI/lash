@@ -1,6 +1,5 @@
-//! The outcomes of a session's own steps: an accepted turn input, a
-//! follow-on recovery run's decision (FIG-4361), its turn-config resolution
-//! (S6), its scope close (S7) and a session's close.
+//! The outcomes of a session's own steps: an accepted turn input, its
+//! turn-config resolution (S6), its scope close (S7) and a session's close.
 
 use super::{RuntimeEffectControllerError, RuntimeEffectOutcome};
 use crate::RuntimeEffectKind;
@@ -13,18 +12,6 @@ impl RuntimeEffectOutcome {
             Self::AcceptTurnInput { accepted } => Ok(*accepted),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::AcceptTurnInput,
-                other.kind(),
-            )),
-        }
-    }
-
-    pub fn into_follow_on_recovery(
-        self,
-    ) -> Result<crate::store::FollowOnRecoveryAnswer, RuntimeEffectControllerError> {
-        match self {
-            Self::RecoverFollowOn { answer } => Ok(*answer),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::RecoverFollowOn,
                 other.kind(),
             )),
         }

@@ -112,13 +112,6 @@ impl LashRuntime {
         opener: StagedOpen,
     ) -> Result<OpenedFrame, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
-        // A pending follow-on owns the session's frame until its turn commits
-        // (ADR 0101 §3); the store's frame invariant is the backstop.
-        if let Some(pending) = self.state.pending_follow_on.as_ref() {
-            return Err(crate::runtime::runtime_error_from_store_commit(
-                pending.pending_error(&self.state.session_id),
-            ));
-        }
         if opener == StagedOpen::Compaction {
             return self.open_frame(request).await;
         }

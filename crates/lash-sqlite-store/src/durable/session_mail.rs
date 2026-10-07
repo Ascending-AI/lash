@@ -24,22 +24,26 @@ fn count(value: i64) -> bool {
     value > 0
 }
 
-/// The session's open mail, read in one snapshot.
-pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbox> {
-    let (meta, deleted, closing, follow_on) = tx
+/// Session `session`'s standing: `(live, closing)`.
+fn standing(tx: &Connection, session: &SessionId) -> rusqlite::Result<(bool, bool)> {
+    let (meta, deleted, closing) = tx
         .prepare_cached(SQL.session_mail.standing.sql())?
         .query_row([session.as_str()], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, i64>(1)?,
-            row.get::<_, i64>(2)?,
-            row.get::<_, i64>(3)?,
-        ))
-    })?;
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+    Ok((count(meta) && !count(deleted), count(closing)))
+}
+
+/// The session's open mail, read in one snapshot.
+pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbox> {
+    let (live, closing) = standing(tx, session)?;
     let mut mailbox = SessionMailbox {
-        live: count(meta) && !count(deleted),
-        closing: count(closing),
-        follow_on_owed: count(follow_on),
+        live,
+        closing,
         ..SessionMailbox::default()
     };
     if !mailbox.live {
@@ -170,18 +174,78 @@ pub(super) fn settle_held(
     Ok(())
 }
 
-/// Bind the admitted mail to its run, each row still open and unbound.
+/// Apply the owner's session-mail write: bind admitted mail to its run, or
+/// mail the session its own next-turn input.
 pub(super) fn apply(
     tx: &Connection,
-    _commit: &Committing<'_>,
+    commit: &Committing<'_>,
     write: &SessionMailWrite,
 ) -> Answer<()> {
-    let SessionMailWrite::Admit {
-        session,
-        run,
-        inputs,
-        batches,
-    } = write;
+    match write {
+        SessionMailWrite::Admit {
+            session,
+            run,
+            inputs,
+            batches,
+        } => admit(tx, session, run, inputs, batches),
+        SessionMailWrite::Enqueue {
+            session,
+            draft_json,
+        } => enqueue(tx, commit, session, draft_json),
+    }
+}
+
+/// Insert the owner's input as any producer's acceptance does, with the
+/// session's wake, in the owner commit. A closing or gone session takes no
+/// mail: its close settles what it holds, and the write inserts nothing.
+fn enqueue(
+    tx: &Connection,
+    commit: &Committing<'_>,
+    session: &SessionId,
+    draft_json: &str,
+) -> Answer<()> {
+    let (live, closing) = standing(tx, session)?;
+    if !live || closing {
+        return Ok(Ok(()));
+    }
+    let refused = |reason: String| {
+        Ok(Err(DurableError::Domain(
+            DomainRefusal::SessionMailRefused {
+                session: session.clone(),
+                reason,
+            },
+        )))
+    };
+    let draft: lash_core_execution::PendingTurnInputDraft = match serde_json::from_str(draft_json) {
+        Ok(draft) => draft,
+        Err(error) => return Ok(Err(undecodable("owner input", error))),
+    };
+    let batch = match lash_core_execution::PendingTurnInputBatch::new(session.clone(), vec![draft])
+    {
+        Ok(batch) => batch,
+        Err(error) => return refused(error.to_string()),
+    };
+    let now = u64::try_from(commit.now.0).unwrap_or(0);
+    match crate::persistence::enqueue_pending_turn_inputs_conn(tx, &batch, now, 0) {
+        Ok(_) => Ok(Ok(())),
+        Err(lash_core_execution::StoreError::Contended) => {
+            Ok(Err(DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Contended,
+                message: "the owner's session mail contended".to_owned(),
+            })))
+        }
+        Err(error) => refused(error.to_string()),
+    }
+}
+
+/// Bind the admitted mail to its run, each row still open and unbound.
+fn admit(
+    tx: &Connection,
+    session: &SessionId,
+    run: &TurnId,
+    inputs: &[InputId],
+    batches: &[BatchId],
+) -> Answer<()> {
     let moved = |item: &str| {
         Ok(Err(DurableError::Domain(DomainRefusal::SessionMailMoved {
             session: session.clone(),

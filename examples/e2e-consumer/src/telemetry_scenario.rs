@@ -172,8 +172,7 @@ impl Scenario {
                             "schema_version":head.schema_version,
                             "head_revision":head.head_revision,
                             "checkpoint_ref":head.checkpoint_ref,
-                            "leaf_node_id":head.leaf_node_id,
-                            "pending_follow_on":head.pending_follow_on
+                            "leaf_node_id":head.leaf_node_id
                         })))
                     }
                 }),

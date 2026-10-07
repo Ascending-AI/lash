@@ -806,9 +806,7 @@ impl SendOutcome {
 /// The status a committed outcome answers.
 pub(crate) fn status_of_outcome(outcome: &TurnOutcome) -> TurnStatus {
     match outcome {
-        TurnOutcome::Finished(_)
-        | TurnOutcome::AgentFrameSwitch { .. }
-        | TurnOutcome::SegmentBoundary { .. } => TurnStatus::Answered,
+        TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. } => TurnStatus::Answered,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. }) => {
             TurnStatus::Cancelled
         }

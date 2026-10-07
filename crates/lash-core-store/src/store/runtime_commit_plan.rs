@@ -46,9 +46,6 @@ pub struct FreshRuntimeCommitFacts {
     /// Incoming node ids already occupied in durable history, including
     /// tombstoned rows.
     pub occupied_node_ids: HashSet<crate::NodeId>,
-    /// The follow-on the head owes, read under the same authority as
-    /// `actual_head_revision` (ADR 0101 §3).
-    pub existing_pending_follow_on: Option<super::PendingFollowOn>,
 }
 
 /// The previously published leaf observed under commit authority.
@@ -333,19 +330,6 @@ impl RuntimeCommitPlanner {
                 batch_id: batch_id.clone(),
             });
         }
-        let derived_frame = derived_frame_node_id
-            .clone()
-            .map(crate::FrameNodeId::new)
-            .transpose()
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        super::validate_follow_on_head_write(
-            &self.commit.session_id,
-            facts.existing_pending_follow_on.as_ref(),
-            &self.commit.turn_commit.operation,
-            self.commit.pending_follow_on.as_ref(),
-            derived_frame.as_ref(),
-        )?;
-
         let next_head_revision = StoreError::checked_monotonic_increment(
             "session_head_revision",
             facts.actual_head_revision,
@@ -436,7 +420,6 @@ impl<'a> RuntimeCommitPlan<'a> {
             }),
             checkpoint_ref: Some(checkpoint_ref),
             leaf_node_id: self.committed_leaf_node_id.clone(),
-            pending_follow_on: self.commit.pending_follow_on.clone(),
         }
     }
 
@@ -461,7 +444,6 @@ impl<'a> RuntimeCommitPlan<'a> {
             realized_node_timestamps: self.realized_node_timestamps.clone(),
             failure_evidence: self.commit.failure_evidence.clone(),
             outcome: self.commit.outcome.clone(),
-            pending_follow_on: self.commit.pending_follow_on.clone(),
             work_remaining,
             command_outcomes: self.commit.command_outcomes.clone(),
             turn_input_applications: self.turn_input_applications.clone(),
@@ -612,7 +594,6 @@ mod tests {
             },
             requested_ancestor_is_active: true,
             occupied_node_ids: HashSet::new(),
-            existing_pending_follow_on: None,
         });
         assert!(
             matches!(result, Err(StoreError::InvalidGraphLeaf { leaf_node_id: Some(id) }) if id == "retired-parent")

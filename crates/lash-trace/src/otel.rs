@@ -559,7 +559,6 @@ impl<'a> Projection<'a> {
                 out.push(A::Outcome.value(match outcome {
                     TraceTurnOutcome::Completed { .. } => "completed",
                     TraceTurnOutcome::AgentFrameSwitch { .. } => "agent_frame_switch",
-                    TraceTurnOutcome::SegmentBoundary { .. } => "segment_boundary",
                     TraceTurnOutcome::Cancelled { .. } => "cancelled",
                     TraceTurnOutcome::Failed { .. } => "failed",
                 }));

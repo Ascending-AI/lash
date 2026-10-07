@@ -399,11 +399,6 @@ fn event_samples() -> Vec<TraceEvent> {
             duration_ms: 250,
             status: TraceDurableTimerStatus::Resolved,
         },
-        TraceEvent::DurableSegmentBoundary {
-            reason: "journal_budget".to_string(),
-            effects_executed: 10_000,
-            journaled_bytes_estimate: None,
-        },
         TraceEvent::StoreErrorObserved {
             operation: "session_restore".to_string(),
             error_class: lash_trace::TraceStoreErrorClass::StoredDataCorrupt,

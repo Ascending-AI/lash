@@ -549,7 +549,7 @@ fn decode_session_head_meta_row(
         message: "head pointer names a missing revision".to_owned(),
     })?;
     let current_frame_node_id = row
-        .try_get::<Option<String>, _>(5)
+        .try_get::<Option<String>, _>(4)
         .map_err(store_sqlx_error)?;
     let leaf = row
         .try_get::<Option<String>, _>(2)
@@ -570,12 +570,6 @@ fn decode_session_head_meta_row(
         })?;
     let leaf_node_id: Option<String> = row.get(2);
     let checkpoint_ref: Option<String> = row.get(3);
-    let pending_follow_on: Option<String> = row.get(4);
-    let pending_follow_on =
-        lash_core_execution::store::pending_follow_on::decode_pending_follow_on(
-            session_id,
-            pending_follow_on.as_deref(),
-        )?;
     let payload: SessionHeadPayload =
         lash_core_execution::store::decode_versioned_json_record_for_fleet(
             &head_json,
@@ -585,19 +579,16 @@ fn decode_session_head_meta_row(
             ),
             fleet,
         )?;
-    Ok(Some(
-        SessionHeadMeta::assemble(
-            session_id,
-            payload,
-            head_revision,
-            checkpoint_ref.map(Into::into),
-            leaf_node_id
-                .map(lash_core_execution::NodeId::parse)
-                .transpose()?,
-            current_frame_node_id,
-        )?
-        .with_pending_follow_on(pending_follow_on),
-    ))
+    Ok(Some(SessionHeadMeta::assemble(
+        session_id,
+        payload,
+        head_revision,
+        checkpoint_ref.map(Into::into),
+        leaf_node_id
+            .map(lash_core_execution::NodeId::parse)
+            .transpose()?,
+        current_frame_node_id,
+    )?))
 }
 
 #[cfg(test)]

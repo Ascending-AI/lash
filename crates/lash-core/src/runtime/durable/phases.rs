@@ -6,7 +6,9 @@
 //! byte, `model.done` commits the phase that re-delivers a round or a cell
 //! before it starts, and `turn.commit` publishes the next revision of the
 //! head the owner cached with the turn's terminal in one fenced
-//! transaction, the store's compare-and-set against that head. Everything
+//! transaction, the store's compare-and-set against that head. A frame
+//! switch's commit also mails the session its follow-on task, which the
+//! session's next drain admits as its next turn. Everything
 //! between commits is in memory and is
 //! recomputed from committed state after a crash; nothing re-executes
 //! orchestration to reach a recorded outcome. On a draining node the turn
@@ -28,6 +30,7 @@ use super::head::HeadCache;
 use super::session::{
     CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnServices, UnfinishedPhase,
 };
+use super::session_mail::follow_on_mail;
 use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel};
@@ -211,6 +214,11 @@ pub async fn run_phases(
                 };
                 let cause = done.run_terminal_cause(&run)?;
                 let kind = cause.kind();
+                // A frame switch mails its follow-on with its commit.
+                let follow_on = match &done.outcome {
+                    Some(outcome) => follow_on_mail(&session, outcome)?,
+                    None => None,
+                };
                 let commit = drive
                     .finish(cx, done, heads.head(cx, &session).await?)
                     .await?;
@@ -229,6 +237,9 @@ pub async fn run_phases(
                     cause: Box::new(cause),
                     head_revision: Some(commit.expected_head.saturating_add(1)),
                 }));
+                if let Some(follow_on) = follow_on {
+                    tx.write(DomainWrite::SessionMail(follow_on));
+                }
                 // The turn's scope ends with its commit (L6b): its waits are
                 // revoked and its first batch of `Until` children marked; the
                 // next pass marks the rest.

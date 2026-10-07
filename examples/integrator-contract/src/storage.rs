@@ -204,19 +204,6 @@ impl SessionCommitStore for Integrator {
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn load_pending_follow_on(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<PendingFollowOn>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn raise_pending_follow_on_attempts(
-        &self,
-        session_id: &SessionId,
-        follow_on_turn_id: &TurnId,
-    ) -> Result<PendingFollowOn, StoreError> {
-        unreachable!("external signature witness")
-    }
     async fn settle_observer_intents(
         &self,
         session_id: &SessionId,

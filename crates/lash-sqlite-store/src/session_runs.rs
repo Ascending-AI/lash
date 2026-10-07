@@ -402,16 +402,6 @@ fn write_unanswered_run_end_conn(
         head_revision: None,
         at_ms,
     };
-    crate::conn::cached_execute(
-        tx,
-        crate::session_sql::session_sql()
-            .head
-            .clear_pending_follow_on
-            .sql(),
-        params![session.as_str()],
-    )
-    .map_err(sqlite_error)?;
-
     // The run's own input is dropped and its batches cancelled first; the
     // terminal write then releases whatever else the run still held.
     let sql = session_runs_sql();
@@ -479,13 +469,11 @@ pub(crate) fn unfinished_run_conn(
 }
 
 /// What owns session `session_id`'s head, read in a head commit's
-/// transaction (FIG-4202): its unfinished run, the follow-on its head owes
-/// (`owed_follow_on`, read with the head) and its earliest open session
+/// transaction (FIG-4202): its unfinished run and its earliest open session
 /// command.
 pub(crate) fn head_ownership_facts_conn(
     conn: &Connection,
     session_id: &SessionId,
-    owed_follow_on: Option<TurnId>,
 ) -> Result<lash_core_execution::store::HeadOwnershipFacts, StoreError> {
     let unfinished_run = unfinished_run_conn(conn, session_id)?.map(|unfinished| unfinished.run);
     let open_command: Option<i64> = conn
@@ -503,7 +491,6 @@ pub(crate) fn head_ownership_facts_conn(
         .map_err(sqlite_error)?;
     Ok(lash_core_execution::store::HeadOwnershipFacts {
         unfinished_run,
-        owed_follow_on,
         open_command: open_command
             .map(|seq| stored_u64("QueuedWorkBatch", seq))
             .transpose()?,

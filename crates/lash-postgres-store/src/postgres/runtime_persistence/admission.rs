@@ -9,25 +9,9 @@
 
 use super::*;
 use lash_core_execution::store::queued_work::TurnWorkPrefix;
-use lash_core_execution::store::{
-    CheckpointAdmission, CheckpointAdmissionRequest, FollowOnAdmission, TurnLaneStop,
-};
+use lash_core_execution::store::{CheckpointAdmission, CheckpointAdmissionRequest, TurnLaneStop};
 
 type PgTx<'c> = sqlx::Transaction<'c, sqlx::Postgres>;
-
-/// Whether the head's pending follow-on refuses `admission` (ADR 0101 §3):
-/// every admission but the follow-on's own is blocked while it is set.
-async fn follow_on_blocks_admission_tx(
-    tx: &mut PgTx<'_>,
-    session_id: &SessionId,
-    admission: FollowOnAdmission<'_>,
-) -> Result<bool, StoreError> {
-    Ok(lash_core_execution::store::follow_on_blocks_admission(
-        pending_follow_on_tx(tx, session_id, false).await?.as_ref(),
-        admission,
-    )
-    .is_some())
-}
 
 /// Admit the checkpoint work of `request`'s run, keyed by its step
 /// ([`RunStore::admit_at_checkpoint`]).
@@ -68,18 +52,6 @@ pub(crate) async fn admit_at_checkpoint_postgres(
     if !recorded.is_empty() {
         tx.commit().await.map_err(store_sqlx_error)?;
         return Ok(recorded);
-    }
-    if follow_on_blocks_admission_tx(
-        &mut tx,
-        session_id,
-        FollowOnAdmission::Checkpoint {
-            turn_id: &request.turn_id,
-        },
-    )
-    .await?
-    {
-        tx.rollback().await.map_err(store_sqlx_error)?;
-        return Ok(CheckpointAdmission::default());
     }
     let now = postgres_transaction_epoch_ms(&mut tx).await?;
     let inputs = if request.max_inputs == 0 {
@@ -126,10 +98,6 @@ pub(crate) async fn open_session_command_run_postgres(
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
     let mut connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
     let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-    if follow_on_blocks_admission_tx(&mut tx, session_id, FollowOnAdmission::Idle).await? {
-        tx.rollback().await.map_err(store_sqlx_error)?;
-        return Ok(Vec::new());
-    }
     let (mut batches, candidates) = scan_queued_work_candidates_tx(
         &mut tx,
         session_id,

@@ -311,5 +311,6 @@ mod session_commit;
 pub(crate) use session_commit::apply_runtime_commit_tx;
 pub(crate) mod turn_cancel;
 mod turn_input;
+pub(crate) use turn_input::enqueue_pending_turn_inputs_tx;
 
 use turn_cancel::*;

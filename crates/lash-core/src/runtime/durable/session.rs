@@ -238,8 +238,7 @@ impl TurnDone {
     ///
     /// # Errors
     ///
-    /// [`TurnError::Exec`] when the outcome ends no run (a frame switch or a
-    /// segment boundary, whose follow-on turn the durable path does not run).
+    /// [`TurnError::Exec`] when `run` is not its own physical turn.
     pub fn run_terminal_cause(
         &self,
         run: &TurnId,
@@ -248,12 +247,7 @@ impl TurnDone {
             .outcome
             .clone()
             .unwrap_or(TurnOutcome::Stopped(crate::TurnStop::Incomplete));
-        let committed =
-            crate::store::RunCommittedOutcome::of_turn_outcome(&outcome).ok_or_else(|| {
-                TurnError::Exec(format!(
-                    "turn {run} ended in {outcome:?}, which ends no run on the durable path"
-                ))
-            })?;
+        let committed = crate::store::RunCommittedOutcome::of_turn_outcome(&outcome);
         let commit = crate::store::TurnCommitId::of_physical_turn(run, run).ok_or_else(|| {
             TurnError::Exec(format!("turn {run} is not its own run's physical turn"))
         })?;

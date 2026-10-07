@@ -761,7 +761,7 @@ pub use runtime::publish_process_execution_env;
 pub use runtime::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, AdmittedScope, AdmittedTurnInputs,
     Ancestry, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
-    AwaitEventKey, AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef, CausalRef,
+    AwaitEventKey, AwaitEventWaitIdentity, BindingId, CapabilityRef, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock, ClockWallTime, CommandJournalGuard,
     CommandReplayKey, ContractRef, DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef,
     DeliveryPolicy, DeploymentStore, DeploymentStoreDecorator, DrainMode, DrainModePolicy,

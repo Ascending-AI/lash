@@ -108,14 +108,6 @@ lash_store_sql::statements! {
     /// Head statements requiring SQLite semantics.
     pub(crate) struct SessionHeadSqliteStatements @ "session_head" {
 
-        /// The follow-on `?1`'s head owes (ADR 0101 §3), read by every admission
-        /// inside its write transaction.
-        select_pending_follow_on = "SELECT pending_follow_on_json FROM session_head WHERE session_id = ?1";
-
-        raise_pending_follow_on = "UPDATE session_head SET pending_follow_on_json = ?2
-             WHERE session_id = ?1
-               AND json_extract(pending_follow_on_json, '$.follow_on_turn_id') = ?3";
-
         /// The leaf node `?1`'s head points at.
         select_leaf_node_id = "SELECT revision.leaf_node_id FROM session_head AS head
              JOIN session_revisions AS revision
@@ -123,14 +115,13 @@ lash_store_sql::statements! {
              WHERE head.session_id = ?1";
 
 
-        /// Publish the new revision over `?4`, after recording its row.
+        /// Publish the new revision over `?3`, after recording its row.
         upsert_cas = "INSERT INTO session_head
-                         (session_id, head_revision, pending_follow_on_json)
-                         VALUES (?1, ?2, ?3)
+                         (session_id, head_revision)
+                         VALUES (?1, ?2)
                          ON CONFLICT (session_id) DO UPDATE SET
-                             head_revision = excluded.head_revision,
-                             pending_follow_on_json = excluded.pending_follow_on_json
-                         WHERE session_head.head_revision = ?4";
+                             head_revision = excluded.head_revision
+                         WHERE session_head.head_revision = ?3";
 
         insert_fork = "INSERT INTO session_head (session_id, head_revision) VALUES (?1, 0)";
 

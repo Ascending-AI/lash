@@ -256,14 +256,13 @@ fn window(
         };
     };
     let admitted = matches!(selector, WindowSelector::Admitted(_));
-    let (revision, leaf, checkpoint_ref, pending) = match selector {
+    let (revision, leaf, checkpoint_ref) = match selector {
         WindowSelector::Current => (
             meta.head_revision,
             meta.leaf_node_id.clone(),
             meta.checkpoint_ref.clone(),
-            meta.pending_follow_on.clone(),
         ),
-        WindowSelector::Admitted(base) => (base.revision, base.leaf, base.checkpoint, None),
+        WindowSelector::Admitted(base) => (base.revision, base.leaf, base.checkpoint),
     };
     let checkpoint = match checkpoint_ref.as_ref() {
         Some(reference) => {
@@ -395,7 +394,6 @@ fn window(
         session.clone(),
         revision,
         config,
-        pending,
         graph,
         checkpoint_ref,
         checkpoint,

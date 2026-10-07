@@ -9,7 +9,7 @@ const LASH_HISTORY_LINEAGE_DOMAIN_VERSION: &str = "lash-history-lineage/v1";
 
 use std::num::{NonZeroU32, NonZeroU64};
 
-use super::{BlobRef, HydratedSessionCheckpoint, PendingFollowOn, SessionHeadRef, StoreError};
+use super::{BlobRef, HydratedSessionCheckpoint, SessionHeadRef, StoreError};
 use crate::{
     FrameNodeId, NodeId, PersistedSessionConfig, SessionGraph, SessionId, SessionNodeRecord,
     TurnFailureSettlement, TurnId,
@@ -37,7 +37,6 @@ pub struct SessionWindowRead {
     /// Equals `window.anchor().map(|a| &a.frame_node_id)`. `None` iff the
     /// window is empty.
     pub current_frame_node_id: Option<FrameNodeId>,
-    pub pending_follow_on: Option<PendingFollowOn>,
     pub window: SessionGraph,
     pub checkpoint_ref: Option<BlobRef>,
     pub checkpoint: Option<HydratedSessionCheckpoint>,
@@ -54,7 +53,6 @@ impl SessionWindowRead {
         session_id: SessionId,
         head_revision: u64,
         config: PersistedSessionConfig,
-        pending_follow_on: Option<PendingFollowOn>,
         window: SessionGraph,
         checkpoint_ref: Option<BlobRef>,
         checkpoint: Option<HydratedSessionCheckpoint>,
@@ -79,7 +77,6 @@ impl SessionWindowRead {
             head_revision,
             config,
             current_frame_node_id,
-            pending_follow_on,
             window,
             checkpoint_ref,
             checkpoint,

@@ -178,7 +178,6 @@ impl RuntimeEffectOutcome {
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
-            Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
 
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,

@@ -138,7 +138,6 @@ fn write_receipt(fleet: FleetFormat) -> Vec<u8> {
         failure_evidence: Vec::new(),
         outcome: None,
         trace: None,
-        pending_follow_on: None,
         turn_input_applications: Vec::new(),
         turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
         command_outcomes: Default::default(),

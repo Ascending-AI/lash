@@ -148,7 +148,7 @@ pub struct CapabilityRef {
 
 // `serde_json::Value` never holds NaN or an infinite number, so its
 // `PartialEq` is reflexive and `CapabilityRef` can be `Eq` — which
-// `ResolvedRun`'s `Eq` (carried on `PendingFollowOn`) requires.
+// `ResolvedRun`'s `Eq` requires.
 impl Eq for CapabilityRef {}
 
 /// One-shot overrides of the session config for the run that runs an
@@ -560,8 +560,7 @@ impl RunSpec {
     /// Resolve this spec against `snapshot`, the run's config after the
     /// boundary's command drain. `definition` is what the spec's registered
     /// definition produced over its context (`None` without a definition).
-    /// `termination` and `follow_on_recoveries` are the host's policy and
-    /// follow-on recovery bound the run records.
+    /// `termination` is the host's policy the run records.
     /// `models` mints the binding of an override key, and `owner` applies
     /// the stated protocol options: the definition's first, then the spec's
     /// own over them.
@@ -570,7 +569,6 @@ impl RunSpec {
         snapshot: &PersistedSessionConfig,
         definition: Option<RunOverrides>,
         termination: TerminationPolicy,
-        follow_on_recoveries: u32,
         models: &dyn crate::provider::LlmProfiles,
         owner: &dyn RunOptionsOwner,
     ) -> Result<ResolvedRun, RunResolveError> {
@@ -601,7 +599,6 @@ impl RunSpec {
             base: snapshot.clone(),
             render: None,
             termination,
-            follow_on_recoveries,
         })
     }
 }
@@ -694,8 +691,7 @@ pub struct ResolvedRun {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved: Option<Box<PersistedSessionConfig>>,
     /// The capability refs the spec's slots named, recorded with the shape so
-    /// a replay — and a recovered follow-on, which carries this record —
-    /// binds the same refs (FIG-3877).
+    /// a replay binds the same refs (FIG-3877).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -704,22 +700,12 @@ pub struct ResolvedRun {
     /// terminal is assembled when its stream ends without `Done`. Recorded so
     /// every execution of the run assembles the same terminal (FIG-4389).
     pub termination: TerminationPolicy,
-    /// The host's follow-on recovery bound when the run first resolved
-    /// (ADR 0101 §3): how many times a shift may recover a follow-on this
-    /// run's frame switches owe before it commits failed. A pending
-    /// follow-on carries this record, so every recovery of the logical run
-    /// decides on it, never on the bound of the host that executes it.
-    pub follow_on_recoveries: u32,
 }
 
 impl ResolvedRun {
     /// The default spec's resolution: the snapshot itself, under
-    /// `termination` and `follow_on_recoveries`.
-    pub fn snapshot(
-        base: PersistedSessionConfig,
-        termination: TerminationPolicy,
-        follow_on_recoveries: u32,
-    ) -> Self {
+    /// `termination`.
+    pub fn snapshot(base: PersistedSessionConfig, termination: TerminationPolicy) -> Self {
         Self {
             base,
             spec: None,
@@ -727,7 +713,6 @@ impl ResolvedRun {
             capabilities: std::collections::BTreeMap::new(),
             render: None,
             termination,
-            follow_on_recoveries,
         }
     }
 

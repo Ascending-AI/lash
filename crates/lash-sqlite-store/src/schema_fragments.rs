@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS session_runs (
     CONSTRAINT ck_session_runs_terminal_kind CHECK (terminal_kind IS NULL OR terminal_kind = CASE json_extract(terminal_cause_json, '$.cause')
         WHEN 'committed' THEN CASE
             WHEN json_type(terminal_cause_json, '$.outcome.finished') IS NOT NULL THEN 'answered'
+            WHEN json_type(terminal_cause_json, '$.outcome.agent_frame_switch') IS NOT NULL THEN 'answered'
             WHEN json_type(terminal_cause_json, '$.outcome.stopped.cancelled') IS NOT NULL THEN 'cancelled'
             ELSE 'failed' END
         WHEN 'substrate_lost' THEN CASE

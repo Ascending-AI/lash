@@ -14,7 +14,7 @@ pub use journal_guard::{
     CommandJournalGuard, RecordedKeyFence, RefusedWriteRange, ServedOnlyRange,
 };
 mod progress;
-pub use progress::{BoundaryReason, SegmentProgress};
+pub use progress::SegmentProgress;
 
 /// One registry step of a process drive, for
 /// [`ActorContext::record_process_drive_step`].

@@ -142,14 +142,13 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
             &snapshot(),
             None,
             TerminationPolicy::default(),
-            3,
             &catalog(),
             &MapOwner,
         )
         .expect("resolve");
     assert_eq!(
         resolved,
-        ResolvedRun::snapshot(snapshot(), TerminationPolicy::default(), 3)
+        ResolvedRun::snapshot(snapshot(), TerminationPolicy::default())
     );
     assert_eq!(resolved.base.config_revision, 7);
 }
@@ -163,14 +162,7 @@ fn a_resolved_run_records_its_termination_policy() {
         treat_missing_done_as_failure: false,
     };
     let resolved = RunSpec::default()
-        .resolve(
-            &snapshot(),
-            None,
-            finishes.clone(),
-            3,
-            &catalog(),
-            &MapOwner,
-        )
+        .resolve(&snapshot(), None, finishes.clone(), &catalog(), &MapOwner)
         .expect("resolve");
     assert_eq!(resolved.termination, finishes);
 
@@ -207,7 +199,7 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
             "preview": lash_render::RenderParams::preview(),
         }),
     };
-    let mut resolved = ResolvedRun::snapshot(snapshot(), TerminationPolicy::default(), 3);
+    let mut resolved = ResolvedRun::snapshot(snapshot(), TerminationPolicy::default());
     resolved.render = Some(record.clone());
     let encoded = serde_json::to_vec(&resolved).expect("encode run");
     let decoded: ResolvedRun = serde_json::from_slice(&encoded).expect("decode run");
@@ -304,7 +296,6 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
             &snapshot(),
             None,
             TerminationPolicy::default(),
-            3,
             &catalog(),
             &MapOwner,
         )
@@ -353,7 +344,6 @@ fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
             &snapshot(),
             None,
             TerminationPolicy::default(),
-            3,
             &catalog,
             &MapOwner,
         )
@@ -382,7 +372,6 @@ fn a_reasoning_only_override_keeps_the_snapshot_model_without_minting() {
             &snapshot(),
             None,
             TerminationPolicy::default(),
-            3,
             &catalog,
             &MapOwner,
         )
@@ -406,7 +395,6 @@ fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
         &snapshot(),
         None,
         TerminationPolicy::default(),
-        3,
         &catalog(),
         &MapOwner,
     ) {
@@ -433,7 +421,6 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         &snapshot(),
         None,
         TerminationPolicy::default(),
-        3,
         &catalog(),
         &MapOwner,
     ) {
@@ -455,7 +442,6 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         &snapshot(),
         None,
         TerminationPolicy::default(),
-        3,
         &catalog(),
         &MapOwner,
     ) {
@@ -476,7 +462,6 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
             &snapshot(),
             None,
             TerminationPolicy::default(),
-            3,
             &catalog(),
             &MapOwner,
         )
@@ -496,7 +481,6 @@ fn a_reasoning_override_for_a_session_without_a_profile_is_refused() {
             &bare,
             None,
             TerminationPolicy::default(),
-            3,
             &catalog(),
             &MapOwner
         ),
@@ -531,7 +515,6 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
             &snapshot(),
             Some(definition),
             TerminationPolicy::default(),
-            3,
             &catalog(),
             &MapOwner,
         )

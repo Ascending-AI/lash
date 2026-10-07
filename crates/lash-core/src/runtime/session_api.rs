@@ -225,17 +225,10 @@ impl LashRuntime {
                 // fallen behind it, whatever unpersisted initial frame it
                 // holds.
                 let created_only = head.is_created();
-                let moved = self.state.head_revision != head.head_revision
+                self.state.head_revision != head.head_revision
                     || (!created_only
                         && (head.leaf_node_id != self.state.session_graph.leaf_node_id
-                            || head.checkpoint_ref != self.state.checkpoint_ref));
-                // A recovery raise rewrites the pending follow-on without
-                // moving the head revision (ADR 0101 §3), so the fact is
-                // taken from the head even when nothing else moved.
-                if !moved {
-                    self.state.pending_follow_on = head.pending_follow_on.map(Box::new);
-                }
-                moved
+                            || head.checkpoint_ref != self.state.checkpoint_ref))
             }
             Ok(None) => {
                 if self.state.checkpoint_ref.is_some() {
@@ -317,7 +310,6 @@ impl LashRuntime {
             empty.session_graph = crate::SessionGraph::default();
             empty.agent_frames.clear();
             empty.current_frame_node_id = None;
-            empty.pending_follow_on = None;
             empty.checkpoint_ref = None;
             empty.checkpoint_components =
                 crate::RuntimeSessionState::new(empty.policy.clone()).checkpoint_components;

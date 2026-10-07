@@ -894,24 +894,18 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
         serde_json::json!({"value": "atomic"}),
     )];
     let (clean, ids) = append_request_commit(&mut state, "atomic-append", &nodes, None);
-    // An append is not a turn's terminal commit, so it may not write a
-    // pending follow-on (ADR 0101 §3): the store refuses the whole commit.
+    // A commit that applies a session command no row holds open is refused
+    // whole, in the transaction that wrote its graph and its receipt.
     let mut failing = clean.clone();
-    failing.pending_follow_on = Some(crate::store::PendingFollowOn {
-        follow_on_turn_id: crate::TurnId::from("atomic-append:agent-frame:1"),
-        frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "atomic-frame"),
-        owes: crate::store::FollowOnWork::FrameTask {
-            task: "must roll back".to_string(),
-        },
-        resolved_run: crate::conformance::helpers::default_resolved_run(),
-        chain_depth: 1,
-        attempts: 0,
+    failing.applied_commands = Some(crate::QueuedWorkCompletion {
+        session_id: SessionId::from("root"),
+        batch_ids: vec![crate::BatchId::from("atomic-append-unqueued-command")],
     });
     let error = store
         .commit_runtime_state(failing)
         .await
-        .expect_err("a refused follow-on write rolls back append and receipt");
-    assert!(matches!(error, StoreError::FollowOnHeadInvariant { .. }));
+        .expect_err("a refused commit rolls back append and receipt");
+    assert!(matches!(error, StoreError::SessionCommandWithdrawn { .. }));
     assert!(
         store
             .load_session_window(

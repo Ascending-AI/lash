@@ -799,12 +799,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::plugins::AgentFrameRecord| {
         let _ = &value.session_id;
     });
-    // W0251: lash::durability::BoundaryReason [enum]
-    type_witness::<lash::durability::BoundaryReason>();
-    // W0253: lash::durability::BoundaryReason::JournalBudget [variant]
-    variant_witness(|value: &lash::durability::BoundaryReason| {
-        matches!(value, lash::durability::BoundaryReason::JournalBudget)
-    });
     // W0254: lash::durability::EffectJournalRetirement [enum]
     type_witness::<lash::durability::EffectJournalRetirement>();
     // W0255: lash::durability::EffectJournalRetirement::Session [variant]
@@ -1530,10 +1524,6 @@ fn drain_area_witnesses() {
     // W0548: lash::persistence::SessionWindowRead::current_frame_node_id [field]
     field_witness(|value: &lash::persistence::SessionWindowRead| {
         let _ = &value.current_frame_node_id;
-    });
-    // W0549: lash::persistence::SessionWindowRead::pending_follow_on [field]
-    field_witness(|value: &lash::persistence::SessionWindowRead| {
-        let _ = &value.pending_follow_on;
     });
     // W0550: lash::persistence::SessionWindowRead::window [field]
     field_witness(|value: &lash::persistence::SessionWindowRead| {

@@ -7,7 +7,9 @@
 //! open rows with [`DurableReads::session_mailbox`](super::DurableReads::session_mailbox),
 //! decides what to admit, and binds it with [`SessionMailWrite::Admit`]
 //! inside the commit that admits the run: the bound rows name that run as
-//! the owner that took them (`admitted_run` and `admitted_by`).
+//! the owner that took them (`admitted_run` and `admitted_by`). The owner
+//! mails its own session with [`SessionMailWrite::Enqueue`]: a frame switch
+//! commits its follow-on that way, in its `turn.commit`.
 
 use lash_sansio::{BatchId, InputId, SessionId, TurnId};
 
@@ -69,9 +71,6 @@ pub struct SessionMailbox {
     pub live: bool,
     /// Whether the session's close began: it admits nothing more.
     pub closing: bool,
-    /// Whether its head owes a follow-on, which the turn lane runs before
-    /// any other work.
-    pub follow_on_owed: bool,
     /// The run its admitted, unfinished work is bound to, if any.
     pub bound_run: Option<TurnId>,
     /// Its open, unbound next-turn inputs, in ingress order.
@@ -96,5 +95,19 @@ pub enum SessionMailWrite {
         inputs: Vec<InputId>,
         /// The batches, in admission order.
         batches: Vec<BatchId>,
+    },
+    /// Mail the session one next-turn input, open and unbound at the
+    /// session's next ingress position, as any producer's acceptance writes
+    /// it. A frame switch's `turn.commit` mails its follow-on task this way
+    /// (ADR 0101 §3), so the switch and its follow-on commit together. An
+    /// input its source key already names is accepted again when it is the
+    /// same submission; anything the session refuses, another submission
+    /// under the key among it, refuses the commit with
+    /// [`DomainRefusal::SessionMailRefused`](super::DomainRefusal::SessionMailRefused).
+    Enqueue {
+        /// The session.
+        session: SessionId,
+        /// The input's draft, encoded by its owner.
+        draft_json: String,
     },
 }

@@ -58,10 +58,6 @@ pub enum RuntimeEffectKind {
     ExecCode,
     /// Durable admission of a turn input (ADR 0069 section 6).
     AcceptTurnInput,
-    /// A follow-on recovery run's recorded decision before its turn
-    /// (FIG-4361): run the owed follow-on under its raised recovery count,
-    /// commit it exhausted, or cede a follow-on the head owes no longer.
-    RecoverFollowOn,
 
     /// The session config a logical turn runs under, recorded once per run
     /// after the boundary's command drain (FIG-3600 S6, D3 §2): every replay
@@ -116,7 +112,6 @@ impl RuntimeEffectKind {
             Self::ExecCode => "exec_code",
             Self::AcceptTurnInput => "accept_turn_input",
             Self::PluginCallbacks => "plugin_callbacks",
-            Self::RecoverFollowOn => "recover_follow_on",
 
             Self::TraceBoundary => "trace_boundary",
             Self::ResolveTurnConfig => "resolve_turn_config",

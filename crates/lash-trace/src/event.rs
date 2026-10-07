@@ -223,13 +223,6 @@ pub enum TraceEvent {
         duration_ms: u64,
         status: TraceDurableTimerStatus,
     },
-    /// The durable controller requested a quiescent handler-segment handover.
-    DurableSegmentBoundary {
-        reason: String,
-        effects_executed: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        journaled_bytes_estimate: Option<u64>,
-    },
     /// The runtime received a typed, non-retryable store integrity failure.
     StoreErrorObserved {
         operation: String,
@@ -351,7 +344,6 @@ impl TraceEvent {
             | Self::JournaledEffectStarted { .. }
             | Self::DurableWaitParked { .. }
             | Self::DurableTimerStarted { .. }
-            | Self::DurableSegmentBoundary { .. }
             | Self::ProtocolStep { .. }
             | Self::Custom { .. } => false,
         }

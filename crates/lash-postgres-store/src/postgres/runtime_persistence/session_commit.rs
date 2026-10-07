@@ -234,43 +234,6 @@ impl SessionCommitStore for PostgresStore {
         Ok(())
     }
 
-    async fn raise_pending_follow_on_attempts(
-        &self,
-        session_id: &SessionId,
-        follow_on_turn_id: &lash_core_execution::TurnId,
-    ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
-            .await?;
-        let not_pending = || StoreError::FollowOnNotPending {
-            session_id: session_id.clone(),
-            follow_on_turn_id: follow_on_turn_id.clone(),
-        };
-        let pending = pending_follow_on_tx(&mut tx, session_id, true)
-            .await?
-            .filter(|pending| pending.is_turn(follow_on_turn_id))
-            .ok_or_else(not_pending)?;
-        let raised = pending.raised()?;
-        let updated = sqlx::query(session_sql().head_postgres.raise_pending_follow_on.sql())
-            .bind(session_id.as_str())
-            .bind(
-                lash_core_execution::store::pending_follow_on::encode_pending_follow_on(Some(
-                    &raised,
-                ))?,
-            )
-            .bind(follow_on_turn_id.as_str())
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        if updated.rows_affected() != 1 {
-            return Err(not_pending());
-        }
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(raised)
-    }
-
     async fn load_session_head_meta(
         &self,
         session_id: &SessionId,
@@ -472,29 +435,15 @@ pub(crate) async fn apply_runtime_commit_tx(
         }
     }
     // The bound turn owns the head (FIG-4202): a write outside every run
-    // is refused while a run, an owed follow-on or an open command owns
-    // it. The session history lock taken above serializes the read with
-    // every admission. A replayed receipt above answered its first
-    // outcome already; the plan's own refusals (a follow-on the commit
-    // would drop, a moved head) answer before the ownership's.
+    // is refused while a run or an open command owns it. The session
+    // history lock taken above serializes the read with every admission. A
+    // replayed receipt above answered its first outcome already; the plan's
+    // own refusals (a moved head) answer before the ownership's.
     let head_ownership = if lash_core_execution::store::head_write_needs_ownership(
         commit.is_sessions_own_head_write(),
         existing.as_ref().is_some_and(|head| !head.is_created()),
     ) {
-        let owed_follow_on = lash_core_execution::store::follow_on_owning_the_head(
-            pending_follow_on_tx(&mut *tx, &commit.session_id, false)
-                .await?
-                .as_ref(),
-            commit.pending_follow_on.as_ref(),
-        );
-        Some(
-            crate::session_runs::head_ownership_facts_conn(
-                &mut *tx,
-                &commit.session_id,
-                owed_follow_on,
-            )
-            .await?,
-        )
+        Some(crate::session_runs::head_ownership_facts_conn(&mut *tx, &commit.session_id).await?)
     } else {
         None
     };
@@ -623,16 +572,11 @@ pub(crate) async fn apply_runtime_commit_tx(
             None => lash_core_execution::store::PublishedLeafFacts::Retired { node_id },
         },
     };
-    // The head row is locked above, so the fact read here is the one this
-    // commit publishes over (ADR 0101 §3).
-    let existing_pending_follow_on =
-        pending_follow_on_tx(&mut *tx, &commit.session_id, true).await?;
     let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
         actual_head_revision: authoritative_revision,
         published_leaf,
         requested_ancestor_is_active,
         occupied_node_ids,
-        existing_pending_follow_on: existing_pending_follow_on.clone(),
     })?;
     if let Some(facts) = head_ownership {
         lash_core_execution::store::require_unowned_head(&commit.session_id, facts)?;
@@ -701,11 +645,6 @@ pub(crate) async fn apply_runtime_commit_tx(
     let head_write = sqlx::query(session_sql().head_postgres.upsert_cas.sql())
         .bind(commit.session_id.as_str())
         .bind(sql_head_revision)
-        .bind(
-            lash_core_execution::store::pending_follow_on::encode_pending_follow_on(
-                meta.pending_follow_on.as_ref(),
-            )?,
-        )
         .bind(plan.actual_head_revision() as i64)
         .execute(&mut ***tx)
         .await;
@@ -800,17 +739,16 @@ pub(crate) async fn apply_runtime_commit_tx(
     if retention.releases_at_commit() {
         crate::revisions::release_unretained_tx(&mut *tx, false, Some(&commit.session_id)).await?;
     }
-    let work_remaining = commit.pending_follow_on.is_some()
-        || sqlx::query_scalar::<_, bool>(
-            crate::turn_ingress::turn_ingress_sql()
-                .family
-                .has_admissible_work
-                .sql(),
-        )
-        .bind(commit.session_id.as_str())
-        .fetch_one(&mut ***tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    let work_remaining = sqlx::query_scalar::<_, bool>(
+        crate::turn_ingress::turn_ingress_sql()
+            .family
+            .has_admissible_work
+            .sql(),
+    )
+    .bind(commit.session_id.as_str())
+    .fetch_one(&mut ***tx)
+    .await
+    .map_err(store_sqlx_error)?;
     let mut result = plan.result(checkpoint_ref, manifest, now, work_remaining);
     result.turn_cancel_input_outcome = turn_cancel_input_outcome;
     {

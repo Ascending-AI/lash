@@ -62,68 +62,6 @@ pub(super) fn cancel_pending_turn_input_row_conn(
     }
 }
 
-/// The follow-on the head of `session_id` owes (ADR 0101 §3), read inside
-/// the caller's transaction.
-pub(super) fn pending_follow_on_conn(
-    conn: &Connection,
-    session_id: &SessionId,
-) -> Result<Option<lash_core_execution::store::PendingFollowOn>, StoreError> {
-    let json = conn
-        .query_row(
-            crate::session_sql::session_sql()
-                .head_sqlite
-                .select_pending_follow_on
-                .sql(),
-            params![session_id.as_str()],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()
-        .map_err(sqlite_error)?
-        .flatten();
-    lash_core_execution::store::pending_follow_on::decode_pending_follow_on(
-        session_id,
-        json.as_deref(),
-    )
-}
-
-/// Raise session `session_id`'s owed follow-on's recovery count (ADR 0101
-/// §3), inside the caller's write transaction. The head revision does not
-/// move.
-pub(super) fn raise_pending_follow_on_conn(
-    conn: &Connection,
-    session_id: &SessionId,
-    follow_on_turn_id: &lash_core_execution::TurnId,
-) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
-    let not_pending = || StoreError::FollowOnNotPending {
-        session_id: session_id.clone(),
-        follow_on_turn_id: follow_on_turn_id.clone(),
-    };
-    let pending = pending_follow_on_conn(conn, session_id)?
-        .filter(|pending| pending.is_turn(follow_on_turn_id))
-        .ok_or_else(not_pending)?;
-    let raised = pending.raised()?;
-    let updated =
-        crate::conn::cached_execute(
-            conn,
-            crate::session_sql::session_sql()
-                .head_sqlite
-                .raise_pending_follow_on
-                .sql(),
-            params![
-                session_id.as_str(),
-                lash_core_execution::store::pending_follow_on::encode_pending_follow_on(Some(
-                    &raised
-                ),)?,
-                follow_on_turn_id.as_str(),
-            ],
-        )
-        .map_err(sqlite_error)?;
-    if updated != 1 {
-        return Err(not_pending());
-    }
-    Ok(raised)
-}
-
 pub(crate) fn decode_stored_json<T: serde::de::DeserializeOwned>(
     json: &str,
     record_kind: &'static str,

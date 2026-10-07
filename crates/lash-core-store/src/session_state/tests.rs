@@ -40,7 +40,6 @@ fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommit
         failure_evidence: Vec::new(),
         outcome: None,
         trace: None,
-        pending_follow_on: None,
         command_outcomes: Default::default(),
         turn_input_applications: Vec::new(),
         turn_cancel_input_outcome: Default::default(),
@@ -558,7 +557,6 @@ fn install_view(state: &mut RuntimeSessionState, config: &crate::PersistedSessio
     let mut run = crate::run_spec::ResolvedRun::snapshot(
         crate::store::persisted_session_config_from_state(state),
         crate::run_spec::TerminationPolicy::default(),
-        crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     );
     run.resolved = (*config != run.base).then(|| Box::new(config.clone()));
     state.install_run_view(&run);
@@ -691,7 +689,6 @@ fn recorded_run_view_never_becomes_sticky_after_commit_replay_or_failed_settleme
         state.session_id.clone(),
         1,
         sticky.clone(),
-        None,
         crate::SessionGraph::default(),
         None,
         None,
@@ -910,7 +907,6 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
             &admitted,
             None,
             crate::run_spec::TerminationPolicy::default(),
-            crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             &crate::provider::EmptyLlmProfiles,
             &crate::run_spec::NoRunOptionsOwner,
         )

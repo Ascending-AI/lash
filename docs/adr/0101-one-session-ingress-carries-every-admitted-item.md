@@ -8,7 +8,8 @@ Accepted.
 
 Host input, process wakes, and session commands require durable admission,
 comparable ordering, idempotent settlement, and explicit cancellation outcomes.
-A frame handoff also needs recovery without becoming ordinary queued input.
+A frame switch's follow-on must survive any crash between the switch and the
+turn that runs it.
 
 ## Decision
 
@@ -59,54 +60,47 @@ Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs:112`,
 `crates/lash-core-store/src/store/admission_plan.rs:332`, and
 `crates/lash-core-execution/src/runtime/turn_queue.rs`.
 
-### 3. The pending follow-on lives on the session head
+### 3. A frame switch mails its follow-on with its commit
 
-A frame switch records `PendingFollowOn` atomically with its frame pointer in
-`pending_follow_on_json` on `session_head`. It contains the
-follow-on turn id, frame id, task, options, resolved run, chain depth, recovery
-count, and the recovery bound of its logical run. It is not a queue item.
+A turn that ends with `AgentFrameSwitch { task }` answers its run. Its
+`turn.commit` publishes the head's new frame pointer with the turn's terminal
+and, in the same session transaction, mails the session its follow-on: one
+next-turn input holding the task, written by the owner's
+`SessionMailWrite::Enqueue` exactly as a producer's acceptance writes it,
+with the session's wake. The input's source key and id name the follow-on's
+run, `frame-task:<frame key>`, so a retried commit mails the same input and a
+frame's task runs once. No crash separates the switch from its follow-on:
+they are one commit.
 
-The turn id derives from the logical run and next physical-turn ordinal.
-Only that follow-on's terminal commit clears the fact or replaces it with the
-next link. Every head write preserves its frame as current; another turn's
-commit or frame open is refused while it is owed. Its own checkpoint admission
-can proceed. Fork heads owe no source follow-on.
+The follow-on is ordinary session mail. The session's next drain admits it
+as a turn, which runs the task on the new frame under the session's config.
+It takes the session's next ingress position: work queued before the switch
+committed runs first, and commands apply at the boundary between the two
+runs, as at any run's end (§4). A closing or deleted session takes no mail,
+so its close settles the switch's work with the rest of its own. A host
+cancels the follow-on as it cancels any queued input or running turn.
 
-Shift admission prioritizes owed follow-on recovery before the unfinished run,
-commands, or fresh turn-lane work. The original run continues its chain inline.
-A recovery run records its decision, `RecoverFollowOn`, between its seal and
-its turn. The step's body raises the recovery count once in a fenced write, and
-records the raised fact, the exhaustion, or that the head does not owe the
-follow-on. A raised or exhausted answer also records the head the follow-on's
-turn runs on and its turn index, and the step retains that head as an
-admission retains its base. Replay executes the recorded answer on the recorded
-head and index, and cannot raise the count twice.
-A run records the host's `max_follow_on_recoveries` (default 3) when it
-resolves, as `follow_on_recoveries` on its `ResolvedRun`. Every fact of the
-logical run carries that record, so the chain carries the bound: every
-recovery decides on the recorded bound, never on the bound of the host executing
-it or of the host that committed the switch, and the recorded decision carries
-it. Exhaustion commits
-`FollowOnRecoveryExhausted` as a failed follow-on with its task delivered and
-clears the fact. Chain depth also survives crashes. Cancellation answers the
-follow-on's own task, rather than deferring it as undelivered ingress.
+The `send()` of the switching input answers with the switch
+(`TurnStatus::Answered`). The follow-on's run answers under its own id,
+which a host attaches to by that id.
 
 Definition carry prepares successor-frame edges before the head CAS and
 retains the complete closure after a committed switch. Guarded cleanup uses
 frame retention and execution end evidence under
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 
-Evidence: `crates/lash-core-store/src/store/pending_follow_on.rs:20`, `:32`,
-`:76`, `crates/lash-core/src/runtime/shift/admission.rs:213`,
-`crates/lash-core/src/runtime/shift/run.rs:677`, and
-`crates/lash-sqlite-store/src/persistence/session_commit.rs:14`.
+Evidence: `crates/lash-core/src/runtime/durable/phases.rs` (`turn.commit`),
+`crates/lash-core/src/runtime/durable/session_mail.rs` (`follow_on_mail`,
+`frame_task_run`), `crates/lash-sqlite-store/src/durable/session_mail.rs`,
+`crates/lash-postgres-store/src/postgres/durable/session_mail.rs`, and the law
+`crates/lash-durable-test/tests/frame_switch_crash_proof.rs`.
 
 ### 4. Session commands are a lane applied at turn boundaries
 
 Commands apply at idle or after a logical run finishes, ahead of fresh
 turn-lane runs. They do not apply mid-turn, at checkpoints, or between the
-physical turns of one logical run. An owed follow-on and an unfinished run
-retain precedence; a parked run whose resume is unsettled holds the command
+physical turns of one logical run. An unfinished run retains precedence; a
+parked run whose resume is unsettled holds the command
 lane as it holds inputs, with the typed, retryable `SessionRedriveUnsettled`,
 because the unfinished run owns the head. A checkpoint does not treat an open
 command as a barrier.
@@ -229,9 +223,8 @@ open row is. A run's release hands an accepted row back open in the state its
 delivery names, and deferral at a cancel writes nothing.
 
 Admission accepts the address only if T is this session's running turn or has
-ended. T is running when it is a physical turn of the unfinished run, of a
-member that run's admission composed, or of the follow-on the head owes. T
-has ended when its final commit or its run's terminal is recorded. An unknown
+ended. T is running when it is a physical turn of the unfinished run or of a
+member that run's admission composed. T has ended when its final commit or its run's terminal is recorded. An unknown
 turn, another session's running turn included, is refused with
 `StoreError::IngressTurnAddressUnknown` (`TurnAddressUnknown` to the runtime)
 before any row or sequence number is allocated. A resubmission of an admitted
@@ -404,14 +397,14 @@ Evidence: `crates/lash-core-store/src/config_transaction.rs`,
 Sequence order is per-session commit order across admission families.
 Turn selection stops at the first ineligible unaddressed row; command priority
 applies only at turn boundaries. Recorded run admission survives resume.
-Scope-close work cannot retain the run's turn admission. Follow-on frame and
-recovery bounds survive reopen. Wake terminal writes and floor writes are atomic.
+Scope-close work cannot retain the run's turn admission. A frame switch and
+its follow-on's mail commit together. Wake terminal writes and floor writes are atomic.
 
 ### 16. Conformance laws
 
 Conformance covers shared sequence allocation, command-lane precedence,
 contiguous turn-lane selection, run admission resume, stale-fence refusal,
-follow-on head invariants and bounded recovery, cancellation of withheld inputs
+exactly one follow-on per frame switch, cancellation of withheld inputs
 and wakes, wake floors, and config compare-and-set.
 
 Store tiers are SQLite file, SQLite memory, and PostgreSQL. Laws run the
@@ -420,7 +413,7 @@ virtual clock and `SimNodes` (ADR 0132 §14). Upgrade proofs use
 synthetic-next. Evidence lives in
 `crates/lash-conformance/src/conformance/session_ingress.rs`,
 `crates/lash-conformance/src/conformance/shift_admission.rs`,
-`crates/lash-conformance/src/conformance/runtime_persistence/pending_follow_on.rs`,
+`crates/lash-durable-test/tests/frame_switch_crash_proof.rs`,
 `crates/lash-conformance/src/conformance/cancelled_turn_withheld_input.rs`,
 and `crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs`.
 
@@ -498,9 +491,12 @@ wake priority can starve earlier wakes. A strict command FIFO barrier delays
 config updates and complicates checkpoints; class-level command priority keeps
 FIFO within its lane and preserves the running turn's snapshot.
 
-A queued frame-handoff item can be withdrawn, overtaken, or rendered in another
-frame. The head fact carries its frame and continuation together. An unbounded
-follow-on retry can block the whole session indefinitely. Config compare-and-set
+A follow-on held as a fact on the session head needs its own admission
+priority, recovery count and head-ownership rule, and every reader of the
+head has to honour it. Mailed as input in the switch's own commit, it needs
+none of them: the switch moved the head to the new frame, so the follow-on
+renders there whenever it runs, and the session's ordinary mail recovers it.
+Config compare-and-set
 against `head_revision` rejects patches merely because a turn commits;
 `config_revision` changes only with config. Caller-driven inline turns require
 another continuation owner; ingress and the engine supply one durable path.
@@ -510,5 +506,5 @@ another continuation owner; ingress and the engine supply one durable path.
 Order spans both admission tables. Commands precede fresh turns at boundaries.
 Recorded admission cannot widen on retry. Hosts observe durable handles, and
 wake cancellation preserves the receiver floor. Follow-ons survive worker loss
-as head facts. Durable shape evolution follows the pre-1.0 freeze and
+as mail their switch committed. Durable shape evolution follows the pre-1.0 freeze and
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).

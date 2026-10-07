@@ -213,8 +213,8 @@ pub use effect::{
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
-    AwaitEventKey, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
-    CausalRef, CheckpointAdmittedSet, CommandJournalGuard, EffectAddress, EffectJournalIdentity,
+    AwaitEventKey, AwaitEventWaitIdentity, CanonicalRuntimeEffectEnvelope, CausalRef,
+    CheckpointAdmittedSet, CommandJournalGuard, EffectAddress, EffectJournalIdentity,
     EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
     ExternalCompletionError, JournalReplay, LlmRequestSpec, LlmStreamRecord, ProcessCommand,
     ProcessDriveStep, ProcessEffectOutcome, ProcessListSelection, ProcessLocalExecution,

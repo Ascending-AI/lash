@@ -11,14 +11,18 @@
 //!
 //! What a drain admits, in the order the session owes it:
 //!
-//! 1. nothing while the session is closing, owes its head a follow-on, or
-//!    still has a bound run (the activation resumes those);
+//! 1. nothing while the session is closing or still has a bound run (the
+//!    activation resumes it);
 //! 2. the head open batch when it is a session command: a command run, or
 //!    an operation run for a plugin task, which binds nothing (the commit
 //!    that applies it settles it, predicated on the row still being open);
 //! 3. otherwise the turn lane's head, the earlier of the head open input
 //!    and the head open turn batch, alone (the default drain policy takes
 //!    the head alone, so each input is its own run).
+//!
+//! The owner mails its own session too: a frame switch's `turn.commit`
+//! mails the switch's task as a next-turn input ([`follow_on_mail`]), so the
+//! follow-on is ordinary mail the session's next drain admits (ADR 0101 §3).
 
 use lash_durable::domain::{MailBatchKind, SessionMailWrite, SessionMailbox};
 use lash_durable::{ActorTx, DomainWrite, DurableError};
@@ -103,7 +107,7 @@ pub async fn drain_session_mail(
 
 /// The run `mailbox` admits next, with what its admission took.
 fn admission(mailbox: &SessionMailbox) -> Result<Option<AdmittedInputs>, SessionMailError> {
-    if !mailbox.live || mailbox.closing || mailbox.follow_on_owed || mailbox.bound_run.is_some() {
+    if !mailbox.live || mailbox.closing || mailbox.bound_run.is_some() {
         return Ok(None);
     }
     let head_batch = mailbox.batches.iter().min_by_key(|batch| batch.enqueue_seq);
@@ -158,4 +162,55 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<AdmittedInputs>, Session
 fn run_of(id: &str) -> Result<TurnId, SessionMailError> {
     TurnId::parse(id)
         .map_err(|error| SessionMailError::Undecodable(format!("run id {id}: {error}")))
+}
+
+/// The run a frame switch's follow-on starts: named by the frame the switch
+/// opened, so every retry of the switch's commit mails the same input, and
+/// a frame's task runs once. The input is keyed by it as a host's keyed
+/// send is, so a host attaches to the follow-on by this id.
+#[must_use]
+pub fn frame_task_run(frame_key: &crate::FrameKey) -> TurnId {
+    TurnId::prefixed("frame-task:", frame_key.as_str())
+}
+
+/// The mail a turn's `turn.commit` sends its own session for `outcome`: a
+/// frame switch's task, as the session's next-turn input under its
+/// follow-on's run ([`frame_task_run`]), so the switch, its new frame and
+/// its follow-on commit together (ADR 0101 §3). Any other outcome mails
+/// nothing.
+///
+/// # Errors
+///
+/// [`SessionMailError::Undecodable`] when the input does not encode.
+pub fn follow_on_mail(
+    session: &SessionId,
+    outcome: &crate::TurnOutcome,
+) -> Result<Option<SessionMailWrite>, SessionMailError> {
+    let crate::TurnOutcome::AgentFrameSwitch {
+        frame_key, task, ..
+    } = outcome
+    else {
+        return Ok(None);
+    };
+    let run = frame_task_run(frame_key);
+    let draft = crate::PendingTurnInputDraft::new(
+        session.clone(),
+        crate::TurnInputIngress::next_turn(),
+        crate::TurnInput::text(task.clone()).durable_projection(),
+    )
+    .with_input_id(crate::PendingTurnInputDraft::keyed_input_id(
+        session,
+        run.as_str(),
+    ))
+    .with_source_key(run.as_str());
+    let draft_json = serde_json::to_string(&draft).map_err(|error| {
+        SessionMailError::Undecodable(format!(
+            "the follow-on of frame {}: {error}",
+            frame_key.as_str()
+        ))
+    })?;
+    Ok(Some(SessionMailWrite::Enqueue {
+        session: session.clone(),
+        draft_json,
+    }))
 }

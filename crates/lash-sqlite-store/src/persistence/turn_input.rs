@@ -405,7 +405,7 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
 /// that row, and every other draft is inserted in request order at the next
 /// positions of the session's ingress sequence. Any refusal rolls the whole
 /// batch back.
-fn enqueue_pending_turn_inputs_conn(
+pub(crate) fn enqueue_pending_turn_inputs_conn(
     tx: &Connection,
     batch: &lash_core_execution::PendingTurnInputBatch,
     now: u64,
@@ -547,12 +547,10 @@ fn turn_address_evidence_conn(
         )
         .map_err(sqlite_error)?;
     let running = crate::session_runs::unfinished_run_turns_conn(tx, session_id)?;
-    let owed = pending_follow_on_conn(tx, session_id)?;
     Ok(
         lash_core_execution::store_backend_support::turn_address_evidence(
             turn_id,
             running.as_ref(),
-            owed.as_ref(),
             ended,
         ),
     )
@@ -638,8 +636,6 @@ fn admit_run_spec_conn(
 /// The steering verdict over the run kinds no `source_key`-filed input
 /// starts (FIG-3877), read inside the admission transaction:
 ///
-/// * `turn_id` is the follow-on the head owes: it inherits the shape its
-///   fact recorded at the switch.
 /// * `turn_id` is a physical turn of the unfinished queued-headed run: it
 ///   started from no input, so it runs the default spec.
 /// * Otherwise nothing running names `turn_id`: the steering input is a
@@ -650,22 +646,7 @@ fn check_unsourced_steering_run_spec_conn(
     turn_id: &lash_core_execution::TurnId,
     spec: &lash_core_execution::store_backend_support::RunSpecAdmission,
 ) -> Result<(), StoreError> {
-    use lash_core_execution::store_backend_support as support;
-    // `Some(hash)` is the shape the running run resolved under (`None` =
-    // the default spec); `None` means the evidence did not decide.
-    let mut running: Option<Option<String>> = None;
-    if let Some(owed) =
-        pending_follow_on_conn(tx, &draft.session_id)?.filter(|owed| owed.is_turn(turn_id))
-    {
-        running = Some(
-            owed.resolved_run
-                .spec
-                .as_ref()
-                .map(|hash| hash.as_str().to_string()),
-        );
-    }
-    if running.is_none()
-        && let Some(unfinished) = crate::session_runs::unfinished_run_conn(tx, &draft.session_id)?
+    if let Some(unfinished) = crate::session_runs::unfinished_run_conn(tx, &draft.session_id)?
         && matches!(
             unfinished.head,
             lash_core_execution::store::AdmittedHead::Batch(_)
@@ -674,10 +655,12 @@ fn check_unsourced_steering_run_spec_conn(
     {
         // A queued-headed run starts from no input, so it runs the default
         // spec.
-        running = Some(None);
-    }
-    if let Some(hash) = running {
-        support::check_running_run_spec(&draft.session_id, turn_id, spec, hash.as_deref())?;
+        lash_core_execution::store_backend_support::check_running_run_spec(
+            &draft.session_id,
+            turn_id,
+            spec,
+            None,
+        )?;
     }
     Ok(())
 }

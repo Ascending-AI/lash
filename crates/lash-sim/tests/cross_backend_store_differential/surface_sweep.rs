@@ -73,15 +73,6 @@ pub(super) enum SurfaceMethod {
     CancelPendingTurnInputSuffix,
     CommittedTurnExists,
     UncommittedTurnExists,
-    /// [`SessionCommitStore::raise_pending_follow_on_attempts`], executed over a
-    /// live fact for the turn it names (`owed`) and for a turn it does not.
-    RaisePendingFollowOnAttempts {
-        owed: bool,
-    },
-    /// [`SessionCommitStore::load_pending_follow_on`]: the head's owed
-    /// follow-on as committed, read on an unowed head, beside a live fact,
-    /// and after the fact's clearing commit.
-    LoadPendingFollowOn,
     /// [`RunStore::run_terminal`](lash_core::store::RunStore::run_terminal)
     /// of the sweep's drain run: none while it is unfinished, and its lost
     /// end's evidence after it (FIG-3600 S7).
@@ -194,13 +185,6 @@ impl SurfaceMethod {
             Self::CancelPendingTurnInputSuffix => "surface:cancel_pending_turn_input_suffix",
             Self::CommittedTurnExists => "surface:committed_turn_exists_committed",
             Self::UncommittedTurnExists => "surface:committed_turn_exists_uncommitted",
-            Self::RaisePendingFollowOnAttempts { owed: true } => {
-                "surface:raise_pending_follow_on_attempts"
-            }
-            Self::RaisePendingFollowOnAttempts { owed: false } => {
-                "surface:raise_pending_follow_on_attempts_unowed"
-            }
-            Self::LoadPendingFollowOn => "surface:load_pending_follow_on",
             Self::RunTerminal => "surface:run_terminal",
             Self::EndRefusedRun => "surface:end_refused_run",
             Self::EndCommandRun => "surface:end_command_run",
@@ -309,14 +293,6 @@ const UNKNOWN_CLOSE_SESSION_ID: &str = "fig-3600-never-created-session";
 const UNKNOWN_INTENT_SEQUENCE: u64 = 9_000_000_000_000_000_000;
 /// The instant the close case hands the ledger's store half.
 const CLOSE_AT_MS: u64 = 5_000;
-/// The turn whose terminal commit writes the follow-on fact (ADR 0101 §3).
-const SURFACE_FOLLOW_ON_SWITCH_TURN_ID: &str = "fig-2841-surface-switch-turn";
-/// The follow-on turn that fact owes: the one `raise_pending_follow_on_attempts`
-/// may raise, and the one whose own terminal commit clears it.
-const SURFACE_FOLLOW_ON_TURN_ID: &str = "fig-2841-surface-follow-on";
-/// A turn no follow-on fact ever names: the raise's `FollowOnNotPending`
-/// refusal path over a live fact.
-const SURFACE_UNOWED_FOLLOW_ON_TURN_ID: &str = "fig-2841-unowed-follow-on";
 
 /// A backend-neutral summary of a control intent: its id and session are
 /// compared as "the case's own", never by value.
@@ -417,10 +393,6 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::ProbeAttachmentReferrers),
             surface(SurfaceMethod::ProbeSessionReferrerState),
             surface(SurfaceMethod::EndAttachmentReferrer),
-            // With no pending follow-on on the head the raise meets its
-            // `FollowOnNotPending` refusal.
-            surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
-            surface(SurfaceMethod::LoadPendingFollowOn),
             // The head resolves to itself; the revision past it names no
             // state yet. The policy reads back its default, then what was set.
             surface(SurfaceMethod::ResolveTarget { published: true }),
@@ -467,56 +439,6 @@ pub(super) fn refused_run_end_case() -> GeneratedCase {
     }
 }
 
-/// `raise_pending_follow_on_attempts` over a live fact (ADR 0101 §3): a
-/// frame-switch terminal commit leaves the head owing a follow-on, the held
-/// lease raises its attempts count twice without moving the head revision,
-/// a raise for a turn the fact does not name refuses, and the follow-on's
-/// own terminal commit clears it — after which the raise refuses again.
-/// `load_pending_follow_on` reads the fact the same commits leave: on the
-/// unowed head, beside the live fact, after a raise, and after the clear.
-pub(super) fn pending_follow_on_raise_case() -> GeneratedCase {
-    GeneratedCase {
-        name: CaseName::PendingFollowOnRaise,
-        operations: vec![
-            commit(
-                "seed_follow_on_frame",
-                0,
-                append(
-                    vec![
-                        NodeSpec::new("root", None, "root"),
-                        NodeSpec::new("active-frame", Some("root"), "active"),
-                    ],
-                    Some("active-frame"),
-                ),
-            ),
-            // The seeded head owes no follow-on.
-            surface(SurfaceMethod::LoadPendingFollowOn),
-            StoreOperation::CommitFollowOn {
-                label: "frame_switch_leaves_pending_follow_on",
-                expected_head_revision: 1,
-                turn_id: SURFACE_FOLLOW_ON_SWITCH_TURN_ID,
-                owed_turn_id: Some(SURFACE_FOLLOW_ON_TURN_ID),
-            },
-            // The switch left the fact on the head, still at zero attempts.
-            surface(SurfaceMethod::LoadPendingFollowOn),
-            surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
-            // The raise is a committed head fact: the read sees attempts=1.
-            surface(SurfaceMethod::LoadPendingFollowOn),
-            surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
-            surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: false }),
-            StoreOperation::CommitFollowOn {
-                label: "follow_on_terminal_clears_pending_follow_on",
-                expected_head_revision: 2,
-                turn_id: SURFACE_FOLLOW_ON_TURN_ID,
-                owed_turn_id: None,
-            },
-            // The follow-on's own terminal commit cleared the fact.
-            surface(SurfaceMethod::LoadPendingFollowOn),
-            surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
-        ],
-    }
-}
-
 /// The same surface after the session is gone: a refusal driver whose whole
 /// point is that nothing it refuses may leave a durable trace.
 pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
@@ -547,8 +469,6 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             surface(SurfaceMethod::AdmitAtCheckpoint),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::UnfinishedRun),
-            surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
-            surface(SurfaceMethod::LoadPendingFollowOn),
             surface(SurfaceMethod::CancelQueuedWorkBatch),
             surface(SurfaceMethod::AcquireUnknownAttachmentRefs),
             surface(SurfaceMethod::ForgetUnknownAttachment),
@@ -886,36 +806,6 @@ impl BackendRunner {
                     )
                     .await?;
                 format!("exists={exists}")
-            }
-            SurfaceMethod::RaisePendingFollowOnAttempts { owed } => {
-                // The raise is leased like every other head write and moves
-                // no head revision (ADR 0101 §3): the returned attempts count
-                // is the cross-backend-comparable part of the raised fact.
-                let turn_id = if owed {
-                    SURFACE_FOLLOW_ON_TURN_ID
-                } else {
-                    SURFACE_UNOWED_FOLLOW_ON_TURN_ID
-                };
-                let raised = store
-                    .raise_pending_follow_on_attempts(
-                        &session_id,
-                        &lash_core::TurnId::from(turn_id),
-                    )
-                    .await?;
-                format!("attempts={}", raised.attempts)
-            }
-            SurfaceMethod::LoadPendingFollowOn => {
-                // Presence, the turn the fact names, and the recovery count
-                // are all caller-supplied facts, so they compare across
-                // backends where a backend-minted id would not.
-                match store.load_pending_follow_on(&session_id).await? {
-                    Some(fact) => format!(
-                        "owed={} attempts={}",
-                        fact.follow_on_turn_id == SURFACE_FOLLOW_ON_TURN_ID,
-                        fact.attempts
-                    ),
-                    None => "owed=none".to_string(),
-                }
             }
             SurfaceMethod::RunTerminal => {
                 // The kind and cause are caller-supplied facts; the instant

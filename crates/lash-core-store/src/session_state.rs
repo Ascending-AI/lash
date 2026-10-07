@@ -676,11 +676,6 @@ pub struct RuntimeSessionState {
     pub agent_frames: Vec<crate::AgentFrameRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame_node_id: Option<crate::FrameNodeId>,
-    /// The follow-on the durable head owes (ADR 0101 §3). A head fact: it is
-    /// adopted with the head and written only through a head commit, never
-    /// serialized with the resident state.
-    #[serde(skip)]
-    pub pending_follow_on: Option<Box<crate::store::PendingFollowOn>>,
     #[serde(default)]
     pub session_graph: crate::SessionGraph,
     #[serde(default)]
@@ -723,7 +718,6 @@ impl RuntimeSessionState {
             policy,
             agent_frames: Vec::new(),
             current_frame_node_id: None,
-            pending_follow_on: None,
             session_graph: crate::SessionGraph::default(),
             turn_index: 0,
             token_usage: TokenUsage::default(),
@@ -762,7 +756,6 @@ impl RuntimeSessionState {
             policy: snapshot.policy,
             agent_frames,
             current_frame_node_id: snapshot.current_frame_node_id,
-            pending_follow_on: None,
             session_graph: snapshot.session_graph,
             turn_index: snapshot.turn_index,
             token_usage: snapshot.token_usage,
@@ -1292,7 +1285,6 @@ pub fn adopt_durable_head(
         head_revision,
         config,
         current_frame_node_id,
-        pending_follow_on,
         window,
         checkpoint_ref,
         checkpoint,
@@ -1308,7 +1300,6 @@ pub fn adopt_durable_head(
         .session_graph
         .try_agent_frame_records(&state.session_id)?;
     state.current_frame_node_id = current_frame_node_id;
-    state.pending_follow_on = pending_follow_on.map(Box::new);
     state.checkpoint_components = if checkpoint_ref.is_some() {
         RuntimeCheckpointComponents::unproven()
     } else {

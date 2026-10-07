@@ -25,7 +25,6 @@ pub(crate) async fn issue_effect(
         | RuntimeEffectCommand::ResolveTurnConfig { .. }
         | RuntimeEffectCommand::RecordCompactionBase { .. }
         | RuntimeEffectCommand::RenderCompactionPrompt { .. }
-        | RuntimeEffectCommand::RecoverFollowOn { .. }
         | RuntimeEffectCommand::TraceBoundary { .. } => cx.turn_effect(envelope, local).await,
         RuntimeEffectCommand::ResolveConfigTransaction { .. }
         | RuntimeEffectCommand::ReadSessionCommandRun { .. }

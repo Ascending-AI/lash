@@ -36,32 +36,6 @@ impl OpenerState {
     pub fn absorb_ledger(&self, ledger: super::IncorporationLedger) {
         self.ledger.lock_recover().absorb(ledger);
     }
-
-    /// Capture the logical Run's state without closing or consuming the Run.
-    #[must_use]
-    pub fn snapshot(&self) -> crate::store::RunOpenerState {
-        let registry = self.run_state.lock_recover();
-        self.snapshot_with_registry(&registry)
-    }
-
-    fn snapshot_with_registry(
-        &self,
-        _registry: &OpenerRunRegistry,
-    ) -> crate::store::RunOpenerState {
-        crate::store::RunOpenerState {
-            incorporation: self.ledger_snapshot(),
-        }
-    }
-
-    /// The opener a continuation carried, before the successor executes.
-    pub fn from_snapshot(
-        snapshot: crate::store::RunOpenerState,
-    ) -> Result<Self, RuntimeEffectControllerError> {
-        Ok(Self {
-            ledger: Arc::new(std::sync::Mutex::new(snapshot.incorporation)),
-            run_state: Arc::default(),
-        })
-    }
 }
 
 impl<'run> RuntimeExecutionContext<'run> {

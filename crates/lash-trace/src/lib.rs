@@ -919,9 +919,6 @@ pub enum TraceTurnOutcome {
     },
     /// The turn ended by handing control to another agent frame.
     AgentFrameSwitch { frame_switch: TraceAgentFrameSwitch },
-    /// The turn ended at a segment boundary of its run, which goes on in a
-    /// new invocation. `done_reason` is why: `journal_budget` or `hand_over`.
-    SegmentBoundary { done_reason: String },
     /// The turn was cancelled. Not a failure.
     Cancelled {
         evidence: TraceTurnCancellationEvidence,
@@ -935,10 +932,9 @@ impl TraceTurnOutcome {
     pub fn is_failed(&self) -> bool {
         match self {
             Self::Failed { .. } => true,
-            Self::Completed { .. }
-            | Self::AgentFrameSwitch { .. }
-            | Self::SegmentBoundary { .. }
-            | Self::Cancelled { .. } => false,
+            Self::Completed { .. } | Self::AgentFrameSwitch { .. } | Self::Cancelled { .. } => {
+                false
+            }
         }
     }
 

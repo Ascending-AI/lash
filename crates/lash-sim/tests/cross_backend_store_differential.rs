@@ -99,7 +99,6 @@ enum CaseName {
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
     RunEndOutcome,
-    PendingFollowOnRaise,
     RefusedSurfaceOnDeletedSession,
     SessionCloseLedger,
     CorruptGraphNodeRefusals,
@@ -141,7 +140,6 @@ impl CaseName {
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
             Self::RunEndOutcome => "refused_run_end",
-            Self::PendingFollowOnRaise => "pending_follow_on_raise_and_clear",
             Self::RefusedSurfaceOnDeletedSession => {
                 "refused_surface_on_deleted_session_leaves_no_residue"
             }
@@ -181,17 +179,6 @@ enum StoreOperation {
         turn_commit: Option<TurnCommitSpec>,
         checkpoint: CheckpointSpec,
         adopt_attachment: bool,
-    },
-    /// A turn's terminal head write over the pending follow-on fact
-    /// (ADR 0101 §3): `owed_turn_id` set is the frame-switch commit that
-    /// leaves the head owing that turn; `None` is the follow-on turn's own
-    /// terminal commit, which clears the fact. Seeded so the inventory can
-    /// shift `raise_pending_follow_on_attempts` over a live fact.
-    CommitFollowOn {
-        label: &'static str,
-        expected_head_revision: u64,
-        turn_id: &'static str,
-        owed_turn_id: Option<&'static str>,
     },
     RecordAttachmentWrite,
     ReclaimRetainedEvidence,
@@ -247,7 +234,7 @@ enum StoreOperation {
 impl StoreOperation {
     fn label(&self) -> &'static str {
         match self {
-            Self::Commit { label, .. } | Self::CommitFollowOn { label, .. } => label,
+            Self::Commit { label, .. } => label,
             Self::RecordAttachmentWrite => "record_attachment_write",
             Self::ReclaimRetainedEvidence => "reclaim_terminal_evidence_with_retained_fork",
             Self::PinLeaf => "pin_leaf",
@@ -543,7 +530,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
         session_lifecycle_cases::delete_then_attempt_admission_case(),
         surface_sweep::surface_sweep_case(),
         surface_sweep::refused_run_end_case(),
-        surface_sweep::pending_follow_on_raise_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
         surface_sweep::session_close_ledger_case(),
         session_lifecycle_cases::stale_handle_after_delete_case(),
@@ -1039,62 +1025,6 @@ impl BackendRunner {
                         .collect(),
                 );
                 self.commit_and_track(commit, *checkpoint).await
-            }
-            StoreOperation::CommitFollowOn {
-                expected_head_revision,
-                turn_id,
-                owed_turn_id,
-                ..
-            } => {
-                // The follow-on fact rides a turn's terminal head write
-                // (ADR 0101 §3): `owed_turn_id` set is the frame switch, and
-                // `None` is the follow-on's own terminal commit clearing it.
-                let head = self
-                    .store()
-                    .load_session_head_meta(&self.session_id)
-                    .await?;
-                let mut commit = runtime_commit(
-                    &self.session_id,
-                    *expected_head_revision,
-                    &append(Vec::new(), None),
-                    None,
-                    HydratedSessionCheckpoint::default(),
-                    Vec::new(),
-                );
-                let (frame, leaf) = head
-                    .map(|head| {
-                        (
-                            head.current_frame_node_id
-                                .filter(|_| head.leaf_node_id.is_some()),
-                            head.leaf_node_id,
-                        )
-                    })
-                    .unwrap_or_default();
-                commit.graph_base_leaf_node_id = leaf;
-                commit.turn_commit =
-                    RuntimeTurnCommitStamp::new(lash_core::store::OperationId::turn(
-                        &self.session_id,
-                        *turn_id,
-                        lash_core::store::pending_follow_on::TURN_TERMINAL_OPERATION_KEY,
-                    ));
-                commit.pending_follow_on =
-                    owed_turn_id.map(|owed_turn_id| lash_core::store::PendingFollowOn {
-                        follow_on_turn_id: lash_core::TurnId::from(owed_turn_id),
-                        frame_id: frame
-                            .clone()
-                            .expect("a pending follow-on owes the head's current frame"),
-                        owes: lash_core::store::FollowOnWork::FrameTask {
-                            task: "fig-2841 follow-on task".to_string(),
-                        },
-                        resolved_run: Box::new(lash_core::ResolvedRun::snapshot(
-                            commit.config.clone(),
-                            lash_core::runtime::TerminationPolicy::default(),
-                            lash_core::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
-                        )),
-                        chain_depth: 1,
-                        attempts: 0,
-                    });
-                self.commit_and_track(commit, CheckpointSpec::Empty).await
             }
             StoreOperation::RecordAttachmentWrite => {
                 attachment_seeding::seed_differential_attachment_rows(
@@ -1891,7 +1821,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 25);
+    assert_eq!(cases.len(), 24);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -1916,7 +1846,6 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "delete_then_attempt_admission",
             "store_surface_sweep",
             "refused_run_end",
-            "pending_follow_on_raise_and_clear",
             "refused_surface_on_deleted_session_leaves_no_residue",
             "session_close_ledger_closes_runs_and_tracks_its_intent",
             "stale_handle_after_delete",

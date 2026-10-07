@@ -69,9 +69,9 @@ fn frame_transition(
     }
 }
 
-/// `(head_revision, head_json, checkpoint_ref, leaf_node_id,
-/// pending_follow_on_json)`, in the order `committed_rows` selects them.
-type SessionHeadRow = (i64, String, Option<String>, Option<String>, Option<String>);
+/// `(head_revision, head_json, checkpoint_ref, leaf_node_id)`, in the order
+/// `committed_rows` selects them.
+type SessionHeadRow = (i64, String, Option<String>, Option<String>);
 
 /// A session's committed rows as admission leaves them: the catalog row and
 /// the created head row written in the same transaction (FIG-4561). A
@@ -88,7 +88,7 @@ struct AdmittedRows {
 /// admission to get `admitted`.
 async fn committed_rows(storage: &PostgresStorage, session_id: &SessionId) -> AdmittedRows {
     let head = sqlx::query_as(
-        "SELECT head_revision, head_json, checkpoint_ref, leaf_node_id, pending_follow_on_json
+        "SELECT head_revision, head_json, checkpoint_ref, leaf_node_id
          FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1",
     )
     .bind(session_id.as_str())
@@ -127,7 +127,7 @@ async fn assert_no_frame_commit_rows(
         &after, admitted,
         "the refused commit changed the admitted rows"
     );
-    let (head_revision, _, checkpoint_ref, leaf_node_id, _) = after
+    let (head_revision, _, checkpoint_ref, leaf_node_id) = after
         .head
         .as_ref()
         .expect("admission wrote the created head");

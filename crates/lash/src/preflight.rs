@@ -289,7 +289,7 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
              bytes this version gates live outside lash's own store",
         ),
         DurableFormat::RlmDriverState => SurfaceRelation::Unwalkable(
-            "no bounded surface: carried by TurnCheckpoint and PendingFollowOn.suspended_cell.driver_state; refused when either RLM channel resumes",
+            "no bounded surface: carried by TurnCheckpoint; refused when either RLM channel resumes",
         ),
         DurableFormat::NativeRlmTransport => SurfaceRelation::Unwalkable(
             "no bounded surface: one session-history record per provider exchange, refused at \

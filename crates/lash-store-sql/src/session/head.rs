@@ -4,7 +4,7 @@
 pub const TABLE: &str = "session_head";
 
 /// Every column, in insert order.
-pub const INSERT_COLUMNS: &str = "session_id, head_revision, pending_follow_on_json";
+pub const INSERT_COLUMNS: &str = "session_id, head_revision";
 
 /// The head leaf and the readable generation range around one candidate node,
 /// read as one statement.
@@ -24,16 +24,12 @@ crate::statements! {
 
         /// The published head of `?1`.
         select_meta = "SELECT revision.head_json, head.head_revision, revision.leaf_node_id, revision.checkpoint_ref,
-                    head.pending_follow_on_json, leaf.frame_node_id
+                    leaf.frame_node_id
              FROM session_head AS head LEFT JOIN session_revisions AS revision
                  ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
              LEFT JOIN graph_nodes AS leaf
                  ON leaf.node_id = revision.leaf_node_id
              WHERE head.session_id = ?1";
-
-
-        /// Clear the follow-on owed by `?1`, without moving its head revision.
-        clear_pending_follow_on = "UPDATE session_head SET pending_follow_on_json = NULL WHERE session_id = ?1";
 
 
         /// The published revision of `?1`, read inside the write transaction

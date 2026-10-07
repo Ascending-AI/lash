@@ -9,9 +9,7 @@
 
 use super::*;
 use lash_core_execution::store::queued_work::TurnWorkPrefix;
-use lash_core_execution::store::{
-    CheckpointAdmission, CheckpointAdmissionRequest, FollowOnAdmission, TurnLaneStop,
-};
+use lash_core_execution::store::{CheckpointAdmission, CheckpointAdmissionRequest, TurnLaneStop};
 
 /// Lower a transaction body's outcome into the write flow's commit decision:
 /// an error rolls back and carries the typed error to the caller.
@@ -23,20 +21,6 @@ fn flow<T>(
         Ok(TxOutcome::Rollback(value)) => TxOutcome::Rollback(Ok(value)),
         Err(error) => TxOutcome::Rollback(Err(error)),
     })
-}
-
-/// Whether the head's pending follow-on refuses `admission` (ADR 0101 §3):
-/// every admission but the follow-on's own is blocked while it is set.
-pub(super) fn follow_on_blocks_admission_conn(
-    conn: &Connection,
-    session_id: &SessionId,
-    admission: FollowOnAdmission<'_>,
-) -> Result<bool, StoreError> {
-    Ok(lash_core_execution::store::follow_on_blocks_admission(
-        super::turn_cancel::pending_follow_on_conn(conn, session_id)?.as_ref(),
-        admission,
-    )
-    .is_some())
 }
 
 /// Admit the checkpoint work of `request`'s run, keyed by its step
@@ -82,15 +66,6 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
                 )?;
                 if !recorded.is_empty() {
                     return Ok(TxOutcome::Commit(recorded));
-                }
-                if follow_on_blocks_admission_conn(
-                    tx,
-                    session_id,
-                    FollowOnAdmission::Checkpoint {
-                        turn_id: &request.turn_id,
-                    },
-                )? {
-                    return Ok(TxOutcome::Commit(CheckpointAdmission::default()));
                 }
                 let inputs = if request.max_inputs == 0 {
                     None
@@ -141,9 +116,6 @@ pub(crate) async fn open_session_command_run_sqlite(
         .read(move |tx| {
             Ok((|| {
                 let session_id = &session_id;
-                if follow_on_blocks_admission_conn(tx, session_id, FollowOnAdmission::Idle)? {
-                    return Ok(Vec::new());
-                }
                 let (_, mut batches, candidates) = scan_queued_work_candidates_sqlite(
                     tx,
                     session_id,

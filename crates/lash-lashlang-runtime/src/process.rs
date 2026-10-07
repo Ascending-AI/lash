@@ -20,15 +20,12 @@ use crate::{
     bridge::lashlang_value_to_json, validate_lashlang_process_admission,
 };
 
-static SEGMENT_BOUNDARY_DECLINED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static PARK_DECLINED_TOTAL: AtomicU64 = AtomicU64::new(0);
 #[cfg(any(test, feature = "testing"))]
 static EXECUTION_BOUND_EXHAUSTION_LOUD: AtomicBool = AtomicBool::new(true);
 
-pub(crate) fn record_segment_boundary_decline(
-    error: &dyn std::fmt::Display,
-    message: &'static str,
-) {
-    let declined_total = SEGMENT_BOUNDARY_DECLINED_TOTAL
+pub(crate) fn record_park_decline(error: &dyn std::fmt::Display, message: &'static str) {
+    let declined_total = PARK_DECLINED_TOTAL
         .fetch_add(1, Ordering::Relaxed)
         .saturating_add(1);
     tracing::warn!(error = %error, declined_total, "{message}");

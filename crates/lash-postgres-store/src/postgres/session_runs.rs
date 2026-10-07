@@ -414,17 +414,6 @@ async fn write_unanswered_run_end_tx(
         head_revision: None,
         at_ms,
     };
-    sqlx::query(
-        crate::session_sql::session_sql()
-            .head
-            .clear_pending_follow_on
-            .sql(),
-    )
-    .bind(session.as_str())
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-
     // The run's own input is dropped and its batches cancelled first; the
     // terminal write then releases whatever else the run still held.
     let mut inputs: Vec<String> = sqlx::query_scalar(session_runs_sql().inputs.bound_inputs.sql())
@@ -506,13 +495,11 @@ pub(crate) async fn unfinished_run_conn(
 }
 
 /// What owns session `session_id`'s head, read in a head commit's
-/// transaction (FIG-4202): its unfinished run, the follow-on its head owes
-/// (`owed_follow_on`, read with the head) and its earliest open session
+/// transaction (FIG-4202): its unfinished run and its earliest open session
 /// command.
 pub(crate) async fn head_ownership_facts_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
-    owed_follow_on: Option<TurnId>,
 ) -> Result<lash_core_execution::store::HeadOwnershipFacts, StoreError> {
     let unfinished_run = unfinished_run_conn(conn, session_id)
         .await?
@@ -530,7 +517,6 @@ pub(crate) async fn head_ownership_facts_conn(
     .map_err(store_sqlx_error)?;
     Ok(lash_core_execution::store::HeadOwnershipFacts {
         unfinished_run,
-        owed_follow_on,
         open_command: row
             .1
             .map(|seq| u64_from_sql("QueuedWorkBatch", "enqueue_seq", seq))

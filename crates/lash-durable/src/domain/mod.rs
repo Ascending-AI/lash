@@ -216,6 +216,15 @@ pub enum DomainRefusal {
         /// The input or batch.
         item: String,
     },
+    /// The session refused mail its owner sent it: the session is closing
+    /// or gone, or the mail's source key names another submission.
+    #[error("session {session} refused its owner's mail: {reason}")]
+    SessionMailRefused {
+        /// The session.
+        session: SessionId,
+        /// The store's refusal.
+        reason: String,
+    },
     /// A trigger start's occurrence is already recorded: another emission of
     /// it committed since the start's plan read.
     #[error("trigger occurrence {occurrence} is already recorded")]

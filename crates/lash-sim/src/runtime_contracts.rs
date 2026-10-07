@@ -620,9 +620,6 @@ pub fn runtime_final_value_invariant_facts(
         lash_core::facade_support::TurnOutcome::AgentFrameSwitch { .. } => {
             ("agent_frame_switch".to_string(), None)
         }
-        lash_core::facade_support::TurnOutcome::SegmentBoundary { .. } => {
-            ("segment_boundary".to_string(), None)
-        }
         lash_core::facade_support::TurnOutcome::Stopped(_) => ("stopped".to_string(), None),
     };
     let terminal_event_count = activities

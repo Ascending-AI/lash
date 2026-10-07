@@ -195,9 +195,7 @@ impl TurnReport {
     pub fn is_success(&self) -> bool {
         matches!(
             self.outcome,
-            TurnOutcome::Finished(_)
-                | TurnOutcome::AgentFrameSwitch { .. }
-                | TurnOutcome::SegmentBoundary { .. }
+            TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
         )
     }
 

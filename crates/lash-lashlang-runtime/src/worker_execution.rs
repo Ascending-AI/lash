@@ -238,7 +238,7 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
         Ok(())
     }
     fn park_declined(&self, reason: &str) {
-        crate::process::record_segment_boundary_decline(&reason, "worker declined segment capture");
+        crate::process::record_park_decline(&reason, "worker declined park capture");
     }
 }
 impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {

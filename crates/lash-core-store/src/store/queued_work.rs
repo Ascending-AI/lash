@@ -46,10 +46,6 @@ pub enum AdmissionRefusal {
     HeadWithheld,
     /// The selection was legal, but another writer took the rows first.
     AdmissionRaceLost,
-    /// A pending follow-on owns the session (ADR 0101 §3): nothing is
-    /// admitted until its turn commits. Not an error; the drain answers it
-    /// after the follow-on.
-    FollowOnPending,
 }
 
 impl AdmissionRefusal {
@@ -62,7 +58,6 @@ impl AdmissionRefusal {
             Self::DeliveryBoundaryBlocked => "delivery_boundary_blocked",
             Self::HeadWithheld => "head_withheld",
             Self::AdmissionRaceLost => "admission_race_lost",
-            Self::FollowOnPending => "follow_on_pending",
         }
     }
 }

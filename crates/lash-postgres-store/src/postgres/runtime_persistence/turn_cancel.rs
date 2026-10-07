@@ -1,38 +1,7 @@
-//! Follow-on and commit-identity helpers the commit and ingress paths share,
+//! Commit-identity helpers the commit and ingress paths share,
 //! each running inside the caller's transaction.
 
 use super::*;
-
-/// The follow-on the head of `session_id` owes (ADR 0101 §3), read inside
-/// the caller's transaction under a row lock: `FOR UPDATE` for a writer that
-/// decides against it, `FOR SHARE` for an admission.
-pub(super) async fn pending_follow_on_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
-    for_update: bool,
-) -> Result<Option<lash_core_execution::store::PendingFollowOn>, StoreError> {
-    let statement = if for_update {
-        crate::session_sql::session_sql()
-            .head_postgres
-            .select_pending_follow_on_for_update
-            .sql()
-    } else {
-        crate::session_sql::session_sql()
-            .head_postgres
-            .select_pending_follow_on_for_share
-            .sql()
-    };
-    let json = sqlx::query_scalar::<_, Option<String>>(statement)
-        .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .flatten();
-    lash_core_execution::store::pending_follow_on::decode_pending_follow_on(
-        session_id,
-        json.as_deref(),
-    )
-}
 
 pub(super) fn requested_append_ancestor(
     stamp: &lash_core_execution::RuntimeTurnCommitStamp,

@@ -1,5 +1,4 @@
 use lash_sansio::SessionId;
-use lash_sansio::TurnId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash::scenario_contracts::AGENT_SCENARIO_CONTRACTS;
@@ -119,24 +118,12 @@ pub const FRAME_SWITCH_SEED_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.frame-switch-seed.v1");
 pub const LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.logical-turn-admission-exactly-once.v1");
-pub const FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE: crate::trace::OracleId<'static> =
-    crate::trace::OracleId::real("sim.oracle.frame-switch-follow-on-atomicity.v1");
-pub const FRAME_SWITCH_ORDERING_ORACLE: crate::trace::OracleId<'static> =
-    crate::trace::OracleId::real("sim.oracle.frame-switch-ordering.v1");
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameSwitchSeedObservation {
     pub protocol: String,
     pub expected_nodes: Vec<Value>,
     pub observed_nodes: Vec<Value>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FrameSwitchCommitObservation {
-    pub turn_id: TurnId,
-    pub inbound_admission_completed: bool,
-    /// Whether the head owed the follow-on once the switch commit was visible.
-    pub follow_on_owed: bool,
 }
 
 mod agent_contracts;
@@ -157,8 +144,7 @@ use agent_contracts::*;
 use contract_facts::*;
 use frame_switch::*;
 pub use frame_switch::{
-    frame_switch_follow_on_is_atomic, frame_switch_follow_on_precedes_pending, frame_switch_seeds,
-    generated_final_value_semantic_channel, generated_suspend_resume,
+    frame_switch_seeds, generated_final_value_semantic_channel, generated_suspend_resume,
     logical_turn_admissions_settle_exactly_once,
 };
 pub use live_provider::{
