@@ -23,7 +23,9 @@ lash_rust_binary(
     crate_root = "src/main.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("e2e-consumer", "e2e_consumer"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -45,6 +47,12 @@ lash_rust_unit_test(
     crate_root = "src/main.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("e2e-consumer", "e2e_consumer", "//examples/e2e-consumer:e2e-consumer__unit_test"),
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = None,
     library_crate_name = None,
@@ -52,9 +60,6 @@ lash_rust_unit_test(
     package_name = "e2e-consumer",
     tags = [],
     version = "0.0.0-dev",
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
 )
 
 filegroup(

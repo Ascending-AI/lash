@@ -162,9 +162,8 @@ enum Command {
         profile: Option<String>,
     },
 
-    /// Run the send-to-completion latency gate (FIG-3843) against a live
-    /// restate-server: `RESTATE_INGRESS_URL`/`RESTATE_ADMIN_URL` when a
-    /// launcher provides one, a spawned private server otherwise.
+    /// Run the send-to-completion latency gate (FIG-3843) on lash's durable
+    /// engine over SQLite store sets under `--store-dir`.
     Latency {
         /// Write the latency gate JSON report to this file.
         #[arg(long, value_name = "OUT.json")]

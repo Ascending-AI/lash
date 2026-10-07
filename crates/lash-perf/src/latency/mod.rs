@@ -1,9 +1,9 @@
 //! The `send()`-to-completion latency gate (FIG-3843).
 //!
-//! Hosts no longer run turns inline: a host calls `send()`, Restate executes
-//! the session, and `SendHandle::outcome()` follows live replay and durable
-//! state to the answer. This module measures that path end to end on a live
-//! `restate-server` and gates the added overhead — host-visible completion
+//! Hosts no longer run turns inline: a host calls `send()`, the session's
+//! actor runs the turn on a node, and `SendHandle::outcome()` follows live
+//! replay and durable state to the answer. This module measures that path end
+//! to end on lash's durable engine and gates the added overhead — host-visible completion
 //! minus the deterministic fast provider's own time — at p50 < 50 ms and
 //! p99 < 250 ms on the same-process fast fixture.
 //!

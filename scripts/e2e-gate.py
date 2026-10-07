@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Run one exact E2E registration in this fork's private Kiln gate."""
+"""Run one exact E2E registration in this fork's private Kiln gate.
+
+A case boots its own lash nodes over the row's store; this script builds the
+hosts, supplies PostgreSQL when the row needs it, runs the exact test and
+splits the case's receipt into the role files `lash-e2e.py` reconciles.
+"""
 
 from __future__ import annotations
 
@@ -20,13 +25,12 @@ import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# No registration runs until L9h (FIG-5186) rebuilds the E2E hosts on the
-# durable runtime: the upgrade harness that owned them went with Restate
-# (FIG-5190).
+# No registration runs until a facade turn runs on the durable engine (L3's
+# facade wiring, FIG-5172) and L9h (FIG-5186) rebuilds the E2E host harness
+# on it.
 LABELS: frozenset[str] = frozenset()
 WORKBENCH = "//examples/agent-workbench:agent-workbench"
 WORKER = "//crates/lash-vm-worker:lash-vm-worker__bin"
-SERVER = "native//:restate"
 LASHCTL = "//crates/lashctl:lashctl"
 CONSUMER = "//examples/e2e-consumer:e2e-consumer"
 RLM_HOST = "//runbooks/rlm-smoke:rlm-smoke"
@@ -85,8 +89,13 @@ def hardlink(path: Path, destination: Path) -> None:
 
 
 def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source: str,
-                 case: str | None, admin_url: str, base_provenance: dict) -> dict:
-    """Split the case's CaseReceipt into the role files reconcile consumes."""
+                 case: str | None, leg: str, base_provenance: dict) -> dict:
+    """Split the case's CaseReceipt into the role files reconcile consumes.
+
+    The case reports the labelled commits it observed with the replay
+    tripwire's counts, and every lash node it booted. A resume leg must show a
+    node killed and its work resumed on another node.
+    """
     errors: list[str] = []
     shutil.copy2(junit, artifacts / "junit.xml")
     evidence: dict = {}
@@ -100,17 +109,21 @@ def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source:
                 raise ValueError("receipt evidence is not an object")
         except (OSError, ValueError, KeyError, TypeError) as error:
             errors.append(f"unreadable CaseReceipt: {error}")
-    journals = evidence.get("journals") or []
+    commits = evidence.get("commits") or []
+    tripwire = evidence.get("tripwire")
+    nodes = evidence.get("nodes") or []
     cleanup = evidence.get("cleanup") or []
     if evidence:
-        if journals:
-            write(artifacts / "journal.json", {
-                "journals": journals,
-                "native_records": evidence.get("native_records") or [],
-                "transfers": evidence.get("transfers") or [],
-            })
+        if commits and isinstance(tripwire, dict):
+            write(artifacts / "commits.json", {"commits": commits, "tripwire": tripwire})
         else:
-            errors.append("no journal evidence")
+            errors.append("no labelled commits or replay tripwire evidence")
+        names = {str(node.get("node")) for node in nodes}
+        killed = {str(node.get("node")) for node in nodes if node.get("killed")}
+        if not names:
+            errors.append("no node evidence")
+        elif leg == "resume" and not (killed and names - killed):
+            errors.append("a resume leg needs a killed node and a node that resumed its work")
         write(artifacts / "store.json", {"stores": evidence.get("stores") or []})
         write(artifacts / "host.json", {
             "outputs": evidence.get("outputs") or [],
@@ -162,30 +175,11 @@ def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source:
             binaries["synthetic_next_vm_worker"] = descriptor(
                 "synthetic_next_vm_worker", outputs["vm_worker_next"])
     binaries["vm_worker"] = descriptor("vm_worker", outputs["vm_worker"])
-    server = descriptor("restate-server", outputs["server"])
-    lock = json.loads((ROOT / "tools/buck2/native-tools-lock.json").read_text())["tools"]["restate"]
-    nodes = {
-        receipt["resource"] for receipt in cleanup
-        if re.fullmatch(r"restate-\d+", str(receipt.get("resource", "")))
-    }
-    if nodes:
-        server_nodes = len(nodes)
-    elif journals and all(str(fact.get("admin_url", "")).rstrip("/") == admin_url
-                          for fact in journals):
-        server_nodes = 1
-    else:
-        server_nodes = None
     provenance = {
         **base_provenance,
         "case": case,
-        "protocol": "V7" if journals and all(fact.get("protocol") == 7 for fact in journals) else None,
-        "server_nodes": server_nodes,
+        "nodes": len({str(node.get("node")) for node in nodes}) or None,
         "binaries": binaries,
-        "server": {
-            "version": lock["version"],
-            "archive_sha256": lock["sha256"],
-            "artifact": server["artifact"],
-        },
         "evidence_error": "; ".join(errors) or None,
     }
     write(artifacts / "provenance.json", provenance)
@@ -239,8 +233,8 @@ def scratch_dir(artifacts: Path) -> Path:
 def run(label: str, name: str, artifacts: Path, case: str | None,
         store: str, leg: str, live_replay: str) -> int:
     gate = os.environ["KILN_GATE_ID"]
-    # S28 owns a second cluster in this block and fleet PostgreSQL owns
-    # offset 40.
+    # A case's nodes and fixtures take ports from this block; fleet
+    # PostgreSQL owns offset 40.
     base, block_fd = claim_port_block(Path(os.environ.get(
         "LASH_GATE_STATE_ROOT", f"/tmp/lash-gate-{os.getuid()}")))
     reservations = []
@@ -278,7 +272,7 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
         lashctl_next = feature_variant(units, "lashctl", LASHCTL, ["synthetic-next"])
         build = artifacts / "build.json"
         subprocess.run([
-            "kiln", "build", WORKBENCH, workbench_e2e, WORKER, SERVER,
+            "kiln", "build", WORKBENCH, workbench_e2e, WORKER,
             lashctl_n, lashctl_next, worker_next, CONSUMER, RLM_HOST, label,
             "--materializations", "final",
             "--target-platforms", "prelude//platforms:default",
@@ -293,7 +287,6 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
             "rlm_host": Path(output(build, RLM_HOST)),
             "vm_worker": Path(output(build, WORKER)),
             "vm_worker_next": Path(output(build, worker_next)),
-            "server": Path(output(build, SERVER)),
         }
         workbench = str(outputs["workbench"])
         worker = str(outputs["vm_worker"])
@@ -371,16 +364,15 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
         code = subprocess.call(command, cwd=ROOT, env=env)
         counts = test_counts(report, label, name)
         junit = Path(counts.pop("junit_xml"))
-        provenance = certify_case(artifacts, junit, outputs, source, case,
-                                  f"http://127.0.0.1:{base + 46}", {
-                                      "scenario": name, "label": label, "source_sha": source,
-                                      "gate": gate, "port_base": base,
-                                      "store": store, "leg": leg,
-                                      "live_replay": live_replay,
-                                      "playwright": "1.62.0",
-                                      "workbench": {"path": workbench,
-                                                    "sha256": env["LASH_E2E_WORKBENCH_SHA256"]},
-                                  })
+        provenance = certify_case(artifacts, junit, outputs, source, case, leg, {
+            "scenario": name, "label": label, "source_sha": source,
+            "gate": gate, "port_base": base,
+            "store": store, "leg": leg,
+            "live_replay": live_replay,
+            "playwright": "1.62.0",
+            "workbench": {"path": workbench,
+                          "sha256": env["LASH_E2E_WORKBENCH_SHA256"]},
+        })
         write(artifacts / "execution.json", {
             "scenario": name, "label": label, "source_sha": source, "counts": counts,
             "store": store, "leg": leg,
@@ -401,8 +393,8 @@ def main() -> int:
     parser.add_argument("test", help="full exact test path inside the label")
     parser.add_argument("--store", choices=("sqlite_memory", "sqlite_file", "postgresql"), required=True,
                         help="store the case runs its host over")
-    parser.add_argument("--leg", choices=("live", "replay"), required=True,
-                        help="invocation leg the case runs")
+    parser.add_argument("--leg", choices=("live", "resume"), required=True,
+                        help="live, or resume: kill a node and resume its work on another")
     parser.add_argument("--artifacts", type=Path, help="fresh directory inside this fork")
     parser.add_argument("--case", help="manifest scenario/variant/store/leg/channel key")
     parser.add_argument("--live-replay", choices=("memory", "postgresql"), default="memory",

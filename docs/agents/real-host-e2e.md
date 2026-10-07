@@ -15,19 +15,33 @@ S22 guards FIG-4896–4900, S13's final drain path guards FIG-4900, and S18's
 final wait contract guards FIG-4897; all are landed. F02/FIG-1863 was already
 landed at intake; S35/S36 have no F02 guard.
 
+Every case boots its own lash nodes over the row's store, with no server
+beside them (ADR 0132 §1): one SQLite file or SQLite memory store for a
+single node, or one PostgreSQL store that several nodes share. A row's
+`nodes` is how many lash nodes the case boots.
+
 Smoke selects exactly S01/S02/S17/S18/S26/S30 on the live leg. S01/S02/S17/S18/S26
 use file SQLite; S30 uses memory SQLite. Full and release select the same
 deterministic catalogue; live-provider cases S35/S36 are separate. Counts cover
 each permutation. Held rows keep their variant hold until the named owner
-lands its implementation. S37 boots two workbench replicas over one
-Restate authority and one PostgreSQL store, runs a turn on replica B while
-replica A's feeds observe it, and kills B mid-turn. Its variant names the
-live replay store both replicas run with: with the process-local `memory`
-store, B's live activity never reaches A and A converges through the
-durable head; with the shared `postgresql` store (FIG-5101), A's feeds carry
-B's live activity before commit and converge without a gap. S33 reuses the existing Phase A operator
-choreography; it does not introduce another operator supervisor. Existing
-supervisors and the Restate law board remain until parity.
+lands its implementation. S14 kills one of two nodes over one PostgreSQL
+store mid-tool and S15 partitions one from the database; the survivor reaps
+it, claims its actors and finishes the work, and the fenced node's late
+commits are refused. S37 boots two workbench nodes over one PostgreSQL
+store, runs a turn on node B while node A's feeds observe it, kills B
+mid-turn and resumes the turn on A. Its variant names the live replay store
+both nodes run with: with the process-local `memory` store, B's live
+activity never reaches A and A converges through the durable head; with the
+shared `postgresql` store (FIG-5101), A's feeds carry B's live activity
+before commit and converge without a gap. S33 reuses the existing Phase A
+operator choreography; it does not introduce another operator supervisor.
+
+2026-10-07: every row is held. The E2E host harness went with the server
+it booted (FIG-5190), and no host can run a turn through the facade until
+L3's facade wiring (FIG-5172) lands; L9h (FIG-5186) then
+rebuilds the harness and registers the rows. Rows whose subject was removed
+machinery (S12, S13, S22, S23, S24, S31, S32) name the lane that re-scopes
+or retires them.
 
 Read a plan without booting services:
 
@@ -69,14 +83,13 @@ For each case the planner calls
 `python3 scripts/e2e-gate.py <label> <test> --store <store> --leg <leg>
 --artifacts <dir>/case-<i>`. The
 runner enters the fork's private Kiln gate, materializes the union of
-binaries the registered selectors need in one `kiln build`, serves pinned
-Restate, and runs an exact uncached `kiln test` under
-`scripts/ci/restate_suite.py`. Its JUnit must contain exactly the registered
-test. Stale case or test selectors refuse before boot. This script owns no
-service processes and inserts no journal commands.
+binaries the registered selectors need in one `kiln build`, and runs an
+exact uncached `kiln test`. Its JUnit must contain exactly the registered
+test. Stale case or test selectors refuse before boot. The case boots and
+stops its own nodes; this script owns no service process but PostgreSQL.
 
 Each row declares its store and leg, and every permutation is its own test
-function named `<test>[_postgresql][_replay]`. A row may also declare
+function named `<test>[_postgresql][_resume]`. A row may also declare
 `"live_replay": "postgresql"` (variant `postgresql-live-replay`): the planner
 passes `--live-replay postgresql`, the runner supplies PostgreSQL as for a
 PostgreSQL store and sets `LASH_E2E_LIVE_REPLAY`, and every workbench of the
@@ -86,25 +99,17 @@ store stays the row's `store`. S01/S02/S17/S18/S26 carry such a row in full
 and release; S30's host is the external consumer, which has no live replay
 seam. For `--store postgresql` the
 runner supplies PostgreSQL through `scripts/ci/with-service.sh pg16`, and the
-case creates a fresh database and applies the committed schema itself. For
-`--leg replay` the runner serves the always-suspending Restate
-(`RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s`), and the scenario's leg
-oracle must observe at least one suspended invocation task in the server's
-Prometheus metrics; a live leg only retains the same scrape. The H2 runner's
-replay leg also reads the V7 frames its proxies retained: one of the case's
-journaled Run invocations must end an attempt in a Suspension and resume on a
-replayed command, and every resumed attempt's replayed entries must match that
-invocation's `sys_journal` entry for entry (`h2_replay_wire` in the store
-evidence).
+case creates a fresh database and applies the committed schema itself.
 
-2026-10-06: the forced-replay legs held by ruling #53 are excluded from the
-1.0 tier (S04/default, S06/default, S07/default, S11/inline and S11/deferred,
-S24/default, and S25/same-key, S25/disjoint-keys, S25/namespaces — the
-always-suspend replay rows on sqlite_file and, where declared, postgresql).
-Always-suspend replay cannot suspend while a sibling tool body executes
-in-invocation (SDK/shared-core limitation), so these cuts are unreachable;
-each scenario certifies on its live legs. FIG-5155 tracks running tool bodies
-as child invocations post-1.0, which makes these legs runnable again.
+A `resume` leg replaces the old forced-replay leg and keeps its crash
+coverage: the case kills a node at the scenario's cut, after the work it
+names has committed, and resumes that work on another node from committed
+state alone. Its `nodes` is at least two (on SQLite the second node opens
+the file after the first is dead). The leg oracle needs a killed node and
+a node that resumed its work in the case's node evidence; every leg reports
+the labelled commits it observed with the replay tripwire's counts (ADR 0132
+§2), so a body run twice or an outcome looked up for re-running code is
+visible in the `commits` artifact.
 
 The producer writes `receipt.json` using
 `scripts/lash-e2e-receipt.schema.json`. It carries the source SHA, manifest
@@ -114,19 +119,17 @@ that order. Status is `passed`, `failed` or `not_run`; `executed` agrees with it
 Quarantine cannot certify. The schema describes the envelope; the reconciler
 also enforces artifact contents and cross-record invariants.
 
-Each case supplies digest-qualified relative paths for journal, store, host,
+Each case supplies digest-qualified relative paths for commits, store, host,
 trace, cleanup, JUnit and provenance artifacts. Files must exist beneath the
 receipt directory, including through symlinks, and match their digests. Scenario
-owners retain decoded journal/barrier/fault and business evidence in these
-artifacts; a provider log cannot substitute for a journal. JUnit must contain
+owners retain labelled commits, tripwire counts, barrier/fault and business
+evidence in these artifacts; a provider log cannot substitute for the
+commits. JUnit must contain
 exactly the registered test, with no failure/error/skip. Cleanup must be
 `{"complete":true,"errors":[],"remaining":[]}` after all owned resources close.
-Provenance carries case/source SHA, negotiated `V7`, server-node count, all
-manifest binary roles with exact source SHAs and artifact descriptors, and
-the server version/archive digest/executable descriptor. The initial server
-archive pin is the existing native-pool pin, 1.7.13; its executable digest
-remains unregistered until H0 supplies it. Activation must use one pin across
-both legs; this change does not alter the independent live-law runner's pin.
+Provenance carries case/source SHA, the number of lash nodes the case
+booted, which must equal the row's `nodes`, and all manifest binary roles
+with exact source SHAs and artifact descriptors.
 
 Reconcile preserved artifacts independently:
 
@@ -153,6 +156,6 @@ Event barriers and deadline-bound predicate probes belong in the
 case and its evidence; sleeps cannot establish readiness, completion or
 cleanup.
 
-The nine laws in `scripts/test_lash_e2e.py` pin R8 selection, counts, artifact and
-release-evidence rules using synthetic envelopes. They execute no host cases
+The laws in `scripts/test_lash_e2e.py` pin R8 selection, counts, artifact,
+resume-leg and release-evidence rules using synthetic envelopes. They execute no host cases
 and provide no live-substrate, upgrade or release proof.

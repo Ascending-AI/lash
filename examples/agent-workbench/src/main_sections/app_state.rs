@@ -277,9 +277,7 @@ impl AppState {
                 },
             };
             // A pending terminal keeps the claim: the run's follower releases
-            // it once the run settles. The engine liveness probe that pruned a
-            // claim with no running run went with Restate (FIG-5190); I0
-            // (FIG-5194) names the durable engine's.
+            // it once the run settles.
             let routing_retained = if receipt.terminal_is_pending() {
                 true
             } else {
@@ -923,8 +921,8 @@ impl AppError {
         // contention arrives as
         // `EmbedError::Runtime(StoreCommitContended)` and does not match. If a
         // future non-open path mints `EmbedError::Store(Contended)`, durable turn
-        // failures would flip from Ambiguous to Retryable and Restate would rerun
-        // the provider call.
+        // failures would flip from Ambiguous to Retryable and the host would
+        // resend the provider call.
         if error.is_contended() {
             return temporarily_unavailable_session_open();
         }

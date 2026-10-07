@@ -276,11 +276,11 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
                 scenario.name()
             );
         }
-        // Restate orders a turn's commit on its own journal, so the
-        // in-process lane never takes local commit admission.
+        // A turn commits in its own phase transaction, so the in-process
+        // lane never takes local commit admission.
         assert!(
             !phases.contains(&"commit_admission.product_attempt"),
-            "{} requires local commit admission on the Restate lane",
+            "{} requires local commit admission on the durable lane",
             scenario.name()
         );
         for removed in [

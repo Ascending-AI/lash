@@ -241,7 +241,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     assert_eq!(inherited_observer.replay_component(), "observer-test");
 
     let external_ref = ProcessExternalRef {
-        backend: "restate".to_string(),
+        backend: "host-queue".to_string(),
         id: "invocation-778".to_string(),
         metadata: Some(json!({ "region": "eu-central-1" })),
         segment_ordinal: None,
@@ -250,7 +250,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         .set_external_ref(&process_id, external_ref)
         .await
         .expect("bind backend work");
-    assert_eq!(record.external_ref.as_ref().unwrap().backend, "restate");
+    assert_eq!(record.external_ref.as_ref().unwrap().backend, "host-queue");
     assert_eq!(record.external_ref.as_ref().unwrap().id, "invocation-778");
     assert_eq!(
         record

@@ -214,7 +214,7 @@ impl AppState {
     ///
     /// These were two facts recorded by two different owners: the mark by
     /// whoever settled the delete, the rotation only by the reset route that
-    /// happened to still be awaiting its Restate call. A delete that completed
+    /// happened to still be awaiting its delete. A delete that completed
     /// durably while that call's result was lost — the browser's request
     /// dropped, an ambiguous attach — left the mark `Retired` and the roster's
     /// current on the tombstoned id, which every session-bound surface then

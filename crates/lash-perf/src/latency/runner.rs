@@ -1,6 +1,6 @@
 //! The latency case runner: topologies, lane loops and the store poller.
 //!
-//! One *sample* is a send→outcome round trip on a live Restate server. The
+//! One *sample* is a send→outcome round trip on the durable engine. The
 //! host measures the wall spans it can see; a per-sample store poller reads
 //! durable evidence so the admission, application and settlement instants do
 //! not ride the follower's own wake schedule. Every read is keyed — the
@@ -61,8 +61,8 @@ const POLL_CEILING_MS: f64 = 1_000.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Topology {
-    /// The endpoint serves in this process: the same `RestateEngine` submits
-    /// and executes, and live replay plus the settled-run mailbox are
+    /// The node serves in this process: the same backend submits and
+    /// executes, and live replay plus the settled-run mailbox are
     /// process-local.
     SameProcess,
     /// A `lash-perf latency-worker` child process serves the endpoint; the
@@ -282,10 +282,10 @@ pub(crate) async fn run_case(
             let observer = build_observer(&stores_dir).await?;
             CaseTopology { core, observer }
         }
-        // A cross-worker case's child served the engine's endpoint for the
-        // host; L9h (FIG-5186) ports these cases to the durable engine.
+        // A cross-worker case's child serves the node the host only sends
+        // to; no host serves a node until L3's facade wiring (FIG-5172).
         Topology::CrossWorker => anyhow::bail!(
-            "latency case `{}` runs cross-worker, and no worker serves the durable engine until L9h (FIG-5186)",
+            "latency case `{}` runs cross-worker, and no worker serves a durable node until L3's facade wiring (FIG-5172)",
             spec.name
         ),
     };

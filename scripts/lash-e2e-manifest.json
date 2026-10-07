@@ -24,13 +24,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -39,25 +39,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -66,7 +66,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -78,13 +78,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -93,14 +93,14 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "live_replay": "postgresql"
         }
       ],
-      "setup": "Workbench Standard, one echo tool, real Restate/file SQLite.",
-      "fault": "None; replay leg suspends.",
-      "observable": "One original call identity, independently decoded A/X/D/V facts in owning Run, one reply; no second body on replay.",
+      "setup": "Workbench Standard, one echo tool, file SQLite.",
+      "fault": "None; the resume leg kills the node after the tool's outcome commits and resumes on another.",
+      "observable": "One original call identity, independently decoded A/X/D/V facts in owning Run, one reply; no second body after resume.",
       "arc_guards": [],
       "host": "workbench"
     },
@@ -126,13 +126,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -141,25 +141,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -168,7 +168,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -180,13 +180,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -195,25 +195,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -222,7 +222,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -234,13 +234,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -249,7 +249,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "live_replay": "postgresql"
         }
@@ -281,13 +281,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -296,25 +296,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -323,7 +323,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -355,13 +355,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -370,25 +370,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -397,7 +397,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -409,13 +409,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -424,25 +424,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -451,7 +451,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -483,13 +483,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -498,25 +498,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -525,7 +525,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -537,13 +537,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -552,25 +552,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -579,13 +579,13 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
       "setup": "Standard batch A/B/C; each body reaches barrier.",
       "fault": "Complete C/A/B, kill after A durable.",
-      "observable": "Three independent attempt receipts; all-started evidence before completion; replay preserves recorded selection and source-order batch output.",
+      "observable": "Three independent attempt receipts; all-started evidence before completion; resume preserves recorded selection and source-order batch output.",
       "arc_guards": []
     },
     {
@@ -609,13 +609,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -624,25 +624,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -651,13 +651,13 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
       "setup": "A/B each fail once with typed retryable result; controllable real backoff.",
       "fault": "Kill mid-backoff; reverse ready order on recovery.",
-      "observable": "Journal reconstructs same dynamic command prefix, ordinal advances only on reported retry, durable attempts do not repeat.",
+      "observable": "The run records reconstruct the same retry schedule, ordinal advances only on reported retry, durable attempts do not repeat.",
       "arc_guards": []
     },
     {
@@ -683,13 +683,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -698,25 +698,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -725,7 +725,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -756,13 +756,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -771,25 +771,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -798,7 +798,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -810,13 +810,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -825,25 +825,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -852,7 +852,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -882,13 +882,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -897,7 +897,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -909,13 +909,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -924,25 +924,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "before-intent",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -951,25 +951,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "after-intent",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -978,7 +978,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -990,13 +990,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1005,7 +1005,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -1017,13 +1017,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1032,25 +1032,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "before-intent",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1059,25 +1059,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "after-intent",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1086,7 +1086,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -1117,13 +1117,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1132,25 +1132,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1159,7 +1159,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -1171,13 +1171,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1186,25 +1186,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1213,7 +1213,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -1244,13 +1244,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1259,7 +1259,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -1271,13 +1271,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1286,25 +1286,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "inline",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1313,25 +1313,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "deferred",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1340,7 +1340,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -1352,13 +1352,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1367,7 +1367,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -1379,13 +1379,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1394,25 +1394,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "inline",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1421,25 +1421,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "deferred",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1448,7 +1448,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -1481,13 +1481,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1496,25 +1496,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, retiring deployment N under a generation drain, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1523,7 +1523,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, retiring deployment N under a generation drain, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
           "registration": null
         },
         {
@@ -1535,13 +1535,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1550,25 +1550,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, retiring deployment N under a generation drain, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1577,7 +1577,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, retiring deployment N under a generation drain, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
           "registration": null
         }
       ],
@@ -1609,7 +1609,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -1619,7 +1619,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1628,19 +1628,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, a drain's refusal to finalize, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -1650,7 +1650,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1659,7 +1659,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, a drain's refusal to finalize, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
           "registration": null
         },
         {
@@ -1671,7 +1671,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -1681,7 +1681,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1690,19 +1690,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, a drain's refusal to finalize, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -1712,7 +1712,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1721,7 +1721,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, a drain's refusal to finalize, went with L10g (FIG-5200); L11 (FIG-5187) re-scopes it to planned:D1 (a build drains by releasing its actors)",
           "registration": null
         }
       ],
@@ -1737,7 +1737,7 @@
     },
     {
       "id": "S14",
-      "title": "Restate leader loss retains accepted work",
+      "title": "a lost node's accepted work finishes on another node",
       "owner": "H4",
       "rules": [
         "L02",
@@ -1747,7 +1747,7 @@
         "R3",
         "R1"
       ],
-      "dependencies": "Base, cluster core, F01",
+      "dependencies": "Base, L8 (FIG-5178), L8b (FIG-5199)",
       "cases": [
         {
           "variant": "default",
@@ -1758,13 +1758,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 3,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1773,18 +1773,18 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
-      "setup": "Three-node local cluster, two Lash workers, PG, acknowledged input plus unfinished tool.",
-      "fault": "Kill observed leader of active partition, restart on same data.",
-      "observable": "Leader epoch/recovery observed; accepted input attaches to one Run terminal; durable X reused, unfinished X same identity; all nodes converge.",
+      "setup": "Two lash nodes over one PostgreSQL store; acknowledged input plus an unfinished tool on node A.",
+      "fault": "SIGKILL node A mid-tool; node B reaps it and claims its actors.",
+      "observable": "The accepted input attaches to one Run terminal on B; a durable tool outcome is reused, an unfinished Once tool records Interrupted and a Repeatable one reruns at its ordinal; the replay tripwire counts no hidden replay.",
       "arc_guards": []
     },
     {
       "id": "S15",
-      "title": "minority partition cannot create a second winner",
+      "title": "a partitioned node cannot create a second winner",
       "owner": "H4",
       "rules": [
         "L03",
@@ -1794,7 +1794,7 @@
         "R3",
         "R5"
       ],
-      "dependencies": "Base, cluster core + link proxies, F01",
+      "dependencies": "Base, L8 (FIG-5178), L8b (FIG-5199)",
       "cases": [
         {
           "variant": "default",
@@ -1805,13 +1805,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 3,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1820,13 +1820,13 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
-      "setup": "Three-node cluster + shared PG; same Run visible to clients.",
-      "fault": "Partition one node bidirectionally from peers during tool/cancel race; heal.",
-      "observable": "Majority settles; no conflicting terminal or new effect identity from minority; journals/head/receipts converge after heal.",
+      "setup": "Two lash nodes over one PostgreSQL store; the same Run visible to clients.",
+      "fault": "Partition node A from the database during a tool/cancel race until B reaps it and claims; heal.",
+      "observable": "B settles; A's commits after the reap are refused by the epoch fence and nothing it wrote is visible; one terminal and no new effect identity from A; head and rows converge after heal.",
       "arc_guards": []
     },
     {
@@ -1852,13 +1852,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1867,7 +1867,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -1879,13 +1879,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1894,25 +1894,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "terminal-publication",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1921,25 +1921,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "sigkill-redrive",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1948,7 +1948,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -1980,13 +1980,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -1995,25 +1995,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2022,7 +2022,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -2034,13 +2034,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2049,25 +2049,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2076,7 +2076,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -2088,13 +2088,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2103,12 +2103,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "live_replay": "postgresql"
         }
       ],
-      "setup": "Workbench e2e-tools plugin task issues a native tool and returns completion; node::h3::double_fixture proves admission and follow on the server double.",
+      "setup": "Workbench e2e-tools plugin task issues a native tool and returns completion.",
       "fault": "Drop caller's handle, then reattach by recorded Run ID.",
       "observable": "Durable admission answers separately; operation completes/Closes only after issued work settles; follow/result match stored terminal.",
       "arc_guards": [],
@@ -2138,13 +2138,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2153,7 +2153,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -2165,13 +2165,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2180,12 +2180,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "live_replay": "postgresql"
         }
       ],
-      "setup": "Workbench process await or durable sleep; wait for actual Restate suspended status.",
+      "setup": "Workbench process await or durable sleep; wait until the awaiting actor releases waiting on its wait row.",
       "fault": "Cancel via public host control.",
       "observable": "Terminal cancellation and late SSE evidence appear without waiting for application timer; child policy discharged and no attach invocation leak.",
       "arc_guards": [
@@ -2219,7 +2219,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -2229,7 +2229,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2238,19 +2238,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -2260,7 +2260,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2269,7 +2269,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -2281,7 +2281,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -2291,7 +2291,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2300,19 +2300,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -2322,7 +2322,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2331,7 +2331,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -2362,7 +2362,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -2372,7 +2372,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2381,19 +2381,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, Run parks and their redrive, went with L3s (FIG-5196); L13 (FIG-5193) re-scopes it to process parks (planned:P1) or retires it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -2403,7 +2403,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2412,7 +2412,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, Run parks and their redrive, went with L3s (FIG-5196); L13 (FIG-5193) re-scopes it to process parks (planned:P1) or retires it",
           "registration": null
         },
         {
@@ -2424,7 +2424,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -2434,7 +2434,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2443,19 +2443,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, Run parks and their redrive, went with L3s (FIG-5196); L13 (FIG-5193) re-scopes it to process parks (planned:P1) or retires it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -2465,7 +2465,7 @@
             "synthetic_next_vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2474,7 +2474,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, Run parks and their redrive, went with L3s (FIG-5196); L13 (FIG-5193) re-scopes it to process parks (planned:P1) or retires it",
           "registration": null
         }
       ],
@@ -2526,13 +2526,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2541,7 +2541,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
@@ -2553,13 +2553,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2568,25 +2568,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
           "variant": "capture-adoption",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2595,25 +2595,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
           "variant": "post-adoption",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2622,7 +2622,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
@@ -2634,13 +2634,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2649,7 +2649,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
@@ -2661,13 +2661,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2676,25 +2676,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
           "variant": "capture-adoption",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2703,25 +2703,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
           "variant": "post-adoption",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2730,7 +2730,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         }
       ],
@@ -2762,7 +2762,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -2772,7 +2772,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2781,19 +2781,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "upgrade between builds is L11's (FIG-5187): it re-scopes the scenario to planned:D1 and planned:FMT1",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -2803,7 +2803,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2812,7 +2812,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "upgrade between builds is L11's (FIG-5187): it re-scopes the scenario to planned:D1 and planned:FMT1",
           "registration": null
         },
         {
@@ -2824,7 +2824,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -2834,7 +2834,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2843,19 +2843,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "upgrade between builds is L11's (FIG-5187): it re-scopes the scenario to planned:D1 and planned:FMT1",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -2865,7 +2865,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2874,7 +2874,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "upgrade between builds is L11's (FIG-5187): it re-scopes the scenario to planned:D1 and planned:FMT1",
           "registration": null
         }
       ],
@@ -2905,7 +2905,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -2915,7 +2915,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2924,7 +2924,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -2936,7 +2936,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -2946,7 +2946,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2955,7 +2955,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -2967,7 +2967,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -2977,7 +2977,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -2986,19 +2986,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "same-key",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -3008,7 +3008,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3017,19 +3017,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "disjoint-keys",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -3039,7 +3039,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3048,19 +3048,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "namespaces",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -3070,7 +3070,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3079,7 +3079,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -3091,7 +3091,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -3101,7 +3101,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3110,7 +3110,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -3122,7 +3122,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -3132,7 +3132,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3141,7 +3141,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -3153,7 +3153,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -3163,7 +3163,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3172,19 +3172,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "same-key",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -3194,7 +3194,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3203,19 +3203,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "disjoint-keys",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -3225,7 +3225,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3234,19 +3234,19 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "namespaces",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -3256,7 +3256,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3265,12 +3265,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
       "setup": "A unrecorded candidate held, B durable; same-key, disjoint-key and namespace variants.",
-      "fault": "SIGKILL; cancel A; restart under N+1 and replay latest checkpoint twice.",
+      "fault": "SIGKILL; cancel A; restart under N+1 and restore the latest checkpoint twice.",
       "observable": "B exact once, A absent; no body/reducer/converter re-execution for completed facts; stale predecessor publish refuses.",
       "arc_guards": []
     },
@@ -3298,13 +3298,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3313,25 +3313,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "recorded-429-retry",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3340,7 +3340,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -3352,13 +3352,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3367,25 +3367,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "partial-stream-reset",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3394,7 +3394,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -3406,13 +3406,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3421,25 +3421,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "observer-reconnect",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3448,7 +3448,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -3460,13 +3460,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3475,7 +3475,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "live_replay": "postgresql"
         }
@@ -3506,13 +3506,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3521,25 +3521,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3548,7 +3548,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -3581,13 +3581,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3596,26 +3596,26 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "host": "workbench"
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3624,7 +3624,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "host": "workbench"
         },
@@ -3637,13 +3637,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3652,26 +3652,26 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "host": "workbench"
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3680,12 +3680,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "host": "workbench"
         }
       ],
-      "setup": "Workbench-owned HTTP/stdio MCP fixtures and binary attachment; SQLite-file and PostgreSQL live and replay legs on RLM.",
+      "setup": "Workbench-owned HTTP/stdio MCP fixtures and binary attachment; SQLite-file and PostgreSQL live and resume legs on RLM.",
       "fault": "Kill/reconnect peer during admitted call, detach after catalog refresh.",
       "observable": "Admitted revision completes or typed-refuses; subsequent catalog stops offering detached tool; exact attachment bytes/reference retained once; host sampling/elicitation results agree.",
       "arc_guards": []
@@ -3712,13 +3712,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3727,7 +3727,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -3739,13 +3739,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3754,7 +3754,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -3788,13 +3788,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3803,25 +3803,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_memory",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3830,7 +3830,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -3863,13 +3863,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3878,25 +3878,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, segment handover, went with L7b (FIG-5198); L13 (FIG-5193) re-scopes it to a process resumed from its snapshot on another node, or retires it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3905,7 +3905,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, segment handover, went with L7b (FIG-5198); L13 (FIG-5193) re-scopes it to a process resumed from its snapshot on another node, or retires it",
           "registration": null
         },
         {
@@ -3917,13 +3917,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3932,25 +3932,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, segment handover, went with L7b (FIG-5198); L13 (FIG-5193) re-scopes it to a process resumed from its snapshot on another node, or retires it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -3959,7 +3959,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, segment handover, went with L7b (FIG-5198); L13 (FIG-5193) re-scopes it to a process resumed from its snapshot on another node, or retires it",
           "registration": null
         }
       ],
@@ -3992,13 +3992,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4007,25 +4007,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, retained material transferred to a successor, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4034,7 +4034,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, retained material transferred to a successor, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
@@ -4046,13 +4046,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4061,25 +4061,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, retained material transferred to a successor, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "rlm",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4088,7 +4088,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "its subject, retained material transferred to a successor, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
           "registration": null
         }
       ],
@@ -4120,7 +4120,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -4130,7 +4130,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4145,13 +4145,13 @@
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -4161,7 +4161,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4182,7 +4182,7 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker",
@@ -4192,7 +4192,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4207,13 +4207,13 @@
         {
           "variant": "default",
           "store": "postgresql",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker",
@@ -4223,7 +4223,7 @@
             "synthetic_next_operator"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4238,7 +4238,7 @@
       ],
       "setup": "Existing Phase A choreography plus external remote client.",
       "fault": "Reverse mid-drain; hold finalize; offer incompatible wire; retry after upgrade.",
-      "observable": "Expected typed floors/refusals, no writes on refused call, supported direction streams exact output; old journals kept on own lanes until genuine work drained.",
+      "observable": "Expected typed floors/refusals, no writes on refused call, supported direction streams exact output; old work keeps its format until it drains.",
       "arc_guards": []
     },
     {
@@ -4262,13 +4262,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4277,25 +4277,25 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
           "variant": "default",
           "store": "sqlite_file",
-          "leg": "replay",
+          "leg": "resume",
           "channel": "standard",
           "tiers": [
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4304,7 +4304,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         }
       ],
@@ -4335,13 +4335,13 @@
           "tiers": [
             "live"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4350,7 +4350,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         },
@@ -4362,13 +4362,13 @@
           "tiers": [
             "live"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4377,7 +4377,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         },
@@ -4389,13 +4389,13 @@
           "tiers": [
             "live"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4404,7 +4404,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         }
@@ -4434,13 +4434,13 @@
           "tiers": [
             "live"
           ],
-          "server_nodes": 1,
+          "nodes": 1,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4461,7 +4461,7 @@
     },
     {
       "id": "S37",
-      "title": "a turn on one replica reaches another replica's feed",
+      "title": "a turn on one node reaches another node's feed",
       "owner": "H6",
       "rules": [],
       "risks": [
@@ -4469,7 +4469,7 @@
         "R7",
         "R8"
       ],
-      "dependencies": "Base, PG, FIG-5090 durable-head feed, FIG-5101 PostgreSQL live replay store",
+      "dependencies": "Base, PG, L8 (FIG-5178), FIG-5090 durable-head feed, FIG-5101 PostgreSQL live replay store",
       "cases": [
         {
           "variant": "memory-live-replay",
@@ -4480,13 +4480,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4495,7 +4495,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null
         },
         {
@@ -4507,13 +4507,13 @@
             "full",
             "release"
           ],
-          "server_nodes": 1,
+          "nodes": 2,
           "binaries": [
             "host",
             "vm_worker"
           ],
           "artifacts": [
-            "journal",
+            "commits",
             "store",
             "host",
             "trace",
@@ -4522,24 +4522,18 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "hold_reason": "no E2E host harness until a facade turn runs on the durable engine: L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it",
           "registration": null,
           "live_replay": "postgresql"
         }
       ],
-      "setup": "Two workbench replicas share one Restate authority and one PostgreSQL store; B registers last, so the turn A accepts executes on B. Observers follow the session feed on A (before and mid-turn) and on B.",
-      "fault": "Hold the provider stream mid-turn, SIGKILL B under it, restart B in place.",
-      "observable": "The Run is pinned to B's deployment; both replicas' snapshots are one durable head; every A feed converges on the durable rows once and in order. With the process-local memory live replay store, B's live activity reaches B's feed and never A's, and A converges through the durable head (replay gap and snapshot). With the shared PostgreSQL live replay store (FIG-5101), A's feeds carry B's live activity before commit and converge without a gap.",
+      "setup": "Two workbench nodes over one PostgreSQL store; B owns the session actor, so the turn A accepts executes on B. Observers follow the session feed on A (before and mid-turn) and on B.",
+      "fault": "Hold the provider stream mid-turn and SIGKILL B under it; A reaps B and resumes the turn.",
+      "observable": "The turn runs on B, then resumes on A from committed state alone (the replay tripwire counts no hidden replay); both nodes' snapshots are one durable head; every A feed converges on the durable rows once and in order. With the process-local memory live replay store, B's live activity reaches B's feed and never A's, and A converges through the durable head (replay gap and snapshot). With the shared PostgreSQL live replay store (FIG-5101), A's feeds carry B's live activity before commit and converge without a gap.",
       "arc_guards": [],
       "host": "workbench"
     }
   ],
-  "server": {
-    "version": "1.7.13",
-    "archive_sha256": "5429b216b68f3fa52b7f0e6627a2c2a86fc0c75d19b1e152cd2e7dcd8bab4c82",
-    "executable_sha256": "bf9d787022823280eefdb898f66b9c92983fba27372e1479a4c00fad35d12d74",
-    "protocol": "V7"
-  },
   "release_audits": {
     "F04": "FIG-4896",
     "Z0A": "FIG-4897",

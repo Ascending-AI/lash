@@ -307,9 +307,6 @@ fn spawn_turn_follower(
                 .map_err(|error| format!("{error:?}")),
             };
             settled?;
-            // The settled turn's trigger registrations reached Restate cron
-            // jobs here; that resynchronisation went with Restate (FIG-5190)
-            // and L9h (FIG-5186) rebuilds the cron leg.
             return Ok(());
         }
     })

@@ -23,7 +23,8 @@ SOURCE = "a" * 40
 # Every catalogue row is held until an engine serves it again; the laws run
 # over the catalogue as if one did, under a registration label of their own.
 SYNTHETIC_LABEL = "//synthetic:e2e__test"
-ENGINE_HOLD = "no engine until L3 (FIG-5172) and L9h (FIG-5186)"
+ENGINE_HOLD = ("no E2E host harness until a facade turn runs on the durable engine: "
+               "L3's facade wiring (FIG-5172), then L9h (FIG-5186) rebuilds it")
 
 
 def readied(manifest):
@@ -69,8 +70,6 @@ class ReceiptLaws(unittest.TestCase):
                     "label": SYNTHETIC_LABEL,
                     "test": f"{scenario['owner'].lower()}::{scenario['id'].lower()}::{row['variant'].replace('-', '_')}",
                 })
-        server = self.artifact("server", "synthetic server artifact")
-        manifest["server"]["executable_sha256"] = server["sha256"]
         expected = e2e.plan(manifest, "b" * 64, tier, [], SOURCE)
         rows = []
         for index, row in enumerate(expected["cases"]):
@@ -82,11 +81,9 @@ class ReceiptLaws(unittest.TestCase):
             binaries = {role: {"source_sha": SOURCE, "artifact": self.artifact(f"{index}-{role}-binary", "synthetic binary")}
                         for role in row["binaries"]}
             artifacts["provenance"] = self.artifact(f"{index}-provenance", {
-                "source_sha": SOURCE, "case": key, "protocol": "V7",
+                "source_sha": SOURCE, "case": key,
                 "live_replay": row.get("live_replay", "memory"),
-                "server_nodes": row["server_nodes"], "binaries": binaries,
-                "server": {"version": manifest["server"]["version"],
-                           "archive_sha256": manifest["server"]["archive_sha256"], "artifact": server},
+                "nodes": row["nodes"], "binaries": binaries,
                 "evidence_error": None,
             })
             rows.append({"key": key, "status": "passed", "executed": True, "artifacts": artifacts, "quarantine": None})
@@ -116,19 +113,19 @@ class ReceiptLaws(unittest.TestCase):
         self.assertEqual(final["guarded"], [])
         self.assertEqual({g["ticket"] for r in final["cases"] for g in r["arc_guards"]}, {f"FIG-{i}" for i in range(4896, 4901)})
         # Held-row refusal is a receipt rule independent of which scenarios
-        # currently have replay oracles registered.
+        # currently have resume oracles registered.
         manifest = copy.deepcopy(self.manifest)
         for scenario in manifest["scenarios"]:
             if scenario["id"] == "S26":
                 for row in scenario["cases"]:
-                    if row["leg"] == "replay":
-                        row.update(state="held", hold_reason="synthetic missing replay oracle",
+                    if row["leg"] == "resume":
+                        row.update(state="held", hold_reason="synthetic missing resume oracle",
                                    registration=None)
         held = e2e.plan(manifest, "b" * 64, "full", ["S26"], SOURCE)
         self.assertEqual(held["held"], [
-            "S26/observer-reconnect/sqlite_file/replay/standard",
-            "S26/partial-stream-reset/sqlite_file/replay/standard",
-            "S26/recorded-429-retry/sqlite_file/replay/standard",
+            "S26/observer-reconnect/sqlite_file/resume/standard",
+            "S26/partial-stream-reset/sqlite_file/resume/standard",
+            "S26/recorded-429-retry/sqlite_file/resume/standard",
         ])
         with self.assertRaisesRegex(ValueError, "held cases"):
             e2e.reconcile(held, {}, self.root, manifest)
@@ -178,7 +175,7 @@ class ReceiptLaws(unittest.TestCase):
             with self.subTest(role=role), self.assertRaises(ValueError):
                 e2e.reconcile(expected, altered, self.root, manifest)
         altered = copy.deepcopy(receipt)
-        altered["cases"][0]["artifacts"].pop("journal")
+        altered["cases"][0]["artifacts"].pop("commits")
         with self.assertRaisesRegex(ValueError, "incomplete artifacts"):
             e2e.reconcile(expected, altered, self.root, manifest)
         path = self.root / receipt["cases"][0]["artifacts"]["trace"]["path"]
@@ -190,16 +187,14 @@ class ReceiptLaws(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inside receipt"):
             e2e.artifact(self.root, descriptor)
 
-    def test_r8_real_substrate_and_exact_binary_provenance_cannot_be_substituted(self):
+    def test_r8_node_count_and_exact_binary_provenance_cannot_be_substituted(self):
         manifest, expected, receipt = self.fixture()
         descriptor = receipt["cases"][0]["artifacts"]["provenance"]
         original = json.loads((self.root / descriptor["path"]).read_text())
         for mutate in (
-            lambda p: p.update(protocol="V6"),
-            lambda p: p.update(server_nodes=3),
+            lambda p: p.update(nodes=p["nodes"] + 1),
             lambda p: p["binaries"].pop("host"),
             lambda p: p["binaries"]["host"].update(source_sha="c" * 40),
-            lambda p: p["server"].update(archive_sha256="c" * 64),
         ):
             altered = copy.deepcopy(receipt)
             provenance = copy.deepcopy(original)
@@ -275,13 +270,12 @@ class ReceiptLaws(unittest.TestCase):
 
     def test_r8_runner_splits_a_case_receipt_into_reconcilable_role_files_and_names_missing_evidence(self):
         gate = e2e.GATE
-        admin = "http://127.0.0.1:61046"
         key = "S30/default/sqlite_memory/live/standard"
         test_name = "s30_external_consumer_accept_follow_cancel"
         outputs = {
             name: self.root / f"built-{name}"
             for name in ("workbench", "workbench_e2e", "node", "consumer", "rlm_host", "node_next",
-                         "lashctl_n", "lashctl_next", "vm_worker", "vm_worker_next", "server")
+                         "lashctl_n", "lashctl_next", "vm_worker", "vm_worker_next")
         }
         for name, path in outputs.items():
             path.write_text(f"built {name}")
@@ -292,16 +286,13 @@ class ReceiptLaws(unittest.TestCase):
                 "sha256": e2e.digest(outputs["workbench"]),
                 "candidate_sha": SOURCE, "generation": "1",
             }],
-            "journals": [{
-                "work": {"ingress": "k", "run": "k", "segment": "inv-1", "call": None, "ordinal": None},
-                "invocation": "inv-1", "index": 0, "entry_type": "Run", "name": None,
-                "value": {}, "decoded": None, "admin_url": admin, "protocol": 7,
-            }],
-            "native_records": [], "barriers": [], "faults": [],
+            "commits": [{"node": "node-1", "label": "turn.commit", "actor": "s/consumer"}],
+            "tripwire": {"bodies": 1, "outcome_lookups": 0},
+            "nodes": [{"node": "node-1", "killed": False}],
+            "barriers": [], "faults": [],
             "stores": [{"binding": True}], "effects": [{"body": 1}],
             "outputs": [{"observation": "ok"}],
-            "cleanup": [{"resource": "restate-1", "closed": True, "detail": "stopped"}],
-            "transfers": [],
+            "cleanup": [{"resource": "node-1", "closed": True, "detail": "stopped"}],
         }
         case_dir = self.root / "case-0"
         (case_dir / "case").mkdir(parents=True)
@@ -314,16 +305,15 @@ class ReceiptLaws(unittest.TestCase):
         base = {"scenario": test_name, "label": SYNTHETIC_LABEL,
                 "source_sha": SOURCE, "gate": "law", "port_base": 61000, "generation": "1",
                 "playwright": "1.62.0", "workbench": {"path": "w", "sha256": "0" * 64}}
-        provenance = gate.certify_case(case_dir, junit_source, outputs, SOURCE, key, admin, base)
+        provenance = gate.certify_case(case_dir, junit_source, outputs, SOURCE, key, "live", base)
         self.assertIsNone(provenance["evidence_error"])
-        self.assertEqual(provenance["protocol"], "V7")
-        self.assertEqual(provenance["server_nodes"], 1)
+        self.assertEqual(provenance["nodes"], 1)
         self.assertEqual(set(provenance["binaries"]), {"host", "vm_worker"})
-        roles = {"journal": "journal.json", "store": "store.json", "host": "host.json",
+        roles = {"commits": "commits.json", "store": "store.json", "host": "host.json",
                  "trace": "trace.json", "cleanup": "cleanup.json", "junit": "junit.xml",
                  "provenance": "provenance.json"}
         spec = {"scenario": "S30", "variant": "default", "store": "sqlite_memory",
-                "leg": "live", "channel": "standard", "server_nodes": 1,
+                "leg": "live", "channel": "standard", "nodes": 1,
                 "binaries": ["host", "vm_worker"], "artifacts": list(roles),
                 "state": "ready",
                 "registration": {"label": "//x:t", "test": test_name}}
@@ -331,7 +321,6 @@ class ReceiptLaws(unittest.TestCase):
                     "selectors": [], "selected": 1, "cases": [spec],
                     "guarded": [], "excluded_held": [], "tier_complete": True, "held": []}
         manifest = copy.deepcopy(self.manifest)
-        manifest["server"]["executable_sha256"] = provenance["server"]["artifact"]["sha256"]
         row = {"key": key, "status": "passed", "executed": True,
                "artifacts": {role: {"path": name, "sha256": e2e.digest(case_dir / name)}
                              for role, name in roles.items()},
@@ -352,18 +341,35 @@ class ReceiptLaws(unittest.TestCase):
             "candidate_sha": SOURCE, "generation": "synthetic-next",
         })
         (upgrade / "case" / "receipt.json").write_text(json.dumps(upgrade_receipt))
-        provenance = gate.certify_case(upgrade, junit_source, outputs, SOURCE, key, admin, dict(base))
+        provenance = gate.certify_case(upgrade, junit_source, outputs, SOURCE, key, "live", dict(base))
         self.assertIsNone(provenance["evidence_error"])
         self.assertEqual(set(provenance["binaries"]), {
             "host", "vm_worker", "synthetic_next_host",
             "operator", "synthetic_next_operator", "synthetic_next_vm_worker",
         })
 
+        # A resume leg certifies only a node killed and its work resumed on
+        # another node.
+        for index, (nodes, error) in enumerate((
+            ([{"node": "node-1", "killed": False}], True),
+            ([{"node": "node-1", "killed": True}], True),
+            ([{"node": "node-1", "killed": True}, {"node": "node-2", "killed": False}], False),
+        )):
+            resumed = self.root / f"case-resume-{index}"
+            (resumed / "case").mkdir(parents=True)
+            resume_receipt = json.loads((case_dir / "case" / "receipt.json").read_text())
+            resume_receipt["case"]["evidence"]["nodes"] = nodes
+            (resumed / "case" / "receipt.json").write_text(json.dumps(resume_receipt))
+            provenance = gate.certify_case(resumed, junit_source, outputs, SOURCE, key, "resume", dict(base))
+            with self.subTest(nodes=nodes):
+                self.assertIs(provenance["evidence_error"] is not None, error)
+                self.assertEqual(provenance["nodes"], len(nodes))
+
         missing = self.root / "case-1"
         (missing / "case").mkdir(parents=True)
-        provenance = gate.certify_case(missing, junit_source, outputs, SOURCE, key, admin, dict(base))
+        provenance = gate.certify_case(missing, junit_source, outputs, SOURCE, key, "live", dict(base))
         self.assertIsNotNone(provenance["evidence_error"])
-        self.assertFalse((missing / "journal.json").exists())
+        self.assertFalse((missing / "commits.json").exists())
         row = {"key": key, "status": "passed", "executed": True,
                "artifacts": {role: {"path": name, "sha256": e2e.digest(missing / name)}
                              for role, name in roles.items() if (missing / name).exists()},
@@ -399,9 +405,6 @@ class ReceiptLaws(unittest.TestCase):
                     if (case["variant"], case["store"], case["leg"]) != ("default", "sqlite_file", "live"):
                         case.update(state="held", hold_reason="R8 fixture: missing sibling oracle",
                                     registration=None)
-        server_file = self.root / "server-bin"
-        server_file.write_text("synthetic server")
-        manifest["server"]["executable_sha256"] = e2e.digest(server_file)
         planned = e2e.plan(manifest, "b" * 64, "full", ["S17"], SOURCE, [], True)
         self.assertIs(planned["tier_complete"], False)
         self.assertEqual(len(planned["cases"]), 1)
@@ -414,7 +417,7 @@ class ReceiptLaws(unittest.TestCase):
             directory = Path(command[command.index("--artifacts") + 1])
             (directory / "binaries").mkdir(parents=True)
             (directory / "junit.xml").write_text(f'<testsuite><testcase name="{test_name}" /></testsuite>')
-            for role in ("journal", "store", "host", "trace"):
+            for role in ("commits", "store", "host", "trace"):
                 (directory / f"{role}.json").write_text(json.dumps({role: []}))
             e2e.write(directory / "cleanup.json", {"complete": True, "errors": [], "remaining": []})
             binaries = {}
@@ -423,15 +426,10 @@ class ReceiptLaws(unittest.TestCase):
                 binary.write_text(f"synthetic {name}")
                 binaries[name] = {"source_sha": SOURCE,
                                   "artifact": {"path": f"binaries/{name}", "sha256": e2e.digest(binary)}}
-            server_link = directory / "binaries" / "restate-server"
-            server_link.write_text("synthetic server")
             e2e.write(directory / "provenance.json", {
-                "source_sha": SOURCE, "case": key, "protocol": "V7",
+                "source_sha": SOURCE, "case": key,
                 "live_replay": row.get("live_replay", "memory"),
-                "server_nodes": row["server_nodes"], "binaries": binaries,
-                "server": {"version": manifest["server"]["version"],
-                           "archive_sha256": manifest["server"]["archive_sha256"],
-                           "artifact": {"path": "binaries/restate-server", "sha256": e2e.digest(server_link)}},
+                "nodes": row["nodes"], "binaries": binaries,
                 "evidence_error": None})
             e2e.write(directory / "execution.json", {
                 "scenario": test_name, "label": row["registration"]["label"], "source_sha": SOURCE,

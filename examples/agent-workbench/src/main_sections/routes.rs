@@ -521,8 +521,6 @@ pub(crate) async fn set_trigger_enabled(
         }),
     );
     let registration = lash::triggers::TriggerRegistration::from(&receipt.record);
-    // The Restate cron job sync went with Restate (FIG-5190); L9h (FIG-5186)
-    // rebuilds the cron leg.
     Ok(Json(TriggerMutationResponse {
         changed,
         registration: Some(registration),
@@ -645,11 +643,9 @@ pub(crate) async fn account_inbox(
 
 /// Enqueue a durable tool-catalog refresh for the chat session.
 ///
-/// The enqueue asks the host-owned queued-work driver to submit a Restate
-/// workflow for the batch; that workflow drains it with a durable handler
-/// context and the runtime commits the refreshed surface to the SQLite session store.
-/// Nothing here executes effects in the foreground — the workbench runs
-/// Restate + SQLite only.
+/// The enqueue writes the batch as session work; the session's actor drains
+/// it and commits the refreshed surface to the session store. Nothing here
+/// executes effects in the foreground.
 pub(crate) async fn enqueue_tool_catalog_refresh(
     state: &AppState,
     reason: &str,
@@ -1023,7 +1019,7 @@ pub(crate) async fn cancel_work(
 ///
 /// This is the host-facing "wait for the work item" flow. It routes through
 /// the configured process-work port
-/// (ADR 0016) — the Restate ingress attach, never a store poll loop — and bounds
+/// (ADR 0016) — the process's terminal, never a host poll loop — and bounds
 /// the wait with `tokio::time::timeout` so a still-running or unknown-to-this-pod
 /// process cannot pin the request. On terminal it reconciles from paged events
 /// (ADR 0017): the durable log is the truth; the best-effort event sink is only
@@ -1042,7 +1038,7 @@ pub(crate) async fn await_work(
     .await
     {
         Ok(Ok(outcome)) => outcome,
-        // Audited: the Restate process attachment lowers workflow/transport failures to untyped PluginError::Session values.
+        // Audited: the process terminal wait lowers store failures to untyped PluginError values.
         Ok(Err(err)) => return Err(AppError::internal(err)),
         Err(_elapsed) => {
             return Err(AppError::gateway_timeout(format!(

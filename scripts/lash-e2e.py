@@ -34,6 +34,7 @@ SPEC.loader.exec_module(GATE)
 SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 AXES = ("scenario", "variant", "store", "leg", "channel")
+ARTIFACTS = {"commits", "store", "host", "trace", "cleanup", "junit", "provenance"}
 
 
 def require(condition: bool, message: str) -> None:
@@ -51,10 +52,7 @@ def case_key(row: dict) -> str:
 
 def load_manifest(path: Path = MANIFEST) -> dict:
     manifest = json.loads(path.read_text())
-    require(set(manifest) == {"scenarios", "server", "release_audits", "release_gates"}, "invalid manifest fields")
-    server = manifest["server"]
-    require(server["protocol"] == "V7" and DIGEST.fullmatch(server["archive_sha256"]) is not None, "invalid server pin")
-    require(server["executable_sha256"] is None or DIGEST.fullmatch(server["executable_sha256"]) is not None, "invalid server executable pin")
+    require(set(manifest) == {"scenarios", "release_audits", "release_gates"}, "invalid manifest fields")
     scenarios = manifest["scenarios"]
     require(isinstance(scenarios, list), "scenarios must be a list")
     ids = [row["id"] for row in scenarios]
@@ -72,7 +70,11 @@ def load_manifest(path: Path = MANIFEST) -> dict:
             key = case_key({"scenario": scenario["id"], **case})
             keys.append(key)
             require(case["store"] in {"sqlite_memory", "sqlite_file", "postgresql"}, f"{key}: invalid store")
-            require(case["leg"] in {"live", "replay"}, f"{key}: invalid leg")
+            require(case["leg"] in {"live", "resume"}, f"{key}: invalid leg")
+            nodes = case["nodes"]
+            require(type(nodes) is int and nodes >= 1, f"{key}: invalid node count")
+            # A resume leg kills a node and resumes its work on another.
+            require(case["leg"] != "resume" or nodes >= 2, f"{key}: a resume leg needs a second node")
             require(case["channel"] in {"standard", "rlm"}, f"{key}: invalid channel")
             require(case.get("live_replay", "memory") in {"memory", "postgresql"}, f"{key}: invalid live replay store")
             tiers = case["tiers"]
@@ -87,7 +89,7 @@ def load_manifest(path: Path = MANIFEST) -> dict:
                 require(set(registration) == {"label", "test"}, f"{key}: invalid registration fields")
                 require(registration["label"] in GATE.LABELS, f"{key}: unknown runner label")
                 require(bool(registration["test"]) and not registration["test"].startswith("-") and not any(c.isspace() for c in registration["test"]), f"{key}: need full test path")
-            require({"journal", "store", "host", "trace", "cleanup", "junit", "provenance"} <= set(case["artifacts"]), f"{key}: incomplete required artifacts")
+            require(ARTIFACTS <= set(case["artifacts"]), f"{key}: incomplete required artifacts")
         require(len(keys) == len(set(keys)), f"{scenario['id']}: duplicate permutation")
     smoke = select(manifest, "smoke", [])
     require(len(smoke) == 6 and {r['scenario'] for r in smoke} == SMOKE, "smoke must select exactly its six scenarios")
@@ -199,18 +201,12 @@ def reconcile(expected: dict, receipt: dict, root: Path, manifest: dict) -> dict
         require(provenance.get("evidence_error") is None, f"{row['key']}: evidence error: {provenance.get('evidence_error')}")
         require(provenance["source_sha"] == expected["source_sha"] and provenance["case"] == row["key"], "wrong binary provenance")
         require(provenance.get("live_replay", "memory") == spec.get("live_replay", "memory"), "wrong live replay store")
-        require(provenance["protocol"] == "V7", "missing negotiated V7 receipt")
-        require(provenance["server_nodes"] == spec["server_nodes"], "wrong cluster size")
+        require(provenance["nodes"] == spec["nodes"], "wrong node count")
         binaries = provenance["binaries"]
         require(set(binaries) == set(spec["binaries"]), "missing binary provenance")
         for name, binary in binaries.items():
             require(SHA.fullmatch(binary["source_sha"]) is not None and binary["source_sha"] == expected["source_sha"], f"{name}: binary from another source")
             artifact(paths["provenance"].parent, binary["artifact"])
-        server = provenance["server"]
-        require(server["version"] == manifest["server"]["version"] and server["archive_sha256"] == manifest["server"]["archive_sha256"], "server archive differs from pin")
-        require(manifest["server"]["executable_sha256"] is not None, "server executable pin not yet registered")
-        require(server["artifact"]["sha256"] == manifest["server"]["executable_sha256"], "server executable differs from pin")
-        artifact(paths["provenance"].parent, server["artifact"])
     actual = counts(rows)
     check_counts(receipt["counts"], actual, "aggregate")
     groups = store_leg_groups(expected["cases"], rows)
@@ -262,7 +258,7 @@ def run_cases(expected: dict, artifacts: Path, manifest: dict) -> dict:
     require(not expected["guarded"], f"unlanded arc guards: {', '.join(expected['guarded'])}")
     require(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() == expected["source_sha"], "checkout differs from exact source SHA")
     require(not subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip(), "execution requires a clean source checkout")
-    role_files = {"journal": "journal.json", "store": "store.json", "host": "host.json",
+    role_files = {"commits": "commits.json", "store": "store.json", "host": "host.json",
                   "trace": "trace.json", "cleanup": "cleanup.json", "junit": "junit.xml",
                   "provenance": "provenance.json"}
     rows = []

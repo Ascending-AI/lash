@@ -46653,7 +46653,8 @@
         "reqwest",
         "serde",
         "serde_json",
-        "tokio"
+        "tokio",
+        "uuid"
       ],
       "doc": null,
       "manifest": "examples/e2e-consumer/Cargo.toml",

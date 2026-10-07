@@ -4,7 +4,7 @@
 # 1377 rows over 808 files, 3686 laws.
 # By class: mechanical 143, semantic 99, delete 735, replace 400.
 # By lane: L1b 11, L3 16, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 325, L9d 70, L9e 90, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 472, ported 43, deleted 862.
+# By status: todo 465, ported 48, deleted 864.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -2044,7 +2044,8 @@ laws = [
   "(no test functions) defines: as_lash_core, session_spec, create_and_open_session, open_session, create_and_open_child_session, run, restate, store, store_metrics, persistence",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5186: the harness builds every core over the durable backend and names no Restate; the turn-running laws it serves are their own replace rows."
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/harness/backend.rs"
@@ -2057,7 +2058,8 @@ laws = [
   "(no test functions) defines: over, over_restate, with_catalog, with_session_work, restate_backend, restate_backend_over, sqlite_memory_stores",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5186: the durable backend over a store set; no Restate backend remains."
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs"
@@ -2070,7 +2072,8 @@ laws = [
   "(no test functions) defines: measure_runtime_perf_phase, measure_runtime_perf_async_phase, run_once_turn_checkpoint, assign_checkpoint_binding, run_once_checkpoint_state_hot_paths, checkpoint_messages, checkpoint_message, run_once_embed, sum_phase_profiles, mean_phase_profiles",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5186: the checkpoint scenarios measure over the harness's durable backend."
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/measurement/high_traffic.rs"
@@ -2084,7 +2087,8 @@ laws = [
   "knee_turn_indices_prefix_the_step_without_collisions",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5186: both laws run without an engine."
 
 [[row]]
 path = "crates/lash-perf/src/workload/load_turn_tests.rs"
@@ -9408,9 +9412,9 @@ lane = "L9h"
 laws = [
   "(no test functions) defines: live_restate_cron_tick_wait, live_restate_cron_provider, gated_live_restate_cron_provider, kill_open, shutdown, start_live_restate_cron_scenario, disable_cron_registration_for_sync_scenario, assert_queued_turn_sync_cancelled, cron_trace_records_for_job, wait_for_cron_workbench_message",
 ]
-disposition = "port"
-status = "todo"
-note = "cron-trigger helpers over the live Restate cron workflow"
+disposition = "subject-deleted"
+status = "deleted"
+note = "cron-trigger helpers over the live Restate cron workflow; the workflow is gone, and the cron laws the workbench owes are the runbook's replace row (runbooks/workbench-cron-schedule/runbook.md)."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_delete_workflow.rs"
@@ -9422,9 +9426,9 @@ lane = "L9h"
 laws = [
   "(no test functions) defines: run_session_delete_in_handler",
 ]
-disposition = "port"
-status = "todo"
-note = "registers the session-delete workflow on the double"
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while_a_process_lives"
+status = "deleted"
+note = "registered the session-delete workflow on the double; a deletion is now the session actor's own close (L6b, FIG-5176)."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs"
@@ -9455,7 +9459,8 @@ laws = [
   "(no test functions) defines: durable_history_messages, sessions_root, memory_trigger_store, test_double_backend, install_test_process_worker, open_session_once_released, run_in_test_handler, delete_session_in_handler, over, with_catalog",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5186: the support module names no double; the stack-budget runner is all that is left."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/trigger_retention.rs"

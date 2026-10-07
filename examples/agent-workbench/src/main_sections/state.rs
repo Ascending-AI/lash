@@ -869,8 +869,8 @@ impl SessionEventRegistry {
     /// a runtime-minted id (FIG-972).
     ///
     /// Retirement drops the events and keeps their identities, exactly as
-    /// settlement compaction does: a Restate replay that re-publishes the same
-    /// row must be a no-op, not a resurrection of the row this just retired.
+    /// settlement compaction does: a later publication of the same row must be
+    /// a no-op, not a resurrection of the row this just retired.
     pub(crate) fn retire_turn_rows(
         &self,
         session_id: &SessionId,

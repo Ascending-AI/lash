@@ -247,7 +247,7 @@ targets = ["append_cost", "dialect_cost"]
 serial = true
 
 [[rule]]
-packages = ["agent-workbench", "toolbench", "workflow-graph-roundtrip", "rlm-smoke-host"]
+packages = ["agent-workbench", "e2e-consumer", "toolbench", "workflow-graph-roundtrip", "rlm-smoke-host"]
 kinds = ["bin", "test", "example", "bench"]
 compile_data = ["//examples:shared_rust_sources"]
 

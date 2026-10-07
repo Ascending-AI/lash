@@ -47,7 +47,8 @@ PACKAGE_DEPS = {
             "reqwest": "//third-party/rust:p0277",
             "serde": "//third-party/rust:p0307",
             "serde_json": "//third-party/rust:p0313",
-            "tokio": "//third-party/rust:p0371"
+            "tokio": "//third-party/rust:p0371",
+            "uuid": "//third-party/rust:p0409"
         }
     },
     "integrator-contract": {

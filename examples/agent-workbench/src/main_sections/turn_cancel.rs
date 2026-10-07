@@ -265,7 +265,7 @@ pub(crate) async fn attach_recorded_cancel_terminal(
             cancellation,
             terminal,
         }),
-        // Audited: terminal attachment lowers Restate transport and revocation failures to RuntimeError without a tombstone cause.
+        // Audited: terminal attachment lowers store and revocation failures to RuntimeError without a tombstone cause.
         Ok(Err(err)) => Err(AppError::internal(err.to_string())),
         Err(_) => Ok(TurnCancelReceipt::CancellationRecordedTerminalPending {
             address,
