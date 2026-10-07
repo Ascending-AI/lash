@@ -13,6 +13,15 @@ impl<'run> RuntimeTurnDriver<'run> {
         crate::ExecutionScope::turn(self.session_id.clone(), self.turn_id.clone())
     }
 
+    /// The logical Run this physical turn belongs to: the admitted scope's
+    /// root, or this turn when it is its own root.
+    pub(super) fn logical_run(&self) -> crate::TurnId {
+        self.scoped_effect_controller
+            .execution_scope()
+            .logical_run()
+            .unwrap_or_else(|| self.turn_id.clone())
+    }
+
     pub(super) fn execution_context(
         &self,
         event_tx: &TurnObserver,
@@ -82,10 +91,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                 context
                     .with_logical_run(crate::TurnAddress::new(
                         self.session_id.clone(),
-                        self.scoped_effect_controller
-                            .execution_scope()
-                            .logical_run()
-                            .unwrap_or_else(|| self.turn_id.clone()),
+                        self.logical_run(),
                     ))
                     .with_run_capabilities(run_capabilities)
                     .with_recorded_turn_cancel(

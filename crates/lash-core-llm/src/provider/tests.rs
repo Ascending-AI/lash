@@ -2064,15 +2064,31 @@ async fn admission_decorator_observes_all_retry_requests_with_session_identity()
         .await
         .expect("third attempt succeeds");
     assert_eq!(attempts.load(Ordering::SeqCst), 3);
-    assert_eq!(completion.call_record.attempts.len(), 3);
+    assert_eq!(
+        completion
+            .call_record
+            .attempts
+            .iter()
+            .map(|attempt| attempt.ordinal)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
     let observed = requests.lock_recover();
     assert_eq!(
         observed.len(),
         3,
         "every physical attempt enters host admission"
     );
-    for retry in observed.iter() {
-        assert_eq!(retry.scope, request.scope);
+    // FIG-5219: each attempt keeps the call's identity and names its own
+    // ordinal, the one its sealed attempt record carries.
+    for (retry, record) in observed.iter().zip(&completion.call_record.attempts) {
+        assert_eq!(
+            retry.scope,
+            crate::LlmRequestScope {
+                attempt: Some(record.ordinal),
+                ..request.scope.clone()
+            }
+        );
         assert_eq!(retry.model, request.model);
         assert_eq!(retry.messages, request.messages);
         assert_eq!(retry.generation, request.generation);

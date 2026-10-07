@@ -1,4 +1,4 @@
-use crate::SessionId;
+use crate::{RunId, SessionId, TurnId};
 use schemars::JsonSchema;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -527,7 +527,28 @@ pub struct LlmRequestScope {
     /// other's provider-local response ids.
     pub agent_frame_id: String,
     /// One provider call, suitable for request correlation/idempotency.
+    /// Opaque: a host attributes the call by `turn` and `attempt`, never by
+    /// reading this spelling.
     pub request_id: String,
+    /// The session turn this call serves. `None` for a call no turn driver
+    /// issued: a direct completion or a host's own request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<LlmTurnScope>,
+    /// The provider attempt this request is, counted from 1 as the sealed
+    /// call record counts it. Set on the copy each attempt sends; `None`
+    /// before the call is dispatched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
+}
+
+/// The turn a model call serves, typed so a host attributes the call's cost
+/// to its turn and Run without parsing an id (ADR 0129).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LlmTurnScope {
+    /// The logical Run the turn belongs to: its root and every follow-on.
+    pub run: RunId,
+    /// The physical turn that issued the call.
+    pub turn_id: TurnId,
 }
 
 impl LlmRequestScope {
@@ -540,7 +561,16 @@ impl LlmRequestScope {
             session_id: session_id.into(),
             agent_frame_id: agent_frame_id.into(),
             request_id: request_id.into(),
+            turn: None,
+            attempt: None,
         }
+    }
+
+    /// This scope attributed to the turn that issues the call.
+    #[must_use]
+    pub fn with_turn(mut self, run: RunId, turn_id: TurnId) -> Self {
+        self.turn = Some(LlmTurnScope { run, turn_id });
+        self
     }
 
     pub fn continuation_key(&self) -> String {

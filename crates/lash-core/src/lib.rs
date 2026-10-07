@@ -495,10 +495,10 @@ pub use lash_sansio::llm::types::{
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     ExecutionEvidenceMergeError, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
     LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
-    LlmStreamEvidence, LlmTerminalReason, NonNegativeFiniteF64, NormalizedError, ProtocolPosition,
-    ProviderEndpointError, ProviderFileScope, ProviderReplayDrop, ProviderReplayDropReason,
-    ProviderReplayKind, ProviderRouteIdentity, RetryClass, RetryDecision, RetryDeclineCause,
-    RetryWait,
+    LlmStreamEvidence, LlmTerminalReason, LlmTurnScope, NonNegativeFiniteF64, NormalizedError,
+    ProtocolPosition, ProviderEndpointError, ProviderFileScope, ProviderReplayDrop,
+    ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity, RetryClass, RetryDecision,
+    RetryDeclineCause, RetryWait,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
@@ -510,7 +510,7 @@ pub use lash_sansio::{
     JsonSchema, LimitCause, LlmCallError, MediaType, Message, MessageOrigin, MessageRole, NodeId,
     Observation, ObservedProcessFailure, OmittedToolCalls, OutcomeShape, OutputRetentionPolicy,
     OutputValue, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
-    ProviderAttemptLimits, RegistrationRefused, RetainedOutput, SchemaAdmissionError,
+    ProviderAttemptLimits, RegistrationRefused, RetainedOutput, RunId, SchemaAdmissionError,
     SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
     SessionAppendNode, TOOL_BINDING_KEY, TextProjectionMetadata, TokenUsage, TokenUsageOverflow,
     ToolAdmissionRefusal, ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome,

@@ -378,13 +378,27 @@ impl From<core_llm::LlmRequestScope> for RemoteLlmRequestScope {
             session_id: value.session_id,
             agent_frame_id: value.agent_frame_id,
             request_id: value.request_id,
+            turn: value.turn.map(|turn| RemoteLlmTurnScope {
+                run: turn.run,
+                turn_id: turn.turn_id,
+            }),
+            attempt: value.attempt,
         }
     }
 }
 
 impl From<RemoteLlmRequestScope> for core_llm::LlmRequestScope {
     fn from(value: RemoteLlmRequestScope) -> Self {
-        Self::new(value.session_id, value.agent_frame_id, value.request_id)
+        Self {
+            session_id: value.session_id,
+            agent_frame_id: value.agent_frame_id,
+            request_id: value.request_id,
+            turn: value.turn.map(|turn| core_llm::LlmTurnScope {
+                run: turn.run,
+                turn_id: turn.turn_id,
+            }),
+            attempt: value.attempt,
+        }
     }
 }
 

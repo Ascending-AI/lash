@@ -520,6 +520,46 @@ impl From<&ProcessId> for TurnId {
     }
 }
 
+/// One logical Run: a turn or operation and every physical segment it owns.
+/// Its spelling is retained across restart and redrive.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(transparent)]
+pub struct RunId(TurnId);
+
+impl RunId {
+    /// Parse a retained Run identity using Lash's validated identity vocabulary.
+    pub fn parse(value: impl Into<String>) -> Result<Self, BlankIdentity> {
+        TurnId::parse(value).map(Self)
+    }
+    /// The retained spelling used to reattach after a restart.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+impl From<TurnId> for RunId {
+    fn from(value: TurnId) -> Self {
+        Self(value)
+    }
+}
+impl From<RunId> for TurnId {
+    fn from(value: RunId) -> Self {
+        value.0
+    }
+}
+/// The input that opened a Run is addressed by the Run's id.
+impl From<&RunId> for InputId {
+    fn from(run: &RunId) -> Self {
+        Self::from(&run.0)
+    }
+}
+impl std::fmt::Display for RunId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Who a runtime runs for: a session, or a process named by its minted id.
 ///
 /// A session runtime and a process runtime cross the same interfaces — the

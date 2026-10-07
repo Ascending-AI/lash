@@ -448,8 +448,11 @@ impl ProviderHandle {
             let attempt = {
                 // The call is built inside the caught future: a provider
                 // that panics while constructing its future is contained.
+                // Each attempt's copy names its ordinal in its scope.
                 let attempt = std::panic::AssertUnwindSafe(async {
-                    self.components.provider.complete(request.clone()).await
+                    let mut attempt_request = request.clone();
+                    attempt_request.scope.attempt = Some(attempt_ordinal);
+                    self.components.provider.complete(attempt_request).await
                 })
                 .catch_unwind();
                 let expiry = clock.sleep_until(deadline);

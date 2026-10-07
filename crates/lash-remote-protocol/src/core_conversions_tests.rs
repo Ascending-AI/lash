@@ -134,11 +134,18 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             parallel_tool_calls: Some(false),
             projection_provenance: Default::default(),
         },
-        scope: core_llm::LlmRequestScope::new(
-            "session-1",
-            "session-1:frame:test",
-            "session-1:request:test",
-        ),
+        scope: core_llm::LlmRequestScope {
+            attempt: Some(2),
+            ..core_llm::LlmRequestScope::new(
+                "session-1",
+                "session-1:frame:test",
+                "session-1:request:test",
+            )
+            .with_turn(
+                lash_sansio::RunId::parse("run-1").expect("run id"),
+                lash_sansio::TurnId::parse("turn-2").expect("turn id"),
+            )
+        },
         output_spec: Some(core_llm::LlmOutputSpec::JsonObject),
         stream_events: None,
         provider_trace: None,
@@ -168,6 +175,15 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     assert_eq!(remote.request_id, "request-1");
     assert_eq!(remote.scope.agent_frame_id, "session-1:frame:test");
     let core = core_llm::LlmRequest::try_from(remote).expect("core request");
+    // FIG-5219: the call's typed turn, Run and attempt cross the wire typed.
+    assert_eq!(
+        core.scope.turn,
+        Some(core_llm::LlmTurnScope {
+            run: lash_sansio::RunId::parse("run-1").expect("run id"),
+            turn_id: lash_sansio::TurnId::parse("turn-2").expect("turn id"),
+        })
+    );
+    assert_eq!(core.scope.attempt, Some(2));
     assert_eq!(core.instructions.as_deref(), Some("I"));
     assert_eq!(
         core.model.metadata().capability.instruction_role,

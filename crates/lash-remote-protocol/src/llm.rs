@@ -2,7 +2,7 @@
 //! specs, provider metadata, and schema-projection contracts.
 
 use crate::processes::RemoteModelConfig;
-use lash_sansio::SessionId;
+use lash_sansio::{RunId, SessionId, TurnId};
 use std::collections::{BTreeMap, HashMap};
 
 use schemars::JsonSchema;
@@ -813,7 +813,19 @@ impl RemoteGenerationOptions {
 pub struct RemoteLlmRequestScope {
     pub session_id: SessionId,
     pub agent_frame_id: String,
+    /// Opaque call correlation; attribute by `turn` and `attempt` instead.
     pub request_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<RemoteLlmTurnScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
+}
+
+/// The turn and logical Run a remote model call serves.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteLlmTurnScope {
+    pub run: RunId,
+    pub turn_id: TurnId,
 }
 
 impl RemoteLlmRequestScope {
@@ -826,6 +838,8 @@ impl RemoteLlmRequestScope {
             session_id: session_id.into(),
             agent_frame_id: agent_frame_id.into(),
             request_id: request_id.into(),
+            turn: None,
+            attempt: None,
         }
     }
 

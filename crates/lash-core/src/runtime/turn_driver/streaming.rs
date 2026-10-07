@@ -275,7 +275,8 @@ impl RuntimeTurnDriver<'_> {
                     "{}:turn:{}:llm:{}",
                     self.session_id, self.turn_id, protocol_iteration
                 ),
-            ),
+            )
+            .with_turn(self.logical_run().into(), self.turn_id.clone()),
             stream_events: transport_stream_events(&provider, Some(llm_stream_tx)),
             provider_trace,
             generation: request.generation.clone(),

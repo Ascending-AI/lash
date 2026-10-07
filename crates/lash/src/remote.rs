@@ -26,7 +26,7 @@ pub mod llm {
         RemoteLlmOutputPart, RemoteLlmOutputSpec, RemoteLlmProfileCapability,
         RemoteLlmProfileRequestDefaults, RemoteLlmRequest, RemoteLlmRequestScope,
         RemoteLlmResponse, RemoteLlmRole, RemoteLlmTerminalReason, RemoteLlmToolChoice,
-        RemoteLlmToolSpec, RemoteNormalizedError, RemoteOpenAiReasoningContext,
+        RemoteLlmToolSpec, RemoteLlmTurnScope, RemoteNormalizedError, RemoteOpenAiReasoningContext,
         RemoteProtocolPosition, RemoteProviderFailureKind, RemoteProviderFileScope,
         RemoteProviderMetadata, RemoteProviderReasoningReplay, RemoteProviderReplayDrop,
         RemoteProviderReplayDropReason, RemoteProviderReplayKind, RemoteProviderReplayMeta,

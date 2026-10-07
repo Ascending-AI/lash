@@ -1107,7 +1107,7 @@ impl<Output, Error> RunHandle<Output, Error> {
     pub async fn output(self) -> Result<TurnOutput> {
         let run = self.run.clone();
         let outcome = self.outcome().await?;
-        settled_output(InputId::from(run.stored()), outcome)
+        settled_output(InputId::from(&run), outcome)
     }
 
     async fn raw_result(
@@ -1144,14 +1144,14 @@ impl<Output, Error> RunHandle<Output, Error> {
                 }
                 lash_core::runtime::PluginOperationCommandOutcome::Cancelled => {
                     Err(EmbedError::from(SendError::NotSettled {
-                        input_id: InputId::from(run.stored()),
+                        input_id: InputId::from(&run),
                         status,
                     }))
                 }
             },
             SendOutcome::Refused { refusal, .. } => Err(EmbedError::Runtime(*refusal)),
             _ => Err(EmbedError::from(SendError::NotSettled {
-                input_id: InputId::from(run.stored()),
+                input_id: InputId::from(&run),
                 status,
             })),
         }

@@ -128,7 +128,7 @@ pub use handle::{
     HANDLE_FIELD, HANDLE_KIND, HandleId, HandleTarget, is_handle_shape, parse_handle,
 };
 pub use identity::{
-    BatchId, BlankIdentity, InputId, InvalidProcessId, NodeId, PROCESS_ID_PREFIX, ProcessId,
+    BatchId, BlankIdentity, InputId, InvalidProcessId, NodeId, PROCESS_ID_PREFIX, ProcessId, RunId,
     RuntimeOwner, SessionId, TurnId, session_owner_namespace,
 };
 pub use llm::capability::{

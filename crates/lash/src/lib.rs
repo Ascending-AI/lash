@@ -175,9 +175,8 @@ pub mod scenario_contracts;
 pub mod sync {
     pub use lash_core::sync::*;
 }
-mod run_id;
 mod send;
-pub use run_id::RunId;
+pub use lash_core::RunId;
 mod session;
 mod session_binding;
 mod support;
@@ -1413,8 +1412,8 @@ pub mod provider {
     pub use lash_core::{
         AttemptOutcome, AttemptUsageOutcome, ExecutionEvidence,
         ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, LlmRequest,
-        LlmRequestScope, LlmResponse, LlmStreamEvidence, NormalizedError, ProtocolPosition,
-        ProviderEndpointError, facade_support::LlmTransportError,
+        LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTurnScope, NormalizedError,
+        ProtocolPosition, ProviderEndpointError, facade_support::LlmTransportError,
     };
     /// The namespaced failure code carried on
     /// [`LlmTransportError`](facade_support::LlmTransportError) and attempt
