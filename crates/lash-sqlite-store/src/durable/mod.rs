@@ -20,11 +20,11 @@ use lash_durable::domain::{
     SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
-    ActorCommit, ActorKey, ActorKind, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause,
-    Claimed, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads, DurableStore,
-    Epoch, Fenced, HeartbeatOutcome, Mail, MailAnswer, MailCommit, MailDomainWrite, MailKind,
-    MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor, Owner,
-    Reaped, Release, StateRevision, StoreFailure, StoreFailureKind, Woken,
+    ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause, Claimed,
+    CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads, DurableStore, Epoch,
+    Fenced, HeartbeatOutcome, Mail, MailAnswer, MailCommit, MailDomainWrite, MailKind, MailRefusal,
+    MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor, Owner, Reaped, Release,
+    StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
 use lash_store_sql::durable::park_events::ParkEventStatements;
 use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
@@ -88,7 +88,10 @@ CREATE TABLE IF NOT EXISTS actors (
     CONSTRAINT ck_actors_owner_boot CHECK ((owner_node IS NULL) = (owner_boot IS NULL)),
     CONSTRAINT ck_actors_ready CHECK ((state = 'ready') = (ready_at_ms IS NOT NULL)),
     CONSTRAINT ck_actors_due CHECK (next_due_ms IS NULL OR state = 'waiting'),
-    CONSTRAINT ck_actors_mail CHECK (acked_seq <= mail_seq)
+    CONSTRAINT ck_actors_mail CHECK (acked_seq <= mail_seq),
+    CONSTRAINT ck_actors_key_kind CHECK (
+        (kind = 'session' AND substr(actor_key, 1, 2) = 's/') OR
+        (kind = 'process' AND substr(actor_key, 1, 2) = 'p/'))
 );
 CREATE INDEX IF NOT EXISTS ix_actors_ready ON actors (ready_at_ms) WHERE state = 'ready';
 CREATE INDEX IF NOT EXISTS ix_actors_due ON actors (next_due_ms)
@@ -225,8 +228,10 @@ impl SqliteDurableStore {
         }
     }
 
-    fn instant(&self) -> DurableInstant {
-        DurableInstant(i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX))
+    fn instant(&self) -> Result<DurableInstant, DurableError> {
+        integer(self.clock.timestamp_ms())
+            .map(DurableInstant)
+            .map_err(store_failure)
     }
 
     async fn write<T, F>(&self, label: CommitLabel, body: F) -> Result<T, DurableError>
@@ -234,7 +239,7 @@ impl SqliteDurableStore {
         T: Send + 'static,
         F: FnOnce(&FencedTx<'_>, DurableInstant) -> Flow<T> + Send + 'static,
     {
-        let now = self.instant();
+        let now = self.instant()?;
         tracing::trace!(label = label.as_str(), "durable sqlite commit");
         self.conn
             .write_flow(move |tx| body(tx, now))
@@ -271,6 +276,19 @@ fn store_failure(error: rusqlite::Error) -> DurableError {
     DurableError::Store(StoreFailure {
         kind,
         message: error.to_string(),
+    })
+}
+
+/// Checked SQL/domain integers: foreign out-of-range data is corruption.
+fn integer<T>(
+    value: impl TryInto<T, Error: std::error::Error + Send + Sync + 'static>,
+) -> rusqlite::Result<T> {
+    value.try_into().map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Integer,
+            Box::new(error),
+        )
     })
 }
 
@@ -555,7 +573,7 @@ pub(crate) fn wake_session_tx(
     if meta == 0 || deleted > 0 {
         return Ok(());
     }
-    let now = DurableInstant(i64::try_from(at_ms).unwrap_or(i64::MAX));
+    let now = DurableInstant(integer::<i64>(at_ms).map_err(crate::sqlite_error)?);
     match wake_session_within(tx, session, control, now).map_err(crate::sqlite_error)? {
         Ok(_) | Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => Ok(()),
         Err(error) => Err(lash_core_execution::StoreError::Backend(format!(
@@ -712,7 +730,7 @@ fn apply_mail(tx: &FencedTx<'_>, writes: MailTx, now: DurableInstant) -> Flow<Ma
 #[async_trait::async_trait]
 impl DurableStore for SqliteDurableStore {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
-        Ok(self.instant())
+        self.instant()
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
@@ -841,7 +859,7 @@ impl DurableStore for SqliteDurableStore {
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let owner = node.owner.clone();
         let formats = formats_json(&node.decodes);
-        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let limit = integer::<i64>(limit).map_err(store_failure)?;
         let decodes = node.decodes.clone();
         self.write(CommitLabel::CLAIM, move |tx, now| {
             match node_draining(tx, &owner)? {
@@ -939,7 +957,7 @@ impl DurableStore for SqliteDurableStore {
     }
 
     async fn live_decodes(&self) -> Result<Vec<Vec<lash_durable::FormatSet>>, DurableError> {
-        let now = self.instant();
+        let now = self.instant()?;
         self.read(move |tx| {
             let rows = tx
                 .prepare_cached(SQL.node.live_decodes.sql())?
@@ -1050,7 +1068,7 @@ impl DurableStore for SqliteDurableStore {
                 })
                 .optional()?;
             let Some((
-                kind,
+                _kind,
                 state,
                 epoch,
                 node,
@@ -1069,7 +1087,6 @@ impl DurableStore for SqliteDurableStore {
             };
             let snapshot = (|| {
                 Ok(ActorSnapshot {
-                    kind: ActorKind::parse(&kind).ok_or_else(|| corrupt("actor kind", &kind))?,
                     state: actor_state(&state)?,
                     epoch: Epoch(epoch),
                     owner: owner(node, boot),
@@ -1077,9 +1094,9 @@ impl DurableStore for SqliteDurableStore {
                     next_due: due.map(DurableInstant),
                     revision: StateRevision(revision),
                     formats: lash_durable::FormatSet::new(formats),
-                    pending_mail: u64::try_from(mail).unwrap_or_default(),
+                    pending_mail: integer::<u64>(mail).map_err(store_failure)?,
                     park,
-                    failed_activations: u32::try_from(failed).unwrap_or(u32::MAX),
+                    failed_activations: integer::<u32>(failed).map_err(store_failure)?,
                     actor: actor.clone(),
                 })
             })();
@@ -1205,3 +1222,63 @@ mod wait_law_tests;
 #[cfg(test)]
 #[path = "../process_law_tests.rs"]
 mod process_law_tests;
+
+#[cfg(test)]
+mod constraint_tests {
+    use super::*;
+    fn assert_check_rejects(connection: &Connection, statement: &str, constraint: &str) {
+        let error = connection
+            .execute_batch(statement)
+            .expect_err("an illegal durable vocabulary must violate its schema CHECK");
+        assert!(
+            error.to_string().contains(constraint),
+            "SQLite reported the wrong CHECK for {constraint}: {error}"
+        );
+    }
+
+    #[test]
+    fn waits_refuse_impossible_purpose_and_lifecycle_rows() {
+        let conn = Connection::open_in_memory().expect("open wait fixture");
+        conn.execute_batch(crate::durable::WAITS_TABLES)
+            .expect("create schema");
+        conn.execute_batch("INSERT INTO waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'signal', 0, 'pending', 1)").expect("valid pending signal");
+        for (assignment, constraint) in [
+            ("kind = 'timer'", "ck_waits_timer_deadline"),
+            ("resolved_at_ms = 1", "ck_waits_settled_at"),
+            ("state = 'revoked'", "ck_waits_settled_at"),
+            (
+                "state = 'resolved', resolution_digest = 'digest', resolved_at_ms = 1",
+                "ck_waits_resolution_ref",
+            ),
+            ("resolution_ref = 'payload'", "ck_waits_resolution_ref"),
+        ] {
+            assert_check_rejects(&conn, &format!("UPDATE waits SET {assignment}"), constraint);
+        }
+        conn.execute_batch("UPDATE waits SET kind = 'timer', deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").expect("resolved timer needs no payload");
+        assert_check_rejects(
+            &conn,
+            "UPDATE waits SET resolution_ref = 'payload'",
+            "ck_waits_resolution_ref",
+        );
+    }
+
+    #[test]
+    fn actors_refuse_kind_that_disagrees_with_key() {
+        let conn = Connection::open_in_memory().expect("open actor fixture");
+        conn.execute_batch(crate::durable::DURABLE_TABLES)
+            .expect("create schema");
+        for (key, kind) in [
+            ("s/session", "process"),
+            ("p/process", "session"),
+            ("x/unknown", "session"),
+        ] {
+            assert_check_rejects(
+                &conn,
+                &format!(
+                    "INSERT INTO actors (actor_key, kind, state, epoch, formats, state_revision, mail_seq, acked_seq, created_at_ms) VALUES ('{key}', '{kind}', 'idle', 0, '[]', 0, 0, 0, 0)"
+                ),
+                "ck_actors_key_kind",
+            );
+        }
+    }
+}

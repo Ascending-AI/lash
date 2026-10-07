@@ -16,14 +16,10 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::run_records::RunRecordStatements;
 use sqlx::{PgConnection, Row};
 
-use super::{Committing, corrupt, sqlx_failure};
+use super::{Committing, corrupt, integer, sqlx_failure};
 
 static SQL: LazyLock<RunRecordStatements> =
     LazyLock::new(|| RunRecordStatements::render(Dialect::postgres()));
-
-fn signed(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
-}
 
 pub(super) async fn apply(
     tx: &mut PgConnection,
@@ -42,8 +38,8 @@ pub(super) async fn apply(
             let owner_key = owner.stored();
             let taken: Option<i32> = sqlx::query_scalar(SQL.ordinal_taken.sql())
                 .bind(&owner_key)
-                .bind(signed(run.0))
-                .bind(signed(ordinal.0))
+                .bind(integer::<i64>(run.0)?)
+                .bind(integer::<i64>(ordinal.0)?)
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(sqlx_failure)?;
@@ -57,8 +53,8 @@ pub(super) async fn apply(
             if let Some(previous) = ordinal.0.checked_sub(1) {
                 let follows: Option<i32> = sqlx::query_scalar(SQL.ordinal_taken.sql())
                     .bind(&owner_key)
-                    .bind(signed(run.0))
-                    .bind(signed(previous))
+                    .bind(integer::<i64>(run.0)?)
+                    .bind(integer::<i64>(previous)?)
                     .fetch_optional(&mut *tx)
                     .await
                     .map_err(sqlx_failure)?;
@@ -75,7 +71,7 @@ pub(super) async fn apply(
             {
                 let exists: Option<i32> = sqlx::query_scalar(SQL.outcome_exists.sql())
                     .bind(&owner_key)
-                    .bind(signed(run.0))
+                    .bind(integer::<i64>(run.0)?)
                     .bind(call.as_str())
                     .fetch_optional(&mut *tx)
                     .await
@@ -90,8 +86,8 @@ pub(super) async fn apply(
             }
             sqlx::query(SQL.append.sql())
                 .bind(&owner_key)
-                .bind(signed(run.0))
-                .bind(signed(ordinal.0))
+                .bind(integer::<i64>(run.0)?)
+                .bind(integer::<i64>(ordinal.0)?)
                 .bind(kind.as_str())
                 .bind(call.as_ref().map(ToolCallId::as_str))
                 .bind(record_json)
@@ -104,7 +100,7 @@ pub(super) async fn apply(
         RunRecordWrite::Prune { owner, before } => {
             sqlx::query(SQL.prune.sql())
                 .bind(owner.stored())
-                .bind(signed(before.0))
+                .bind(integer::<i64>(before.0)?)
                 .execute(&mut *tx)
                 .await
                 .map_err(sqlx_failure)?;
@@ -135,8 +131,8 @@ pub(super) async fn read(
                 .transpose()?;
             Ok(RunRecordRow {
                 owner: owner.clone(),
-                run: RunSeq(u64::try_from(run).unwrap_or(0)),
-                ordinal: Ordinal(u64::try_from(ordinal).unwrap_or(0)),
+                run: RunSeq(integer::<u64>(run)?),
+                ordinal: Ordinal(integer::<u64>(ordinal)?),
                 kind,
                 call,
                 record_json: row.try_get(4).map_err(sqlx_failure)?,

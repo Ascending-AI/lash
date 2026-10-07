@@ -350,3 +350,46 @@ async fn the_ddl_artifact_is_idempotent() {
     assert_eq!(first, second, "reapplying schema.sql must change nothing");
     drop_scratch_schema(connection, &scratch).await;
 }
+
+#[tokio::test]
+async fn retention_keeps_terminal_process_until_cascade_drains() {
+    let url = crate::testing::required_database_url();
+    let (mut conn, scratch, _) = provision_scratch_schema(&url).await;
+    sqlx::query("INSERT INTO lash_processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq, status, lifetime, record_json, cascade_cursor) VALUES ('parent', 'origin', 'standard', 0, 0, 0, 1, 'completed', 'detached', '{}', 'child')").execute(&mut conn).await.expect("terminal with unfinished cascade");
+    let statements = crate::process_sql::process_sql();
+    for sql in [
+        statements.process_postgres.list_prunable_terminal.sql(),
+        statements
+            .process_postgres
+            .list_prunable_terminal_for_update
+            .sql(),
+    ] {
+        let rows = sqlx::query(sql)
+            .bind(1_i64)
+            .bind(Option::<i64>::None)
+            .fetch_all(&mut conn)
+            .await
+            .expect("candidate list");
+        assert!(rows.is_empty(), "an unfinished cascade retains its parent");
+    }
+    sqlx::query("UPDATE lash_processes SET cascade_cursor = NULL")
+        .execute(&mut conn)
+        .await
+        .expect("drain cascade");
+    for sql in [
+        statements.process_postgres.list_prunable_terminal.sql(),
+        statements
+            .process_postgres
+            .list_prunable_terminal_for_update
+            .sql(),
+    ] {
+        let rows = sqlx::query(sql)
+            .bind(1_i64)
+            .bind(Option::<i64>::None)
+            .fetch_all(&mut conn)
+            .await
+            .expect("candidate list");
+        assert_eq!(rows.len(), 1);
+    }
+    drop_scratch_schema(conn, &scratch).await;
+}

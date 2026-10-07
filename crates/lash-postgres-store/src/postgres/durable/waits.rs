@@ -10,8 +10,8 @@
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitResolution, WaitRow, WaitState,
-    WaitWrite,
+    ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitLifecycle, WaitPurpose,
+    WaitResolution, WaitRow, WaitState, WaitWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, Woken};
 use lash_store_sql::Dialect;
@@ -49,25 +49,20 @@ pub(super) async fn apply(
     write: &WaitWrite,
 ) -> Result<(), DurableError> {
     match write {
-        WaitWrite::Pin {
-            id,
-            scope,
-            kind,
-            target_process,
-            deadline,
-        } => {
+        WaitWrite::Pin { id, scope, purpose } => {
             sqlx::query(SQL.waits.pin.sql())
                 .bind(id.to_hex())
                 .bind(commit.actor.as_str())
                 .bind(scope.stored())
-                .bind(kind.as_str())
-                .bind(kind.host_resolvable())
+                .bind(purpose.kind().as_str())
+                .bind(purpose.kind().host_resolvable())
                 .bind(
-                    target_process
+                    purpose
+                        .target_process()
                         .as_ref()
                         .map(|process| process.as_str().to_owned()),
                 )
-                .bind(deadline.map(|deadline| deadline.0))
+                .bind(purpose.deadline().map(|deadline| deadline.0))
                 .bind(commit.epoch.0)
                 .execute(&mut *tx)
                 .await
@@ -192,16 +187,23 @@ pub(super) async fn resolve(
 /// The answer a resolution gets without writing: a reserved kind for a host,
 /// or a wait that is no longer pending. `None` when it may resolve.
 fn settled_answer(row: &WaitRow, resolution: &WaitResolution) -> Option<ResolveAnswer> {
-    if resolution.by_host && !row.kind.host_resolvable() {
+    if resolution.by_host && !row.purpose.kind().host_resolvable() {
         return Some(ResolveAnswer::ReservedKind);
     }
-    match row.state {
-        WaitState::Pending => None,
-        WaitState::Resolved if row.resolution_digest.as_deref() == Some(&resolution.digest) => {
+    match &row.lifecycle {
+        WaitLifecycle::Pending => None,
+        WaitLifecycle::Resolved { digest, .. } if digest == &resolution.digest => {
             Some(ResolveAnswer::AlreadyResolved)
         }
-        WaitState::Resolved => Some(ResolveAnswer::Conflict),
-        WaitState::TimedOut | WaitState::Revoked => Some(ResolveAnswer::Revoked),
+        WaitLifecycle::TimerElapsed { .. } if resolution.digest == TIMER_DIGEST => {
+            Some(ResolveAnswer::AlreadyResolved)
+        }
+        WaitLifecycle::Resolved { .. } | WaitLifecycle::TimerElapsed { .. } => {
+            Some(ResolveAnswer::Conflict)
+        }
+        WaitLifecycle::TimedOut { .. } | WaitLifecycle::Revoked { .. } => {
+            Some(ResolveAnswer::Revoked)
+        }
     }
 }
 
@@ -233,24 +235,35 @@ fn decode(row: &PgRow) -> Result<WaitRow, DurableError> {
     let id: String = get(row, 0)?;
     let scope: String = get(row, 2)?;
     let kind: String = get(row, 3)?;
+    let kind = WaitKind::parse(&kind).ok_or_else(|| corrupt("wait kind", &kind))?;
     let target: Option<String> = get(row, 4)?;
     let state: String = get(row, 5)?;
-    Ok(WaitRow {
-        id: WaitId::parse_hex(&id).ok_or_else(|| corrupt("wait id", &id))?,
-        owner: actor_key(&get::<String>(row, 1)?)?,
-        scope: ScopeKey::parse(&scope).map_err(|_| corrupt("wait scope", &scope))?,
-        kind: WaitKind::parse(&kind).ok_or_else(|| corrupt("wait kind", &kind))?,
-        target_process: target
+    let state = WaitState::parse(&state).ok_or_else(|| corrupt("wait state", &state))?;
+    let purpose = WaitPurpose::decode(
+        kind,
+        target
             .map(|process| {
                 lash_sansio::ProcessId::parse(&process)
                     .map_err(|_| corrupt("wait target process", &process))
             })
             .transpose()?,
-        state: WaitState::parse(&state).ok_or_else(|| corrupt("wait state", &state))?,
-        deadline: get::<Option<i64>>(row, 6)?.map(DurableInstant),
-        resolution_digest: get(row, 7)?,
-        resolution_ref: get(row, 8)?,
-        resolved_at: get::<Option<i64>>(row, 9)?.map(DurableInstant),
+        get::<Option<i64>>(row, 6)?.map(DurableInstant),
+    )
+    .ok_or_else(|| corrupt("wait purpose", &id))?;
+    let lifecycle = WaitLifecycle::decode(
+        kind,
+        state,
+        get::<Option<i64>>(row, 9)?.map(DurableInstant),
+        get(row, 7)?,
+        get(row, 8)?,
+    )
+    .ok_or_else(|| corrupt("wait lifecycle", &id))?;
+    Ok(WaitRow {
+        id: WaitId::parse_hex(&id).ok_or_else(|| corrupt("wait id", &id))?,
+        owner: actor_key(&get::<String>(row, 1)?)?,
+        scope: ScopeKey::parse(&scope).map_err(|_| corrupt("wait scope", &scope))?,
+        purpose,
+        lifecycle,
         created_epoch: Epoch(get(row, 10)?),
     })
 }

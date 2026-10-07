@@ -10,8 +10,8 @@
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitResolution, WaitRow, WaitState,
-    WaitWrite,
+    ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitLifecycle, WaitPurpose,
+    WaitResolution, WaitRow, WaitState, WaitWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, Woken};
 use lash_store_sql::durable::waits::WaitStatements;
@@ -40,7 +40,11 @@ CREATE TABLE IF NOT EXISTS waits (
     CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'custom'))),
     CONSTRAINT ck_waits_target
         CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
-    CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL))
+    CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL)),
+    CONSTRAINT ck_waits_timer_deadline CHECK (kind <> 'timer' OR deadline_ms IS NOT NULL),
+    CONSTRAINT ck_waits_settled_at CHECK ((state <> 'pending') = (resolved_at_ms IS NOT NULL)),
+    CONSTRAINT ck_waits_resolution_ref
+        CHECK ((state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS ix_waits_owner ON waits (owner_actor) WHERE state = 'pending';
 CREATE INDEX IF NOT EXISTS ix_waits_scope ON waits (owner_scope);
@@ -55,13 +59,7 @@ static SQL: LazyLock<WaitStatements> =
 
 pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite) -> Answer<()> {
     match write {
-        WaitWrite::Pin {
-            id,
-            scope,
-            kind,
-            target_process,
-            deadline,
-        } => {
+        WaitWrite::Pin { id, scope, purpose } => {
             cached_execute(
                 tx,
                 SQL.pin.sql(),
@@ -69,12 +67,13 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
                     id.to_hex(),
                     commit.actor.as_str(),
                     scope.stored(),
-                    kind.as_str(),
-                    kind.host_resolvable(),
-                    target_process
+                    purpose.kind().as_str(),
+                    purpose.kind().host_resolvable(),
+                    purpose
+                        .target_process()
                         .as_ref()
                         .map(|process| process.as_str().to_owned()),
-                    deadline.map(|deadline| deadline.0),
+                    purpose.deadline().map(|deadline| deadline.0),
                     commit.epoch.0
                 ],
             )?;
@@ -211,16 +210,23 @@ pub(super) fn resolve(
 /// The answer a resolution gets without writing: a reserved kind for a host,
 /// or a wait that is no longer pending. `None` when it may resolve.
 pub(super) fn settled_answer(row: &WaitRow, resolution: &WaitResolution) -> Option<ResolveAnswer> {
-    if resolution.by_host && !row.kind.host_resolvable() {
+    if resolution.by_host && !row.purpose.kind().host_resolvable() {
         return Some(ResolveAnswer::ReservedKind);
     }
-    match row.state {
-        WaitState::Pending => None,
-        WaitState::Resolved if row.resolution_digest.as_deref() == Some(&resolution.digest) => {
+    match &row.lifecycle {
+        WaitLifecycle::Pending => None,
+        WaitLifecycle::Resolved { digest, .. } if digest == &resolution.digest => {
             Some(ResolveAnswer::AlreadyResolved)
         }
-        WaitState::Resolved => Some(ResolveAnswer::Conflict),
-        WaitState::TimedOut | WaitState::Revoked => Some(ResolveAnswer::Revoked),
+        WaitLifecycle::TimerElapsed { .. } if resolution.digest == TIMER_DIGEST => {
+            Some(ResolveAnswer::AlreadyResolved)
+        }
+        WaitLifecycle::Resolved { .. } | WaitLifecycle::TimerElapsed { .. } => {
+            Some(ResolveAnswer::Conflict)
+        }
+        WaitLifecycle::TimedOut { .. } | WaitLifecycle::Revoked { .. } => {
+            Some(ResolveAnswer::Revoked)
+        }
     }
 }
 
@@ -279,24 +285,35 @@ fn stored_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stored> {
 }
 
 fn decode(stored: Stored) -> Result<WaitRow, DurableError> {
-    Ok(WaitRow {
-        id: WaitId::parse_hex(&stored.id).ok_or_else(|| corrupt("wait id", &stored.id))?,
-        owner: actor_key(&stored.owner)?,
-        scope: ScopeKey::parse(&stored.scope).map_err(|_| corrupt("wait scope", &stored.scope))?,
-        kind: WaitKind::parse(&stored.kind).ok_or_else(|| corrupt("wait kind", &stored.kind))?,
-        target_process: stored
+    let kind = WaitKind::parse(&stored.kind).ok_or_else(|| corrupt("wait kind", &stored.kind))?;
+    let state =
+        WaitState::parse(&stored.state).ok_or_else(|| corrupt("wait state", &stored.state))?;
+    let purpose = WaitPurpose::decode(
+        kind,
+        stored
             .target
             .map(|process| {
                 lash_sansio::ProcessId::parse(&process)
                     .map_err(|_| corrupt("wait target process", &process))
             })
             .transpose()?,
-        state: WaitState::parse(&stored.state)
-            .ok_or_else(|| corrupt("wait state", &stored.state))?,
-        deadline: stored.deadline.map(DurableInstant),
-        resolution_digest: stored.digest,
-        resolution_ref: stored.resolution_ref,
-        resolved_at: stored.resolved_at.map(DurableInstant),
+        stored.deadline.map(DurableInstant),
+    )
+    .ok_or_else(|| corrupt("wait purpose", &stored.id))?;
+    let lifecycle = WaitLifecycle::decode(
+        kind,
+        state,
+        stored.resolved_at.map(DurableInstant),
+        stored.digest,
+        stored.resolution_ref,
+    )
+    .ok_or_else(|| corrupt("wait lifecycle", &stored.id))?;
+    Ok(WaitRow {
+        id: WaitId::parse_hex(&stored.id).ok_or_else(|| corrupt("wait id", &stored.id))?,
+        owner: actor_key(&stored.owner)?,
+        scope: ScopeKey::parse(&stored.scope).map_err(|_| corrupt("wait scope", &stored.scope))?,
+        purpose,
+        lifecycle,
         created_epoch: Epoch(stored.created_epoch),
     })
 }

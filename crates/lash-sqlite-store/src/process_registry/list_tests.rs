@@ -156,3 +156,31 @@ fn until_scope_query_seeks_the_lifetime_scope_index() {
         "the scope lookup must not degrade to a table scan, plan: {plan:?}"
     );
 }
+
+#[test]
+fn retention_keeps_terminal_process_until_cascade_drains() {
+    let conn = rusqlite::Connection::open_in_memory().expect("open retention fixture");
+    conn.execute_batch(crate::schema::PROCESS_SCHEMA)
+        .expect("create schema");
+    conn.execute_batch("INSERT INTO processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq, status, lifetime, record_json, cascade_cursor) VALUES ('parent', 'origin', 'standard', 0, 0, 0, 1, 'completed', 'detached', '{}', 'child')").expect("terminal with unfinished cascade");
+    let sql = process_sql().process_sqlite.list_prunable_terminal.sql();
+    let count = |conn: &rusqlite::Connection| {
+        conn.prepare(sql)
+            .expect("prepare candidates")
+            .query_map(params![1, Option::<i64>::None], |_| Ok(()))
+            .expect("candidates")
+            .count()
+    };
+    assert_eq!(
+        count(&conn),
+        0,
+        "an unfinished cancellation cascade must retain its parent"
+    );
+    conn.execute_batch("UPDATE processes SET cascade_cursor = NULL")
+        .expect("drain cascade");
+    assert_eq!(
+        count(&conn),
+        1,
+        "a drained terminal is eligible for retention"
+    );
+}

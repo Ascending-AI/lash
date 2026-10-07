@@ -572,7 +572,7 @@ impl DurableSnapshotStore {
                 .await
                 .map_err(refused)?
                 .ok_or_else(|| QuietPointRefusal(format!("pinned wait {id:?} is gone")))?;
-            waits.push(WaitRef::new(id, row.kind));
+            waits.push(WaitRef::new(id, row.purpose.kind()));
         }
         let Some(operation) = pending.operation() else {
             return Ok(Recovered::Rerun { waits });

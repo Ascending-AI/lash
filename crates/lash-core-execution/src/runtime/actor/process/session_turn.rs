@@ -172,7 +172,7 @@ impl ProcessActivation {
             return Ok(Pass::Again);
         };
         let wait = owned.store().wait(&driver.wait.0).await?;
-        match wait.map(|wait| wait.state) {
+        match wait.map(|wait| wait.lifecycle.state()) {
             Some(WaitState::Resolved) => {
                 let outcome = turns
                     .outcome(record)

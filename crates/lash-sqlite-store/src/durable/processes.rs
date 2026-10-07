@@ -21,7 +21,7 @@ use lash_durable::{
 use lash_sansio::{CancelOrigin, ProcessId};
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, SQL, wake_within};
+use super::{Answer, Committing, SQL, integer, wake_within};
 use crate::SqliteProcessRegistry;
 use crate::conn::cached_execute;
 use crate::process_registry::actor::CancelRecorded;
@@ -35,12 +35,12 @@ fn registry_failure(error: &lash_core_execution::PluginError) -> DurableError {
     })
 }
 
-fn millis(at: DurableInstant) -> u64 {
-    u64::try_from(at.0).unwrap_or_default()
+fn millis(at: DurableInstant) -> rusqlite::Result<u64> {
+    integer(at.0)
 }
 
-fn instant(ms: u64) -> DurableInstant {
-    DurableInstant(i64::try_from(ms).unwrap_or(i64::MAX))
+fn instant(ms: u64) -> rusqlite::Result<DurableInstant> {
+    integer(ms).map(DurableInstant)
 }
 
 /// Create `process`'s actor, ready, in the caller's transaction: a process
@@ -85,7 +85,7 @@ pub(crate) fn cancel_within(
         process,
         origin,
         requester,
-        millis(now),
+        millis(now)?,
         fleet,
     ) {
         Ok(recorded) => recorded,
@@ -93,10 +93,12 @@ pub(crate) fn cancel_within(
     };
     let answer = match recorded {
         CancelRecorded::Ended => return Ok(Ok((CancelAnswer::AlreadyEnded, None))),
-        CancelRecorded::Requested { at_ms } => CancelAnswer::Requested { at: instant(at_ms) },
-        CancelRecorded::AlreadyRequested { at_ms } => {
-            CancelAnswer::AlreadyRequested { at: instant(at_ms) }
-        }
+        CancelRecorded::Requested { at_ms } => CancelAnswer::Requested {
+            at: instant(at_ms)?,
+        },
+        CancelRecorded::AlreadyRequested { at_ms } => CancelAnswer::AlreadyRequested {
+            at: instant(at_ms)?,
+        },
     };
     let woken = match cancel_mail_within(
         tx,
@@ -179,7 +181,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 .query_row(
                     rusqlite::params![
                         process.as_str(),
-                        i64::try_from(*expected_rev).unwrap_or(i64::MAX),
+                        integer::<i64>(*expected_rev)?,
                         driver_json,
                         commit.epoch.0
                     ],
@@ -216,7 +218,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 event_type,
                 payload,
                 replay_key,
-                millis(commit.now),
+                millis(commit.now)?,
                 commit.fleet,
             )
             .map_err(|error| registry_failure(&error)))
@@ -234,8 +236,8 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 tx,
                 process,
                 &output,
-                u64::try_from(commit.epoch.0).unwrap_or_default(),
-                millis(commit.now),
+                integer::<u64>(commit.epoch.0)?,
+                millis(commit.now)?,
                 commit.fleet,
             ) {
                 Ok(ended) => ended,
@@ -290,7 +292,7 @@ fn close_scope(tx: &Connection, commit: &Committing<'_>, scope: &ScopeKey) -> An
     if let Err(error) = crate::process_registry::parent_end::record_conn(
         tx,
         &closed,
-        millis(commit.now),
+        millis(commit.now)?,
         commit.fleet,
     ) {
         return Ok(Err(registry_failure(&error)));
@@ -335,17 +337,21 @@ pub(super) fn process(tx: &Connection, process: &ProcessId) -> Answer<Option<Pro
             ))
         })
         .optional()?;
-    Ok(Ok(row.map(
-        |(state_rev, driver_json, cancel, status, cascade_cursor, written_epoch)| ProcessActorRow {
-            process: process.clone(),
-            state_rev: u64::try_from(state_rev).unwrap_or_default(),
-            driver_json,
-            cancel_requested_at: cancel.map(DurableInstant),
-            terminal: !matches!(status.as_str(), "running" | "waiting"),
-            cascade_cursor,
-            written_epoch: written_epoch.map(Epoch),
-        },
-    )))
+    Ok(Ok(row
+        .map(
+            |(state_rev, driver_json, cancel, status, cascade_cursor, written_epoch)| {
+                Ok::<_, rusqlite::Error>(ProcessActorRow {
+                    process: process.clone(),
+                    state_rev: integer::<u64>(state_rev)?,
+                    driver_json,
+                    cancel_requested_at: cancel.map(DurableInstant),
+                    terminal: !matches!(status.as_str(), "running" | "waiting"),
+                    cascade_cursor,
+                    written_epoch: written_epoch.map(Epoch),
+                })
+            },
+        )
+        .transpose()?))
 }
 
 pub(super) fn until_children(
@@ -358,7 +364,7 @@ pub(super) fn until_children(
         return Ok(Ok(Vec::new()));
     };
     let after = after.map_or("", ProcessId::as_str);
-    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let limit = integer::<i64>(limit)?;
     let ids = tx
         .prepare_cached(SQL.process.pending_children.sql())?
         .query_map(rusqlite::params![kind, id, after, limit], |row| {
@@ -391,7 +397,7 @@ pub(super) fn live_until_descendants(
                 roots.id,
                 roots.turns,
                 roots.operations,
-                i64::try_from(limit).unwrap_or(i64::MAX)
+                integer::<i64>(limit)?
             ],
             |row| row.get::<_, String>(0),
         )?

@@ -11,7 +11,7 @@ use lash_durable::domain::{
 use lash_durable::{DurableInstant, Woken};
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, SQL, actor_key, corrupt, wake_within};
+use super::{Answer, Committing, SQL, actor_key, corrupt, integer, wake_within};
 use crate::conn::cached_execute;
 
 /// `park_events`: the operator's feed of parks, redrives and ends of parked
@@ -105,7 +105,7 @@ pub(super) fn read(
     limit: usize,
 ) -> Answer<Vec<ParkEventRow>> {
     let after = after.map_or(0, |seq| seq.0);
-    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let limit = integer::<i64>(limit)?;
     let rows = tx
         .prepare_cached(SQL.park_events.page.sql())?
         .query_map(rusqlite::params![after, limit], |row| {

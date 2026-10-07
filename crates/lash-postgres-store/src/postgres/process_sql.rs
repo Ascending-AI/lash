@@ -116,6 +116,7 @@ lash_store_sql::statements! {
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
+               AND cascade_cursor IS NULL
          ORDER BY process_id ASC";
 
         /// The same predicate, locking every candidate row for the prune that
@@ -129,6 +130,7 @@ lash_store_sql::statements! {
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
+               AND cascade_cursor IS NULL
          ORDER BY process_id ASC
          FOR UPDATE";
 

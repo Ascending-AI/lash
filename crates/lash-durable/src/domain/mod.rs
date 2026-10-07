@@ -56,7 +56,7 @@ pub use turns::{
 };
 pub use waits::{
     CANCEL_MAIL, ResolveAnswer, TIMER_DIGEST, WAIT_ROW_FORMAT_VERSION, WaitId, WaitKind,
-    WaitResolution, WaitRow, WaitState, WaitWrite,
+    WaitLifecycle, WaitPurpose, WaitResolution, WaitRow, WaitState, WaitWrite,
 };
 
 use crate::error::DurableError;

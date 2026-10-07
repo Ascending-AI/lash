@@ -139,7 +139,7 @@ table lash_deleted_sessions
 table lash_exec_snapshots
   column exec_key text not-null
   column executable_identity text not-null
-  column format_version integer not-null
+  column format_version bigint not-null
   column rev bigint not-null
   column snapshot_ref text not-null
   column written_epoch bigint not-null

@@ -12,14 +12,14 @@ use lash_durable::{DurableError, Epoch};
 use lash_store_sql::durable::snapshots::SnapshotStatements;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing};
+use super::{Answer, Committing, integer};
 use crate::conn::cached_execute;
 
 static SQL: LazyLock<SnapshotStatements> =
     LazyLock::new(|| SnapshotStatements::render(crate::schema_layout::MAIN));
 
-fn revision(stored: i64) -> SnapshotRev {
-    SnapshotRev(u64::try_from(stored).unwrap_or(0))
+fn revision(stored: i64) -> rusqlite::Result<SnapshotRev> {
+    integer(stored).map(SnapshotRev)
 }
 
 /// `exec_snapshots`, created by I0 (FIG-5194); its statements are V0's.
@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS exec_snapshots (
     rev INTEGER NOT NULL CONSTRAINT ck_exec_snapshots_rev CHECK (rev >= 1),
     snapshot_ref TEXT NOT NULL,
     executable_identity TEXT NOT NULL,
-    format_version INTEGER NOT NULL,
+    format_version INTEGER NOT NULL CONSTRAINT ck_exec_snapshots_format_version
+        CHECK (format_version BETWEEN 0 AND 4294967295),
     written_epoch INTEGER NOT NULL
 );
 ";
@@ -48,7 +49,8 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &SnapshotWr
                 .prepare_cached(SQL.rev.sql())?
                 .query_row([&key], |row| row.get::<_, i64>(0))
                 .optional()?
-                .map(revision);
+                .map(revision)
+                .transpose()?;
             if found != *expected {
                 return Ok(Err(DurableError::Domain(
                     DomainRefusal::SnapshotRevConflict {
@@ -76,7 +78,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &SnapshotWr
                     tx.prepare_cached(SQL.replace.sql())?.query_row(
                         rusqlite::params![
                             key,
-                            i64::try_from(expected.0).unwrap_or(i64::MAX),
+                            integer::<i64>(expected.0)?,
                             snapshot_ref,
                             executable_identity,
                             format_version,
@@ -101,7 +103,7 @@ pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<SnapshotRow
         .query_row([exec.stored()], |row| {
             Ok(SnapshotRow {
                 exec: exec.clone(),
-                rev: revision(row.get(0)?),
+                rev: revision(row.get(0)?)?,
                 snapshot_ref: row.get(1)?,
                 executable_identity: row.get(2)?,
                 format_version: row.get(3)?,
@@ -110,4 +112,63 @@ pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<SnapshotRow
         })
         .optional()?;
     Ok(Ok(row))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_durable::domain::CellId;
+    use lash_durable::{ActorKey, DurableInstant};
+
+    #[test]
+    fn snapshots_preserve_full_format_version_and_refuse_oversized_revision() {
+        let conn = Connection::open_in_memory().expect("open snapshots");
+        conn.execute_batch(TABLES).expect("create snapshots");
+        for version in [-1_i64, i64::from(u32::MAX) + 1] {
+            let error = conn
+                .execute(
+                    "INSERT INTO exec_snapshots VALUES ('bad', 1, 'snapshot', 'identity', ?1, 1)",
+                    [version],
+                )
+                .expect_err("format versions are u32");
+            assert!(
+                error
+                    .to_string()
+                    .contains("ck_exec_snapshots_format_version")
+            );
+        }
+
+        let actor = ActorKey::session("session").expect("actor");
+        let commit = Committing {
+            actor: &actor,
+            epoch: Epoch(1),
+            now: DurableInstant(1),
+            fleet: lash_core_execution::FleetFormat::current(),
+            blob_profile: crate::BuiltinBlobProfile::default(),
+        };
+        let exec = ExecKey::Cell("session".into(), "turn".into(), CellId::new("cell"));
+        let put = |expected| SnapshotWrite::Put {
+            exec: exec.clone(),
+            expected,
+            snapshot_ref: "snapshot".into(),
+            executable_identity: "identity".into(),
+            format_version: u32::MAX,
+        };
+        apply(&conn, &commit, &put(None))
+            .expect("insert")
+            .expect("accepted");
+        let before = read(&conn, &exec)
+            .expect("read")
+            .expect("decoded")
+            .expect("snapshot");
+        assert_eq!(before.format_version, u32::MAX);
+        assert!(!matches!(
+            apply(&conn, &commit, &put(Some(SnapshotRev(u64::MAX)))),
+            Ok(Ok(()))
+        ));
+        assert_eq!(
+            read(&conn, &exec).expect("read").expect("decoded"),
+            Some(before)
+        );
+    }
 }

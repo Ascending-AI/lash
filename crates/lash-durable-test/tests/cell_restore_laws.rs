@@ -425,7 +425,7 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
             .await
             .expect("the session's waits read")
             .into_iter()
-            .filter(|wait| wait.kind == WaitKind::Timer)
+            .filter(|wait| wait.purpose.kind() == WaitKind::Timer)
             .collect();
         if let [timer] = timers.as_slice() {
             break timer.clone();
@@ -436,7 +436,7 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
             nodes.script().rendered_trace()
         );
     };
-    let deadline = timer.deadline.expect("a timer has a deadline").0;
+    let deadline = timer.purpose.deadline().expect("a timer has a deadline").0;
     let deadline = u64::try_from(deadline).unwrap() - SimClock::timestamp_ms_at(0);
     let slept_at = clock.logical_ms();
     assert!(

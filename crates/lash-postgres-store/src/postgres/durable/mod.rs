@@ -35,12 +35,11 @@ use lash_durable::domain::{
     SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
-    ActorCommit, ActorKey, ActorKind, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause,
-    ClaimPurpose, Claimed, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads,
-    DurableStore, Epoch, Fenced, FormatSet, HeartbeatOutcome, Mail, MailAnswer, MailCommit,
-    MailDomainWrite, MailKind, MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease,
-    NodeSpec, OpenedActor, Owner, Reaped, Release, StateRevision, StoreFailure, StoreFailureKind,
-    Woken,
+    ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause, ClaimPurpose,
+    Claimed, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads, DurableStore,
+    Epoch, Fenced, FormatSet, HeartbeatOutcome, Mail, MailAnswer, MailCommit, MailDomainWrite,
+    MailKind, MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor,
+    Owner, Reaped, Release, StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::park_events::ParkEventStatements;
@@ -263,6 +262,13 @@ fn sqlx_failure(error: sqlx::Error) -> DurableError {
     }
 }
 
+/// Refuse an integer that the SQL or domain representation cannot carry.
+fn integer<T>(value: impl TryInto<T, Error: std::fmt::Display>) -> Result<T, DurableError> {
+    value
+        .try_into()
+        .map_err(|error| corrupt("integer", &error.to_string()))
+}
+
 fn corrupt(what: &str, value: &str) -> DurableError {
     DurableError::Store(StoreFailure {
         kind: StoreFailureKind::Corrupt,
@@ -328,12 +334,10 @@ impl PostgresDurableStore {
         self
     }
 
-    fn injected_instant(&self) -> Option<DurableInstant> {
+    fn injected_instant(&self) -> Option<Result<DurableInstant, DurableError>> {
         #[cfg(any(test, feature = "testing"))]
         if let Some(clock) = &self.clock {
-            return Some(DurableInstant(
-                i64::try_from(clock.timestamp_ms()).unwrap_or(i64::MAX),
-            ));
+            return Some(integer(clock.timestamp_ms()).map(DurableInstant));
         }
         None
     }
@@ -342,7 +346,7 @@ impl PostgresDurableStore {
         &self,
         connection: &mut PgConnection,
     ) -> Result<DurableInstant, DurableError> {
-        if let Some(now) = self.injected_instant() {
+        if let Some(now) = self.injected_instant().transpose()? {
             return Ok(now);
         }
         let now: i64 = sqlx::query_scalar(
@@ -375,7 +379,7 @@ impl PostgresDurableStore {
             .fetch_one(&mut **tx)
             .await
             .map_err(sqlx_failure)?;
-        let now = match self.injected_instant() {
+        let now = match self.injected_instant().transpose()? {
             Some(now) => now,
             None => DurableInstant(get(&row, 3)?),
         };
@@ -698,7 +702,7 @@ pub(crate) async fn wake_session_tx(
         if !session_mail::standing(tx, session).await?.0 {
             return Ok(());
         }
-        let now = DurableInstant(i64::try_from(at_ms).unwrap_or(i64::MAX));
+        let now = DurableInstant(integer::<i64>(at_ms)?);
         match wake_session_within(tx, session, control, now).await {
             Ok(_) | Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => Ok(()),
             Err(error) => Err(error),
@@ -1006,7 +1010,7 @@ impl DurableStore for PostgresDurableStore {
             .iter()
             .map(|formats| formats.as_str().to_owned())
             .collect();
-        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let limit = integer::<i64>(limit)?;
         let (mut tx, now) = self.open(CommitLabel::CLAIM).await?;
         let outcome = async {
             match node_draining(&mut tx, &node.owner).await? {
@@ -1169,12 +1173,11 @@ impl DurableStore for PostgresDurableStore {
         else {
             return Ok(None);
         };
-        let kind: String = get(&row, 0)?;
+
         let mail_seq: i64 = get(&row, 5)?;
         let acked_seq: i64 = get(&row, 6)?;
         Ok(Some(ActorSnapshot {
             actor: actor.clone(),
-            kind: ActorKind::parse(&kind).ok_or_else(|| corrupt("actor kind", &kind))?,
             state: actor_state(&get::<String>(&row, 1)?)?,
             epoch: Epoch(get(&row, 2)?),
             owner: owner(get(&row, 3)?, get(&row, 4)?),
@@ -1182,9 +1185,9 @@ impl DurableStore for PostgresDurableStore {
             next_due: get::<Option<i64>>(&row, 7)?.map(DurableInstant),
             revision: StateRevision(get(&row, 8)?),
             formats: FormatSet::new(get::<String>(&row, 9)?),
-            pending_mail: u64::try_from(get::<i64>(&row, 10)?).unwrap_or_default(),
+            pending_mail: integer::<u64>(get::<i64>(&row, 10)?)?,
             park: get(&row, 11)?,
-            failed_activations: u32::try_from(get::<i64>(&row, 12)?).unwrap_or(u32::MAX),
+            failed_activations: integer::<u32>(get::<i64>(&row, 12)?)?,
         }))
     }
 }
@@ -1298,3 +1301,76 @@ mod process_law_tests;
 #[cfg(test)]
 #[path = "../durable_concurrency_tests.rs"]
 mod concurrency_tests;
+
+#[cfg(test)]
+mod constraint_tests {
+    use sqlx::Connection as _;
+
+    #[tokio::test]
+    async fn durable_waits_and_actors_refuse_impossible_rows() {
+        let url = crate::testing::required_database_url();
+        let database = crate::testing::IsolatedDatabase::create(&url).await;
+        let mut conn = sqlx::PgConnection::connect(database.url())
+            .await
+            .expect("open constraint fixture");
+        sqlx::raw_sql(crate::PostgresStorage::schema_ddl())
+            .execute(&mut conn)
+            .await
+            .expect("create constraint fixture");
+        sqlx::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch) VALUES ('wait', 's/session', 's/session', 'signal', false, 'pending', 1)").execute(&mut conn).await.expect("pending signal");
+        for (assignment, constraint) in [
+            ("kind = 'timer'", "ck_waits_timer_deadline"),
+            ("resolved_at_ms = 1", "ck_waits_settled_at"),
+            ("state = 'revoked'", "ck_waits_settled_at"),
+            (
+                "state = 'resolved', resolution_digest = 'digest', resolved_at_ms = 1",
+                "ck_waits_resolution_ref",
+            ),
+            ("resolution_ref = 'payload'", "ck_waits_resolution_ref"),
+        ] {
+            let error = sqlx::query(&format!("UPDATE lash_waits SET {assignment}"))
+                .execute(&mut conn)
+                .await
+                .expect_err("impossible wait must be refused");
+            assert_eq!(
+                error
+                    .as_database_error()
+                    .and_then(sqlx::error::DatabaseError::constraint),
+                Some(constraint)
+            );
+        }
+        sqlx::query("UPDATE lash_waits SET kind = 'timer', deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").execute(&mut conn).await.expect("resolved timer without value");
+        let error = sqlx::query("UPDATE lash_waits SET resolution_ref = 'payload'")
+            .execute(&mut conn)
+            .await
+            .expect_err("timer has no payload");
+        assert_eq!(
+            error
+                .as_database_error()
+                .and_then(sqlx::error::DatabaseError::constraint),
+            Some("ck_waits_resolution_ref")
+        );
+        for (key, kind) in [
+            ("s/session", "process"),
+            ("p/process", "session"),
+            ("x/unknown", "session"),
+        ] {
+            let error = sqlx::query(&format!("INSERT INTO lash_actors (actor_key, kind, state, epoch, formats, state_revision, mail_seq, acked_seq, created_at_ms) VALUES ('{key}', '{kind}', 'idle', 0, '[]', 0, 0, 0, 0)")).execute(&mut conn).await.expect_err("key must agree with kind");
+            assert_eq!(
+                error
+                    .as_database_error()
+                    .and_then(sqlx::error::DatabaseError::constraint),
+                Some("ck_lash_actors_key_kind")
+            );
+        }
+        for version in [-1_i64, i64::from(u32::MAX) + 1] {
+            let error = sqlx::query("INSERT INTO lash_exec_snapshots VALUES ('p/process', 1, 'snapshot', 'identity', $1, 1)").bind(version).execute(&mut conn).await.expect_err("format versions are u32");
+            assert_eq!(
+                error
+                    .as_database_error()
+                    .and_then(sqlx::error::DatabaseError::constraint),
+                Some("ck_exec_snapshots_format_version")
+            );
+        }
+    }
+}

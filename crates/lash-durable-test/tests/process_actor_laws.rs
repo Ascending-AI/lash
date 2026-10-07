@@ -526,13 +526,13 @@ async fn a_refused_step_admission_ends_the_process_failed_and_its_awaiter_reads_
 /// again: the wait keeps the material, not the producer's row (source-seal
 /// laws L02/L12).
 ///
-/// Node A dies the instant the awaited process's terminal commits, so the
+/// Node A dies the instant the awaited process's cascade drains, so the
 /// awaiter has not run since; the host prunes the awaited process; then
 /// node B claims the awaiter.
 #[tokio::test]
 async fn an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended() {
     let script = Script::new();
-    script.cut(CommitLabel::PROCESS_TERMINAL, 1, Fault::CommitThenAbort);
+    script.cut(CommitLabel::CASCADE_BATCH, 1, Fault::CommitThenAbort);
     let world = World::new(script).await;
     let producer = world
         .register(registration(json!({
@@ -548,8 +548,8 @@ async fn an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended() {
         .await;
     world.nodes.start("a");
     world
-        .until("the producer ended", || async {
-            world.terminal(&producer).await.is_some()
+        .until("the producer's cascade drained", || async {
+            world.actor_state(&producer).await == Some(ActorState::Terminal)
         })
         .await;
     let produced = world.terminal(&producer).await.expect("the producer's end");

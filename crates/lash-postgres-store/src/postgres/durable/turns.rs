@@ -21,17 +21,13 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::turns::TurnStatements;
 use sqlx::{PgConnection, Row};
 
-use super::{Committing, corrupt, sqlx_failure};
+use super::{Committing, corrupt, integer, sqlx_failure};
 
 static SQL: LazyLock<TurnStatements> =
     LazyLock::new(|| TurnStatements::render(Dialect::postgres()));
 
 fn refuse<T>(refusal: DomainRefusal) -> Result<T, DurableError> {
     Err(DurableError::Domain(refusal))
-}
-
-fn signed(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 pub(super) async fn apply(
@@ -68,7 +64,7 @@ pub(super) async fn apply(
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .bind(phase)
-                .bind(argument.map(signed))
+                .bind(argument.map(integer::<i64>).transpose()?)
                 .bind(0_i64)
                 .bind(Option::<String>::None)
                 .bind(Option::<i64>::None)
@@ -94,7 +90,7 @@ pub(super) async fn apply(
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .bind(phase)
-                .bind(argument.map(signed))
+                .bind(argument.map(integer::<i64>).transpose()?)
                 .bind(i64::from(*iteration))
                 .bind(checkpoint_ref.as_deref())
                 .bind(model.as_ref().map(|pin| i64::from(pin.attempt)))
@@ -124,7 +120,7 @@ pub(super) async fn apply(
                 .bind(run.as_str())
                 .bind(terminal.as_str())
                 .bind(cause_json.as_deref().unwrap_or("null"))
-                .bind(head_revision.map(signed))
+                .bind(head_revision.map(integer::<i64>).transpose()?)
                 .bind(commit.now.0)
                 .fetch_optional(&mut *tx)
                 .await
@@ -174,7 +170,7 @@ pub(super) async fn apply_session_commit(
     let planner =
         lash_core_execution::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
             .map_err(|error| refused(error.to_string()))?;
-    let now = u64::try_from(commit.now.0).unwrap_or(0);
+    let now = integer::<u64>(commit.now.0)?;
     match crate::runtime_persistence::apply_runtime_commit_tx(tx, &planner, now).await {
         Ok(_) => Ok(()),
         Err(StoreError::HeadRevisionConflict { expected, actual }) => {
@@ -313,7 +309,7 @@ pub(super) async fn turn_end(
     Ok(Some(TurnEnd {
         terminal,
         cause_json: cause_json.filter(|cause| cause != "null"),
-        head_revision: head_revision.and_then(|revision| u64::try_from(revision).ok()),
+        head_revision: head_revision.map(integer::<u64>).transpose()?,
     }))
 }
 
@@ -334,14 +330,14 @@ pub(super) async fn turn(
     let run = TurnId::try_from(run.clone()).map_err(|_| corrupt("turn id", &run))?;
     let phase: String = row.try_get(2).map_err(decode)?;
     let argument: Option<i64> = row.try_get(3).map_err(decode)?;
-    let argument = argument.and_then(|value| u64::try_from(value).ok());
+    let argument = argument.map(integer::<u64>).transpose()?;
     let phase = TurnPhase::parse(&phase, argument).ok_or_else(|| corrupt("turn phase", &phase))?;
     let attempt: Option<i64> = row.try_get(6).map_err(decode)?;
     let request: Option<String> = row.try_get(7).map_err(decode)?;
     let deadline: Option<i64> = row.try_get(8).map_err(decode)?;
     let model = match (attempt, request, deadline) {
         (Some(attempt), Some(request_ref), Some(deadline)) => Some(ModelPin {
-            attempt: u32::try_from(attempt).unwrap_or(u32::MAX),
+            attempt: integer::<u32>(attempt)?,
             request_ref,
             deadline: DurableInstant(deadline),
         }),
@@ -358,7 +354,7 @@ pub(super) async fn turn(
         run,
         admission_json,
         phase,
-        iteration: u32::try_from(iteration).unwrap_or(u32::MAX),
+        iteration: integer::<u32>(iteration)?,
         checkpoint_ref,
         model,
         turn_deadline: turn_deadline.map(DurableInstant),

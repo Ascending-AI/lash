@@ -22,17 +22,15 @@ pub const CANCEL_MAIL: &str = "cancel";
 /// version_guard(
 ///     items(
 ///         path = "crates/lash-durable/src/domain/waits.rs",
-///         WaitRow, WaitKind, WaitState, WaitId,
+///         WaitRow, WaitPurpose, WaitLifecycle, WaitKind, WaitState, WaitId,
 ///     ),
 /// )
 /// version_surface = "drain"
 /// format_manifest = "WaitRow"
 pub const WAIT_ROW_FORMAT_VERSION: u32 = 1;
 
-/// A wait's identity: 128 random bits from the operating system's CSPRNG,
-/// minted by the owner in the transaction that pins the wait. A
-/// host-resolvable wait's completion key is this id: it is unguessable, so
-/// holding it is the capability to resolve the wait.
+/// A wait's identity: 128 random bits, minted by the owner in the
+/// transaction that pins the wait.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WaitId(pub [u8; 16]);
 
@@ -161,7 +159,194 @@ impl WaitState {
 /// The digest a due timer resolves with: a timer carries no value.
 pub const TIMER_DIGEST: &str = "timer";
 
-/// One stored wait.
+/// A wait's purpose carries exactly the data that kind requires.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WaitPurpose {
+    /// A tool's host-resolvable completion key.
+    ToolCompletion {
+        /// Its optional deadline, fixed at minting.
+        deadline: Option<DurableInstant>,
+    },
+    /// A host-defined completion key.
+    Custom {
+        /// Its optional deadline, fixed at minting.
+        deadline: Option<DurableInstant>,
+    },
+    /// A process's terminal.
+    ProcessTerminal {
+        /// The process this wait follows.
+        process: ProcessId,
+        /// Its optional deadline, fixed at minting.
+        deadline: Option<DurableInstant>,
+    },
+    /// A child session's turn terminal.
+    ChildSession {
+        /// The process this wait follows.
+        process: ProcessId,
+        /// Its optional deadline, fixed at minting.
+        deadline: Option<DurableInstant>,
+    },
+    /// A signal.
+    Signal {
+        /// Its optional deadline, fixed at minting.
+        deadline: Option<DurableInstant>,
+    },
+    /// A sleep always has a due time.
+    Timer {
+        /// The time the timer must elapse.
+        deadline: DurableInstant,
+    },
+}
+
+impl WaitPurpose {
+    /// The discriminator, derived from the purpose.
+    #[must_use]
+    pub const fn kind(&self) -> WaitKind {
+        match self {
+            Self::ToolCompletion { .. } => WaitKind::ToolCompletion,
+            Self::Custom { .. } => WaitKind::Custom,
+            Self::ProcessTerminal { .. } => WaitKind::ProcessTerminal,
+            Self::ChildSession { .. } => WaitKind::ChildSession,
+            Self::Signal { .. } => WaitKind::Signal,
+            Self::Timer { .. } => WaitKind::Timer,
+        }
+    }
+
+    /// The deadline written at minting.
+    #[must_use]
+    pub const fn deadline(&self) -> Option<DurableInstant> {
+        match self {
+            Self::Timer { deadline } => Some(*deadline),
+            Self::ToolCompletion { deadline, .. }
+            | Self::Custom { deadline, .. }
+            | Self::ProcessTerminal { deadline, .. }
+            | Self::ChildSession { deadline, .. }
+            | Self::Signal { deadline } => *deadline,
+        }
+    }
+
+    /// The process this wait follows, for the two process-targeting purposes.
+    #[must_use]
+    pub fn target_process(&self) -> Option<&ProcessId> {
+        match self {
+            Self::ProcessTerminal { process, .. } | Self::ChildSession { process, .. } => {
+                Some(process)
+            }
+            _ => None,
+        }
+    }
+
+    /// Decode SQL columns together; reject any inconsistent purpose.
+    #[must_use]
+    pub fn decode(
+        kind: WaitKind,
+        target: Option<ProcessId>,
+        deadline: Option<DurableInstant>,
+    ) -> Option<Self> {
+        match (kind, target, deadline) {
+            (WaitKind::ToolCompletion, None, deadline) => Some(Self::ToolCompletion { deadline }),
+            (WaitKind::Custom, None, deadline) => Some(Self::Custom { deadline }),
+            (WaitKind::ProcessTerminal, Some(process), deadline) => {
+                Some(Self::ProcessTerminal { process, deadline })
+            }
+            (WaitKind::ChildSession, Some(process), deadline) => {
+                Some(Self::ChildSession { process, deadline })
+            }
+            (WaitKind::Signal, None, deadline) => Some(Self::Signal { deadline }),
+            (WaitKind::Timer, None, Some(deadline)) => Some(Self::Timer { deadline }),
+            _ => None,
+        }
+    }
+}
+
+/// A lifecycle carries its settlement time and, for a resolution, its value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WaitLifecycle {
+    /// No winner yet.
+    Pending,
+    /// A non-timer resolved with a value.
+    Resolved {
+        /// When the resolution won.
+        at: DurableInstant,
+        /// The resolution's digest for first-winner comparison.
+        digest: String,
+        /// The stored value's reference.
+        resolution_ref: String,
+    },
+    /// A timer elapsed; it has no value.
+    TimerElapsed {
+        /// When this settlement won.
+        at: DurableInstant,
+    },
+    /// The deadline passed first.
+    TimedOut {
+        /// When this settlement won.
+        at: DurableInstant,
+    },
+    /// The owning scope ended first.
+    Revoked {
+        /// When this settlement won.
+        at: DurableInstant,
+    },
+}
+
+impl WaitLifecycle {
+    /// The SQL state, derived from the lifecycle.
+    #[must_use]
+    pub const fn state(&self) -> WaitState {
+        match self {
+            Self::Pending => WaitState::Pending,
+            Self::Resolved { .. } | Self::TimerElapsed { .. } => WaitState::Resolved,
+            Self::TimedOut { .. } => WaitState::TimedOut,
+            Self::Revoked { .. } => WaitState::Revoked,
+        }
+    }
+
+    /// Every settled variant carries a time.
+    #[must_use]
+    pub const fn resolved_at(&self) -> Option<DurableInstant> {
+        match self {
+            Self::Pending => None,
+            Self::Resolved { at, .. }
+            | Self::TimerElapsed { at }
+            | Self::TimedOut { at }
+            | Self::Revoked { at } => Some(*at),
+        }
+    }
+
+    /// Decode SQL columns by variant; reject absent or extraneous payloads.
+    #[must_use]
+    pub fn decode(
+        kind: WaitKind,
+        state: WaitState,
+        at: Option<DurableInstant>,
+        digest: Option<String>,
+        resolution_ref: Option<String>,
+    ) -> Option<Self> {
+        match (kind, state, at, digest, resolution_ref) {
+            (_, WaitState::Pending, None, None, None) => Some(Self::Pending),
+            (WaitKind::Timer, WaitState::Resolved, Some(at), Some(digest), None)
+                if digest == TIMER_DIGEST =>
+            {
+                Some(Self::TimerElapsed { at })
+            }
+            (kind, WaitState::Resolved, Some(at), Some(digest), Some(resolution_ref))
+                if kind != WaitKind::Timer =>
+            {
+                Some(Self::Resolved {
+                    at,
+                    digest,
+                    resolution_ref,
+                })
+            }
+            (_, WaitState::TimedOut, Some(at), None, None) => Some(Self::TimedOut { at }),
+            (_, WaitState::Revoked, Some(at), None, None) => Some(Self::Revoked { at }),
+            _ => None,
+        }
+    }
+}
+
+/// One stored wait, decoded into its purpose and lifecycle.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WaitRow {
     /// Its identity.
@@ -170,20 +355,10 @@ pub struct WaitRow {
     pub owner: ActorKey,
     /// The scope that revokes it.
     pub scope: ScopeKey,
-    /// What it waits for.
-    pub kind: WaitKind,
-    /// For a process-terminal wait, the process.
-    pub target_process: Option<ProcessId>,
-    /// Where it is.
-    pub state: WaitState,
-    /// Its deadline, written once.
-    pub deadline: Option<DurableInstant>,
-    /// The resolution's digest, once resolved.
-    pub resolution_digest: Option<String>,
-    /// The resolution, by reference, once resolved.
-    pub resolution_ref: Option<String>,
-    /// When it was resolved.
-    pub resolved_at: Option<DurableInstant>,
+    /// Required data for the wait's kind.
+    pub purpose: WaitPurpose,
+    /// Required data for the wait's state.
+    pub lifecycle: WaitLifecycle,
     /// The epoch of the commit that minted it.
     pub created_epoch: Epoch,
 }
@@ -197,13 +372,8 @@ pub enum WaitWrite {
         id: WaitId,
         /// The scope that revokes it.
         scope: ScopeKey,
-        /// What it waits for.
-        kind: WaitKind,
-        /// For a process-terminal wait, the process; for a child-session
-        /// wait, the process whose child turn it waits for.
-        target_process: Option<ProcessId>,
-        /// Its deadline.
-        deadline: Option<DurableInstant>,
+        /// Required data for the wait's kind, written once.
+        purpose: WaitPurpose,
     },
     /// Settle a pending wait of the committing owner whose deadline passed
     /// as of the commit: a timer resolves with [`TIMER_DIGEST`], any other

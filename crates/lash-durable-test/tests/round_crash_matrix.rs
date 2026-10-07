@@ -665,7 +665,7 @@ async fn key_laws(backend: &Backend, call: &ToolCallId, key: &str) -> Vec<String
         None => Ok(None),
     };
     match named {
-        Ok(Some(row)) if row.kind == WaitKind::ToolCompletion => {}
+        Ok(Some(row)) if row.purpose.kind() == WaitKind::ToolCompletion => {}
         other => violations.push(format!(
             "K: {call}'s key names no tool completion wait: {other:?}"
         )),

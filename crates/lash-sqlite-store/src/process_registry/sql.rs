@@ -106,6 +106,7 @@ lash_store_sql::statements! {
                AND updated_at_ms < ?1
                AND (?2 IS NULL OR change_seq <= ?2)
                AND consumer_hold_key IS NULL
+               AND cascade_cursor IS NULL
              ORDER BY process_id ASC";
 
         /// The change feed after `?1`, at most `?2` rows: live rows unioned

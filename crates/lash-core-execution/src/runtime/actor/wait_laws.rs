@@ -395,7 +395,7 @@ pub async fn the_first_resolution_wins(backend: &Backend) -> LawResult {
         "a resolution after the timeout answered {late:?}"
     );
     ensure!(
-        row(backend, &after).await?.state == WaitState::TimedOut,
+        row(backend, &after).await?.lifecycle.state() == WaitState::TimedOut,
         "a late resolution overwrote the timeout"
     );
 
@@ -414,14 +414,14 @@ pub async fn the_first_resolution_wins(backend: &Backend) -> LawResult {
             .map_err(|error| LawBroken(error.to_string()))??;
         let stored = row(backend, &wait).await?;
         let agreed = match resolved {
-            ResolveAnswer::Resolved => stored.state == WaitState::Resolved,
-            ResolveAnswer::Revoked => stored.state == WaitState::TimedOut,
+            ResolveAnswer::Resolved => stored.lifecycle.state() == WaitState::Resolved,
+            ResolveAnswer::Revoked => stored.lifecycle.state() == WaitState::TimedOut,
             _ => false,
         };
         ensure!(
             agreed,
             "round {round}: the resolve answered {resolved:?} but the row is {:?}",
-            stored.state
+            stored.lifecycle.state()
         );
     }
     Ok(())
@@ -485,7 +485,8 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
     let (wait, _) = pin(&cx, WaitKind::ToolCompletion, None, Some(SHORT)).await?;
     let deadline = row(backend, &wait)
         .await?
-        .deadline
+        .purpose
+        .deadline()
         .ok_or_else(|| LawBroken("the wait has no deadline".into()))?;
     let mut tx = cx.begin().await?;
     tx.give_up(Release::Waiting {
@@ -538,12 +539,13 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
         .first()
         .ok_or_else(|| LawBroken("no wait settled".into()))?;
     ensure!(
-        settled.id == wait.id() && settled.state == WaitState::TimedOut,
+        settled.id == wait.id() && settled.lifecycle.state() == WaitState::TimedOut,
         "the claimed wait settled as {:?}",
-        settled.state
+        settled.lifecycle.state()
     );
     let resolved_at = settled
-        .resolved_at
+        .lifecycle
+        .resolved_at()
         .ok_or_else(|| LawBroken("a timed-out wait has no settle time".into()))?;
     let bound = deadline
         .after_millis(i64::try_from((CLAIM_POLL + EPSILON).as_millis()).unwrap_or(i64::MAX));
@@ -703,7 +705,7 @@ pub async fn the_awaiters_cancel_ends_its_wait(backend: &Backend) -> LawResult {
         "the cancelled await saw {won:?}"
     );
     ensure!(
-        row(backend, &wait).await?.state == WaitState::Pending,
+        row(backend, &wait).await?.lifecycle.state() == WaitState::Pending,
         "the awaiter's cancel settled the wait itself"
     );
     Ok(())
@@ -790,7 +792,7 @@ pub async fn a_wait_survives_its_owners_death_with_the_same_key_and_deadline(
     );
     let resolved = waits::resolve_host(backend, &key, answer("after failover")).await?;
     ensure!(resolved == ResolveAnswer::Resolved, "resolve: {resolved:?}");
-    let won = waits::race(&resumed, &[WaitRef::new(minted.id, minted.kind)]).await?;
+    let won = waits::race(&resumed, &[WaitRef::new(minted.id, minted.purpose.kind())]).await?;
     ensure!(
         won == RaceWinner::Resolved {
             wait,
@@ -803,7 +805,7 @@ pub async fn a_wait_survives_its_owners_death_with_the_same_key_and_deadline(
         "the dead owner can still open a transaction"
     );
     ensure!(
-        row(backend, &wait).await?.deadline == minted.deadline,
+        row(backend, &wait).await?.purpose.deadline() == minted.purpose.deadline(),
         "failover moved the deadline"
     );
     Ok(())
@@ -832,9 +834,9 @@ pub async fn a_key_that_never_resolves_times_out(backend: &Backend) -> LawResult
     );
     let stored = row(backend, &wait).await?;
     ensure!(
-        stored.state == WaitState::TimedOut
-            && stored.resolved_at >= stored.deadline
-            && stored.resolved_at.is_some(),
+        stored.lifecycle.state() == WaitState::TimedOut
+            && stored.lifecycle.resolved_at() >= stored.purpose.deadline()
+            && stored.lifecycle.resolved_at().is_some(),
         "the timed-out wait is stored as {stored:?}"
     );
     Ok(())

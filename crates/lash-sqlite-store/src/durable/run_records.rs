@@ -15,15 +15,11 @@ use lash_sansio::ToolCallId;
 use lash_store_sql::durable::run_records::RunRecordStatements;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, corrupt};
+use super::{Answer, Committing, corrupt, integer};
 use crate::conn::cached_execute;
 
 static SQL: LazyLock<RunRecordStatements> =
     LazyLock::new(|| RunRecordStatements::render(crate::schema_layout::MAIN));
-
-fn signed(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
-}
 
 /// `run_records`, created by I0 (FIG-5194); its statements are V0's.
 pub(crate) const TABLES: &str = "
@@ -61,7 +57,11 @@ pub(super) fn apply(
             let taken = tx
                 .prepare_cached(SQL.ordinal_taken.sql())?
                 .query_row(
-                    rusqlite::params![owner_key, signed(run.0), signed(ordinal.0)],
+                    rusqlite::params![
+                        owner_key,
+                        integer::<i64>(run.0)?,
+                        integer::<i64>(ordinal.0)?
+                    ],
                     |_| Ok(()),
                 )
                 .optional()?;
@@ -76,7 +76,11 @@ pub(super) fn apply(
                 let follows = tx
                     .prepare_cached(SQL.ordinal_taken.sql())?
                     .query_row(
-                        rusqlite::params![owner_key, signed(run.0), signed(previous)],
+                        rusqlite::params![
+                            owner_key,
+                            integer::<i64>(run.0)?,
+                            integer::<i64>(previous)?
+                        ],
                         |_| Ok(()),
                     )
                     .optional()?;
@@ -94,7 +98,7 @@ pub(super) fn apply(
                 let exists = tx
                     .prepare_cached(SQL.outcome_exists.sql())?
                     .query_row(
-                        rusqlite::params![owner_key, signed(run.0), call.as_str()],
+                        rusqlite::params![owner_key, integer::<i64>(run.0)?, call.as_str()],
                         |_| Ok(()),
                     )
                     .optional()?;
@@ -111,8 +115,8 @@ pub(super) fn apply(
                 SQL.append.sql(),
                 rusqlite::params![
                     owner_key,
-                    signed(run.0),
-                    signed(ordinal.0),
+                    integer::<i64>(run.0)?,
+                    integer::<i64>(ordinal.0)?,
                     kind.as_str(),
                     call.as_ref().map(ToolCallId::as_str),
                     record_json,
@@ -125,7 +129,7 @@ pub(super) fn apply(
             cached_execute(
                 tx,
                 SQL.prune.sql(),
-                rusqlite::params![owner.stored(), signed(before.0)],
+                rusqlite::params![owner.stored(), integer::<i64>(before.0)?],
             )?;
             Ok(Ok(()))
         }
@@ -160,8 +164,8 @@ pub(super) fn read(tx: &Connection, owner: &OwnerKey) -> Answer<Vec<RunRecordRow
         };
         records.push(RunRecordRow {
             owner: owner.clone(),
-            run: RunSeq(u64::try_from(run).unwrap_or(0)),
-            ordinal: Ordinal(u64::try_from(ordinal).unwrap_or(0)),
+            run: RunSeq(integer::<u64>(run)?),
+            ordinal: Ordinal(integer::<u64>(ordinal)?),
             kind,
             call,
             record_json,
@@ -169,4 +173,59 @@ pub(super) fn read(tx: &Connection, owner: &OwnerKey) -> Answer<Vec<RunRecordRow
         });
     }
     Ok(Ok(records))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn negative_record_identity_is_corruption() {
+        let conn = Connection::open_in_memory().expect("open records");
+        conn.execute_batch(TABLES).expect("create records");
+        let owner = OwnerKey::Turn("session".into(), "turn".into());
+        let actor = lash_durable::ActorKey::session("session").expect("actor");
+        let commit = Committing {
+            actor: &actor,
+            epoch: Epoch(1),
+            now: lash_durable::DurableInstant(1),
+            fleet: lash_core_execution::FleetFormat::current(),
+            blob_profile: crate::BuiltinBlobProfile::default(),
+        };
+        let write = RunRecordWrite::Append {
+            owner: owner.clone(),
+            run: RunSeq(u64::MAX),
+            ordinal: Ordinal(0),
+            kind: RunRecordKind::Admit,
+            call: None,
+            record_json: "{}".into(),
+        };
+        assert!(
+            !matches!(apply(&conn, &commit, &write), Ok(Ok(()))),
+            "an oversized identity must refuse its write"
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM run_records", [], |row| row
+                .get::<_, i64>(0))
+                .expect("count"),
+            0
+        );
+
+        conn.execute(
+            "INSERT INTO run_records VALUES (?1, -1, 0, 'admit', NULL, '{}', 1)",
+            [owner.stored()],
+        )
+        .expect("foreign negative identity");
+        let answer = read(&conn, &owner);
+        assert!(
+            matches!(
+                answer,
+                Ok(Err(DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Corrupt,
+                    ..
+                })))
+            ) || matches!(answer, Err(rusqlite::Error::FromSqlConversionFailure(..))),
+            "negative identities must report corruption: {answer:?}"
+        );
+    }
 }

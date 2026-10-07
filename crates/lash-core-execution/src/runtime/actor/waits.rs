@@ -27,8 +27,8 @@
 use std::time::Duration;
 
 use lash_durable::domain::{
-    CANCEL_MAIL, DomainWrite, MailAnswer, MailDomainWrite, ScopeKey, TIMER_DIGEST, WaitResolution,
-    WaitRow, WaitState, WaitWrite,
+    CANCEL_MAIL, DomainWrite, MailAnswer, MailDomainWrite, ScopeKey, WaitLifecycle, WaitPurpose,
+    WaitResolution, WaitRow, WaitState, WaitWrite,
 };
 use lash_durable::{
     ActorKind, ActorTx, CommitLabel, DueSource, DurableError, DurableInstant, Fenced, MailTx,
@@ -261,7 +261,7 @@ pub enum WaitSettled {
 ///
 /// A stored resolution that does not decode.
 pub fn settled(row: &WaitRow) -> Result<Option<WaitSettled>, DurableError> {
-    Ok(match row.state {
+    Ok(match row.lifecycle.state() {
         WaitState::Pending => None,
         WaitState::Resolved => Some(WaitSettled::Resolved(decode_resolution(row)?)),
         WaitState::TimedOut => Some(WaitSettled::TimedOut),
@@ -292,9 +292,12 @@ pub fn pin(tx: &mut ActorTx, spec: WaitSpec) -> Result<(WaitRef, Option<PinnedKe
     tx.write(DomainWrite::Wait(WaitWrite::Pin {
         id,
         scope: spec.scope,
-        kind: spec.kind,
-        target_process: spec.target_process,
-        deadline: spec.deadline.map(WaitDeadline::at),
+        purpose: WaitPurpose::decode(
+            spec.kind,
+            spec.target_process,
+            spec.deadline.map(WaitDeadline::at),
+        )
+        .ok_or(PinRefusal::TargetMismatch(spec.kind))?,
     }));
     Ok((WaitRef::new(id, spec.kind), key))
 }
@@ -399,7 +402,10 @@ pub async fn race(cx: &ActorContext, waits: &[WaitRef]) -> Result<RaceWinner, Du
             return Ok(RaceWinner::Cancelled);
         }
         let now = store.now().await?;
-        let earliest = rows.iter().filter_map(|(_, row)| row.deadline).min();
+        let earliest = rows
+            .iter()
+            .filter_map(|(_, row)| row.purpose.deadline())
+            .min();
         if earliest.is_some_and(|due| due <= now) {
             match settle_rows(cx, tx, rows.iter().map(|(_, row)| row), now).await {
                 Ok(()) => {}
@@ -411,8 +417,8 @@ pub async fn race(cx: &ActorContext, waits: &[WaitRef]) -> Result<RaceWinner, Du
             continue;
         }
         for (_, row) in &rows {
-            if let Some(due) = row.deadline {
-                cx.note_due(due_source(row.kind), due);
+            if let Some(due) = row.purpose.deadline() {
+                cx.note_due(due_source(row.purpose.kind()), due);
             }
         }
         let until_due = earliest.map_or(poll, |due| {
@@ -440,8 +446,12 @@ pub async fn settle_due(cx: &ActorContext) -> Result<Vec<WaitRef>, DurableError>
     let now = store.now().await?;
     let due: Vec<WaitRef> = pending
         .iter()
-        .filter(|row| row.deadline.is_some_and(|deadline| deadline <= now))
-        .map(|row| WaitRef::new(row.id, row.kind))
+        .filter(|row| {
+            row.purpose
+                .deadline()
+                .is_some_and(|deadline| deadline <= now)
+        })
+        .map(|row| WaitRef::new(row.id, row.purpose.kind()))
         .collect();
     if !due.is_empty() {
         let mut attempt = 1;
@@ -466,7 +476,9 @@ async fn settle_rows<'a>(
     now: DurableInstant,
 ) -> Result<(), DurableError> {
     for row in rows {
-        if row.state == WaitState::Pending && row.deadline.is_some_and(|due| due <= now) {
+        if row.lifecycle.state() == WaitState::Pending
+            && row.purpose.deadline().is_some_and(|due| due <= now)
+        {
             tx.write(DomainWrite::Wait(WaitWrite::Due { id: row.id }));
         }
     }
@@ -480,8 +492,8 @@ async fn refresh_wait_dues(cx: &ActorContext) -> Result<(), DurableError> {
     cx.clear_due(DueSource::WaitDeadline);
     cx.clear_due(DueSource::Timer);
     for row in pending {
-        if let Some(due) = row.deadline {
-            cx.note_due(due_source(row.kind), due);
+        if let Some(due) = row.purpose.deadline() {
+            cx.note_due(due_source(row.purpose.kind()), due);
         }
     }
     Ok(())
@@ -500,12 +512,12 @@ fn due_source(kind: WaitKind) -> DueSource {
 fn decided(rows: &[(WaitRef, WaitRow)]) -> Result<Option<RaceWinner>, DurableError> {
     let first = rows
         .iter()
-        .filter(|(_, row)| row.state != WaitState::Pending)
-        .min_by_key(|(_, row)| row.resolved_at);
+        .filter(|(_, row)| row.lifecycle.state() != WaitState::Pending)
+        .min_by_key(|(_, row)| row.lifecycle.resolved_at());
     let Some((wait, row)) = first else {
         return Ok(None);
     };
-    Ok(Some(match row.state {
+    Ok(Some(match row.lifecycle.state() {
         WaitState::Resolved => RaceWinner::Resolved {
             wait: *wait,
             resolution: decode_resolution(row)?,
@@ -602,12 +614,13 @@ pub async fn resolve_ended_terminal(backend: &Backend, wait: &WaitRef) -> Result
         return Ok(());
     };
     let Some(process) = row
-        .target_process
-        .filter(|_| row.state == WaitState::Pending)
+        .purpose
+        .target_process()
+        .filter(|_| row.lifecycle.state() == WaitState::Pending)
     else {
         return Ok(());
     };
-    let record = match backend.process_registry().get_process(&process).await {
+    let record = match backend.process_registry().get_process(process).await {
         Ok(record) => record,
         Err(crate::PluginError::ProcessNoLongerRetained { .. }) => return Ok(()),
         Err(error) => {
@@ -707,7 +720,7 @@ pub async fn outstanding_keys(
         .pending_waits(owner)
         .await?
         .into_iter()
-        .filter(|row| row.kind.host_resolvable())
+        .filter(|row| row.purpose.kind().host_resolvable())
         .map(|row| PinnedKey::of(&row.id))
         .collect())
 }
@@ -773,15 +786,12 @@ fn encode_resolution(resolution: &Resolution) -> Result<(String, String), Durabl
 }
 
 fn decode_resolution(row: &WaitRow) -> Result<Resolution, DurableError> {
-    if row.kind == WaitKind::Timer && row.resolution_digest.as_deref() == Some(TIMER_DIGEST) {
-        return Ok(Resolution::Ok(serde_json::Value::Null));
+    match &row.lifecycle {
+        WaitLifecycle::TimerElapsed { .. } => Ok(Resolution::Ok(serde_json::Value::Null)),
+        WaitLifecycle::Resolved { resolution_ref, .. } => serde_json::from_str(resolution_ref)
+            .map_err(|error| corrupt(&format!("wait {}'s resolution: {error}", row.id))),
+        _ => Err(corrupt(&format!("wait {} is not resolved", row.id))),
     }
-    let stored = row
-        .resolution_ref
-        .as_deref()
-        .ok_or_else(|| corrupt(&format!("resolved wait {} has no resolution", row.id)))?;
-    serde_json::from_str(stored)
-        .map_err(|error| corrupt(&format!("wait {}'s resolution: {error}", row.id)))
 }
 
 fn encode_process_outcome(outcome: &ProcessOutcome) -> Result<(String, String), DurableError> {

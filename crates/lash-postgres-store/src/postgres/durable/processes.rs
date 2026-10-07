@@ -21,7 +21,7 @@ use lash_durable::{
 use lash_sansio::{CancelOrigin, ProcessId};
 use sqlx::PgConnection;
 
-use super::{Committing, SQL, corrupt, get, sqlx_failure, wake_within};
+use super::{Committing, SQL, corrupt, get, integer, sqlx_failure, wake_within};
 use crate::process_helpers::{
     CancelRecorded, record_cancel_tx, record_event_tx, record_terminal_tx,
 };
@@ -44,12 +44,12 @@ fn registry_failure(error: &lash_core_execution::PluginError) -> DurableError {
     })
 }
 
-fn millis(at: DurableInstant) -> u64 {
-    u64::try_from(at.0).unwrap_or_default()
+fn millis(at: DurableInstant) -> Result<u64, DurableError> {
+    integer(at.0)
 }
 
-fn instant(ms: u64) -> DurableInstant {
-    DurableInstant(i64::try_from(ms).unwrap_or(i64::MAX))
+fn instant(ms: u64) -> Result<DurableInstant, DurableError> {
+    integer(ms).map(DurableInstant)
 }
 
 fn process_actor(process: &ProcessId) -> Result<ActorKey, DurableError> {
@@ -144,15 +144,17 @@ pub(crate) async fn cancel_within(
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
 ) -> Result<(CancelAnswer, Option<Woken>), DurableError> {
-    let recorded = record_cancel_tx(tx, process, origin, requester, millis(now), fleet)
+    let recorded = record_cancel_tx(tx, process, origin, requester, millis(now)?, fleet)
         .await
         .map_err(|error| registry_failure(&error))?;
     let answer = match recorded {
         CancelRecorded::Ended => return Ok((CancelAnswer::AlreadyEnded, None)),
-        CancelRecorded::Requested { at_ms } => CancelAnswer::Requested { at: instant(at_ms) },
-        CancelRecorded::AlreadyRequested { at_ms } => {
-            CancelAnswer::AlreadyRequested { at: instant(at_ms) }
-        }
+        CancelRecorded::Requested { at_ms } => CancelAnswer::Requested {
+            at: instant(at_ms)?,
+        },
+        CancelRecorded::AlreadyRequested { at_ms } => CancelAnswer::AlreadyRequested {
+            at: instant(at_ms)?,
+        },
     };
     let woken = cancel_mail_within(
         tx,
@@ -182,7 +184,7 @@ pub(super) async fn apply(
         } => {
             let moved: Option<i64> = sqlx::query_scalar(SQL.process.advance.sql())
                 .bind(process.as_str())
-                .bind(i64::try_from(*expected_rev).unwrap_or(i64::MAX))
+                .bind(integer::<i64>(*expected_rev)?)
                 .bind(driver_json)
                 .bind(commit.epoch.0)
                 .fetch_optional(&mut *tx)
@@ -215,7 +217,7 @@ pub(super) async fn apply(
                 event_type,
                 payload,
                 replay_key,
-                millis(commit.now),
+                millis(commit.now)?,
                 commit.fleet,
             )
             .await
@@ -232,8 +234,8 @@ pub(super) async fn apply(
                 tx,
                 process,
                 &output,
-                u64::try_from(commit.epoch.0).unwrap_or_default(),
-                millis(commit.now),
+                integer::<u64>(commit.epoch.0)?,
+                millis(commit.now)?,
                 commit.fleet,
             )
             .await
@@ -278,7 +280,7 @@ async fn close_scope(
     let Some(closed) = scope_id(scope) else {
         return Ok(());
     };
-    crate::process_registry::parent_end::record_tx(tx, &closed, millis(commit.now), commit.fleet)
+    crate::process_registry::parent_end::record_tx(tx, &closed, millis(commit.now)?, commit.fleet)
         .await
         .map_err(|error| registry_failure(&error))?;
     let ScopeKey::Turn(session, _) = scope else {
@@ -338,7 +340,7 @@ pub(super) async fn process(
     let status: String = get(&row, 3)?;
     Ok(Some(ProcessActorRow {
         process: process.clone(),
-        state_rev: u64::try_from(get::<i64>(&row, 0)?).unwrap_or_default(),
+        state_rev: integer::<u64>(get::<i64>(&row, 0)?)?,
         driver_json: get(&row, 1)?,
         cancel_requested_at: get::<Option<i64>>(&row, 2)?.map(DurableInstant),
         terminal: !matches!(status.as_str(), "running" | "waiting"),
@@ -360,7 +362,7 @@ pub(super) async fn until_children(
         .bind(kind)
         .bind(id)
         .bind(after.map_or("", ProcessId::as_str))
-        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .bind(integer::<i64>(limit)?)
         .fetch_all(&mut *tx)
         .await
         .map_err(sqlx_failure)?;
@@ -384,7 +386,7 @@ pub(super) async fn live_until_descendants(
         .bind(roots.id)
         .bind(roots.turns)
         .bind(roots.operations)
-        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .bind(integer::<i64>(limit)?)
         .fetch_all(&mut *tx)
         .await
         .map_err(sqlx_failure)?;

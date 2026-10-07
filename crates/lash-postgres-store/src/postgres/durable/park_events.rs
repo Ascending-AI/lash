@@ -11,7 +11,7 @@ use lash_durable::domain::{
 use lash_durable::{DurableError, DurableInstant, Woken};
 use sqlx::PgConnection;
 
-use super::{Committing, SQL, actor_key, corrupt, get, sqlx_failure, wake_within};
+use super::{Committing, SQL, actor_key, corrupt, get, integer, sqlx_failure, wake_within};
 
 async fn append(
     tx: &mut PgConnection,
@@ -96,7 +96,7 @@ pub(super) async fn read(
 ) -> Result<Vec<ParkEventRow>, DurableError> {
     let rows = sqlx::query(SQL.park_events.page.sql())
         .bind(after.map_or(0, |seq| seq.0))
-        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .bind(integer::<i64>(limit)?)
         .fetch_all(&mut *tx)
         .await
         .map_err(sqlx_failure)?;

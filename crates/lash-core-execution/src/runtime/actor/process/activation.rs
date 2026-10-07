@@ -880,7 +880,7 @@ impl ProcessActivation {
                     .wait(&wait.0)
                     .await?
                     .ok_or_else(|| corrupt("a pinned key's wait", "its row is gone"))?;
-                match row.state {
+                match row.lifecycle.state() {
                     WaitState::Resolved => {
                         driver.blocked = None;
                         return Ok(Next::Event(EngineEvent::ExternalResolved {
@@ -892,7 +892,7 @@ impl ProcessActivation {
                         driver.blocked = None;
                         return Ok(Next::Event(EngineEvent::ExternalTimedOut { name }));
                     }
-                    WaitState::Pending => match row.deadline {
+                    WaitState::Pending => match row.purpose.deadline() {
                         Some(deadline) if now >= deadline => {
                             tx.write(DomainWrite::Wait(WaitWrite::Due { id: wait.0 }));
                             return Ok(Next::Committed);
@@ -911,7 +911,7 @@ impl ProcessActivation {
                 // stays a timeout, and a resolution outlives the target's
                 // pruning.
                 let mut row = process_wait(reads, &wait).await?;
-                if row.state == WaitState::Pending {
+                if row.lifecycle.state() == WaitState::Pending {
                     // A target that ended before the wait was pinned
                     // resolved no wait: resolve it from the target's
                     // recorded end, first winner, and read the winner.
@@ -922,7 +922,7 @@ impl ProcessActivation {
                     .await?;
                     row = process_wait(reads, &wait).await?;
                 }
-                match row.state {
+                match row.lifecycle.state() {
                     WaitState::Resolved => {
                         driver.blocked = None;
                         return Ok(Next::Event(EngineEvent::ProcessEnded {
@@ -936,7 +936,7 @@ impl ProcessActivation {
                             process: target,
                         }));
                     }
-                    WaitState::Pending => match row.deadline {
+                    WaitState::Pending => match row.purpose.deadline() {
                         Some(deadline) if now >= deadline => {
                             tx.write(DomainWrite::Wait(WaitWrite::Due { id: wait.0 }));
                             return Ok(Next::Committed);
@@ -1195,10 +1195,13 @@ async fn process_wait(
 }
 
 fn resolution(row: &lash_durable::domain::WaitRow) -> Result<waits::Resolution, DurableError> {
-    let stored = row
-        .resolution_ref
-        .as_deref()
-        .ok_or_else(|| corrupt("a resolved wait", "it holds no resolution"))?;
+    let lash_durable::domain::WaitLifecycle::Resolved {
+        resolution_ref: stored,
+        ..
+    } = &row.lifecycle
+    else {
+        return Err(corrupt("a resolved wait", "it holds no resolution"));
+    };
     serde_json::from_str(stored).map_err(|error| corrupt("a wait's resolution", error))
 }
 

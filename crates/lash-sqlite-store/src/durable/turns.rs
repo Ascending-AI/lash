@@ -20,7 +20,7 @@ use lash_sansio::{SessionId, TurnId};
 use lash_store_sql::durable::turns::TurnStatements;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, corrupt};
+use super::{Answer, Committing, corrupt, integer};
 use crate::conn::cached_execute;
 
 /// `turn_phases`: V0's (FIG-5170) side table of `session_runs`.
@@ -51,10 +51,6 @@ static SQL: LazyLock<TurnStatements> =
 
 fn refuse<T>(refusal: DomainRefusal) -> Answer<T> {
     Ok(Err(DurableError::Domain(refusal)))
-}
-
-fn signed(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 fn model_columns(model: Option<&ModelPin>) -> (Option<i64>, Option<String>, Option<i64>) {
@@ -97,7 +93,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                     session.as_str(),
                     run.as_str(),
                     phase,
-                    argument.map(signed),
+                    argument.map(integer::<i64>).transpose()?,
                     0_i64,
                     Option::<String>::None,
                     Option::<i64>::None,
@@ -126,7 +122,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                         session.as_str(),
                         run.as_str(),
                         phase,
-                        argument.map(signed),
+                        argument.map(integer::<i64>).transpose()?,
                         i64::from(*iteration),
                         checkpoint_ref,
                         attempt,
@@ -160,7 +156,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                         run.as_str(),
                         terminal.as_str(),
                         cause_json.as_deref().unwrap_or("null"),
-                        head_revision.map(signed),
+                        head_revision.map(integer::<i64>).transpose()?,
                         commit.now.0,
                     ],
                     |_| Ok(()),
@@ -217,7 +213,7 @@ pub(super) fn apply_session_commit(
             Ok(planner) => planner,
             Err(error) => return refused(error.to_string()),
         };
-    let now = u64::try_from(commit.now.0).unwrap_or(0);
+    let now = integer::<u64>(commit.now.0)?;
     match crate::persistence::session_commit::apply_runtime_commit_conn(
         tx,
         &planner,
@@ -375,7 +371,7 @@ pub(super) fn turn_end(
     Ok(Ok(Some(TurnEnd {
         terminal,
         cause_json: cause_json.filter(|cause| cause != "null"),
-        head_revision: head_revision.and_then(|revision| u64::try_from(revision).ok()),
+        head_revision: head_revision.map(integer::<u64>).transpose()?,
     })))
 }
 
@@ -417,13 +413,13 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
     let Ok(run) = TurnId::try_from(stored.run.clone()) else {
         return Ok(Err(corrupt("turn id", &stored.run)));
     };
-    let argument = stored.argument.and_then(|value| u64::try_from(value).ok());
+    let argument = stored.argument.map(integer::<u64>).transpose()?;
     let Some(phase) = TurnPhase::parse(&stored.phase, argument) else {
         return Ok(Err(corrupt("turn phase", &stored.phase)));
     };
     let model = match (stored.attempt, stored.request, stored.deadline) {
         (Some(attempt), Some(request_ref), Some(deadline)) => Some(ModelPin {
-            attempt: u32::try_from(attempt).unwrap_or(u32::MAX),
+            attempt: integer::<u32>(attempt)?,
             request_ref,
             deadline: DurableInstant(deadline),
         }),
@@ -438,7 +434,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         run,
         admission_json: stored.admission_json,
         phase,
-        iteration: u32::try_from(stored.iteration).unwrap_or(u32::MAX),
+        iteration: integer::<u32>(stored.iteration)?,
         checkpoint_ref: stored.checkpoint_ref,
         model,
         turn_deadline: stored.turn_deadline.map(DurableInstant),

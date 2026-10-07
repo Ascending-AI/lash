@@ -4,7 +4,7 @@ use crate::domain::{DurableReads, MailAnswer};
 use crate::error::DurableError;
 use crate::formats::FormatSet;
 use crate::ids::{
-    ActorKey, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, MailSeq, NodeId, StateRevision,
+    ActorKey, BootId, CommitLabel, DurableInstant, Epoch, MailSeq, NodeId, StateRevision,
 };
 use crate::tx::{ActorTx, MailTx};
 
@@ -202,8 +202,6 @@ pub struct MailCommit {
 pub struct ActorSnapshot {
     /// The actor.
     pub actor: ActorKey,
-    /// Its kind.
-    pub kind: ActorKind,
     /// Its scheduling state.
     pub state: ActorState,
     /// Its current epoch.

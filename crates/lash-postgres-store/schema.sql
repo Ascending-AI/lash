@@ -890,7 +890,10 @@ CREATE TABLE IF NOT EXISTS lash_actors (
     CONSTRAINT ck_lash_actors_owner_boot CHECK ((owner_node IS NULL) = (owner_boot IS NULL)),
     CONSTRAINT ck_lash_actors_ready CHECK ((state = 'ready') = (ready_at_ms IS NOT NULL)),
     CONSTRAINT ck_lash_actors_due CHECK (next_due_ms IS NULL OR state = 'waiting'),
-    CONSTRAINT ck_lash_actors_mail CHECK (acked_seq <= mail_seq)
+    CONSTRAINT ck_lash_actors_mail CHECK (acked_seq <= mail_seq),
+    CONSTRAINT ck_lash_actors_key_kind CHECK (
+        (kind = 'session' AND substr(actor_key, 1, 2) = 's/') OR
+        (kind = 'process' AND substr(actor_key, 1, 2) = 'p/'))
 );
 CREATE INDEX IF NOT EXISTS ix_lash_actors_ready ON lash_actors (ready_at_ms) WHERE state = 'ready';
 CREATE INDEX IF NOT EXISTS ix_lash_actors_due ON lash_actors (next_due_ms)
@@ -969,7 +972,8 @@ CREATE TABLE IF NOT EXISTS lash_exec_snapshots (
     rev BIGINT NOT NULL CONSTRAINT ck_exec_snapshots_rev CHECK (rev >= 1),
     snapshot_ref TEXT NOT NULL,
     executable_identity TEXT NOT NULL,
-    format_version INTEGER NOT NULL,
+    format_version BIGINT NOT NULL CONSTRAINT ck_exec_snapshots_format_version
+        CHECK (format_version BETWEEN 0 AND 4294967295),
     written_epoch BIGINT NOT NULL
 );
 
@@ -1020,7 +1024,11 @@ CREATE TABLE IF NOT EXISTS lash_waits (
     CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'custom'))),
     CONSTRAINT ck_waits_target
         CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
-    CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL))
+    CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL)),
+    CONSTRAINT ck_waits_timer_deadline CHECK (kind <> 'timer' OR deadline_ms IS NOT NULL),
+    CONSTRAINT ck_waits_settled_at CHECK ((state <> 'pending') = (resolved_at_ms IS NOT NULL)),
+    CONSTRAINT ck_waits_resolution_ref
+        CHECK ((state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS ix_lash_waits_owner ON lash_waits (owner_actor)
