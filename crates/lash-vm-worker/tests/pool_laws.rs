@@ -573,17 +573,18 @@ fn parked_projected_tool_arguments_keep_the_recorded_request() {
     assert_eq!(
         (again.kind, &again.payload),
         (request.kind, &request.payload),
-        "parking must preserve the issued request, including a derived projected scalar"
+        "parking must preserve the issued request, including a scalar read from a projection"
     );
     let message = resumed.effect_result(answer(again)).expect("answer");
     let WorkerMessage::Complete { value, .. } = drive(&mut resumed, message) else {
         panic!("the resumed cell completes");
     };
     let outcome: lashlang::ExecutionOutcome = rmp_serde::from_slice(&value.0).expect("outcome");
-    let lashlang::ExecutionOutcome::Finished(lashlang::Value::Projected(value)) = outcome else {
-        panic!("the terminal value keeps its projected provenance: {outcome:?}");
-    };
-    assert_eq!(value.scalar_value(), Some(&lashlang::Value::Number(15.0)));
+    assert_eq!(
+        outcome,
+        lashlang::ExecutionOutcome::Finished(lashlang::Value::Number(15.0)),
+        "a scalar read from a projection finishes as its plain value"
+    );
     resumed.release().expect("release");
 }
 
