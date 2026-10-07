@@ -1,39 +1,174 @@
 use super::*;
 
 impl RuntimeSessionServices {
-    /// Run a `ProcessInput::SessionTurn`: initialize the recorded child
-    /// session and execute its first turn through the shared session-turn path.
+    /// Mail a `ProcessInput::SessionTurn`'s turn (FIG-5208): initialize the
+    /// recorded child session, or reopen the one an earlier pass created,
+    /// and accept the turn's input into it under the child turn's id. The
+    /// child's session actor runs the turn; the process waits for its end.
     ///
-    /// Cancellation never tears the session down. The process token is the
-    /// turn's own cancellation token inside the port, so a cancelled process
-    /// leaves an ordinary cancelled turn inside a retained, reusable child
-    /// session — and no pending or held turn input. Only the caller records
-    /// the process terminal; the committed child turn is not itself a
-    /// recorded process result.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the process identity and its recorded lineage are separate durable facts \
-                  the runner reads from the registration"
-    )]
-    pub(in crate::runtime::session_manager::process_runners) async fn run_process_session_turn(
+    /// A request this deployment can never run answers
+    /// [`SessionTurnMail::Refused`](lash_core_execution::runtime::actor::process::SessionTurnMail)
+    /// with the process's terminal failure; every other failure is an
+    /// error another pass may not meet.
+    pub(in crate::runtime) async fn mail_process_session_turn(
         &self,
-        process_id: crate::ProcessId,
-        lineage: crate::ProcessLineage,
-        mut create_request: crate::SessionCreateRequest,
+        process_id: &crate::ProcessId,
+        create_request: crate::SessionCreateRequest,
         turn_input: crate::TurnInput,
-        result: crate::SessionTurnOutcome,
-        execution_write_authority: crate::ProcessExecutionWriteAuthority,
-        scoped_effect_controller: crate::ActorContext,
-        cancellation: tokio_util::sync::CancellationToken,
-    ) -> Result<crate::ProcessAwaitOutput, crate::ProcessInfraError> {
-        create_request = create_request.with_caused_by(crate::CausalRef::Process {
+    ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnMail, crate::PluginError>
+    {
+        let create_request = self.child_create_request(process_id, create_request);
+        let turn_id = crate::runtime::process_session_turn_id(process_id);
+        match Box::pin(self.initialize_session_and_mail_turn(
+            create_request,
+            process_id,
+            &turn_id,
+            turn_input,
+        ))
+        .await
+        {
+            Ok(_) => Ok(lash_core_execution::runtime::actor::process::SessionTurnMail::Mailed),
+            // A recorded request this deployment cannot initialize fails
+            // deterministically: no pass can run it, so the refusal is a
+            // terminal failure, not an error another pass retries forever.
+            Err(session_init::SessionTurnInitError::Refused { source }) => Ok(
+                lash_core_execution::runtime::actor::process::SessionTurnMail::Refused(
+                    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+                        crate::ToolFailure::tool(
+                            crate::ToolFailureClass::Execution,
+                            "process_session_turn_refused",
+                            source.to_string(),
+                        ),
+                    )),
+                ),
+            ),
+            Err(session_init::SessionTurnInitError::Create { session_id, source }) => {
+                if let Some(session_id) = session_id {
+                    tracing::debug!(
+                        process_id = %process_id,
+                        session_id = %session_id,
+                        "a process's child session may be retained by a failed mail"
+                    );
+                }
+                Err(*source)
+            }
+        }
+    }
+
+    /// Stop a `ProcessInput::SessionTurn`'s child turn: withdraw its input
+    /// while no run has taken it, or else request the run's cancel, which
+    /// the child's session actor honours.
+    pub(in crate::runtime) async fn cancel_process_session_turn(
+        &self,
+        process_id: &crate::ProcessId,
+        create_request: crate::SessionCreateRequest,
+        requester: Option<String>,
+    ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnCancel, crate::PluginError>
+    {
+        use lash_core_execution::runtime::actor::process::SessionTurnCancel;
+        let session_id = self
+            .child_create_request(process_id, create_request)
+            .session_id;
+        let turn_id = crate::runtime::process_session_turn_id(process_id);
+        let run = self
+            .withdraw_process_child_inputs(session_id.as_ref(), process_id, &turn_id)
+            .await?;
+        let Some(session_id) = session_id else {
+            return Ok(SessionTurnCancel::Withdrawn);
+        };
+        let request = crate::TurnCancelRequest::new(
+            crate::TurnAddress::new(session_id.clone(), run.unwrap_or_else(|| turn_id.clone())),
+            format!("process-cancel:{process_id}"),
+            requester,
+        );
+        let receipt = crate::TurnWorkDriver::new(self.current.host.core.backend().clone())
+            .request_cancel(request)
+            .await
+            .map_err(crate::PluginError::Runtime)?;
+        Ok(match receipt.outcome {
+            crate::TurnCancelOutcome::Requested(_)
+            | crate::TurnCancelOutcome::Escalated(_)
+            | crate::TurnCancelOutcome::AlreadyRequested(_)
+            | crate::TurnCancelOutcome::PolicyConflict { .. } => SessionTurnCancel::Requested,
+            // The run is not open: it ended, and its end resolved the
+            // process's wait, or no run ever took the input, which the
+            // withdrawal above cancelled.
+            _ => match self.child_run_terminal(&session_id, &turn_id).await? {
+                Some(_) => SessionTurnCancel::Ended,
+                None => SessionTurnCancel::Withdrawn,
+            },
+        })
+    }
+
+    /// A `ProcessInput::SessionTurn`'s answer once its child turn ended: the
+    /// turn's committed end, as the child session's store records it,
+    /// projected onto what `result` asks for.
+    pub(in crate::runtime) async fn process_session_turn_outcome(
+        &self,
+        process_id: &crate::ProcessId,
+        create_request: crate::SessionCreateRequest,
+        result: &crate::SessionTurnOutcome,
+    ) -> Result<crate::ProcessOutcome, crate::PluginError> {
+        let session_id = self
+            .child_create_request(process_id, create_request)
+            .session_id
+            .ok_or_else(|| {
+                crate::PluginError::Session(format!(
+                    "process `{process_id}` names no child session"
+                ))
+            })?;
+        let turn_id = crate::runtime::process_session_turn_id(process_id);
+        let cause = self
+            .child_run_terminal(&session_id, &turn_id)
+            .await?
+            .ok_or_else(|| {
+                crate::PluginError::Session(format!(
+                    "process `{process_id}`'s child turn in `{session_id}` has not ended"
+                ))
+            })?;
+        let outcome = match cause {
+            crate::store::RunTerminalCause::Committed { outcome, .. } => {
+                crate::TurnOutcome::from(outcome)
+            }
+            crate::store::RunTerminalCause::Cancelled { evidence } => {
+                crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence })
+            }
+            crate::store::RunTerminalCause::Refused { code, message, .. } => {
+                return Ok(crate::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::failure(crate::ToolFailure::tool(
+                        crate::ToolFailureClass::Execution,
+                        "process_session_turn_refused",
+                        format!("{code}: {message}"),
+                    )),
+                ));
+            }
+            other => {
+                return Err(crate::PluginError::Session(format!(
+                    "process `{process_id}`'s child turn ended without an outcome: {other:?}"
+                )));
+            }
+        };
+        let turn = self.child_turn(&session_id, outcome).await?;
+        let state = process_terminal_state_for_turn(&turn);
+        Ok(crate::ProcessAwaitOutput::from_tool_output(
+            output_from_process_turn(process_id, &session_id, turn, state, result),
+        ))
+    }
+
+    /// The child session's create request as the process runs it: caused by
+    /// the process, in the session its id derives when the start named none
+    /// (ADR 0107), under the model its starter's environment recorded.
+    fn child_create_request(
+        &self,
+        process_id: &crate::ProcessId,
+        create_request: crate::SessionCreateRequest,
+    ) -> crate::SessionCreateRequest {
+        let mut create_request = create_request.with_caused_by(crate::CausalRef::Process {
             process_id: process_id.clone(),
         });
-        // A child session the start did not name is the process's own,
-        // derived from its minted id (ADR 0107).
         if create_request.session_id.is_none() {
             create_request = create_request
-                .with_session_id(crate::runtime::process_child_session_id(&process_id));
+                .with_session_id(crate::runtime::process_child_session_id(process_id));
         }
         // The child is resolved against the environment this process's start
         // captured — its starter's recorded policy and plugin config — the
@@ -42,97 +177,96 @@ impl RuntimeSessionServices {
         // environment's recorded one, copied as recorded rather than
         // re-resolved.
         self.inherit_session_turn_llm_profile(&mut create_request);
-        // The child session's first turn is deliberately scoped by the
-        // process identity that started it, so the crossing is spelled out.
-        // The process worker admitted this controller under the process id.
-        // Keep that execution authority through the child turn; session and
-        // turn ids remain the turn's foreground routing and attribution.
-        let child_turn_id = crate::runtime::process_session_turn_id(&process_id);
-        match Box::pin(
-            self.initialize_session_and_run_turn(session_init::ProcessSessionTurnInit {
-                create_request,
-                process_id: &process_id,
-                lineage,
-                turn_id: child_turn_id,
-                turn_input,
-                execution_write_authority: &execution_write_authority,
-                scoped_effect_controller,
-                cancellation,
-            }),
-        )
-        .await
-        {
-            Ok(run) => {
-                let child_session_id = run.session_id.clone();
-                let state = process_terminal_state_for_turn(&run.turn);
-                Ok(crate::ProcessAwaitOutput::from_tool_output(
-                    output_from_process_turn(
-                        &process_id,
-                        &child_session_id,
-                        run.turn,
-                        state,
-                        &result,
-                    ),
-                ))
+        create_request
+    }
+
+    /// The child session's store.
+    async fn child_store(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::store::SessionStore, crate::PluginError> {
+        let factory = self.current.host.core.session_store_factory();
+        crate::runtime::live_session_view(&factory, session_id)
+            .await
+            .map_err(|error| {
+                crate::PluginError::of_store_error(
+                    format_args!("failed to open child session `{session_id}`"),
+                    error,
+                )
+            })?
+            .ok_or_else(|| {
+                crate::PluginError::Session(format!("child session `{session_id}` is not live"))
+            })
+    }
+
+    /// How the child's run `turn_id` ended, if it did.
+    async fn child_run_terminal(
+        &self,
+        session_id: &SessionId,
+        turn_id: &crate::TurnId,
+    ) -> Result<Option<crate::store::RunTerminalCause>, crate::PluginError> {
+        let store = self.child_store(session_id).await?;
+        let terminal = store.run_terminal(turn_id).await.map_err(|error| {
+            crate::PluginError::of_store_error(
+                format_args!("failed to read child run `{turn_id}` of `{session_id}`"),
+                error,
+            )
+        })?;
+        Ok(terminal.map(|terminal| terminal.cause))
+    }
+
+    /// The child turn as its commit left it: the session's committed head
+    /// and the turn's committed outcome.
+    async fn child_turn(
+        &self,
+        session_id: &SessionId,
+        outcome: crate::TurnOutcome,
+    ) -> Result<crate::AssembledTurn, crate::PluginError> {
+        let store = self.child_store(session_id).await?;
+        let state =
+            crate::store::load_session_window_state(&store, crate::store::WindowSelector::Current)
+                .await
+                .map_err(|error| {
+                    crate::PluginError::of_store_error(
+                        format_args!("failed to load child session `{session_id}`"),
+                        error,
+                    )
+                })?
+                .map(|loaded| loaded.state)
+                .ok_or_else(|| {
+                    crate::PluginError::Session(format!(
+                        "child session `{session_id}` has no committed head"
+                    ))
+                })?;
+        let text = match &outcome {
+            crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { text }) => {
+                Some(text.clone())
             }
-            Err(err) => {
-                if let Some(session_id) = err.retained_session_id() {
-                    tracing::debug!(
-                        process_id = %process_id,
-                        session_id = %session_id,
-                        "process session turn left a retained child session"
-                    );
-                }
-                match err {
-                    // A cancelled output is only produced once the port has
-                    // settled (or never accepted) this turn's child input, so
-                    // the substrate's cancelled terminal cannot strand an
-                    // admissible input inside the retained session.
-                    session_init::SessionTurnInitError::CancelledBeforeCreate
-                    | session_init::SessionTurnInitError::CancelledAfterCreate { .. } => {
-                        Ok(cancelled_session_turn_output())
-                    }
-                    // A recorded request this deployment cannot initialize
-                    // (a predecessor `snapshot` start kept only for decode,
-                    // or a catalog that cannot resolve the recorded session
-                    // by id) fails deterministically: no attempt can run it,
-                    // so the refusal is a terminal failure, not a
-                    // recoverable infrastructure error the substrate would
-                    // retry forever.
-                    session_init::SessionTurnInitError::Refused { source, .. } => {
-                        Ok(crate::ProcessAwaitOutput::from_tool_output(
-                            crate::ToolCallOutput::failure(crate::ToolFailure::tool(
-                                crate::ToolFailureClass::Execution,
-                                "process_session_turn_refused",
-                                source.to_string(),
-                            )),
-                        ))
-                    }
-                    // Authority validation is deterministic: retrying the
-                    // attempt cannot change it, so it stays an ordinary
-                    // terminal failure.
-                    session_init::SessionTurnInitError::Request { source, .. } => {
-                        Ok(crate::ProcessAwaitOutput::from_tool_output(
-                            crate::ToolCallOutput::failure(crate::ToolFailure::tool(
-                                crate::ToolFailureClass::Execution,
-                                "process_session_turn_scope_failed",
-                                source.to_string(),
-                            )),
-                        ))
-                    }
-                    // Create, turn-commit, and reconcile failures are
-                    // infrastructure failures: the durable child may hold
-                    // uncommitted or unsettled state. The process must stay
-                    // recoverable so a later attempt can resume or settle the
-                    // child rather than recording a terminal over it.
-                    session_init::SessionTurnInitError::Create { source, .. }
-                    | session_init::SessionTurnInitError::Turn { source, .. }
-                    | session_init::SessionTurnInitError::Reconcile { source, .. } => {
-                        Err(crate::ProcessInfraError::new(*source))
-                    }
-                }
-            }
-        }
+            _ => None,
+        };
+        Ok(crate::AssembledTurn {
+            state: state.to_snapshot(),
+            outcome,
+            assistant_output: crate::AssistantOutput {
+                state: if text.is_some() {
+                    crate::OutputState::Usable
+                } else {
+                    crate::OutputState::EmptyOutput
+                },
+                safe_text: text.clone().unwrap_or_default(),
+                raw_text: text.unwrap_or_default(),
+            },
+            execution: Default::default(),
+            token_usage: Default::default(),
+            llm_calls: Vec::new(),
+            tool_calls: Vec::new(),
+            omitted: None,
+            retained_outputs: Vec::new(),
+            failure_evidence: Vec::new(),
+            errors: Vec::new(),
+            turn_input_acceptance: None,
+            turn_cancel_input_outcome: Default::default(),
+        })
     }
 
     fn inherit_session_turn_llm_profile(&self, create_request: &mut crate::SessionCreateRequest) {
@@ -143,12 +277,6 @@ impl RuntimeSessionServices {
             policy.model = self.current.policy.model.clone();
         }
     }
-}
-
-fn cancelled_session_turn_output() -> crate::ProcessAwaitOutput {
-    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
-        crate::ToolCancellation::runtime("background session turn was cancelled"),
-    ))
 }
 
 fn process_terminal_state_for_turn(turn: &crate::AssembledTurn) -> crate::ProcessStatus {

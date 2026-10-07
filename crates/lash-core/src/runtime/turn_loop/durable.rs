@@ -378,16 +378,12 @@ impl LashRuntime {
             withheld_terminal_work: Default::default(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             turn_phase_probe: self.turn_phase_probe.clone(),
-            // The session actor reads a cancel from the turn's row; nothing
-            // stops the driver locally.
-            turn_control: LocalTurnStop::default(),
             protocol_reply: Default::default(),
             opener_state: crate::session::OpenerState::default(),
             turn_cancel: None,
             children_stop: CancellationToken::new(),
             turn_observations: turn_observation_cursor(&controller, run, "shift"),
             trace: self.host.core.tracing.turn_execution(&controller),
-            segment: crate::runtime::turn_driver::TurnSegment::new(false, None),
         });
         Ok(DurableTurn {
             driver,

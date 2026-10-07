@@ -46,6 +46,14 @@ crate::statements! {
              WHERE target_process = ?1 AND kind = 'process_terminal' AND state = 'pending'
              RETURNING owner_actor";
 
+        /// Resolve every pending child-session wait on process `?1` with
+        /// digest `?2` and resolution `?3` at `?4`, returning each owner.
+        resolve_child_session = "UPDATE waits
+             SET state = 'resolved', resolution_digest = ?2, resolution_ref = ?3,
+                 resolved_at_ms = ?4
+             WHERE target_process = ?1 AND kind = 'child_session' AND state = 'pending'
+             RETURNING owner_actor";
+
         /// Resolve pending wait `?1` with digest `?2` and resolution `?3` at
         /// `?4`; no row when it is not pending.
         resolve = "UPDATE waits

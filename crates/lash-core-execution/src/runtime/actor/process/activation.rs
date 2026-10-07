@@ -46,6 +46,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
+use super::session_turn::SessionTurns;
 use super::terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
 use super::{CascadeProgress, end_scope};
 use crate::runtime::actor::round::{
@@ -64,9 +65,11 @@ use crate::{
 /// The activation of claimed process actors: one per node, routed by
 /// [`lash_durable::ActorDispatch`].
 pub struct ProcessActivation {
-    backend: Backend,
+    pub(super) backend: Backend,
     steps: Arc<dyn ProcessSteps>,
     probe: Arc<dyn DurableProbe>,
+    /// What runs `SessionTurn` processes; a node given none parks them.
+    pub(super) session_turns: Option<Arc<dyn SessionTurns>>,
 }
 
 impl ProcessActivation {
@@ -82,12 +85,20 @@ impl ProcessActivation {
             backend,
             steps,
             probe,
+            session_turns: None,
         }
+    }
+
+    /// This activation running `SessionTurn` processes with `turns`.
+    #[must_use]
+    pub fn with_session_turns(mut self, turns: Arc<dyn SessionTurns>) -> Self {
+        self.session_turns = Some(turns);
+        self
     }
 }
 
 /// How a pass ended.
-enum Pass {
+pub(super) enum Pass {
     /// It committed; run another.
     Again,
     /// Steps run and nothing else is due: wait for one to finish, for mail
@@ -100,7 +111,7 @@ enum Pass {
 
 /// What one activation keeps in memory: never a grant, rebuilt from rows
 /// by the next owner.
-struct Live {
+pub(super) struct Live {
     /// The context step bodies run under; its token is the steps' cancel.
     steps_cx: ActorContext,
     steps_token: CancellationToken,
@@ -121,14 +132,14 @@ struct Live {
     ended_refused: bool,
 }
 
-fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError {
+pub(super) fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
         kind: StoreFailureKind::Corrupt,
         message: format!("{what}: {error}"),
     })
 }
 
-fn registry_failure(error: &crate::PluginError) -> DurableError {
+pub(super) fn registry_failure(error: &crate::PluginError) -> DurableError {
     DurableError::Store(StoreFailure {
         kind: StoreFailureKind::Unavailable,
         message: error.to_string(),
@@ -301,13 +312,10 @@ impl ProcessActivation {
             .map(|request| request.origin);
         let ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
             // A kernel process (a child session turn) has no engine to
-            // advance; a cancel still ends it here.
-            if let Some(origin) = cancel {
-                return self.end_engine_free(owned, tx, process, live, origin).await;
-            }
-            tx.ack_seen().give_up(Release::Idle);
-            owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-            return Ok(Pass::Released);
+            // advance: its turn is its child session's mail.
+            return self
+                .session_turn_pass(owned, tx, process, &row, &record, cancel, live)
+                .await;
         };
         let engine = self.backend.process_engine(kind).cloned();
         let loaded = match &engine {
@@ -519,7 +527,7 @@ impl ProcessActivation {
         Ok(Ok((EngineState { format, bytes }, Some(snapshot.rev))))
     }
 
-    async fn park(
+    pub(super) async fn park(
         &self,
         owned: &Owned,
         mut tx: ActorTx,
@@ -594,7 +602,7 @@ impl ProcessActivation {
 
     /// End a cancelled process without calling its engine: it is parked,
     /// undecodable here, or never started.
-    async fn end_engine_free(
+    pub(super) async fn end_engine_free(
         &self,
         owned: &Owned,
         mut tx: ActorTx,

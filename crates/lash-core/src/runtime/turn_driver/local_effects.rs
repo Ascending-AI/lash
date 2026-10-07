@@ -68,13 +68,9 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // the engine runs it again, and it is never the call's
                 // recorded result.
                 let provider = runner.driver.policy.binding().bind_for_unjournaled_call()?;
-                // The model call runs under the turn's host-local stop: an
-                // immediate request, or a cancellation the turn already
-                // honoured, stops it.
-                let stop = runner.driver.turn_control.immediate_token().child_token();
-                if runner.driver.turn_cancel.is_some() {
-                    stop.cancel();
-                }
+                // A cancellation the turn already honoured stops the model
+                // call.
+                let stop = runner.driver.children_stop.child_token();
                 let request = Arc::new((*request).into_request(None, None));
                 let invocation = envelope.invocation.into_runtime_invocation();
                 let protocol_iteration = runner.protocol_iteration;
@@ -225,7 +221,6 @@ pub(super) fn turn_effect_executor(
         tool_run_owner: driver.tool_run_owner.clone(),
         // An effect body takes no boundary of its own, but a cell it runs
         // asks whether its turn may end at one inside it (FIG-4739).
-        segment: TurnSegment::new(driver.segment.allowed, None),
         session: driver.session.clone_for_effect(),
         policy: driver.policy.clone(),
         prelude: driver.prelude.clone(),
@@ -261,7 +256,6 @@ pub(super) fn turn_effect_executor(
         withheld_terminal_work: Default::default(),
         checkpoint_messages: driver.checkpoint_messages.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
-        turn_control: driver.turn_control.clone(),
         protocol_reply: Default::default(),
         opener_state: driver.opener_state.clone(),
         turn_cancel: driver.turn_cancel.clone(),

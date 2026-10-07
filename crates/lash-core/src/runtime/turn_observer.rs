@@ -26,14 +26,8 @@
 //!   `Stopped` terminal, everything it publishes is held
 //!   ([`TurnObserver::hold_terminal`]) until the turn's commit is accepted,
 //!   and is then released in order ([`TurnObserver::release_terminal`]). A
-//!   commit that fails publishes none of it
-//!   ([`TurnObserver::abandon_terminal`]).
-//! - **"Finished" comes after the last event.** The turn commits inside the
-//!   shift and never waits on the host to do so. The turn's terminal
-//!   publication to waiters (turn attach, await-event resolution) and the turn
-//!   call's return both happen only after every event the turn queued,
-//!   including its final deltas and `Done`, has been published to the host
-//!   ([`TurnObserver::published`]).
+//!   commit that fails publishes none of it: the drive that held it is
+//!   dropped.
 //!
 //! The host end is published by
 //! [`work_with_observations`](super::work_with_observations), outside the
@@ -272,47 +266,9 @@ impl TurnObserver {
         }
     }
 
-    /// The commit failed: nothing held is ever published.
-    pub(in crate::runtime) fn abandon_terminal(&self) {
-        self.queue.state.lock_recover().held = None;
-    }
-
     /// Whether the shift is over and publications are dropped.
     pub(in crate::runtime) fn is_closed(&self) -> bool {
         self.queue.state.lock_recover().closed
-    }
-
-    /// Resolves once every event queued so far has been published to the
-    /// host. The turn awaits it after its commit and before it announces the
-    /// turn finished, so no waiter sees "finished" before the host has seen
-    /// the turn's last event. Awaiting it cuts every open frame: nothing the
-    /// turn streamed waits out a frame's interval.
-    pub(in crate::runtime) fn published(&self) -> Published<'_> {
-        Published { observer: self }
-    }
-}
-
-/// The future [`TurnObserver::published`] returns.
-pub(in crate::runtime) struct Published<'a> {
-    observer: &'a TurnObserver,
-}
-
-impl Future for Published<'_> {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<()> {
-        let mut state = self.observer.queue.state.lock_recover();
-        if state.closed || state.drained() {
-            return Poll::Ready(());
-        }
-        state.published_waiter = Some(context.waker().clone());
-        if state.seal_frames()
-            && let Some(publisher) = state.publisher.take()
-        {
-            drop(state);
-            publisher.wake();
-        }
-        Poll::Pending
     }
 }
 

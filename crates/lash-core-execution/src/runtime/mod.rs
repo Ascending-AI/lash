@@ -157,7 +157,7 @@ pub use queued_drain_policy::{
 pub use session_catalog::*;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 pub use turn_control::{
-    LocalTurnStop, TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelAffectedWake,
+    TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelAffectedWake,
     TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
     TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal,
     TurnWorkDriver,

@@ -2,7 +2,7 @@
 //! applied, and settled, and what a frame open carries out of the frame it
 //! leaves.
 
-use crate::{PluginSession, Session, SessionError, StoreError};
+use crate::{Session, SessionError, StoreError};
 
 use super::RuntimeSessionState;
 
@@ -26,14 +26,6 @@ impl ExecutionStateUpdate {
             Self::Clear { .. } => state.set_execution_state_snapshot(None),
         }
         Ok(())
-    }
-
-    /// The artifacts a clear carries into the successor frame.
-    pub(super) fn carries(&self) -> SeedCarries {
-        match self {
-            Self::Clear { carries } => carries.clone(),
-            Self::Clean | Self::Replace(_) => SeedCarries::none(),
-        }
     }
 }
 
@@ -88,19 +80,6 @@ pub(in crate::runtime) async fn derive_seed_carries(
         )
         .await?;
     Ok(SeedCarries(carries))
-}
-
-/// The clear a committed frame switch makes: the frame's globals are wiped,
-/// and only the artifacts the code executor finds in the switch's seed
-/// `initial_nodes` are carried into the successor frame (ADR 0113 §3.1).
-pub(super) async fn frame_switch_execution_state_update(
-    session: &mut Session,
-    successor: &crate::FrameNodeId,
-    initial_nodes: &[crate::SessionAppendNode],
-) -> Result<ExecutionStateUpdate, SessionError> {
-    Ok(ExecutionStateUpdate::Clear {
-        carries: derive_seed_carries(Some(session), successor, initial_nodes).await?,
-    })
 }
 
 /// The artifact half of a commit that moves the session from frame `ended`
@@ -235,25 +214,6 @@ pub(super) async fn probe_execution_state_capture(
             session.fleet_format(),
         ))
         .await
-}
-
-pub(super) async fn settle_execution_state_capture(
-    plugins: Option<&PluginSession>,
-    captured: bool,
-    committed: bool,
-) {
-    let Some(code_executor) = captured
-        .then_some(plugins)
-        .flatten()
-        .and_then(PluginSession::code_executor)
-    else {
-        return;
-    };
-    if committed {
-        code_executor.acknowledge_execution_state_capture().await;
-    } else {
-        code_executor.abort_execution_state_capture().await;
-    }
 }
 
 /// Whether the store already holds `frame`'s open.

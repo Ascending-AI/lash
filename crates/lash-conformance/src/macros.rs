@@ -1,11 +1,7 @@
 //! Named backend test registration. Every generated test owns a fresh fixture.
 
-mod declared_start;
 mod obligation_relay;
 mod session_ingress;
-mod tool_batch;
-mod tool_call_identity;
-mod turn_runner;
 
 /// Expansion machinery for the runtime-persistence registration macros.
 #[macro_export]

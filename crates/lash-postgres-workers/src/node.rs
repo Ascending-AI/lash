@@ -138,11 +138,19 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         lash::testing::session_turn_services(&core),
         Arc::new(NoProbe),
     );
+    // A `SessionTurn` process mails its turn to its child session, whose
+    // actor this node serves with the same core (FIG-5208).
+    let session_turns = lash::durability::DurableProcessWorker::new(
+        core.durable_process_worker_config()
+            .map_err(|error| format!("configure the process worker: {error}"))?,
+    )
+    .map_err(|error| format!("build the process worker: {error}"))?;
     let processes = ProcessActivation::new(
         backend.clone(),
         Arc::new(WorkerSteps::new(witness)),
         Arc::new(NoProbe),
-    );
+    )
+    .with_session_turns(Arc::new(session_turns));
     // The commands are read on a task of their own: a heartbeat hold or
     // release must reach the store whatever the runner awaits.
     let (stopping, stop) = tokio::sync::oneshot::channel::<()>();

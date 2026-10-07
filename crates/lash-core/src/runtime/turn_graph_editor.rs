@@ -250,6 +250,7 @@ impl TurnGraphEditor {
         self.active_messages = MessageSequence::from_owned(projection.active_messages);
     }
 
+    #[cfg(test)]
     pub(super) fn take_projection_diagnostics(&mut self) -> Vec<ReadProjectionDiagnostic> {
         std::mem::take(&mut self.projection_diagnostics)
     }

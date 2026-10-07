@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1520 rows over 834 files, 3846 laws.
-# By class: mechanical 163, semantic 110, delete 821, replace 426.
-# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 77, L9e 129, L9f 125, L9g 101, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, I0 49.
-# By status: todo 410, ported 85, deleted 1025.
+# 1550 rows over 847 files, 3902 laws.
+# By class: mechanical 163, semantic 110, delete 829, replace 448.
+# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 77, L9e 129, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 8, L9t 25, I0 49.
+# By status: todo 410, ported 85, deleted 1055.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -623,6 +623,10 @@ law = "a send or cancel against an absent or deleted session wakes no session ac
 [planned."L3S-TURN"]
 owner = "L9c"
 law = "the turn and ingress laws L3s deleted with the store run admission, its final commit and the shift fence hold on the session actor's turn commit; each row's owed law names one"
+
+[planned."L9T-TOOLS"]
+owner = "L9t"
+law = "the tool-semantics laws FIG-5208 deleted with TestTurnExecution (declared start, batch sugar, batch parallelism and its call limit, call identity, intent runtime, migrated-tools redrive) hold through a host's send() with the core's node serving the turn, on SQLite memory, SQLite file and PostgreSQL; each row's owed law names one"
 
 [planned."L3S-CLOSE"]
 owner = "L9c"
@@ -3229,7 +3233,7 @@ test = "*"
 area = "tool-batches"
 needs = ["cell", "round", "process"]
 class = "semantic"
-lane = "L9g"
+lane = "L9t"
 laws = [
   "lash_conformance::tool_batch_parallelism_tests!",
   "lash_conformance::tool_call_limit_process_tests!",
@@ -3237,7 +3241,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
+note = "FIG-5208 deleted the lash-conformance suites this row's macros named, with TestTurnExecution, the in-process turn entry they drove: no target instantiated them. FIG-5210 (L9t) ports each law onto a host's send() with the core's node serving the turn. Before: L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
 
 [[row]]
 path = "crates/lash-protocol-standard/src/prompt_tests.rs"
@@ -3441,7 +3445,7 @@ test = "*"
 area = "tool-batches"
 needs = ["turn", "round"]
 class = "semantic"
-lane = "L9g"
+lane = "L9t"
 laws = [
   "lash_conformance::batch_sugar_tests!",
   "lash_conformance::tool_batch_parallelism_tests!",
@@ -3449,7 +3453,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
+note = "FIG-5208 deleted the lash-conformance suites this row's macros named, with TestTurnExecution, the in-process turn entry they drove: no target instantiated them. FIG-5210 (L9t) ports each law onto a host's send() with the core's node serving the turn. Before: L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
 
 [[row]]
 path = "crates/lash-provider-google/src/runtime_reasoning_tests.rs"
@@ -7791,7 +7795,7 @@ laws = [
 disposition = "owed"
 status = "todo"
 owed = "stop modes over a waiting turn: after-step lets a sleep, event wait or process await finish, immediate aborts it at wake, and escalating a deferred stop aborts the wait; the conformance turn_runner_tests re-instantiate (L9g)"
-note = "stop modes over a waiting turn: fig-5172-prod: the phase runner reaches no wait_effect; L6 (FIG-5175, not landed) for process awaits"
+note = "stop modes over a waiting turn: fig-5172-prod: the phase runner reaches no wait_effect; L6 (FIG-5175, not landed) for process awaits FIG-5208 deleted lash_conformance::turn_runner_tests! and its in-process ConformanceTurnRunner: these laws are written against send() and a served node."
 
 [[row]]
 path = "crates/lash-restate/src/tests/turn_cancel_modes.rs"
@@ -8381,14 +8385,14 @@ test = "*"
 area = "subagents"
 needs = ["turn", "process"]
 class = "semantic"
-lane = "L9g"
+lane = "L9t"
 laws = [
   "a_session_lifetime_subagent_survives_its_waiting_turn",
   "lash_conformance::declared_start_tests!",
 ]
 disposition = "port"
 status = "todo"
-note = "L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
+note = "FIG-5208 deleted the lash-conformance suites this row's macros named, with TestTurnExecution, the in-process turn entry they drove: no target instantiated them. FIG-5210 (L9t) ports each law onto a host's send() with the core's node serving the turn. Before: L9g (FIG-5185): not ported. Every law here drives its turn in process through the runtime (LashRuntime::execute_turn and its kin) over the tier's runner. Since L3s (FIG-5196) a turn input is session mail the session actor admits and runs, so on the durable backend that call answers SessionRunPending, as it does for the turn laws L9g ran on the SQLite tiers (turn_config, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence). Each law must be rewritten to send() its input and let a served node run the turn, or be deleted with a disposition; owed."
 
 [[row]]
 path = "crates/lash-upgrade-harness/src/e2e/control/transport.rs"
@@ -24365,3 +24369,470 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "deleted by L10b (FIG-5191): the multi-kind relay assembly is deleted; the core builds the one artifact-cleanup relay directly"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/batch_sugar.rs"
+test = "*"
+area = "tool-batches"
+needs = ["turn", "round"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "batch_admission_and_identity_contract",
+  "standard_rounds_and_batches_use_the_run",
+  "batch_folds_to_one_transcript_call",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "a model batch is admitted under one identity, runs on the run's rounds and folds to one transcript call, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/tool_batch_parallelism.rs"
+test = "*"
+area = "tool-batches"
+needs = ["turn", "round"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "tool_group_members_start_before_any_finishes",
+  "tool_group_reverse_dependency",
+  "measure_tool_batch",
+  "measure_gated_tool_batch",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "every member of a tool group starts before any finishes, and a reverse dependency between members does not serialize them, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/tool_batch_parallelism/limit.rs"
+test = "*"
+area = "tool-batches"
+needs = ["turn", "round", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "tool_call_limit_admits_the_limit_and_refuses_the_group_past_it",
+  "tool_call_limit_staged_calls",
+  "tool_call_limit_refuses_the_same_call_across_a_crash",
+  "tool_call_limit_counts_what_a_process_holds_across_a_worker_kill",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "the tool-call limit admits the limit and refuses past it, staged and across a crash or a worker kill, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/tool_batch_parallelism/budget.rs"
+test = "*"
+area = "tool-batches"
+needs = ["turn"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "activated_members_can_settle_after_one_budget",
+  "an_expired_activation_budget_executes_the_released_turn",
+  "an_expiry_before_the_first_step_still_executes_the_whole_turn",
+  "a_turn_that_never_activates_expires",
+  "continuing_activation_outlasts_one_budget",
+  "progress_wakes_yield_before_repolling_a_pending_turn",
+  "stalled_activation_names_missing_members_and_releases_waiters",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "the batch-parallelism measurement's activation budget releases a stalled group and still runs the turn to its end, on the served node"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/tool_call_identity/admission.rs"
+test = "*"
+area = "replay"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "process_admission_names_each_call_and_survives_replay",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "a process admission names each tool call and the names survive a replay, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/tool_call_identity/laws.rs"
+test = "*"
+area = "replay"
+needs = ["turn"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "repeated_provider_id_across_turns_is_distinct",
+  "same_scope_completion_collision",
+  "reported_failure_retry_preserves_call_id",
+  "one_turn_commits_history_once_and_never_replaces_existing_nodes",
+  "suspended_tool_keeps_turn_and_history_head_until_resolution",
+  "live_and_durable_queue_paths_share_results_and_capability_refusals",
+  "fork_inherits_history_without_execution_queues_waits_or_journals_on_engine",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "a tool call's identity is distinct across turns and stable across a retry, a suspension and a fork, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/tool_call_identity/replay.rs"
+test = "code_cells_keep_identity_and_distinguish_fresh_calls"
+area = "replay"
+needs = ["turn", "cell"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "code_cells_keep_identity_and_distinguish_fresh_calls",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "a tool call a code cell makes keeps its identity across a restore and a fresh call is a different call, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/tool_intent_runtime.rs"
+test = "*"
+area = "processes"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "public_signal_intent_wakes_parked_process",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "a tool's public signal intent wakes the parked process it names, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/migrated_tools_redrive.rs"
+test = "*"
+area = "replay"
+needs = ["turn"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "public_migrated_tools_redrive_to_literal_outcomes",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "the migrated public tools redrive to their literal recorded outcomes, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_crash_at_every_launch_boundary"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_crash_at_every_launch_boundary",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start crash at every launch boundary, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "spawn_agent_record_carries_child_identity"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "spawn_agent_record_carries_child_identity",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "spawn agent record carries child identity, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "a_session_lifetime_subagent_survives_its_waiting_turn"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "a_session_lifetime_subagent_survives_its_waiting_turn",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "a session lifetime subagent survives its waiting turn, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start child runs under recorded facts on a worker with other defaults, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_cancel_at_each_point"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_cancel_at_each_point",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start cancel at each point, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_retention_hold_blocks_prune_until_consumed"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_retention_hold_blocks_prune_until_consumed",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start retention hold blocks prune until consumed, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_early_terminal_resolves_before_wait"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_early_terminal_resolves_before_wait",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start early terminal resolves before wait, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_rearm_is_idempotent"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_rearm_is_idempotent",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start rearm is idempotent, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "batch_of_spawns_overlaps"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "batch_of_spawns_overlaps",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "batch of spawns overlaps, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_discarded_retry_launches_nothing"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_discarded_retry_launches_nothing",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start discarded retry launches nothing, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_refusal_settles_the_call"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_refusal_settles_the_call",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start refusal settles the call, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_rejects_foreign_or_reused_serialized_identity_before_launch"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_rejects_foreign_or_reused_serialized_identity_before_launch",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start rejects foreign or reused serialized identity before launch, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/declared_start.rs"
+test = "declared_start_prune_after_hold_release_before_settlement_replays_terminal"
+area = "declared-start"
+needs = ["turn", "process"]
+class = "replace"
+lane = "L9t"
+laws = [
+  "declared_start_prune_after_hold_release_before_settlement_replays_terminal",
+]
+disposition = "replaced-by:planned:L9T-TOOLS"
+status = "deleted"
+owed = "declared start prune after hold release before settlement replays terminal, through send()"
+note = "deleted by FIG-5208 with TestTurnExecution: the suite drove its turn in process and no target instantiated it; FIG-5210 (L9t) ports each law onto a host's send() with a served node"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/turn_config.rs"
+test = "a_missing_recorded_termination_is_a_typed_terminal_refusal"
+area = "turn-config"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "a_missing_recorded_termination_is_a_typed_terminal_refusal",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5208 with the legacy turn loop: it finished a turn through the legacy final commit with no recorded run (finish_without_recorded_run_for_testing); the session actor's turn commit always has its run row, and its instantiations in both stores' durable_laws.rs went with it"
+
+[[row]]
+path = "crates/lash-core/src/runtime/session_manager/session_init.rs"
+test = "*"
+area = "processes"
+needs = ["process", "turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "contained_child_turn_panic_is_loud_in_test_builds",
+  "process_turn_validation_attaches_invocation_correlation",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5208 with the legacy turn loop: a child turn no longer runs in a task inside its parent's execution, nor is its input validated there; it is session mail, its durable projection, that its child session's actor runs (crates/lash-durable-test/tests/child_turn_crash_proof.rs)"
+[[row]]
+path = "crates/lash-core/src/runtime/turn_loop/accept.rs"
+test = "*"
+area = "turn-control"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "ordinary_turn_clears_reused_process_invocation_correlation",
+  "process_turn_preserves_attached_invocation_correlation",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5208 with the legacy turn loop: the legacy accept phase is deleted; the session actor admits a turn from its mail row"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_loop.rs"
+test = "*"
+area = "turn-control"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "physical_turn_ids_count_on_from_the_run_deterministically",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5208 with the legacy turn loop: a run's follow-on physical turns belonged to the legacy logical-turn loop"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_boundary/materialize.rs"
+test = "*"
+area = "attachments"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "committed_attachment_ids_merge_tool_outputs_with_message_refs",
+  "committed_attachment_ids_include_retained_outputs",
+  "committed_attachment_ids_include_omitted_tool_call_attachments",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5208 with the legacy turn loop: committed_attachment_ids fed only the legacy final commit"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_boundary/tests.rs"
+test = "final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_mutation"
+area = "commit"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_mutation",
+]
+disposition = "covered-by:crates/lash-conformance/src/conformance/runtime_persistence/suite_and_receipts.rs::commit_rejects_carried_nondefault_node_budget"
+status = "deleted"
+note = "deleted by FIG-5208 with the legacy turn loop: the legacy final commit is deleted; the session actor's head commit carries the turn's commit budget and the store refuses a commit over it"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_boundary/tests.rs"
+test = "no_store_final_commit_discards_snapshots_without_touching_graph"
+area = "commit"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "no_store_final_commit_discards_snapshots_without_touching_graph",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5208 with the legacy turn loop: the legacy final commit's no-store path is deleted"
+
+[[row]]
+path = "crates/lash-core/src/runtime/turn_observer/tests.rs"
+test = "*"
+area = "observations"
+needs = ["turn"]
+class = "delete"
+lane = "L3t"
+laws = [
+  "awaiting_published_and_closing_cut_every_open_frame",
+  "an_abandoned_terminal_publishes_nothing",
+  "published_waits_until_the_host_has_taken_and_published_everything",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5208 with the legacy turn loop: TurnObserver::published and abandon_terminal served only the legacy loop's return to its host sink; the session actor's drive publishes through its live publisher"

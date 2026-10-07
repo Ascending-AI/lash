@@ -1,16 +1,16 @@
-//! The engine-neutral laws that run turns or need an effect context, run on
+//! The engine-neutral laws that need an effect context, run on
 //! the durable backend over this substrate (ADR 0132 §14, FIG-5185).
 //!
 //! Each law's runtime runs in process over the production durable backend
-//! assembled over this substrate's store set; its turns run on an
-//! [`ActorContext`] over that backend.
+//! assembled over this substrate's store set, on an [`ActorContext`] over
+//! that backend.
 
 use std::sync::Arc;
 
-use lash_conformance::{ConformanceTurnRunner, HostTurnRunner, ReopenableRuntimeStore};
+use lash_conformance::ReopenableRuntimeStore;
 use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
 use lash_core_execution::{
-    ActorContext, DeploymentStore, ProcessRegistry, SessionCatalogStore as _, StoreSet,
+    ActorContext, DeploymentStore, ProcessRegistry, SessionCatalogStore as _,
 };
 
 use super::{Retained, SUBSTRATE, root_session_request};
@@ -21,27 +21,6 @@ use crate::backend_fixture::{TestBackend, sync_await};
 fn durable_host(backend: &TestBackend) -> ActorContext {
     ActorContext::detached(backend.as_backend())
 }
-
-/// The fixture of a law that runs its turns through a runner: a fresh
-/// substrate, the durable host over it, its store set and the in-process
-/// runner on that host.
-async fn turn_law_fixture(
-    prefix: &'static str,
-) -> (
-    TestBackend,
-    &'static str,
-    ActorContext,
-    Arc<dyn StoreSet>,
-    Arc<dyn ConformanceTurnRunner>,
-) {
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let host = durable_host(&backend);
-    let stores = backend.as_stores();
-    let runner = HostTurnRunner::shared(host.clone());
-    (backend, prefix, host, stores, runner)
-}
-
-lash_conformance::turn_config_tests!({ turn_law_fixture("sqlite-turn-config").await });
 
 /// The deployment-store fixture: a fresh substrate per store, and the durable
 /// host over one more.

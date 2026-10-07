@@ -1,5 +1,4 @@
 use super::*;
-use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 
 impl RuntimeTurnDriver<'_> {
@@ -170,23 +169,6 @@ impl RuntimeTurnDriver<'_> {
             (error.code == Some(FailureCode::lash(TurnFailureCode::ProviderPanicked)))
                 .then(|| error.message.clone())
         });
-        // FIG-793: the model call is this protocol iteration's first durable
-        // effect, so it is awaited before any cancellation observation is
-        // registered. The durable contract is cancellation between
-        // iterations. The call's body watches the gate itself and stops on an
-        // immediate request, and that result is recorded (FIG-3672 P9).
-        let pending_cancel = self.turn_control.honoured(&self.turn_id, false);
-        if let Some(evidence) = pending_cancel {
-            self.record_turn_cancel(evidence.clone());
-            // The stop is recorded here: its `Done` is the terminal's first
-            // event and publishes after the commit (ADR 0122).
-            event_tx.hold_terminal();
-            self.emit_recorded(event_tx, SessionStreamEvent::Done);
-            machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
-                evidence,
-            }));
-            return Ok(());
-        }
         if let Ok(response) = &result {
             let usage = crate::runtime::effect::token_usage_from_llm(&response.usage);
             self.latest_prompt_usage = nonzero_usage(usage);
@@ -274,18 +256,6 @@ impl RuntimeTurnDriver<'_> {
                         );
                     }
                 }
-                // FIG-635: the step boundary. The checkpoint commit above is
-                // the last act of the protocol iteration it closes (response
-                // streamed, tools completed, work committed), and the machine
-                // has already advanced its counter, so the closed iteration
-                // is one behind. A machine that finished on this checkpoint
-                // has its request honoured at commit instead.
-                if !machine.is_done()
-                    && let Some(closed_iteration) = machine.protocol_iteration().checked_sub(1)
-                {
-                    self.observe_step_boundary_cancel(machine, closed_iteration, event_tx)
-                        .await?;
-                }
             }
             Err(err) => {
                 // A failed checkpoint delivers nothing and starts no follow-on
@@ -297,41 +267,6 @@ impl RuntimeTurnDriver<'_> {
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
             }
         }
-        Ok(())
-    }
-
-    /// Observe the cancellation gate at the step boundary that closed
-    /// `closed_iteration` (`turn_cancel.after_step.{n}`).
-    ///
-    /// A request found here is honoured without the cooperative token:
-    /// nothing is in flight, the checkpoint is committed, so the turn simply
-    /// finishes cancelled, between journal commands, like the after-LLM gate.
-    async fn observe_step_boundary_cancel(
-        &mut self,
-        machine: &mut TurnMachine,
-        closed_iteration: usize,
-        event_tx: &TurnObserver,
-    ) -> Result<(), RuntimeError> {
-        let pending_cancel = self
-            .turn_control
-            .honoured(&self.turn_id, true)
-            .map(|mut evidence| {
-                if evidence.mode == crate::TurnCancelMode::AfterStep {
-                    evidence.honoured_after_step = Some(closed_iteration);
-                }
-                evidence
-            });
-        let Some(evidence) = pending_cancel else {
-            return Ok(());
-        };
-        self.record_turn_cancel(evidence.clone());
-        // The stop is recorded here: its `Done` is the terminal's first event
-        // and publishes after the commit (ADR 0122).
-        event_tx.hold_terminal();
-        self.emit_recorded(event_tx, SessionStreamEvent::Done);
-        machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
-            evidence,
-        }));
         Ok(())
     }
 
@@ -412,199 +347,12 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
-    pub(super) async fn handle_tool_calls_effect(
-        &mut self,
-        machine: &mut TurnMachine,
-        id: crate::sansio::EffectId,
-        calls: Vec<crate::sansio::PendingToolCall>,
-        event_tx: &TurnObserver,
-        run_offset: usize,
-    ) -> Result<(), RuntimeError> {
-        // Per-tool trace events (ToolCallStarted / ToolCallCompleted) are
-        // emitted from the shared tool-execution seam so every tool call
-        // produces exactly one Started + one Completed pair. See
-        // `RuntimeExecutionContext::emit_tool_call_started_trace` /
-        // `emit_tool_call_completed_trace`.
-        let round = match Box::pin(self.invoke_turn_tool_calls_effect(machine, id, calls, event_tx))
-            .await
-        {
-            Ok(super::tools::ToolRoundAdmission::Admitted(round)) => round,
-            Ok(super::tools::ToolRoundAdmission::Refused(results)) => {
-                return self.deliver_tool_results(machine, id, results);
-            }
-            Err(error) => {
-                return self
-                    .end_unanswered_tool_round(machine, run_offset, error)
-                    .await;
-            }
-        };
-        let state = serde_json::to_value(round).map_err(|error| {
-            RuntimeError::new(
-                RuntimeErrorCode::ExecutionStateCaptureFailed,
-                error.to_string(),
-            )
-        })?;
-        if !machine.settle_tool_dispatch(state) {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::ExecutionStateCaptureFailed,
-                "the machine was not waiting on the admitted tools",
-            ));
-        }
-        Ok(())
-    }
-
-    /// Ends the turn's wait on a tool round the Run did not answer, whether
-    /// it refused the round's admission or the await on its results. A
-    /// generation drain's hand-over is a hand-over in both (FIG-5075): the
-    /// turn ends at a boundary owing the round, and the successor admits or
-    /// awaits it. Every other cause fails or aborts the turn.
-    async fn end_unanswered_tool_round(
-        &mut self,
-        machine: &mut TurnMachine,
-        run_offset: usize,
-        error: crate::RuntimeEffectControllerError,
-    ) -> Result<(), RuntimeError> {
-        if error.code == RuntimeErrorCode::TurnWaitHandedOver {
-            return self
-                .end_waiting_for_tool_results(machine, run_offset, crate::BoundaryReason::HandOver)
-                .await;
-        }
-        Self::fail_or_abort_runtime_effect_controller(machine, error)?;
-        Ok(())
-    }
-
-    fn deliver_tool_results(
-        &mut self,
-        machine: &mut TurnMachine,
-        id: crate::sansio::EffectId,
-        results: Vec<crate::sansio::CompletedToolCall>,
-    ) -> Result<(), RuntimeError> {
-        for result in &results {
-            let producer = crate::AttachmentProducer::Tool {
-                tool_name: result.tool_name.clone(),
-            };
-            for source in result.output.attachments() {
-                if let Err(err) = self
-                    .host
-                    .core
-                    .attachment_source_policy
-                    .authorize(&producer, &source)
-                {
-                    Self::fail_or_abort_runtime_effect_controller(
-                        machine,
-                        crate::RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::AttachmentSourcePolicyDenied,
-                            err.to_string(),
-                        ),
-                    )?;
-                    return Ok(());
-                }
-            }
-        }
-        self.handle_machine_response(machine, Response::ToolResults { id, results })?;
-        Ok(())
-    }
-
-    pub(super) async fn handle_await_tool_results_effect(
-        &mut self,
-        machine: &mut TurnMachine,
-        id: crate::sansio::EffectId,
-        state: serde_json::Value,
-        run_offset: usize,
-        event_tx: &TurnObserver,
-    ) -> Result<(), RuntimeError> {
-        let round: super::tools::WaitingToolRound =
-            serde_json::from_value(state).map_err(|error| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ExecutionStateCaptureFailed,
-                    error.to_string(),
-                )
-            })?;
-        let context = self
-            .execution_context(
-                event_tx,
-                Arc::new(crate::ChronologicalProjection::default()),
-            )
-            .map_err(|error| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ToolCatalogResolutionFailed,
-                    error.to_string(),
-                )
-            })?
-            .with_tracing(self.execution_tracing(machine.protocol_iteration()))
-            .with_turn_hand_over(false);
-        let poll = context
-            .await_tool_run_aggregate(
-                &round.cursor,
-                crate::session::ToolAggregateConsumer::AllSettled,
-            )
-            .await;
-        let replies = match poll {
-            Ok(crate::session::ToolRunAggregatePoll::Ready {
-                outcome: crate::session::ToolAggregateOutcome::AllResults(replies),
-                ..
-            }) => replies,
-            Err(error) => {
-                drop(context);
-                return self
-                    .end_unanswered_tool_round(machine, run_offset, error)
-                    .await;
-            }
-            Ok(_) => {
-                return Err(RuntimeError::new(
-                    RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                    "an awaited allSettled tool round did not return every source slot",
-                ));
-            }
-        };
-        let results = replies
-            .into_iter()
-            .map(|reply| match reply {
-                Some(crate::session::ToolAggregateLeafReply::Tool(reply)) => {
-                    reply.completed.map(|completed| *completed).ok_or_else(|| {
-                        RuntimeError::new(
-                            RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                            "a tool Run reply omitted its recorded presentation",
-                        )
-                    })
-                }
-                _ => Err(RuntimeError::new(
-                    RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                    "a tool Run reply omitted a source call",
-                )),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        self.deliver_tool_results(machine, id, results)
-    }
-
-    /// The cancellation a code cell's turn honours after the cell: the
-    /// turn's recorded fact, or — when the cell stopped on the host, so its
-    /// stop may be the turn's cancellation — the answer of a journaled peek
-    /// under the cell's own identity. Recorded as the turn's fact.
-    async fn recorded_cell_cancel(
-        &mut self,
-        _machine: &TurnMachine,
-        cell_key: &str,
-        stopped_on_host: bool,
-    ) -> Result<Option<crate::TurnCancellationEvidence>, RuntimeError> {
-        if self.turn_cancel.is_some() || !stopped_on_host {
-            return Ok(self.turn_cancel.clone());
-        }
-        let _ = cell_key;
-        let observed = self.turn_control.honoured(&self.turn_id, false);
-        if let Some(evidence) = observed.clone() {
-            self.record_turn_cancel(evidence);
-        }
-        Ok(observed)
-    }
-
     pub(super) async fn handle_exec_code_effect(
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         language: String,
         code: String,
-        run_offset: usize,
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
@@ -701,24 +449,9 @@ impl RuntimeTurnDriver<'_> {
                         },
                     },
                 );
-                // A cell that aborted may have stopped for the turn's
-                // cancellation, at a recorded checkpoint or on an outcome that
-                // lost to the gate: it asks the gate why, through a journaled
-                // peek (FIG-3672 P9). A refusal that parks the turn (a replay
-                // divergence, a drifted binding) is not a stop, and journals
-                // nothing further. Nor is a session retirement: the deleted
-                // session's gate is revoked with it, so a peek could only
-                // fail, and the typed retirement refusal must reach the turn.
-                // Nor is a fault of the attempt itself, such as its host's
-                // worker verdict: the retry runs the cell again, and a peek
-                // journaled here would stand where that run's commands go
-                // (FIG-4451).
-                let stopped_on_host = !err.code.parks_turn()
-                    && !err.is_session_retirement()
-                    && !err.is_attempt_fault();
-                let cancellation_evidence = self
-                    .recorded_cell_cancel(machine, &cell_key, stopped_on_host)
-                    .await?;
+                // A cell that aborted stopped for the turn's cancellation only
+                // when the turn recorded one.
+                let cancellation_evidence = self.turn_cancel.clone();
                 if let Some(code_executor) = self.session.plugins().code_executor() {
                     code_executor
                         .settle_code_execution(if cancellation_evidence.is_some() {
@@ -751,25 +484,13 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
-        // A cell that stopped at a segment boundary inside itself has no
-        // answer yet (FIG-4739): the wait it was parked on now belongs to the
-        // run's successor segment. The plugin keeps the cell's captured state
-        // for this turn's commit, the turn ends at the boundary still waiting
-        // on the cell, and the successor issues the cell again. Nothing of
-        // it reaches history or the model here.
+        // A turn on the session actor takes no segment boundary: a cell that
+        // stopped at one inside itself has no successor to hand its wait to.
         if result.as_ref().is_ok_and(|output| output.suspended) {
-            if let Some(code_executor) = self.session.plugins().code_executor() {
-                code_executor
-                    .settle_code_execution(crate::plugin::CodeExecutionOutcome::Accepted)
-                    .await
-                    .map_err(|error| {
-                        RuntimeError::new(
-                            RuntimeErrorCode::ExecutionStateCaptureFailed,
-                            error.to_string(),
-                        )
-                    })?;
-            }
-            return self.end_inside_cell(machine, run_offset).await;
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::ExecutionStateCaptureFailed,
+                "a code cell stopped at a segment boundary in a turn that takes none",
+            ));
         }
         let cell_duration_ms = self
             .host
@@ -877,21 +598,9 @@ impl RuntimeTurnDriver<'_> {
                 error: error.message.clone(),
             });
         }
-        // Name the request that stopped code execution before the protocol
-        // classifies its typed Stop response. A cell stops on the host only
-        // at a recorded point — a checkpoint, or a nested outcome that lost
-        // to the turn's gate — so a host-stopped cell asks the gate why
-        // through a journaled peek, and a replay asks at the same point
-        // (FIG-3672 P9).
-        let host_stopped = result.as_ref().ok().is_some_and(|output| {
-            output
-                .error
-                .as_ref()
-                .is_some_and(|error| error.kind == crate::CellFailureKind::Host)
-        });
-        let cancellation_evidence = self
-            .recorded_cell_cancel(machine, &cell_key, host_stopped)
-            .await?;
+        // Name the cancellation the turn recorded, if any, before the
+        // protocol classifies its typed Stop response.
+        let cancellation_evidence = self.turn_cancel.clone();
         // A cancelled tool call ended the cell as an uncatchable host terminal,
         // so the execution settles as cancelled even without a host cancel
         // request. The protocol then reads the cancelled record off the call

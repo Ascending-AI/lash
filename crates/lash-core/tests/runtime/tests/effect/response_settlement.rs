@@ -1,5 +1,4 @@
 use super::*;
-use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_e215;
 

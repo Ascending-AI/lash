@@ -111,6 +111,21 @@ pub(super) async fn apply(
                 .map_err(sqlx_failure)?;
             wake_owners(tx, commit.actor, owners, commit.now).await
         }
+        WaitWrite::ResolveChildSession {
+            process,
+            digest,
+            resolution_ref,
+        } => {
+            let owners: Vec<String> = sqlx::query_scalar(SQL.waits.resolve_child_session.sql())
+                .bind(process.as_str())
+                .bind(digest)
+                .bind(resolution_ref)
+                .bind(commit.now.0)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(sqlx_failure)?;
+            wake_owners(tx, commit.actor, owners, commit.now).await
+        }
     }
 }
 

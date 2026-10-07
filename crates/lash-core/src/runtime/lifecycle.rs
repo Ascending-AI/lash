@@ -318,7 +318,6 @@ impl LashRuntime {
             state,
             runtime_lease_owner,
             runtime_lease_executor_id,
-            admitted_turn_index: None,
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,
             resident_session,

@@ -56,6 +56,27 @@ lash_rust_unit_test(
 )
 
 lash_rust_integration_test(
+    name = "child_turn_crash_proof__test",
+    crate_features = [],
+    crate_name = "child_turn_crash_proof",
+    crate_root = "tests/child_turn_crash_proof.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "child_turn_crash_proof", "//crates/lash-durable-test:child_turn_crash_proof__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "drain_by_release__test",
     crate_features = [],
     crate_name = "drain_by_release",

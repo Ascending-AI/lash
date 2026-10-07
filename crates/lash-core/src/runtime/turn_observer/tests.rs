@@ -1,4 +1,3 @@
-use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -462,34 +461,6 @@ fn a_cancellation_delivers_the_open_frame_whole_before_the_terminal() {
 }
 
 #[test]
-fn awaiting_published_and_closing_cut_every_open_frame() {
-    let clock = HandClock::new();
-    let (observer, mut observations) = framed(&clock);
-    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
-    delta(&observer, &mut cursor, false, "A", "a");
-    delta(&observer, &mut cursor, false, "A", "b");
-    publish_ready(&mut observations);
-    let waker = std::task::Waker::noop();
-    let mut context = Context::from_waker(waker);
-    let mut published = std::pin::pin!(observer.published());
-    assert_eq!(published.as_mut().poll(&mut context), Poll::Pending);
-    assert_eq!(
-        publish_ready(&mut observations),
-        vec![row("session_text", "A", "b"), row("turn_text", "A", "b")],
-        "the turn's last frame never waits out its interval"
-    );
-    assert_eq!(published.as_mut().poll(&mut context), Poll::Ready(()));
-
-    delta(&observer, &mut cursor, false, "A", "c");
-    observations.close();
-    assert_eq!(
-        publish_ready(&mut observations),
-        vec![row("session_text", "A", "c"), row("turn_text", "A", "c")],
-        "a closed queue keeps what it holds, open frames included"
-    );
-}
-
-#[test]
 fn a_held_terminal_publishes_only_on_release_and_in_order() {
     let (observer, mut observations) = TurnObserver::unread();
     let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
@@ -514,29 +485,6 @@ fn a_held_terminal_publishes_only_on_release_and_in_order() {
     assert_eq!(released[1], row("turn_text", "A", "held"));
     assert!(released[2].2.contains("Cancelled"), "{released:?}");
     assert_eq!(released[3].2, "Done");
-}
-
-#[test]
-fn an_abandoned_terminal_publishes_nothing() {
-    let (observer, mut observations) = TurnObserver::unread();
-    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
-    delta(&observer, &mut cursor, false, "A", "before");
-    observer.hold_terminal();
-    delta(&observer, &mut cursor, false, "A", "held");
-    stopped_cancelled(&observer, &mut cursor);
-    cursor.observe(&observer, ObservedEvent::Session(SessionStreamEvent::Done));
-
-    observer.abandon_terminal();
-    // A release after the abandon finds nothing to publish.
-    observer.release_terminal();
-    assert_eq!(
-        drain(&mut observations),
-        vec![
-            row("session_text", "A", "before"),
-            row("turn_text", "A", "before"),
-        ],
-        "a failed commit publishes none of the held terminal"
-    );
 }
 
 #[test]
@@ -590,37 +538,4 @@ fn keyed_observations_take_their_ids_from_key_and_ordinal() {
             ("root:t1:1:0:tool:2#0".into(), "root:t1:1:0:tool:2#0".into()),
         ]
     );
-}
-
-#[test]
-fn published_waits_until_the_host_has_taken_and_published_everything() {
-    let (observer, mut observations) = TurnObserver::unread();
-    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
-    delta(&observer, &mut cursor, false, "A", "tail");
-    let waker = std::task::Waker::noop();
-    let mut context = Context::from_waker(waker);
-    let mut published = std::pin::pin!(observer.published());
-
-    assert_eq!(published.as_mut().poll(&mut context), Poll::Pending);
-    assert!(matches!(
-        observations.poll_next(&mut context),
-        Poll::Ready(Some(_))
-    ));
-    observations.published_one();
-    assert_eq!(
-        published.as_mut().poll(&mut context),
-        Poll::Pending,
-        "one event still queued"
-    );
-    assert!(matches!(
-        observations.poll_next(&mut context),
-        Poll::Ready(Some(_))
-    ));
-    assert_eq!(
-        published.as_mut().poll(&mut context),
-        Poll::Pending,
-        "taken is not yet published"
-    );
-    observations.published_one();
-    assert_eq!(published.as_mut().poll(&mut context), Poll::Ready(()));
 }

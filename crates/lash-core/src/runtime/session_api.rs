@@ -437,12 +437,6 @@ impl LashRuntime {
         )?))
     }
 
-    pub(super) fn runtime_session_services_after_commit(
-        &self,
-    ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
-        Ok(Arc::new(RuntimeSessionServices::new(self)?))
-    }
-
     pub fn session_read_service(
         &self,
     ) -> Result<Arc<dyn crate::plugin::SessionReadService>, PluginOperationInvokeError> {

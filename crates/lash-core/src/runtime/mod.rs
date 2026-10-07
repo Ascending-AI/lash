@@ -45,7 +45,6 @@ mod frame_definition_carry;
 mod frame_open;
 mod host_commands;
 mod observation_publisher;
-mod turn_settlement;
 use lash_core_execution::runtime::host;
 #[cfg(feature = "testing")]
 pub use lash_core_store::input_normalization as io;
@@ -55,15 +54,14 @@ pub mod artifact_cleanup;
 pub mod durable;
 mod durable_queue;
 mod lifecycle;
-pub mod obligations;
-pub mod recovery_lease;
-mod turn_config;
-use turn_settlement::TurnIngressSettlement;
 #[cfg(feature = "testing")]
 pub mod logical_turn;
 #[cfg(not(feature = "testing"))]
 mod logical_turn;
+pub mod obligations;
 mod observation;
+pub mod recovery_lease;
+mod turn_config;
 use lash_core_execution::runtime::process;
 #[cfg(test)]
 mod plugin_namespace_tests;
@@ -88,8 +86,6 @@ mod session_manager;
 pub use process_runtime::{ProcessRuntimeContext, ProcessRuntimePorts};
 #[doc(hidden)]
 pub use session_manager::RuntimeSessionServices;
-#[cfg(any(test, feature = "testing"))]
-pub use session_manager::take_spawned_child_runtimes;
 mod session_ops;
 use lash_core_store::session_store_factory_types;
 pub use session_store_factory_types::{
@@ -137,7 +133,6 @@ pub(crate) use lash_core_store::usage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::llm::types::{
@@ -148,12 +143,12 @@ use crate::plugin::{CheckpointHookContext, SessionConfigChangedContext, SessionR
 use crate::sansio::{LlmCallError, Response};
 use crate::session_model::{
     Message, MessageRole, Part, RuntimeSessionPolicy, SessionPolicy, SessionStreamEvent,
-    TokenUsage, make_error_event, reassign_part_ids, shared_parts, transport_stream_events,
+    make_error_event, reassign_part_ids, shared_parts, transport_stream_events,
 };
 use crate::{
     CheckpointKind, PersistentRuntimeServices, PluginOperationInvokeError, RuntimeServices,
-    Session, SessionCreateRequest, SessionError, SessionHandle, SessionSnapshot, TurnFinish,
-    TurnOutcome, TurnStop,
+    Session, SessionCreateRequest, SessionError, SessionHandle, SessionSnapshot, TurnOutcome,
+    TurnStop,
 };
 use crate::{Effect, TurnMachine};
 
@@ -351,7 +346,7 @@ use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_
 #[cfg(feature = "testing")]
 pub use turn_boundary::{RecordedTurnAssembly, classify_output_state};
 pub use turn_control::{
-    LocalTurnStop, TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelAffectedWake,
+    TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelAffectedWake,
     TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
     TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal,
     TurnWorkDriver,
@@ -407,71 +402,6 @@ pub use normalized_item::NormalizedItem;
 #[cfg(not(feature = "testing"))]
 pub(crate) use normalized_item::NormalizedItem;
 
-/// Optional sinks and scoped effect controller for a turn the kernel executes in
-/// process: a child session's turn, and a test's turn on the engine's calls
-/// (`testing::TestTurnExecution`).
-///
-/// Event sinks default to no-op sinks.
-/// Execution scope is explicit and required at every runtime boundary that can execute
-/// nondeterministic work.
-pub struct TurnOptions<'a> {
-    events: Option<&'a dyn EventSink>,
-    turn_events: Option<&'a dyn TurnActivitySink>,
-    scoped_effect_controller: ActorContext,
-    local_stop: LocalTurnStop,
-}
-
-impl<'a> TurnOptions<'a> {
-    /// `cancel` is a host-local stop lever for the turn: firing it asks the
-    /// turn to stop now, delivered as a durable request on the turn's gate
-    /// (see [`LocalTurnStop`]). The shift itself never reads it.
-    pub fn new(cancel: CancellationToken, scoped_effect_controller: ActorContext) -> Self {
-        Self {
-            events: None,
-            turn_events: None,
-            scoped_effect_controller,
-            local_stop: LocalTurnStop::from_token(cancel, None),
-        }
-    }
-
-    pub fn with_events(mut self, events: &'a dyn EventSink) -> Self {
-        self.events = Some(events);
-        self
-    }
-
-    pub fn with_turn_events(mut self, turn_events: &'a dyn TurnActivitySink) -> Self {
-        self.turn_events = Some(turn_events);
-        self
-    }
-
-    /// Replaces the host-local stop lever with `stop`, which also carries the
-    /// origin a forwarded stop records and its `AfterStep` request.
-    pub fn with_local_stop(mut self, stop: LocalTurnStop) -> Self {
-        self.local_stop = stop;
-        self
-    }
-
-    pub(crate) fn local_stop(&self) -> &LocalTurnStop {
-        &self.local_stop
-    }
-
-    pub(crate) fn events_or_noop(&self) -> &'a dyn EventSink {
-        self.events.unwrap_or(&NOOP_EVENT_SINK)
-    }
-
-    pub(crate) fn turn_events_or_noop(&self) -> &'a dyn TurnActivitySink {
-        self.turn_events.unwrap_or(&NOOP_TURN_ACTIVITY_SINK)
-    }
-
-    pub(crate) fn execution_scope_id(&self) -> &str {
-        self.scoped_effect_controller.scope_id()
-    }
-
-    pub(crate) fn scoped_effect_controller(&self) -> ActorContext {
-        self.scoped_effect_controller.clone()
-    }
-}
-
 enum RuntimeStreamEvent {
     Session(SessionStreamEvent),
     Turn(TurnActivity),
@@ -510,12 +440,6 @@ pub struct LashRuntime {
     /// resident re-sync. The next turn takes it and reports it as
     /// `TurnEvent::ToolRestoreReported` (FIG-3367, FIG-5134).
     pub tool_restore_report: Option<crate::ToolRestoreReport>,
-    /// The turn index the running direct turn's admission recorded
-    /// (FIG-3682). The accept phase sets it after it adopted the head the
-    /// turn was admitted on; the prepare phase takes it, so the admitted
-    /// physical turn is addressed under the recorded index and never re-reads
-    /// the head a replay's live store may have moved past.
-    pub(crate) admitted_turn_index: Option<usize>,
 }
 
 #[doc(hidden)]

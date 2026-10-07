@@ -1183,6 +1183,9 @@ pub mod durability {
         facade_support::TerminationPolicy,
     };
     pub use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig};
+    /// The session work a node runs `SessionTurn` processes with, which
+    /// [`DurableProcessWorker`] implements (FIG-5208).
+    pub use lash_core_worker::{SessionTurnCancel, SessionTurnMail, SessionTurns};
 }
 
 /// Runtime events, errors, and execution controls.

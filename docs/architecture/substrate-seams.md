@@ -10,7 +10,7 @@ FIG-5193) fails on any stub that remains.
 Lanes: V0 = FIG-5170, L3 = FIG-5172, L3s = FIG-5196, L4 = FIG-5174,
 L5 = FIG-5173, L6 = FIG-5175, L6b = FIG-5176, L7 = FIG-5177, L7b = FIG-5198,
 L7p = FIG-5197, L8 = FIG-5178, L10a = FIG-5190, L10g = FIG-5200, L11 = FIG-5187,
-L13 = FIG-5193.
+L13 = FIG-5193, L3t = FIG-5208, L9t = FIG-5210.
 
 ## Seams
 

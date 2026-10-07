@@ -52,12 +52,7 @@ pub(in crate::runtime) struct RecordedFrameSwitch {
     outcome: crate::OpenAgentFrameOutcome,
 }
 
-impl RecordedFrameSwitch {
-    /// The nodes the switch's fresh frame starts with.
-    pub(in crate::runtime) fn initial_nodes(&self) -> &[crate::SessionAppendNode] {
-        &self.request.initial_nodes
-    }
-}
+impl RecordedFrameSwitch {}
 
 #[derive(Clone, Debug)]
 struct TurnGraphAppendDraftInner {
@@ -352,9 +347,8 @@ impl TurnGraphAppendDraft {
         Ok(())
     }
 
-    /// The frame switch recorded but not yet folded, if any. Read before the
-    /// final fold: the final commit clears protocol execution when this
-    /// materializes, exactly as an in-frame-switching outcome would.
+    /// The frame switch recorded but not yet folded, if any.
+    #[cfg(test)]
     pub(in crate::runtime) fn pending_frame_switch(&self) -> Option<RecordedFrameSwitch> {
         self.inner.lock_recover().frame_switch.clone()
     }
@@ -446,14 +440,9 @@ impl TurnCommitDraft {
         self.graph.read_model().active_events
     }
 
+    #[cfg(test)]
     pub(super) fn message_sequence(&self) -> MessageSequence {
         self.graph.message_sequence()
-    }
-
-    pub(super) fn take_projection_diagnostics(
-        &mut self,
-    ) -> Vec<super::turn_graph_editor::ReadProjectionDiagnostic> {
-        self.graph.take_projection_diagnostics()
     }
 
     /// Applies one boundary: the boundary's messages first, then every

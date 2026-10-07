@@ -258,7 +258,8 @@ pub struct WaitSpec {
     pub kind: WaitKind,
     /// The scope that revokes it.
     pub scope: ScopeKey,
-    /// For a process-terminal wait, the process.
+    /// For a process-terminal wait, the process; for a child-session wait,
+    /// the process whose child turn it waits for.
     pub target_process: Option<ProcessId>,
     /// Its deadline.
     pub deadline: Option<WaitDeadline>,
@@ -294,7 +295,8 @@ impl WaitRef {
 /// A refused pin; nothing was recorded.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PinRefusal {
-    /// A process-terminal wait names no process, or another kind names one.
+    /// A process-terminal or child-session wait names no process, or
+    /// another kind names one.
     #[error("a {0:?} wait's target process does not match its kind")]
     TargetMismatch(WaitKind),
     /// A timer has no deadline: a timer is its due time.
@@ -395,7 +397,11 @@ pub fn pin(
     secrets: &CompletionKeySecrets,
     spec: WaitSpec,
 ) -> Result<(WaitRef, Option<PinnedKey>), PinRefusal> {
-    if spec.target_process.is_some() != (spec.kind == WaitKind::ProcessTerminal) {
+    let targeted = matches!(
+        spec.kind,
+        WaitKind::ProcessTerminal | WaitKind::ChildSession
+    );
+    if spec.target_process.is_some() != targeted {
         return Err(PinRefusal::TargetMismatch(spec.kind));
     }
     if spec.kind == WaitKind::Timer && spec.deadline.is_none() {
@@ -797,6 +803,30 @@ pub fn resolve_process_terminal_waits(
 ) -> Result<(), DurableError> {
     let (digest, resolution_ref) = encode_process_outcome(outcome)?;
     tx.write(DomainWrite::Wait(WaitWrite::ResolveProcessTerminal {
+        process: process.clone(),
+        digest,
+        resolution_ref,
+    }));
+    Ok(())
+}
+
+/// Resolve every pending child-session wait on `process` in the
+/// transaction that ends its child turn, and wake each owner. The process
+/// reads the turn's end from the child session's store; the resolution
+/// names only the turn. A run that is no process's child turn has no such
+/// wait, and the write changes nothing.
+///
+/// # Errors
+///
+/// The resolution does not encode.
+pub fn resolve_child_session_waits(
+    tx: &mut ActorTx,
+    process: &ProcessId,
+) -> Result<(), DurableError> {
+    let (digest, resolution_ref) = encode_resolution(&Resolution::Ok(
+        serde_json::json!({ "run": process.as_str() }),
+    ))?;
+    tx.write(DomainWrite::Wait(WaitWrite::ResolveChildSession {
         process: process.clone(),
         digest,
         resolution_ref,

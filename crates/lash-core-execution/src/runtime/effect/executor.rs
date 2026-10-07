@@ -85,31 +85,6 @@ struct WaitControls {
     pub(super) transferable: bool,
 }
 
-/// The process one run is admitted for: its registration and the minted id
-/// the registrar gave it, which is the logical opener (ADR 0099 §1).
-#[derive(Clone, Debug)]
-pub struct AdmittedProcess {
-    pub registration: crate::ProcessRegistration,
-    pub process_id: crate::ProcessId,
-    /// The trace scope the process's registration retained, read off the
-    /// record its admission returned. It never changes after registration,
-    /// so a replayed segment runs under it without a fresh registry read
-    /// (ADR 0105 §1).
-    pub trace: Option<lash_trace::DurableTraceScope>,
-}
-
-#[async_trait::async_trait]
-pub trait ProcessRunner: Send + Sync {
-    async fn run_process(
-        &self,
-        admitted: AdmittedProcess,
-        execution_context: crate::ProcessExecutionContext,
-        registry: Arc<dyn ProcessRegistry>,
-        scoped_effect_controller: crate::ActorContext,
-        cancellation: CancellationToken,
-    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError>;
-}
-
 /// Observer invoked after a process side effect and before durable outcome
 /// recording.
 ///

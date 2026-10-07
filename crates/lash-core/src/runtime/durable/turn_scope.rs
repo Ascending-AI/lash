@@ -70,6 +70,10 @@ pub(super) async fn mark_until_children(
 /// first batch of its `Until` children for cancel. When children remain the
 /// scope is recorded as ending, for [`continue_scope_ends`].
 ///
+/// A run named by a process id is that `SessionTurn` process's child turn
+/// (FIG-5208): its end resolves the process's child-session wait, which
+/// wakes the process to commit its terminal.
+///
 /// # Errors
 ///
 /// The children's read; nothing is written.
@@ -82,6 +86,9 @@ pub async fn end_turn_scope(
     let scope = ScopeKey::Turn(session.clone(), run.clone());
     let progress = mark_until_children(cx, tx, &scope).await?;
     waits::revoke_scope(tx, &scope);
+    if let Ok(process) = crate::ProcessId::parse(run.as_str()) {
+        waits::resolve_child_session_waits(tx, &process)?;
+    }
     if progress != CascadeProgress::Done {
         tx.write(DomainWrite::SessionClose(SessionCloseWrite::ScopeEnding {
             session: session.clone(),

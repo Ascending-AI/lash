@@ -10,7 +10,6 @@ use lash_core::llm::types::{
 };
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
-use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 mod fig1127;
 

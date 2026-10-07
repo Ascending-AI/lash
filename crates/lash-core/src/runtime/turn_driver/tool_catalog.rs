@@ -10,29 +10,6 @@ pub(super) struct PreparedExecutionEnvironment {
 }
 
 impl RuntimeTurnDriver<'_> {
-    pub(super) async fn prepare_turn_machine(
-        &mut self,
-        messages: crate::MessageSequence,
-        event_tx: &TurnObserver,
-        run_offset: usize,
-    ) -> Result<TurnMachine, (crate::MessageSequence, usize)> {
-        macro_rules! emit {
-            ($event:expr) => {
-                self.emit_recorded(event_tx, $event)
-            };
-        }
-
-        match self.validate_recorded_selection() {
-            Ok(()) => {}
-            Err(event) => {
-                emit!(*event);
-                emit!(SessionStreamEvent::Done);
-                return Err((messages.clone(), run_offset));
-            }
-        };
-        Ok(self.prepare_machine(messages, run_offset))
-    }
-
     /// The turn's machine over `messages`, counting its protocol iterations
     /// on from `run_offset`.
     #[expect(
@@ -77,7 +54,7 @@ impl RuntimeTurnDriver<'_> {
             turn_causes: self.turn_causes.clone(),
             protocol_run_offset: run_offset,
             turn_driver_preamble,
-            turn_budget: self.segment.remaining_budget(session_policy.turn_budget),
+            turn_budget: session_policy.turn_budget,
             no_progress_budget: session_policy.no_progress_budget,
             attachment_acceptance: Arc::clone(&session_policy.attachment_acceptance),
             generation: session_policy.generation.clone(),

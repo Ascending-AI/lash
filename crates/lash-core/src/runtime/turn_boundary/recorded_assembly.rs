@@ -162,22 +162,6 @@ impl RecordedTurnAssembly {
         }
     }
 
-    pub(in crate::runtime) fn with_llm_calls(
-        mut self,
-        llm_calls: Vec<crate::LlmCallRecord>,
-    ) -> Self {
-        self.llm_calls = llm_calls;
-        self
-    }
-
-    pub(in crate::runtime) fn with_failure_evidence(
-        mut self,
-        failure_evidence: Vec<crate::TurnFailureEvidence>,
-    ) -> Self {
-        self.failure_evidence = failure_evidence;
-        self
-    }
-
     pub fn finish(
         mut self,
         state: crate::SessionSnapshot,
@@ -289,10 +273,6 @@ impl RecordedTurnAssembly {
             turn_input_acceptance: None,
             turn_cancel_input_outcome: Default::default(),
         }
-    }
-
-    pub(in crate::runtime) fn last_llm_usage(&self) -> Option<&TokenUsage> {
-        self.last_llm_usage.as_ref()
     }
 }
 

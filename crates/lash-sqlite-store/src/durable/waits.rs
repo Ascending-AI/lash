@@ -41,13 +41,15 @@ CREATE TABLE IF NOT EXISTS waits (
     CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'custom'))),
     CONSTRAINT ck_waits_key CHECK ((key_version IS NOT NULL) = (host_resolvable = 1)),
     CONSTRAINT ck_waits_target
-        CHECK ((target_process IS NOT NULL) = (kind = 'process_terminal')),
+        CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
     CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS ix_waits_owner ON waits (owner_actor) WHERE state = 'pending';
 CREATE INDEX IF NOT EXISTS ix_waits_scope ON waits (owner_scope);
 CREATE INDEX IF NOT EXISTS ix_waits_target ON waits (target_process)
     WHERE state = 'pending' AND kind = 'process_terminal';
+CREATE INDEX IF NOT EXISTS ix_waits_child_target ON waits (target_process)
+    WHERE state = 'pending' AND kind = 'child_session';
 ";
 
 static SQL: LazyLock<WaitStatements> =
@@ -111,6 +113,18 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
             let owners = owners_of(
                 tx,
                 SQL.resolve_process_terminal.sql(),
+                rusqlite::params![process.as_str(), digest, resolution_ref, commit.now.0],
+            )?;
+            wake_owners(tx, commit.actor, owners, commit.now)
+        }
+        WaitWrite::ResolveChildSession {
+            process,
+            digest,
+            resolution_ref,
+        } => {
+            let owners = owners_of(
+                tx,
+                SQL.resolve_child_session.sql(),
                 rusqlite::params![process.as_str(), digest, resolution_ref, commit.now.0],
             )?;
             wake_owners(tx, commit.actor, owners, commit.now)

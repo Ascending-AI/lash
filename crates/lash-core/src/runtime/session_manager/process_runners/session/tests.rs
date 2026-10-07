@@ -160,20 +160,9 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
     failure
 }
 use crate::runtime::tests::helpers::{
-    EmptyTools, host_process_scope, mock_provider, runtime_with_plugins_and_tools_and_host,
+    EmptyTools, mock_provider, runtime_with_plugins_and_tools_and_host,
 };
 use std::sync::Arc;
-
-fn test_process_execution_write_authority(
-    process_id: impl Into<crate::ProcessId>,
-) -> crate::ProcessExecutionWriteAuthority {
-    let process_id = process_id.into();
-    crate::ProcessExecutionWriteAuthority::invocation(
-        process_id.clone(),
-        format!("test-process-execution:{process_id}"),
-    )
-    .bind_attempt(1)
-}
 
 /// Durable cutover (FIG-3378): `SessionCreateRequest` rides inside
 /// durable `ProcessInput::SessionTurn` rows, and rows recorded before
@@ -181,7 +170,7 @@ fn test_process_execution_write_authority(
 /// `{"kind":"snapshot","snapshot":{...}}`. The payload still decodes —
 /// `SessionStartPoint` keeps the variant for exactly that — and the run
 /// port refuses it with a terminal failure instead of a record-decode
-/// error or an endlessly recoverable infra error.
+/// error or an endlessly recoverable infra error, before any turn is mailed.
 #[tokio::test]
 async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let backend = crate::testing::sqlite_recording_backend().await;
@@ -234,19 +223,18 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         crate::SessionStartPoint::Snapshot { .. }
     ));
 
-    let output = services
-        .run_process_session_turn(
-            process_id.clone(),
-            test_lineage(&process_id, &predecessor_request),
+    let mailed = services
+        .mail_process_session_turn(
+            &process_id,
             predecessor_request,
             crate::TurnInput::text("run"),
-            crate::SessionTurnOutcome::Turn,
-            test_process_execution_write_authority(process_id.clone()),
-            host_process_scope(&runtime.host.core, &process_id),
-            tokio_util::sync::CancellationToken::new(),
         )
         .await
         .expect("the refusal is a typed terminal, not an infra error");
+    let lash_core_execution::runtime::actor::process::SessionTurnMail::Refused(output) = mailed
+    else {
+        panic!("the snapshot start must terminalize, got {mailed:?}");
+    };
     let failure = match output.into_tool_output().outcome {
         crate::ToolCallOutcome::Failure(failure) => failure,
         outcome => panic!("the snapshot start must terminalize, got {outcome:?}"),
@@ -347,24 +335,6 @@ fn assert_child_turn_cancellation(
             .map(crate::ToolValue::to_json_value),
         Some(serde_json::to_value(evidence).expect("encode turn cancellation evidence"))
     );
-}
-
-/// The lineage the runner derives for `process_id` from its registration: a
-/// root process whose own session is the child session it runs.
-fn test_lineage(
-    process_id: &crate::ProcessId,
-    create_request: &crate::SessionCreateRequest,
-) -> crate::ProcessLineage {
-    let own_session = create_request
-        .session_id
-        .clone()
-        .unwrap_or_else(|| crate::runtime::process_child_session_id(process_id));
-    crate::ProcessLineage::of_process(
-        process_id,
-        &crate::Ancestry::root(),
-        None,
-        Some(&own_session),
-    )
 }
 
 /// Project one ended child turn through the runner under `result`.

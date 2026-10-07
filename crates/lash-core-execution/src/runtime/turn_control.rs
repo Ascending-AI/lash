@@ -7,11 +7,7 @@
 //! and ends the turn `Cancelled`. A turn's terminal is its run row's: the
 //! terminal, its typed cause and the head revision its commit published.
 
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
-use lash_sansio::sync::MutexExt;
-use tokio_util::sync::CancellationToken;
 
 use lash_durable::domain::{
     MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnCancelRequest as DurableCancelRequest,
@@ -25,105 +21,6 @@ pub use lash_sansio::{TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCanc
 
 use super::RuntimeError;
 use crate::{Backend, TurnOutcome, TurnStop};
-
-/// A host-local request to stop the turn it was handed to: a shutdown lever,
-/// a process runner stopping its child turn.
-///
-/// `Immediate` fires the handle's token; `AfterStep` leaves the token alone
-/// and asks the turn to stop at its next step boundary. The first origin
-/// recorded with a request wins; a token installed with an origin supplies the
-/// origin when nothing else recorded one. A durable cancel is session mail
-/// ([`request_turn_cancel`]), not this handle.
-#[derive(Clone, Default)]
-pub struct LocalTurnStop {
-    immediate: CancellationToken,
-    after_step: CancellationToken,
-    origin: Arc<Mutex<LocalStopOrigin>>,
-}
-
-#[derive(Default)]
-struct LocalStopOrigin {
-    configured: Option<Option<String>>,
-    observed: Option<Option<String>>,
-}
-
-impl LocalTurnStop {
-    /// A stop nothing has requested yet.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// A stop requested `Immediate` when `token` fires, with `origin` as the
-    /// origin to record if the token fires on its own.
-    pub fn from_token(token: CancellationToken, origin: Option<String>) -> Self {
-        let stop = Self {
-            immediate: token,
-            ..Self::default()
-        };
-        stop.origin.lock_recover().configured = Some(origin);
-        stop
-    }
-
-    /// Request the stop in `mode`, recording `origin` unless an earlier request
-    /// already recorded one.
-    pub fn request(&self, mode: TurnCancelMode, origin: Option<String>) {
-        {
-            let mut state = self.origin.lock_recover();
-            if state.observed.is_none() {
-                state.observed = Some(origin);
-            }
-        }
-        match mode {
-            TurnCancelMode::Immediate => self.immediate.cancel(),
-            TurnCancelMode::AfterStep => self.after_step.cancel(),
-        }
-    }
-
-    /// The origin the stop's evidence carries.
-    pub fn origin(&self) -> Option<String> {
-        let state = self.origin.lock_recover();
-        state
-            .observed
-            .clone()
-            .or_else(|| state.configured.clone())
-            .flatten()
-    }
-
-    /// The `Immediate` lever's token.
-    pub fn immediate_token(&self) -> CancellationToken {
-        self.immediate.clone()
-    }
-
-    /// The strongest mode requested so far, if any.
-    pub fn requested(&self) -> Option<TurnCancelMode> {
-        if self.immediate.is_cancelled() {
-            Some(TurnCancelMode::Immediate)
-        } else if self.after_step.is_cancelled() {
-            Some(TurnCancelMode::AfterStep)
-        } else {
-            None
-        }
-    }
-
-    /// The cancellation turn `turn` honours now: an `Immediate` request
-    /// anywhere, an `AfterStep` one only at a step boundary.
-    #[must_use]
-    pub fn honoured(
-        &self,
-        turn: &crate::TurnId,
-        at_step_boundary: bool,
-    ) -> Option<TurnCancellationEvidence> {
-        let mode = self.requested()?;
-        if mode == TurnCancelMode::AfterStep && !at_step_boundary {
-            return None;
-        }
-        Some(TurnCancellationEvidence {
-            origin: self.origin(),
-            mode,
-            ..TurnCancellationEvidence::internal(turn)
-        })
-    }
-}
 
 /// What a cancel request did.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

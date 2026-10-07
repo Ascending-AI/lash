@@ -1,32 +1,23 @@
-use super::turn_graph_editor::ReadProjectionDiagnostic;
 use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft};
 
 use crate::facade_support::AgentFrameReasonFacadeOps as _;
 use crate::facade_support::SessionGraphFacadeOps;
-use crate::runtime::turn_settlement::TurnIngressSettlement;
 use crate::session_model::SessionHistoryRecord;
-use crate::store::{GraphAppend, RuntimeCommit, StoreError};
-use crate::{
-    AssembledTurn, MessageSequence, PluginSession, Session, SessionPolicy, SessionReadView,
-    TurnOutcome,
-};
+use crate::store::{GraphAppend, StoreError};
+use crate::{MessageSequence, PluginSession, Session, SessionPolicy, SessionReadView, TurnOutcome};
 use std::sync::Arc;
 
-mod materialize;
-use materialize::*;
 mod execution_state;
+mod materialize;
 use execution_state::*;
 pub(in crate::runtime) use execution_state::{
     SeedCarries, committed_frame_transition, derive_seed_carries,
 };
 mod durable_commit;
-mod final_commit_input;
-use final_commit_input::FinalCommitInput;
 mod recorded_assembly;
 pub use recorded_assembly::RecordedTurnAssembly;
 #[cfg(feature = "testing")]
 pub use recorded_assembly::classify_output_state;
-type FinalCommitResult = Result<(crate::TurnCancelInputOutcome, bool), StoreError>;
 
 /// Derive the stable ids of the nodes `graph` appends under `operation`, and
 /// rename them in `state`, its current frame among them.
@@ -110,17 +101,6 @@ pub(super) struct TurnBoundary {
     /// driver when the turn finishes so the final commit recognizes it by
     /// identity.
     protocol_terminal_output: materialize::ProtocolTerminalOutput,
-}
-
-/// The frame end a final commit makes (ADR 0113 §3.1). A switch the turn
-/// makes ends the frame the turn was admitted on (`ended`) and carries
-/// `carries` into the frame it opens; with no `ended`, the commit ends the
-/// last committed frame when a resident open moved the session past it. The
-/// committing turn is the gate.
-pub(super) struct FrameSwitchCommit {
-    ended: Option<crate::FrameNodeId>,
-    carries: SeedCarries,
-    committing: crate::ExecutionScope,
 }
 
 /// Explicit two-phase lifecycle for a turn commit.
@@ -286,11 +266,10 @@ impl TurnBoundary {
     pub(super) fn active_events(&self) -> lash_sansio::AppendVec<SessionHistoryRecord> {
         self.draft_ref().active_events()
     }
+
+    #[cfg(test)]
     pub(super) fn message_sequence(&self) -> MessageSequence {
         self.draft_ref().message_sequence()
-    }
-    pub(super) fn take_projection_diagnostics(&mut self) -> Vec<ReadProjectionDiagnostic> {
-        self.draft_mut().take_projection_diagnostics()
     }
     pub(super) fn finalize_turn_read_state(
         &mut self,
@@ -402,10 +381,6 @@ impl TurnBoundary {
         Ok(ProgressBoundaryResult { protocol_events })
     }
 
-    pub(super) fn export_state_for_assembly(&mut self) -> crate::SessionSnapshot {
-        self.final_state_mut().to_snapshot()
-    }
-
     pub(super) fn apply_event_delta(
         &mut self,
         event_delta: Vec<SessionHistoryRecord>,
@@ -424,116 +399,6 @@ impl TurnBoundary {
                 .map(SessionHistoryRecord::Protocol),
         );
         protocol_events
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn final_commit(
-        &mut self,
-        returned_turn: &mut AssembledTurn,
-        session: Option<&mut Session>,
-        ingress_settlement: TurnIngressSettlement,
-        pending_follow_on: Option<crate::store::PendingFollowOn>,
-        recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-    ) -> Result<bool, StoreError> {
-        // Record the outcome before capturing execution state: a second author
-        // that conflicts refuses here, with nothing captured and nothing
-        // written.
-        self.record_outcome_frame_switch(&returned_turn.outcome)?;
-        let agent_frame_switch_materializes = self.recorded_frame_switch_materializes();
-        let (store, plugins, execution_state_update) = match session {
-            Some(session) => {
-                let store = session.history_store();
-                // The final gate may cancel an already accepted suspension.
-                // Terminal cleanup precedes the capture published atomically
-                // with the Run's terminal and the cleared follow-on.
-                let run_terminates = matches!(
-                    returned_turn.outcome,
-                    TurnOutcome::Finished(_) | TurnOutcome::Stopped(_)
-                );
-                if run_terminates && let Some(executor) = session.plugins().code_executor() {
-                    executor
-                        .settle_code_execution(crate::plugin::CodeExecutionOutcome::Terminated)
-                        .await
-                        .map_err(execution_state_capture_error)?;
-                }
-                let execution_state_update = if agent_frame_switch_materializes {
-                    let initial_nodes = self
-                        .graph_appends
-                        .pending_frame_switch()
-                        .map(|recorded| recorded.initial_nodes().to_vec())
-                        .unwrap_or_default();
-                    let successor = self
-                        .graph_appends
-                        .pending_frame_switch()
-                        .map(|recorded| {
-                            crate::session_graph::frame_node_id(
-                                &self.state().session_id,
-                                recorded.request.frame_key.as_str(),
-                            )
-                        })
-                        .ok_or_else(|| {
-                            StoreError::Backend("frame switch has no successor".into())
-                        })?;
-                    frame_switch_execution_state_update(session, &successor, &initial_nodes)
-                        .await
-                        .map_err(execution_state_capture_error)?
-                } else {
-                    capture_execution_state_update(session)
-                        .await
-                        .map_err(execution_state_capture_error)?
-                };
-                let plugins = Arc::clone(session.plugins());
-                (store, Some(plugins), execution_state_update)
-            }
-            None => (None, None, ExecutionStateUpdate::Clean),
-        };
-        let captured_execution_state = !agent_frame_switch_materializes
-            && !matches!(execution_state_update, ExecutionStateUpdate::Clean);
-        // The returned state moves into the commit; a successful commit
-        // hands the committed state back below, and a failed one abandons
-        // the turn.
-        let returned_graph = std::mem::take(&mut returned_turn.state.session_graph);
-        let returned_state = crate::SessionSnapshot {
-            session_graph: returned_graph,
-            ..returned_turn.state.clone()
-        };
-        let commit_result = self
-            .final_commit_with_snapshots(FinalCommitInput {
-                returned_state,
-                tool_calls: &returned_turn.tool_calls,
-                omitted: returned_turn.omitted.as_ref(),
-                retained_outputs: &returned_turn.retained_outputs,
-                plugins: plugins.as_deref(),
-                execution_state_update,
-                agent_frame_switch_materializes,
-                store: store.as_ref(),
-                failure_evidence: &returned_turn.failure_evidence,
-                outcome: &returned_turn.outcome,
-                ingress_settlement,
-                pending_follow_on,
-                recorded_attachment_intent_ids,
-            })
-            .await;
-        settle_execution_state_capture(
-            plugins.as_deref(),
-            captured_execution_state,
-            commit_result.is_ok(),
-        )
-        .await;
-        let (turn_cancel_input_outcome, work_remaining) = commit_result?;
-        returned_turn.state = self.final_state_mut().to_snapshot();
-        returned_turn.turn_cancel_input_outcome = turn_cancel_input_outcome;
-        Ok(work_remaining)
-    }
-
-    pub(super) fn into_final_state(self) -> RuntimeSessionState {
-        match self.stage {
-            Some(TurnCommitStage::Drafting(draft)) => (*draft).into_final_state(),
-            Some(TurnCommitStage::Finalized(finalized)) => finalized.state,
-            None => {
-                unreachable!("turn commit stage is only absent inside final_state_mut")
-            }
-        }
     }
 
     fn draft_ref(&self) -> &TurnCommitDraft {
@@ -603,320 +468,6 @@ impl TurnBoundary {
             .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
                 error: Box::new(error),
             })
-    }
-
-    /// Whether this turn's one recorded switch opens a frame the session is
-    /// not already in. Derived from the slot alone, so the commit and the
-    /// protocol-execution clear it executes answer the same question.
-    fn recorded_frame_switch_materializes(&self) -> bool {
-        self.graph_appends
-            .pending_frame_switch()
-            .is_some_and(|recorded| {
-                materialize::agent_frame_switch_materializes(
-                    &self.state().session_id,
-                    &recorded.request.frame_key,
-                    self.state().current_frame_node_id.as_deref(),
-                )
-            })
-    }
-
-    async fn final_commit_with_snapshots(
-        &mut self,
-        input: FinalCommitInput<'_>,
-    ) -> FinalCommitResult {
-        let fleet_format = self.fleet_format;
-        let FinalCommitInput {
-            returned_state,
-            tool_calls,
-            omitted,
-            retained_outputs,
-            plugins,
-            execution_state_update,
-            agent_frame_switch_materializes,
-            store,
-            failure_evidence,
-            outcome,
-            ingress_settlement,
-            pending_follow_on,
-            recorded_attachment_intent_ids,
-        } = input;
-        // Every path into the final commit reconciles the same way. A turn
-        // executed through `final_commit` already recorded this outcome so the
-        // refusal lands before execution state is captured; recording it here
-        // again is a replay of that record and answers it unchanged.
-        self.record_outcome_frame_switch(outcome)?;
-        let clock = Arc::clone(&self.clock);
-        let graph_appends = self.graph_appends.clone();
-        let protocol_terminal_output = self.protocol_terminal_output.clone();
-        let turn_id = crate::TurnId::parse(self.operation_scope.id())?;
-        let terminal_message_id = format!("m_turn_{turn_id}_assistant");
-        let state = self.final_state_mut();
-        state.adopt_snapshot(returned_state);
-        // The follow-on the head owes after this commit: written by a frame
-        // switch, cleared by the follow-on's own terminal commit (ADR 0101
-        // §3). A store-less session keeps the same fact resident.
-        state.pending_follow_on = pending_follow_on.map(Box::new);
-        if let Some(plugins) = plugins {
-            state
-                .capture_plugin_states(plugins, fleet_format)
-                .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
-                    error: Box::new(error),
-                })?;
-        }
-        // The frame the turn was admitted on, which a switch this commit
-        // opens ends (ADR 0113 §3.1), and what the switch carries out of it.
-        let admitted_frame = state.current_frame_node_id.clone();
-        let frame_carries = execution_state_update.carries();
-        execution_state_update.apply(state)?;
-        materialize_turn_reply(
-            state,
-            outcome,
-            clock.as_ref(),
-            &turn_id,
-            &terminal_message_id,
-            &protocol_terminal_output,
-        );
-        // The pre-snapshot decision that cleared protocol execution state and
-        // this post-snapshot state must never diverge; fail in debug/tests
-        // instead of silently clearing the wrong frame's state.
-        debug_assert_eq!(
-            agent_frame_switch_materializes,
-            graph_appends
-                .pending_frame_switch()
-                .is_some_and(|recorded| materialize::agent_frame_switch_materializes(
-                    &state.session_id,
-                    &recorded.request.frame_key,
-                    state.current_frame_node_id.as_deref(),
-                ))
-        );
-        // Appends recorded after finalization (finalize-turn hooks) land here,
-        // after everything the turn materialized, and the turn's one recorded
-        // agent-frame switch opens after them.
-        graph_appends
-            .fold_into_final_state(state)
-            .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
-                error: Box::new(error),
-            })?;
-        // `apply_commit` takes the finalized state directly, so the values it
-        // read from `self` are hoisted before the state borrow begins.
-        let operation = self.final_operation();
-        let commit_budget = self.commit_budget;
-        let metrics = self.metrics.clone();
-        let trace = self.trace.clone();
-        let trace_metadata = self.trace_metadata.clone();
-        // A switch this turn makes ends the frame the turn was admitted on;
-        // otherwise the commit ends whatever frame a resident open left
-        // behind, if any.
-        let definition_engines = self.definition_engines.clone();
-        let frame_switch = FrameSwitchCommit {
-            ended: admitted_frame.filter(|_| agent_frame_switch_materializes),
-            carries: frame_carries,
-            committing: self.operation_scope.clone(),
-        };
-        let state = self.final_state_mut();
-
-        if let Some(store) = store {
-            let graph = state.pending_graph_commit();
-            let committed_attachment_ids =
-                committed_attachment_ids(state, tool_calls, omitted, retained_outputs);
-            // ADR 0058: this deduped union of explicit ids and recorded
-            // write-ahead intent ids is a declared estimate, not the stamped
-            // row count — replay can undercount prior-attempt rows, and
-            // cancelled or failed puts can overcount. That residual is
-            // accepted; admission never queries the store.
-            let adopted_intent_rows = committed_attachment_ids
-                .iter()
-                .cloned()
-                .chain(recorded_attachment_intent_ids)
-                .collect::<std::collections::BTreeSet<_>>()
-                .len()
-                .try_into()
-                .unwrap_or(u64::MAX);
-            Box::pin(Self::apply_commit(
-                &definition_engines,
-                state,
-                commit_budget,
-                &metrics,
-                trace.as_ref(),
-                &trace_metadata,
-                super::turn_loop::trace_outcome(outcome),
-                store,
-                graph,
-                failure_evidence,
-                crate::store::TurnCommitOutcome::from_terminal(outcome),
-                operation,
-                ingress_settlement,
-                committed_attachment_ids,
-                adopted_intent_rows,
-                frame_switch,
-            ))
-            .await
-        } else {
-            // No store will ever rehydrate this commit: the accepted execution
-            // stays resident for the next same-frame restore (FIG-2521).
-            state.discard_runtime_snapshots_retaining_accepted_execution();
-            Ok((Default::default(), true))
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    #[expect(
-        clippy::expect_used,
-        reason = "derived graph node identities are non-empty"
-    )]
-    async fn apply_commit(
-        definition_engines: &crate::ProcessEngineRegistry,
-        state: &mut RuntimeSessionState,
-        commit_budget: crate::CommitBudget,
-        metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
-        trace: Option<&crate::trace::TraceStanding>,
-        trace_metadata: &std::collections::BTreeMap<String, serde_json::Value>,
-        trace_outcome: Option<lash_trace::TraceTurnOutcome>,
-        store: &crate::store::SessionStore,
-        mut graph: GraphAppend,
-        failure_evidence: &[crate::TurnFailureEvidence],
-        outcome: crate::store::TurnCommitOutcome,
-        operation: crate::OperationId,
-        ingress_settlement: TurnIngressSettlement,
-        committed_attachment_ids: Vec<crate::AttachmentId>,
-        adopted_intent_rows: u64,
-        frame_switch: FrameSwitchCommit,
-    ) -> FinalCommitResult {
-        let session_id = state.session_id.clone();
-        let node_id_mapping = derive_commit_node_ids(state, &mut graph, &operation)?;
-        let FrameSwitchCommit {
-            ended,
-            carries,
-            committing,
-        } = frame_switch;
-        let ended = ended.map(|ended| {
-            node_id_mapping
-                .iter()
-                .find(|(draft, _)| draft == ended.as_str())
-                .map(|(_, derived)| {
-                    crate::FrameNodeId::new(derived.clone())
-                        .expect("derived graph node identities are non-empty")
-                })
-                .unwrap_or(ended)
-        });
-        let persisted_node_ids = graph
-            .nodes()
-            .iter()
-            .map(|node| node.node_id.clone())
-            .collect::<Vec<_>>();
-        let frame_transition =
-            committed_frame_transition(state, ended, carries, &committing, &persisted_node_ids)?;
-        let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
-            state,
-            graph,
-            operation,
-            commit_budget,
-            store.fleet_format(),
-        )?
-        .with_committed_attachments(committed_attachment_ids);
-        commit.failure_evidence = failure_evidence.to_vec();
-        commit.outcome = Some(outcome);
-        commit.trace = trace.zip(trace_outcome).and_then(|(trace, outcome)| {
-            let scope = trace.scope()?.clone();
-            let lash_trace::TraceScopeOwner::Turn { turn_id, .. } = &scope.scope.owner else {
-                return None;
-            };
-            let context = lash_trace::TraceContext::default()
-                .for_session(session_id.clone())
-                .for_turn(turn_id.clone())
-                .for_turn_index(state.turn_index);
-            Some(Box::new(crate::store::TurnTraceReceipt {
-                metadata: trace_metadata.clone(),
-                scope,
-                context,
-                outcome,
-                run_scope: None,
-            }))
-        });
-        commit.adopted_intent_rows = adopted_intent_rows;
-        // The rows a turn settles are its run's (FIG-3927), and a run's turn
-        // commits from the session actor: a turn here runs under no admitted
-        // run, admitted nothing and settles nothing.
-        if !ingress_settlement.is_empty() {
-            return Err(StoreError::Backend(format!(
-                "session {session_id}: a turn under no admitted run has no ingress rows to settle"
-            )));
-        }
-        super::frame_definition_carry::prepare(definition_engines, frame_transition.as_ref())
-            .await?;
-        commit.frame_transition = frame_transition;
-        let result = store.commit_runtime_state_verified(commit, metrics).await?;
-        if !result.receipt_replayed
-            && let (Some(trace), Some(receipt)) = (trace, result.trace.as_ref())
-        {
-            let standing = trace.under(receipt.scope.clone());
-            let permit = lash_trace::EmissionPermit::new_transition();
-            standing.transition(
-                Some(&permit),
-                receipt.scope.started_at_ms,
-                lash_trace::TraceTransitionKind::Started,
-                0,
-                || {
-                    (
-                        receipt.context.clone(),
-                        lash_trace::TraceEvent::TurnStarted {
-                            metadata: receipt.metadata.clone(),
-                        },
-                    )
-                },
-            );
-            standing.transition(
-                Some(&permit),
-                result.committed_at_ms,
-                lash_trace::TraceTransitionKind::Terminal,
-                0,
-                || {
-                    (
-                        receipt.context.clone(),
-                        lash_trace::TraceEvent::TurnCompleted {
-                            outcome: receipt.outcome.clone(),
-                        },
-                    )
-                },
-            );
-        }
-        if !result.receipt_replayed
-            && let (Some(trace), Some(receipt)) = (trace, result.trace.as_ref())
-            && let Some(scope) = &receipt.run_scope
-        {
-            let status = match &result.outcome {
-                Some(crate::store::TurnCommitOutcome::Cancelled) => {
-                    lash_trace::TraceDomainStatus::Cancelled
-                }
-                Some(crate::store::TurnCommitOutcome::Failed(_)) => {
-                    lash_trace::TraceDomainStatus::Failed
-                }
-                _ => lash_trace::TraceDomainStatus::Completed,
-            };
-            trace.under(scope.clone()).transition(
-                Some(&lash_trace::EmissionPermit::new_transition()),
-                result.committed_at_ms,
-                lash_trace::TraceTransitionKind::Terminal,
-                0,
-                || {
-                    (
-                        receipt.context.clone(),
-                        lash_trace::TraceEvent::DomainCompleted {
-                            completion: lash_trace::TraceDomainCompletion::new(
-                                lash_trace::TraceDomainOperation::Run,
-                                scope.started_at_ms,
-                                status,
-                            ),
-                        },
-                    )
-                },
-            );
-        }
-        let turn_cancel_input_outcome = result.turn_cancel_input_outcome.clone();
-        let work_remaining = result.work_remaining;
-        state.apply_persisted_commit_result(result);
-        state.mark_node_ids_persisted(persisted_node_ids);
-        Ok((turn_cancel_input_outcome, work_remaining))
     }
 }
 

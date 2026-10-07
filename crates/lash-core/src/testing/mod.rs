@@ -72,13 +72,11 @@ pub mod runtime_helpers;
 pub mod runtime_internals;
 #[cfg(target_os = "linux")]
 mod thread_census;
-mod turn_execution;
 
 #[cfg(target_os = "linux")]
 pub use thread_census::ThreadCensus;
 
 pub use poll::{poll_until, wait_until};
-pub use turn_execution::TestTurnExecution;
 
 #[cfg(test)]
 std::thread_local! {

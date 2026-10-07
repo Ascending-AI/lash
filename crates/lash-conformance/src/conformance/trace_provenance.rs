@@ -65,7 +65,6 @@ pub async fn first_admission_wins_without_changing_business_identity(
     prefix: &str,
     _host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
-    _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let session_id = crate::SessionId::fixture(format!("{prefix}-trace-first-writer"));
     let parts = TraceParts {

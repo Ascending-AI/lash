@@ -1,6 +1,5 @@
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f410;
 /// A clock jump past the 30s session-lease TTL these probes expire.

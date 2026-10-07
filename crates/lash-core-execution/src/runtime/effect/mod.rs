@@ -55,7 +55,7 @@ pub use validation::{
     validate_replayed_effect_envelope,
 };
 
-pub use executor::{AdmittedProcess, ProcessRunner, ServedOnly};
+pub use executor::ServedOnly;
 pub use executor::{RUN_SEAL_OPERATION, TurnCancelWait};
 pub use outcome::{
     LlmTraceFailure, direct_trace_context, emit_llm_trace_completed, emit_llm_trace_failed,

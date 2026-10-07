@@ -1015,7 +1015,7 @@ CREATE TABLE IF NOT EXISTS lash_waits (
     CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'custom'))),
     CONSTRAINT ck_waits_key CHECK ((key_version IS NOT NULL) = host_resolvable),
     CONSTRAINT ck_waits_target
-        CHECK ((target_process IS NOT NULL) = (kind = 'process_terminal')),
+        CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
     CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL))
 );
 
@@ -1024,3 +1024,5 @@ CREATE INDEX IF NOT EXISTS ix_lash_waits_owner ON lash_waits (owner_actor)
 CREATE INDEX IF NOT EXISTS ix_lash_waits_scope ON lash_waits (owner_scope);
 CREATE INDEX IF NOT EXISTS ix_lash_waits_target ON lash_waits (target_process)
     WHERE state = 'pending' AND kind = 'process_terminal';
+CREATE INDEX IF NOT EXISTS ix_lash_waits_child_target ON lash_waits (target_process)
+    WHERE state = 'pending' AND kind = 'child_session';

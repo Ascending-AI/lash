@@ -65,9 +65,7 @@ pub use tokio_util::sync::CancellationToken;
 /// The module lives in `lash-core-ids`; this facade re-exports its public
 /// surface unchanged and keeps the crate-internal helpers crate-internal.
 pub mod panic_containment {
-    pub(crate) use lash_core_ids::panic_containment::{
-        enforce_loudness, enforce_message, payload_message,
-    };
+    pub(crate) use lash_core_ids::panic_containment::{enforce_message, payload_message};
     pub use lash_core_ids::panic_containment::{is_loud, set_loud};
 }
 pub use lash_core_execution::hook_key;
@@ -348,7 +346,6 @@ pub mod facade_support {
     pub use crate::runtime::WeakRuntimeHandle;
     pub use crate::runtime::current_epoch_ms;
 
-    pub use crate::runtime::TurnOptions;
     pub use crate::runtime::process_child_session_id;
     pub use crate::runtime::process_signal_event_type;
     pub use crate::runtime::process_signal_wait_key;
@@ -679,8 +676,8 @@ pub use runtime::{
     InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, KeyName, Lifetime,
     LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome,
     LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
-    LlmRequestSpec, LlmStreamRecord, LocalTurnStop, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
-    NoProcessWork, NoRunOptionsOwner, NonTerminalProcessPage, PROCESS_EFFECT_OCCURRENCE_CAP,
+    LlmRequestSpec, LlmStreamRecord, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork,
+    NoRunOptionsOwner, NonTerminalProcessPage, PROCESS_EFFECT_OCCURRENCE_CAP,
     PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
     PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
     ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,

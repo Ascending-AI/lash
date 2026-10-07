@@ -5,7 +5,6 @@ mod context;
 mod durable_drive;
 pub(in crate::runtime) use durable_drive::{DriveParts, RuntimeDrive};
 mod effects;
-pub(in crate::runtime) use effects::normalize_plugin_message_attachments;
 mod events;
 mod failures;
 mod handlers;
@@ -13,12 +12,9 @@ pub(crate) mod issue;
 mod lease;
 mod local_effects;
 mod machine;
-mod tool_run_close;
-pub(in crate::runtime) use tool_run_close::OpenerForCommit;
-mod segment;
-pub(in crate::runtime) use segment::{BoundaryTaken, TurnSegment};
 mod streaming;
 mod tool_catalog;
+mod tool_run_close;
 mod tools;
 mod trace;
 
@@ -69,8 +65,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) withheld_terminal_work: super::logical_turn::WithheldTerminalWork,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
-    /// The host-local stop the turn reads at its boundaries.
-    pub(super) turn_control: crate::LocalTurnStop,
     /// Names the reply the protocol driver materialized, for the boundary's
     /// terminal materialization to recognize by identity.
     pub(super) protocol_reply: machine::ProtocolReplyTracker,
@@ -96,17 +90,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// may emit once a step body of this attempt has really run, or, on the
     /// copy a recorded step's body runs on, that body's live step.
     pub(super) trace: crate::trace::TraceStanding,
-    /// The turn's part in its run's segment boundaries (FIG-4739).
-    pub(super) segment: TurnSegment,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'a ()>,
-}
-
-impl RuntimeTurnDriver<'_> {
-    /// Records the cancellation this turn honours, from a journaled peek or a
-    /// recorded outcome, and stops the children it lent its context to.
-    pub(super) fn record_turn_cancel(&mut self, evidence: crate::TurnCancellationEvidence) {
-        self.turn_cancel = Some(evidence);
-        self.children_stop.cancel();
-    }
 }

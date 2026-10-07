@@ -312,7 +312,10 @@ pub async fn k1_forged_keys_are_refused_and_write_nothing(backend: &Backend) -> 
         (WaitKind::Signal, None),
         (WaitKind::ProcessTerminal, Some(target)),
         (WaitKind::Timer, None),
-        (WaitKind::ChildSession, None),
+        (
+            WaitKind::ChildSession,
+            Some(ProcessId::fixture("k1-child-turn")),
+        ),
     ] {
         let (wait, minted) = pin(&cx, kind, target, Some(LONG)).await?;
         ensure!(minted.is_none(), "a {kind:?} wait was minted a host key");

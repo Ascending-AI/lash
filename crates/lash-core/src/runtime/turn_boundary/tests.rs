@@ -1,20 +1,12 @@
 use super::*;
 use crate::SessionId;
 use crate::facade_support::AgentFrameReasonFacadeOps;
-use crate::runtime::tests::helpers::RecordingStore;
 use crate::session_model::{MessageRole, Part};
-use crate::store::SessionStore;
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, shared_parts,
 };
 use lash_sansio::core_support::MessageSequenceCoreSupport;
-use lash_sansio::sync::MutexExt;
 const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
-fn cancelled_outcome() -> TurnOutcome {
-    TurnOutcome::Stopped(crate::TurnStop::Cancelled {
-        evidence: crate::TurnCancellationEvidence::internal("turn-boundary-test"),
-    })
-}
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {
         id: id.to_string(),
@@ -64,14 +56,6 @@ fn test_protocol_event(kind: &str) -> crate::ProtocolEvent {
     )
     .expect("test protocol event serializes")
 }
-/// A recording store over a fresh memory catalog, and the view of the
-/// fixtures' `session-1` on it.
-async fn recording_session() -> (Arc<RecordingStore>, SessionStore) {
-    let recording = Arc::new(crate::testing::unbound_recording_store().await);
-    let session = SessionStore::new(recording.clone(), SessionId::from("session-1"))
-        .expect("valid fixture session id");
-    (recording, session)
-}
 fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("session-1"),
@@ -117,22 +101,6 @@ fn outcome_switch(
     }
 }
 
-async fn admitted_boundary(store: &SessionStore, state: RuntimeSessionState) -> TurnBoundary {
-    assert_eq!(store.session_id(), &state.session_id);
-    store
-        .store()
-        .admit_session(&crate::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: state.session_id.clone(),
-            relation: crate::SessionRelation::Root,
-            config: state.policy.clone().into(),
-            head: crate::SessionCreationHead::Config,
-        })
-        .await
-        .expect("admit turn-boundary test session");
-    TurnBoundary::from_state(state)
-}
 #[test]
 fn agent_frame_switch_seeds_the_new_frame_without_a_tool_call_event() {
     let graph =
@@ -341,115 +309,6 @@ fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
             .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref())
             .map(crate::NodeId::as_str),
         Some(frame_b.frame_node_id.as_str())
-    );
-}
-
-/// A turn outcome naming a persisted, non-current frame aborts the commit
-/// with the typed refusal, leaves resident state untouched, and writes
-/// nothing durable; the next turn on the same state commits normally.
-#[tokio::test]
-async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_mutation() {
-    let messages = (0..crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT)
-        .map(|index| {
-            text_message(
-                &format!("message-{index}"),
-                MessageRole::Assistant,
-                &format!("step {index}"),
-            )
-        })
-        .collect::<Vec<_>>();
-    let (recording, store) = recording_session().await;
-    let mut pipeline = admitted_boundary(&store, state_with_graph(SessionGraph::default())).await;
-    pipeline
-        .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
-            turn_index: 1,
-            messages: MessageSequence::from_base(messages.into()),
-            event_delta: Vec::new(),
-            execution_state_update: ExecutionStateUpdate::Clean,
-            plugins: None,
-        })
-        .await
-        .expect("build the oversized turn tail in memory");
-
-    let returned_state = pipeline.export_state_for_assembly();
-    let error = pipeline
-        .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: returned_state.clone(),
-            tool_calls: &[],
-            omitted: None,
-            retained_outputs: &[],
-            plugins: None,
-            execution_state_update: ExecutionStateUpdate::Clean,
-            agent_frame_switch_materializes: false,
-            store: Some(&store),
-            failure_evidence: &[],
-            outcome: &cancelled_outcome(),
-            ingress_settlement: TurnIngressSettlement::default(),
-            pending_follow_on: None,
-            recorded_attachment_intent_ids: Default::default(),
-        })
-        .await
-        .expect_err("the final append must enforce the transaction node budget");
-
-    assert!(matches!(
-        error,
-        StoreError::CommitNodeBudgetExceeded {
-            node_count,
-            max_nodes,
-        } if node_count == crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT + 1
-            && max_nodes == crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT
-    ));
-    assert_eq!(*recording.runtime_commit_count.lock_recover(), 0);
-    assert!(
-        store
-            .load_session_window(crate::store::WindowSelector::Current)
-            .await
-            .expect("load session")
-            .is_none_or(|read| read.window.nodes.is_empty())
-    );
-}
-
-#[tokio::test]
-async fn no_store_final_commit_discards_snapshots_without_touching_graph() {
-    let graph =
-        SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "hello")]);
-    let mut state = state_with_graph(graph.clone());
-    state.set_tool_state_snapshot(Some(crate::ToolState::default()));
-    state.set_plugin_state(Some(crate::PluginState::default()));
-    state.set_execution_state_snapshot(Some(b"runtime".to_vec().into()));
-    let mut pipeline = TurnBoundary::from_state(state);
-    let returned_state = pipeline.export_state_for_assembly();
-
-    pipeline
-        .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: returned_state.clone(),
-            plugins: None,
-            execution_state_update: ExecutionStateUpdate::Clean,
-            agent_frame_switch_materializes: false,
-            store: None,
-            failure_evidence: &[],
-            outcome: &cancelled_outcome(),
-            tool_calls: &[],
-            omitted: None,
-            retained_outputs: &[],
-            ingress_settlement: TurnIngressSettlement::default(),
-            pending_follow_on: None,
-            recorded_attachment_intent_ids: Default::default(),
-        })
-        .await
-        .expect("no-store commit");
-
-    let state = pipeline.state_mut();
-    assert_eq!(state.session_graph.nodes.len(), graph.nodes.len() + 1);
-    assert!(state.tool_state_snapshot().is_none());
-    assert!(state.plugin_state().is_none());
-    // Without a store the committed execution snapshot is the only accepted
-    // copy, so the storeless release keeps it resident for a later restore.
-    assert_eq!(
-        state.execution_state_snapshot().as_deref(),
-        Some(b"runtime".as_slice()),
-        "storeless commits retain the accepted execution snapshot"
     );
 }
 

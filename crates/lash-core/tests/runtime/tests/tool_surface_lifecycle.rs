@@ -5,7 +5,6 @@ use lash_core::ToolProvider as _;
 use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::{SessionAuthorityContext, StaticPluginFactory};
-use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 
 const SEED: u64 = 0x5_c402;

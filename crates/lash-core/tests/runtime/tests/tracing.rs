@@ -6,7 +6,6 @@
 use super::*;
 use ::tracing::Instrument;
 use lash_core::facade_support::ToolStateFacadeOps;
-use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;

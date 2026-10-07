@@ -43,8 +43,6 @@ fn processes_area_witnesses() {
     // W0005: lash::AwaitEventWaitIdentity::process_signal [function]
     let _ =
         lash::AwaitEventWaitIdentity::process_signal(lash::ProcessId::fixture("proc"), "sig", 1);
-    // W0006: lash::durability::DurableProcessWorkerConfig::with_turn_phase_probe_slot [function]
-    let _ = lash::durability::DurableProcessWorkerConfig::with_turn_phase_probe_slot;
     // W0007: lash::runtime::RuntimeEffectLocalExecutor::with_process_turn_cancellation [function]
     let _ = lash::runtime::RuntimeEffectLocalExecutor::with_process_turn_cancellation;
     // W0008: lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_observation [function]
@@ -64,9 +62,6 @@ fn processes_area_witnesses() {
     let _ = lash::durability::DurableProcessWorker::new;
     // W0019: lash::durability::DurableProcessWorker::request_process_cancel [function]
     let _ = lash::durability::DurableProcessWorker::request_process_cancel;
-    // W0020: lash::durability::DurableProcessWorker::run_process_segment_with_scoped_effect_controller [function]
-    let _ =
-        lash::durability::DurableProcessWorker::run_process_segment_with_scoped_effect_controller;
     // W0021: lash::durability::DurableProcessWorkerConfig [struct]
     type_witness::<lash::durability::DurableProcessWorkerConfig>();
     // W0022: lash::durability::DurableProcessWorkerConfig::from_plugin_factories [function]

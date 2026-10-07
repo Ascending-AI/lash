@@ -1,13 +1,13 @@
-//! The engine-neutral laws that run turns or need an effect context, run on
+//! The engine-neutral laws that need an effect context, run on
 //! the durable backend over PostgreSQL (ADR 0132 §14, FIG-5185).
 //!
 //! Each law's runtime runs in process over the production durable backend
-//! assembled over an isolated database's store set; its turns run on an
-//! [`ActorContext`] over that backend.
+//! assembled over an isolated database's store set, on an [`ActorContext`]
+//! over that backend.
 
 use std::sync::Arc;
 
-use lash_conformance::{ConformanceTurnRunner, HostTurnRunner, ReopenableRuntimeStore};
+use lash_conformance::ReopenableRuntimeStore;
 use lash_core_execution::store::ConformanceDeployment;
 use lash_core_execution::{ActorContext, StoreSet};
 
@@ -18,39 +18,6 @@ use super::*;
 fn durable_host(stores: &Arc<dyn StoreSet>) -> ActorContext {
     ActorContext::detached(lash_conformance::backend_over(Arc::clone(stores)))
 }
-
-/// The fixture of a law that runs its turns through a runner: an isolated
-/// database, the durable host over its store set, the store set and the
-/// in-process runner on that host.
-async fn turn_law_fixture(
-    prefix: &'static str,
-) -> Option<(
-    (IsolatedDatabase, tempfile::TempDir),
-    &'static str,
-    ActorContext,
-    Arc<dyn StoreSet>,
-    Arc<dyn ConformanceTurnRunner>,
-)> {
-    let (database_fixture, storage) = storage().await?;
-    reset(storage.pool()).await;
-    let (attachments, stores) = pg_law_stores(&storage);
-    let host = durable_host(&stores);
-    let runner = HostTurnRunner::shared(host.clone());
-    Some((
-        (database_fixture, attachments),
-        prefix,
-        host,
-        stores,
-        runner,
-    ))
-}
-
-lash_conformance::turn_config_tests!({
-    let Some(fixture) = turn_law_fixture("postgres-turn-config").await else {
-        return;
-    };
-    fixture
-});
 
 fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCreateRequest {
     lash_core_execution::SessionStoreCreateRequest {

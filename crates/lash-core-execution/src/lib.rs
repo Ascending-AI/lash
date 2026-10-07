@@ -771,7 +771,7 @@ pub use runtime::{
     EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, ExecutableGeneration,
     ExecutableGenerationRefusal, ExecutionScope, ForkSessionReceipt, ForkSessionRequest, HandleId,
     HostWaitKind, InputItem, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, KeyName,
-    Lifetime, LifetimeDecision, LifetimePolicy, LlmRequestSpec, LlmStreamRecord, LocalTurnStop,
+    Lifetime, LifetimeDecision, LifetimePolicy, LlmRequestSpec, LlmStreamRecord,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoRunOptionsOwner, NonTerminalProcessPage,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, PendingTurnInput,
     PendingTurnInputBatch, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,

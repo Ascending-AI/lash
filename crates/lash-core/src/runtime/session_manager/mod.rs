@@ -22,12 +22,8 @@ mod direct_outcome;
 mod graph;
 mod process_runners;
 mod session_init;
-#[cfg(any(test, feature = "testing"))]
-pub use session_init::take_spawned_child_runtimes;
-mod event_sink;
 
 pub use crate::direct_completion_client::DirectCompletionClient;
-pub(in crate::runtime::session_manager) use event_sink::ChannelEventSink;
 
 #[derive(Clone)]
 enum CurrentSnapshot {
@@ -394,9 +390,6 @@ impl ProcessCapability {
 }
 
 impl RuntimeSessionServices {
-    pub(in crate::runtime) fn plugins(&self) -> &Arc<crate::PluginSession> {
-        &self.current.plugins
-    }
     /// Adopt `admission` as the plugin admission the owner's plugins write
     /// under (FIG-4747).
     pub(in crate::runtime) fn adopt_plugin_admission(

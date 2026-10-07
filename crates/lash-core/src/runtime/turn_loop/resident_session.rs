@@ -229,15 +229,6 @@ impl ResidentSessionContinuity {
         &self.graph_head_stale
     }
 
-    /// Name the turn that produced `revision`, for observation attribution.
-    pub(in crate::runtime) fn record_committed_observation_turn(
-        &mut self,
-        revision: u64,
-        turn_id: &TurnId,
-    ) {
-        self.last_committed_observation_turn = Some((revision, turn_id.clone()));
-    }
-
     /// The turn id this handle committed at `revision`, when it is the most
     /// recent one it committed.
     pub(in crate::runtime) fn last_committed_turn_id_for_revision(

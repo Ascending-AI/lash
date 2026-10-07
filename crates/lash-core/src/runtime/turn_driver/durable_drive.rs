@@ -253,7 +253,6 @@ impl TurnDrive for RuntimeDrive {
             id,
             cell.language,
             cell.code,
-            0,
             &self.observer,
         ))
         .await

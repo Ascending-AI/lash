@@ -1,8 +1,4 @@
-#[cfg(test)]
-use super::logical_turn::next_physical_turn_id;
-use super::logical_turn::{
-    LogicalTurnAdmissions, LogicalTurnStart, PhysicalTurnExecution, PreparedLogicalTurn,
-};
+use super::logical_turn::LogicalTurnAdmissions;
 use super::*;
 use crate::ActorContext;
 use crate::SessionId;
@@ -11,134 +7,18 @@ use crate::facade_support::RuntimeSessionStateFacadeOps;
 use context_pressure::ContextPressureStep;
 use lash_sansio::core_support::*;
 
-mod accept;
-mod commit;
 mod context_pressure;
 mod durable;
 mod execute;
-mod post_commit;
 #[cfg(feature = "testing")]
 pub mod prepare;
 #[cfg(not(feature = "testing"))]
 mod prepare;
 mod resident_session;
 
-pub(in crate::runtime) use commit::LogicalTurnErrorContext;
-use commit::{CancelledTurnFinishContext, TurnCommitContext, TurnFinishInput};
 pub(in crate::runtime) use durable::DurableTurn;
-pub(in crate::runtime) use execute::PreparedTurnExecuteContext;
-use execute::TurnDriverRemainder;
-use post_commit::PostCommitDelivery;
-pub(in crate::runtime) use prepare::TurnPrepareContext;
 pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
 pub use resident_session::ResidentSessionState;
-
-/// What every turn phase publishes through: the logical turn's observer,
-/// whose host end [`execute_logical_turn`](LashRuntime::execute_logical_turn)
-/// publishes to the host sinks outside the shift.
-pub(in crate::runtime) struct TurnSinks<'sinks> {
-    pub(in crate::runtime) observer: &'sinks TurnObserver,
-}
-
-/// Projects a terminal turn outcome onto the closed trace outcome.
-///
-/// Cancellation is its own trace variant carrying the evidence
-/// [`TurnStop::Cancelled`] already holds, so a cancelled turn is never traced
-/// as a failure.
-pub(super) fn trace_outcome(outcome: &TurnOutcome) -> Option<lash_trace::TraceTurnOutcome> {
-    use lash_trace::{TraceTurnCompletionReason as Reason, TraceTurnOutcome as Outcome};
-    Some(match outcome {
-        TurnOutcome::Finished(TurnFinish::AssistantMessage { .. }) => Outcome::Completed {
-            done_reason: Reason::AssistantMessage,
-        },
-        TurnOutcome::Finished(TurnFinish::FinalValue { .. }) => Outcome::Completed {
-            done_reason: Reason::FinalValue,
-        },
-        TurnOutcome::Finished(TurnFinish::ToolValue { .. }) => Outcome::Completed {
-            done_reason: Reason::ToolValue,
-        },
-        TurnOutcome::AgentFrameSwitch { frame_key, .. } => Outcome::AgentFrameSwitch {
-            frame_switch: lash_trace::TraceAgentFrameSwitch {
-                frame_key: frame_key.as_str().to_string(),
-            },
-        },
-        TurnOutcome::SegmentBoundary { reason } => Outcome::SegmentBoundary {
-            done_reason: match reason {
-                crate::BoundaryReason::JournalBudget => "journal_budget",
-                crate::BoundaryReason::HandOver => "hand_over",
-            }
-            .to_string(),
-        },
-        TurnOutcome::Stopped(stop) => {
-            use lash_trace::TraceTurnFailureReason as Failure;
-            match stop {
-                TurnStop::Cancelled { evidence } => Outcome::Cancelled {
-                    evidence: lash_trace::TraceTurnCancellationEvidence {
-                        request_id: evidence.request_id.clone(),
-                        origin: evidence.origin.clone(),
-                        reason: evidence.reason.clone(),
-                    },
-                },
-                TurnStop::Incomplete => Outcome::Failed {
-                    done_reason: Failure::Incomplete,
-                },
-                TurnStop::InvalidInput => Outcome::Failed {
-                    done_reason: Failure::InvalidInput,
-                },
-                TurnStop::MaxTurns => Outcome::Failed {
-                    done_reason: Failure::MaxTurns,
-                },
-                TurnStop::ToolFailure => Outcome::Failed {
-                    done_reason: Failure::ToolFailure,
-                },
-                TurnStop::ProviderError => Outcome::Failed {
-                    done_reason: Failure::ProviderError,
-                },
-                TurnStop::ContextOverflow => Outcome::Failed {
-                    done_reason: Failure::ContextOverflow,
-                },
-                TurnStop::PluginAbort => Outcome::Failed {
-                    done_reason: Failure::PluginAbort,
-                },
-                TurnStop::RuntimeError => Outcome::Failed {
-                    done_reason: Failure::RuntimeError,
-                },
-                TurnStop::SubmittedError { .. } => Outcome::Failed {
-                    done_reason: Failure::SubmittedError,
-                },
-                TurnStop::ToolError { .. } => Outcome::Failed {
-                    done_reason: Failure::ToolError,
-                },
-            }
-        }
-    })
-}
-
-pub(super) fn post_commit_delivery_issue(
-    code: crate::FailureCode,
-    message: impl Into<String>,
-) -> TurnIssue {
-    TurnIssue {
-        severity: crate::runtime::TurnIssueSeverity::Blocking,
-        kind: crate::TurnFailureKind::Runtime,
-        code: Some(code),
-        terminal_reason: None,
-        message: message.into(),
-        raw: None,
-        retryable: Some(false),
-        provider_failure_kind: None,
-        plugin_failures: Vec::new(),
-    }
-}
-
-/// A refresh that met the store keeps the store error's one typed
-/// classification: a corrupt or refused head is not a redrivable refresh.
-fn session_head_refresh_error(err: SessionError) -> RuntimeError {
-    match err {
-        SessionError::Store { source, .. } => source.runtime_error(),
-        err => RuntimeError::new(RuntimeErrorCode::SessionHeadRefresh, err.to_string()),
-    }
-}
 
 fn queued_work_batch_ids(queued: &crate::AdmittedQueuedWork) -> Vec<crate::BatchId> {
     queued
@@ -146,37 +26,6 @@ fn queued_work_batch_ids(queued: &crate::AdmittedQueuedWork) -> Vec<crate::Batch
         .iter()
         .map(|batch| batch.batch_id.clone())
         .collect()
-}
-
-/// Measures the whole host-visible turn.
-///
-/// Opened before the runtime admits the turn's rows and stamped onto the
-/// assembled turn after the final commit and post-persist hooks complete, so
-/// [`TurnExecutionMetrics`](crate::TurnExecutionMetrics) timing covers
-/// admission → final commit. Reads only the injected [`Clock`](crate::Clock):
-/// `started_at_ms` comes from the wall-clock source and the duration from the
-/// monotonic source, so deterministic clocks produce deterministic timing.
-#[derive(Clone, Copy)]
-pub(in crate::runtime) struct TurnStopwatch {
-    started: std::time::Instant,
-    started_at_ms: u64,
-}
-
-impl TurnStopwatch {
-    pub(in crate::runtime) fn start(clock: &dyn crate::Clock) -> Self {
-        Self {
-            started: clock.now(),
-            started_at_ms: clock.timestamp_ms(),
-        }
-    }
-
-    pub(super) fn stamp(&self, turn: &mut AssembledTurn, clock: &dyn crate::Clock) {
-        turn.execution.started_at_ms = self.started_at_ms;
-        turn.execution.duration_ms = clock
-            .now()
-            .saturating_duration_since(self.started)
-            .as_millis() as u64;
-    }
 }
 
 fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
@@ -271,10 +120,6 @@ pub(in crate::runtime) fn send_queued_work_started_event(
     );
 }
 
-trait TypedTurnPhase {
-    const RUNTIME_PHASE: RuntimeTurnPhase;
-}
-
 /// [`LashRuntime::max_context_tokens`] of `state`.
 pub(super) fn max_context_tokens_of(
     state: &crate::RuntimeSessionState,
@@ -347,98 +192,6 @@ async fn emit_turn_activity_to_sink_for_turn(
     }
 }
 
-/// Kind tag carried by a terminal diagnostic's error envelope.
-#[derive(Clone, Copy)]
-enum TerminalDiagnosticKind {
-    /// The runtime itself refused to continue the turn.
-    Runtime,
-    /// Turn input failed normalization before any provider work.
-    InputValidation,
-}
-
-impl TerminalDiagnosticKind {
-    fn as_envelope_kind(self) -> crate::TurnFailureKind {
-        match self {
-            Self::Runtime => crate::TurnFailureKind::Runtime,
-            Self::InputValidation => crate::TurnFailureKind::InputValidation,
-        }
-    }
-}
-
-/// Where a terminal diagnostic's turn activity is addressed: the unscoped
-/// observer, for `turn_id`.
-struct TerminalActivityTarget<'a> {
-    observer: &'a TurnObserver,
-    turn_id: &'a TurnId,
-}
-
-/// Typed diagnostic emitted immediately ahead of a terminal `TurnOutcome`.
-struct TerminalDiagnostic<'a> {
-    kind: TerminalDiagnosticKind,
-    code: Option<crate::FailureCode>,
-    message: String,
-    retryable: Option<bool>,
-    activity: TerminalActivityTarget<'a>,
-}
-
-/// Record the canonical terminal sequence for a stopped turn and hold its
-/// publication for the commit.
-///
-/// The order is fixed and load-bearing for host transcripts: the optional
-/// diagnostic's session `Error` event (with its turn activity in between),
-/// then `TurnOutcome::Stopped(stop)`, then `Done`. Every session event is
-/// recorded on `recorded_assembly` here, so the committed turn carries the
-/// same terminal facts the host is sent.
-///
-/// Nothing publishes before the turn's commit (ADR 0122): the sequence is
-/// held on the observer and released after the commit, or abandoned when the
-/// commit fails.
-fn hold_terminal_sequence(
-    recorded_assembly: &mut RecordedTurnAssembly,
-    observer: &TurnObserver,
-    cursor: &mut crate::engine::ObservationCursor,
-    diagnostic: Option<TerminalDiagnostic<'_>>,
-    stop: TurnStop,
-) {
-    observer.hold_terminal();
-    if let Some(diagnostic) = diagnostic {
-        let error_event = SessionStreamEvent::Error {
-            message: diagnostic.message.clone(),
-            envelope: Some(crate::session_model::ErrorEnvelope {
-                kind: diagnostic.kind.as_envelope_kind(),
-                code: diagnostic.code,
-                terminal_reason: None,
-                user_message: diagnostic.message.clone(),
-                raw: None,
-                retryable: diagnostic.retryable,
-                provider_failure_kind: None,
-            }),
-        };
-        recorded_assembly.record(&error_event);
-        // The diagnostic activity publishes ahead of the session error it
-        // belongs to; the session events stay verbatim — `observe` would
-        // project a second `TurnEvent::Error`.
-        let activity = crate::engine::ObservedEvent::Activity {
-            correlation_id: None,
-            event: TurnEvent::Error {
-                message: diagnostic.message,
-            },
-        };
-        let target = diagnostic.activity;
-        cursor.observe(&target.observer.for_turn(target.turn_id), activity);
-        observer.publish(crate::runtime::RuntimeStreamEvent::Session(error_event));
-    }
-    let outcome_event = SessionStreamEvent::TurnOutcome {
-        outcome: TurnOutcome::Stopped(stop),
-    };
-    recorded_assembly.record(&outcome_event);
-    observer.publish(crate::runtime::RuntimeStreamEvent::Session(outcome_event));
-    recorded_assembly.record(&SessionStreamEvent::Done);
-    observer.publish(crate::runtime::RuntimeStreamEvent::Session(
-        SessionStreamEvent::Done,
-    ));
-}
-
 /// Publish one observation to its host sink, addressing an activity to its
 /// physical turn when it has one.
 pub(in crate::runtime) async fn publish_observation(
@@ -454,24 +207,5 @@ pub(in crate::runtime) async fn publish_observation(
             }
             None => emit_turn_activity_to_sink(turn_events, activity).await,
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::TurnId;
-
-    use super::next_physical_turn_id;
-
-    #[test]
-    fn physical_turn_ids_count_on_from_the_run_deterministically() {
-        let first = next_physical_turn_id(&TurnId::from("root-turn"), 0).expect("first");
-        assert_eq!(first, "root-turn:agent-frame:1");
-        let second = next_physical_turn_id(&TurnId::from("root-turn"), 1).expect("second");
-        assert_eq!(second, "root-turn:agent-frame:2");
-        assert_eq!(
-            crate::store::PhysicalTurn::split_turn_id(&second),
-            (TurnId::from("root-turn"), 2)
-        );
     }
 }

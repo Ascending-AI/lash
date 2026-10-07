@@ -22,25 +22,8 @@ impl LawBackend {
         Self::over(&crate::Backend::for_testing(stores))
     }
 
-    pub(crate) fn with_process_registry(
-        self,
-        process_registry: Arc<dyn crate::ProcessRegistry>,
-    ) -> Self {
-        Self {
-            layered: self.layered.map_process_registry(|_| process_registry),
-        }
-    }
-
     pub(crate) fn into_backend(self) -> crate::Backend {
         self.layered.into_backend()
-    }
-
-    pub(crate) fn host_config(
-        self,
-        commit_budget: crate::CommitBudget,
-        queued_work_batching: crate::QueuedWorkBatchingConfig,
-    ) -> crate::RuntimeHostConfig {
-        crate::RuntimeHostConfig::new(self.into_backend(), commit_budget, queued_work_batching)
     }
 }
 

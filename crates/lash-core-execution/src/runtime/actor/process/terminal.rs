@@ -35,6 +35,9 @@ pub enum ProcessParkReason {
         /// The engine's account.
         message: String,
     },
+    /// It runs a turn in a child session, and the node that claimed it runs
+    /// no session turns.
+    UnservedSessionTurn,
     /// The store refused its commits as corrupt, its terminal too.
     CommitRefused {
         /// The store's account.

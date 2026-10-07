@@ -6,9 +6,11 @@
 
 mod activation;
 mod driver;
+mod session_turn;
 mod terminal;
 
 pub use activation::ProcessActivation;
+pub use session_turn::{SessionTurnCancel, SessionTurnMail, SessionTurns};
 pub use terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
 
 use lash_durable::domain::{ProcessWrite, ScopeKey};

@@ -86,7 +86,9 @@ pub enum WaitKind {
     Signal,
     /// A durable sleep.
     Timer,
-    /// A child session's end.
+    /// The end of the turn a `SessionTurn` process runs in its child
+    /// session: the wait's target is that process, whose id names the
+    /// child's run.
     ChildSession,
 }
 
@@ -203,7 +205,8 @@ pub enum WaitWrite {
         scope: ScopeKey,
         /// What it waits for.
         kind: WaitKind,
-        /// For a process-terminal wait, the process.
+        /// For a process-terminal wait, the process; for a child-session
+        /// wait, the process whose child turn it waits for.
         target_process: Option<ProcessId>,
         /// Its deadline.
         deadline: Option<DurableInstant>,
@@ -228,6 +231,18 @@ pub enum WaitWrite {
         /// Its outcome's digest.
         digest: String,
         /// Its outcome, by reference.
+        resolution_ref: String,
+    },
+    /// Resolve every pending child-session wait on `process` with
+    /// `resolution`, and wake each owner: the end of the turn the process
+    /// runs in its child session, written by the child's terminal
+    /// transaction.
+    ResolveChildSession {
+        /// The process whose child turn ended.
+        process: ProcessId,
+        /// The turn's end's digest.
+        digest: String,
+        /// The turn's end, by reference.
         resolution_ref: String,
     },
 }

@@ -1,6 +1,5 @@
 use super::*;
 use lash_core::plugin::config::core::{SetAutonomy, SetGeneration, SetLlmProfile, SetTurnBudget};
-use lash_core::testing::TestTurnExecution as _;
 use lash_core::testing::{Script, StoreOp};
 
 const SEED: u64 = 0x5_f420;

@@ -3,7 +3,6 @@ use super::*;
 #[cfg(test)]
 mod context_tests;
 mod control;
-mod runner;
 mod session;
 
 #[cfg_attr(

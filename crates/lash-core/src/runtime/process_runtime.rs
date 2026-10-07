@@ -29,18 +29,17 @@ pub struct ProcessRuntimeContext {
 }
 
 impl ProcessRuntimeContext {
-    /// Build the runtime `admitted` runs under: the environment its start
+    /// Build the runtime `process` runs under: the environment its start
     /// captured — its starter's recorded policy and plugin config — and this
     /// worker's ports. An engine process and a session-turn process alike run
     /// under the facts their start recorded; the worker supplies no default
     /// for either (FIG-4396).
-    pub async fn for_admitted(
+    pub async fn for_record(
         ports: ProcessRuntimePorts,
-        admitted: &crate::runtime::effect::AdmittedProcess,
+        process: &crate::ProcessRecord,
     ) -> Result<Self, crate::PluginError> {
-        let process_id = admitted.process_id.clone();
-        let registration = &admitted.registration;
-        let Some(env_ref) = registration.env_ref.as_ref() else {
+        let process_id = process.id.clone();
+        let Some(env_ref) = process.env_ref.as_ref() else {
             return Err(crate::PluginError::Session(format!(
                 "process `{process_id}` is missing a captured execution env"
             )));
@@ -130,73 +129,89 @@ struct ProcessRuntimeBuild {
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
 }
 
-#[async_trait::async_trait]
-impl crate::runtime::effect::ProcessRunner for ProcessRuntimeContext {
-    async fn run_process(
+impl ProcessRuntimeContext {
+    /// The `SessionTurn` input of this runtime's process, or why it is not one.
+    fn session_turn<'a>(
         &self,
-        admitted: crate::runtime::effect::AdmittedProcess,
-        execution_context: crate::ProcessExecutionContext,
-        registry: Arc<dyn crate::ProcessRegistry>,
-        scoped_effect_controller: crate::ActorContext,
-        cancellation: tokio_util::sync::CancellationToken,
-    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        if admitted.process_id != self.process_id {
-            return Err(crate::ProcessInfraError::new(
-                crate::PluginError::attempt_fault(format!(
-                    "the runtime of process `{}` cannot run process `{}`",
-                    self.process_id, admitted.process_id
-                )),
-            ));
+        process: &'a crate::ProcessRecord,
+    ) -> Result<
+        (
+            &'a crate::SessionCreateRequest,
+            &'a crate::TurnInput,
+            &'a crate::SessionTurnOutcome,
+        ),
+        crate::PluginError,
+    > {
+        if process.id != self.process_id {
+            return Err(crate::PluginError::attempt_fault(format!(
+                "the runtime of process `{}` cannot run process `{}`",
+                self.process_id, process.id
+            )));
         }
-        let environment = admitted.registration.env_ref.clone().ok_or_else(|| {
-            crate::PluginError::attempt_fault("admitted process has no captured environment")
-        })?;
-        let plugins = self.services.plugins();
-        let target = execution_context.plugin_admission.clone().ok_or_else(|| {
-            crate::PluginError::attempt_fault("process segment has no recorded plugin admission")
-        })?;
-        let address = crate::EffectAddress::new(
-            scoped_effect_controller.execution_scope().clone(),
-            "plugin-transition",
-        )
-        .map_err(|error| {
-            crate::ProcessInfraError::from(crate::PluginError::Runtime(crate::RuntimeError::from(
-                error,
-            )))
-        })?;
-        let request = crate::plugin::PluginTransitionRequest {
-            id: crate::plugin::PluginTransitionId(address),
-            owner: crate::RuntimeOwner::Process(self.process_id.clone()),
-            base: crate::plugin::PluginTransitionBase::Process {
-                environment,
-                segment: scoped_effect_controller.execution_scope().clone(),
-            },
-            target,
-        };
-        let record = super::plugin_transition::record_native_transition(
-            &scoped_effect_controller,
-            plugins.host().clone(),
-            request,
-            plugins.export_state(),
-            (*plugins.admitted_plugin_config().config).clone(),
-        )
-        .await?;
-        plugins.adopt_plugin_transition(&record)?;
-        let state_segment = u32::try_from(execution_context.segment_ordinal).map_err(|_| {
-            crate::PluginError::attempt_fault(
-                "process segment exceeds the plugin-state segment range",
-            )
-        })?;
-        plugins.adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment));
-        plugins.materialize()?;
+        match process.input.as_ref() {
+            crate::ProcessInput::SessionTurn {
+                create_request,
+                turn_input,
+                result,
+                ..
+            } => Ok((create_request, turn_input, result)),
+            crate::ProcessInput::Engine { kind, .. } => Err(crate::PluginError::Invoke(format!(
+                "process `{}` runs engine `{kind}`, which its process actor drives by advance",
+                process.id
+            ))),
+        }
+    }
+
+    /// Create `process`'s child session, or find it, and mail its turn's
+    /// input to it under the child turn's id (FIG-5208).
+    ///
+    /// # Errors
+    ///
+    /// A failure another pass may not meet.
+    pub async fn mail_session_turn(
+        &self,
+        process: &crate::ProcessRecord,
+    ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnMail, crate::PluginError>
+    {
+        let (create_request, turn_input, _) = self.session_turn(process)?;
         self.services
-            .run_admitted_process(
-                admitted,
-                execution_context,
-                registry,
-                scoped_effect_controller,
-                cancellation,
-            )
+            .mail_process_session_turn(&process.id, create_request.clone(), turn_input.clone())
+            .await
+    }
+
+    /// Withdraw `process`'s child turn input, or request the child turn's
+    /// cancel once a run took it.
+    ///
+    /// # Errors
+    ///
+    /// A store failure.
+    pub async fn cancel_session_turn(
+        &self,
+        process: &crate::ProcessRecord,
+    ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnCancel, crate::PluginError>
+    {
+        let (create_request, _, _) = self.session_turn(process)?;
+        let requester = process
+            .cancel_request
+            .as_deref()
+            .map(|request| request.requester.clone());
+        self.services
+            .cancel_process_session_turn(&process.id, create_request.clone(), requester)
+            .await
+    }
+
+    /// `process`'s answer from its child turn's committed end.
+    ///
+    /// # Errors
+    ///
+    /// A store failure, or a child turn that has not ended.
+    pub async fn session_turn_outcome(
+        &self,
+        process: &crate::ProcessRecord,
+    ) -> Result<crate::ProcessOutcome, crate::PluginError> {
+        let (create_request, _, result) = self.session_turn(process)?;
+        self.services
+            .process_session_turn_outcome(&process.id, create_request.clone(), result)
             .await
     }
 }
