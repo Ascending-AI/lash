@@ -240,17 +240,20 @@ mod tests {
             crate::QueuedWorkBatchingConfig::new(1),
         ))
         .build();
-        let receipt = env
+        let plan = env
             .core
             .trigger_store()
-            .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            .plan_occurrence(&crate::TriggerOccurrenceRequest::new(
                 "fig1982.clock",
                 "resolved-core-clock",
                 serde_json::Value::Null,
                 "fig1982:resolved-core-clock",
             ))
             .await
-            .expect("ingest clock probe");
-        assert_eq!(receipt.occurrence.occurred_at_ms, NOW_MS);
+            .expect("plan clock probe");
+        let crate::TriggerOccurrencePlan::Fresh { occurrence, .. } = plan else {
+            panic!("a fresh store holds no occurrence: {plan:?}");
+        };
+        assert_eq!(occurrence.occurred_at_ms, NOW_MS);
     }
 }

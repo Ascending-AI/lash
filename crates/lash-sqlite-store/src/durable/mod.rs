@@ -551,24 +551,50 @@ fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWr
 }
 
 /// Apply one mailbox domain write by its domain's module, with its answer
-/// and the actor it woke.
+/// and the actors it woke.
 fn apply_mail_domain(
     tx: &Connection,
     write: &MailDomainWrite,
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
-) -> Answer<(MailAnswer, Option<Woken>)> {
+) -> Answer<(MailAnswer, Vec<Woken>)> {
     Ok(match write {
         MailDomainWrite::ResolveWait(resolution) => waits::resolve(tx, resolution, now)?
-            .map(|(answer, woken)| (MailAnswer::ResolveWait(answer), woken)),
+            .map(|(answer, woken)| (MailAnswer::ResolveWait(answer), woken.into_iter().collect())),
         MailDomainWrite::RequestProcessCancel(request) => {
-            processes::request_cancel(tx, request, now, fleet)?
-                .map(|(answer, woken)| (MailAnswer::RequestProcessCancel(answer), woken))
+            processes::request_cancel(tx, request, now, fleet)?.map(|(answer, woken)| {
+                (
+                    MailAnswer::RequestProcessCancel(answer),
+                    woken.into_iter().collect(),
+                )
+            })
         }
         MailDomainWrite::RequestTurnCancel(request) => turns::request_cancel(tx, request, now)?
-            .map(|(answer, woken)| (MailAnswer::RequestTurnCancel(answer), woken)),
+            .map(|(answer, woken)| {
+                (
+                    MailAnswer::RequestTurnCancel(answer),
+                    woken.into_iter().collect(),
+                )
+            }),
         MailDomainWrite::Redrive(request) => park_events::redrive(tx, request, now)?
-            .map(|(answer, woken)| (MailAnswer::Redrive(answer), woken)),
+            .map(|(answer, woken)| (MailAnswer::Redrive(answer), woken.into_iter().collect())),
+        // Each started process's actor is created ready in the start's own
+        // transaction (ADR 0132 §12).
+        MailDomainWrite::StartTrigger(start) => {
+            crate::triggers::start::start_within(tx, start, now, fleet)?.map(|answer| {
+                let woken = answer
+                    .processes
+                    .iter()
+                    .filter_map(|process| ActorKey::process(process.as_str()).ok())
+                    .map(|actor| Woken {
+                        actor,
+                        state: ActorState::Ready,
+                        owner: None,
+                    })
+                    .collect();
+                (MailAnswer::StartTrigger(answer), woken)
+            })
+        }
     })
 }
 
@@ -645,7 +671,7 @@ fn apply_mail(tx: &FencedTx<'_>, writes: MailTx, now: DurableInstant) -> Flow<Ma
                     Err(error) => return refuse(error),
                 };
                 receipt.answers.push(answer);
-                if let Some(woken) = woken {
+                for woken in woken {
                     note_woken(&mut receipt.woken, woken);
                 }
             }

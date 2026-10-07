@@ -1,7 +1,25 @@
 use super::*;
-use lash_core_execution::{TriggerOccurrenceOutcome, TriggerOccurrenceRequest, TriggerStore as _};
+use lash_core_execution::{
+    TriggerIngressReceipt, TriggerOccurrenceOutcome, TriggerOccurrenceRequest, TriggerStore as _,
+};
 
-async fn retention_uses_columns(store: Arc<SqliteTriggerStore>) {
+/// Record `request`'s occurrence through the start a trigger router commits.
+async fn record(
+    stores: &crate::SqliteStoreSet,
+    request: TriggerOccurrenceRequest,
+) -> TriggerIngressReceipt {
+    lash_core::testing::record_trigger_occurrence(
+        stores.trigger_store().as_ref(),
+        stores.process_registry().as_ref(),
+        &stores.durable_store(),
+        request,
+    )
+    .await
+    .expect("record occurrence")
+}
+
+async fn retention_uses_columns(stores: crate::SqliteStoreSet) {
+    let store = stores.trigger_store();
     for (key, outcome) in [
         ("fired", TriggerOccurrenceOutcome::Fired),
         (
@@ -11,13 +29,12 @@ async fn retention_uses_columns(store: Arc<SqliteTriggerStore>) {
             },
         ),
     ] {
-        store
-            .ingest_occurrence(
-                TriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), key)
-                    .with_outcome(outcome),
-            )
-            .await
-            .expect("ingest occurrence");
+        record(
+            &stores,
+            TriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), key)
+                .with_outcome(outcome),
+        )
+        .await;
     }
     store
         .conn
@@ -56,8 +73,7 @@ async fn retention_uses_typed_outcomes_on_sqlite_memory() {
     retention_uses_columns(
         crate::SqliteStoreSet::memory()
             .await
-            .expect("memory store set")
-            .trigger_store(),
+            .expect("memory store set"),
     )
     .await;
 }
@@ -65,33 +81,32 @@ async fn retention_uses_typed_outcomes_on_sqlite_memory() {
 #[tokio::test]
 async fn retention_uses_typed_outcomes_on_disk() {
     let dir = tempfile::tempdir().expect("trigger directory");
-    retention_uses_columns(Arc::new(
-        SqliteTriggerStore::open(&dir.path().join("triggers.db"))
+    retention_uses_columns(
+        crate::SqliteStoreSet::open(dir.path().join("lash.db"))
             .await
-            .expect("file trigger store"),
-    ))
+            .expect("file store set"),
+    )
     .await;
 }
 
 #[tokio::test]
 async fn dropped_occurrences_cannot_be_reclaimed_or_have_deliveries() {
-    let store = crate::SqliteStoreSet::memory()
+    let stores = crate::SqliteStoreSet::memory()
         .await
-        .expect("memory store set")
-        .trigger_store();
-    let record = store
-        .ingest_occurrence(
-            TriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), "dropped")
-                .with_outcome(TriggerOccurrenceOutcome::Dropped {
-                    reason: "audit".into(),
-                }),
-        )
-        .await
-        .expect("dropped occurrence")
-        .occurrence;
+        .expect("memory store set");
+    let store = stores.trigger_store();
+    let record = record(
+        &stores,
+        TriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), "dropped")
+            .with_outcome(TriggerOccurrenceOutcome::Dropped {
+                reason: "audit".into(),
+            }),
+    )
+    .await
+    .occurrence;
     store.conn.write(move |tx| {
         assert!(tx.execute("UPDATE trigger_occurrences SET reclaimable_at_ms = 0 WHERE occurrence_id = ?1", params![record.occurrence_id]).is_err(), "dropped rows cannot arm reclamation");
-        assert!(tx.execute("INSERT INTO trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation, subscription_revision, subscription_snapshot_json, created_at_ms) VALUES (?1, 'sub', 'incarnation', 1, '{}', 0)", params![record.occurrence_id]).is_err(), "dropped rows cannot reserve a delivery");
+        assert!(tx.execute("INSERT INTO trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation, subscription_revision, subscription_snapshot_json, created_at_ms, process_id) VALUES (?1, 'sub', 'incarnation', 1, '{}', 0, 'process')", params![record.occurrence_id]).is_err(), "dropped rows cannot reserve a delivery");
         assert!(tx.execute("UPDATE trigger_occurrences SET outcome_kind = 'unknown'", []).is_err(), "outcome vocabulary is closed");
         Ok(())
     }).await.expect("schema rejects impossible states");

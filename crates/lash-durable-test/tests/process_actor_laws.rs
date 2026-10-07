@@ -823,7 +823,6 @@ async fn an_emit_whose_commit_meets_a_store_fault_is_appended_exactly_once() {
 /// the process ends `Failed` with the refusal instead of retrying a commit
 /// that can never land (the typed half of the store-fault laws, FIG-4649).
 #[tokio::test]
-#[ignore = "blocked: L6 (FIG-5175): the registry's refusal of an Emit refuses the whole process.advance commit as Corrupt, and the activation recomputes and retries it every poll forever, never ending or parking the process (runtime/actor/process/activation.rs apply, EngineAction::Emit)"]
 async fn an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal() {
     let world = World::new(Script::new()).await;
     let process = world

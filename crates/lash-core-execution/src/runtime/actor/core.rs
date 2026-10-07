@@ -308,6 +308,26 @@ impl ActorContext {
         self.durable()?.commit(tx, label).await
     }
 
+    /// Commit the mailbox transaction `tx` under `label` through this
+    /// context's store (its node's, under a claim), then hint every actor it
+    /// woke, as [`Backend::commit_mail`] does.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal; nothing was written. Unavailable for
+    /// [`Self::unavailable`].
+    pub async fn commit_mail(
+        &self,
+        tx: lash_durable::MailTx,
+        label: CommitLabel,
+    ) -> Result<lash_durable::MailCommit, DurableError> {
+        let commit = self.durable()?.commit_mail(tx, label).await?;
+        if let Some(backend) = &self.inner.backend {
+            backend.hint_woken(&commit);
+        }
+        Ok(commit)
+    }
+
     /// Note that `source` is due at `at`. A release as `waiting` records the
     /// earliest due time of every source.
     pub fn note_due(&self, source: DueSource, at: DurableInstant) {

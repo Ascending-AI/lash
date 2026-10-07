@@ -2068,10 +2068,6 @@ struct ReattachingWorkPort {
 
 #[async_trait::async_trait]
 impl crate::ProcessWorkSubstrate for ReattachingWorkPort {
-    async fn deliver_process_start(&self, _: &ProcessRecord) -> Result<(), PluginError> {
-        Err(PluginError::Invoke("unexpected start delivery".to_string()))
-    }
-
     async fn await_process_terminal(
         &self,
         process_id: &ProcessId,

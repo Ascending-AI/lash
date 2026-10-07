@@ -312,14 +312,7 @@ fn stalled_row(key: &ObligationKey) -> Value {
             parent_id,
         } => json!({"parent_kind":parent_kind,"parent_id":parent_id}),
         ObligationKey::SessionDelete { session_id } => json!({"session_id":session_id.as_str()}),
-        ObligationKey::TriggerDelivery {
-            occurrence_id,
-            subscription_id,
-        } => json!({"occurrence_id":occurrence_id,"subscription_id":subscription_id}),
-        ObligationKey::ProcessStart { process_id }
-        | ObligationKey::ProcessTerminal { process_id } => {
-            json!({"process_id":process_id.as_str()})
-        }
+        ObligationKey::ProcessTerminal { process_id } => json!({"process_id":process_id.as_str()}),
         ObligationKey::ArtifactCleanup { referrer } => {
             json!({"referrer_kind":referrer.kind().as_str(),"referrer_id":referrer.canonical_id()})
         }

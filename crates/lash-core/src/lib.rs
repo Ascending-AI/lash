@@ -357,7 +357,6 @@ pub mod facade_support {
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
     pub use crate::runtime::registry_transitions;
-    pub use crate::runtime::release_bound_trigger_delivery_pins;
     pub use crate::runtime::terminal_append_request;
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
@@ -544,7 +543,7 @@ pub use triggers::{
     TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerEventCatalog, TriggerHandle,
     TriggerIngressReceipt, TriggerInputBinding, TriggerLifecycleColumnError,
     TriggerMutationOutcome, TriggerMutationReceipt, TriggerOccurrenceFilter,
-    TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
+    TriggerOccurrenceOutcome, TriggerOccurrencePlan, TriggerOccurrenceReclamationReport,
     TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
     TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
     TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestore,
@@ -761,7 +760,7 @@ pub(crate) use runtime::{
     process_event_invocation, process_wake_batch_draft, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text, require_event_replay,
 };
-pub use runtime::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
+pub use runtime::{ConsumerHold, SessionTurnOutcome};
 pub use runtime::{ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal};
 pub use runtime::{
     ProcessStartRegistration, ProcessStartTarget, RetiredProcessStatus, TerminalProcessStatus,

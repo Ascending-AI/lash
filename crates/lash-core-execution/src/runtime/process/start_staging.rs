@@ -14,10 +14,12 @@
 //! cleanup holds the retained input before ending staging. The starter makes
 //! this claim independent of earlier uses of a pruned host key.
 //!
-//! Every engine runs this one sequence, inline in the local executor. The
-//! start's recorded result is state, so a resumed parent reads it and never
-//! registers again (ADR 0107: the registrar mints an id once per start, and a
-//! parent resumed after the process was pruned must still see that id).
+//! Every start runs this one sequence in three parts: a prepare that admits,
+//! stages and mints the registration before any transaction
+//! ([`stage_process_start`]); the transaction that applies the
+//! registration, the registrar's own or a trigger start's, which binds its
+//! delivery in the same commit; and the adoption of what was staged once the
+//! row committed ([`StartStaging::adopt`]).
 
 use std::sync::Arc;
 
@@ -302,8 +304,8 @@ pub struct ProcessStartStores<'a> {
     pub trigger_route: Option<&'a crate::TriggerRouteRestore>,
 }
 
-impl ProcessStartStores<'_> {
-    fn ports(&self) -> Option<&ArtifactReferrerPorts> {
+impl<'a> ProcessStartStores<'a> {
+    fn ports(&self) -> Option<&'a ArtifactReferrerPorts> {
         self.engines.artifact_ports()
     }
 }
@@ -361,7 +363,8 @@ impl RegisteredProcessStart {
     }
 }
 
-/// Stages and registers one process start.
+/// Stages and registers one process start: [`stage_process_start`], the
+/// registrar's transaction, then [`StartStaging::adopt`].
 ///
 /// A start is addressed by its key (ADR 0107); a start with none is refused.
 /// Engine artifacts are staged under `Start(key)` first. Input attachments
@@ -387,6 +390,58 @@ pub async fn register_process_start(
     registration: impl Into<ProcessStartRegistration>,
     observers: &[SessionId],
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
+    let PreparedProcessStart {
+        staging,
+        registration,
+    } = stage_process_start(stores, registration, observers).await?;
+    let anchor = staging.anchor();
+    let committed = stores
+        .registry
+        .commit_process_registration(registration, anchor)
+        .await;
+    staging.adopt(stores, committed).await
+}
+
+/// A process start staged and its registration prepared, before the
+/// transaction that applies the registration: the registrar's own, or a
+/// trigger start's.
+pub struct PreparedProcessStart<'a> {
+    /// What the start staged, adopted once the registration commits.
+    pub staging: StartStaging<'a>,
+    /// The registration to apply, its process id minted.
+    pub registration: crate::PreparedProcessRegistration,
+}
+
+/// What one prepared start staged under `Start(key)`.
+pub struct StartStaging<'a> {
+    start_key: StartKey,
+    claim: ReferrerClaim,
+    definition: Option<StagedDefinition<'a>>,
+    env: Option<StagedEnv>,
+    engine: Option<StagedEngine<'a>>,
+    submitted_env_ref: Option<ProcessExecutionEnvRef>,
+    submitted_input: Arc<ProcessInput>,
+    anchor: lash_trace::TraceAnchor,
+    candidate: Option<Box<dyn lash_trace::TraceAdmissionCandidate>>,
+}
+
+/// Admit and stage one process start, and prepare its registration: every
+/// step of a start before the transaction that registers it. Nothing here
+/// writes a process row.
+///
+/// The host's live services (the session catalog, the session-turn admission
+/// and a trigger delivery's route restorer) are asked here, while no process
+/// holds the key. A terminal refusal while none does ends `Start(key)`.
+///
+/// # Errors
+///
+/// A refusal for a start with no key or an executor missing a store the
+/// start needs, the admission's refusal, and any store failure.
+pub async fn stage_process_start<'a>(
+    stores: &ProcessStartStores<'a>,
+    registration: impl Into<ProcessStartRegistration>,
+    observers: &[SessionId],
+) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
     let registration = registration.into();
     let Some(start_key) = registration.start_key.clone() else {
         return Err(RuntimeEffectControllerError::foreign(
@@ -395,36 +450,29 @@ pub async fn register_process_start(
             "a journaled process start must carry its start key",
         ));
     };
-    require_host_session_live(stores, &registration).await?;
-    restore_trigger_route(stores, &start_key).await?;
-    if let Some(admit) = stores.session_turn_admission {
-        let fresh = stores
-            .registry
-            .get_process_by_start_key(&start_key)
-            .await?
-            .is_none();
-        admit(fresh).await?;
-    }
-    match stage_and_register(stores, &start_key, registration, observers).await {
-        Ok(registered) => {
-            if let Some(ports) = stores.ports() {
-                ports
-                    .nudge(&ArtifactReferrer::Start(start_key.clone()))
-                    .await;
-                ports.nudge(&start_input_referrer(stores, &start_key)).await;
-            }
-            Ok(registered)
+    let prepared = async {
+        require_host_session_live(stores, &registration).await?;
+        restore_trigger_route(stores, &start_key).await?;
+        if let Some(admit) = stores.session_turn_admission {
+            let fresh = stores
+                .registry
+                .get_process_by_start_key(&start_key)
+                .await?
+                .is_none();
+            admit(fresh).await?;
         }
-        Err(error) => {
-            if error.is_terminal() {
-                abandon_start(stores, start_key.clone()).await?;
-                if let Some(ports) = stores.ports() {
-                    ports.nudge(&start_input_referrer(stores, &start_key)).await;
-                }
-            }
-            Err(error)
+        stage(stores, &start_key, registration, observers).await
+    }
+    .await;
+    if let Err(error) = &prepared
+        && error.is_terminal()
+    {
+        abandon_start(stores, start_key.clone()).await?;
+        if let Some(ports) = stores.ports() {
+            ports.nudge(&start_input_referrer(stores, &start_key)).await;
         }
     }
+    prepared
 }
 
 /// Refuse a root start whose host session-lookup grant names a session the
@@ -506,7 +554,7 @@ async fn restore_trigger_route(
 /// this one is refused (FIG-4111). Its row can commit between the read below
 /// and the end, and `Start(key)`'s end then carries nothing onto it. Either
 /// that start meets the fence once its row commits and holds its own content
-/// under `ProcessRecord` ([`stage_and_register`]), or it looked before the
+/// under `ProcessRecord` ([`StartStaging::adopt`]), or it looked before the
 /// fence existed, and then the cleanup executor, which reads the key's record
 /// after the fence, holds the row's content under it before it severs
 /// anything (FIG-4130).
@@ -529,12 +577,12 @@ async fn abandon_start(
     Ok(())
 }
 
-async fn stage_and_register(
-    stores: &ProcessStartStores<'_>,
+async fn stage<'a>(
+    stores: &ProcessStartStores<'a>,
     start_key: &StartKey,
     registration: ProcessStartRegistration,
     observers: &[SessionId],
-) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
+) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
     let claim = ReferrerClaim::guarded(ReferrerGuard::Start {
         start_key: start_key.clone(),
         starter: stores.starter.clone(),
@@ -581,87 +629,185 @@ async fn stage_and_register(
         || prepared.trace().anchor().clone(),
         |candidate| candidate.anchor(),
     );
-    let result = stores
-        .registry
-        .commit_process_registration(prepared, anchor)
-        .await;
-    if let Some(candidate) = candidate {
-        candidate.settle(match &result {
-            Ok(receipt) if receipt.is_created() => lash_trace::TraceCandidateOutcome::Selected,
-            Ok(_) => lash_trace::TraceCandidateOutcome::Reused,
-            Err(_) => lash_trace::TraceCandidateOutcome::Refused,
-        });
-    }
-    let registered = result?;
-    let disposition = registered.outcome;
-    let created = disposition == crate::ProcessRegistrationOutcome::Created;
-    let record = registered.record;
-    let process_claim =
-        ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(record.id.clone()))
-            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-    let adopts_env = created || record.env_ref == submitted_env_ref;
-    let adopts_engine = created || record.input == submitted_input;
-    // A key is global, so another start's terminal refusal can end
-    // `Start(key)` after this start staged there and before its row committed
-    // (`abandon_start`, FIG-4111). The guard then carries nothing onto the
-    // row: this start holds what it staged under `ProcessRecord` itself.
-    let start_ended = (adopts_env || adopts_engine)
-        && start_ended_after_staging(
-            stores,
-            &claim,
-            definition.as_ref(),
-            env.as_ref(),
-            engine.as_ref(),
-        )
-        .await?;
-    if let Some(definition) = definition.as_ref()
-        && (!definition.staged || start_ended)
-        && adopts_engine
-        && definition
-            .ports
-            .acquire_definition(definition.engines, &process_claim, &definition.id)
-            .await?
-            == super::DefinitionAcquisition::Ended
-    {
-        return Err(RuntimeEffectControllerError::foreign(
-            "process_record_ended",
-            TurnFailureCause::Outcome,
-            format!(
-                "process `{}` ended before it could hold definition `{}`",
-                record.id, definition.id
-            ),
-        ));
-    }
-    if let (Some(env_store), Some(env)) = (stores.env_store, env.as_ref())
-        && (!env.staged || start_ended)
-        && adopts_env
-    {
-        acquire_env(env_store.as_ref(), &process_claim, env).await?;
-    }
-    if let Some(engine) = engine.as_ref()
-        && (!engine.staged || start_ended)
-        && adopts_engine
-    {
-        engine
-            .ports
-            .acquire(engine.engines, &process_claim, &engine.names)
-            .await?;
-    }
-    // StartInput holds the input before registration. Both this step and its
-    // cleanup acquire the retained record before staging's attachment edges
-    // end, so an abandoned caller leaves the handoff to the cleanup relay.
-    if let Some(ports) = stores.ports() {
-        crate::runtime::attachment_delivery::acquire_start_input(
-            ports.attachments().as_ref(),
-            &record,
-        )
-        .await?;
-    }
-    Ok(RegisteredProcessStart {
-        record,
-        disposition,
-        env_ref: submitted_env_ref,
+    Ok(PreparedProcessStart {
+        staging: StartStaging {
+            start_key: start_key.clone(),
+            claim,
+            definition,
+            env,
+            engine,
+            submitted_env_ref,
+            submitted_input,
+            anchor,
+            candidate,
+        },
+        registration: prepared,
     })
+}
+
+impl StartStaging<'_> {
+    /// The trace anchor the registration commits with.
+    #[must_use]
+    pub fn anchor(&self) -> lash_trace::TraceAnchor {
+        self.anchor.clone()
+    }
+
+    /// Settle the start once the transaction that applies its registration
+    /// answered `committed`: hold what the row adopts under its record and
+    /// nudge `Start(key)`'s guard, or, on a terminal refusal while no
+    /// process holds the key, end `Start(key)`.
+    ///
+    /// # Errors
+    ///
+    /// `committed`'s refusal, and any store failure holding the row's
+    /// content.
+    pub async fn adopt(
+        self,
+        stores: &ProcessStartStores<'_>,
+        committed: Result<crate::ProcessRegistrationReceipt, crate::PluginError>,
+    ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
+        let start_key = self.start_key.clone();
+        match self.adopt_committed(stores, committed).await {
+            Ok(registered) => {
+                if let Some(ports) = stores.ports() {
+                    ports
+                        .nudge(&ArtifactReferrer::Start(start_key.clone()))
+                        .await;
+                    ports.nudge(&start_input_referrer(stores, &start_key)).await;
+                }
+                Ok(registered)
+            }
+            Err(error) => {
+                if error.is_terminal() {
+                    abandon_start(stores, start_key.clone()).await?;
+                    if let Some(ports) = stores.ports() {
+                        ports.nudge(&start_input_referrer(stores, &start_key)).await;
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// Give the start up after the transaction that would have applied its
+    /// registration refused it: `Start(key)` ends unless a process holds the
+    /// key.
+    ///
+    /// # Errors
+    ///
+    /// Any store failure ending the referrer.
+    pub async fn abandon(
+        self,
+        stores: &ProcessStartStores<'_>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        if let Some(candidate) = self.candidate {
+            candidate.settle(lash_trace::TraceCandidateOutcome::Refused);
+        }
+        abandon_start(stores, self.start_key.clone()).await?;
+        if let Some(ports) = stores.ports() {
+            ports
+                .nudge(&start_input_referrer(stores, &self.start_key))
+                .await;
+        }
+        Ok(())
+    }
+
+    async fn adopt_committed(
+        self,
+        stores: &ProcessStartStores<'_>,
+        committed: Result<crate::ProcessRegistrationReceipt, crate::PluginError>,
+    ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
+        let Self {
+            start_key: _,
+            claim,
+            definition,
+            env,
+            engine,
+            submitted_env_ref,
+            submitted_input,
+            anchor: _,
+            candidate,
+        } = self;
+        if let Some(candidate) = candidate {
+            candidate.settle(match &committed {
+                Ok(receipt) if receipt.is_created() => lash_trace::TraceCandidateOutcome::Selected,
+                Ok(_) => lash_trace::TraceCandidateOutcome::Reused,
+                Err(_) => lash_trace::TraceCandidateOutcome::Refused,
+            });
+        }
+        let registered = committed?;
+        let disposition = registered.outcome;
+        let created = disposition == crate::ProcessRegistrationOutcome::Created;
+        let record = registered.record;
+        let process_claim =
+            ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(record.id.clone()))
+                .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+        let adopts_env = created || record.env_ref == submitted_env_ref;
+        let adopts_engine = created || record.input == submitted_input;
+        // A key is global, so another start's terminal refusal can end
+        // `Start(key)` after this start staged there and before its row
+        // committed (`abandon_start`, FIG-4111). The guard then carries
+        // nothing onto the row: this start holds what it staged under
+        // `ProcessRecord` itself.
+        let start_ended = (adopts_env || adopts_engine)
+            && start_ended_after_staging(
+                stores,
+                &claim,
+                definition.as_ref(),
+                env.as_ref(),
+                engine.as_ref(),
+            )
+            .await?;
+        if let Some(definition) = definition.as_ref()
+            && (!definition.staged || start_ended)
+            && adopts_engine
+            && definition
+                .ports
+                .acquire_definition(definition.engines, &process_claim, &definition.id)
+                .await?
+                == super::DefinitionAcquisition::Ended
+        {
+            return Err(RuntimeEffectControllerError::foreign(
+                "process_record_ended",
+                TurnFailureCause::Outcome,
+                format!(
+                    "process `{}` ended before it could hold definition `{}`",
+                    record.id, definition.id
+                ),
+            ));
+        }
+        if let (Some(env_store), Some(env)) = (stores.env_store, env.as_ref())
+            && (!env.staged || start_ended)
+            && adopts_env
+        {
+            acquire_env(env_store.as_ref(), &process_claim, env).await?;
+        }
+        if let Some(engine) = engine.as_ref()
+            && (!engine.staged || start_ended)
+            && adopts_engine
+        {
+            engine
+                .ports
+                .acquire(engine.engines, &process_claim, &engine.names)
+                .await?;
+        }
+        // StartInput holds the input before registration. Both this step and
+        // its cleanup acquire the retained record before staging's attachment
+        // edges end, so an abandoned caller leaves the handoff to the cleanup
+        // relay.
+        if let Some(ports) = stores.ports() {
+            crate::runtime::attachment_delivery::acquire_start_input(
+                ports.attachments().as_ref(),
+                &record,
+            )
+            .await?;
+        }
+        Ok(RegisteredProcessStart {
+            record,
+            disposition,
+            env_ref: submitted_env_ref,
+        })
+    }
 }
 
 fn start_input_referrer(stores: &ProcessStartStores<'_>, start_key: &StartKey) -> ArtifactReferrer {
@@ -863,7 +1009,7 @@ async fn stage_engine<'a>(
 /// only place a start becomes a registration, so no registrar is ever handed
 /// an unresolved definition.
 async fn resolve_start_target<'a>(
-    stores: &'a ProcessStartStores<'a>,
+    stores: &ProcessStartStores<'a>,
     claim: &ReferrerClaim,
     registration: ProcessStartRegistration,
     env_spec: Option<&ProcessExecutionEnvSpec>,
@@ -919,7 +1065,7 @@ async fn resolve_start_target<'a>(
 /// holds nothing more: the definition is read, and the row's record holds it
 /// once registered.
 async fn stage_definition<'a>(
-    stores: &'a ProcessStartStores<'a>,
+    stores: &ProcessStartStores<'a>,
     claim: &ReferrerClaim,
     registration: &ProcessStartRegistration,
     definition_id: &super::ProcessDefinitionId,

@@ -29,16 +29,6 @@ impl std::fmt::Debug for DurableProcessWork {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for DurableProcessWork {
-    /// Nothing to deliver: registration created the process's actor ready
-    /// in its own transaction (ADR 0132 §3), so its start obligation
-    /// settles as a no-op.
-    async fn deliver_process_start(
-        &self,
-        _record: &crate::ProcessRecord,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
-
     /// A caller outside an actor has no wait row to own: it reads the
     /// process's terminal from the registry the terminal transaction
     /// writes. An actor awaits through `waits::await_process`, bounded and

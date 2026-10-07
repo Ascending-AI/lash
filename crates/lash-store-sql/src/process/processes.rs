@@ -18,8 +18,7 @@ pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
                 wake_session_id, identity_kind, identity_label, created_at_ms, updated_at_ms,
                 last_event_sequence, change_seq, status, lifetime_scope_kind, lifetime_scope_id,
                 lifetime, cancel_requested_at_ms, record_json, consumer_hold_key,
-                consumer_hold_scope_kind, consumer_hold_scope_id, consumer_hold_cancels,
-                trigger_delivery_pin_occurrence_id, trigger_delivery_pin_subscription_id";
+                consumer_hold_scope_kind, consumer_hold_scope_id, consumer_hold_cancels";
 
 /// What the change feed reports for a live row.
 ///
@@ -55,21 +54,6 @@ crate::statements! {
              SET consumer_hold_key = NULL, consumer_hold_scope_kind = NULL,
                  consumer_hold_scope_id = NULL, consumer_hold_cancels = NULL
              WHERE process_id = ?1 AND consumer_hold_key = ?2";
-
-        /// Release the trigger delivery pin `?1` carries (FIG-4203): a no-op
-        /// when the row carries none.
-        release_trigger_delivery_pin = "UPDATE processes
-             SET trigger_delivery_pin_occurrence_id = NULL,
-                 trigger_delivery_pin_subscription_id = NULL
-             WHERE process_id = ?1 AND trigger_delivery_pin_occurrence_id IS NOT NULL";
-
-        /// Every row still pinned by its trigger delivery, in process-id
-        /// order: the worklist the retention pass releases lost pins from.
-        list_trigger_delivery_pins = "SELECT process_id, trigger_delivery_pin_occurrence_id,
-                    trigger_delivery_pin_subscription_id
-             FROM processes
-             WHERE trigger_delivery_pin_occurrence_id IS NOT NULL
-             ORDER BY process_id";
 
         /// The processes held under the consumer hold `?1` whose call owes
         /// them a cancel now that it is abandoned (ADR 0116 §3.4).
@@ -220,113 +204,6 @@ impl crate::obligation::ObligationStatementSet for ProcessObligationStatements {
             select_stalled: &self.obligation_select_stalled,
             count_stalled: &self.obligation_count_stalled,
             select_standing: &self.obligation_select_standing,
-        }
-    }
-}
-
-crate::statements! {
-    /// `processes` start-obligation statements (ADR 0109): a registered process owes its first engine run. Both backends issue
-    /// them verbatim; every settling write compares the state and, while
-    /// claimed, the claim token.
-    pub struct ProcessStartObligationStatements @ "process" {
-        /// Arm the row keyed `?1` as obligation `?2`, due at
-        /// `?3`, if it owes nothing.
-        start_obligation_arm = "UPDATE processes
-             SET start_obligation_id = ?2, start_obligation_state = 'due', start_obligation_attempts = 0,
-                 start_obligation_due_at_ms = ?3, start_obligation_claim_token = NULL,
-                 start_obligation_stall_reason = NULL, start_obligation_last_error = NULL, start_obligation_last_error_code = NULL,
-                 start_obligation_settled_at_ms = NULL
-             WHERE process_id = ?1 AND start_obligation_state IS NULL";
-
-        /// At most `?2` obligations due at `?1`, a lapsed claim included,
-        /// oldest due first.
-        start_obligation_select_due = "SELECT start_obligation_id FROM processes
-             WHERE start_obligation_state IN ('due', 'claimed') AND start_obligation_due_at_ms <= ?1
-             ORDER BY start_obligation_due_at_ms, start_obligation_id
-             LIMIT ?2";
-
-        /// Claim obligation `?1` under token `?2` until `?3` if it is still
-        /// due at `?4`.
-        start_obligation_claim_due_row = "UPDATE processes
-             SET start_obligation_state = 'claimed', start_obligation_claim_token = ?2,
-                 start_obligation_attempts = start_obligation_attempts + 1, start_obligation_due_at_ms = ?3
-             WHERE start_obligation_id = ?1 AND start_obligation_state IN ('due', 'claimed')
-               AND start_obligation_due_at_ms <= ?4
-             RETURNING start_obligation_id, start_obligation_attempts, process_id";
-
-        /// Claim obligation `?1` under token `?2` until `?3`: a `due` row
-        /// whatever its backoff (a producer's own immediate attempt), or a
-        /// claim `?2` already holds, its claimant re-deriving it after an
-        /// interruption, which keeps its attempt count.
-        start_obligation_claim = "UPDATE processes
-             SET start_obligation_state = 'claimed', start_obligation_claim_token = ?2,
-                 start_obligation_attempts = start_obligation_attempts + CASE WHEN start_obligation_state = 'due' THEN 1 ELSE 0 END, start_obligation_due_at_ms = ?3
-             WHERE start_obligation_id = ?1 AND (start_obligation_state = 'due'
-                  OR (start_obligation_state = 'claimed' AND start_obligation_claim_token = ?2))
-             RETURNING start_obligation_id, start_obligation_attempts, process_id";
-
-        /// Settle claim `?2` on obligation `?1` delivered at `?3`.
-        start_obligation_settle_delivered = "UPDATE processes
-             SET start_obligation_state = 'delivered', start_obligation_claim_token = NULL,
-                 start_obligation_due_at_ms = NULL, start_obligation_last_error = NULL, start_obligation_last_error_code = NULL,
-                 start_obligation_settled_at_ms = ?3
-             WHERE start_obligation_id = ?1 AND start_obligation_state = 'claimed'
-               AND start_obligation_claim_token = ?2";
-
-        /// Hand claim `?2` on obligation `?1` back, due again at `?3`, with
-        /// error `?4` under code `?5`.
-        start_obligation_settle_retry = "UPDATE processes
-             SET start_obligation_state = 'due', start_obligation_claim_token = NULL,
-                 start_obligation_due_at_ms = ?3, start_obligation_last_error = ?4, start_obligation_last_error_code = ?5
-             WHERE start_obligation_id = ?1 AND start_obligation_state = 'claimed'
-               AND start_obligation_claim_token = ?2";
-
-        /// Stall claim `?2` on obligation `?1` for reason `?3` with error
-        /// `?4` under code `?6` at `?5`.
-        start_obligation_settle_stall = "UPDATE processes
-             SET start_obligation_state = 'stalled', start_obligation_claim_token = NULL,
-                 start_obligation_due_at_ms = NULL, start_obligation_stall_reason = ?3,
-                 start_obligation_last_error = ?4, start_obligation_last_error_code = ?6, start_obligation_settled_at_ms = ?5
-             WHERE start_obligation_id = ?1 AND start_obligation_state = 'claimed'
-               AND start_obligation_claim_token = ?2";
-
-        /// Re-arm stalled obligation `?1`, due at `?2`, its attempts reset.
-        start_obligation_rearm = "UPDATE processes
-             SET start_obligation_state = 'due', start_obligation_attempts = 0, start_obligation_due_at_ms = ?2,
-                 start_obligation_stall_reason = NULL, start_obligation_settled_at_ms = NULL
-             WHERE start_obligation_id = ?1 AND start_obligation_state = 'stalled'";
-
-        /// At most `?2` stalled obligations after id `?1`, in id order.
-        start_obligation_select_stalled = "SELECT start_obligation_id, start_obligation_attempts, start_obligation_stall_reason, start_obligation_last_error, start_obligation_last_error_code, start_obligation_settled_at_ms, process_id
-             FROM processes
-             WHERE start_obligation_state = 'stalled' AND start_obligation_id > ?1
-             ORDER BY start_obligation_id
-             LIMIT ?2";
-
-        /// How many obligations are stalled.
-        start_obligation_count_stalled = "SELECT COUNT(*) FROM processes WHERE start_obligation_state = 'stalled'";
-
-        /// Obligation `?1`'s state and the claims taken since it was armed.
-        start_obligation_select_standing = "SELECT start_obligation_state, start_obligation_attempts FROM processes WHERE start_obligation_id = ?1";
-
-    }
-}
-
-impl crate::obligation::ObligationStatementSet for ProcessStartObligationStatements {
-    fn obligation_sql(&self) -> crate::obligation::ObligationSql<'_> {
-        crate::obligation::ObligationSql {
-            key_columns: 1,
-            arm: &self.start_obligation_arm,
-            select_due: &self.start_obligation_select_due,
-            claim_due_row: &self.start_obligation_claim_due_row,
-            claim: &self.start_obligation_claim,
-            settle_delivered: &self.start_obligation_settle_delivered,
-            settle_retry: &self.start_obligation_settle_retry,
-            settle_stall: &self.start_obligation_settle_stall,
-            rearm: &self.start_obligation_rearm,
-            select_stalled: &self.start_obligation_select_stalled,
-            count_stalled: &self.start_obligation_count_stalled,
-            select_standing: &self.start_obligation_select_standing,
         }
     }
 }

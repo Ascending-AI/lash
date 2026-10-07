@@ -704,29 +704,54 @@ async fn apply_domain(
 }
 
 /// Apply one mailbox domain write by its domain's module, with its answer
-/// and the actor it woke.
+/// and the actors it woke.
 async fn apply_mail_domain(
     tx: &mut PgConnection,
     write: &MailDomainWrite,
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
-) -> Result<(MailAnswer, Option<Woken>), DurableError> {
+) -> Result<(MailAnswer, Vec<Woken>), DurableError> {
     Ok(match write {
         MailDomainWrite::ResolveWait(resolution) => {
             let (answer, woken) = waits::resolve(tx, resolution, now).await?;
-            (MailAnswer::ResolveWait(answer), woken)
+            (MailAnswer::ResolveWait(answer), woken.into_iter().collect())
         }
         MailDomainWrite::RequestProcessCancel(request) => {
             let (answer, woken) = processes::request_cancel(tx, request, now, fleet).await?;
-            (MailAnswer::RequestProcessCancel(answer), woken)
+            (
+                MailAnswer::RequestProcessCancel(answer),
+                woken.into_iter().collect(),
+            )
         }
         MailDomainWrite::RequestTurnCancel(request) => {
             let (answer, woken) = turns::request_cancel(tx, request, now).await?;
-            (MailAnswer::RequestTurnCancel(answer), woken)
+            (
+                MailAnswer::RequestTurnCancel(answer),
+                woken.into_iter().collect(),
+            )
         }
         MailDomainWrite::Redrive(request) => {
             let (answer, woken) = park_events::redrive(tx, request, now).await?;
-            (MailAnswer::Redrive(answer), woken)
+            (MailAnswer::Redrive(answer), woken.into_iter().collect())
+        }
+        // Each started process's actor is created ready in the start's own
+        // transaction (ADR 0132 §12).
+        MailDomainWrite::StartTrigger(start) => {
+            let answer = Box::pin(crate::trigger_store::start::start_within(
+                tx, start, now, fleet,
+            ))
+            .await?;
+            let woken = answer
+                .processes
+                .iter()
+                .filter_map(|process| ActorKey::process(process.as_str()).ok())
+                .map(|actor| Woken {
+                    actor,
+                    state: ActorState::Ready,
+                    owner: None,
+                })
+                .collect();
+            (MailAnswer::StartTrigger(answer), woken)
         }
     })
 }
@@ -813,9 +838,9 @@ async fn apply_mail(
                 note_woken(&mut receipt.woken, woken);
             }
             MailWrite::Domain(domain) => {
-                let (answer, woken) = apply_mail_domain(tx, domain, now, fleet).await?;
+                let (answer, woken) = Box::pin(apply_mail_domain(tx, domain, now, fleet)).await?;
                 receipt.answers.push(answer);
-                if let Some(woken) = woken {
+                for woken in woken {
                     note_woken(&mut receipt.woken, woken);
                 }
             }
@@ -1069,7 +1094,7 @@ impl DurableStore for PostgresDurableStore {
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
         let (mut guarded, now) = self.open(label).await?;
-        let outcome = apply_mail(&mut guarded, &tx, now, self.fence.fleet()).await;
+        let outcome = Box::pin(apply_mail(&mut guarded, &tx, now, self.fence.fleet())).await;
         finish(guarded, outcome).await
     }
 

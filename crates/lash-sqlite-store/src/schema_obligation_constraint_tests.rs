@@ -81,31 +81,23 @@ fn sqlite_obligation_checks_reject_incomplete_variants() {
         for constraint in ddl.lines().filter_map(obligation_constraint) {
             constraints += 1;
             let cleanup = constraint.contains("ck_artifact_cleanup_obligations_obligation");
-            let trigger = constraint.contains("ck_trigger_deliveries_obligation");
-            let not_null = if cleanup || trigger { "NOT NULL" } else { "" };
+            let not_null = if cleanup { "NOT NULL" } else { "" };
             let connection = Connection::open_in_memory().expect("open obligation CHECK fixture");
-            // Preserve the production predicate, including the process start prefix.
-            let prefix = if constraint.contains("start_obligation_state") {
-                "start_"
-            } else {
-                ""
-            };
             connection
                 .execute_batch(&format!(
                     "CREATE TABLE obligation_projection (
-                    {prefix}obligation_id TEXT {not_null},
-                    {prefix}obligation_state TEXT {not_null},
-                    {prefix}obligation_due_at_ms BIGINT,
-                    {prefix}obligation_claim_token TEXT,
-                    {prefix}obligation_stall_reason TEXT,
-                    {prefix}obligation_settled_at_ms BIGINT,
+                    obligation_id TEXT {not_null},
+                    obligation_state TEXT {not_null},
+                    obligation_due_at_ms BIGINT,
+                    obligation_claim_token TEXT,
+                    obligation_stall_reason TEXT,
+                    obligation_settled_at_ms BIGINT,
                     {constraint});"
                 ))
                 .expect("create projection with the production obligation CHECK");
             let mut accepted = 0;
             for (values, valid) in &cases {
                 let expected = *valid
-                    && (!trigger || !values.starts_with("NULL"))
                     && (!cleanup
                         || (!values.contains("'delivered'") && !values.starts_with("NULL")));
                 let result = connection.execute(
@@ -128,20 +120,11 @@ fn sqlite_obligation_checks_reject_incomplete_variants() {
                 }
             }
             if mismatches.is_empty() {
-                assert_eq!(
-                    accepted,
-                    if cleanup {
-                        5
-                    } else if trigger {
-                        6
-                    } else {
-                        7
-                    }
-                );
+                assert_eq!(accepted, if cleanup { 5 } else { 7 });
             }
         }
     }
-    assert_eq!(constraints, 10, "exercise every physical SQLite CHECK");
+    assert_eq!(constraints, 8, "exercise every physical SQLite CHECK");
     assert!(
         mismatches.is_empty(),
         "{} incorrect verdicts across {constraints} constraints:\n{}",

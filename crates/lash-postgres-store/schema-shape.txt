@@ -320,25 +320,13 @@ table lash_processes
   column process_id text not-null
   column record_json text not-null
   column start_key text nullable
-  column start_obligation_attempts integer not-null default
-  column start_obligation_claim_token text nullable
-  column start_obligation_due_at_ms bigint nullable
-  column start_obligation_id text nullable
-  column start_obligation_last_error text nullable
-  column start_obligation_last_error_code text nullable
-  column start_obligation_settled_at_ms bigint nullable
-  column start_obligation_stall_reason text nullable
-  column start_obligation_state text nullable
   column state_rev bigint not-null default
   column status text not-null
-  column trigger_delivery_pin_occurrence_id text nullable
-  column trigger_delivery_pin_subscription_id text nullable
   column updated_at_ms bigint not-null
   column wake_session_id text nullable
   column written_epoch bigint nullable
   unique (obligation_id)
   unique (start_key) where start_key is not null
-  unique (start_obligation_id)
   primary-key (process_id)
 table lash_queued_work_batches
   column admitted_by text nullable
@@ -545,23 +533,13 @@ table lash_tool_intent_submissions
   primary-key (replay_key)
 table lash_trigger_deliveries
   column created_at_ms bigint not-null
-  column obligation_attempts integer not-null default
-  column obligation_claim_token text nullable
-  column obligation_due_at_ms bigint nullable
-  column obligation_id text nullable
-  column obligation_last_error text nullable
-  column obligation_last_error_code text nullable
-  column obligation_settled_at_ms bigint nullable
-  column obligation_stall_reason text nullable
-  column obligation_state text not-null
   column occurrence_id text not-null
   column occurrence_outcome_kind text not-null default
-  column process_id text nullable
+  column process_id text not-null
   column subscription_id text not-null
   column subscription_incarnation text not-null
   column subscription_revision bigint not-null
   column subscription_snapshot_json text not-null
-  unique (obligation_id)
   primary-key (occurrence_id, subscription_id)
   foreign-key (occurrence_id, occurrence_outcome_kind) references lash_trigger_occurrences (occurrence_id, outcome_kind) on delete cascade
 table lash_trigger_mutation_receipts

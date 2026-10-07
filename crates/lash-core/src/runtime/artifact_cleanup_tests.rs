@@ -202,10 +202,7 @@ impl ArtifactCleanupAuthorities for Authorities {
             .subscription
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .unwrap_or(SubscriptionRevisionStanding {
-                current: false,
-                unbound_deliveries: false,
-            }))
+            .unwrap_or(SubscriptionRevisionStanding { current: false }))
     }
 }
 
@@ -934,10 +931,10 @@ async fn a_start_that_never_registered_ends_when_its_starter_settles() {
     assert_eq!(engine, vec![resolved(&start, Vec::new())]);
 }
 
-/// ADR 0113 §3.4: a revision is held while it is current or a delivery
-/// reserved under it is unbound, and ends only once its creator settles.
+/// ADR 0113 §3.4: a revision is held while it is current, and ends only once
+/// its creator settles.
 #[tokio::test]
-async fn a_subscription_revision_waits_for_currency_bindings_and_its_creator() {
+async fn a_subscription_revision_waits_for_currency_and_its_creator() {
     let harness = harness();
     let creator = journal("register");
     let revision =
@@ -947,27 +944,16 @@ async fn a_subscription_revision_waits_for_currency_bindings_and_its_creator() {
         creator: creator.clone(),
     });
     harness.authorities.settle(&creator);
-    for standing in [
-        SubscriptionRevisionStanding {
-            current: true,
-            unbound_deliveries: false,
-        },
-        SubscriptionRevisionStanding {
-            current: false,
-            unbound_deliveries: true,
-        },
-    ] {
-        *harness
-            .authorities
-            .subscription
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(standing);
-        assert_eq!(
-            harness.deliver(guard.clone()).await,
-            Err(DeliveryFailure::NotYet),
-            "{standing:?}"
-        );
-    }
+    *harness
+        .authorities
+        .subscription
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(SubscriptionRevisionStanding { current: true });
+    assert_eq!(
+        harness.deliver(guard.clone()).await,
+        Err(DeliveryFailure::NotYet)
+    );
     *harness
         .authorities
         .subscription

@@ -469,24 +469,14 @@ runtime_error_codes! {
         /// A host rail was handed a start key of a family lash derives for its
         /// own start paths (ADR 0107): a host mints only host keys.
         StartKeyFamilyRefused = "start_key_family_refused" => Terminal,
-        // a delivery's binding is written once.
-        /// A trigger delivery's start found no retained process under its key,
-        /// and the delivery already bound to one (ADR 0107 §5, FIG-4369): the
-        /// bound process was pruned, and the start registers nothing.
-        TriggerDeliveryBound = "trigger_delivery_bound" => Terminal,
-        // the delivery's row is gone, and only a new reservation starts.
-        /// A trigger delivery's start found no retained process under its key,
-        /// and no delivery row (FIG-4369): retention removed the delivery once
-        /// its bound process was pruned, and the start registers nothing.
-        TriggerDeliveryRetired = "trigger_delivery_retired" => Terminal,
         // the occurrence's tombstone outlives every redelivery it answers.
         /// An ingest named an occurrence retention reclaimed (FIG-4513).
         TriggerOccurrenceReclaimed = "trigger_occurrence_reclaimed" => Terminal,
         // the provider said nothing about the grant; the same delivery is asked again.
         /// A trigger delivery's start asked the host to restore its captured
         /// provider route, and the provider did not answer (FIG-4554). Nothing
-        /// registered; the reservation stays owed, and its recovery asks again
-        /// under the same identity.
+        /// was recorded; the emission's retry asks again under the same
+        /// identity.
         TriggerRouteUnavailable = "trigger_route_unavailable" => Retryable,
         // the provider withdrew the captured grant, and nothing re-resolves it.
         /// A trigger delivery's start asked the host to restore its captured

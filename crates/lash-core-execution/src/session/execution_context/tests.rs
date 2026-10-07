@@ -246,11 +246,15 @@ fn scoped_context(
     let controller = crate::ActorContext::unavailable()
         .scoped(admitted)
         .expect("the test scope validates");
-    crate::testing::TestExecutionContextBuilder::over_controller(controller)
-        .session_id(lash_sansio::SessionId::fixture(session_id))
-        .plugin_factories(vec![])
-        .build()
-        .into_runtime()
+    // Borrowed: the build keeps the scope the controller admits, where a
+    // shared controller is re-scoped to the fixture's turn.
+    crate::testing::TestExecutionContextBuilder::over_controller(
+        crate::testing::TestEffectController::Borrowed(controller),
+    )
+    .session_id(lash_sansio::SessionId::fixture(session_id))
+    .plugin_factories(vec![])
+    .build()
+    .into_runtime()
 }
 
 /// A session operation is a durable owner with an end protocol (FIG-3419), so

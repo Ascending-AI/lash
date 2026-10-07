@@ -93,21 +93,15 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
                 );
             }
             let cleanup = constraint.contains("ck_artifact_cleanup_obligations_obligation");
-            let trigger = constraint.contains("ck_trigger_deliveries_obligation");
-            let not_null = if cleanup || trigger { "NOT NULL" } else { "" };
-            let prefix = if constraint.contains("start_obligation_state") {
-                "start_"
-            } else {
-                ""
-            };
+            let not_null = if cleanup { "NOT NULL" } else { "" };
             sqlx::raw_sql(&format!(
                 "CREATE TEMP TABLE obligation_projection (
-                    {prefix}obligation_id TEXT {not_null},
-                    {prefix}obligation_state TEXT {not_null},
-                    {prefix}obligation_due_at_ms BIGINT,
-                    {prefix}obligation_claim_token TEXT,
-                    {prefix}obligation_stall_reason TEXT,
-                    {prefix}obligation_settled_at_ms BIGINT,
+                    obligation_id TEXT {not_null},
+                    obligation_state TEXT {not_null},
+                    obligation_due_at_ms BIGINT,
+                    obligation_claim_token TEXT,
+                    obligation_stall_reason TEXT,
+                    obligation_settled_at_ms BIGINT,
                     {constraint});"
             ))
             .execute(&mut connection)
@@ -117,7 +111,6 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
             let mut accepted = 0;
             for (values, valid) in &cases {
                 let expected = *valid
-                    && (!trigger || !values.starts_with("NULL"))
                     && (!cleanup
                         || (!values.contains("'delivered'") && !values.starts_with("NULL")));
                 let result = sqlx::query(&format!(
@@ -137,8 +130,7 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
                         .expect("a constraint violation is a database error");
                     assert!(
                         database_error.is_check_violation()
-                            || ((cleanup || trigger)
-                                && database_error.code().as_deref() == Some("23502")),
+                            || (cleanup && database_error.code().as_deref() == Some("23502")),
                         "unexpected insert error: {error}"
                     );
                     if database_error.is_check_violation() {
@@ -147,16 +139,7 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
                 }
             }
             if mismatches.is_empty() {
-                assert_eq!(
-                    accepted,
-                    if cleanup {
-                        5
-                    } else if trigger {
-                        6
-                    } else {
-                        7
-                    }
-                );
+                assert_eq!(accepted, if cleanup { 5 } else { 7 });
             }
             sqlx::query("DROP TABLE obligation_projection")
                 .execute(&mut connection)
@@ -167,8 +150,8 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
     // The release catalog carries no step; a later step's CHECK is exercised
     // by the same loop and must match the published DDL.
     assert_eq!(
-        published, 10,
-        "exercise all ten published PostgreSQL CHECKs"
+        published, 8,
+        "exercise all eight published PostgreSQL CHECKs"
     );
     connection
         .close()

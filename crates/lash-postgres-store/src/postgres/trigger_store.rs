@@ -23,6 +23,9 @@ use lash_store_sql::trigger::subscriptions::{
 };
 use std::sync::LazyLock;
 
+#[path = "trigger_store/start.rs"]
+pub(crate) mod start;
+
 lash_store_sql::statements! {
     /// `trigger_subscriptions` statements only PostgreSQL issues.
     pub(crate) struct SubscriptionPostgresStatements @ "trigger_subscription" {
@@ -225,15 +228,6 @@ lash_store_sql::statements! {
              WHERE delivery.occurrence_id = candidate.occurrence_id
                AND delivery.subscription_id = candidate.subscription_id
                AND delivery.process_id = candidate.process_id";
-
-        /// At most `?2` delivery obligations due at `?1`, oldest due first,
-        /// each row locked for the caller's claim and skipped by every
-        /// concurrent claimant: two deployments' relays take disjoint pages.
-        obligation_select_due_locking = "SELECT obligation_id FROM trigger_deliveries
-             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
-             ORDER BY obligation_due_at_ms, obligation_id
-             LIMIT ?2
-             FOR UPDATE SKIP LOCKED";
     }
 }
 
@@ -776,41 +770,27 @@ impl TriggerStore for PostgresTriggerStore {
         Ok(rows.len())
     }
 
-    async fn ingest_occurrence(
+    async fn plan_occurrence(
         &self,
-        request: TriggerOccurrenceRequest,
-    ) -> Result<lash_core_execution::TriggerIngressReceipt, PluginError> {
-        lash_core_execution::facade_support::validate_trigger_occurrence_request(&request)?;
+        request: &TriggerOccurrenceRequest,
+    ) -> Result<lash_core_execution::TriggerOccurrencePlan, PluginError> {
+        lash_core_execution::facade_support::validate_trigger_occurrence_request(request)?;
         let sql = trigger_sql();
-        let occurrence_id =
-            lash_core_execution::facade_support::deterministic_occurrence_id(&request);
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        sqlx::query(
-            crate::connection_sql::connection_sql()
-                .lock_xact_by_text
-                .sql(),
-        )
-        .bind(&request.idempotency_key)
-        .execute(&mut **tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let existing = sqlx::query(
+        let mut conn = self.pool.acquire().await.map_err(plugin_sqlx_error)?;
+        let existing: Option<String> = sqlx::query_scalar(
             sql.occurrence_postgres
                 .select_record_by_idempotency_key
                 .sql(),
         )
         .bind(&request.idempotency_key)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(plugin_sqlx_error)?;
-        let (occurrence, is_new) = if let Some(row) = existing {
-            let json: String = row.get(0);
+        if let Some(json) = existing {
             let occurrence: TriggerOccurrenceRecord =
                 lash_core_execution::facade_support::decode_trigger_occurrence_json(&json)?;
             if !lash_core_execution::facade_support::trigger_occurrence_request_matches_record(
-                &request,
+                request,
                 &occurrence,
             ) {
                 return Err(lash_core_execution::durable_identity_conflict(format!(
@@ -818,64 +798,31 @@ impl TriggerStore for PostgresTriggerStore {
                     request.idempotency_key
                 )));
             }
-            (occurrence, false)
-        } else {
-            // Retention reclaimed this identity: the ingest is a redelivery,
-            // and writes nothing back (FIG-4513). The key's lock is held, and
-            // a reclaim deletes and tombstones in one statement, so a row
-            // this transaction found absent shows its tombstone here.
-            let reclaimed = sqlx::query(sql.tombstone.select_by_occurrence_id.sql())
-                .bind(&occurrence_id)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-            if reclaimed.is_some() {
-                return Err(lash_core_execution::trigger_occurrence_reclaimed(
-                    &occurrence_id,
-                ));
-            }
-            let occurrence = request.into_record(occurrence_id, self.clock.timestamp_ms());
-            sqlx::query(sql.occurrence.insert.sql())
-                .bind(&occurrence.occurrence_id)
-                .bind(&occurrence.idempotency_key)
-                .bind(&occurrence.source_type)
-                .bind(&occurrence.source_key)
-                .bind(occurrence.occurred_at_ms as i64)
-                .bind(occurrence.outcome.kind())
-                .bind(lash_core_execution::facade_support::encode_trigger_row(
-                    &occurrence,
-                )?)
-                .execute(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-            (occurrence, true)
-        };
-        let reservations = match (
-            is_new,
-            occurrence.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired,
-        ) {
-            (true, true) => {
-                reserve_postgres_deliveries(&mut tx, &occurrence, self.clock.timestamp_ms()).await?
-            }
-            (false, true) => postgres_delivery_snapshots(&mut tx, &occurrence).await?,
-            (_, false) => Vec::new(),
-        };
-        if is_new
-            && occurrence.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired
-            && reservations.is_empty()
-        {
-            sqlx::query(sql.occurrence.arm_reclaimable.sql())
-                .bind(&occurrence.occurrence_id)
-                .bind(i64::try_from(occurrence.occurred_at_ms).unwrap_or(i64::MAX))
-                .execute(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
+            let reservations = postgres_delivery_snapshots(&mut conn, &occurrence).await?;
+            return Ok(lash_core_execution::TriggerOccurrencePlan::Held(
+                lash_core_execution::TriggerIngressReceipt {
+                    occurrence,
+                    reservations,
+                    realization: lash_core_execution::StoreRealization::from_wrote(false),
+                },
+            ));
         }
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core_execution::TriggerIngressReceipt {
+        let occurrence_id =
+            lash_core_execution::facade_support::deterministic_occurrence_id(request);
+        // Retention reclaimed this identity: the emission is a redelivery,
+        // and nothing is written back (FIG-4513).
+        if postgres_occurrence_reclaimed(&mut conn, &occurrence_id).await? {
+            return Err(lash_core_execution::trigger_occurrence_reclaimed(
+                &occurrence_id,
+            ));
+        }
+        let occurrence = request
+            .clone()
+            .into_record(occurrence_id, self.clock.timestamp_ms());
+        let subscriptions = postgres_matched_subscriptions(&mut conn, &occurrence).await?;
+        Ok(lash_core_execution::TriggerOccurrencePlan::Fresh {
             occurrence,
-            reservations,
-            realization: lash_core_execution::StoreRealization::from_wrote(is_new),
+            subscriptions,
         })
     }
 
@@ -948,37 +895,6 @@ impl TriggerStore for PostgresTriggerStore {
 
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
         list_deliveries_with(&self.pool, trigger_sql().delivery.list_all.sql(), None).await
-    }
-
-    async fn bind_delivery_process(
-        &self,
-        occurrence_id: &str,
-        subscription_id: &str,
-        process_id: &ProcessId,
-    ) -> Result<(), PluginError> {
-        let bound_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
-        let bound = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
-            Box::pin(async move {
-                sqlx::query(trigger_sql().delivery.bind_process.sql())
-                    .bind(occurrence_id)
-                    .bind(subscription_id)
-                    .bind(process_id.as_str())
-                    .bind(bound_at_ms)
-                    .execute(tx.as_mut())
-                    .await
-                    .map_err(crate::store_sqlx_error)
-            })
-        })
-        .await
-        .map_err(crate::plugin_store_error)?
-        .rows_affected();
-        if bound == 1 {
-            Ok(())
-        } else {
-            Err(lash_core_execution::durable_identity_conflict(format!(
-                "trigger delivery `{occurrence_id}`/`{subscription_id}` is absent or already bound to another process than `{process_id}`"
-            )))
-        }
     }
 
     async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, PluginError> {
@@ -1319,11 +1235,31 @@ async fn record_subscription_change(
     Ok(())
 }
 
-async fn reserve_postgres_deliveries(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+/// Whether retention reclaimed `occurrence_id`, read from its tombstone.
+pub(crate) async fn postgres_occurrence_reclaimed(
+    conn: &mut sqlx::PgConnection,
+    occurrence_id: &str,
+) -> Result<bool, PluginError> {
+    Ok(
+        sqlx::query(trigger_sql().tombstone.select_by_occurrence_id.sql())
+            .bind(occurrence_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .is_some(),
+    )
+}
+
+/// The enabled subscriptions a fired `occurrence` matches: none for any
+/// other outcome. A malformed subscription is skipped, the same way on the
+/// plan's read and the start's commit.
+pub(crate) async fn postgres_matched_subscriptions(
+    conn: &mut sqlx::PgConnection,
     occurrence: &TriggerOccurrenceRecord,
-    created_at_ms: u64,
-) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
+) -> Result<Vec<TriggerSubscriptionRecord>, PluginError> {
+    if occurrence.outcome != lash_core_execution::TriggerOccurrenceOutcome::Fired {
+        return Ok(Vec::new());
+    }
     let sql = trigger_sql();
     let owner_scope = occurrence
         .session_id
@@ -1343,65 +1279,33 @@ async fn reserve_postgres_deliveries(
         query = query.bind(owner_scope);
     }
     let rows = query
-        .fetch_all(&mut **tx)
+        .fetch_all(&mut *conn)
         .await
         .map_err(plugin_sqlx_error)?;
-    let mut reservations = Vec::new();
+    let mut subscriptions = Vec::new();
     for row in rows {
         let subscription_id: String = row.get(0);
         let json: String = row.get(1);
-        let subscription: TriggerSubscriptionRecord =
-            match lash_core_execution::facade_support::decode_trigger_subscription_json(&json) {
-                Ok(subscription) => subscription,
-                Err(err) => {
-                    tracing::warn!(
-                        error = %err,
-                        subscription_id,
-                        "skipping malformed trigger subscription during occurrence ingress"
-                    );
-                    continue;
-                }
-            };
-        let sql_revision =
-            plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
-        sqlx::query(sql.delivery.insert.sql())
-            .bind(&occurrence.occurrence_id)
-            .bind(&subscription.subscription_id)
-            .bind(&subscription.incarnation)
-            .bind(sql_revision)
-            .bind(lash_core_execution::facade_support::encode_trigger_row(
-                &subscription,
-            )?)
-            .bind(created_at_ms as i64)
-            .bind(
-                lash_core_execution::store::ObligationKey::TriggerDelivery {
-                    occurrence_id: occurrence.occurrence_id.clone(),
-                    subscription_id: subscription.subscription_id.clone(),
-                }
-                .id()
-                .as_str(),
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        reservations.push(TriggerDeliveryReservation {
-            occurrence: occurrence.clone(),
-            subscription,
-            process_id: None,
-            created_at_ms,
-        });
+        match lash_core_execution::facade_support::decode_trigger_subscription_json(&json) {
+            Ok(subscription) => subscriptions.push(subscription),
+            Err(err) => tracing::warn!(
+                error = %err,
+                subscription_id,
+                "skipping malformed trigger subscription during occurrence ingress"
+            ),
+        }
     }
-    lash_core_execution::facade_support::sort_trigger_delivery_reservations(&mut reservations);
-    Ok(reservations)
+    lash_core_execution::facade_support::sort_trigger_subscriptions(&mut subscriptions);
+    Ok(subscriptions)
 }
 
 async fn postgres_delivery_snapshots(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    conn: &mut sqlx::PgConnection,
     occurrence: &TriggerOccurrenceRecord,
 ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
     let rows = sqlx::query(trigger_sql().delivery.select_snapshots_by_occurrence.sql())
         .bind(&occurrence.occurrence_id)
-        .fetch_all(&mut **tx)
+        .fetch_all(&mut *conn)
         .await
         .map_err(plugin_sqlx_error)?;
     let mut reservations = rows
@@ -1412,10 +1316,7 @@ async fn postgres_delivery_snapshots(
                 occurrence: occurrence.clone(),
                 subscription:
                     lash_core_execution::facade_support::decode_trigger_subscription_json(&json)?,
-                process_id: row
-                    .get::<Option<String>, _>(0)
-                    .map(|value| crate::stored_process_id(&value))
-                    .transpose()?,
+                process_id: crate::stored_process_id(&row.get::<String, _>(0))?,
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
             })
         })
@@ -1444,9 +1345,7 @@ async fn list_deliveries_with(
             lash_core_execution::facade_support::decode_trigger_delivery(
                 &occurrence_json,
                 &subscription_json,
-                row.get::<Option<String>, _>(0)
-                    .map(|value| crate::stored_process_id(&value))
-                    .transpose()?,
+                crate::stored_process_id(&row.get::<String, _>(0))?,
                 row.get(1),
             )
         })

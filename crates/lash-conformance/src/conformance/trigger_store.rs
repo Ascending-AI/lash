@@ -10,27 +10,27 @@ pub use subscription_changes::trigger_subscription_change_cursor_law;
 
 pub async fn trigger_store<F>(make: F)
 where
-    F: Fn() -> Arc<dyn crate::TriggerStore>,
+    F: Fn() -> TriggerStores,
 {
     let first = make();
     let second = make();
-    assert_fresh_instances(&first, &second, "trigger_store");
+    assert_fresh_instances(&first.triggers, &second.triggers, "trigger_store");
     drop((first, second));
-    hostile_trigger_namespaces(make()).await;
+    hostile_trigger_namespaces(make().triggers).await;
     trigger_source_key_and_subscription_identity_are_stable();
-    same_owner_key_definition_is_idempotent(make()).await;
-    changed_register_conflicts_and_update_is_cas(make()).await;
-    committed_mutation_receipt_survives_later_revision(make()).await;
-    conflicting_mutation_receipt_survives_later_revision(make()).await;
-    list_operations_are_not_receipted(make()).await;
-    for_session_filter_is_canonical_and_scoped(make()).await;
+    same_owner_key_definition_is_idempotent(make().triggers).await;
+    changed_register_conflicts_and_update_is_cas(make().triggers).await;
+    committed_mutation_receipt_survives_later_revision(make().triggers).await;
+    conflicting_mutation_receipt_survives_later_revision(make().triggers).await;
+    list_operations_are_not_receipted(make().triggers).await;
+    for_session_filter_is_canonical_and_scoped(make().triggers).await;
     reservations_execute_the_reserved_revision(make()).await;
     disable_preserves_reserved_work_and_requires_explicit_enable(make()).await;
     register_disable_reenable_roundtrip_is_fenced_and_receipted(make()).await;
     delete_tombstones_preserves_history_and_revive_changes_incarnation(make()).await;
-    register_and_revive_commit_their_operation_incarnation(make()).await;
-    owner_namespaces_are_exact_and_session_cleanup_is_scoped(make()).await;
-    explicit_prune_is_journaled_and_owner_scoped(make()).await;
+    register_and_revive_commit_their_operation_incarnation(make().triggers).await;
+    owner_namespaces_are_exact_and_session_cleanup_is_scoped(make().triggers).await;
+    explicit_prune_is_journaled_and_owner_scoped(make().triggers).await;
     occurrence_and_reservations_are_atomic_and_idempotent(make()).await;
     non_fired_occurrences_are_durable_and_never_reserve(make()).await;
     occurrence_time_bounds_match_the_rust_predicate(make()).await;
@@ -94,11 +94,12 @@ pub trait TriggerOccurrenceListingFaultInjector: Send + Sync {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn trigger_occurrence_listing_corruption_law(
-    store: Arc<dyn crate::TriggerStore>,
+    stores: TriggerStores,
     injector: &dyn TriggerOccurrenceListingFaultInjector,
 ) {
-    store
-        .ingest_occurrence(button_occurrence(
+    let store = &stores.triggers;
+    stores
+        .record_occurrence(button_occurrence(
             "occurrence-listing-valid-source",
             "occurrence-listing-valid",
         ))
@@ -139,12 +140,13 @@ pub async fn trigger_occurrence_listing_corruption_law(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn trigger_occurrence_retention_failure_law(
-    store: Arc<dyn crate::TriggerStore>,
+    stores: TriggerStores,
     fault: &dyn TriggerOccurrenceRetentionFaultInjector,
 ) {
+    let store = &stores.triggers;
     for key in ["failure-a", "failure-b"] {
-        store
-            .ingest_occurrence(button_occurrence("no-matching-subscription", key))
+        stores
+            .record_occurrence(button_occurrence("no-matching-subscription", key))
             .await
             .expect("ingest zero-match occurrence for failure law");
     }
@@ -192,12 +194,13 @@ pub async fn trigger_occurrence_retention_failure_law(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn trigger_retention_reconciliation_failure_law(
-    store: Arc<dyn crate::TriggerStore>,
+    stores: TriggerStores,
     fault: &dyn TriggerOccurrenceRetentionFaultInjector,
 ) {
+    let store = &stores.triggers;
     for key in ["transaction-failure-a", "transaction-failure-b"] {
-        store
-            .ingest_occurrence(button_occurrence("no-matching-subscription", key))
+        stores
+            .record_occurrence(button_occurrence("no-matching-subscription", key))
             .await
             .expect("ingest zero-match occurrence for transaction failure law");
     }
@@ -245,8 +248,9 @@ pub async fn trigger_retention_reconciliation_failure_law(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
-    store: Arc<dyn crate::TriggerStore>,
+    stores: TriggerStores,
 ) {
+    let store = &stores.triggers;
     const SESSION: &str = "dead-owner-retention-session";
     const KEY: &str = "dead-owner-retention-key";
     const ACTIVE_KEY: &str = "dead-owner-retention-active-key";
@@ -258,13 +262,13 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
         "dead-owner-retention-worker",
     );
     let created = mutate(
-        &store,
+        store,
         REGISTER_OPERATION,
         register_command(&SessionId::from(SESSION), draft.clone()),
     )
     .await;
-    let ingress = store
-        .ingest_occurrence(button_occurrence(
+    let ingress = stores
+        .record_occurrence(button_occurrence(
             "dead-owner-retention-source",
             "dead-owner-retention-occurrence",
         ))
@@ -272,7 +276,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
         .expect("ingest dead-owner retention occurrence");
     assert_eq!(ingress.reservations.len(), 1);
     let deleted = mutate(
-        &store,
+        store,
         "dead-owner-retention-delete",
         revision_command(
             &SessionId::from(SESSION),
@@ -295,7 +299,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     );
     assert_eq!(
         mutate(
-            &store,
+            store,
             REGISTER_OPERATION,
             register_command(&SessionId::from(SESSION), draft.clone()),
         )
@@ -305,7 +309,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     );
     assert!(
         execute(
-            &store,
+            store,
             "dead-owner-retention-register-probe",
             register_command(&SessionId::from(SESSION), draft.clone()),
         )
@@ -314,7 +318,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
         "the tombstone remains the Revive fence while a delivery references it"
     );
     mutate(
-        &store,
+        store,
         "dead-owner-retention-active-register",
         register_command(
             &SessionId::from(SESSION),
@@ -329,12 +333,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     .await;
 
     let reservation = &ingress.reservations[0];
-    let process_id = bind_fixture_process(
-        store.as_ref(),
-        reservation,
-        "dead-owner-retention-final-delivery",
-    )
-    .await;
+    let process_id = reservation.process_id.clone();
     let report = store
         .reconcile_trigger_retention(
             &[crate::TriggerDeliveryRetentionCandidate {
@@ -358,7 +357,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     // lever runs the operation id still replays its journaled answer.
     assert_eq!(
         mutate(
-            &store,
+            store,
             REGISTER_OPERATION,
             register_command(&SessionId::from(SESSION), draft.clone()),
         )
@@ -369,7 +368,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     let mut replacement = draft;
     replacement.source_key = "dead-owner-retention-replacement".to_string();
     let recreated = mutate(
-        &store,
+        store,
         "dead-owner-retention-replacement-operation",
         register_command(&SessionId::from(SESSION), replacement),
     )
@@ -385,7 +384,8 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::TriggerStore>) {
+async fn host_tombstone_remains_a_permanent_revive_fence(stores: TriggerStores) {
+    let store = &stores.triggers;
     let owner_scope = crate::TriggerOwnerScope::host("retention-host").unwrap();
     let mut draft = sample_draft(
         &SessionId::from("unused-host-session"),
@@ -396,7 +396,7 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
     draft.wake_target = None;
     let actor = crate::ProcessOriginator::host_scoped("retention-host");
     let created = mutate(
-        &store,
+        store,
         "host-retention-register",
         crate::TriggerCommand::Register {
             owner_scope: owner_scope.clone(),
@@ -406,7 +406,7 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
     )
     .await;
     let deleted = mutate(
-        &store,
+        store,
         "host-retention-delete",
         crate::TriggerCommand::Delete {
             owner_scope: owner_scope.clone(),
@@ -416,8 +416,8 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
         },
     )
     .await;
-    store
-        .ingest_occurrence(button_occurrence(
+    stores
+        .record_occurrence(button_occurrence(
             "host-zero-match-source",
             "host-zero-match-occurrence",
         ))
@@ -432,7 +432,7 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
     assert_eq!(report.reclaimed_subscription_count, 0);
 
     let revived = mutate(
-        &store,
+        store,
         "host-retention-revive",
         crate::TriggerCommand::Revive {
             owner_scope,
@@ -450,9 +450,10 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn zero_match_occurrence_reconciles_without_deliveries(store: Arc<dyn crate::TriggerStore>) {
-    store
-        .ingest_occurrence(button_occurrence(
+async fn zero_match_occurrence_reconciles_without_deliveries(stores: TriggerStores) {
+    let store = &stores.triggers;
+    stores
+        .record_occurrence(button_occurrence(
             "reconciliation-zero-match-source",
             "reconciliation-zero-match-occurrence",
         ))
@@ -476,18 +477,17 @@ async fn zero_match_occurrence_reconciles_without_deliveries(store: Arc<dyn crat
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn occurrence_with_live_delivery_survives_reconciliation(
-    store: Arc<dyn crate::TriggerStore>,
-) {
-    store
-        .ingest_occurrence(button_occurrence(
+async fn occurrence_with_live_delivery_survives_reconciliation(stores: TriggerStores) {
+    let store = &stores.triggers;
+    stores
+        .record_occurrence(button_occurrence(
             "live-reconciliation-zero-control",
             "live-reconciliation-zero-control-occurrence",
         ))
         .await
         .expect("ingest zero-match control occurrence");
     mutate(
-        &store,
+        store,
         "live-reconciliation-register",
         register_command(
             &SessionId::from("live-reconciliation-session"),
@@ -500,8 +500,8 @@ async fn occurrence_with_live_delivery_survives_reconciliation(
         ),
     )
     .await;
-    let ingress = store
-        .ingest_occurrence(button_occurrence(
+    let ingress = stores
+        .record_occurrence(button_occurrence(
             "live-reconciliation-source",
             "live-reconciliation-occurrence",
         ))
@@ -531,7 +531,11 @@ where
     F: Fn() -> ReopenableTriggerStore,
 {
     let probe = make();
-    assert_fresh_instances(&probe.open, &probe.reopen, "trigger_store_reopenable");
+    assert_fresh_instances(
+        &probe.open.triggers,
+        &probe.reopen.triggers,
+        "trigger_store_reopenable",
+    );
     trigger_store(|| make().open).await;
     same_identity_and_receipt_survive_store_reopen(make()).await;
 }
@@ -1037,11 +1041,12 @@ async fn explicit_prune_is_journaled_and_owner_scoped(store: Arc<dyn crate::Trig
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-async fn reservations_execute_the_reserved_revision(store: Arc<dyn crate::TriggerStore>) {
+async fn reservations_execute_the_reserved_revision(stores: TriggerStores) {
+    let store = &stores.triggers;
     let key = "snapshot-key";
     let source_key = "snapshot-v1";
     mutate(
-        &store,
+        store,
         "snapshot-register",
         register_command(
             &SessionId::from("session-a"),
@@ -1049,15 +1054,15 @@ async fn reservations_execute_the_reserved_revision(store: Arc<dyn crate::Trigge
         ),
     )
     .await;
-    let first = store
-        .ingest_occurrence(button_occurrence(source_key, "snapshot-occurrence-v1"))
+    let first = stores
+        .record_occurrence(button_occurrence(source_key, "snapshot-occurrence-v1"))
         .await
         .unwrap();
     assert_eq!(first.reservations.len(), 1);
     assert_eq!(first.reservations[0].subscription.revision, 1);
 
     mutate(
-        &store,
+        store,
         "snapshot-update",
         update_command(
             &SessionId::from("session-a"),
@@ -1077,8 +1082,8 @@ async fn reservations_execute_the_reserved_revision(store: Arc<dyn crate::Trigge
         Some("worker-v1")
     );
 
-    let second = store
-        .ingest_occurrence(button_occurrence(source_key, "snapshot-occurrence-v2"))
+    let second = stores
+        .record_occurrence(button_occurrence(source_key, "snapshot-occurrence-v2"))
         .await
         .unwrap();
     assert_eq!(second.reservations[0].subscription.revision, 2);
@@ -1098,24 +1103,23 @@ async fn reservations_execute_the_reserved_revision(store: Arc<dyn crate::Trigge
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-async fn disable_preserves_reserved_work_and_requires_explicit_enable(
-    store: Arc<dyn crate::TriggerStore>,
-) {
+async fn disable_preserves_reserved_work_and_requires_explicit_enable(stores: TriggerStores) {
+    let store = &stores.triggers;
     let key = "disable-key";
     let source_key = "disable-source";
     let draft = sample_draft(&SessionId::from("session-a"), key, source_key, "worker");
     mutate(
-        &store,
+        store,
         "disable-register",
         register_command(&SessionId::from("session-a"), draft.clone()),
     )
     .await;
-    let reserved = store
-        .ingest_occurrence(button_occurrence(source_key, "disable-before"))
+    let reserved = stores
+        .record_occurrence(button_occurrence(source_key, "disable-before"))
         .await
         .unwrap();
     let disabled = mutate(
-        &store,
+        store,
         "disable-command",
         revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
@@ -1130,15 +1134,15 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
         1
     );
     assert!(
-        store
-            .ingest_occurrence(button_occurrence(source_key, "disable-after"))
+        stores
+            .record_occurrence(button_occurrence(source_key, "disable-after"))
             .await
             .unwrap()
             .reservations
             .is_empty()
     );
     let repeated = mutate(
-        &store,
+        store,
         "disable-reregister",
         register_command(&SessionId::from("session-a"), draft),
     )
@@ -1146,14 +1150,14 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
     assert!(!repeated.enabled());
     assert_eq!(repeated.record.revision, 2);
     mutate(
-        &store,
+        store,
         "disable-enable",
         revision_command(&SessionId::from("session-a"), key, 2, "enable"),
     )
     .await;
     assert_eq!(
-        store
-            .ingest_occurrence(button_occurrence(source_key, "disable-reenabled"))
+        stores
+            .record_occurrence(button_occurrence(source_key, "disable-reenabled"))
             .await
             .unwrap()
             .reservations
@@ -1173,13 +1177,12 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
-    store: Arc<dyn crate::TriggerStore>,
-) {
+async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(stores: TriggerStores) {
+    let store = &stores.triggers;
     let key = "reenable-roundtrip-key";
     let source_key = "reenable-roundtrip-source";
     let registered = mutate(
-        &store,
+        store,
         "reenable-roundtrip-register",
         register_command(
             &SessionId::from("session-a"),
@@ -1191,7 +1194,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     assert!(registered.enabled());
 
     let disabled = mutate(
-        &store,
+        store,
         "reenable-roundtrip-disable",
         revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
@@ -1202,8 +1205,8 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
         crate::TriggerMutationOutcome::Disabled
     );
     assert!(
-        store
-            .ingest_occurrence(button_occurrence(source_key, "reenable-roundtrip-disabled"))
+        stores
+            .record_occurrence(button_occurrence(source_key, "reenable-roundtrip-disabled"))
             .await
             .unwrap()
             .reservations
@@ -1214,7 +1217,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     // The revision the caller read before the disable is now stale: the fence
     // must reject it instead of enabling from a superseded view.
     let stale = execute(
-        &store,
+        store,
         "reenable-roundtrip-stale-enable",
         revision_command(&SessionId::from("session-a"), key, 1, "enable"),
     )
@@ -1231,7 +1234,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     // The host re-reads through the same command surface, then enables at the
     // observed revision.
     let listed = execute(
-        &store,
+        store,
         "reenable-roundtrip-list",
         crate::TriggerCommand::List {
             owner_scope: owner(&SessionId::from("session-a")),
@@ -1251,7 +1254,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     assert!(!records[0].lifecycle.enabled());
 
     let reenabled = mutate(
-        &store,
+        store,
         "reenable-roundtrip-enable",
         revision_command(
             &SessionId::from("session-a"),
@@ -1290,8 +1293,8 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     assert!(live[0].lifecycle.enabled());
 
     // Delivery resumes for occurrences emitted after the re-enable.
-    let delivered = store
-        .ingest_occurrence(button_occurrence(source_key, "reenable-roundtrip-enabled"))
+    let delivered = stores
+        .record_occurrence(button_occurrence(source_key, "reenable-roundtrip-enabled"))
         .await
         .unwrap();
     assert_eq!(delivered.reservations.len(), 1);
@@ -1300,7 +1303,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     // Both journaled operations replay to their original receipts, even though
     // the row has moved past them.
     let replayed_enable = mutate(
-        &store,
+        store,
         "reenable-roundtrip-enable",
         revision_command(
             &SessionId::from("session-a"),
@@ -1312,7 +1315,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     .await;
     assert_eq!(replayed_enable, reenabled);
     let replayed_disable = mutate(
-        &store,
+        store,
         "reenable-roundtrip-disable",
         revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
@@ -1333,24 +1336,23 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
-    store: Arc<dyn crate::TriggerStore>,
-) {
+async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(stores: TriggerStores) {
+    let store = &stores.triggers;
     let key = "revive-key";
     let source_key = "revive-source";
     let draft = sample_draft(&SessionId::from("session-a"), key, source_key, "worker");
     let created = mutate(
-        &store,
+        store,
         "revive-register",
         register_command(&SessionId::from("session-a"), draft.clone()),
     )
     .await;
-    let ingress = store
-        .ingest_occurrence(button_occurrence(source_key, "revive-occurrence"))
+    let ingress = stores
+        .record_occurrence(button_occurrence(source_key, "revive-occurrence"))
         .await
         .unwrap();
     let deleted = mutate(
-        &store,
+        store,
         "revive-delete",
         revision_command(&SessionId::from("session-a"), key, 1, "delete"),
     )
@@ -1374,7 +1376,7 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
     );
     assert!(
         execute(
-            &store,
+            store,
             "revive-register-after-delete",
             register_command(&SessionId::from("session-a"), draft.clone())
         )
@@ -1382,7 +1384,7 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
         .is_err()
     );
     let revived = mutate(
-        &store,
+        store,
         "revive-command",
         crate::TriggerCommand::Revive {
             owner_scope: owner(&SessionId::from("session-a")),
@@ -1537,10 +1539,11 @@ async fn owner_namespaces_are_exact_and_session_cleanup_is_scoped(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn occurrence_time_bounds_match_the_rust_predicate(store: Arc<dyn crate::TriggerStore>) {
+async fn occurrence_time_bounds_match_the_rust_predicate(stores: TriggerStores) {
+    let store = &stores.triggers;
     for (index, source_key) in ["bounds-source-a", "bounds-source-b"].iter().enumerate() {
-        store
-            .ingest_occurrence(button_occurrence(
+        stores
+            .record_occurrence(button_occurrence(
                 *source_key,
                 format!("bounds-occurrence-{index}"),
             ))
@@ -1607,11 +1610,10 @@ async fn occurrence_time_bounds_match_the_rust_predicate(store: Arc<dyn crate::T
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-async fn occurrence_and_reservations_are_atomic_and_idempotent(
-    store: Arc<dyn crate::TriggerStore>,
-) {
+async fn occurrence_and_reservations_are_atomic_and_idempotent(stores: TriggerStores) {
+    let store = &stores.triggers;
     mutate(
-        &store,
+        store,
         "atomic-register",
         register_command(
             &SessionId::from("session-a"),
@@ -1625,8 +1627,8 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
     )
     .await;
     let request = button_occurrence("atomic-source", "atomic-occurrence");
-    let first = store.ingest_occurrence(request.clone()).await.unwrap();
-    let replay = store.ingest_occurrence(request).await.unwrap();
+    let first = stores.record_occurrence(request.clone()).await.unwrap();
+    let replay = stores.record_occurrence(request).await.unwrap();
     assert_eq!(first.occurrence, replay.occurrence);
     assert_eq!(first.reservations.len(), 1);
     assert_eq!(replay.reservations.len(), 1);
@@ -1649,9 +1651,10 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn zero_match_occurrence_is_immediately_reclaimable(store: Arc<dyn crate::TriggerStore>) {
-    let ingress = store
-        .ingest_occurrence(button_occurrence(
+async fn zero_match_occurrence_is_immediately_reclaimable(stores: TriggerStores) {
+    let store = &stores.triggers;
+    let ingress = stores
+        .record_occurrence(button_occurrence(
             "zero-match-source",
             "zero-match-immediate-eligibility",
         ))
@@ -1688,9 +1691,10 @@ async fn zero_match_occurrence_is_immediately_reclaimable(store: Arc<dyn crate::
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn matched_occurrence_waits_for_terminal_deliveries(store: Arc<dyn crate::TriggerStore>) {
+async fn matched_occurrence_waits_for_terminal_deliveries(stores: TriggerStores) {
+    let store = &stores.triggers;
     mutate(
-        &store,
+        store,
         "matched-retention-register",
         register_command(
             &SessionId::from("matched-retention-session"),
@@ -1703,8 +1707,8 @@ async fn matched_occurrence_waits_for_terminal_deliveries(store: Arc<dyn crate::
         ),
     )
     .await;
-    let ingress = store
-        .ingest_occurrence(button_occurrence(
+    let ingress = stores
+        .record_occurrence(button_occurrence(
             "matched-retention-source",
             "matched-retention-occurrence",
         ))
@@ -1735,8 +1739,7 @@ async fn matched_occurrence_waits_for_terminal_deliveries(store: Arc<dyn crate::
     );
 
     let reservation = &ingress.reservations[0];
-    let process_id =
-        bind_fixture_process(store.as_ref(), reservation, "matched-occurrence-delivery").await;
+    let process_id = reservation.process_id.clone();
     let terminal_delivery = crate::TriggerDeliveryRetentionCandidate {
         occurrence_id: ingress.occurrence.occurrence_id.clone(),
         subscription_id: reservation.subscription.subscription_id.clone(),
@@ -1763,16 +1766,17 @@ async fn matched_occurrence_waits_for_terminal_deliveries(store: Arc<dyn crate::
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn cutoff_defers_but_never_initiates_occurrence_reclaim(store: Arc<dyn crate::TriggerStore>) {
-    store
-        .ingest_occurrence(button_occurrence(
+async fn cutoff_defers_but_never_initiates_occurrence_reclaim(stores: TriggerStores) {
+    let store = &stores.triggers;
+    stores
+        .record_occurrence(button_occurrence(
             "cutoff-zero-match",
             "cutoff-zero-match-occurrence",
         ))
         .await
         .expect("ingest cutoff-deferred zero-match occurrence");
     mutate(
-        &store,
+        store,
         "cutoff-live-register",
         register_command(
             &SessionId::from("cutoff-live-session"),
@@ -1785,8 +1789,8 @@ async fn cutoff_defers_but_never_initiates_occurrence_reclaim(store: Arc<dyn cra
         ),
     )
     .await;
-    store
-        .ingest_occurrence(button_occurrence(
+    stores
+        .record_occurrence(button_occurrence(
             "cutoff-live-source",
             "cutoff-live-occurrence",
         ))
@@ -1828,10 +1832,11 @@ async fn cutoff_defers_but_never_initiates_occurrence_reclaim(store: Arc<dyn cra
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crate::TriggerStore>) {
+async fn non_fired_occurrences_are_durable_and_never_reserve(stores: TriggerStores) {
+    let store = &stores.triggers;
     let owner_scope = crate::TriggerOwnerScope::session("tick-outcome-session");
     mutate(
-        &store,
+        store,
         "register-tick-outcome",
         crate::TriggerCommand::Register {
             owner_scope,
@@ -1848,8 +1853,8 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
     )
     .await;
 
-    let fired = store
-        .ingest_occurrence(button_occurrence("tick-outcome-source", "tick-fired"))
+    let fired = stores
+        .record_occurrence(button_occurrence("tick-outcome-source", "tick-fired"))
         .await
         .expect("ingest fired tick");
     assert_eq!(fired.reservations.len(), 1);
@@ -1863,8 +1868,8 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
             reason: "session_retired".to_string(),
         },
     );
-    let dropped = store
-        .ingest_occurrence(dropped_request.clone())
+    let dropped = stores
+        .record_occurrence(dropped_request.clone())
         .await
         .expect("record dropped tick");
     assert!(
@@ -1878,8 +1883,8 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
         }
     );
     assert!(
-        store
-            .ingest_occurrence(dropped_request)
+        stores
+            .record_occurrence(dropped_request)
             .await
             .expect("replay dropped tick")
             .reservations
@@ -1951,12 +1956,11 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
-    store: Arc<dyn crate::TriggerStore>,
-) {
+async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(stores: TriggerStores) {
+    let store = &stores.triggers;
     let session = SessionId::from("audit-cutoff-session");
     mutate(
-        &store,
+        store,
         "audit-cutoff-register",
         register_command(
             &session,
@@ -1970,8 +1974,8 @@ async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
     )
     .await;
 
-    let matched = store
-        .ingest_occurrence(button_occurrence("audit-cutoff-source", "audit-fired"))
+    let matched = stores
+        .record_occurrence(button_occurrence("audit-cutoff-source", "audit-fired"))
         .await
         .expect("ingest matched fired occurrence");
     assert_eq!(
@@ -1979,15 +1983,15 @@ async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
         1,
         "the fired occurrence must hold a live fan-out for the negative half of this law"
     );
-    store
-        .ingest_occurrence(button_occurrence(
+    stores
+        .record_occurrence(button_occurrence(
             "audit-cutoff-zero-match",
             "audit-zero-match",
         ))
         .await
         .expect("ingest zero-match fired occurrence");
-    let dropped = store
-        .ingest_occurrence(
+    let dropped = stores
+        .record_occurrence(
             button_occurrence("audit-cutoff-source", "audit-dropped").with_outcome(
                 crate::TriggerOccurrenceOutcome::Dropped {
                     reason: "tick_suppressed".to_string(),
@@ -2028,7 +2032,7 @@ async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
         "a row recorded at the cutoff itself was not recorded before it"
     );
     assert_eq!(
-        occurrence_ids(&store).await.len(),
+        occurrence_ids(store).await.len(),
         2,
         "an ineffective cutoff deletes nothing"
     );
@@ -2066,8 +2070,8 @@ async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
 
     // Half two: ordinary retention still cannot touch a fresh non-fired row,
     // at any cutoff, even once its scoped session is gone.
-    store
-        .ingest_occurrence(
+    stores
+        .record_occurrence(
             button_occurrence("audit-cutoff-source", "audit-dropped-again").with_outcome(
                 crate::TriggerOccurrenceOutcome::Dropped {
                     reason: "tick_suppressed".to_string(),
@@ -2094,7 +2098,7 @@ async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
         "delivery-fan-out retention cannot reclaim audit history"
     );
     assert_eq!(
-        occurrence_ids(&store).await.len(),
+        occurrence_ids(store).await.len(),
         2,
         "the fired row and the fresh audit row both survive ordinary retention"
     );
@@ -2118,7 +2122,7 @@ async fn occurrence_ids(store: &Arc<dyn crate::TriggerStore>) -> Vec<String> {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn null_source_occurrence_replay_is_idempotent(store: Arc<dyn crate::TriggerStore>) {
+async fn null_source_occurrence_replay_is_idempotent(stores: TriggerStores) {
     let request = crate::TriggerOccurrenceRequest::new(
         "ui.button.pressed",
         "null-source",
@@ -2126,12 +2130,12 @@ async fn null_source_occurrence_replay_is_idempotent(store: Arc<dyn crate::Trigg
         "null-source-occurrence",
     )
     .with_source(serde_json::Value::Null);
-    let first = store
-        .ingest_occurrence(request.clone())
+    let first = stores
+        .record_occurrence(request.clone())
         .await
         .expect("ingest null-source occurrence");
-    let replay = store
-        .ingest_occurrence(request)
+    let replay = stores
+        .record_occurrence(request)
         .await
         .expect("an exact null-source retry must be idempotent");
     assert_eq!(
@@ -2145,9 +2149,8 @@ async fn null_source_occurrence_replay_is_idempotent(store: Arc<dyn crate::Trigg
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
 /// First delivery and replay both preserve subscription-key order, independent of hash order.
-pub async fn first_ingress_and_replay_share_canonical_subscription_order(
-    store: Arc<dyn crate::TriggerStore>,
-) {
+pub async fn first_ingress_and_replay_share_canonical_subscription_order(stores: TriggerStores) {
+    let store = &stores.triggers;
     let owner_scope = crate::TriggerOwnerScope::host("fig811").unwrap();
     // The fixture opposes hash order, so canonical-order coverage cannot pass
     // by accident: the key that sorts first has the id that sorts last.
@@ -2174,7 +2177,7 @@ pub async fn first_ingress_and_replay_share_canonical_subscription_order(
         );
         draft.wake_target = None;
         mutate(
-            &store,
+            store,
             &format!("canonical-order-register-{key}"),
             crate::TriggerCommand::Register {
                 owner_scope: owner_scope.clone(),
@@ -2185,8 +2188,8 @@ pub async fn first_ingress_and_replay_share_canonical_subscription_order(
         .await;
     }
     let request = button_occurrence("canonical-order-source", "canonical-order-occurrence");
-    let first = store.ingest_occurrence(request.clone()).await.unwrap();
-    let replay = store.ingest_occurrence(request).await.unwrap();
+    let first = stores.record_occurrence(request.clone()).await.unwrap();
+    let replay = stores.record_occurrence(request).await.unwrap();
     let keys = |ingress: &crate::TriggerIngressReceipt| {
         ingress
             .reservations
@@ -2204,6 +2207,8 @@ pub async fn first_ingress_and_replay_share_canonical_subscription_order(
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
 async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTriggerStore) {
+    let ReopenableTriggerStore { open, reopen } = factory;
+    let (open, reopen) = (open.triggers, reopen.triggers);
     let draft = sample_draft(
         &SessionId::from("session-a"),
         "reopen-key",
@@ -2211,12 +2216,12 @@ async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTrigg
         "worker",
     );
     let command = register_command(&SessionId::from("session-a"), draft.clone());
-    let first = mutate(&factory.open, "reopen-register", command.clone()).await;
-    drop(factory.open);
-    let replay = mutate(&factory.reopen, "reopen-register", command).await;
+    let first = mutate(&open, "reopen-register", command.clone()).await;
+    drop(open);
+    let replay = mutate(&reopen, "reopen-register", command).await;
     assert_eq!(replay, first);
     let repeated = mutate(
-        &factory.reopen,
+        &reopen,
         "reopen-register-again",
         register_command(&SessionId::from("session-a"), draft),
     )
@@ -2226,8 +2231,7 @@ async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTrigg
         first.record.subscription_id
     );
     assert_eq!(repeated.record.revision, 1);
-    let restored = factory
-        .reopen
+    let restored = reopen
         .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
         .await
         .unwrap();
@@ -2297,29 +2301,6 @@ async fn hostile_trigger_namespaces(store: Arc<dyn crate::TriggerStore>) {
     );
 }
 
-/// Binds `reservation` to a fixture process, as the router does once its start
-/// registers (ADR 0107): a retention candidate names a delivery's bound process.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn bind_fixture_process(
-    store: &dyn crate::TriggerStore,
-    reservation: &crate::TriggerDeliveryReservation,
-    label: &str,
-) -> crate::ProcessId {
-    let process_id = crate::ProcessId::fixture(label);
-    store
-        .bind_delivery_process(
-            &reservation.occurrence.occurrence_id,
-            &reservation.subscription.subscription_id,
-            &process_id,
-        )
-        .await
-        .expect("bind the delivery's process");
-    process_id
-}
-
 /// Both plugin-facing writers keep the refusal after a newer fleet format —
 /// the epoch past this build's writable range — was finalized while their
 /// handles remained open.
@@ -2367,7 +2348,7 @@ pub async fn host_scope_filters_list_cancel_and_deactivate_uniformly<F>(make: F)
 where
     F: Fn() -> ReopenableTriggerStore,
 {
-    let store = make().open;
+    let store = make().open.triggers;
     let mut identities = Vec::new();
     for binding in ["binding", "binding.foreign", "other"] {
         let owner = crate::TriggerOwnerScope::host(binding).expect("host namespace");

@@ -12,6 +12,7 @@ mod mutation;
 mod report;
 mod revision_referrer;
 mod router;
+mod start;
 mod store_support;
 mod subscription_changes;
 #[cfg(test)]
@@ -28,6 +29,7 @@ pub use revision_referrer::RevisionReferrerTriggerStore;
 use router::default_enabled;
 pub use router::*;
 use router::{project_trigger_actor, project_trigger_draft, project_trigger_owner};
+pub use start::{TriggerDeliveryStartRows, TriggerStartRows, TriggerSubscriptionFence};
 pub use store_support::{
     PreparedTriggerCommand, TriggerMutationPreparation, decode_trigger_delivery,
     decode_trigger_mutation_receipt_json, decode_trigger_occurrence_json,
@@ -1089,32 +1091,30 @@ pub struct TriggerIngressReceipt {
     pub realization: crate::StoreRealization,
 }
 
-/// The process an emission recorded one of its deliveries bound to
-/// (FIG-4297, FIG-4503).
-///
-/// An emission's ingest is a recorded step, and the emission acts on the
-/// receipt it recorded: a delivery the receipt holds bound answers its
-/// process and starts nothing, and one it holds unbound starts. The start's
-/// bind is this recorded step, as is the binding read after a start refused
-/// as bound (FIG-4369). Every replay serves the recorded process and never
-/// binds or reads the delivery, which retention may have reclaimed.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "admission", rename_all = "snake_case")]
-pub enum TriggerDeliveryAdmission {
-    /// The delivery is bound to `process_id`.
-    Bound { process_id: ProcessId },
+/// What recording an occurrence would do, read before its start: the
+/// answer [`TriggerStore::plan_occurrence`] gives.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TriggerOccurrencePlan {
+    /// The occurrence is already recorded under its idempotency key: what it
+    /// holds, every delivery bound to its process.
+    Held(TriggerIngressReceipt),
+    /// The occurrence is new: its record, stamped on the store's clock, and
+    /// the enabled subscriptions it matches, which its start prepares a
+    /// process for each of and records only while they still match.
+    Fresh {
+        occurrence: TriggerOccurrenceRecord,
+        subscriptions: Vec<TriggerSubscriptionRecord>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerDeliveryReservation {
     pub occurrence: TriggerOccurrenceRecord,
     pub subscription: TriggerSubscriptionRecord,
-    /// The process this delivery started, bound after the start registered it
-    /// and before the delivery is reported (ADR 0107). `None` while the
-    /// reservation is unbound: its start has not yet completed, and recovery
-    /// resumes it under the same start key.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_id: Option<ProcessId>,
+    /// The process this delivery started: registered and bound in the
+    /// transaction that recorded the delivery (ADR 0132 §12), so a delivery
+    /// is never unbound.
+    pub process_id: ProcessId,
     pub created_at_ms: u64,
 }
 
@@ -1205,32 +1205,25 @@ pub type TriggerOccurrenceReclamationResult = Result<
 /// is derived from it. The final tie-breaker only defends corrupted snapshots;
 /// if reached, it remains replay-stable because the ID is content-derived.
 pub fn sort_trigger_delivery_reservations(reservations: &mut [TriggerDeliveryReservation]) {
-    reservations.sort_by(|left, right| {
-        left.subscription
-            .owner_scope
-            .namespace()
-            .cmp(&right.subscription.owner_scope.namespace())
-            .then_with(|| {
-                left.subscription
-                    .subscription_key
-                    .cmp(&right.subscription.subscription_key)
-            })
-            .then_with(|| {
-                left.subscription
-                    .subscription_id
-                    .cmp(&right.subscription.subscription_id)
-            })
-    });
+    reservations.sort_by(|left, right| subscription_order(&left.subscription, &right.subscription));
 }
 
-impl TriggerDeliveryReservation {
-    fn emit_report(&self, outcome: TriggerDeliveryEmitOutcome) -> TriggerDeliveryEmitReceipt {
-        TriggerDeliveryEmitReceipt {
-            occurrence_id: self.occurrence.occurrence_id.clone(),
-            subscription_id: self.subscription.subscription_id.clone(),
-            outcome,
-        }
-    }
+/// [`sort_trigger_delivery_reservations`]'s order over the subscriptions an
+/// occurrence's plan matched, so its deliveries start in the order they are
+/// later reported.
+pub fn sort_trigger_subscriptions(subscriptions: &mut [TriggerSubscriptionRecord]) {
+    subscriptions.sort_by(subscription_order);
+}
+
+fn subscription_order(
+    left: &TriggerSubscriptionRecord,
+    right: &TriggerSubscriptionRecord,
+) -> std::cmp::Ordering {
+    left.owner_scope
+        .namespace()
+        .cmp(&right.owner_scope.namespace())
+        .then_with(|| left.subscription_key.cmp(&right.subscription_key))
+        .then_with(|| left.subscription_id.cmp(&right.subscription_id))
 }
 
 /// Store and durable-substrate implementors provide this durable home for
@@ -1299,22 +1292,23 @@ pub trait TriggerStore: Send + Sync {
         session_id: &SessionId,
     ) -> Result<usize, PluginError>;
 
-    /// Record `request`'s occurrence and reserve its deliveries, or answer
-    /// the occurrence and reservations already held under its idempotency
-    /// key.
+    /// Read what recording `request`'s occurrence would do: the occurrence
+    /// and deliveries already held under its idempotency key, or a new
+    /// record stamped now with the enabled subscriptions it matches. Writes
+    /// nothing; the occurrence is recorded by its start's `trigger.start`
+    /// commit, which records it only while the plan still holds.
     ///
     /// An identity retention has reclaimed is never written back while its
-    /// tombstone remains (FIG-4513, FIG-4610). Every occurrence delete leaves
-    /// a tombstone under its id in the same transaction. An ingest that finds the
-    /// tombstone writes nothing and refuses with
-    /// [`trigger_occurrence_reclaimed`](crate::trigger_occurrence_reclaimed):
-    /// it is a redelivery of an emission that already ran, on a host with no
-    /// journal to answer it from. The tombstone remains until the host
-    /// explicitly deletes it with [`Self::forget_trigger_tombstones`].
-    async fn ingest_occurrence(
+    /// tombstone remains (FIG-4513, FIG-4610): a plan that finds the
+    /// tombstone refuses with
+    /// [`trigger_occurrence_reclaimed`](crate::trigger_occurrence_reclaimed),
+    /// a redelivery of an emission that already ran. The tombstone remains
+    /// until the host explicitly deletes it with
+    /// [`Self::forget_trigger_tombstones`].
+    async fn plan_occurrence(
         &self,
-        request: TriggerOccurrenceRequest,
-    ) -> Result<TriggerIngressReceipt, PluginError>;
+        request: &TriggerOccurrenceRequest,
+    ) -> Result<TriggerOccurrencePlan, PluginError>;
 
     async fn list_occurrences(
         &self,
@@ -1338,25 +1332,8 @@ pub trait TriggerStore: Send + Sync {
 
     /// List every reserved delivery snapshot, including deliveries whose live
     /// subscription has since been updated or tombstoned: the direct
-    /// delivery-table view, bound or unbound. Recovery of an unbound delivery
-    /// does not scan it: the reservation's `TriggerDelivery` obligation
-    /// carries the delivery to its start (ADR 0109, ADR 0021).
+    /// delivery-table view.
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError>;
-
-    /// Bind the process a delivery's start registered to its reservation,
-    /// delivering the reservation's `TriggerDelivery` obligation in the same
-    /// write.
-    ///
-    /// Idempotent: binding the same process again is a no-op. Binding a
-    /// different process to an already-bound reservation is refused — a
-    /// delivery's key mints one process while that process is retained, and
-    /// a bound delivery is never started again.
-    async fn bind_delivery_process(
-        &self,
-        occurrence_id: &str,
-        subscription_id: &str,
-        process_id: &ProcessId,
-    ) -> Result<(), PluginError>;
 
     /// List the distinct process ids currently bound to delivery rows,
     /// without materializing occurrence or subscription JSON.

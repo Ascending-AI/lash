@@ -478,9 +478,7 @@ impl SqliteTriggerStore {
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             Ok((
-                                row.get::<_, Option<String>>(0)?
-                                    .map(|value| crate::sql_process_id(0, value))
-                                    .transpose()?,
+                                crate::sql_process_id(0, row.get::<_, String>(0)?)?,
                                 row.get::<_, i64>(1)?,
                                 row.get::<_, String>(2)?,
                                 row.get::<_, String>(3)?,
@@ -885,97 +883,15 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
             .map_err(process_sqlite_error)?
     }
 
-    async fn ingest_occurrence(
+    async fn plan_occurrence(
         &self,
-        request: lash_core_execution::TriggerOccurrenceRequest,
-    ) -> Result<lash_core_execution::TriggerIngressReceipt, lash_core_execution::PluginError> {
-        lash_core_execution::facade_support::validate_trigger_occurrence_request(&request)?;
-        let occurrence_id =
-            lash_core_execution::facade_support::deterministic_occurrence_id(&request);
+        request: &lash_core_execution::TriggerOccurrenceRequest,
+    ) -> Result<lash_core_execution::TriggerOccurrencePlan, lash_core_execution::PluginError> {
+        lash_core_execution::facade_support::validate_trigger_occurrence_request(request)?;
+        let request = request.clone();
         let occurred_at_ms = self.clock.timestamp_ms();
         self.conn
-            .write_flow(move |tx| {
-                let sql = trigger_sql();
-                Ok(trigger_tx_outcome((|| {
-                    let existing: Option<String> = tx
-                        .query_row(
-                            sql.occurrence_sqlite.select_record_by_idempotency_key.sql(),
-                            params![request.idempotency_key.as_str()],
-                            |row| row.get(0),
-                        )
-                        .optional()
-                        .map_err(process_sqlite_error)?;
-                    let (record, is_new) = if let Some(existing_json) = existing {
-                        let record =
-                            lash_core_execution::facade_support::decode_trigger_occurrence_json(
-                                &existing_json,
-                            )?;
-                        if !lash_core_execution::facade_support::trigger_occurrence_request_matches_record(
-                            &request, &record,
-                        ) {
-                            return Err(lash_core_execution::durable_identity_conflict(format!(
-                                "trigger occurrence idempotency conflict for `{}`",
-                                request.idempotency_key
-                            )));
-                        }
-                        (record, false)
-                    } else {
-                        // Retention reclaimed this identity: the ingest is a
-                        // redelivery, and writes nothing back (FIG-4513).
-                        let reclaimed: Option<i64> = tx
-                            .query_row(
-                                sql.tombstone.select_by_occurrence_id.sql(),
-                                params![occurrence_id.as_str()],
-                                |row| row.get(0),
-                            )
-                            .optional()
-                            .map_err(process_sqlite_error)?;
-                        if reclaimed.is_some() {
-                            return Err(lash_core_execution::trigger_occurrence_reclaimed(
-                                &occurrence_id,
-                            ));
-                        }
-                        let record = request.into_record(occurrence_id.clone(), occurred_at_ms);
-                        crate::conn::cached_execute(tx,
-                            sql.occurrence.insert.sql(),
-                            params![
-                                record.occurrence_id.as_str(),
-                                record.idempotency_key.as_str(),
-                                record.source_type.as_str(),
-                                record.source_key.as_str(),
-                                record.occurred_at_ms as i64,
-                                record.outcome.kind(),
-                                lash_core_execution::facade_support::encode_trigger_row(&record)?,
-                            ],
-                        )
-                        .map_err(process_sqlite_error)?;
-                        (record, true)
-                    };
-                    let reservations = match (
-                        is_new,
-                        record.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired,
-                    ) {
-                        (true, true) => reserve_sqlite_deliveries(tx, &record, occurred_at_ms)?,
-                        (false, true) => sqlite_delivery_snapshots(tx, &record)?,
-                        (_, false) => Vec::new(),
-                    };
-                    if is_new
-                        && record.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired
-                        && reservations.is_empty()
-                    {
-                        crate::conn::cached_execute(tx,
-                            sql.occurrence.arm_reclaimable.sql(),
-                            params![record.occurrence_id.as_str(), record.occurred_at_ms as i64],
-                        )
-                        .map_err(process_sqlite_error)?;
-                    }
-                    Ok(lash_core_execution::TriggerIngressReceipt {
-                        occurrence: record,
-                        reservations,
-                        realization: lash_core_execution::StoreRealization::from_wrote(is_new),
-                    })
-                })()))
-            })
+            .call(move |conn| Ok(plan_sqlite_occurrence(conn, request, occurred_at_ms)))
             .await
             .map_err(process_sqlite_error)?
     }
@@ -1072,43 +988,6 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
     > {
         self.list_deliveries_with(trigger_sql().delivery.list_all.sql(), Vec::new())
             .await
-    }
-
-    async fn bind_delivery_process(
-        &self,
-        occurrence_id: &str,
-        subscription_id: &str,
-        process_id: &ProcessId,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        let occurrence_id = occurrence_id.to_string();
-        let subscription_id = subscription_id.to_string();
-        let process_id = process_id.clone();
-        let bound_at_ms = self.clock.timestamp_ms();
-        self.conn
-            .write(move |conn| {
-                Ok((|| {
-                    let bound = conn
-                        .execute(
-                            trigger_sql().delivery.bind_process.sql(),
-                            params![
-                                occurrence_id.as_str(),
-                                subscription_id.as_str(),
-                                process_id.as_str(),
-                                bound_at_ms as i64,
-                            ],
-                        )
-                        .map_err(process_sqlite_error)?;
-                    if bound == 1 {
-                        Ok(())
-                    } else {
-                        Err(lash_core_execution::durable_identity_conflict(format!(
-                            "trigger delivery `{occurrence_id}`/`{subscription_id}` is absent or already bound to another process than `{process_id}`"
-                        )))
-                    }
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
     }
 
     async fn list_delivery_process_ids(
@@ -1448,12 +1327,85 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
     }
 }
 
-fn reserve_sqlite_deliveries(
-    tx: &rusqlite::Transaction<'_>,
+/// What recording `request`'s occurrence would do, read on `conn`: the
+/// occurrence and deliveries already held under its idempotency key, or a new
+/// record stamped `occurred_at_ms` with the subscriptions it matches.
+fn plan_sqlite_occurrence(
+    conn: &rusqlite::Connection,
+    request: lash_core_execution::TriggerOccurrenceRequest,
+    occurred_at_ms: u64,
+) -> Result<lash_core_execution::TriggerOccurrencePlan, lash_core_execution::PluginError> {
+    let sql = trigger_sql();
+    let existing: Option<String> = conn
+        .query_row(
+            sql.occurrence_sqlite.select_record_by_idempotency_key.sql(),
+            params![request.idempotency_key.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(process_sqlite_error)?;
+    if let Some(existing_json) = existing {
+        let record =
+            lash_core_execution::facade_support::decode_trigger_occurrence_json(&existing_json)?;
+        if !lash_core_execution::facade_support::trigger_occurrence_request_matches_record(
+            &request, &record,
+        ) {
+            return Err(lash_core_execution::durable_identity_conflict(format!(
+                "trigger occurrence idempotency conflict for `{}`",
+                request.idempotency_key
+            )));
+        }
+        let reservations = sqlite_delivery_snapshots(conn, &record)?;
+        return Ok(lash_core_execution::TriggerOccurrencePlan::Held(
+            lash_core_execution::TriggerIngressReceipt {
+                occurrence: record,
+                reservations,
+                realization: lash_core_execution::StoreRealization::from_wrote(false),
+            },
+        ));
+    }
+    let occurrence_id = lash_core_execution::facade_support::deterministic_occurrence_id(&request);
+    // Retention reclaimed this identity: the emission is a redelivery, and
+    // nothing is written back (FIG-4513).
+    if sqlite_occurrence_reclaimed(conn, &occurrence_id)? {
+        return Err(lash_core_execution::trigger_occurrence_reclaimed(
+            &occurrence_id,
+        ));
+    }
+    let occurrence = request.into_record(occurrence_id, occurred_at_ms);
+    let subscriptions = sqlite_matched_subscriptions(conn, &occurrence)?;
+    Ok(lash_core_execution::TriggerOccurrencePlan::Fresh {
+        occurrence,
+        subscriptions,
+    })
+}
+
+/// Whether retention reclaimed `occurrence_id`, read from its tombstone.
+pub(crate) fn sqlite_occurrence_reclaimed(
+    conn: &rusqlite::Connection,
+    occurrence_id: &str,
+) -> Result<bool, lash_core_execution::PluginError> {
+    Ok(conn
+        .query_row(
+            trigger_sql().tombstone.select_by_occurrence_id.sql(),
+            params![occurrence_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(process_sqlite_error)?
+        .is_some())
+}
+
+/// The enabled subscriptions a fired `occurrence` matches: none for any
+/// other outcome. A malformed subscription is skipped, the same way on the
+/// plan's read and the start's commit.
+pub(crate) fn sqlite_matched_subscriptions(
+    conn: &rusqlite::Connection,
     occurrence: &lash_core_execution::TriggerOccurrenceRecord,
-    created_at_ms: u64,
-) -> Result<Vec<lash_core_execution::TriggerDeliveryReservation>, lash_core_execution::PluginError>
-{
+) -> Result<Vec<lash_core_execution::TriggerSubscriptionRecord>, lash_core_execution::PluginError> {
+    if occurrence.outcome != lash_core_execution::TriggerOccurrenceOutcome::Fired {
+        return Ok(Vec::new());
+    }
     let sql = trigger_sql();
     let mut values: Vec<rusqlite::types::Value> = vec![
         occurrence.source_type.clone().into(),
@@ -1470,7 +1422,7 @@ fn reserve_sqlite_deliveries(
         }
         None => &sql.subscription_sqlite.select_enabled_for_source,
     };
-    let mut stmt = tx
+    let mut stmt = conn
         .prepare_cached(statement.sql())
         .map_err(process_sqlite_error)?;
     let rows = stmt
@@ -1490,44 +1442,12 @@ fn reserve_sqlite_deliveries(
             ),
         }
     }
-    drop(stmt);
-
-    let mut reservations = Vec::with_capacity(subscriptions.len());
-    for subscription in subscriptions {
-        let sql_revision =
-            plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
-        crate::conn::cached_execute(
-            tx,
-            sql.delivery.insert.sql(),
-            params![
-                occurrence.occurrence_id.as_str(),
-                subscription.subscription_id.as_str(),
-                subscription.incarnation.as_str(),
-                sql_revision,
-                lash_core_execution::facade_support::encode_trigger_row(&subscription)?,
-                created_at_ms as i64,
-                lash_core_execution::store::ObligationKey::TriggerDelivery {
-                    occurrence_id: occurrence.occurrence_id.clone(),
-                    subscription_id: subscription.subscription_id.clone(),
-                }
-                .id()
-                .as_str(),
-            ],
-        )
-        .map_err(process_sqlite_error)?;
-        reservations.push(lash_core_execution::TriggerDeliveryReservation {
-            occurrence: occurrence.clone(),
-            subscription,
-            process_id: None,
-            created_at_ms,
-        });
-    }
-    lash_core_execution::facade_support::sort_trigger_delivery_reservations(&mut reservations);
-    Ok(reservations)
+    lash_core_execution::facade_support::sort_trigger_subscriptions(&mut subscriptions);
+    Ok(subscriptions)
 }
 
 fn sqlite_delivery_snapshots(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     occurrence: &lash_core_execution::TriggerOccurrenceRecord,
 ) -> Result<Vec<lash_core_execution::TriggerDeliveryReservation>, lash_core_execution::PluginError>
 {
@@ -1537,9 +1457,7 @@ fn sqlite_delivery_snapshots(
     let rows = stmt
         .query_map(params![occurrence.occurrence_id.as_str()], |row| {
             Ok((
-                row.get::<_, Option<String>>(0)?
-                    .map(|value| crate::sql_process_id(0, value))
-                    .transpose()?,
+                crate::sql_process_id(0, row.get::<_, String>(0)?)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
             ))
@@ -1572,3 +1490,6 @@ mod revision_column_tests;
 #[cfg(test)]
 #[path = "triggers/outcome_laws.rs"]
 mod outcome_laws;
+
+#[path = "triggers/start.rs"]
+pub(crate) mod start;

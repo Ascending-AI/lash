@@ -86,7 +86,7 @@ lash_conformance::trigger_occurrence_listing_tests!({
     };
     reset(storage.pool()).await;
     let pool = storage.pool().clone();
-    let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
+    let store = super::trigger_stores(&storage);
     let injector = Arc::new(PostgresTriggerOccurrenceListingFaultInjector { pool });
     (database_fixture, store, injector)
 });

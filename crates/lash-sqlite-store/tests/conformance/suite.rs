@@ -691,15 +691,15 @@ lash_conformance::trigger_store_reopenable_tests!({
         });
         retained.keep(&reopened);
         ReopenableTriggerStore {
-            open: backend.trigger_store() as Arc<dyn TriggerStore>,
-            reopen: reopened.trigger_store() as Arc<dyn TriggerStore>,
+            open: lash_conformance::TriggerStores::of(&*backend),
+            reopen: lash_conformance::TriggerStores::of(&*reopened),
         }
     })
 });
 
 lash_conformance::trigger_occurrence_listing_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let store = backend.trigger_store() as Arc<dyn TriggerStore>;
+    let store = lash_conformance::TriggerStores::of(&*backend);
     let injector = Arc::new(SqliteTriggerOccurrenceListingFaultInjector {
         backend: backend.clone(),
     });
@@ -762,9 +762,9 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     .expect("poison trigger row");
     drop(conn);
 
-    let reopened = backend.reopen().await.trigger_store();
-    let ingress = reopened
-        .ingest_occurrence(lash_core_execution::TriggerOccurrenceRequest::new(
+    let reopened = backend.reopen().await;
+    let ingress = lash_conformance::TriggerStores::of(&*reopened)
+        .record_occurrence(lash_core_execution::TriggerOccurrenceRequest::new(
             source_type,
             source_key,
             serde_json::json!({ "button": "Blue" }),

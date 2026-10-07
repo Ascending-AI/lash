@@ -22,12 +22,9 @@ use lash_store_sql::artifact::cleanup_obligations::{
 };
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
 use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
-use lash_store_sql::process::processes::{
-    ProcessObligationStatements, ProcessStartObligationStatements,
-};
+use lash_store_sql::process::processes::ProcessObligationStatements;
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
 use lash_store_sql::session_runs::runs::SessionRunObligationStatements;
-use lash_store_sql::trigger::deliveries::DeliveryObligationStatements;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row};
 
@@ -35,7 +32,6 @@ use crate::StoreError;
 use crate::begin_guarded;
 use crate::process_sql::{
     ParentEndPlanObligationPostgresStatements, ProcessObligationPostgresStatements,
-    ProcessStartObligationPostgresStatements,
 };
 use crate::session_runs::SessionRunObligationPostgresStatements;
 use crate::session_sql::SessionMetaObligationPostgresStatements;
@@ -71,14 +67,6 @@ static PROCESSES: LazyLock<
     shared: ProcessObligationStatements::render(Dialect::postgres()),
     locking: ProcessObligationPostgresStatements::render(Dialect::postgres()),
 });
-static PROCESS_STARTS: LazyLock<
-    LedgerSql<ProcessStartObligationStatements, ProcessStartObligationPostgresStatements>,
-> = LazyLock::new(|| LedgerSql {
-    shared: ProcessStartObligationStatements::render(Dialect::postgres()),
-    locking: ProcessStartObligationPostgresStatements::render(Dialect::postgres()),
-});
-static DELIVERIES: LazyLock<DeliveryObligationStatements> =
-    LazyLock::new(|| DeliveryObligationStatements::render(Dialect::postgres()));
 static CLEANUP: LazyLock<CleanupObligationStatements> =
     LazyLock::new(|| CleanupObligationStatements::render(Dialect::postgres()));
 static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
@@ -99,20 +87,6 @@ fn obligation_sql(kind: ObligationKind) -> (ObligationSql<'static>, &'static str
         ObligationKind::ParentEnd => (
             PLANS.shared.obligation_sql(),
             PLANS.locking.obligation_select_due_locking.sql(),
-        ),
-        ObligationKind::TriggerDelivery => (
-            DELIVERIES.obligation_sql(),
-            crate::trigger_store::trigger_sql()
-                .delivery_postgres
-                .obligation_select_due_locking
-                .sql(),
-        ),
-        ObligationKind::ProcessStart => (
-            PROCESS_STARTS.shared.obligation_sql(),
-            PROCESS_STARTS
-                .locking
-                .start_obligation_select_due_locking
-                .sql(),
         ),
         ObligationKind::ProcessTerminal => (
             PROCESSES.shared.obligation_sql(),

@@ -1,11 +1,5 @@
 //! Shared fixtures for the store-backed tests.
 
-/// Storage ports over an isolated SQLite memory store set and a recording
-/// controller for tests that do not need a durable engine.
-pub async fn sqlite_recording_backend() -> lash_core_execution::Backend {
-    sqlite_memory_store_backend().await
-}
-
 std::thread_local! {
     /// The store sets the running test opened, held as its backends are.
     static TEST_STORE_SETS: std::cell::RefCell<Vec<std::sync::Arc<lash_sqlite_store::SqliteStoreSet>>> =
@@ -13,8 +7,8 @@ std::thread_local! {
 }
 
 /// A fresh SQLite memory store set, storage only (no engine), held for the
-/// rest of the running test: the twin of [`sqlite_recording_backend`] for a test that reaches
-/// only store ports.
+/// rest of the running test: the twin of [`sqlite_memory_store_backend`] for a test that
+/// reaches only store ports.
 pub async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
     let stores = std::sync::Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()

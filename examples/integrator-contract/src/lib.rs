@@ -440,10 +440,10 @@ impl TriggerStore for Integrator {
     ) -> Result<usize, PluginError> {
         unreachable!("external signature witness")
     }
-    async fn ingest_occurrence(
+    async fn plan_occurrence(
         &self,
-        request: TriggerOccurrenceRequest,
-    ) -> Result<TriggerIngressReceipt, PluginError> {
+        request: &TriggerOccurrenceRequest,
+    ) -> Result<TriggerOccurrencePlan, PluginError> {
         unreachable!("external signature witness")
     }
     async fn list_occurrences(
@@ -471,14 +471,6 @@ impl TriggerStore for Integrator {
         unreachable!("external signature witness")
     }
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn bind_delivery_process(
-        &self,
-        occurrence_id: &str,
-        subscription_id: &str,
-        process_id: &ProcessId,
-    ) -> Result<(), PluginError> {
         unreachable!("external signature witness")
     }
     async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, PluginError> {
@@ -881,12 +873,6 @@ impl ProcessToolIntents for Integrator {
 
 #[lash::async_trait]
 impl ProcessRetention for Integrator {
-    async fn release_trigger_delivery_pin(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<(), PluginError> {
-        unreachable!("external signature witness")
-    }
     async fn release_process_events(
         &self,
         process_id: &ProcessId,
@@ -895,9 +881,6 @@ impl ProcessRetention for Integrator {
         self.registry
             .release_process_events(process_id, through)
             .await
-    }
-    async fn list_trigger_delivery_pins(&self) -> Result<Vec<PinnedTriggerDelivery>, PluginError> {
-        unreachable!("external signature witness")
     }
     async fn compact_process_tombstones(
         &self,

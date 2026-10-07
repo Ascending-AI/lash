@@ -43,10 +43,10 @@ pub struct RetainedStart {
 /// Where a subscription revision stands (ADR 0113 §3.4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SubscriptionRevisionStanding {
-    /// It is the subscription's current live revision.
+    /// It is the subscription's current live revision. Every delivery
+    /// reserved under it bound its process in the transaction that recorded
+    /// it, so nothing else holds it.
     pub current: bool,
-    /// A delivery reserved under it has not bound its start yet.
-    pub unbound_deliveries: bool,
 }
 
 /// The authorities a guard asks whether its referrer has ended. Each answer
@@ -130,21 +130,7 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
                         TriggerSubscriptionLifecycle::Tombstoned(_)
                     )
             });
-        let unbound_deliveries = self
-            .triggers
-            .list_deliveries_by_subscription_id(revision.subscription_id())
-            .await
-            .map_err(|error| error.to_string())?
-            .iter()
-            .any(|delivery| {
-                delivery.process_id.is_none()
-                    && delivery.subscription.incarnation == revision.incarnation()
-                    && delivery.subscription.revision == revision.revision()
-            });
-        Ok(SubscriptionRevisionStanding {
-            current,
-            unbound_deliveries,
-        })
+        Ok(SubscriptionRevisionStanding { current })
     }
 }
 
@@ -297,7 +283,7 @@ impl ArtifactCleanupRelay {
                         .subscription_revision(revision)
                         .await
                         .map_err(retryable_text("subscription read"))?;
-                    if standing.current || standing.unbound_deliveries {
+                    if standing.current {
                         return Ok(Resolution::NotYet);
                     }
                     Ok(settled_or_not_yet(self.journal_settled(creator).await?))

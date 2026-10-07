@@ -584,15 +584,6 @@ CREATE TABLE IF NOT EXISTS processes (
     cascade_cursor        TEXT,
     written_epoch         INTEGER,
     record_json           TEXT NOT NULL,
-    start_obligation_id         TEXT,
-    start_obligation_state      TEXT,
-    start_obligation_attempts   INTEGER NOT NULL DEFAULT 0,
-    start_obligation_due_at_ms  INTEGER,
-    start_obligation_claim_token TEXT,
-    start_obligation_stall_reason TEXT,
-    start_obligation_last_error TEXT,
-    start_obligation_last_error_code TEXT CONSTRAINT ck_processes_start_obligation_error_code CHECK ((start_obligation_last_error IS NULL) = (start_obligation_last_error_code IS NULL)),
-    start_obligation_settled_at_ms INTEGER,
     obligation_id         TEXT,
     obligation_state      TEXT,
     obligation_attempts   INTEGER NOT NULL DEFAULT 0,
@@ -606,11 +597,7 @@ CREATE TABLE IF NOT EXISTS processes (
     consumer_hold_scope_kind TEXT,
     consumer_hold_scope_id TEXT,
     consumer_hold_cancels INTEGER,
-    trigger_delivery_pin_occurrence_id TEXT,
-    trigger_delivery_pin_subscription_id TEXT,
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
-    CONSTRAINT ck_processes_trigger_delivery_pin CHECK ((trigger_delivery_pin_occurrence_id IS NULL) = (trigger_delivery_pin_subscription_id IS NULL)),
-    CONSTRAINT ck_processes_start_obligation CHECK (((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
@@ -621,14 +608,6 @@ CREATE TABLE IF NOT EXISTS processes (
 -- and the stalled listing.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_obligation_id
     ON processes(obligation_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_start_obligation_id
-    ON processes(start_obligation_id);
-CREATE INDEX IF NOT EXISTS idx_processes_start_obligation_due
-    ON processes(start_obligation_due_at_ms, start_obligation_id)
-    WHERE start_obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_processes_start_obligation_stalled
-    ON processes(start_obligation_id)
-    WHERE start_obligation_state = 'stalled';
 CREATE INDEX IF NOT EXISTS idx_processes_obligation_due
     ON processes(obligation_due_at_ms, obligation_id)
     WHERE obligation_state IN ('due', 'claimed');
@@ -645,10 +624,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_start_key
 CREATE INDEX IF NOT EXISTS idx_processes_consumer_hold_owner
     ON processes(consumer_hold_scope_kind, consumer_hold_scope_id)
     WHERE consumer_hold_key IS NOT NULL;
--- A row pinned by its trigger delivery until the bind commits (FIG-4203).
-CREATE INDEX IF NOT EXISTS idx_processes_trigger_delivery_pin
-    ON processes(process_id)
-    WHERE trigger_delivery_pin_occurrence_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_processes_non_terminal
     ON processes(process_id) WHERE status IN ('running', 'waiting');
 

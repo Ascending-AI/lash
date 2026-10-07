@@ -314,6 +314,7 @@ fn store_trait_surface_is_fully_gated() {
         "subscriptions_changed_since",
         "list_subscriptions_with_cursor",
         "compact_subscription_tombstones",
+        "plan_occurrence",
     ] {
         if harness_drives(&sources, method) {
             covered += 1;

@@ -637,11 +637,6 @@ macro_rules! process_trigger_retention_tests {
     ($fixture:block) => {
         $crate::process_trigger_retention_tests!(@catalogue $fixture; [
             (trigger_capture_route_and_compaction_refusal_matrix, "trigger-capture-compaction-matrix"),
-            (trigger_delivery_recovery, "trigger-delivery-recovery"),
-            (trigger_delivery_pinned_recovery, "trigger-delivery-pinned-recovery"),
-            (trigger_delivery_pin, "trigger-delivery-pin"),
-            (trigger_delivery_start_admission, "trigger-delivery-start-admission"),
-            (trigger_delivery_refusal, "trigger-delivery-refusal"),
             (trigger_occurrence_redelivery_after_reclaim, "trigger-occurrence-redelivery-after-reclaim"),
             (trigger_redelivery_after_forget_starts_again, "trigger-redelivery-after-forget"),
         ]);

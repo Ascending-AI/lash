@@ -50,7 +50,6 @@ DROP TABLE IF EXISTS lash_session_terminal_changes CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_cancel_requests CASCADE;
 
-
 DROP TABLE IF EXISTS lash_queued_work_batches CASCADE;
 
 DROP TABLE IF EXISTS lash_pending_turn_inputs CASCADE;

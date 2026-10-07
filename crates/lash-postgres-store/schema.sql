@@ -602,15 +602,6 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     cascade_cursor TEXT,
     written_epoch BIGINT,
     record_json TEXT NOT NULL,
-    start_obligation_id TEXT,
-    start_obligation_state TEXT,
-    start_obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    start_obligation_due_at_ms BIGINT,
-    start_obligation_claim_token TEXT,
-    start_obligation_stall_reason TEXT,
-    start_obligation_last_error TEXT,
-    start_obligation_last_error_code TEXT CONSTRAINT ck_processes_start_obligation_error_code CHECK ((start_obligation_last_error IS NULL) = (start_obligation_last_error_code IS NULL)),
-    start_obligation_settled_at_ms BIGINT,
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -624,11 +615,7 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     consumer_hold_scope_kind TEXT,
     consumer_hold_scope_id TEXT COLLATE "C",
     consumer_hold_cancels BOOLEAN,
-    trigger_delivery_pin_occurrence_id TEXT,
-    trigger_delivery_pin_subscription_id TEXT,
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
-    CONSTRAINT ck_processes_trigger_delivery_pin CHECK ((trigger_delivery_pin_occurrence_id IS NULL) = (trigger_delivery_pin_subscription_id IS NULL)),
-    CONSTRAINT ck_processes_start_obligation CHECK (((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
@@ -639,11 +626,6 @@ CREATE TABLE IF NOT EXISTS lash_processes (
 CREATE INDEX IF NOT EXISTS idx_lash_processes_consumer_hold_owner
     ON lash_processes(consumer_hold_scope_kind, consumer_hold_scope_id)
     WHERE consumer_hold_key IS NOT NULL;
-
--- A row pinned by its trigger delivery until the bind commits (FIG-4203).
-CREATE INDEX IF NOT EXISTS idx_lash_processes_trigger_delivery_pin
-    ON lash_processes(process_id)
-    WHERE trigger_delivery_pin_occurrence_id IS NOT NULL;
 
 -- The consumer holds whose call was abandoned before it consumed its child
 -- (ADR 0116 §3.4): a registration under a marked key is refused, and the
@@ -661,14 +643,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_abandoned_consumer_holds_owner
 -- and the stalled listing.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_processes_obligation_id
     ON lash_processes(obligation_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_processes_start_obligation_id
-    ON lash_processes(start_obligation_id);
-CREATE INDEX IF NOT EXISTS idx_lash_processes_start_obligation_due
-    ON lash_processes(start_obligation_due_at_ms, start_obligation_id)
-    WHERE start_obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_lash_processes_start_obligation_stalled
-    ON lash_processes(start_obligation_id)
-    WHERE start_obligation_state = 'stalled';
 CREATE INDEX IF NOT EXISTS idx_lash_processes_obligation_due
     ON lash_processes(obligation_due_at_ms, obligation_id)
     WHERE obligation_state IN ('due', 'claimed');
@@ -890,24 +864,13 @@ CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
         CONSTRAINT lash_trigger_deliveries_occurrence_outcome_kind_check
         CHECK (occurrence_outcome_kind = 'fired'),
     subscription_id TEXT NOT NULL,
-    process_id TEXT,
+    process_id TEXT NOT NULL,
     subscription_incarnation TEXT NOT NULL,
     subscription_revision BIGINT NOT NULL,
     subscription_snapshot_json TEXT NOT NULL,
     created_at_ms BIGINT NOT NULL,
-    obligation_id TEXT,
-    obligation_state TEXT NOT NULL,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_trigger_deliveries_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
-    CONSTRAINT ck_trigger_deliveries_obligation CHECK (((obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     PRIMARY KEY (occurrence_id, subscription_id),
-    FOREIGN KEY (occurrence_id, occurrence_outcome_kind) REFERENCES lash_trigger_occurrences(occurrence_id, outcome_kind) ON DELETE CASCADE,
-    CONSTRAINT ck_trigger_deliveries_binding CHECK ((process_id IS NOT NULL) = (obligation_state = 'delivered'))
+    FOREIGN KEY (occurrence_id, occurrence_outcome_kind) REFERENCES lash_trigger_occurrences(occurrence_id, outcome_kind) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS lash_trigger_mutation_receipts (
     operation_id TEXT PRIMARY KEY,
@@ -922,16 +885,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_subscription
     ON lash_trigger_deliveries(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_process
     ON lash_trigger_deliveries(process_id);
--- A reserved delivery owes its start (ADR 0109, ADR 0021): its obligation id,
--- the relay's due read and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_obligation_id
-    ON lash_trigger_deliveries(obligation_id);
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_obligation_due
-    ON lash_trigger_deliveries(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_obligation_stalled
-    ON lash_trigger_deliveries(obligation_id)
-    WHERE obligation_state = 'stalled';
 
 CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
     namespace TEXT NOT NULL,

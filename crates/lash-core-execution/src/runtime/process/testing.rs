@@ -25,6 +25,5 @@ pub use registration_refusals::{
 };
 pub use registry_faults::{
     NonTerminalPagePause, NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
-    TriggerDeliveryPinReleaseLoss,
 };
 pub use support::TestProcessRegistryWriteExt;

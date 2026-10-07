@@ -57,7 +57,6 @@ fn peer_record(
         env_ref,
         wake_session_id: _,
         consumer_hold: _,
-        trigger_delivery_pin: _,
         engine_config,
         trace: _,
     } = registration;

@@ -54,14 +54,6 @@ pub enum RuntimeEffectKind {
     PresentToolResult,
     ToolParentEnd,
     Trigger,
-    /// An emission's recorded ingest of its occurrence (FIG-4503): a replay
-    /// serves the occurrence and reservations the store answered the first
-    /// execution, and writes nothing.
-    IngestTriggerOccurrence,
-    /// An emission's recorded binding of one trigger delivery to its process
-    /// (FIG-4297, FIG-4503): a replay serves the recorded process, and
-    /// neither binds nor reads the delivery.
-    AdmitTriggerDelivery,
     Process,
     ExecCode,
     /// Durable admission of a turn input (ADR 0069 section 6).
@@ -120,8 +112,6 @@ impl RuntimeEffectKind {
             Self::PresentToolResult => "present_tool_result",
             Self::ToolParentEnd => "tool_parent_end",
             Self::Trigger => "trigger",
-            Self::IngestTriggerOccurrence => "ingest_trigger_occurrence",
-            Self::AdmitTriggerDelivery => "admit_trigger_delivery",
             Self::Process => "process",
             Self::ExecCode => "exec_code",
             Self::AcceptTurnInput => "accept_turn_input",

@@ -108,13 +108,34 @@ impl ActorContext {
         envelope: crate::RuntimeEffectEnvelope,
         local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        match &envelope.command {
+        match envelope.command {
             // The registry operations commit their actor rows in their own
             // transactions: a start creates the actor ready, a cancel
             // records the first request with its mail, an await reads the
-            // process-terminal wait.
-            crate::RuntimeEffectCommand::Process { .. }
-            | crate::RuntimeEffectCommand::LoadExecutionEnv { .. } => local.execute(envelope).await,
+            // process-terminal wait. A process command runs on its own
+            // executor, never through `execute`, which refuses it.
+            crate::RuntimeEffectCommand::Process { command } => {
+                let result = if matches!(
+                    command.as_ref(),
+                    crate::ProcessCommand::PublishDefinition { .. }
+                        | crate::ProcessCommand::GetDefinition { .. }
+                ) {
+                    local.into_definition_execution()?.execute(*command).await?
+                } else {
+                    let receiver = envelope.invocation.execution_scope().clone();
+                    // Boxed: the start and await state machines are large.
+                    Box::pin(local.into_process()?.execute(&receiver, *command)).await?
+                };
+                Ok(crate::RuntimeEffectOutcome::Process { result })
+            }
+            command @ crate::RuntimeEffectCommand::LoadExecutionEnv { .. } => {
+                local
+                    .execute(crate::RuntimeEffectEnvelope {
+                        invocation: envelope.invocation,
+                        command,
+                    })
+                    .await
+            }
             other => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::EngineControlUnsupported,
                 format!("`{:?}` is not a process effect", other.kind()),

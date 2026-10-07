@@ -21,14 +21,6 @@ use crate::{PluginError, ProcessAwaitOutput};
 /// Deployment port for durable process work.
 #[async_trait::async_trait]
 pub trait ProcessWorkSubstrate: Send + Sync {
-    /// Submit `record`'s registered process to the engine: the delivery of
-    /// its `ProcessStart` obligation (ADR 0109). The relay supplies the armed
-    /// row's record as of the claim, already filtered of terminal processes;
-    /// a workflow engine coalesces a repeated
-    /// send on the process's workflow key.
-    async fn deliver_process_start(&self, record: &crate::ProcessRecord)
-    -> Result<(), PluginError>;
-
     /// There is no polling fallback and no "attach if provided". [`ProcessTerminalWait::Reattach`]
     /// is recoverable: the port bounded one transport attachment while the
     /// durable wait stayed live, so the caller re-enters with the same explicit
@@ -200,16 +192,6 @@ impl std::fmt::Debug for NoProcessWork {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for NoProcessWork {
-    async fn deliver_process_start(
-        &self,
-        record: &crate::ProcessRecord,
-    ) -> Result<(), PluginError> {
-        Err(PluginError::Invoke(format!(
-            "this engine cannot start process `{}`",
-            record.id
-        )))
-    }
-
     async fn await_process_terminal(
         &self,
         process_id: &crate::ProcessId,

@@ -61,6 +61,11 @@ impl CommitLabel {
     /// `cascade.batch`: One batch of a scope's `Until` children marked for cancel.
     pub const CASCADE_BATCH: Self = Self::new("cascade.batch");
 
+    // Triggers (L6).
+    /// `trigger.start`: A trigger occurrence recorded with its deliveries, each
+    /// bound to the process it started, whose actor is created ready.
+    pub const TRIGGER_START: Self = Self::new("trigger.start");
+
     // VM (V0, then L7).
     /// `cell.snapshot+admit`: A snapshot, its broker ledger and the admission of the operations it issued.
     pub const CELL_SNAPSHOT_ADMIT: Self = Self::new("cell.snapshot+admit");
@@ -116,7 +121,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 42] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -145,6 +150,7 @@ impl CommitLabel {
         Self::PROCESS_CANCEL,
         Self::PROCESS_TERMINAL,
         Self::CASCADE_BATCH,
+        Self::TRIGGER_START,
         Self::CELL_SNAPSHOT_ADMIT,
         Self::CELL_INJECT,
         Self::CELL_SNAPSHOT,

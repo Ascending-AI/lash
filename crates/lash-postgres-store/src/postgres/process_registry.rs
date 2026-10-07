@@ -29,7 +29,10 @@ use crate::process_sql::{list_processes_sql, process_sql};
 
 #[path = "process_registry/pages.rs"]
 pub(crate) mod pages;
+#[path = "process_registry/registration.rs"]
+pub(crate) mod registration;
 use prune::prune_process_rows_tx;
+use registration::{AppliedRegistration, apply_registration_tx};
 use retention::{filter_tombstoned_process_ids, filter_unregistered_process_ids};
 impl lash_core_execution::FleetFormatStore for PostgresProcessRegistry {
     fn fleet_format(&self) -> lash_core_execution::FleetFormat {
@@ -230,249 +233,54 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         anchor: lash_core_execution::TraceAnchor,
     ) -> Result<lash_core_execution::ProcessRegistrationReceipt, PluginError> {
         let (registration, observers, process_id, retained, now) = prepared.into_commit(anchor);
-        let mut observers = observers.to_vec();
-        observers.sort();
-        observers.dedup();
-        let wake_session_id = registration.wake_session_id.clone();
-        let consumer_hold = registration.consumer_hold.clone();
-        let trigger_delivery_pin = registration.trigger_delivery_pin.clone();
-        let start_key = registration.start_key.clone();
+        let unprepared = registration.clone();
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(plugin_store_error)?;
-        // While the process minted for a key is retained, a start under the
-        // same key returns that process untouched (ADR 0107); a host's key
-        // must also present its start, wake target included.
-        if let Some(start_key) = start_key.as_ref()
-            && let Some(existing) = load_process_by_start_key_tx(&mut tx, start_key).await?
-        {
-            if retained && existing.id != process_id {
-                return Err(
-                    lash_core_execution::StoreError::PreparedProcessRegistrationStale {
-                        process_id: process_id.clone(),
-                    }
-                    .into(),
-                );
-            }
-            let existing_wake = wake_session_id_tx(&mut tx, &existing.id).await?;
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            lash_core_execution::runtime::check_retained_start(
-                &registration,
-                &existing,
-                existing_wake.as_ref(),
-            )?;
-            return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
-                existing,
-            ));
-        }
-        if retained {
-            return Err(
-                lash_core_execution::StoreError::PreparedProcessRegistrationStale {
-                    process_id: process_id.clone(),
-                }
-                .into(),
-            );
-        }
-        // A delivery's key finds its process only while that process is
-        // retained. A delivery already bound, or gone, had its process
-        // pruned, and starts nothing: its row is read in this transaction,
-        // after the key found nothing, so a bind and prune that committed
-        // since this start's ingest are seen here (ADR 0107 §5, FIG-4369).
-        if let Some(pin) = trigger_delivery_pin.as_ref() {
-            let row: Option<Option<String>> = sqlx::query_scalar(
-                crate::trigger_store::trigger_sql()
-                    .delivery
-                    .select_bound_process_id
-                    .sql(),
-            )
-            .bind(pin.occurrence_id.as_str())
-            .bind(pin.subscription_id.as_str())
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-            let binding = match row {
-                None => lash_core_execution::runtime::TriggerDeliveryBinding::Absent,
-                Some(None) => lash_core_execution::runtime::TriggerDeliveryBinding::Unbound,
-                Some(Some(process_id)) => {
-                    lash_core_execution::runtime::TriggerDeliveryBinding::Bound(
-                        crate::stored_process_id(&process_id)?,
-                    )
-                }
-            };
-            lash_core_execution::runtime::check_trigger_delivery_start(pin, binding)?;
-        }
-        let unprepared = registration.clone();
-        let registration =
-            lash_core_execution::runtime::prepare_process_registration(registration)?;
-        // Admission against closure (FIG-3607 R11): a new start is refused
-        // once its starter has ended, whatever its own lifetime, once the
-        // scope its lifetime names has closed, and once the session either
-        // lies inside has closed (FIG-3948).
-        //
-        // The reads and this transaction's insert are one decision, so each
-        // is taken under its scope's advisory lock. Without it the pair is a
-        // check-then-act against a close written in its own transaction on
-        // another connection: the start would read "no row", the row would
-        // commit, the sweep would page children without seeing this
-        // uncommitted one, and the child would land live under a closed
-        // scope. Holding the lock orders the two writes either way round. The
-        // locks are taken in key order, so two starts never wait on each
-        // other's second lock.
-        let fenced = registration.closing_scopes();
-        for scope in &fenced {
-            parent_end::lock_parent_scope_tx(&mut tx, scope).await?;
-        }
-        for scope in fenced {
-            if parent_end::plan_exists_tx(&mut tx, &scope).await? {
-                return Err(lash_core_execution::PluginError::ParentEnded {
-                    start_key: registration.start_key.clone(),
-                    parent: scope,
-                });
-            }
-        }
-        // A start whose consuming call was abandoned is refused: the call's
-        // opener already drained what the hold owed (ADR 0116 §3.4). The
-        // hold's lock orders this read against the abandonment's mark.
-        if let Some(hold) = consumer_hold.as_ref() {
-            parent_end::lock_consumer_hold_tx(&mut tx, &hold.key).await?;
-            let abandoned: bool = sqlx::query_scalar(process_sql().abandoned_hold.exists.sql())
-                .bind(hold.key.as_str())
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-            if abandoned {
-                return Err(lash_core_execution::runtime::abandoned_consumer_refusal(
-                    registration.start_key.as_ref(),
-                    &hold.key,
-                ));
-            }
-        }
-        // Minted only once the start is admitted, so no refusal names an id
-        // that was never registered.
-        let change_seq = next_process_change_seq_tx(&mut tx).await?;
-        let mut record = ProcessRecord::from_prepared_registration(registration, process_id, now);
-        let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
-        let result = sqlx::query(process_sql().process_postgres.insert_registration.sql())
-            .bind(record.id.as_str())
-            .bind(
-                record
-                    .start_key
-                    .as_ref()
-                    .map(lash_core_execution::StartKey::as_str),
-            )
-            .bind(record.originator_id().as_str())
-            .bind(wake_session_id.as_deref())
-            .bind(record.identity.kind.as_str())
-            .bind(&record.identity.label)
-            .bind(record.created_at_ms as i64)
-            .bind(record.updated_at_ms as i64)
-            .bind(record.last_event_sequence as i64)
-            .bind(change_seq as i64)
-            .bind(process_status_label(&record))
-            .bind(
-                record
-                    .lifetime
-                    .scope()
-                    .map(lash_core_execution::ScopeId::storage_kind),
-            )
-            .bind(
-                record
-                    .lifetime
-                    .scope()
-                    .map(lash_core_execution::ScopeId::storage_id),
-            )
-            .bind(record.lifetime.storage_label())
-            .bind(cancel_requested_at_ms(&record))
-            .bind(record_json)
-            .bind(consumer_hold.as_ref().map(|hold| hold.key.clone()))
-            .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
-            .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
-            .bind(consumer_hold.as_ref().map(|hold| hold.cancels))
-            .bind(
-                trigger_delivery_pin
-                    .as_ref()
-                    .map(|pin| pin.occurrence_id.clone()),
-            )
-            .bind(
-                trigger_delivery_pin
-                    .as_ref()
-                    .map(|pin| pin.subscription_id.clone()),
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        // On this tier alone the read that found no retained process for the
-        // key and the insert that acts on it are two statements in one
-        // `READ COMMITTED` transaction, so each takes its own snapshot: two
-        // callers presenting one key can both read "no row". The change clock
-        // above orders the pair: the first holds that row lock from its bump
-        // until it commits, so by the time the second reaches this insert the
-        // winner's row is committed and `ON CONFLICT DO NOTHING` reports zero
-        // rows instead of raising the start-key unique index. Re-read the
-        // winner under this statement's own snapshot and abandon the attempt:
-        // the rollback takes the clock bump and the observer rows with it, so
-        // the loser adds no event and no `change_seq` of its own (ADR 0046),
-        // and the caller gets the sequential answer — the winner's process.
-        if result.rows_affected() == 0 {
-            let winner = match start_key.as_ref() {
-                Some(start_key) => load_process_by_start_key_tx(&mut tx, start_key).await?,
-                None => None,
-            };
-            let winner_wake = match winner.as_ref() {
-                Some(winner) => wake_session_id_tx(&mut tx, &winner.id).await?,
-                None => None,
-            };
-            tx.rollback().await.map_err(plugin_sqlx_error)?;
-            let Some(winner) = winner else {
-                return Err(PluginError::Session(format!(
-                    "process `{}` lost the registration insert race to a row that no longer exists",
-                    record.id
-                )));
-            };
-            lash_core_execution::runtime::check_retained_start(
-                &unprepared,
-                &winner,
-                winner_wake.as_ref(),
-            )?;
-            return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
-                winner,
-            ));
-        }
-        // The process's actor commits with its row, ready: the start is a
-        // wake of the actor, never a relayed obligation (ADR 0132 §12).
-        crate::durable::processes::create_actor_within(
+        match apply_registration_tx(
             &mut tx,
-            &record.id,
-            lash_durable::domain::PROCESS_FORMATS,
-            lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
+            registration,
+            observers,
+            process_id,
+            retained,
+            now,
+            self.fence.fleet(),
         )
-        .await
-        .map_err(|error| PluginError::Session(error.to_string()))?;
-        let process_id = record.id.clone();
-        for session_id in observers {
-            sqlx::query(process_sql().observer.insert.sql())
-                .bind(session_id.as_str())
-                .bind(process_id.as_str())
-                .execute(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-            append_process_event_tx(
-                &mut tx,
-                &mut record,
-                ProcessEventAppendRequest::observer_added(
-                    &process_id,
-                    &session_id,
-                    &ProcessObserverBy::host("registration"),
-                ),
-                now,
-                self.fence.fleet(),
-            )
-            .await?;
+        .await?
+        {
+            AppliedRegistration::Created(record) => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                Ok(lash_core_execution::ProcessRegistrationReceipt::created(
+                    record,
+                ))
+            }
+            AppliedRegistration::Retained { record, wake } => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                lash_core_execution::runtime::check_retained_start(
+                    &unprepared,
+                    &record,
+                    wake.as_ref(),
+                )?;
+                Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
+                    record,
+                ))
+            }
+            // The rollback takes the clock bump and the observer rows with
+            // it, so the loser adds no event and no `change_seq` of its own
+            // (ADR 0046), and the caller gets the sequential answer — the
+            // winner's process.
+            AppliedRegistration::LostRace { winner, wake } => {
+                tx.rollback().await.map_err(plugin_sqlx_error)?;
+                lash_core_execution::runtime::check_retained_start(
+                    &unprepared,
+                    &winner,
+                    wake.as_ref(),
+                )?;
+                Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
+                    winner,
+                ))
+            }
         }
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core_execution::ProcessRegistrationReceipt::created(
-            record,
-        ))
     }
 
     async fn set_external_ref(
@@ -1093,45 +901,6 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         })
         .await
         .map_err(plugin_store_error)
-    }
-
-    async fn release_trigger_delivery_pin(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<(), PluginError> {
-        crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
-            Box::pin(async move {
-                sqlx::query(process_sql().process.release_trigger_delivery_pin.sql())
-                    .bind(process_id.as_str())
-                    .execute(tx.as_mut())
-                    .await
-                    .map(drop)
-                    .map_err(store_sqlx_error)
-            })
-        })
-        .await
-        .map_err(plugin_store_error)
-    }
-
-    async fn list_trigger_delivery_pins(
-        &self,
-    ) -> Result<Vec<lash_core_execution::PinnedTriggerDelivery>, PluginError> {
-        let rows: Vec<(String, String, String)> =
-            sqlx::query_as(process_sql().process.list_trigger_delivery_pins.sql())
-                .fetch_all(&self.pool)
-                .await
-                .map_err(plugin_sqlx_error)?;
-        rows.into_iter()
-            .map(|(process_id, occurrence_id, subscription_id)| {
-                Ok(lash_core_execution::PinnedTriggerDelivery {
-                    process_id: crate::stored_process_id(&process_id)?,
-                    pin: lash_core_execution::TriggerDeliveryPin {
-                        occurrence_id,
-                        subscription_id,
-                    },
-                })
-            })
-            .collect()
     }
 
     async fn abandon_consumer_hold(

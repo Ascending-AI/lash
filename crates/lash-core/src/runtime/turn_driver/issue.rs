@@ -35,11 +35,7 @@ pub(crate) async fn issue_effect(
         | RuntimeEffectCommand::PluginCallbacks { .. } => cx.ingress_effect(envelope, local).await,
         RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::PresentToolResult { .. }
-        | RuntimeEffectCommand::Trigger { .. }
-        | RuntimeEffectCommand::IngestTriggerOccurrence { .. }
-        | RuntimeEffectCommand::AdmitTriggerDelivery { .. } => {
-            cx.tool_effect(envelope, local).await
-        }
+        | RuntimeEffectCommand::Trigger { .. } => cx.tool_effect(envelope, local).await,
         RuntimeEffectCommand::Sleep { .. }
         | RuntimeEffectCommand::AwaitEvent { .. }
         | RuntimeEffectCommand::PeekAwaitEvent { .. } => cx.wait_effect(envelope, local).await,

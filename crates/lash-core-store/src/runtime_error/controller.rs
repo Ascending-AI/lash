@@ -161,8 +161,6 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::ResolveConfigTransaction
                 | RuntimeEffectKind::CloseRunScope
-                | RuntimeEffectKind::IngestTriggerOccurrence
-                | RuntimeEffectKind::AdmitTriggerDelivery
                 | RuntimeEffectKind::Process
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
             || self.is_unbound_llm_profile_call(kind)

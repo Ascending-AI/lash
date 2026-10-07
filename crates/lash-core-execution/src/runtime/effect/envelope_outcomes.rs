@@ -97,34 +97,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    /// Extracts the receipt an emission's recorded ingest was answered
-    /// (FIG-4503).
-    pub fn into_trigger_ingress_receipt(
-        self,
-    ) -> Result<crate::TriggerIngressReceipt, RuntimeEffectControllerError> {
-        match self {
-            Self::IngestTriggerOccurrence { receipt } => Ok(*receipt),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::IngestTriggerOccurrence,
-                other.kind(),
-            )),
-        }
-    }
-
-    /// Extracts the binding an emission recorded for one trigger delivery
-    /// (FIG-4297).
-    pub(crate) fn into_trigger_delivery_admission(
-        self,
-    ) -> Result<crate::TriggerDeliveryAdmission, RuntimeEffectControllerError> {
-        match self {
-            Self::AdmitTriggerDelivery { admission } => Ok(*admission),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::AdmitTriggerDelivery,
-                other.kind(),
-            )),
-        }
-    }
-
     pub fn into_exec_code(
         self,
     ) -> Result<Result<ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError> {
@@ -211,8 +183,6 @@ impl RuntimeEffectOutcome {
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
-            Self::IngestTriggerOccurrence { .. } => RuntimeEffectKind::IngestTriggerOccurrence,
-            Self::AdmitTriggerDelivery { .. } => RuntimeEffectKind::AdmitTriggerDelivery,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,

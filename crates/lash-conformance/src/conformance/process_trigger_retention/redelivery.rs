@@ -1,11 +1,11 @@
 //! A redelivered emission on a host that journals nothing never writes a
 //! reclaimed occurrence or delivery back (FIG-4513).
 //!
-//! A host with no journal runs an emission's ingest again on every
-//! redelivery. Once retention has reclaimed the occurrence, the ingest finds
-//! no row under the idempotency key. The trigger store answers from the
-//! tombstone the reclaim left: it refuses the ingest as reclaimed and writes
-//! nothing, so the emission reserves and starts nothing.
+//! A host with no journal plans an emission again on every redelivery. Once
+//! retention has reclaimed the occurrence, the plan finds no row under the
+//! idempotency key. The trigger store answers from the tombstone the reclaim
+//! left: it refuses the plan as reclaimed, so the emission writes, reserves
+//! and starts nothing.
 //!
 //! Reclaim never deletes the tombstone (FIG-4610). Only an explicit host
 //! forget allows its identity to run again.
@@ -76,11 +76,12 @@ async fn deliver(
     handles: &ProcessTriggerRetentionHandles,
     request: &crate::TriggerOccurrenceRequest,
 ) -> Result<lash_core::facade_support::TriggerEmitReport, crate::PluginError> {
-    let scoped = crate::ActorContext::unavailable()
-        .scoped(crate::admit(crate::ExecutionScope::runtime_operation(
-            format!("redelivery:{}", request.idempotency_key),
-        )))
-        .expect("scope the emission");
+    let scoped =
+        crate::ActorContext::detached(crate::Backend::for_testing(Arc::clone(&handles.stores)))
+            .scoped(crate::admit(crate::ExecutionScope::runtime_operation(
+                format!("redelivery:{}", request.idempotency_key),
+            )))
+            .expect("scope the emission");
     router(handles)
         .emit_recorded(request.clone(), &scoped)
         .await
@@ -344,7 +345,7 @@ pub(super) async fn a_redelivered_audit_emission_writes_no_pruned_occurrence_bac
 pub(super) async fn tombstones_survive_every_reclaim<F, Fut>(make: F)
 where
     F: Fn(Arc<dyn crate::Clock>) -> Fut,
-    Fut: Future<Output = Arc<dyn TriggerStore>>,
+    Fut: Future<Output = crate::TriggerStores>,
 {
     const RECLAIMED_AT_MS: u64 = 4_000_000_000_000;
     let clock = Arc::new(crate::testing::TestClock::new(RECLAIMED_AT_MS));
@@ -356,7 +357,7 @@ where
         "retained-occurrence",
     );
     triggers
-        .ingest_occurrence(request.clone())
+        .record_occurrence(request.clone())
         .await
         .expect("ingest first occurrence");
     assert_eq!(
@@ -383,7 +384,7 @@ where
                 0
             );
             let error = triggers
-                .ingest_occurrence(request.clone())
+                .record_occurrence(request.clone())
                 .await
                 .expect_err("every reclaim retains the redelivery fence");
             assert!(
@@ -418,7 +419,7 @@ pub(super) async fn forgetting_selects_exactly_the_tombstones_written_before_the
     make: F,
 ) where
     F: Fn(Arc<dyn crate::Clock>) -> Fut,
-    Fut: Future<Output = Arc<dyn TriggerStore>>,
+    Fut: Future<Output = crate::TriggerStores>,
 {
     const INGESTED_AT_MS: u64 = 4_000_000_000_000;
     let clock = Arc::new(crate::testing::TestClock::new(INGESTED_AT_MS));
@@ -433,7 +434,7 @@ pub(super) async fn forgetting_selects_exactly_the_tombstones_written_before_the
     });
     for request in &requests[..2] {
         triggers
-            .ingest_occurrence(request.clone())
+            .record_occurrence(request.clone())
             .await
             .expect("ingest older occurrence");
     }
@@ -447,7 +448,7 @@ pub(super) async fn forgetting_selects_exactly_the_tombstones_written_before_the
         2
     );
     triggers
-        .ingest_occurrence(requests[2].clone())
+        .record_occurrence(requests[2].clone())
         .await
         .expect("ingest newer occurrence");
     clock.advance(10);
@@ -489,12 +490,12 @@ pub(super) async fn forgetting_selects_exactly_the_tombstones_written_before_the
     );
     for request in &requests[..2] {
         triggers
-            .ingest_occurrence(request.clone())
+            .record_occurrence(request.clone())
             .await
             .expect("forgotten identities ingest again");
     }
     let error = triggers
-        .ingest_occurrence(requests[2].clone())
+        .record_occurrence(requests[2].clone())
         .await
         .expect_err("the tombstone at the cutoff survives");
     assert!(

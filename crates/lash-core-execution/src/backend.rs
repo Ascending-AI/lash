@@ -237,8 +237,14 @@ impl Backend {
         label: lash_durable::CommitLabel,
     ) -> Result<lash_durable::MailCommit, DurableError> {
         let commit = self.durable().commit_mail(tx, label).await?;
-        self.inner.hints.woke(&commit);
+        self.hint_woken(&commit);
         Ok(commit)
+    }
+
+    /// Hand every actor `commit` woke to this node's runner, as
+    /// [`Self::commit_mail`] does after its commit.
+    pub(crate) fn hint_woken(&self, commit: &lash_durable::MailCommit) {
+        self.inner.hints.woke(commit);
     }
 
     /// Wake `session`'s actor from outside a store transaction: a mailbox

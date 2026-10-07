@@ -37,7 +37,7 @@ impl TriggerOccurrenceRetentionFaultInjector for SqliteTriggerOccurrenceRetentio
 
 lash_conformance::trigger_retention_fault_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let store = backend.trigger_store() as Arc<dyn TriggerStore>;
+    let store = lash_conformance::TriggerStores::of(&*backend);
     let fault = Arc::new(SqliteTriggerOccurrenceRetentionFaultInjector {
         backend: backend.clone(),
     });
@@ -52,17 +52,10 @@ lash_conformance::process_trigger_retention_tests!({
             let backend = TestBackend::open(SUBSTRATE).await;
             retained.keep(&backend);
             lash_conformance::ProcessTriggerRetentionHandles {
+                stores: Arc::new((*backend).clone()) as Arc<dyn lash_core_execution::StoreSet>,
                 registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
                 triggers: backend.trigger_store() as Arc<dyn TriggerStore>,
                 sessions: backend.store().await as Arc<dyn lash_core_execution::DeploymentStore>,
-                deliveries: lash_core_execution::StoreSet::obligation_ledger(
-                    &*backend,
-                    lash_core_execution::store::ObligationKind::TriggerDelivery,
-                ),
-                process_starts: lash_core_execution::StoreSet::obligation_ledger(
-                    &*backend,
-                    lash_core_execution::store::ObligationKind::ProcessStart,
-                ),
                 process_env: lash_core_execution::StoreSet::process_env_store(&*backend),
             }
         }
@@ -76,7 +69,7 @@ lash_conformance::trigger_occurrence_tombstone_retention_tests!({
         async move {
             let backend = TestBackend::open_with_clock(SUBSTRATE, clock).await;
             retained.keep(&backend);
-            backend.trigger_store() as Arc<dyn TriggerStore>
+            lash_conformance::TriggerStores::of(&*backend)
         }
     })
 });

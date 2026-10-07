@@ -245,16 +245,6 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
          ) VALUES ('bad-owner-kind', 'workflow', 'owner', 'fingerprint', '{}', 0)",
         "ck_trigger_receipts_owner_kind",
     );
-    assert_check_rejects(
-        &triggers,
-        "INSERT INTO trigger_deliveries (
-             occurrence_id, subscription_id, process_id, subscription_incarnation,
-             subscription_revision, subscription_snapshot_json, created_at_ms,
-             obligation_id, obligation_state, obligation_due_at_ms
-         ) VALUES ('occurrence', 'subscription', NULL, 'incarnation', 1, '{}', 0,
-                   NULL, 'due', 0)",
-        "ck_trigger_deliveries_obligation",
-    );
 }
 
 #[test]
@@ -401,20 +391,4 @@ fn parent_end_delivery_atomically_arms_reclaim() {
         )
         .expect("apply stalled plan");
     assert_eq!(stamps(), ("stalled".into(), None));
-}
-
-#[test]
-fn trigger_delivery_cannot_settle_without_binding() {
-    let conn = Connection::open_in_memory().expect("trigger fixture");
-    conn.execute_batch(crate::trigger_schema::TRIGGER_SCHEMA)
-        .expect("trigger schema");
-    conn.execute_batch("INSERT INTO trigger_occurrences
-        (occurrence_id, idempotency_key, source_type, source_key, occurred_at_ms, outcome_kind, record_json)
-        VALUES ('occurrence', 'key', 'source', 'key', 0, 'fired', '{}')").expect("occurrence");
-    assert_check_rejects(&conn,
-        "INSERT INTO trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation,
-         subscription_revision, subscription_snapshot_json, created_at_ms, obligation_id,
-         obligation_state, obligation_settled_at_ms)
-         VALUES ('occurrence', 'subscription', 'incarnation', 1, '{}', 0, 'obligation', 'delivered', 1)",
-        "ck_trigger_deliveries_binding");
 }

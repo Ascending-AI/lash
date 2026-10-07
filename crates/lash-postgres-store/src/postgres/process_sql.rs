@@ -78,10 +78,9 @@ lash_store_sql::statements! {
                 change_seq, status,
                 lifetime_scope_kind, lifetime_scope_id, lifetime, cancel_requested_at_ms,
                 record_json, consumer_hold_key, consumer_hold_scope_kind, consumer_hold_scope_id,
-                consumer_hold_cancels, trigger_delivery_pin_occurrence_id,
-                trigger_delivery_pin_subscription_id
+                consumer_hold_cancels
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
              ON CONFLICT (start_key) WHERE start_key IS NOT NULL DO NOTHING";
 
         /// How many processes are live.
@@ -176,14 +175,13 @@ lash_store_sql::statements! {
          LIMIT ?2";
 
         /// Prune candidates: retired rows older than `?1`, at or below change
-        /// sequence `?2`, with no consumer hold and no trigger delivery pin.
-        /// The survey half, which locks nothing.
+        /// sequence `?2`, with no consumer hold. The survey half, which locks
+        /// nothing.
         list_prunable_terminal = "SELECT record_json FROM processes
          WHERE {{retired_process_status(status)}}
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
-           AND trigger_delivery_pin_occurrence_id IS NULL
          ORDER BY process_id ASC";
 
         /// The same predicate, locking every candidate row for the prune that
@@ -197,7 +195,6 @@ lash_store_sql::statements! {
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
-           AND trigger_delivery_pin_occurrence_id IS NULL
          ORDER BY process_id ASC
          FOR UPDATE";
 
@@ -606,17 +603,6 @@ lash_store_sql::statements! {
         obligation_select_due_locking = "SELECT obligation_id FROM processes
              WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
              ORDER BY obligation_due_at_ms, obligation_id
-             LIMIT ?2
-             FOR UPDATE SKIP LOCKED";
-    }
-}
-
-lash_store_sql::statements! {
-    /// Lock the due process-start obligations before claiming them.
-    pub(crate) struct ProcessStartObligationPostgresStatements @ "process" {
-        start_obligation_select_due_locking = "SELECT start_obligation_id FROM processes
-             WHERE start_obligation_state IN ('due', 'claimed') AND start_obligation_due_at_ms <= ?1
-             ORDER BY start_obligation_due_at_ms, start_obligation_id
              LIMIT ?2
              FOR UPDATE SKIP LOCKED";
     }

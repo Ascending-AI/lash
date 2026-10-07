@@ -132,15 +132,18 @@ async fn backend_trigger_store_observes_the_backend_clock_for_the_worker_config(
 
     let public_trigger_store = core.durable_process_worker_config()?.trigger_store();
 
-    let receipt = public_trigger_store
-        .ingest_occurrence(lash_core::TriggerOccurrenceRequest::new(
+    let plan = public_trigger_store
+        .plan_occurrence(&lash_core::TriggerOccurrenceRequest::new(
             "fig1882.clock",
             "public-worker-config",
             serde_json::Value::Null,
             "fig1882:public-worker-config",
         ))
         .await
-        .expect("the backend's trigger store must ingest the clock probe");
-    assert_eq!(receipt.occurrence.occurred_at_ms, NOW_MS);
+        .expect("the backend's trigger store must plan the clock probe");
+    let lash_core::TriggerOccurrencePlan::Fresh { occurrence, .. } = plan else {
+        panic!("a fresh store holds no occurrence: {plan:?}");
+    };
+    assert_eq!(occurrence.occurred_at_ms, NOW_MS);
     Ok(())
 }

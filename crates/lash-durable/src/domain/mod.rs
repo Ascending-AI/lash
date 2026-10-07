@@ -33,6 +33,7 @@ pub mod run_records;
 pub mod session_close;
 pub mod session_mail;
 pub mod snapshots;
+pub mod triggers;
 pub mod turns;
 pub mod waits;
 
@@ -48,6 +49,7 @@ pub use session_mail::{
     MailBatch, MailBatchKind, MailInput, SESSION_ACTOR_FORMATS, SessionMailWrite, SessionMailbox,
 };
 pub use snapshots::{SnapshotRev, SnapshotRow, SnapshotWrite};
+pub use triggers::{TriggerStart, TriggerStartAnswer};
 pub use turns::{
     ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnPhase, TurnRow,
     TurnTerminal, TurnWrite,
@@ -112,6 +114,9 @@ pub enum MailDomainWrite {
     /// activations, record the redrive on the park feed, and control-wake
     /// it.
     Redrive(RedriveRequest),
+    /// L6: record a trigger occurrence and start its deliveries' processes,
+    /// each delivery bound to its process, every actor created ready.
+    StartTrigger(TriggerStart),
 }
 
 /// The answer to one [`MailDomainWrite`], in the order they were recorded.
@@ -125,6 +130,8 @@ pub enum MailAnswer {
     RequestTurnCancel(TurnCancelAnswer),
     /// The answer to [`MailDomainWrite::Redrive`].
     Redrive(RedriveAnswer),
+    /// The answer to [`MailDomainWrite::StartTrigger`].
+    StartTrigger(TriggerStartAnswer),
 }
 
 /// A conditional domain write that found the rows otherwise than it
@@ -208,6 +215,35 @@ pub enum DomainRefusal {
         session: SessionId,
         /// The input or batch.
         item: String,
+    },
+    /// A trigger start's occurrence is already recorded: another emission of
+    /// it committed since the start's plan read.
+    #[error("trigger occurrence {occurrence} is already recorded")]
+    TriggerOccurrenceHeld {
+        /// The occurrence.
+        occurrence: String,
+    },
+    /// A trigger start's occurrence was reclaimed by retention; its
+    /// tombstone refuses it until the host forgets it.
+    #[error("trigger occurrence {occurrence} was reclaimed")]
+    TriggerOccurrenceReclaimed {
+        /// The occurrence.
+        occurrence: String,
+    },
+    /// The subscriptions a trigger start's occurrence matches are not the
+    /// ones its deliveries were prepared against.
+    #[error("the subscriptions trigger occurrence {occurrence} matches moved since its plan")]
+    TriggerSubscriptionsMoved {
+        /// The occurrence.
+        occurrence: String,
+    },
+    /// A trigger start's prepared registration was refused by the registrar.
+    #[error("trigger occurrence {occurrence} could not register its delivery's process: {reason}")]
+    TriggerStartRefused {
+        /// The occurrence.
+        occurrence: String,
+        /// The registrar's refusal.
+        reason: String,
     },
     /// The session head moved past the revision the commit expected.
     #[error("session {session} head is at {found:?}, not the expected {expected}")]

@@ -340,8 +340,8 @@ pub(crate) fn workbench_lashlang_resources() -> lash::rlm::lang::LashlangHostCat
 }
 
 /// The configuration contract `cron.Schedule` declares, and therefore the
-/// contract a registration captures and `start_delivery` checks every emitted
-/// occurrence source against. `tz` is optional, so an occurrence for a schedule
+/// contract a registration captures and a delivery's start checks every
+/// emitted occurrence source against. `tz` is optional, so an occurrence for a schedule
 /// registered without one must omit the key rather than send `null`.
 pub(crate) fn cron_schedule_config_type() -> lash::rlm::lang::TypeExpr {
     lash::rlm::lang::TypeExpr::Object(vec![

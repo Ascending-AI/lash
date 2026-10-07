@@ -3,15 +3,33 @@ mod tests {
 
     use lash_sansio::sync::MutexExt;
 
-    use crate::SessionId;
     use crate::triggers::*;
 
     /// Every port of one memory backend the router tests route through.
     struct RouterWorld {
+        backend: crate::Backend,
         store: Arc<dyn crate::TriggerStore>,
         registry: Arc<dyn crate::ProcessRegistry>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
         env_ref: crate::ProcessExecutionEnvRef,
+    }
+
+    impl RouterWorld {
+        /// The context an emission commits its start through.
+        fn emitter(&self) -> crate::ActorContext {
+            crate::ActorContext::detached(self.backend.clone())
+        }
+
+        /// Every process the registry holds, any status.
+        async fn processes(&self) -> Vec<crate::ProcessRecord> {
+            self.registry
+                .list_processes(&crate::ProcessListFilter {
+                    status: crate::ProcessStatusFilter::Any,
+                    ..crate::ProcessListFilter::default()
+                })
+                .await
+                .expect("list processes")
+        }
     }
 
     async fn router_world() -> RouterWorld {
@@ -23,6 +41,7 @@ mod tests {
         RouterWorld {
             store: stores.trigger_store(),
             registry: stores.process_registry(),
+            backend: lash_conformance::backend_over(stores),
             process_env_store,
             env_ref,
         }
@@ -85,10 +104,34 @@ mod tests {
         )
     }
 
+    fn pressed(source_key: &str, idempotency_key: &str) -> TriggerOccurrenceRequest {
+        TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            source_key,
+            serde_json::json!({"button": "Blue"}),
+            idempotency_key,
+        )
+        .with_source(serde_json::json!({"account": "a"}))
+    }
+
     struct StubRestorer {
         refusal: Option<TriggerRouteRefusal>,
-        calls: Arc<std::sync::atomic::AtomicUsize>,
-        seen: Arc<Mutex<Vec<TriggerSourceCapture>>>,
+        calls: std::sync::atomic::AtomicUsize,
+        seen: Mutex<Vec<TriggerSourceCapture>>,
+    }
+
+    impl StubRestorer {
+        fn new(refusal: Option<TriggerRouteRefusal>) -> Arc<Self> {
+            Arc::new(Self {
+                refusal,
+                calls: std::sync::atomic::AtomicUsize::new(0),
+                seen: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
     }
 
     #[async_trait::async_trait]
@@ -103,52 +146,49 @@ mod tests {
         }
     }
 
-    async fn router_with_restorer(
-        store: Arc<dyn crate::TriggerStore>,
-        registry: Arc<dyn crate::ProcessRegistry>,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-        restorer: Option<Arc<StubRestorer>>,
-    ) -> TriggerRouter {
-        let mut router = TriggerRouter::new(
-            store,
-            crate::testing::process_work_wiring_for_registry(registry),
+    fn router_with_restorer(world: &RouterWorld, restorer: Arc<StubRestorer>) -> TriggerRouter {
+        TriggerRouter::new(
+            Arc::clone(&world.store),
+            crate::testing::process_work_wiring_for_registry(Arc::clone(&world.registry)),
         )
-        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
-        if let Some(restorer) = restorer {
-            router = router.with_route_restorer(restorer);
-        }
-        router
+        .with_process_artifacts(
+            Arc::clone(&world.process_env_store),
+            crate::testing::process_engine_fixture(),
+        )
+        .with_route_restorer(restorer)
     }
 
-    /// FIG-2913: an explicit update after a delivery was reserved must not
-    /// rewrite that delivery's captured contract or route.
+    /// FIG-2913 and FIG-4554: an update after an occurrence started leaves
+    /// its delivery's captured contract and route intact, and its emission
+    /// again answers the process it started without asking the route.
     #[tokio::test]
-    async fn update_after_reservation_leaves_the_reserved_delivery_capture_intact() {
+    async fn a_held_occurrence_answers_the_capture_it_started_against_and_asks_no_route() {
         let world = router_world().await;
-        let store = Arc::clone(&world.store);
-        let env_ref = world.env_ref.clone();
         let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
-        let draft = trigger_process_draft(&source_key, "reserved", env_ref.clone())
-            .with_source_capture(captured_provider_source());
-        let registered = register(store.as_ref(), "reserved-register", draft).await;
+        let registered = register(
+            world.store.as_ref(),
+            "held-register",
+            trigger_process_draft(&source_key, "held", world.env_ref.clone())
+                .with_source_capture(captured_provider_source()),
+        )
+        .await;
+        let restorer = StubRestorer::new(None);
+        let router = router_with_restorer(&world, Arc::clone(&restorer));
 
-        let receipt = store
-            .ingest_occurrence(
-                TriggerOccurrenceRequest::new(
-                    "ui.button.pressed",
-                    source_key.clone(),
-                    serde_json::json!({"button": "Blue"}),
-                    "reserve-first",
-                )
-                .with_source(serde_json::json!({"account": "a"})),
-            )
+        let first = router
+            .emit(pressed(&source_key, "held-first"), &world.emitter())
             .await
-            .expect("reserve delivery");
-        assert_eq!(receipt.reservations.len(), 1);
+            .expect("the first emission starts its delivery");
+        let [delivery] = first.deliveries.as_slice() else {
+            panic!("one subscription matches: {first:?}");
+        };
+        let TriggerDeliveryEmitOutcome::Started { process_id } = &delivery.outcome else {
+            panic!("the delivery started: {first:?}");
+        };
+        assert_eq!(restorer.calls(), 1, "a fresh start restores its route once");
         assert_eq!(
-            receipt.reservations[0].subscription.source_capture,
-            captured_provider_source(),
-            "the reservation pins the capture that was live when it reserved"
+            *restorer.seen.lock_recover(),
+            vec![captured_provider_source()]
         );
 
         let rerouted = TriggerSourceCapture::provider(
@@ -157,14 +197,15 @@ mod tests {
             "other-provider",
             serde_json::json!({"account": "b"}),
         );
-        let updated = store
+        let updated = world
+            .store
             .execute_command(
-                "reserved-update",
+                "held-update",
                 TriggerCommand::Update {
                     owner_scope: TriggerOwnerScope::host("test").unwrap(),
                     actor: crate::ProcessOriginator::host_scoped("test"),
                     subscription_key: registered.subscription_key.clone(),
-                    draft: trigger_process_draft(&source_key, "reserved", env_ref)
+                    draft: trigger_process_draft(&source_key, "held", world.env_ref.clone())
                         .with_source_capture(rerouted.clone()),
                     expected_revision: registered.revision,
                 },
@@ -176,38 +217,36 @@ mod tests {
             panic!("expected mutation receipt")
         };
         assert_eq!(updated.record.source_capture, rerouted);
-        assert_ne!(
-            updated.record.definition_fingerprint, registered.definition_fingerprint,
-            "a rerouted source is a different definition"
-        );
 
-        let replayed = store
-            .ingest_occurrence(
-                TriggerOccurrenceRequest::new(
-                    "ui.button.pressed",
-                    source_key,
-                    serde_json::json!({"button": "Blue"}),
-                    "reserve-first",
-                )
-                .with_source(serde_json::json!({"account": "a"})),
-            )
+        let again = router
+            .emit(pressed(&source_key, "held-first"), &world.emitter())
             .await
-            .expect("replay reservation");
+            .expect("the redelivered emission answers its occurrence");
+        assert_eq!(again, first, "the held occurrence answers its first start");
+        let held = world
+            .store
+            .list_deliveries_by_occurrence_id(&first.occurrence_id)
+            .await
+            .expect("read the delivery");
+        let [held] = held.as_slice() else {
+            panic!("the occurrence holds one delivery: {held:?}");
+        };
+        assert_eq!(held.subscription.source_capture, captured_provider_source());
+        assert_eq!(&held.process_id, process_id);
         assert_eq!(
-            replayed.reservations[0].subscription.source_capture,
-            captured_provider_source(),
-            "the already-reserved delivery keeps the capture it reserved against"
+            restorer.calls(),
+            1,
+            "a held occurrence's emission asks the route nothing"
         );
+        assert_eq!(world.processes().await.len(), 1);
     }
 
-    /// FIG-4090: a delivery reserved before a crash is recovered from its
-    /// reservation, and the recovery keeps the route's two failures apart: an
-    /// unavailable provider leaves the delivery owed for a retry under the
-    /// same identity, a revoked route refuses it for good. Neither starts a
-    /// process; a restored provider's recovery starts and binds the one
-    /// process the delivery's start key names.
+    /// FIG-4090: an unavailable route fails the emission before anything
+    /// commits, so a retry starts the delivery's one process; a revoked
+    /// route refuses the delivery for good: the occurrence is recorded with
+    /// no delivery for it, and no emission of it starts a process.
     #[tokio::test]
-    async fn a_recovered_delivery_retries_an_unavailable_route_and_refuses_a_revoked_one() {
+    async fn an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery() {
         for (refusal, retryable) in [
             (
                 TriggerRouteRefusal::Unavailable {
@@ -228,393 +267,74 @@ mod tests {
             let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
             register(
                 world.store.as_ref(),
-                "recover-register",
-                trigger_process_draft(&source_key, "recover", world.env_ref.clone())
+                "route-register",
+                trigger_process_draft(&source_key, "route", world.env_ref.clone())
                     .with_source_capture(captured_provider_source()),
             )
             .await;
-            // The emit reserved the delivery; the deployment died before its
-            // start.
-            let reservation = world
-                .store
-                .ingest_occurrence(
-                    TriggerOccurrenceRequest::new(
-                        "ui.button.pressed",
-                        source_key,
-                        serde_json::json!({"button": "Blue"}),
-                        "recover-occurrence",
-                    )
-                    .with_source(serde_json::json!({"account": "a"})),
-                )
-                .await
-                .expect("reserve the delivery")
-                .reservations
-                .remove(0);
-            let occurrence_id = reservation.occurrence.occurrence_id.clone();
-            let subscription_id = reservation.subscription.subscription_id.clone();
-            let router = |restorer: StubRestorer| {
-                router_with_restorer(
-                    Arc::clone(&world.store),
-                    Arc::clone(&world.registry),
-                    Arc::clone(&world.process_env_store),
-                    Some(Arc::new(restorer)),
-                )
-            };
-            let stub = |refusal: Option<TriggerRouteRefusal>| StubRestorer {
-                refusal,
-                calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                seen: Arc::new(Mutex::new(Vec::new())),
-            };
+            let request = pressed(&source_key, "route-occurrence");
 
-            let failed = Box::pin(
-                router(stub(Some(refusal.clone())))
-                    .await
-                    .recover_delivery(&occurrence_id, &subscription_id),
-            )
-            .await
-            .expect_err("a refused route starts nothing");
-            assert_eq!(
-                matches!(failed, TriggerDeliveryRecoveryError::Retryable(_)),
-                retryable,
-                "{refusal:?} classifies as retryable={retryable}, got {failed:?}"
-            );
-            let start_key = trigger_delivery_start_key(&reservation);
+            let refused = router_with_restorer(&world, StubRestorer::new(Some(refusal.clone())))
+                .emit(request.clone(), &world.emitter())
+                .await;
+            let occurrences = world
+                .store
+                .list_occurrences(TriggerOccurrenceFilter::default())
+                .await
+                .expect("list occurrences");
+            if retryable {
+                assert!(refused.is_err(), "{refusal:?} fails the emission");
+                assert!(occurrences.is_empty(), "{refusal:?} records nothing");
+            } else {
+                let report = refused.expect("a revoked route refuses only its delivery");
+                assert!(
+                    matches!(
+                        report.deliveries.as_slice(),
+                        [TriggerDeliveryEmitReceipt {
+                            outcome: TriggerDeliveryEmitOutcome::Failed { .. },
+                            ..
+                        }]
+                    ),
+                    "{report:?}"
+                );
+                assert_eq!(occurrences.len(), 1, "the occurrence is recorded");
+            }
             assert!(
                 world
-                    .registry
-                    .get_process_by_start_key(&start_key)
-                    .await
-                    .expect("read the start key")
-                    .is_none(),
-                "a refused route registers no process"
-            );
-
-            let process_id = Box::pin(
-                router(stub(None))
-                    .await
-                    .recover_delivery(&occurrence_id, &subscription_id),
-            )
-            .await
-            .expect("a restored route recovers the delivery");
-            assert_eq!(
-                world
-                    .registry
-                    .get_process_by_start_key(&start_key)
-                    .await
-                    .expect("read the start key")
-                    .map(|record| record.id),
-                Some(process_id.clone()),
-                "recovery registered the one process the start key names"
-            );
-            assert_eq!(
-                world
                     .store
-                    .list_deliveries_by_occurrence_id(&occurrence_id)
+                    .list_deliveries()
                     .await
-                    .expect("read the delivery")[0]
-                    .process_id,
-                Some(process_id.clone()),
-                "recovery bound the delivery"
+                    .expect("list deliveries")
+                    .is_empty(),
+                "{refusal:?} reserves no delivery"
             );
-            assert_eq!(
-                Box::pin(
-                    router(stub(None))
-                        .await
-                        .recover_delivery(&occurrence_id, &subscription_id)
-                )
-                .await
-                .expect("a bound delivery answers at once"),
-                process_id,
-                "recovering a bound delivery again answers its process"
+            assert!(
+                world.processes().await.is_empty(),
+                "{refusal:?} starts no process"
             );
-        }
-    }
 
-    /// FIG-4554: the route restorer serves new work only. A delivery whose
-    /// start registered before its bind was lost is redriven from the process
-    /// its start key holds, and a route revoked since is never asked.
-    #[tokio::test]
-    async fn a_redriven_delivery_whose_start_registered_never_asks_a_revoked_route() {
-        let world = router_world().await;
-        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
-        register(
-            world.store.as_ref(),
-            "redrive-register",
-            trigger_process_draft(&source_key, "redrive", world.env_ref.clone())
-                .with_source_capture(captured_provider_source()),
-        )
-        .await;
-        let reservation = world
-            .store
-            .ingest_occurrence(
-                TriggerOccurrenceRequest::new(
-                    "ui.button.pressed",
-                    source_key,
-                    serde_json::json!({"button": "Blue"}),
-                    "redrive-occurrence",
-                )
-                .with_source(serde_json::json!({"account": "a"})),
-            )
-            .await
-            .expect("reserve the delivery")
-            .reservations
-            .remove(0);
-        let occurrence_id = reservation.occurrence.occurrence_id.clone();
-        let subscription_id = reservation.subscription.subscription_id.clone();
-        let stub = |refusal: Option<TriggerRouteRefusal>| {
-            Arc::new(StubRestorer {
-                refusal,
-                calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                seen: Arc::new(Mutex::new(Vec::new())),
-            })
-        };
-
-        // The first shift restores the route and registers; its bind is lost.
-        let granted = stub(None);
-        router_with_restorer(
-            Arc::new(BindFailsOnce::new(Arc::clone(&world.store))),
-            Arc::clone(&world.registry),
-            Arc::clone(&world.process_env_store),
-            Some(Arc::clone(&granted)),
-        )
-        .await
-        .recover_delivery(&occurrence_id, &subscription_id)
-        .await
-        .expect_err("the first shift's bind is lost");
-        assert_eq!(
-            granted.calls.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "the fresh start restored its route once"
-        );
-        let started = world
-            .registry
-            .get_process_by_start_key(&trigger_delivery_start_key(&reservation))
-            .await
-            .expect("read the start key")
-            .expect("the first shift registered the delivery's process");
-
-        // The provider revokes the route; the redrive binds the started
-        // process and asks nothing.
-        let revoked = stub(Some(TriggerRouteRefusal::Revoked {
-            provider_id: "ui-provider".to_string(),
-            message: "grant withdrawn".to_string(),
-        }));
-        let redriven = router_with_restorer(
-            Arc::clone(&world.store),
-            Arc::clone(&world.registry),
-            Arc::clone(&world.process_env_store),
-            Some(Arc::clone(&revoked)),
-        )
-        .await
-        .recover_delivery(&occurrence_id, &subscription_id)
-        .await
-        .expect("the redrive answers the process the first shift started");
-        assert_eq!(redriven, started.id);
-        assert_eq!(
-            revoked.calls.load(std::sync::atomic::Ordering::SeqCst),
-            0,
-            "a started delivery's redrive never asks the restorer"
-        );
-    }
-
-    /// A trigger store whose first delivery bind fails as a lost write would:
-    /// the registration before it landed, the bind did not.
-    struct BindFailsOnce {
-        inner: Arc<dyn crate::TriggerStore>,
-        failed: std::sync::atomic::AtomicBool,
-    }
-
-    impl BindFailsOnce {
-        fn new(inner: Arc<dyn crate::TriggerStore>) -> Self {
-            Self {
-                inner,
-                failed: std::sync::atomic::AtomicBool::new(false),
+            let restored = router_with_restorer(&world, StubRestorer::new(None))
+                .emit(request, &world.emitter())
+                .await
+                .expect("the emission runs again");
+            let processes = world.processes().await;
+            if retryable {
+                assert_eq!(restored.started_process_ids().len(), 1, "{restored:?}");
+                assert_eq!(
+                    processes
+                        .iter()
+                        .map(|record| &record.id)
+                        .collect::<Vec<_>>(),
+                    restored.started_process_ids().iter().collect::<Vec<_>>(),
+                    "the retry started the delivery's one process"
+                );
+            } else {
+                assert!(
+                    restored.deliveries.is_empty(),
+                    "the refused delivery holds nothing: {restored:?}"
+                );
+                assert!(processes.is_empty(), "nothing starts the refused delivery");
             }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl crate::TriggerStore for BindFailsOnce {
-        async fn execute_command(
-            &self,
-            operation_id: &str,
-            command: TriggerCommand,
-        ) -> Result<crate::TriggerEffectResult, crate::PluginError> {
-            self.inner.execute_command(operation_id, command).await
-        }
-
-        async fn list_subscriptions(
-            &self,
-            filter: crate::TriggerSubscriptionFilter,
-        ) -> Result<Vec<TriggerSubscriptionRecord>, crate::PluginError> {
-            self.inner.list_subscriptions(filter).await
-        }
-
-        async fn subscriptions_changed_since(
-            &self,
-            cursor: crate::TriggerSubscriptionChangeCursor,
-            limit: usize,
-        ) -> std::result::Result<
-            (
-                Vec<crate::TriggerSubscriptionChange>,
-                crate::TriggerSubscriptionChangeCursor,
-            ),
-            crate::PluginError,
-        > {
-            self.inner.subscriptions_changed_since(cursor, limit).await
-        }
-        async fn list_subscriptions_with_cursor(
-            &self,
-        ) -> std::result::Result<
-            (
-                Vec<crate::TriggerSubscriptionRecord>,
-                crate::TriggerSubscriptionChangeCursor,
-            ),
-            crate::PluginError,
-        > {
-            self.inner.list_subscriptions_with_cursor().await
-        }
-        async fn compact_subscription_tombstones(
-            &self,
-            cutoff_epoch_ms: u64,
-        ) -> std::result::Result<usize, crate::PluginError> {
-            self.inner
-                .compact_subscription_tombstones(cutoff_epoch_ms)
-                .await
-        }
-
-        async fn delete_session_subscriptions(
-            &self,
-            session_id: &SessionId,
-        ) -> Result<usize, crate::PluginError> {
-            self.inner.delete_session_subscriptions(session_id).await
-        }
-
-        async fn ingest_occurrence(
-            &self,
-            request: TriggerOccurrenceRequest,
-        ) -> Result<crate::TriggerIngressReceipt, crate::PluginError> {
-            self.inner.ingest_occurrence(request).await
-        }
-
-        async fn list_occurrences(
-            &self,
-            filter: crate::TriggerOccurrenceFilter,
-        ) -> Result<Vec<crate::TriggerOccurrenceRecord>, crate::PluginError> {
-            self.inner.list_occurrences(filter).await
-        }
-
-        async fn list_deliveries_by_occurrence_id(
-            &self,
-            occurrence_id: &str,
-        ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
-            self.inner
-                .list_deliveries_by_occurrence_id(occurrence_id)
-                .await
-        }
-
-        async fn list_deliveries_by_subscription_id(
-            &self,
-            subscription_id: &str,
-        ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
-            self.inner
-                .list_deliveries_by_subscription_id(subscription_id)
-                .await
-        }
-
-        async fn list_deliveries_by_process_id(
-            &self,
-            process_id: &crate::ProcessId,
-        ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
-            self.inner.list_deliveries_by_process_id(process_id).await
-        }
-
-        async fn list_deliveries(
-            &self,
-        ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
-            self.inner.list_deliveries().await
-        }
-
-        async fn bind_delivery_process(
-            &self,
-            occurrence_id: &str,
-            subscription_id: &str,
-            process_id: &crate::ProcessId,
-        ) -> Result<(), crate::PluginError> {
-            if !self.failed.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                return Err(crate::PluginError::from(
-                    crate::store::StoreFault::Backend {
-                        message: "the delivery's bind was lost".to_string(),
-                    },
-                ));
-            }
-            self.inner
-                .bind_delivery_process(occurrence_id, subscription_id, process_id)
-                .await
-        }
-
-        async fn list_delivery_process_ids(
-            &self,
-        ) -> Result<Vec<crate::ProcessId>, crate::PluginError> {
-            self.inner.list_delivery_process_ids().await
-        }
-
-        async fn list_delivery_retention_candidates(
-            &self,
-        ) -> Result<Vec<crate::TriggerDeliveryRetentionCandidate>, crate::PluginError> {
-            self.inner.list_delivery_retention_candidates().await
-        }
-
-        async fn list_session_owner_ids_for_retention(
-            &self,
-        ) -> Result<Vec<SessionId>, crate::PluginError> {
-            self.inner.list_session_owner_ids_for_retention().await
-        }
-
-        async fn reconcile_trigger_retention(
-            &self,
-            candidates: &[crate::TriggerDeliveryRetentionCandidate],
-            deleted_session_ids: &[SessionId],
-        ) -> Result<crate::TriggerRetentionReconciliationReport, crate::PluginError> {
-            self.inner
-                .reconcile_trigger_retention(candidates, deleted_session_ids)
-                .await
-        }
-
-        async fn delete_delivery_retention_candidates(
-            &self,
-            candidates: &[crate::TriggerDeliveryRetentionCandidate],
-        ) -> Result<usize, crate::PluginError> {
-            self.inner
-                .delete_delivery_retention_candidates(candidates)
-                .await
-        }
-
-        async fn reclaim_trigger_occurrences(
-            &self,
-            cutoff_epoch_ms: u64,
-        ) -> crate::TriggerOccurrenceReclamationResult {
-            self.inner
-                .reclaim_trigger_occurrences(cutoff_epoch_ms)
-                .await
-        }
-
-        async fn forget_trigger_tombstones(
-            &self,
-            written_before_epoch_ms: u64,
-        ) -> std::result::Result<usize, crate::StoreError> {
-            self.inner
-                .forget_trigger_tombstones(written_before_epoch_ms)
-                .await
-        }
-
-        async fn prune_non_fired_occurrences(
-            &self,
-            cutoff_epoch_ms: u64,
-        ) -> Result<usize, crate::PluginError> {
-            self.inner
-                .prune_non_fired_occurrences(cutoff_epoch_ms)
-                .await
         }
     }
 }

@@ -107,6 +107,8 @@ struct Live {
     /// The claims in a row that committed nothing, as of the claim.
     failed_activations: u32,
     first_pass: bool,
+    /// Whether this activation ended the process for a corrupt refusal.
+    ended_refused: bool,
 }
 
 fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError {
@@ -148,6 +150,7 @@ impl Activation for ProcessActivation {
             park,
             failed_activations,
             first_pass: true,
+            ended_refused: false,
         };
         loop {
             match self.pass(&owned, &process, &mut live).await {
@@ -160,6 +163,19 @@ impl Activation for ProcessActivation {
                     }
                 }
                 Ok(Pass::Released) | Err(DurableError::OwnershipLost(_)) => return,
+                // A refusal as corrupt answers every retry the same: the
+                // process ends Failed on the first one, and the next pass
+                // runs its cascade.
+                Err(DurableError::Store(StoreFailure {
+                    kind: StoreFailureKind::Corrupt,
+                    message,
+                })) => {
+                    live.running.abort_all();
+                    match self.end_refused(&owned, &process, &mut live, message).await {
+                        Ok(Pass::Again) => {}
+                        Ok(_) | Err(_) => return,
+                    }
+                }
                 // Anything else did not commit, or committed with its
                 // answer lost: the next pass reloads the rows and carries on
                 // from them.
@@ -473,6 +489,33 @@ impl ProcessActivation {
         record_park(&mut tx, reason);
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
         Ok(Pass::Released)
+    }
+
+    /// End `process` Failed because the store refused its commit as
+    /// corrupt; park it when its terminal is refused too, or when a refusal
+    /// recurs after it ended.
+    async fn end_refused(
+        &self,
+        owned: &Owned,
+        process: &ProcessId,
+        live: &mut Live,
+        message: String,
+    ) -> Result<Pass, DurableError> {
+        tracing::warn!(%process, %message, "process commit refused as corrupt; ending it");
+        if !live.ended_refused {
+            live.ended_refused = true;
+            let mut tx = owned.begin().await?;
+            record_terminal(&mut tx, process, &commit_refused(&message))?;
+            tx.ack_seen();
+            match owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await {
+                Ok(_) => return Ok(Pass::Again),
+                Err(error @ DurableError::OwnershipLost(_)) => return Err(error),
+                Err(_) => {}
+            }
+        }
+        let tx = owned.begin().await?;
+        self.park(owned, tx, &ProcessParkReason::CommitRefused { message })
+            .await
     }
 
     /// End a cancelled process without calling its engine: it is parked,
@@ -960,6 +1003,17 @@ impl ProcessActivation {
         }
         Ok(None)
     }
+}
+
+/// A process ended because the store refused its commit as corrupt.
+fn commit_refused(message: &str) -> crate::ProcessOutcome {
+    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+        crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Internal,
+            "process_commit_refused",
+            message,
+        ),
+    ))
 }
 
 /// A process ended because lash refused what its engine asked for.

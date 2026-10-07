@@ -118,11 +118,11 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
         self.inner.delete_session_subscriptions(session_id).await
     }
 
-    async fn ingest_occurrence(
+    async fn plan_occurrence(
         &self,
-        request: lash_core::TriggerOccurrenceRequest,
-    ) -> std::result::Result<lash_core::TriggerIngressReceipt, lash_core::PluginError> {
-        self.inner.ingest_occurrence(request).await
+        request: &lash_core::TriggerOccurrenceRequest,
+    ) -> std::result::Result<lash_core::TriggerOccurrencePlan, lash_core::PluginError> {
+        self.inner.plan_occurrence(request).await
     }
 
     async fn list_occurrences(
@@ -165,17 +165,6 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
     ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
     {
         self.inner.list_deliveries().await
-    }
-
-    async fn bind_delivery_process(
-        &self,
-        occurrence_id: &str,
-        subscription_id: &str,
-        process_id: &ProcessId,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner
-            .bind_delivery_process(occurrence_id, subscription_id, process_id)
-            .await
     }
 
     async fn list_delivery_process_ids(
@@ -396,14 +385,6 @@ impl Processes {
                     },
                 )
                 .with_process_attachments(self.core.backend.attachment_referrers())
-                .with_process_starts(
-                    self.core
-                        .backend
-                        .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
-                    Arc::clone(&self.core.env.core.clock),
-                    self.core.env.core.control.relay_policy(),
-                    self.core.env.core.tracing.metrics().clone(),
-                )
                 .with_process_env_store(Arc::clone(
                     &self.core.env.core.durability.process_env_store,
                 )),
@@ -698,10 +679,8 @@ impl Processes {
                 "process start returned the wrong outcome".to_string(),
             )));
         };
-        // The start's one delivery path ran inside the effect: registration
-        // armed the obligation and the executor's `with_process_starts`
-        // relay claimed and delivered it (ADR 0109 §1.5). A row it could not
-        // deliver is settled on the ledger for the reconcile tick.
+        // Registration created the process's actor ready, in the same
+        // transaction: nothing is left to deliver.
         Ok(lash_core::ProcessStartReceipt::of(&record, disposition))
     }
 
@@ -1026,12 +1005,6 @@ impl Processes {
     /// retired rows, a nonempty set containing only running and waiting
     /// statuses cannot match and is refused. This includes the running
     /// default selected by an otherwise unspecified filter.
-    ///
-    /// A process a trigger delivery registered stays pinned until the
-    /// delivery's bind commits, so a completed child whose bind was lost is
-    /// never pruned and started again (ADR 0021, FIG-4203). The pass first
-    /// releases the pins of deliveries that are bound or no longer reserved,
-    /// recovering any release lost after its bind, then prunes.
     pub async fn prune(
         &self,
         cutoff_epoch_ms: u64,
@@ -1040,21 +1013,6 @@ impl Processes {
     ) -> Result<lash_core::ProcessPruneReport> {
         let registry = self.registry();
         Self::prune_selection(filter)?;
-        let trigger_store = self.core.env.core.trigger_store();
-        if let Err(err) = lash_core::facade_support::release_bound_trigger_delivery_pins(
-            registry.as_ref(),
-            trigger_store.as_ref(),
-        )
-        .await
-        {
-            tracing::warn!(
-                failure_stage = "release_bound_trigger_delivery_pins",
-                cutoff_epoch_ms,
-                error = %err,
-                "process retention failed"
-            );
-            return Err(err.into());
-        }
         let mut report = match registry
             .prune_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
             .await
@@ -1070,6 +1028,7 @@ impl Processes {
                 return Err(err.into());
             }
         };
+        let trigger_store = self.core.env.core.trigger_store();
         let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
             registry.as_ref(),
             trigger_store.as_ref(),
@@ -1243,13 +1202,6 @@ mod terminal_wait_tests {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessWorkSubstrate for ReattachOnce {
-        async fn deliver_process_start(
-            &self,
-            _record: &lash_core::ProcessRecord,
-        ) -> std::result::Result<(), lash_core::PluginError> {
-            unreachable!("terminal-wait witness does not deliver starts")
-        }
-
         async fn await_process_terminal(
             &self,
             process_id: &lash_core::ProcessId,
@@ -1325,8 +1277,6 @@ mod host_start_refusal_tests {
         ];
         for code in [
             RuntimeErrorCode::ProcessParentEnded,
-            RuntimeErrorCode::TriggerDeliveryBound,
-            RuntimeErrorCode::TriggerDeliveryRetired,
             RuntimeErrorCode::SessionHeadOwned,
             RuntimeErrorCode::RuntimeStore,
             RuntimeErrorCode::ReasoningRefused,

@@ -333,7 +333,6 @@ pub mod facade_support {
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
     pub use crate::runtime::registry_transitions;
-    pub use crate::runtime::release_bound_trigger_delivery_pins;
     pub use crate::runtime::terminal_append_request;
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
@@ -361,11 +360,14 @@ pub mod facade_support {
     pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
     pub use crate::triggers::TriggerDeliveryEmitOutcome;
     pub use crate::triggers::TriggerDeliveryEmitReceipt;
+    pub use crate::triggers::TriggerDeliveryStartRows;
     pub use crate::triggers::TriggerEmitReport;
     pub use crate::triggers::TriggerEvent;
     pub use crate::triggers::TriggerEventType;
     pub use crate::triggers::TriggerRegistration;
     pub use crate::triggers::TriggerRouter;
+    pub use crate::triggers::TriggerStartRows;
+    pub use crate::triggers::TriggerSubscriptionFence;
     pub use crate::triggers::TriggerTarget;
     pub use crate::triggers::decode_trigger_delivery;
     pub use crate::triggers::decode_trigger_mutation_receipt_json;
@@ -384,6 +386,7 @@ pub mod facade_support {
     pub use crate::triggers::next_trigger_store_revision;
     pub use crate::triggers::prepare_trigger_command;
     pub use crate::triggers::sort_trigger_delivery_reservations;
+    pub use crate::triggers::sort_trigger_subscriptions;
     pub use crate::triggers::stored_trigger_receipt;
     pub use crate::triggers::trigger_command_fingerprint;
     pub use crate::triggers::trigger_delivery_start_key;
@@ -561,17 +564,17 @@ pub use tool_result::{
 };
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 pub use triggers::{
-    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryAdmission, TriggerDeliveryReservation,
+    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
     TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerEventCatalog, TriggerHandle,
     TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
-    TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
-    TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
-    TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
-    TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestore,
-    TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionChange,
-    TriggerSubscriptionChangeCursor, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-    TriggerSubscriptionRecord, admit_trigger_registration_target, trigger_handle,
-    trigger_handle_outcome_value, trigger_incarnation,
+    TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrencePlan,
+    TriggerOccurrenceReclamationReport, TriggerOccurrenceReclamationResult,
+    TriggerOccurrenceRecord, TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope,
+    TriggerProviderRoute, TriggerRetentionReconciliationReport, TriggerRouteRefusal,
+    TriggerRouteRestore, TriggerRouteRestorer, TriggerSourceCapture, TriggerStore,
+    TriggerSubscriptionChange, TriggerSubscriptionChangeCursor, TriggerSubscriptionDraft,
+    TriggerSubscriptionFilter, TriggerSubscriptionRecord, admit_trigger_registration_target,
+    trigger_handle, trigger_handle_outcome_value, trigger_incarnation,
 };
 
 pub(crate) mod facade_ops {}
@@ -842,7 +845,7 @@ pub(crate) use runtime::{
     process_event_invocation, process_wake_batch_draft, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text, require_event_replay,
 };
-pub use runtime::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
+pub use runtime::{ConsumerHold, SessionTurnOutcome};
 pub use runtime::{ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal};
 pub use runtime::{
     ProcessStartRegistration, ProcessStartTarget, RetiredProcessStatus, TerminalProcessStatus,

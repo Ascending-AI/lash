@@ -126,13 +126,6 @@ pub type ProcessOutcomeObserver =
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work: Arc<dyn crate::ProcessWorkSubstrate>,
-    /// The relay a committed `Start` makes its own-commit delivery attempt
-    /// through (ADR 0109 §1.5): claim the armed row and deliver it now, so a
-    /// registered process starts here instead of waiting for the reconcile
-    /// tick. `None` where no ProcessStart ledger is bound — the reconcile
-    /// pass still retries the armed row. Public because an engine that
-    /// delivers a start through its own send settles the row itself.
-    pub process_starts: Option<Arc<crate::runtime::process_start::ProcessStartRelay>>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     /// The required registry that admits every engine start inside its recorded step.
     pub process_engines: crate::ProcessEngineRegistry,
@@ -146,10 +139,6 @@ pub struct ProcessLocalExecution {
     /// before the receiver records it (ADR 0124). `None` on a host with no
     /// durable attachment store: its terminals deliver nothing to hold.
     pub attachments: Option<Arc<dyn crate::AttachmentReferrers>>,
-    /// The captured provider route a trigger delivery's `Start` restores
-    /// inside its recorded admission (FIG-4554). `None` for every other
-    /// command.
-    pub trigger_route: Option<crate::TriggerRouteRestore>,
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
 }
 
@@ -638,14 +627,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 ProcessLocalExecution {
                     registry,
                     process_work,
-                    process_starts: None,
                     process_env_store: None,
                     process_engines,
                     host_start: Box::new(host_start),
                     turn_cancellation: None,
                     effect_controller: None,
                     attachments: None,
-                    trigger_route: None,
                     outcome_observer: None,
                 },
             ))),
@@ -653,36 +640,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             served_only: None,
             issued: crate::trace::StepIssue::default(),
         }
-    }
-
-    /// Binds the `ProcessStart` obligation ledger a committed `Start`
-    /// delivers through (ADR 0109 §1.5): the start's one production delivery
-    /// path is claim + deliver through the obligation relay, and a host with
-    /// the backend's ledger calls this so the start does not wait for the
-    /// reconcile tick. `policy` is the host's relay policy, so the immediate
-    /// delivery runs under the configured attempt budget.
-    pub fn with_process_starts(
-        mut self,
-        ledger: Arc<dyn crate::store::ObligationLedger>,
-        clock: Arc<dyn crate::Clock>,
-        policy: crate::runtime::obligations::relay::RelayPolicy,
-        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
-    ) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
-            &mut self.state
-        {
-            execution.process_starts = Some(Arc::new(
-                crate::runtime::process_start::ProcessStartRelay::new(
-                    ledger,
-                    Arc::clone(&execution.registry),
-                    Arc::clone(&execution.process_work),
-                    clock,
-                )
-                .with_policy(policy)
-                .with_metrics(metrics),
-            ));
-        }
-        self
     }
 
     /// Binds the definition executor for the journaled `PublishDefinition` /

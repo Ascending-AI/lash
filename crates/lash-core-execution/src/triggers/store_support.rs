@@ -164,12 +164,12 @@ pub fn decode_trigger_mutation_receipt_json(
     })
 }
 
-/// One `trigger_deliveries` row: the frozen record JSON, the bound process if
-/// any, and the creation stamp.
+/// One `trigger_deliveries` row: the frozen record JSON, the bound process
+/// and the creation stamp.
 pub fn decode_trigger_delivery(
     occurrence_json: &str,
     subscription_json: &str,
-    process_id: Option<ProcessId>,
+    process_id: ProcessId,
     created_at_ms: i64,
 ) -> Result<TriggerDeliveryReservation, PluginError> {
     Ok(TriggerDeliveryReservation {
@@ -247,20 +247,20 @@ mod tests {
         let decoded = decode_trigger_delivery(
             &serde_json::to_string(&occurrence).expect("occurrence"),
             &serde_json::to_string(&subscription).expect("subscription"),
-            None,
+            ProcessId::fixture("delivery"),
             5,
         )
         .expect("a delivery row decodes");
         assert_eq!(decoded.created_at_ms, 5);
         assert!(matches!(
-            decode_trigger_delivery("{}", "{}", None, -1),
+            decode_trigger_delivery("{}", "{}", ProcessId::fixture("delivery"), -1),
             Err(PluginError::StoredDataCorrupt { .. }) | Err(PluginError::Session(_))
         ));
         assert!(matches!(
             decode_trigger_delivery(
                 &serde_json::to_string(&occurrence).expect("occurrence"),
                 &serde_json::to_string(&subscription).expect("subscription"),
-                None,
+                ProcessId::fixture("delivery"),
                 -1,
             ),
             Err(PluginError::StoredDataCorrupt { .. })

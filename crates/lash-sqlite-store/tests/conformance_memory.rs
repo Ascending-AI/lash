@@ -28,7 +28,7 @@ async fn ingress_and_replay_preserve_canonical_subscription_order() {
         .await
         .expect("memory store set");
     lash_conformance::first_ingress_and_replay_share_canonical_subscription_order(
-        stores.trigger_store(),
+        lash_conformance::TriggerStores::of(&stores),
     )
     .await;
 }

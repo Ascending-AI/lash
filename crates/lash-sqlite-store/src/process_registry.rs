@@ -3,8 +3,6 @@ use lash_core_execution::ProcessQuery as _;
 use lash_core_execution::facade_support;
 use lash_sansio::ProcessId;
 pub(crate) mod actor;
-#[path = "process_registry/delivery_binding.rs"]
-mod delivery_binding;
 mod event_release;
 #[cfg(test)]
 mod list_tests;

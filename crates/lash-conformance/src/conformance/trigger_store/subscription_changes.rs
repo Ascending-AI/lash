@@ -12,7 +12,7 @@ where
     F: Fn() -> ReopenableTriggerStore,
 {
     let stores = make();
-    let store = &stores.open;
+    let store = &stores.open.triggers;
     let start = crate::TriggerSubscriptionChangeCursor::initial();
     let (empty, initial) = store
         .list_subscriptions_with_cursor()

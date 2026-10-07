@@ -730,14 +730,14 @@ lash_conformance::process_trigger_retention_tests!({
         async move {
             reset(storage.pool()).await;
             lash_conformance::ProcessTriggerRetentionHandles {
+                stores: Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                    &storage,
+                    Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+                )) as Arc<dyn lash_core_execution::StoreSet>,
                 registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
                 triggers: Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>,
                 sessions: Arc::new(storage.store())
                     as Arc<dyn lash_core_execution::DeploymentStore>,
-                deliveries: storage
-                    .obligation_ledger(lash_core_execution::store::ObligationKind::TriggerDelivery),
-                process_starts: storage
-                    .obligation_ledger(lash_core_execution::store::ObligationKind::ProcessStart),
                 process_env: Arc::new(storage.process_env_store())
                     as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
             }
@@ -787,7 +787,11 @@ lash_conformance::trigger_occurrence_tombstone_retention_tests!({
             let storage = Arc::clone(&storage);
             async move {
                 reset(storage.pool()).await;
-                Arc::new(storage.trigger_store().with_clock(clock)) as Arc<dyn TriggerStore>
+                lash_conformance::TriggerStores {
+                    triggers: Arc::new(storage.trigger_store().with_clock(clock)),
+                    registry: Arc::new(storage.process_registry()),
+                    durable: Arc::new(storage.durable_store()),
+                }
             }
         },
     )
@@ -839,6 +843,16 @@ fn trigger_subscription_owner_filter_is_pushed_down() {
     );
 }
 
+/// One catalog's trigger store, with the registry and durable store its
+/// occurrences start through.
+fn trigger_stores(storage: &PostgresStorage) -> lash_conformance::TriggerStores {
+    lash_conformance::TriggerStores {
+        triggers: Arc::new(storage.trigger_store()),
+        registry: Arc::new(storage.process_registry()),
+        durable: Arc::new(storage.durable_store()),
+    }
+}
+
 lash_conformance::trigger_store_reopenable_tests!({
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!("skipping Postgres trigger conformance: LASH_POSTGRES_DATABASE_URL is not set");
@@ -849,9 +863,10 @@ lash_conformance::trigger_store_reopenable_tests!({
         let storage = Arc::clone(&storage);
         sync_await(async move {
             reset(storage.pool()).await;
-            let open = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
-            let reopen = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
-            ReopenableTriggerStore { open, reopen }
+            ReopenableTriggerStore {
+                open: trigger_stores(&storage),
+                reopen: trigger_stores(&storage),
+            }
         })
     })
 });
@@ -863,7 +878,7 @@ lash_conformance::trigger_retention_fault_tests!({
     };
     reset(storage.pool()).await;
     let pool = storage.pool().clone();
-    let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
+    let store = trigger_stores(&storage);
     let fault = Arc::new(PostgresTriggerOccurrenceRetentionFaultInjector { pool });
     (database_fixture, store, fault)
 });

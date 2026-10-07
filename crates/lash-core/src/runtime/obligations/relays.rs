@@ -15,9 +15,7 @@ use crate::engine::ScopeCloseSink;
 use crate::runtime::artifact_cleanup::{
     ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
 };
-use crate::runtime::process_start::ProcessStartRelay;
 use crate::runtime::process_terminal::ProcessTerminalRelay;
-use crate::runtime::trigger_delivery::TriggerDeliveryRelay;
 use crate::store::ObligationKind;
 use crate::{Backend, Clock, DeploymentStore, ProcessWorkWiring, SessionAdministration};
 
@@ -30,8 +28,7 @@ pub enum RelayNeed {
     /// published through it.
     ProcessWork,
     /// The session administration whose engine registry an artifact
-    /// cleanup applies to and a recovered trigger delivery registers its
-    /// process against.
+    /// cleanup applies to.
     SessionAdministration,
 }
 
@@ -41,11 +38,8 @@ impl RelayNeed {
     pub const fn of(kind: ObligationKind) -> &'static [Self] {
         match kind {
             ObligationKind::ScopeClose | ObligationKind::SessionDelete => &[],
-            ObligationKind::ParentEnd
-            | ObligationKind::ProcessStart
-            | ObligationKind::ProcessTerminal => &[Self::ProcessWork],
+            ObligationKind::ParentEnd | ObligationKind::ProcessTerminal => &[Self::ProcessWork],
             ObligationKind::ArtifactCleanup => &[Self::SessionAdministration],
-            ObligationKind::TriggerDelivery => &[Self::ProcessWork, Self::SessionAdministration],
         }
     }
 
@@ -103,7 +97,6 @@ impl RelaySupply {
 /// The parts every kind's relay is assembled from: what a core resolved for
 /// one reconcile tick.
 pub struct RelayParts {
-    pub tracing: crate::trace::TraceRuntime,
     /// The backend whose store set holds every kind's ledger.
     pub backend: Backend,
     pub sessions: Arc<dyn DeploymentStore>,
@@ -111,11 +104,8 @@ pub struct RelayParts {
     pub scopes: Arc<dyn ScopeCloseSink>,
     /// The process registry and the port its processes run on.
     pub processes: Option<ProcessWorkWiring>,
-    /// What an artifact cleanup and a recovered trigger delivery run
-    /// through.
+    /// What an artifact cleanup runs through.
     pub administration: Option<SessionAdministration>,
-    /// The same live route service the deployment uses for immediate emits.
-    pub trigger_route_restorer: Option<Arc<dyn crate::TriggerRouteRestorer>>,
     pub clock: Arc<dyn Clock>,
     /// The policy every kind's relay runs under: the host's attempt budget
     /// (ADR 0109 §1.8) on the kinds' shared retry shape.
@@ -175,13 +165,11 @@ pub fn obligation_relays(
 ) -> Result<Vec<Arc<dyn ObligationRelay>>, ObligationRelayUnavailable> {
     parts.supply().check()?;
     let RelayParts {
-        tracing,
         backend,
         sessions,
         scopes,
         processes,
         administration,
-        trigger_route_restorer,
         clock,
         policy,
         metrics,
@@ -220,52 +208,6 @@ pub fn obligation_relays(
                 policy,
                 metrics: metrics.clone(),
             }),
-            ObligationKind::TriggerDelivery => {
-                let wiring = processes
-                    .as_ref()
-                    .ok_or_else(|| unavailable(kind, RelayNeed::ProcessWork))?;
-                let administration = administration
-                    .as_ref()
-                    .ok_or_else(|| unavailable(kind, RelayNeed::SessionAdministration))?;
-                // The router a recovered delivery starts through is wired the
-                // way the deployment's own emits are, so the recovered start
-                // registers the process a first attempt would have.
-                let mut router = crate::TriggerRouter::new(backend.trigger_store(), wiring.clone())
-                    .with_trace_runtime(tracing.clone())
-                    .with_process_artifacts(
-                        backend.process_env_store(),
-                        administration.process_engines().clone(),
-                    )
-                    .with_process_starts(
-                        backend.obligation_ledger(ObligationKind::ProcessStart),
-                        Arc::clone(&clock),
-                        policy,
-                        metrics.clone(),
-                    );
-                if let Some(restorer) = &trigger_route_restorer {
-                    router = router.with_route_restorer(Arc::clone(restorer));
-                }
-                Arc::new(
-                    TriggerDeliveryRelay::new(backend.obligation_ledger(kind), router)
-                        .with_policy(policy)
-                        .with_metrics(metrics.clone()),
-                )
-            }
-            ObligationKind::ProcessStart => {
-                let wiring = processes
-                    .as_ref()
-                    .ok_or_else(|| unavailable(kind, RelayNeed::ProcessWork))?;
-                Arc::new(
-                    ProcessStartRelay::new(
-                        backend.obligation_ledger(kind),
-                        Arc::clone(wiring.registry()),
-                        Arc::clone(wiring.port()),
-                        Arc::clone(&clock),
-                    )
-                    .with_policy(policy)
-                    .with_metrics(metrics.clone()),
-                )
-            }
             ObligationKind::ProcessTerminal => {
                 let wiring = processes
                     .as_ref()
@@ -342,7 +284,7 @@ mod tests {
             }
             .check(),
             Err(ObligationRelayUnavailable {
-                kind: ObligationKind::TriggerDelivery,
+                kind: ObligationKind::ArtifactCleanup,
                 need: RelayNeed::SessionAdministration,
             })
         );

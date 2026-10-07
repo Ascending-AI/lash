@@ -479,35 +479,6 @@ pub fn process_event_invocation(
     }
 }
 
-pub(crate) fn trigger_occurrence_invocation(
-    attribution: RuntimeAttribution,
-    cause: &CausalRef,
-) -> RuntimeInvocation {
-    let CausalRef::TriggerOccurrence {
-        occurrence_id,
-        subscription_id,
-        subscription_incarnation,
-        subscription_revision,
-    } = cause
-    else {
-        unreachable!("trigger occurrence invocation requires a trigger cause")
-    };
-    RuntimeInvocation {
-        attribution,
-        subject: RuntimeSubject::TriggerOccurrence {
-            occurrence_id: occurrence_id.to_string(),
-            subscription_id: subscription_id.clone(),
-            subscription_incarnation: subscription_incarnation.clone(),
-            subscription_revision: *subscription_revision,
-        },
-        caused_by: None,
-        replay: Some(RuntimeReplay {
-            key: format!("trigger:{occurrence_id}"),
-            attribution: None,
-        }),
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the caller's live effect controller admitted this scope"

@@ -272,48 +272,6 @@ define_plugin_errors! {
         => Self::StartKeyConflict { .. }
         => "process_start_key_conflict"
         => crate::ToolFailureClass::InvalidRequest;
-/// A trigger delivery's start found no retained process under its key,
-    /// and the delivery already bound to `process_id` (ADR 0107 §5,
-    /// FIG-4369). The bound process was pruned, so its key finds nothing; the
-    /// registrar read the binding in the transaction that checked the key and
-    /// registered nothing.
-    #[error(
-        "trigger delivery `{occurrence_id}`/`{subscription_id}` is already bound to process `{process_id}`"
-    )]
-    TriggerDeliveryBound {
-        occurrence_id: String,
-        subscription_id: String,
-        process_id: ProcessId,
-    }
-        => PluginError::TriggerDeliveryBound { occurrence_id, subscription_id, process_id }
-        => {
-        occurrence_id: String,
-        subscription_id: String,
-        process_id: ProcessId,
-    }
-        => Self::TriggerDeliveryBound { occurrence_id: occurrence_id.clone(), subscription_id: subscription_id.clone(), process_id: process_id.clone() }
-        => Self::TriggerDeliveryBound { .. }
-        => "trigger_delivery_bound"
-        => crate::ToolFailureClass::InvalidRequest;
-/// A trigger delivery's start found no retained process under its key,
-    /// and no delivery row: retention removed the delivery once its bound
-    /// process was pruned (FIG-4369). The registrar registered nothing.
-    #[error(
-        "trigger delivery `{occurrence_id}`/`{subscription_id}` is no longer reserved: its process was pruned and the delivery retired"
-    )]
-    TriggerDeliveryRetired {
-        occurrence_id: String,
-        subscription_id: String,
-    }
-        => PluginError::TriggerDeliveryRetired { occurrence_id, subscription_id }
-        => {
-        occurrence_id: String,
-        subscription_id: String,
-    }
-        => Self::TriggerDeliveryRetired { occurrence_id: occurrence_id.clone(), subscription_id: subscription_id.clone() }
-        => Self::TriggerDeliveryRetired { .. }
-        => "trigger_delivery_retired"
-        => crate::ToolFailureClass::InvalidRequest;
 /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String }
@@ -1096,8 +1054,6 @@ impl PluginError {
             | Self::ProcessCancelConflict { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
-            | Self::TriggerDeliveryBound { .. }
-            | Self::TriggerDeliveryRetired { .. }
             | Self::InvalidToolDiscovery { .. }
             | Self::InvalidBatchMaximum { .. }
             | Self::ResidentToolContractUnavailable { .. }

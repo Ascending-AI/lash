@@ -107,11 +107,59 @@ pub struct ReopenableAttachmentStore {
     pub reopen: Arc<dyn crate::AttachmentStore>,
 }
 
-/// A pair of [`TriggerStore`](crate::TriggerStore) handles opened against
-/// the same durable backing store.
+/// One store set's trigger store, with the process registry and durable
+/// store an occurrence starts through: its start records the occurrence, its
+/// processes and their deliveries in one `trigger.start` transaction.
+#[derive(Clone)]
+pub struct TriggerStores {
+    pub triggers: Arc<dyn crate::TriggerStore>,
+    pub registry: Arc<dyn crate::ProcessRegistry>,
+    pub durable: Arc<dyn crate::DurableStore>,
+}
+
+impl TriggerStores {
+    /// The stores `stores` holds.
+    pub fn of(stores: &dyn crate::StoreSet) -> Self {
+        Self {
+            triggers: stores.trigger_store(),
+            registry: stores.process_registry(),
+            durable: stores.durable_store(),
+        }
+    }
+
+    /// Record `request`'s occurrence as a trigger router's start does, each
+    /// delivery bound to a fixture process.
+    ///
+    /// # Errors
+    ///
+    /// The plan's or the start's refusal.
+    pub async fn record_occurrence(
+        &self,
+        request: crate::TriggerOccurrenceRequest,
+    ) -> Result<crate::TriggerIngressReceipt, crate::PluginError> {
+        lash_core::testing::record_trigger_occurrence(
+            self.triggers.as_ref(),
+            self.registry.as_ref(),
+            self.durable.as_ref(),
+            request,
+        )
+        .await
+    }
+}
+
+impl std::ops::Deref for TriggerStores {
+    type Target = dyn crate::TriggerStore;
+
+    fn deref(&self) -> &Self::Target {
+        self.triggers.as_ref()
+    }
+}
+
+/// A pair of [`TriggerStores`] opened against the same durable backing
+/// store.
 pub struct ReopenableTriggerStore {
-    pub open: Arc<dyn crate::TriggerStore>,
-    pub reopen: Arc<dyn crate::TriggerStore>,
+    pub open: TriggerStores,
+    pub reopen: TriggerStores,
 }
 
 /// Push an unpersisted event node onto `state`'s active path and make it the

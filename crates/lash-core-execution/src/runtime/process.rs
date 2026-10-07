@@ -104,7 +104,7 @@ pub use model::{
     mint_process_id, process_child_session_id, process_session_turn_id,
     publish_process_execution_env,
 };
-pub use model::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
+pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
     ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState, ProcessWorkObserver,
@@ -131,24 +131,24 @@ pub use registry::{
     ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry, ProcessPruneReport, ProcessQuery,
     ProcessRegistrar, ProcessRegistry, ProcessRegistryCursor, ProcessRetention,
     ProcessTerminalPublication, ProcessToolIntents, ProjectionWatermark,
-    reconcile_pruned_trigger_deliveries, release_bound_trigger_delivery_pins,
+    reconcile_pruned_trigger_deliveries,
 };
 pub use scope_close::RegistryScopeClose;
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 pub use start_staging::{
-    ArtifactReferrerPorts, HostStartAdmission, ProcessStartStores, ReferrerAcquisition,
-    RegisteredProcessStart, SessionTurnAdmission, register_process_start,
+    ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,
+    ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StartStaging,
+    register_process_start, stage_process_start,
 };
 pub use steps::{ProcessSteps, StepAdmission, StepRefusal};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
 pub use validation::{
     ProcessEventAppendPlan, ProcessRegistrationRefusal, ProcessStartPlan, ProcessTransition,
-    ProcessTransitionPlan, TriggerDeliveryBinding, abandoned_consumer_refusal,
-    allocate_process_event_sequence, apply_process_event_projection, check_retained_start,
-    check_trigger_delivery_start, fold_process_record, prepare_process_event_append,
-    prepare_process_registration, prepare_process_start, prepare_process_transition,
-    require_event_replay, validate_generic_process_event_append,
+    ProcessTransitionPlan, abandoned_consumer_refusal, allocate_process_event_sequence,
+    apply_process_event_projection, check_retained_start, fold_process_record,
+    prepare_process_event_append, prepare_process_registration, prepare_process_start,
+    prepare_process_transition, require_event_replay, validate_generic_process_event_append,
 };
 
 pub fn current_epoch_ms() -> u64 {

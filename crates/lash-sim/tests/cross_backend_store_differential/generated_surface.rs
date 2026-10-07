@@ -25,7 +25,7 @@ use lash_core::{
     TriggerSubscriptionDraft,
 };
 use lash_s3_store::{S3AttachmentStore, S3AttachmentStoreConfig};
-use lash_sqlite_store::{SqliteProcessRegistry, SqliteStore, SqliteTriggerStore};
+use lash_sqlite_store::{SqliteStore, SqliteStoreSet, SqliteStoreSetOptions};
 
 const DEFAULT_CASES: usize = 4;
 const DEFAULT_SEED: u64 = 852;
@@ -120,6 +120,9 @@ struct SurfaceRunner {
     scenario: StoreContractScenario,
     process_registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
+    /// The durable store an occurrence's start commits through, over the
+    /// registry's and the trigger store's database.
+    durable: Arc<dyn lash_core::DurableStore>,
     trigger_feed_reads: Vec<serde_json::Value>,
     reader: SurfaceReader,
 }
@@ -145,6 +148,25 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
 }
 
 impl SurfaceRunner {
+    /// Plan `request`'s occurrence, then record it as a trigger router's
+    /// start does: the occurrence, each matched delivery's process and the
+    /// delivery bound to it, in one `trigger.start` transaction.
+    async fn start_occurrence(&self, request: TriggerOccurrenceRequest) -> Result<(), String> {
+        self.trigger_store
+            .plan_occurrence(&request)
+            .await
+            .map_err(|error| error.to_string())?;
+        lash_core::testing::record_trigger_occurrence(
+            self.trigger_store.as_ref(),
+            self.process_registry.as_ref(),
+            self.durable.as_ref(),
+            request,
+        )
+        .await
+        .map(drop)
+        .map_err(|error| error.to_string())
+    }
+
     async fn apply(&mut self, operation: &SurfaceOperation) -> Result<(), String> {
         match operation {
             SurfaceOperation::StoreContract(operation) => self.scenario.apply(operation).await,
@@ -259,36 +281,30 @@ impl SurfaceRunner {
                 Ok(())
             }
             SurfaceOperation::TriggerOccurrence { key } => {
-                self.trigger_store
-                    .ingest_occurrence(
-                        TriggerOccurrenceRequest::new(
-                            "surface.event",
-                            format!("source-{key}"),
-                            serde_json::json!({"event": key}),
-                            format!("surface-occurrence-{key}"),
-                        )
-                        .with_source(serde_json::json!({"source": key}))
-                        .for_session(SURFACE_SESSION),
+                self.start_occurrence(
+                    TriggerOccurrenceRequest::new(
+                        "surface.event",
+                        format!("source-{key}"),
+                        serde_json::json!({"event": key}),
+                        format!("surface-occurrence-{key}"),
                     )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                Ok(())
+                    .with_source(serde_json::json!({"source": key}))
+                    .for_session(SURFACE_SESSION),
+                )
+                .await
             }
             SurfaceOperation::TriggerOccurrenceNullSource { key } => {
-                self.trigger_store
-                    .ingest_occurrence(
-                        TriggerOccurrenceRequest::new(
-                            "surface.event",
-                            format!("null-source-{key}"),
-                            serde_json::json!({"event": key}),
-                            format!("surface-null-source-occurrence-{key}"),
-                        )
-                        .with_source(serde_json::Value::Null)
-                        .for_session(SURFACE_SESSION),
+                self.start_occurrence(
+                    TriggerOccurrenceRequest::new(
+                        "surface.event",
+                        format!("null-source-{key}"),
+                        serde_json::json!({"event": key}),
+                        format!("surface-null-source-occurrence-{key}"),
                     )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                Ok(())
+                    .with_source(serde_json::Value::Null)
+                    .for_session(SURFACE_SESSION),
+                )
+                .await
             }
             SurfaceOperation::ProcessSignalZero { negative } => {
                 let payload = if *negative {
@@ -347,8 +363,7 @@ async fn surface_runners(
     // session-bound runtime store. The SQL effect engines are not storage
     // (ADR 0104); FIG-3667 and FIG-3668 delete them.
     let sqlite_runtime_root = root.join("runtime");
-    let sqlite_process_path = root.join("process.db");
-    let sqlite_trigger_path = root.join("trigger.db");
+    let sqlite_stores_path = root.join("stores.db");
     let session_request = SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -371,20 +386,20 @@ async fn surface_runners(
     // The two registrars mint the same ids in the same order, so the
     // generated slots name the same process on both backends.
     let (sqlite_mint, postgres_mint) = super::paired_process_id_mints();
-    let sqlite_registry = Arc::new(
-        SqliteProcessRegistry::open_standalone_with_clock_for_testing(
-            &sqlite_process_path,
-            Arc::clone(&clock),
-        )
-        .await
-        .unwrap()
-        .with_process_id_mint_for_testing(sqlite_mint),
-    );
-    let sqlite_triggers = Arc::new(
-        SqliteTriggerStore::open_with_clock(&sqlite_trigger_path, Arc::clone(&clock))
-            .await
-            .unwrap(),
-    );
+    // The registry and the trigger store share one database, as an
+    // occurrence's start writes both in one transaction.
+    let sqlite_stores = SqliteStoreSet::open_with_options_and_clock(
+        &sqlite_stores_path,
+        SqliteStoreSetOptions {
+            process_id_mint: sqlite_mint,
+            ..SqliteStoreSetOptions::default()
+        },
+        Arc::clone(&clock),
+    )
+    .await
+    .unwrap();
+    let sqlite_registry = sqlite_stores.process_registry();
+    let sqlite_triggers = sqlite_stores.trigger_store();
 
     let postgres_store = Arc::new(
         storage
@@ -413,10 +428,11 @@ async fn surface_runners(
             }),
             process_registry: sqlite_registry,
             trigger_store: sqlite_triggers,
+            durable: Arc::new(sqlite_stores.durable_store()),
             trigger_feed_reads: Vec::new(),
             reader: SurfaceReader::Sqlite {
-                process_path: sqlite_process_path,
-                trigger_path: sqlite_trigger_path,
+                process_path: sqlite_stores_path.clone(),
+                trigger_path: sqlite_stores_path,
             },
         },
         SurfaceRunner {
@@ -427,6 +443,7 @@ async fn surface_runners(
             }),
             process_registry: postgres_registry,
             trigger_store: postgres_triggers,
+            durable: Arc::new(storage.durable_store()),
             trigger_feed_reads: Vec::new(),
             reader: SurfaceReader::Postgres {
                 pool: storage.pool().clone(),

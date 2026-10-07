@@ -13,8 +13,6 @@ pub use lash_core_store::input_normalization as io;
 pub use owner::ExecutionOwner;
 pub(crate) use owner::not_a_session_runtime;
 pub mod process;
-pub mod process_start;
-pub mod trigger_delivery;
 pub mod work;
 pub(crate) use lash_core_store::queued_drain_policy;
 use lash_core_store::session_catalog;
@@ -126,27 +124,27 @@ pub use process::{
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, SettledOutcome,
     SettledOutcomeRefusal, StartCx, StartCxError, StartKey, StepName, StepRequest,
-    StoreRealization, TerminalProcessStatus, TriggerDeliveryBinding, UnavailableProcessService,
-    WaitKind, WaitState, WakeId, WatchedRegistry, WeakProcessEngineRegistry,
-    abandoned_consumer_refusal, admitted_signal_wait, allocate_process_event_sequence,
-    apply_parent_end_plan, apply_process_event_projection, artifact_referrer_ended,
-    check_retained_start, check_trigger_delivery_start, current_epoch_ms, end_parent_scope,
-    end_session_runs, fold_process_record, lifetime, load_process_execution_env,
-    materialize_process_event_semantics, mint_process_id, parent_end_delivery_key,
-    parent_end_requester, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, prepare_process_transition, process_child_session_id,
-    process_session_turn_id, process_signal_event_type, process_signal_name_from_event_type,
-    process_signal_wait_key, process_wake_delivery, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, publish_process_execution_env,
-    reconcile_pruned_trigger_deliveries, reconcile_session_process_observer_intents,
-    release_bound_trigger_delivery_pins, release_process_event_payload, require_event_replay,
-    restore_released_process_event_payload, terminal_append_request, terminal_event_type_name,
-    validate_generic_process_event_append, validate_process_signal_name, watch_process_registry,
-    watch_process_registry_with_sink,
+    StoreRealization, TerminalProcessStatus, UnavailableProcessService, WaitKind, WaitState,
+    WakeId, WatchedRegistry, WeakProcessEngineRegistry, abandoned_consumer_refusal,
+    admitted_signal_wait, allocate_process_event_sequence, apply_parent_end_plan,
+    apply_process_event_projection, artifact_referrer_ended, check_retained_start,
+    current_epoch_ms, end_parent_scope, end_session_runs, fold_process_record, lifetime,
+    load_process_execution_env, materialize_process_event_semantics, mint_process_id,
+    parent_end_delivery_key, parent_end_requester, prepare_process_event_append,
+    prepare_process_registration, prepare_process_start, prepare_process_transition,
+    process_child_session_id, process_session_turn_id, process_signal_event_type,
+    process_signal_name_from_event_type, process_signal_wait_key, process_wake_delivery,
+    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
+    publish_process_execution_env, reconcile_pruned_trigger_deliveries,
+    reconcile_session_process_observer_intents, release_process_event_payload,
+    require_event_replay, restore_released_process_event_payload, terminal_append_request,
+    terminal_event_type_name, validate_generic_process_event_append, validate_process_signal_name,
+    watch_process_registry, watch_process_registry_with_sink,
 };
 pub use process::{
-    ArtifactReferrerPorts, HostStartAdmission, ProcessStartStores, ReferrerAcquisition,
-    RegisteredProcessStart, SessionTurnAdmission, register_process_start,
+    ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,
+    ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StartStaging,
+    register_process_start, stage_process_start,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{
@@ -155,7 +153,7 @@ pub use process::{
     TestProcessRegistryWriteExt, accepted_process_registration, fail_parent_end_once,
     refused_process_registrations,
 };
-pub use process::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
+pub use process::{ConsumerHold, SessionTurnOutcome};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub(crate) use queued_drain_policy::shared_drain_mode_policy;
 pub use queued_drain_policy::{

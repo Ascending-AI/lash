@@ -20,11 +20,7 @@ impl ActorContext {
         match &envelope.command {
             crate::RuntimeEffectCommand::ToolAttempt { .. }
             | crate::RuntimeEffectCommand::PresentToolResult { .. }
-            | crate::RuntimeEffectCommand::Trigger { .. }
-            | crate::RuntimeEffectCommand::IngestTriggerOccurrence { .. }
-            | crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } => {
-                local.run_in_place(envelope).await
-            }
+            | crate::RuntimeEffectCommand::Trigger { .. } => local.run_in_place(envelope).await,
             other => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!("{:?} is not a tool effect", other.kind()),

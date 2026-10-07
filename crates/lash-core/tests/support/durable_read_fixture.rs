@@ -214,6 +214,8 @@ pub struct FixtureHandles {
     pub processes: Arc<dyn lash_core::ConformanceProcessRegistry>,
     pub process_envs: Arc<dyn ProcessExecutionEnvStore>,
     pub triggers: Arc<dyn TriggerStore>,
+    /// The durable store a trigger occurrence's start commits through.
+    pub durable: Arc<dyn lash_core::DurableStore>,
 }
 
 impl FixtureHandles {
@@ -554,16 +556,19 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     )
     .await;
     assert_eq!(receipt.disposition, TriggerMutationOutcome::Created);
-    handles
-        .triggers
-        .ingest_occurrence(TriggerOccurrenceRequest::new(
+    lash_core::testing::record_trigger_occurrence(
+        handles.triggers.as_ref(),
+        handles.processes.as_ref(),
+        handles.durable.as_ref(),
+        TriggerOccurrenceRequest::new(
             "fixture.event",
             "fixture-source",
             serde_json::json!({"value": 42}),
             "durable-read-occurrence",
-        ))
-        .await
-        .expect("ingest fixture occurrence");
+        ),
+    )
+    .await
+    .expect("record fixture occurrence");
 
     let wake_batch = session
         .enqueue_queued_work(process_wake_batch_draft(wake_delivery.clone()))
@@ -1018,7 +1023,11 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             "durable fixture drift: process tombstone did not return ProcessNoLongerRetained: {other:?}"
         ),
     }
-    assert_process_change_feed(handles.processes.as_ref()).await;
+    assert_process_change_feed(
+        handles.processes.as_ref(),
+        &expected.trigger_delivery.process_id,
+    )
+    .await;
 
     let subscriptions = handles
         .triggers
@@ -1152,7 +1161,9 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
     }
 }
 
-async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
+/// `delivered` is the process the fixture occurrence started with its
+/// delivery, in the same commit.
+async fn assert_process_change_feed(processes: &dyn ProcessRegistry, delivered: &ProcessId) {
     let (first, first_cursor) = processes
         .processes_changed_since(ProcessChangeCursor::initial(), 2)
         .await
@@ -1163,7 +1174,7 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
         .processes_changed_since(first_cursor, 10)
         .await
         .expect("durable fixture drift: second process-change page failed");
-    assert_eq!(second.len(), 1);
+    assert_eq!(second.len(), 2);
     assert!(final_cursor.store_sequence() > first_cursor.store_sequence());
     let (empty, stable_cursor) = processes
         .processes_changed_since(final_cursor, 10)
@@ -1194,6 +1205,7 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
             (waiting_process_id(), "upsert".to_string()),
             (tombstone_process_id(), "deleted".to_string()),
             (wake_process_id(), "upsert".to_string()),
+            (delivered.clone(), "upsert".to_string()),
         ]),
         "durable fixture semantic drift: ADR-0020 change-feed rows changed"
     );

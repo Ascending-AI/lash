@@ -1205,14 +1205,6 @@ impl ToolIntentIngress {
                 },
             )
             .with_process_attachments(self.core.backend.attachment_referrers())
-            .with_process_starts(
-                self.core
-                    .backend
-                    .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
-                std::sync::Arc::clone(&self.core.env.core.clock),
-                self.core.env.core.control.relay_policy(),
-                self.core.env.core.tracing.metrics().clone(),
-            )
             .with_process_env_store(std::sync::Arc::clone(
                 &self.core.env.core.durability.process_env_store,
             ))

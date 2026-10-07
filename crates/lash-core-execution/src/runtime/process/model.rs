@@ -621,13 +621,6 @@ pub struct ProcessRegistration<I = ProcessInput> {
     /// hold with the row, and prune leaves a held row alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consumer_hold: Option<ConsumerHold>,
-    /// The trigger delivery whose bind this start awaits, when a trigger
-    /// delivery registered it (ADR 0021, FIG-4203). The registrar writes the
-    /// pin with the row, and prune leaves a pinned row alone: until the
-    /// delivery's bind commits, a recovery that registers under the same
-    /// start key finds this process again, even once it completed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trigger_delivery_pin: Option<TriggerDeliveryPin>,
     /// What the process's engine recorded when the row was created
     /// ([`ProcessEngine::creation_config`](super::ProcessEngine::creation_config)):
     /// the engine-owned configuration its runs read back. Captured settings
@@ -664,7 +657,6 @@ impl<I> Clone for ProcessRegistration<I> {
             env_ref: self.env_ref.clone(),
             wake_session_id: self.wake_session_id.clone(),
             consumer_hold: self.consumer_hold.clone(),
-            trigger_delivery_pin: self.trigger_delivery_pin.clone(),
             engine_config: self.engine_config.clone(),
             trace: self.trace.clone(),
         }
@@ -692,38 +684,6 @@ pub struct ConsumerHold {
     /// cancels the process it holds (ADR 0116 §3.4).
     #[serde(default)]
     pub cancels: bool,
-}
-
-/// A trigger delivery's pin on the process its start registered (ADR 0021,
-/// FIG-4203).
-///
-/// A delivery registers its process and binds it to the reservation in two
-/// writes to two stores. Between them the reservation is unbound, and only
-/// the start key leads recovery back to the process. The start key finds a
-/// process only while the registry retains it (ADR 0107), so the delivery
-/// pins the row in the registration's own transaction: a pinned row is never
-/// pruned, and a recovery after a lost bind finds the one process the first
-/// attempt registered, however long ago it completed.
-///
-/// The router releases the pin once the bind commits. A release that never
-/// landed is recovered by
-/// [`release_bound_trigger_delivery_pins`](crate::runtime::release_bound_trigger_delivery_pins),
-/// which releases every pin whose delivery is bound or no longer reserved.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TriggerDeliveryPin {
-    /// The reserved occurrence the delivery starts.
-    pub occurrence_id: String,
-    /// The subscription the occurrence was reserved for.
-    pub subscription_id: String,
-}
-
-/// A registry row that still carries its trigger delivery's pin.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PinnedTriggerDelivery {
-    /// The pinned process.
-    pub process_id: ProcessId,
-    /// The delivery whose bind the pin awaits.
-    pub pin: TriggerDeliveryPin,
 }
 
 impl ProcessRegistration {
@@ -821,7 +781,6 @@ impl<I> ProcessRegistration<I> {
             env_ref: None,
             wake_session_id: None,
             consumer_hold: None,
-            trigger_delivery_pin: None,
             engine_config: None,
             trace: lash_trace::TraceScopeOffer::default(),
         }
@@ -871,7 +830,6 @@ impl<I> ProcessRegistration<I> {
             env_ref: self.env_ref,
             wake_session_id: self.wake_session_id,
             consumer_hold: self.consumer_hold,
-            trigger_delivery_pin: self.trigger_delivery_pin,
             engine_config: self.engine_config,
             trace: self.trace,
         }
@@ -928,16 +886,6 @@ impl<I> ProcessRegistration<I> {
     /// Registers the process under a parked call's hold (ADR 0116 §3.6).
     pub fn with_consumer_hold(mut self, consumer_hold: Option<ConsumerHold>) -> Self {
         self.consumer_hold = consumer_hold;
-        self
-    }
-
-    /// Pins the process to the trigger delivery whose bind it awaits (ADR
-    /// 0021, FIG-4203).
-    pub fn with_trigger_delivery_pin(
-        mut self,
-        trigger_delivery_pin: Option<TriggerDeliveryPin>,
-    ) -> Self {
-        self.trigger_delivery_pin = trigger_delivery_pin;
         self
     }
 
@@ -1110,6 +1058,12 @@ impl PreparedProcessRegistration {
     }
     pub fn process_id(&self) -> &ProcessId {
         &self.process_id
+    }
+    /// Whether a retained process already holds the registration's start
+    /// key: its id is that process's, and applying it creates nothing.
+    #[must_use]
+    pub fn retained(&self) -> bool {
+        self.retained
     }
     pub fn trace(&self) -> &lash_trace::TraceScopeOffer {
         &self.registration.trace

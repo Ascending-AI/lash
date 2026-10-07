@@ -35,6 +35,11 @@ pub enum ProcessParkReason {
         /// The engine's account.
         message: String,
     },
+    /// The store refused its commits as corrupt, its terminal too.
+    CommitRefused {
+        /// The store's account.
+        message: String,
+    },
 }
 
 impl ProcessParkReason {

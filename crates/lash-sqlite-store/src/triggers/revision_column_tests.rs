@@ -50,9 +50,10 @@ async fn trigger_revision_columns_carry_the_record_revision() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("trigger-revision-columns.db");
     let source_type = "ui.button.pressed";
-    let store = SqliteTriggerStore::open(&path)
+    let stores = crate::SqliteStoreSet::open(&path)
         .await
-        .expect("open trigger store");
+        .expect("open store set");
+    let store = stores.trigger_store();
 
     let registered = receipt_of(
         store
@@ -88,15 +89,19 @@ async fn trigger_revision_columns_carry_the_record_revision() {
     // The delivery row copies the same counter through the same helper.
     let source_key = lash_core_execution::facade_support::empty_trigger_source_key(source_type)
         .expect("source key");
-    let ingress = store
-        .ingest_occurrence(lash_core_execution::TriggerOccurrenceRequest::new(
+    let ingress = lash_core::testing::record_trigger_occurrence(
+        store.as_ref(),
+        stores.process_registry().as_ref(),
+        &stores.durable_store(),
+        lash_core_execution::TriggerOccurrenceRequest::new(
             source_type,
             source_key,
             serde_json::json!({ "button": "Blue" }),
             "revision-column-occurrence",
-        ))
-        .await
-        .expect("ingest occurrence");
+        ),
+    )
+    .await
+    .expect("record occurrence");
     assert_eq!(ingress.reservations.len(), 1);
     let delivered = column_i64(
         &path,

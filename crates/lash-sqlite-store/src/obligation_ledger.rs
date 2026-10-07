@@ -23,12 +23,9 @@ use lash_store_sql::artifact::cleanup_obligations::{
 };
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
 use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
-use lash_store_sql::process::processes::{
-    ProcessObligationStatements, ProcessStartObligationStatements,
-};
+use lash_store_sql::process::processes::ProcessObligationStatements;
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
 use lash_store_sql::session_runs::runs::SessionRunObligationStatements;
-use lash_store_sql::trigger::deliveries::DeliveryObligationStatements;
 use rusqlite::types::Value;
 use rusqlite::{Row, params_from_iter};
 
@@ -43,10 +40,6 @@ static PLANS: LazyLock<ParentEndPlanObligationStatements> =
     LazyLock::new(|| ParentEndPlanObligationStatements::render(crate::schema_layout::MAIN));
 static PROCESSES: LazyLock<ProcessObligationStatements> =
     LazyLock::new(|| ProcessObligationStatements::render(crate::schema_layout::MAIN));
-static PROCESS_STARTS: LazyLock<ProcessStartObligationStatements> =
-    LazyLock::new(|| ProcessStartObligationStatements::render(crate::schema_layout::MAIN));
-static DELIVERIES: LazyLock<DeliveryObligationStatements> =
-    LazyLock::new(|| DeliveryObligationStatements::render(crate::schema_layout::MAIN));
 static CLEANUPS: LazyLock<CleanupObligationStatements> =
     LazyLock::new(|| CleanupObligationStatements::render(crate::schema_layout::MAIN));
 static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
@@ -58,8 +51,6 @@ pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
         ObligationKind::ScopeClose => RUNS.obligation_sql(),
         ObligationKind::SessionDelete => META.obligation_sql(),
         ObligationKind::ParentEnd => PLANS.obligation_sql(),
-        ObligationKind::TriggerDelivery => DELIVERIES.obligation_sql(),
-        ObligationKind::ProcessStart => PROCESS_STARTS.obligation_sql(),
         ObligationKind::ProcessTerminal => PROCESSES.obligation_sql(),
         ObligationKind::ArtifactCleanup => CLEANUP_LEDGER.obligation_sql(),
     }

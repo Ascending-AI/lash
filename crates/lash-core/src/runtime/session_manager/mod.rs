@@ -499,16 +499,6 @@ impl RuntimeSessionServices {
                         .with_process_artifacts(
                             Arc::clone(&self.current.host.core.durability.process_env_store),
                             self.current.host.core.process_engines.clone(),
-                        )
-                        .with_process_starts(
-                            self.current
-                                .host
-                                .core
-                                .backend()
-                                .obligation_ledger(crate::store::ObligationKind::ProcessStart),
-                            Arc::clone(&self.current.host.core.clock),
-                            self.current.host.core.control.relay_policy(),
-                            self.current.host.core.tracing.metrics().clone(),
                         );
                 if let Some(restorer) = &self.current.host.core.control.trigger_route_restorer {
                     router = router.with_route_restorer(Arc::clone(restorer));
@@ -760,7 +750,6 @@ mod process_visibility_tests {
     }
 
     #[tokio::test]
-    #[ignore = "blocked: L6 (FIG-5175): ActorContext::process_effect refuses every process command as RuntimeEffectLocalExecutorMismatch; repro lash-core-execution store_backed process_local::a_process_start_issued_through_the_actor_context_registers_its_process"]
     async fn process_service_filter_policy_is_enforced_by_every_production_operation() {
         let cases = [
             (ProcessVisibility::Full, true),

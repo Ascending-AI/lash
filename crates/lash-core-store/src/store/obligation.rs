@@ -54,10 +54,6 @@ pub enum ObligationKind {
     ParentEnd,
     /// A closing session owes its physical delete.
     SessionDelete,
-    /// A reserved trigger delivery owes its one process, started and bound.
-    TriggerDelivery,
-    /// A registered process owes its first engine run.
-    ProcessStart,
     /// A terminal process owes its terminal publication.
     ProcessTerminal,
     /// An ended or guarded artifact referrer owes its cleanup (ADR 0113 §2.5).
@@ -66,12 +62,10 @@ pub enum ObligationKind {
 
 impl ObligationKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 5] = [
         Self::ScopeClose,
         Self::ParentEnd,
         Self::SessionDelete,
-        Self::TriggerDelivery,
-        Self::ProcessStart,
         Self::ProcessTerminal,
         Self::ArtifactCleanup,
     ];
@@ -91,8 +85,6 @@ impl ObligationKind {
             Self::ScopeClose => "scope_close",
             Self::ParentEnd => "parent_end",
             Self::SessionDelete => "session_delete",
-            Self::TriggerDelivery => "trigger_delivery",
-            Self::ProcessStart => "process_start",
             Self::ProcessTerminal => "process_terminal",
             Self::ArtifactCleanup => "artifact_cleanup",
         }
@@ -103,12 +95,10 @@ impl ObligationKind {
     #[must_use]
     pub const fn key_column_types(self) -> &'static [KeyColumnType] {
         match self {
-            Self::ScopeClose | Self::ParentEnd | Self::TriggerDelivery | Self::ArtifactCleanup => {
+            Self::ScopeClose | Self::ParentEnd | Self::ArtifactCleanup => {
                 &[KeyColumnType::Text, KeyColumnType::Text]
             }
-            Self::SessionDelete | Self::ProcessStart | Self::ProcessTerminal => {
-                &[KeyColumnType::Text]
-            }
+            Self::SessionDelete | Self::ProcessTerminal => &[KeyColumnType::Text],
         }
     }
 }
@@ -146,14 +136,6 @@ pub enum ObligationKey {
     },
     /// A `session_meta` row.
     SessionDelete { session_id: SessionId },
-    /// A `trigger_deliveries` row: the occurrence and the subscription it
-    /// fired at.
-    TriggerDelivery {
-        occurrence_id: String,
-        subscription_id: String,
-    },
-    /// A `processes` row.
-    ProcessStart { process_id: ProcessId },
     /// A `processes` row.
     ProcessTerminal { process_id: ProcessId },
     /// An `artifact_cleanup_obligations` row: the referrer's stored pair.
@@ -197,8 +179,6 @@ impl ObligationKey {
             Self::ScopeClose { .. } => ObligationKind::ScopeClose,
             Self::ParentEnd { .. } => ObligationKind::ParentEnd,
             Self::SessionDelete { .. } => ObligationKind::SessionDelete,
-            Self::TriggerDelivery { .. } => ObligationKind::TriggerDelivery,
-            Self::ProcessStart { .. } => ObligationKind::ProcessStart,
             Self::ProcessTerminal { .. } => ObligationKind::ProcessTerminal,
             Self::ArtifactCleanup { .. } => ObligationKind::ArtifactCleanup,
         }
@@ -224,14 +204,7 @@ impl ObligationKey {
             Self::SessionDelete { session_id } => {
                 vec![KeyColumn::Text(session_id.as_str().to_owned())]
             }
-            Self::TriggerDelivery {
-                occurrence_id,
-                subscription_id,
-            } => vec![
-                KeyColumn::Text(occurrence_id.clone()),
-                KeyColumn::Text(subscription_id.clone()),
-            ],
-            Self::ProcessStart { process_id } | Self::ProcessTerminal { process_id } => {
+            Self::ProcessTerminal { process_id } => {
                 vec![KeyColumn::Text(process_id.as_str().to_owned())]
             }
             Self::ArtifactCleanup { referrer } => vec![
@@ -265,10 +238,6 @@ impl ObligationKey {
             ObligationKind::SessionDelete => Self::SessionDelete {
                 session_id: next_identity(&mut columns, kind, "session_id")?,
             },
-            ObligationKind::TriggerDelivery => Self::TriggerDelivery {
-                occurrence_id: next_text(&mut columns, kind, "occurrence_id")?,
-                subscription_id: next_text(&mut columns, kind, "subscription_id")?,
-            },
             ObligationKind::ArtifactCleanup => {
                 let referrer_kind = next_text(&mut columns, kind, "referrer_kind")?;
                 let referrer_id = next_text(&mut columns, kind, "referrer_id")?;
@@ -282,15 +251,10 @@ impl ObligationKey {
                     )?,
                 }
             }
-            kind @ (ObligationKind::ProcessStart | ObligationKind::ProcessTerminal) => {
-                let process_id = ProcessId::parse(&next_text(&mut columns, kind, "process_id")?)
-                    .map_err(|error| UndecodableObligation::malformed(error.to_string()))?;
-                match kind {
-                    ObligationKind::ProcessStart => Self::ProcessStart { process_id },
-                    ObligationKind::ProcessTerminal => Self::ProcessTerminal { process_id },
-                    _ => unreachable!("the matched kinds are ProcessStart and ProcessTerminal"),
-                }
-            }
+            ObligationKind::ProcessTerminal => Self::ProcessTerminal {
+                process_id: ProcessId::parse(&next_text(&mut columns, kind, "process_id")?)
+                    .map_err(|error| UndecodableObligation::malformed(error.to_string()))?,
+            },
         })
     }
 }

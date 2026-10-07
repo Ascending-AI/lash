@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1464 rows over 815 files, 3773 laws.
-# By class: mechanical 163, semantic 107, delete 772, replace 422.
-# By lane: L1b 11, L3 18, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 72, L9e 129, L9f 124, L9g 92, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 445, ported 74, deleted 945.
+# 1480 rows over 819 files, 3797 laws.
+# By class: mechanical 163, semantic 110, delete 781, replace 426.
+# By lane: L1b 12, L3 18, L3s 57, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 67, L9c 341, L9d 77, L9e 129, L9f 125, L9g 101, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 443, ported 78, deleted 959.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -251,8 +251,6 @@
 #   a session-turn process (subagent) crashed at create, acceptance or final commit resumes once from its recorded creation config, keeps its durable rows when cancelled, and a child panic is typed while the parent lives
 # - L9d: crates/lash-restate/src/tests/run_control_witnesses/process_run.rs
 #   a live process keeps its child run, and a run admitted ahead of its own, until it is terminal; a terminal process releases them
-# - L9d: crates/lash-restate/src/tests/store_fault_journaling.rs
-#   a process step's typed append refusal is its recorded answer
 # - L9d: crates/lash/src/tests/agent_scenarios/cases.rs
 #   agent scenario awaited process attachment is a parent commit gc root; and 3 more law(s) of the file, by test name
 # - L9d: crates/lash/src/tests/agent_scenarios/plugin_operations.rs
@@ -664,6 +662,21 @@ path = "crates/lash-durable-test/tests/process_actor_laws.rs::a_signal_is_admitt
 owner = "L7"
 law = "a cell's deferred tool resolutions are held in its snapshot and restored from it: a restored cell sees the grants it resolved, never a changed ambient binding, and resolves nothing twice"
 
+[planned."TS1"]
+owner = "L6"
+law = "a trigger occurrence starts exactly one process per delivery at every trigger.start commit cut, each bound to its delivery under its start key, on SQLite memory, SQLite file and PostgreSQL"
+path = "crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_sqlite_memory"
+
+[planned."TS2"]
+owner = "L6"
+law = "a crash between a trigger start's prepare and its commit leaves no process and no reservation: the store holds the whole start or none of it"
+path = "crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_postgres"
+
+[planned."CR1"]
+owner = "L6"
+law = "a process commit the store refuses as corrupt ends the process Failed on the first refusal, its failure naming the refusal, with no retry"
+path = "crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal"
+
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs"
 test = "*"
@@ -845,7 +858,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "the tests left run without an engine; TriggerRouter::emit starts its delivery's process through process_effect (triggers/router.rs:844): blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
+note = "FIG-5175 rewrote the file on trigger.start: an emission commits its occurrence, its processes and its bound deliveries in one mailbox commit, and its two laws run (rows of their own); the other laws listed here were already gone from the file and stay L9d's to disposition"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/support.rs"
@@ -886,8 +899,8 @@ laws = [
   "process_service_filter_policy_is_enforced_by_every_production_operation",
 ]
 disposition = "port"
-status = "todo"
-note = "L9d (FIG-5182) re-wrote the law on a SQLite memory backend with a detached turn context; it lands #[ignore]d, red: blocked: L6 (FIG-5175): ActorContext::process_effect hands its process executor to RuntimeEffectLocalExecutor::execute, which refuses every process command as RuntimeEffectLocalExecutorMismatch (lash-core-execution runtime/effect/executor.rs:1042); repro crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs::a_process_start_issued_through_the_actor_context_registers_its_process (#[ignore]d, red)"
+status = "ported"
+note = "L9d (FIG-5182) re-wrote the law on a SQLite memory backend with a detached turn context; FIG-5175 un-ignored it once ActorContext::process_effect ran a process command on its own executor"
 
 [[row]]
 path = "crates/lash-core/src/runtime/shift/attempt_drop_tests.rs"
@@ -7468,10 +7481,10 @@ lane = "L9d"
 laws = [
   "a_refused_append_is_the_steps_journaled_answer",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal"
+status = "deleted"
 owed = "a process step's typed append refusal is its recorded answer"
-note = "L9d (FIG-5182) wrote the law as crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal; it lands #[ignore]d, red: blocked: L6 (FIG-5175): the registry's refusal of an Emit refuses the whole process.advance commit as Corrupt, and the activation retries it every poll forever, never ending or parking the process (runtime/actor/process/activation.rs apply, EngineAction::Emit)"
+note = "L9d (FIG-5182) wrote the law as crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal; FIG-5175 un-ignored it once the process activation ended a process Failed on the first commit refused as corrupt"
 
 [[row]]
 path = "crates/lash-restate/src/tests/store_fault_journaling.rs"
@@ -21778,6 +21791,213 @@ owed = "a changed retry is a typed conflict"
 note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
 
 [[row]]
+path = "crates/lash-sim/src/runner/trigger_delivery/tests.rs"
+test = "*"
+area = "triggers"
+needs = ["process"]
+class = "replace"
+lane = "L9f"
+laws = [
+  "sqlite_generated_trigger_delivery_is_bound_and_settled",
+  "postgres_generated_trigger_delivery_is_bound_and_settled",
+]
+disposition = "replaced-by:planned:TS1"
+status = "deleted"
+owed = "a generated trigger delivery starts one process bound to its delivery, with nothing left for a relay to settle"
+note = "FIG-5175 deleted the TriggerDelivery relay: a delivery is bound to its process in the trigger.start commit, so there is no obligation to settle; TS1 cuts that commit on every dialect"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/process_start.rs"
+test = "*"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L9d"
+laws = [
+  "a_delivered_start_settles_and_is_never_claimed_again",
+  "a_failing_start_retries_with_its_last_error_and_stalls_typed_at_the_ceiling",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 deleted the ProcessStart relay kind: a start creates its process actor ready in its registration's transaction (ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs"
+test = "a_failed_worker_poke_still_returns_the_started_record"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L9d"
+laws = [
+  "a_failed_worker_poke_still_returns_the_started_record",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 deleted the worker poke (deliver_process_start): a started process's actor is ready in its start's commit"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
+test = "update_after_reservation_leaves_the_reserved_delivery_capture_intact"
+area = "triggers"
+needs = ["process"]
+class = "semantic"
+lane = "L9d"
+laws = [
+  "an update after an occurrence started leaves its delivery's captured contract intact",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5175 ported it as crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::a_held_occurrence_answers_the_capture_it_started_against_and_asks_no_route"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
+test = "a_recovered_delivery_retries_an_unavailable_route_and_refuses_a_revoked_one"
+area = "triggers"
+needs = ["process"]
+class = "semantic"
+lane = "L9d"
+laws = [
+  "an unavailable route is retried and a revoked route refuses its delivery",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5175 ported it as crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery: nothing commits before the route admits, so a retry is a fresh emission, not a recovery"
+
+[[row]]
+path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
+test = "a_redriven_delivery_whose_start_registered_never_asks_a_revoked_route"
+area = "triggers"
+needs = ["process"]
+class = "delete"
+lane = "L9d"
+laws = [
+  "a_redriven_delivery_whose_start_registered_never_asks_a_revoked_route",
+]
+disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::a_held_occurrence_answers_the_capture_it_started_against_and_asks_no_route"
+status = "deleted"
+note = "FIG-5175: there is no redrive of a delivery; a held occurrence's emission answers its started process and asks no route"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_trigger_retention/delivery_starts.rs"
+test = "*"
+area = "triggers"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "a_delivery_start_registers_nothing_once_its_process_was_pruned",
+  "a_trigger_delivery_pin_holds_its_row_until_released",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 deleted the delivery's separate start and its pin: both are rows of the trigger.start commit"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
+test = "*"
+area = "triggers"
+needs = ["process"]
+class = "semantic"
+lane = "L9g"
+laws = [
+  "trigger_capture_route_and_compaction_refusal_matrix",
+  "trigger_occurrence_redelivery_after_reclaim",
+  "trigger_redelivery_after_forget_starts_again",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5175 records its occurrences through the trigger.start commit; the relay's laws have rows of their own"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
+test = "trigger_delivery_recovery"
+area = "triggers"
+needs = ["process"]
+class = "replace"
+lane = "L9g"
+laws = [
+  "trigger_delivery_recovery",
+  "a_reserved_delivery_recovers_through_its_obligation_into_one_bound_process",
+]
+disposition = "replaced-by:planned:TS1"
+status = "deleted"
+owed = "a reserved delivery ends with exactly one bound process"
+note = "FIG-5175: no reserve/start window is left to recover; TS1 cuts the one commit that writes both"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
+test = "trigger_delivery_pinned_recovery"
+area = "triggers"
+needs = ["process"]
+class = "replace"
+lane = "L9g"
+laws = [
+  "trigger_delivery_pinned_recovery",
+  "a_completed_child_whose_bind_was_lost_is_bound_not_started_again",
+]
+disposition = "replaced-by:planned:TS1"
+status = "deleted"
+owed = "a delivery whose child ran is never started again"
+note = "FIG-5175: no bind can be lost after its child runs; the child and its binding commit together"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
+test = "trigger_delivery_pin"
+area = "triggers"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "trigger_delivery_pin",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 deleted trigger delivery pins"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
+test = "trigger_delivery_start_admission"
+area = "triggers"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "trigger_delivery_start_admission",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 deleted the delivery's separate start: no start runs after its delivery is bound or gone"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
+test = "trigger_delivery_refusal"
+area = "triggers"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "trigger_delivery_refusal",
+  "captured_delivery_refusals",
+]
+disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery"
+status = "deleted"
+note = "FIG-5175: a delivery the route or engine refuses is refused in the emission, before anything commits; no due pass stalls it"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
+test = "trigger_capture_route_and_compaction_refusal_matrix"
+area = "triggers"
+needs = ["process"]
+class = "delete"
+lane = "L9g"
+laws = [
+  "unregistered_delivery_is_offered_to_the_recovery_sweep",
+]
+disposition = "replaced-by:planned:TS1"
+status = "deleted"
+note = "FIG-5175: no delivery is reserved unbound, so the recovery sweep's window is gone; the matrix's other laws stay"
+
+[[row]]
 path = "crates/lash-conformance/src/conformance/obligation_relay.rs"
 test = "*"
 area = "obligation-relay"
@@ -23534,3 +23754,32 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "L6 (FIG-5175) deleted the process wake outbox (lash_process_wake_deliveries) and the PG wake-source lock this law raced"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/obligation_relay.rs"
+test = "registered_processes_are_claimed_through_every_obligation_page"
+area = "obligations"
+needs = ["process"]
+class = "replace"
+lane = "L9g"
+laws = [
+  "registered_processes_are_claimed_through_every_obligation_page",
+]
+disposition = "replaced-by:crates/lash-conformance/src/conformance/obligation_relay.rs::armed_obligations_are_claimed_through_every_page"
+status = "deleted"
+owed = "every armed obligation is claimed exactly once across claim pages"
+note = "FIG-5175: processes arm no obligation; the paging law runs over SessionDelete rows"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/schema_check_constraint_tests.rs"
+test = "trigger_delivery_cannot_settle_without_binding"
+area = "triggers"
+needs = ["process"]
+class = "delete"
+lane = "L1b"
+laws = [
+  "trigger_delivery_cannot_settle_without_binding",
+]
+disposition = "covered-by:planned:TS1"
+status = "deleted"
+note = "FIG-5175 deleted the delivery's obligation columns; process_id is NOT NULL, and TS1 checks every delivery's process"

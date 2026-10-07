@@ -394,7 +394,7 @@ pub mod triggers {
         TriggerCommandOutcome, TriggerDeliveryReservation, TriggerDeliveryRetentionCandidate,
         TriggerEffectResult, TriggerHandle, TriggerIngressReceipt, TriggerInputBinding,
         TriggerMutationOutcome, TriggerMutationReceipt, TriggerOccurrenceFilter,
-        TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
+        TriggerOccurrenceOutcome, TriggerOccurrencePlan, TriggerOccurrenceReclamationReport,
         TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
         TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
         TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestore,
@@ -1110,16 +1110,16 @@ pub mod process {
         DeclaredProcessIdentity, HandleId, InvalidProcessDefinitionId, InvalidStartKey, Lifetime,
         LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork,
         NonTerminalProcessPage, PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-        PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PinnedTriggerDelivery, ProcessAwaitOutput,
-        ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority,
-        ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError,
-        ProcessDefinitionId, ProcessDefinitionRef, ProcessDefinitionRefusal,
-        ProcessDefinitionResolution, ProcessDefinitionTarget, ProcessDefinitionValue,
-        ProcessEffectNodeReport, ProcessEffectOccurrence, ProcessEffectOmissions,
-        ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectReport,
-        ProcessEffectReportError, ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt,
-        ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog,
-        ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+        PROCESS_EFFECT_OUTCOME_EVENT_TYPE, ProcessAwaitOutput, ProcessCancelReceipt,
+        ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority, ProcessDefinition,
+        ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionId,
+        ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+        ProcessDefinitionTarget, ProcessDefinitionValue, ProcessEffectNodeReport,
+        ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+        ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError,
+        ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+        ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
+        ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
         ProcessEventReadOutcome, ProcessEventRelease, ProcessEventType, ProcessExecutionContext,
         ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView,
         ProcessIdentity, ProcessInput, ProcessLifecycle, ProcessLineage, ProcessListFilter,
@@ -1134,17 +1134,16 @@ pub mod process {
         ProcessTerminalWait, ProcessToolIntents, ProcessWakeDelivery, ProcessWakeSpec,
         ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus,
         ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionScope, StartCx, StartCxError,
-        StartKey, TerminalProcessStatus, TriggerDeliveryPin, WakeId, WatchedRegistry,
-        facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
-        facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
-        facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,
-        facade_support::ObservedWorkItemState, facade_support::ProcessChangeHub,
-        facade_support::ProcessChangeSubscription, facade_support::ProcessEventSink,
-        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
-        facade_support::ProcessWake, facade_support::ProcessWorkObserver,
-        facade_support::ProcessWorkSnapshot, facade_support::SessionScopeId,
-        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
-        lifetime,
+        StartKey, TerminalProcessStatus, WakeId, WatchedRegistry, facade_support::ObservedProcess,
+        facade_support::ObservedProcessEvent, facade_support::ObservedProcessEventLite,
+        facade_support::ObservedProcessEventPage, facade_support::ObservedProcessEventReadOutcome,
+        facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,
+        facade_support::ProcessChangeHub, facade_support::ProcessChangeSubscription,
+        facade_support::ProcessEventSink, facade_support::ProcessRuntimeHost,
+        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
+        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
+        facade_support::SessionScopeId, facade_support::watch_process_registry,
+        facade_support::watch_process_registry_with_sink, lifetime,
     };
     /// Test-only registry probes and the conformance-suite registry type that
     /// carries them (`testing` feature only; no production trait requires them).
@@ -1170,7 +1169,6 @@ pub mod durability {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::PreparedProcessRegistration;
     pub use lash_core::RecordedKeys;
-    pub use lash_core::runtime::process_start::ProcessStartRelay;
     pub use lash_core_store::attachments::{
         AttachmentProducer, AttachmentSourcePolicy, AttachmentSourcePolicyError,
     };
@@ -1209,7 +1207,6 @@ pub mod runtime {
     pub use lash_core::tool_dispatch::ToolAttemptLineage;
     /// The cancellation policy pinned in a Run-owned source descriptor.
     pub use lash_core::tool_run::ExternalCancelPolicy;
-    pub use lash_core::triggers::TriggerDeliveryAdmission;
 
     pub use lash_core::ServedOnly;
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};

@@ -553,21 +553,12 @@ impl ProcessToolIntents for ReceiverHoldRegistry {
 
 #[async_trait::async_trait]
 impl ProcessRetention for ReceiverHoldRegistry {
-    async fn release_trigger_delivery_pin(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<(), PluginError> {
-        self.inner.release_trigger_delivery_pin(process_id).await
-    }
     async fn release_process_events(
         &self,
         process_id: &ProcessId,
         through: u64,
     ) -> Result<ProcessEventRelease, PluginError> {
         self.inner.release_process_events(process_id, through).await
-    }
-    async fn list_trigger_delivery_pins(&self) -> Result<Vec<PinnedTriggerDelivery>, PluginError> {
-        self.inner.list_trigger_delivery_pins().await
     }
     async fn compact_process_tombstones(
         &self,

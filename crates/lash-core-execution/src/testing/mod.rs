@@ -43,7 +43,6 @@ mod trigger_context;
 /// A recording or fault layer over any effect host (FIG-3580).
 pub use crate::runtime::process::{
     NonTerminalPagePause, NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
-    TriggerDeliveryPinReleaseLoss,
 };
 pub use execution_context_builder::*;
 #[cfg(any(test, feature = "testing"))]

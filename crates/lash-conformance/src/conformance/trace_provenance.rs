@@ -379,7 +379,7 @@ async fn a_redelivered_occurrence_keeps_its_first_scope(
     prefix: &str,
     stores: &Arc<dyn crate::StoreSet>,
 ) {
-    let triggers = stores.trigger_store();
+    let triggers = crate::TriggerStores::of(stores.as_ref());
     let fire = |payload: serde_json::Value, offer: TraceScopeOffer| {
         crate::TriggerOccurrenceRequest::new(
             "ui.button.pressed",
@@ -403,7 +403,7 @@ async fn a_redelivered_occurrence_keeps_its_first_scope(
     );
 
     let first = triggers
-        .ingest_occurrence(fire(pressed.clone(), offer(FIRST, FIRST_ANCHOR)))
+        .record_occurrence(fire(pressed.clone(), offer(FIRST, FIRST_ANCHOR)))
         .await
         .expect("the first ingest");
     assert_eq!(first.realization, lash_core::StoreRealization::Realized);
@@ -419,7 +419,7 @@ async fn a_redelivered_occurrence_keeps_its_first_scope(
 
     for retry in [offer(SECOND, SECOND_ANCHOR), TraceScopeOffer::default()] {
         let again = triggers
-            .ingest_occurrence(fire(pressed.clone(), retry))
+            .record_occurrence(fire(pressed.clone(), retry))
             .await
             .expect("a redelivery under another context is the same fire");
         assert_eq!(again.realization, lash_core::StoreRealization::Coalesced);
@@ -437,7 +437,7 @@ async fn a_redelivered_occurrence_keeps_its_first_scope(
 
     // A changed fire under the idempotency key is the conflict it always was.
     let error = triggers
-        .ingest_occurrence(fire(
+        .record_occurrence(fire(
             serde_json::json!({ "button": "Red" }),
             offer(FIRST, FIRST_ANCHOR),
         ))

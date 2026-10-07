@@ -21,11 +21,11 @@ use std::sync::Arc;
 
 use super::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
-    TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerIngressReceipt,
-    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceReclamationResult,
-    TriggerOccurrenceRecord, TriggerOccurrenceRequest, TriggerOwnerScope,
-    TriggerRetentionReconciliationReport, TriggerStore, TriggerSubscriptionFilter,
-    TriggerSubscriptionRecord, deterministic_subscription_id, trigger_incarnation,
+    TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerMutationOutcome,
+    TriggerOccurrenceFilter, TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord,
+    TriggerOccurrenceRequest, TriggerOwnerScope, TriggerRetentionReconciliationReport,
+    TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
+    deterministic_subscription_id, trigger_incarnation,
 };
 use crate::plugin::PluginError;
 use crate::{
@@ -346,11 +346,11 @@ impl TriggerStore for RevisionReferrerTriggerStore {
         self.inner.delete_session_subscriptions(session_id).await
     }
 
-    async fn ingest_occurrence(
+    async fn plan_occurrence(
         &self,
-        request: TriggerOccurrenceRequest,
-    ) -> Result<TriggerIngressReceipt, PluginError> {
-        self.inner.ingest_occurrence(request).await
+        request: &TriggerOccurrenceRequest,
+    ) -> Result<super::TriggerOccurrencePlan, PluginError> {
+        self.inner.plan_occurrence(request).await
     }
 
     async fn list_occurrences(
@@ -387,17 +387,6 @@ impl TriggerStore for RevisionReferrerTriggerStore {
 
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
         self.inner.list_deliveries().await
-    }
-
-    async fn bind_delivery_process(
-        &self,
-        occurrence_id: &str,
-        subscription_id: &str,
-        process_id: &ProcessId,
-    ) -> Result<(), PluginError> {
-        self.inner
-            .bind_delivery_process(occurrence_id, subscription_id, process_id)
-            .await
     }
 
     async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, PluginError> {

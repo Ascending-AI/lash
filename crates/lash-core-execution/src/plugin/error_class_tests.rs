@@ -79,15 +79,6 @@ plugin_error_samples! {
     StartKeyConflict { .. } => PluginError::StartKeyConflict {
         start_key: crate::StartKey::for_host("sampled"),
     },
-    TriggerDeliveryBound { .. } => PluginError::TriggerDeliveryBound {
-        occurrence_id: "occurrence".to_string(),
-        subscription_id: "subscription".to_string(),
-        process_id: process(),
-    },
-    TriggerDeliveryRetired { .. } => PluginError::TriggerDeliveryRetired {
-        occurrence_id: "occurrence".to_string(),
-        subscription_id: "subscription".to_string(),
-    },
     InvalidToolDiscovery { .. } => PluginError::InvalidToolDiscovery {
         operation: "sampled".to_string(),
     },

@@ -266,11 +266,6 @@ impl RuntimeEffectCommand {
     /// replay compares.
     pub fn without_trace_provenance(&self) -> Option<Self> {
         match self {
-            Self::IngestTriggerOccurrence { request } if !request.trace.is_empty() => {
-                let mut request = request.clone();
-                request.trace = lash_trace::TraceScopeOffer::default();
-                Some(Self::IngestTriggerOccurrence { request })
-            }
             Self::AcceptTurnInput { draft } if !draft.trace_cause.is_root() => {
                 let mut draft = draft.clone();
                 draft.trace_cause = lash_trace::TraceCause::Root;
@@ -429,20 +424,6 @@ pub enum RuntimeEffectCommand {
     },
     Trigger {
         command: Box<crate::TriggerCommand>,
-    },
-    /// Ingest an emission's occurrence as one recorded step (FIG-4503). The
-    /// store's receipt is the step's outcome: a replay serves the occurrence
-    /// and the reservations the first execution was answered, and writes
-    /// nothing to the trigger store.
-    IngestTriggerOccurrence {
-        request: Box<crate::TriggerOccurrenceRequest>,
-    },
-    /// Record the process one delivery an emission ingested is bound to
-    /// (FIG-4297, FIG-4503). The envelope names only the delivery; the
-    /// binding is the step's outcome.
-    AdmitTriggerDelivery {
-        occurrence_id: String,
-        subscription_id: String,
     },
     Process {
         command: Box<ProcessCommand>,
@@ -607,8 +588,6 @@ impl RuntimeEffectCommand {
 
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
-            Self::IngestTriggerOccurrence { .. } => RuntimeEffectKind::IngestTriggerOccurrence,
-            Self::AdmitTriggerDelivery { .. } => RuntimeEffectKind::AdmitTriggerDelivery,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
@@ -1179,17 +1158,6 @@ pub enum RuntimeEffectOutcome {
     },
     Trigger {
         result: Box<crate::TriggerEffectResult>,
-    },
-    /// The receipt the trigger store answered an
-    /// [`IngestTriggerOccurrence`](RuntimeEffectCommand::IngestTriggerOccurrence).
-    IngestTriggerOccurrence {
-        receipt: Box<crate::TriggerIngressReceipt>,
-    },
-    /// The binding an
-    /// [`AdmitTriggerDelivery`](RuntimeEffectCommand::AdmitTriggerDelivery)
-    /// recorded for its delivery.
-    AdmitTriggerDelivery {
-        admission: Box<crate::TriggerDeliveryAdmission>,
     },
     Process {
         result: ProcessEffectOutcome,

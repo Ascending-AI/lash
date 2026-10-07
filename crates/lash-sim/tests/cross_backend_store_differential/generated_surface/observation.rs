@@ -80,8 +80,8 @@ pub(super) fn normalized_trigger_delivery_json(
     let fields = value
         .as_object_mut()
         .expect("trigger delivery observation must be an object");
-    // A delivery's process is minted when the delivery starts it, so the two
-    // backends agree on whether a process is bound, not on its id.
+    // A delivery is bound to its process in the transaction that records
+    // it; the process rows are compared on their own.
     let process_id_bound = fields
         .remove("process_id")
         .is_some_and(|process_id| !process_id.is_null());

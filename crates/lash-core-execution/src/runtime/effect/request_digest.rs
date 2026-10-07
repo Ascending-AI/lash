@@ -436,8 +436,8 @@ mod tests {
     }
 
     /// Trace provenance rides a command beside its payload and is no part
-    /// of the envelope's identity (FIG-4829): the same start, signal,
-    /// occurrence or accepted input under another trace context, or under
+    /// of the envelope's identity (FIG-4829): the same start, signal or
+    /// accepted input under another trace context, or under
     /// none, journals the same bytes and hashes the same, so a retry replays
     /// its recorded effect instead of diverging from it.
     #[test]
@@ -476,23 +476,6 @@ mod tests {
                 .with_trace_cause(cause),
             })
         };
-        let fire = |trace: lash_trace::TraceScopeOffer| {
-            let mut envelope = process_effect(crate::ProcessCommand::List {
-                selection: crate::ProcessListSelection::HostRunning,
-            });
-            envelope.command = RuntimeEffectCommand::IngestTriggerOccurrence {
-                request: Box::new(
-                    crate::TriggerOccurrenceRequest::new(
-                        "ui.button.pressed",
-                        "provenance-source",
-                        serde_json::json!({"button": "Blue"}),
-                        "provenance-fire",
-                    )
-                    .with_trace(trace),
-                ),
-            };
-            envelope
-        };
         let accept = |cause: lash_trace::TraceCause| {
             let mut envelope = process_effect(crate::ProcessCommand::List {
                 selection: crate::ProcessListSelection::HostRunning,
@@ -522,12 +505,6 @@ mod tests {
                 signal(lash_trace::TraceCause::Root),
                 signal(linked(1)),
                 signal(linked(2)),
-            ),
-            (
-                "occurrence",
-                fire(lash_trace::TraceScopeOffer::default()),
-                fire(offer(1)),
-                fire(offer(2)),
             ),
             (
                 "input",
