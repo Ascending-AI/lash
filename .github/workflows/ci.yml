@@ -468,6 +468,7 @@ jobs:
           python3 scripts/check_retired_terms.py
           python3 scripts/check_outcome_suffixes.py
           python3 scripts/check_adr_current.py
+          python3 scripts/check-no-restate.py
           python3 scripts/check_session_ingress_docs.py
           python3 scripts/check_postgres_gate_coverage.py
           GATES

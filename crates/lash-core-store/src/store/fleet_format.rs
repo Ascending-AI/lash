@@ -326,8 +326,7 @@ pub enum SurfaceReads {
         /// The oldest version any build of this line still reads.
         floor: u32,
     },
-    /// Mutable state: rows a writer rewrites in place, and Restate objects an
-    /// `upgrade` handler rewrites. Its readers admit whatever the upcaster
+    /// Mutable state: rows a writer rewrites in place. Its readers admit whatever the upcaster
     /// chain lifts; after the release that finalized it, backfills and
     /// object sweeps move every record to the newest version, and the next
     /// release may drop the lift.
@@ -499,8 +498,7 @@ fn oldest_upcastable(surface: SurfaceFormat, floor: u32, newest: u32) -> u32 {
 #[derive(Clone, Copy)]
 pub enum Lift {
     /// A transform of the record's decoded JSON tree. The tree it leaves is
-    /// the next generation's, including the record's own version field; a
-    /// Restate object family's lift rewrites the stamped value's body.
+    /// the next generation's, including the record's own version field.
     Tree(fn(&mut serde_json::Value) -> Result<(), crate::StoreError>),
     /// The surface's bytes are not a JSON tree — a canonical binary encoding,
     /// a label vocabulary, a byte envelope — so its own decoder reads
@@ -908,7 +906,7 @@ mod tests {
         let window = FleetFormat::current().read_window(mutable);
         assert_eq!(window.oldest(), 30);
         assert!(window.admits(30) && !window.admits(29));
-        let wire = SurfaceFormat::of("RESTATE_WIRE_VERSION", 30);
+        let wire = SurfaceFormat::of("UNGUARDED_WIRE_VERSION", 30);
         assert_eq!(guarded_surface(wire), None);
         assert_eq!(FleetFormat::current().read_window(wire).oldest(), 30);
     }

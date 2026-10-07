@@ -98,7 +98,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
     assert_eq!(created_head.current_frame_node_id, None);
     assert_eq!(created_head.checkpoint_ref, None);
     assert_eq!(created_head.leaf_node_id, None);
-    let restated = crate::SessionStoreCreateRequest {
+    let rebinding = crate::SessionStoreCreateRequest {
         config: crate::PersistedSessionConfig::from(&crate::SessionPolicy {
             model: Some(crate::testing::test_llm_profile_config(
                 "a-rebinding-model",
@@ -113,7 +113,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
     };
     assert_eq!(
         factory
-            .admit_session(&restated)
+            .admit_session(&rebinding)
             .await
             .expect("rebind with other config"),
         crate::SessionAdmission::Rebound

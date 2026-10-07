@@ -733,8 +733,7 @@ struct World {
     registry: Arc<dyn crate::ProcessRegistry>,
     /// The runtime's own wait on [`Self::registry`]: it wakes on the watch's
     /// change ticks, and re-reads on its work cadence for a terminal written
-    /// outside the watch (Restate's process workflow writes through the
-    /// engine's own registry handle).
+    /// outside the watch (through the engine's own registry handle).
     awaiter: crate::ProcessRegistryAwaiter,
     faults: crate::testing::ProcessRegistryFaults,
     process_work: crate::ProcessWorkWiring,

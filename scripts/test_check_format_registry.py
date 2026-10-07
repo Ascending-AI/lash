@@ -536,7 +536,7 @@ class RealRepositoryTests(unittest.TestCase):
 
     def test_the_gate_names_the_constants_fig_3521_found_unregistered(self) -> None:
         # The surviving version constant that was in neither the registry nor the
-        # manifest before FIG-3521 (the other two went with the Restate engine).
+        # manifest before FIG-3521 (the other two were deleted with their engine).
         # Dropping its source declaration must fail the gate by name; a sweep that
         # stopped seeing it would pass silently instead.
         missing = {

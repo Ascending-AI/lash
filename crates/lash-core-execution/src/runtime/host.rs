@@ -262,7 +262,8 @@ impl RuntimeHostConfig {
     /// There is intentionally no `Default` and no in-memory constructor. The
     /// backend and the commit limits decide a runtime's durability envelope,
     /// so hosts must choose them rather than silently inheriting policy; the
-    /// local durable choice is Restate over SQLite file storage (ADR 0104 §4).
+    /// local durable choice is the durable engine over one SQLite database
+    /// file (ADR 0132 §1).
     pub fn new(
         backend: crate::Backend,
         commit_budget: crate::CommitBudget,

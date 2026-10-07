@@ -1,7 +1,6 @@
 //! Each global invariant catches a history broken on purpose.
 //!
-//! The base is a real history: the pending-tool scenario on the Restate
-//! server double, whose tool defers, whose host resolves the completion and
+//! The base is a real history: the pending-tool scenario, whose tool defers, whose host resolves the completion and
 //! whose turn commits the result. It keeps every invariant. Each test breaks
 //! it the way its checker exists to catch and proves that checker fails it.
 

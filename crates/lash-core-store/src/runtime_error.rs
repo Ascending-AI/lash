@@ -574,7 +574,7 @@ runtime_error_codes! {
         // the host runs outside a handler scope; wiring, not the attempt.
         EngineEffectHostRequiresHandlerScope = "engine_effect_host_requires_handler_scope" => Terminal,
         // the give-up is journaled, so replay reproduces it.
-        /// A journaled Restate effect produced an unacceptable outcome and became
+        /// A recorded engine effect produced an unacceptable outcome and became
         /// terminal rather than failing every enclosing-turn redrive.
         EngineJournaledEffectPoisoned = "engine_journaled_effect_poisoned" => Terminal,
         // engine interaction failed; the engine redrives the invocation.
@@ -582,18 +582,18 @@ runtime_error_codes! {
         // engine interaction failed; the engine redrives the invocation.
         EngineProcessCancel = "engine_process_cancel" => Retryable,
         // the live command diverged from its journal entry; a redrive diverges the same way.
-        /// A Restate DirectProcess redrive addressed an existing journal entry
+        /// A DirectProcess redrive addressed an existing engine record
         /// with a different canonical process-command identity.
         EngineProcessJournalIdentityDrift = "engine_process_journal_identity_drift" => Terminal,
         // the journal entry does not decode in this build.
-        /// A Restate DirectProcess journal entry has an unsupported version or a
+        /// A DirectProcess engine record has an unsupported version or a
         /// shape this build cannot decode exactly.
         EngineProcessJournalPayloadIncompatible = "engine_process_journal_payload_incompatible" => Terminal,
         // the value's format stamp names a stored format this build does
         // not read; a redrive meets the same stamp.
-        /// A Restate object's retained state carries a stored-format stamp this
+        /// An engine object's retained state carries a stored-format stamp this
         /// build does not read — unstamped pre-format state, or a newer or
-        /// skipped format; the handler refuses the value before any effect.
+        /// skipped format; the engine refuses the value before any effect.
         EngineObjectStateFormatUnsupported = "engine_object_state_format_unsupported" => Terminal,
         // engine interaction failed; the engine redrives the invocation.
         EngineProcessIngressSubmit = "engine_process_ingress_submit" => Retryable,
@@ -655,7 +655,7 @@ runtime_error_codes! {
         /// settled.
         SessionDeleteCleanupPending = "session_delete_cleanup_pending" => Retryable,
         // the attach ceiling elapsed; re-attaching is safe.
-        /// A Restate terminal attachment elapsed; re-attaching is safe.
+        /// An engine terminal attachment elapsed; re-attaching is safe.
         EngineTurnTerminalAttachCeilingElapsed = "engine_turn_terminal_attach_ceiling_elapsed" => Retryable,
         // the terminal does not decode.
         EngineTurnTerminalDecode = "engine_turn_terminal_decode" => Terminal,

@@ -204,7 +204,7 @@ impl ConfigOwner for TestCodeConfigOwner {
         Ok(())
     }
 
-    /// A run restates the extras whole.
+    /// A run replaces the extras whole.
     fn apply_run_options(
         &self,
         _recorded: &TestCodeCreateExtras,

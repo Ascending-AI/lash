@@ -239,9 +239,8 @@ fn members(tool: &str, values: &[&str]) -> serde_json::Value {
     )
 }
 
-/// Everything one law turn is built from. Restate re-runs a turn's handler
-/// from the top on every replay, so each execution builds its runtime afresh
-/// from these and reaches the same journaled commands.
+/// Everything one law turn is built from. Each execution of the turn builds
+/// its runtime afresh from these, which outlive it.
 #[derive(Clone)]
 struct SugarTurn {
     stores: Arc<dyn crate::StoreSet>,

@@ -24,8 +24,8 @@ struct DurableFaultMatrixRow {
 }
 
 const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
-    // Its crash-point matrix ran on the Restate server double and went with
-    // it (FIG-5190); L9f (FIG-5184) re-implements it on the durable harness.
+    // L9f (FIG-5184) implements its crash-point matrix on the durable
+    // harness.
     DurableFaultMatrixRow {
         id: "crash-reopen-runtime-rebuild",
         evidence: FaultEvidence::Blocked,

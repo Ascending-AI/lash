@@ -258,9 +258,9 @@ impl LashRuntime {
     /// (FIG-4258): it adopts the durable head. The replay must not present
     /// the fence again. The shift that applied
     /// the command goes on to the input queued behind it, whose seal
-    /// supersedes the command run's fence, and Restate replays the whole
-    /// shift from its journal: the store checks a commit's fence before its
-    /// receipt, so the settled commit would be refused as superseded.
+    /// supersedes the command run's fence: the store checks a commit's fence
+    /// before its receipt, so the settled commit would be refused as
+    /// superseded.
     ///
     /// A frame whose recorded base the head has moved from, which only a
     /// writer outside the lane can do, can never commit: the command settles

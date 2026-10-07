@@ -14,7 +14,7 @@ use crate::runtime::state::MAX_SNAPSHOT_VALUE_DEPTH;
 /// The deepest value nesting any runtime value walk will follow.
 ///
 /// It is the durable boundary's ceiling (`MAX_SNAPSHOT_VALUE_DEPTH`), reused
-/// rather than restated: a value nested deeper than a snapshot will accept has
+/// rather than repeated: a value nested deeper than a snapshot will accept has
 /// no future anyway, and the walks that materialize a value — export at the
 /// instruction boundary, at the terminal-exit boundary, and ECMA-262's
 /// object-to-primitive coercion — are recursive. Bounding them at the same

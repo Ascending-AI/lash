@@ -2,9 +2,7 @@
 //! is applied to SQLite memory, SQLite file and PostgreSQL stores, and their
 //! durable storage rows are compared after every step.
 //!
-//! It compares storage surfaces only. Under ADR 0104 (FIG-3664) Restate is
-//! the only effect engine. The SQL effect-engine path was retired in
-//! 476264fbea, after the PostgreSQL engine deletion in 4f03596847. Effect
+//! It compares storage surfaces only. Effect
 //! records, tool-intent batches, await-event resolution and revocation,
 //! runtime-operation journaling and retirement, and the historical effect-group
 //! lifecycle — are not part of this surface.

@@ -1,5 +1,4 @@
-//! L9d (FIG-5182): the process laws the Restate double used to carry,
-//! written on the durable harness (ADR 0132 §10, §11, §14).
+//! L9d (FIG-5182): the process laws, written on the durable harness (ADR 0132 §10, §11, §14).
 //!
 //! Each law runs the production process activation over a SQLite memory
 //! store set on simulated nodes and virtual time. Producers outside the
@@ -460,7 +459,7 @@ fn find<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 /// A step whose admission is refused ends its process `Failed`, typed, with
 /// exactly one terminal event, and the process awaiting it reads that
 /// failure: nothing is stranded running with its awaiter waiting
-/// (replaces the Restate double's admission-invariant laws, FIG-3819).
+/// (the admission invariant, FIG-3819).
 #[tokio::test]
 async fn a_refused_step_admission_ends_the_process_failed_and_its_awaiter_reads_it() {
     let world = World::new(Script::new()).await;
@@ -519,8 +518,8 @@ async fn a_refused_step_admission_ends_the_process_failed_and_its_awaiter_reads_
 
 /// A process awaiting another reads the outcome its wait was resolved
 /// with, even when the awaited process was pruned before the awaiter ran
-/// again: the wait keeps the material, not the producer's row (replaces
-/// L02/L12 of the Restate double's source seal).
+/// again: the wait keeps the material, not the producer's row (source-seal
+/// laws L02/L12).
 ///
 /// Node A dies the instant the awaited process's terminal commits, so the
 /// awaiter has not run since; the host prunes the awaited process; then
@@ -584,7 +583,7 @@ async fn an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended() {
 /// engine consumed it reaches the engine never again, a resend under the
 /// same identity with a changed payload is refused before anything
 /// resolves, and the next distinct signal arrives as the next event
-/// (replaces the Restate double's signal-admission laws, FIG-4298).
+/// (signal admission, FIG-4298).
 #[tokio::test]
 async fn a_signal_is_admitted_once_and_a_changed_resend_is_refused() {
     let world = World::new(Script::new()).await;
@@ -670,7 +669,7 @@ async fn a_signal_is_admitted_once_and_a_changed_resend_is_refused() {
 
 /// A process started under the start key of a pruned process is a new
 /// process: its own id, its own engine run from `Started`, its own terminal
-/// (replaces the Restate double's successor-after-prune law, FIG-3611).
+/// (successor after prune, FIG-3611).
 #[tokio::test]
 async fn a_start_under_a_pruned_processs_key_is_a_new_process_with_its_own_lifecycle() {
     let world = World::new(Script::new()).await;
@@ -720,8 +719,8 @@ async fn a_start_under_a_pruned_processs_key_is_a_new_process_with_its_own_lifec
 
 /// An opaque failure of an engine's `advance` never becomes the process's
 /// terminal: the process parks with `AdvanceRefused`, holds no outcome, and
-/// an operator's redrive runs it on to its own terminal (replaces the
-/// Restate double's opaque-infrastructure-failure law).
+/// an operator's redrive runs it on to its own terminal (an opaque
+/// infrastructure failure).
 #[tokio::test]
 async fn an_opaque_advance_failure_parks_the_process_and_a_redrive_runs_it_on() {
     let world = World::new(Script::new()).await;
@@ -778,8 +777,7 @@ async fn an_opaque_advance_failure_parks_the_process_and_a_redrive_runs_it_on() 
 /// An `Emit` whose commit meets a transient store fault, or whose commit's
 /// answer is lost, is never the step's answer: the transition is
 /// recomputed from the committed rows, and the event is appended exactly
-/// once (replaces the Restate double's store-fault journaling laws,
-/// FIG-4649).
+/// once (store faults, FIG-4649).
 #[tokio::test]
 async fn an_emit_whose_commit_meets_a_store_fault_is_appended_exactly_once() {
     for fault in [Fault::FailBefore, Fault::AckHidden] {
@@ -823,8 +821,7 @@ async fn an_emit_whose_commit_meets_a_store_fault_is_appended_exactly_once() {
 
 /// An `Emit` the registry refuses, typed, is the process's recorded answer:
 /// the process ends `Failed` with the refusal instead of retrying a commit
-/// that can never land (the typed half of the Restate double's store-fault
-/// journaling laws, FIG-4649).
+/// that can never land (the typed half of the store-fault laws, FIG-4649).
 #[tokio::test]
 #[ignore = "blocked: L6 (FIG-5175): the registry's refusal of an Emit refuses the whole process.advance commit as Corrupt, and the activation recomputes and retries it every poll forever, never ending or parking the process (runtime/actor/process/activation.rs apply, EngineAction::Emit)"]
 async fn an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal() {

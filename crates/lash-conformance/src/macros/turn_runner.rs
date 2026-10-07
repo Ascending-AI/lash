@@ -9,8 +9,7 @@
 /// The fixture hands back a guard, a session prefix, the tier's effect host,
 /// the store set under test (whose session catalog and process registry the
 /// law's runtime uses), the process-work substrate, the tier's turn runner and
-/// a post-law verification handed the law's name. Restate runs each turn inside a live handler
-/// (`#[ignore]`d, deferred to `run-conformance-e2e`).
+/// a post-law verification handed the law's name.
 #[macro_export]
 macro_rules! turn_runner_tests {
     ($(#[$attr:meta])* $fixture:block) => {

@@ -48,7 +48,7 @@ pub struct SessionBuilder {
 /// only one that takes session config (FIG-4112).
 ///
 /// Creation writes all of it once, with the session's catalog row, in one
-/// store transaction. Nothing here is restated on open.
+/// store transaction. Nothing here is written again on open.
 #[derive(Clone, Debug)]
 pub struct SessionCreation {
     /// The session's whole config, stated by its creator (FIG-4594): the
@@ -175,8 +175,8 @@ impl SessionBuilder {
     }
 
     /// The Durable Session resolved through the catalog on first use: building
-    /// the handle reads nothing, so a Restate host may build it before its
-    /// journal answers.
+    /// the handle reads nothing, so a host may build it before the store
+    /// answers.
     pub(crate) async fn catalog_durable(self) -> DurableSession {
         let live_replay_store = Arc::clone(&self.core.live_replay_store);
         DurableSession::from_catalog(

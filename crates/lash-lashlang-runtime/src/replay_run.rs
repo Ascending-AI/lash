@@ -7,9 +7,7 @@
 //! writes lives under that ordinal's key. Nothing a compiler produces
 //! reaches a key.
 //!
-//! A run starts fresh: the recorded-frontier read a replayed run made went
-//! with Restate's journal (FIG-5190). A process body has no journal here: it
-//! resumes from its snapshot, fed its operations' outcomes by operation id
+//! A run starts fresh. A process body resumes from its snapshot, fed its operations' outcomes by operation id
 //! (ADR 0132 §8; FIG-5198).
 
 /// version_surface = "coexist"

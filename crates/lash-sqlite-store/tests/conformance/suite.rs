@@ -7,7 +7,7 @@
 //! pre-seeded legacy schemas, path spellings, a second OS process, WAL
 //! snapshot reads — live in `conformance.rs` alone.
 // No live_replay_tests!: live replay is an in-process cache, not SQLite-backed storage.
-// No queued-lane resolver macro: engine pacing belongs to Restate, not a persistence store.
+// No queued-lane resolver macro: engine pacing belongs to the durable engine, not a persistence store.
 
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;

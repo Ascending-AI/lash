@@ -55,7 +55,7 @@ mod admitted_scope_tests {
             .expect("process scope");
 
         // Rescoping onto the pin it already carries is still fine — that is
-        // the same admission restated, not a repin.
+        // the same admission again, not a repin.
         scoped
             .rescope(AdmittedScope::process(old_ref))
             .expect("rescope onto the same process");

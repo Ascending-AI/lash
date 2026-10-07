@@ -13,7 +13,7 @@
 //! host's share of the system prompt, which a creator states, a child copies
 //! from its parent, and [`SetRlmPrompt`] and [`SetRlmPromptContext`] replace.
 //! The termination and the final-answer format are fixed at creation: no
-//! command changes them, and a turn restates them through its run's options
+//! command changes them, and a turn states them again through its run's options
 //! ([`RlmRunOptions`]), which this owner applies over the recorded namespace.
 //! The channel, the dialect and the behaviour are the session's pins: a
 //! candidate that changes any of them is refused, and a run's options have
@@ -84,7 +84,7 @@ impl RlmRecordedConfig {
         namespace.decode().map(Some)
     }
 
-    /// What a turn of this session runs under, of what a run may restate.
+    /// What a turn of this session runs under, of what a run may state again.
     pub fn turn_options(&self) -> RlmTurnOptions {
         RlmTurnOptions {
             termination: self.termination.clone(),
@@ -543,7 +543,7 @@ mod tests {
         assert_eq!(resolved.print.max_chars, 5);
         assert_eq!(resolved.print.max_depth, 1);
 
-        let restated = owner()
+        let run = owner()
             .apply_run_options(
                 &recorded,
                 RlmRunOptions(RlmTurnOptions {
@@ -554,14 +554,14 @@ mod tests {
             )
             .expect("the run's termination applies");
         assert_eq!(
-            restated.termination,
+            run.termination,
             Some(RlmTermination::Natural { schema: None })
         );
         assert_eq!(
-            restated.final_answer_format,
+            run.final_answer_format,
             Some(RlmFinalAnswerFormat::RawFinalValue)
         );
-        assert_eq!(restated.render, recorded.render);
+        assert_eq!(run.render, recorded.render);
         assert_eq!(
             owner()
                 .apply_run_options(&recorded, RlmRunOptions::default())
@@ -572,7 +572,7 @@ mod tests {
     }
 
     /// FIG-4652: a run's options have no field for a pin or for the prompt,
-    /// so a payload naming one does not decode, even when it restates the
+    /// so a payload naming one does not decode, even when it repeats the
     /// recorded value. Every recorded field a run cannot state is covered:
     /// the list is the recorded namespace's own keys.
     #[test]
@@ -598,7 +598,7 @@ mod tests {
         assert_eq!(
             stated,
             std::collections::BTreeSet::from(["final_answer_format", "render", "termination"]),
-            "a run restates only its termination, its answer format and its render"
+            "a run states only its termination, its answer format and its render"
         );
     }
 

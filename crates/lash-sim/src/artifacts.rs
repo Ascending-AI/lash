@@ -528,7 +528,7 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ToolAttempt and RuntimeEffectLocalExecutor on the scoped controller of an engine handler",
             model_only_scope: "the effect body is a scripted no-network outcome; the first attempt dies after the engine records the effect and the server replays the invocation into a redrive",
             oracle_id: crate::oracles::DURABLE_EFFECT_EXACTLY_ONCE_ORACLE,
-            artifact_evidence: "durable-effect observations carry runtime_effect.controller=restate_runtime_effect_controller, local_executor_called=true, redrive_local_executor_called=false, and redrive_served_recorded_result=true",
+            artifact_evidence: "durable-effect observations carry runtime_effect.controller=runtime_effect_controller, local_executor_called=true, redrive_local_executor_called=false, and redrive_served_recorded_result=true",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "backend_failure",
@@ -552,7 +552,7 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ToolAttempt, RuntimeEffectLocalExecutor, ToolAttemptLaunch, ToolCallRecord, and ToolCallOutput",
             model_only_scope: "app-specific ToolProvider implementation bodies remain excluded; generated runs execute the attempt on an engine handler's scoped controller with scripted no-network tool outcomes",
             oracle_id: crate::oracles::TOOL_BOUNDARY_ORACLE,
-            artifact_evidence: "tool events carry runtime_effect.controller=restate_runtime_effect_controller, runtime_tool_record, and runtime_tool_output",
+            artifact_evidence: "tool events carry runtime_effect.controller=runtime_effect_controller, runtime_tool_record, and runtime_tool_output",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "exec_code",
@@ -560,7 +560,7 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ExecCode, RuntimeEffectLocalExecutor, RuntimeEffectOutcome::ExecCode, and ExecResponse",
             model_only_scope: "host kernel process launch remains excluded; generated runs pass the boundary through an engine handler's scoped controller with scripted ExecResponse outcomes that launch no kernel process. ExecCode replays by re-execution (ADR 0103)",
             oracle_id: crate::oracles::EXEC_CODE_ORACLE,
-            artifact_evidence: "exec-code events carry runtime_effect.controller=restate_runtime_effect_controller, runtime_effect_outcome from the local executor, and exit-code data",
+            artifact_evidence: "exec-code events carry runtime_effect.controller=runtime_effect_controller, runtime_effect_outcome from the local executor, and exit-code data",
         },
     ]
 }

@@ -19,8 +19,8 @@
 //! | K8 operation Run | [`operation`] | FIG-4888 |
 //! | K10 state commands | [`state_command`] | FIG-4878 |
 //!
-//! K0 (the SDK intake) is witnessed in `lash-restate`; K5 (declared starts)
-//! lives beside the process model in `lash-core-execution`.
+//! K5 (declared starts) lives beside the process model in
+//! `lash-core-execution`.
 
 pub mod admission;
 pub mod material;

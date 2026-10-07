@@ -378,7 +378,7 @@ impl ModelStore {
                 let ingress_mode = event.queued_ingress_mode().unwrap_or_else(|err| {
                     panic!("queued-ingress boundary `{}`: {err}", event.boundary_id)
                 });
-                // Deliberate vocabulary restatement: keep this drift-pin for prelude item 21.
+                // Deliberate vocabulary copy: keep this drift-pin for prelude item 21.
                 let input_state = match ingress_mode {
                     QueuedIngressMode::ActiveTurn => ACTIVE_TURN_INPUT_STATE,
                     QueuedIngressMode::NextTurn => NEXT_TURN_INPUT_STATE,
@@ -631,7 +631,7 @@ impl ModelStore {
                     "tool_call_id": event.boundary_id,
                     "execution_count": *count,
                     "runtime_effect": {
-                        "controller": "restate_runtime_effect_controller",
+                        "controller": "runtime_effect_controller",
                         "kind": "tool_attempt",
                         "local_executor_called": true,
                     },
@@ -696,7 +696,7 @@ impl ModelStore {
                     "exit_code": exit_code,
                     "execution_count": *count,
                     "runtime_effect": {
-                        "controller": "restate_runtime_effect_controller",
+                        "controller": "runtime_effect_controller",
                         "kind": "exec_code",
                         "local_executor_called": true,
                     },
@@ -929,7 +929,7 @@ impl ModelStore {
                 "effect_id": effect_id,
                 "replay_key": envelope.invocation.effect_replay_key(),
                 "envelope_hash": envelope_hash,
-                "controller": "restate_runtime_effect_controller",
+                "controller": "runtime_effect_controller",
                 "local_executor_called": true,
                 "redrive_local_executor_called": false,
             },

@@ -203,10 +203,8 @@ impl CommandJournalGuard {
     ///
     /// Once any write under the command was refused, every later one is
     /// refused with the same refusal before it reaches the engine: the first
-    /// refusal is the last thing the command's attempt asks of its journal.
-    /// On a positional journal (Restate) a served-only refusal leaves an
-    /// orphaned run, and anything journaled after it would wedge the next
-    /// replay (FIG-3719, FIG-3725).
+    /// refusal is the last thing the command's attempt asks of the engine
+    /// (FIG-3719, FIG-3725).
     pub fn admit(&self, key: Option<&str>) -> Result<(), RuntimeEffectControllerError> {
         self.touched
             .store(true, std::sync::atomic::Ordering::SeqCst);

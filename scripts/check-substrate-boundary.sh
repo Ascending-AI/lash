@@ -34,9 +34,9 @@ capability_names='replay_ownership|journal_addressing|durable_workflow_controlle
 capability_forbidden="fn[[:space:]]+(${capability_names})([^[:alnum:]_]|$)|\.(${capability_names})[[:space:]]*\(|(^|[^[:alnum:]_])(${capability_names})[[:space:]]*:"
 # Historical, retired in 60e0e86b2a: every effect host journals (FIG-3585): the in-process native tier, its
 # journaling fact, store-delegated turn control and in-memory persistence are
-# deleted, and none of their types may come back under any shape. Restate is
-# the only engine (ADR 0104): the in-process session and process work, its
-# substrate config and the worker's self-driven sweep are deleted too.
+# deleted, and none of their types may come back under any shape. The
+# in-process session and process work, its substrate config and the worker's
+# self-driven sweep are deleted too.
 retired_type_names='EffectJournaling|TurnControlAuthorityOwner|NativeEffectHost|NativeRuntimeEffectController|NativeEffectGroups|NativeAwaitEventAuthority|AwaitEventRegistry|StoreTurnCancellationAuthority|InMemorySessionStore|InMemorySessionStoreFactory|TestLocalProcessRegistry|NativeQueuedWork|NativeQueuedWorkRunHandle|InlineSessionWork|NativeProcessWork|NativeProcessAwaiter|NativeSubstrateSetup|NativeSubstrateSlot|NativeSubstrateConfig|WorkerProcessWork|WorkerSweepPolicy'
 retired_type_forbidden="(^|[^[:alnum:]_])(${retired_type_names})([^[:alnum:]_]|$)"
 test_path_regex='^crates/lash-conformance/|(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)'
@@ -235,69 +235,6 @@ if [[ -s "$tmp_dir/rule4b.hits" ]]; then
   cat "$tmp_dir/rule4b.hits" >&2
   echo "substrate boundary rule 4 failed: a retired native-tier or in-memory type name was found" >&2
   failed=1
-fi
-
-# The kernel names no engine (ADR 0104 §2): the execution identifiers that
-# named Restate moved to engine-neutral names under FIG-3670. Only the engine
-# crate, its test crate, and deployments that are explicitly Restate may still
-# spell the retired identifiers.
-engine_id_forbidden='(^|[^[:alnum:]_])(restate_invocation_id|restate_process_execution)([^[:alnum:]_]|$)'
-capture_search "engine execution identifiers" "$engine_id_forbidden" "$tmp_dir/rule4c.raw" "${rule4_runs[@]}"
-: >"$tmp_dir/rule4c.hits"
-while IFS=: read -r file line source; do
-  [[ -n "$file" ]] || continue
-  case "$file" in
-    examples/agent-workbench/*)
-      continue
-      ;;
-  esac
-  printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$tmp_dir/rule4c.hits"
-done <"$tmp_dir/rule4c.raw"
-if [[ -s "$tmp_dir/rule4c.hits" ]]; then
-  cat "$tmp_dir/rule4c.hits" >&2
-  echo "substrate boundary rule 4 failed: an engine-named execution identifier was found outside the engine crates" >&2
-  failed=1
-fi
-
-# The error vocabulary is engine-neutral too (FIG-3670 error-code slice):
-# `RuntimeErrorCode` variants and their wiring may not carry a `Restate*`
-# name. The check is scoped to the runtime_error* files so engine-owned
-# Restate types elsewhere stay legal.
-engine_error_runs=()
-for path in crates/lash-core-store/src/runtime_error.rs \
-  crates/lash-core-store/src/runtime_error_tests.rs \
-  crates/lash-core-store/src/runtime_error; do
-  [[ -e $path ]] && engine_error_runs+=("$path")
-done
-if [[ ${#engine_error_runs[@]} -gt 0 ]]; then
-  engine_error_forbidden='(^|[^[:alnum:]_])Restate[A-Z][A-Za-z]*'
-  capture_search "engine-named error codes" "$engine_error_forbidden" "$tmp_dir/rule4d.hits" "${engine_error_runs[@]}"
-  if [[ -s "$tmp_dir/rule4d.hits" ]]; then
-    cat "$tmp_dir/rule4d.hits" >&2
-    echo "substrate boundary rule 4 failed: a Restate-named RuntimeErrorCode variant was found" >&2
-    failed=1
-  fi
-fi
-
-# The facade's durable-format table names no engine either (FIG-3670 format
-# slice, ADR 0104 §2): the formats an engine writes are rows the engine
-# registers under `lash::restate`, so the table and the preflight that walks
-# it may not spell `Restate*` identifiers. The check is scoped to the format
-# table and preflight files so `lash::restate` and the engine crate keep
-# naming their own formats.
-engine_format_runs=()
-for path in crates/lash/src/formats.rs crates/lash/src/preflight.rs \
-  crates/lash/src/preflight; do
-  [[ -e $path ]] && engine_format_runs+=("$path")
-done
-if [[ ${#engine_format_runs[@]} -gt 0 ]]; then
-  engine_format_forbidden='(^|[^[:alnum:]_])Restate[A-Z][A-Za-z]*'
-  capture_search "engine-named durable formats" "$engine_format_forbidden" "$tmp_dir/rule4e.hits" "${engine_format_runs[@]}"
-  if [[ -s "$tmp_dir/rule4e.hits" ]]; then
-    cat "$tmp_dir/rule4e.hits" >&2
-    echo "substrate boundary rule 4 failed: a Restate-named durable-format identifier was found in the facade's format table or preflight" >&2
-    failed=1
-  fi
 fi
 
 # A pinned lash service (FIG-3795: the process workflow and the session

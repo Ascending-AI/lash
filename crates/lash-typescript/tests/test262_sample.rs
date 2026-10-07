@@ -165,7 +165,7 @@ fn inventory_census_and_skip_register_are_exhaustive() {
         selected.iter().all(|path| !skipped.contains(path.as_str())),
         "a selected test cannot also be excluded"
     );
-    // The selection rule, restated over the vendored bytes rather than
+    // The selection rule, re-checked over the vendored bytes rather than
     // trusted from sync.mjs: every census row a selected test touches is
     // accepted.
     let accepted = |kind: &str, name: &str| {

@@ -56,8 +56,7 @@ pub trait ProcessWorkSubstrate: Send + Sync {
     /// 0109 §3). `key` is the obligation's stable dedupe identity; a repeat
     /// must be a no-op, and a terminal already published stays as it was.
     ///
-    /// The engine's waiters wait on the engine (Restate's in-journal awaits
-    /// on the process's terminal promise), so it resolves them here. A port
+    /// The engine's waiters wait on the engine, so it resolves them here. A port
     /// that wraps another forwards it, or the relay settles publications no
     /// waiter ever saw.
     async fn publish_process_terminal(

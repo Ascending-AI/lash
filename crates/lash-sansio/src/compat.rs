@@ -1,7 +1,7 @@
 //! The version range every compatibility surface declares (ADR 0115 §1.1).
 //!
-//! A stored component, the fleet epoch `F`, the remote protocol and the
-//! Restate handler wire all state what they support as one inclusive range,
+//! A stored component, the fleet epoch `F` and the remote protocol all state
+//! what they support as one inclusive range,
 //! and two builds agree on a version by [`VersionRange::select`]: the highest
 //! version both ranges contain. The JSON shape `{"min":1,"max":1}` is frozen:
 //! every build parses every peer's range, so it never gains a field.

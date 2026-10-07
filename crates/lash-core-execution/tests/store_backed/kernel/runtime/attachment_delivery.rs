@@ -2,8 +2,7 @@ mod tests {
     //! A delivery's acquisition keeps its two permanent failures apart: a
     //! store incompatibility is a typed, terminal refusal, and an attachment
     //! whose source is gone is the typed source-gone value, which acquires
-    //! nothing (the contrast law of the Restate double's start-input
-    //! acquisition suite).
+    //! nothing (the contrast law of start-input acquisition).
 
     use std::sync::Arc;
 

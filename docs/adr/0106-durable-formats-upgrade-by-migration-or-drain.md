@@ -111,7 +111,7 @@ Evidence: `crates/lash-core-store/src/store/fleet_format.rs`,
 `crates/lash-sqlite-store/src/backend.rs`,
 `crates/lash-sqlite-store/src/finalize.rs`.
 
-### 3. Restate object state
+### 3. Object state outside the store
 
 Retired: no durable state lives outside the lash store. Wait rows and source
 seals are store rows under ADR 0132 §6, versioned as surfaces under §4.

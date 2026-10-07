@@ -514,7 +514,7 @@ pub fn lashlang_resources_from_tool_catalog(
     Ok(host_catalog)
 }
 
-/// Restates a tool contract as the host-operation contract the catalog reads.
+/// Re-expresses a tool contract as the host-operation contract the catalog reads.
 ///
 /// This is a pure re-shaping: the schemas the tool declares travel unchanged
 /// into the catalog, which is what keeps a tool and a lash-owned host

@@ -83,8 +83,8 @@ pub trait ProcessQuery: Send + Sync {
         limit: usize,
     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError>;
 
-    /// Read one bounded page of non-terminal processes. Restate uses this for
-    /// admission and lost-run reconciliation. Terminal processes are excluded.
+    /// Read one bounded page of non-terminal processes, for admission and
+    /// lost-run reconciliation. Terminal processes are excluded.
     ///
     /// A first call (`continuation = None`) captures the greatest non-terminal
     /// `process_id` as an inclusive upper bound. Continuations use keyset

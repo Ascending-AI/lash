@@ -98,7 +98,7 @@ pub(super) async fn terminal_completion_replay_keeps_original_authority_and_writ
                     .set_external_ref(
                         &id,
                         crate::ProcessExternalRef {
-                            backend: "restate".into(),
+                            backend: "workflow-engine".into(),
                             id: "carrier".into(),
                             metadata: None,
                             segment_ordinal: Some(ordinal),

@@ -54,11 +54,10 @@ pub const PROCESS_EVENT_VOCABULARY_VERSION: u32 = 2;
 /// event the body appends, or the terminal completion. A segment boundary
 /// commits nothing: the pending occurrences ride segment state and the
 /// successor commits them with its first boundary. There is no periodic flush.
-/// The journal and this event live in different stores; a crash before a
-/// boundary commits loses nothing the journal cannot rebuild. On Restate the
-/// redrive replays the invocation's journal (and, across segments, restores
-/// segment state), re-derives the same pending occurrences without re-running
-/// their effects, and commits them once. Re-committing a written occurrence is
+/// A crash before a boundary commits loses nothing committed state cannot
+/// rebuild: the resumed process re-derives the same pending occurrences from
+/// its committed state without re-running their effects, and commits them
+/// once. Re-committing a written occurrence is
 /// a replay-key no-op; a different payload under the same key is refused and
 /// its batch commits nothing. A failed boundary write carrying a summary is an
 /// incorporation failure: the run aborts for redrive and the program never

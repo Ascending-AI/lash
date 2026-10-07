@@ -2,8 +2,7 @@
 
 Implementation and laws were validated against main `8db745071bf31b164cc8d0bdd1541f5108e7e651`. The optimized
 remeasurement was previously **PENDING** on the remote rustc memory cap; lash-bd's sizing2 commit `22b370ec6c` gave
-optimized compiles their own measured requests (lash-perf lib 4.75 GiB, test binary 5.25 GiB; lash-restate-test lib
-3.0 GiB). The optimized matrix has now run end to end at main `d9cd65af80b7ab38523b01203cabcdc530eda914`.
+optimized compiles their own measured requests (lash-perf lib 4.75 GiB, test binary 5.25 GiB). The optimized matrix has now run end to end at main `d9cd65af80b7ab38523b01203cabcdc530eda914`.
 
 The run below is one full matrix execution — `--verify`, then `--out` with the fixed 10,000 warm observations and 200
 cold starts per workload — taken on a **loaded shared host** (load average 7.5/21.6/33.4 on 32 cores while it ran).
@@ -60,8 +59,7 @@ Evidence: fork-local `.benchmarks/vm-worker/` holds the preserved raw `samples.c
 this file carries the committed record. Build proof: `kiln build --config=optimized` of
 `//crates/lash-perf:vm-worker-matrix__bin` succeeded (2063 actions, 46% cached, 1113 remote, no OOM), and
 `kiln test --config=optimized //crates/lash-perf:lash-perf__unit_test` passed 139 cases including
-`measured_phases_cover_every_exchange_and_reconcile`, building the optimized 5.25 GiB test binary and the optimized
-lash-restate-test rlib that previously exited 9 under the 2.75 GiB cap.
+`measured_phases_cover_every_exchange_and_reconcile`, building the optimized 5.25 GiB test binary.
 
 Earlier correctness evidence is unchanged: the three laws failed on the main baseline, then passed in 20 real
 uncached executions each (60 cases, 2,540 live exchange samples and 60 paired production codec/socket baselines

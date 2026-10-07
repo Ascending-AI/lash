@@ -52,7 +52,7 @@ pub struct CompatDescriptor {
 /// The PostgreSQL schema's version: the one number `schema.sql` seeds into
 /// `lash_schema_versions`, the migration ledger records, the shape artifact
 /// names and the release stamp carries. Every reader takes it from the
-/// PostgreSQL descriptor below; no backend restates it.
+/// PostgreSQL descriptor below; no backend repeats it.
 ///
 /// It is the 1.0 baseline: `schema.sql` provisions the whole catalog at
 /// version 1, and the migrate catalog carries no step before it (FIG-5191).

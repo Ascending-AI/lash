@@ -301,8 +301,8 @@ impl TerminalWait {
 
 /// Where a follower stands in its subject's live activity: the replay
 /// cursor to go on from, and whether it has observed any of the run's
-/// activity. A windowed follower hands its position to the next window; the
-/// host's Restate wait journals it between probes.
+/// activity. A windowed follower hands its position to the next window, which
+/// persists it between probes.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Position {
     pub(crate) cursor: SessionCursor,

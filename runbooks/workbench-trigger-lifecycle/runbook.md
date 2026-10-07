@@ -204,7 +204,7 @@ global declaration set.
 against this baseline, so it must be stable: the unscoped endpoint serves the runtime-wide
 snapshot with `retired_since_ms = now - 10_000` and drops terminal rows about ten seconds
 after they settle, which makes an unscoped baseline shrink on its own between probes. This is
-golden rule 2's warning, restated here because Phase 2 is where the baseline is taken.
+golden rule 2's warning, repeated here because Phase 2 is where the baseline is taken.
 
 Record the baseline personal inbox and process-id set. From the `work` compose form,
 deliver two messages sequentially with unique titles

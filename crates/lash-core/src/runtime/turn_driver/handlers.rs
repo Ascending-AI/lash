@@ -170,14 +170,11 @@ impl RuntimeTurnDriver<'_> {
             (error.code == Some(FailureCode::lash(TurnFailureCode::ProviderPanicked)))
                 .then(|| error.message.clone())
         });
-        // FIG-793: the LLM run is the deployed first journal command for this
-        // protocol iteration, so it must be emitted and awaited before any
-        // cancellation observation is registered. Restate SDK 0.10 emits a
-        // `ctx.run` command only when its future is polled and requires that
-        // future to be awaited immediately; it cannot honestly be selected
-        // away from mid-flight. The durable contract is therefore cancellation
-        // between iterations. The run's body watches the gate itself and stops
-        // on an immediate request, and that result is journaled (FIG-3672 P9).
+        // FIG-793: the model call is this protocol iteration's first durable
+        // effect, so it is awaited before any cancellation observation is
+        // registered. The durable contract is cancellation between
+        // iterations. The call's body watches the gate itself and stops on an
+        // immediate request, and that result is recorded (FIG-3672 P9).
         let pending_cancel = self.turn_control.honoured(&self.turn_id, false);
         if let Some(evidence) = pending_cancel {
             self.record_turn_cancel(evidence.clone());

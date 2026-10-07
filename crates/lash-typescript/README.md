@@ -271,7 +271,7 @@ Test262 runs every upstream test the census accepts at a pinned commit through
 the same lower → link → compile → heap VM path as a real cell. Each selected
 test has one ratcheted outcome in `tests/test262/outcomes/**/*.tsv` —
 `pass`, `refused <TS_* code>`, `fail <ticket>` or `harness <capability>` — and the
-figures are derived from that record rather than restated here:
+figures are derived from that record rather than repeated here:
 `python3 scripts/check_test262_ratchet.py --base <base>` prints the current
 tallies, as do the test262 binaries' outputs.
 `//crates/lash-typescript:test262__test` checks a stratified sample in
@@ -925,7 +925,7 @@ shared AST's generic limit, which no accepted-grammar source can reach.
 The Node differential table keeps duplicate expressions deliberately, so each
 review lane's provenance count stays executable, and the table's effective
 corner coverage is that of the distinct expressions rather than of all rows.
-The counts are derived, not restated: `node
+The counts are derived, not copied: `node
 crates/lash-typescript/tests/differential/generate.mjs` prints the per-shard
 and total counts, and the oracle test holds every shard's rows to its findings
 file.

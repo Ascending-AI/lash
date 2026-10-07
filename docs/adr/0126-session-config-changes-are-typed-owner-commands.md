@@ -128,8 +128,8 @@ a reducer under new code.
 
 **Publication.** One fenced host-command commit publishes an applied
 resolution's replacements, advances `config_revision` by exactly one, and
-records the outcome as the command's settlement. A restatement advances the
-revision too. A stale or refused transaction publishes no config, and its
+records the outcome as the command's settlement. A command that sets the
+current values advances the revision too. A stale or refused transaction publishes no config, and its
 outcome is still durable.
 
 **Pending while a run owns the head.** A transaction submitted while a run

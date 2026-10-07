@@ -1351,9 +1351,8 @@ impl fmt::Display for SchemaReport {
                  in. A stamp below the range is an older or skipped release — drain the \
                  affected sessions and recreate the whole Lash trust domain with this build: \
                  drop the schema lash owns \
-                 (`DROP SCHEMA ... CASCADE`) or recreate the database, then reset the Restate \
-                 state with it — Restate left behind still refers to sessions the recreated \
-                 database does not have. `PostgresStorage::teardown_ddl()` (committed as \
+                 (`DROP SCHEMA ... CASCADE`) or recreate the database. \
+                 `PostgresStorage::teardown_ddl()` (committed as \
                  crates/lash-postgres-store/teardown.sql) drops only the objects this build \
                  owns: an older build's catalog can hold tables this build no longer declares, \
                  so tearing that catalog down with it leaves them behind. A stamp above the \

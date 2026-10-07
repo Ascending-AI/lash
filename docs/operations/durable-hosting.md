@@ -19,7 +19,7 @@ Four host-facing parts are still open. The guide says where each applies.
 - **Session mail** (L3s, FIG-5196). Session input written as mail with a wake
   in its producer's transaction, and its drain inside the session actor, are
   still stubs (`Backend::wake_session`, the durable shift work).
-  [§1](#no-restate-deployment) describes the end state.
+  [§1](#no-engine-server) describes the end state.
 - **Serving through the facade.** A node is served today by
   `lash_core::runtime::durable::node::serve` (the
   [`lash-postgres-workers` runbook](../../runbooks/lash-postgres-workers/README.md)
@@ -36,12 +36,11 @@ Four host-facing parts are still open. The guide says where each applies.
 
 ## 1. What a host runs
 
-### No Restate deployment
+### No engine server
 
-A 1.0 host runs no `restate-server`, registers no handlers and pins no
-Restate SDK. It does not configure an ingress or admin URL, and it exposes no
-handler endpoint. Lash's handlers, its server double and its SDK fork are
-deleted.
+A 1.0 host runs no workflow-engine server, registers no handlers and pins no
+engine SDK. It does not configure an ingress or admin URL, and it exposes no
+handler endpoint.
 
 A host runs **lash nodes**. A node is one host process that serves lash's
 runner over a store set:

@@ -62,9 +62,8 @@ pub trait ProcessService: Send + Sync {
     /// Implementations must not consult live visibility, existence, terminal,
     /// or host policy state before crossing the effect-controller boundary.
     ///
-    /// The drain calls this from shift code, so an engine that replays its
-    /// shift calls it again for an intent it already landed: Restate re-runs
-    /// the handler from the top of its journal on every resumption. The
+    /// The drain calls this from session-actor code, so a drain recomputed
+    /// after a crash calls it again for an intent it already landed. The
     /// repeat carries the same recorded identity (the request's derived
     /// process id) and the effect controller answers it with the recorded
     /// outcome, so the start lands once. An implementation keys anything it

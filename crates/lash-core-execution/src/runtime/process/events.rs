@@ -157,8 +157,8 @@ pub struct AbandonEvidence {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "authority", rename_all = "snake_case")]
 pub enum ProcessCompletionAuthority {
-    /// A workflow-key-coalesced substrate (e.g. Restate keyed by `process_id`)
-    /// completes a row it ran itself. Its single-writer discipline is the
+    /// An engine that coalesces a process's executions under one workflow key
+    /// (the `process_id`) completes a row it ran itself. Its single-writer discipline is the
     /// engine's per-key coalescing; `workflow_key` records the
     /// key that served as that discipline. Valid for every process: lash
     /// executes every process it registers.

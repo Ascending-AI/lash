@@ -978,9 +978,9 @@ pub enum RlmPromptIntro {
     Omitted,
 }
 
-/// The RLM options a *single turn* may restate (FIG-1979).
+/// The RLM options a *single turn* may state again (FIG-1979).
 ///
-/// There is currently no language choice to restate: TypeScript is the only shipped RLM dialect
+/// There is currently no language choice to state: TypeScript is the only shipped RLM dialect
 /// and nothing — a turn bag, a session bag, a create contract — names one.
 ///
 /// These are the RLM owner's run options: the owner applies each stated
@@ -1031,7 +1031,7 @@ impl RlmTurnOptions {
 /// keys to label a fresh session honestly — the hack this type replaces.
 ///
 /// The facts are recorded once, when the session is created (FIG-4379): no
-/// config command changes them, and a turn restates them through its run's
+/// config command changes them, and a turn states them again through its run's
 /// protocol turn options.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RlmSessionConfig {

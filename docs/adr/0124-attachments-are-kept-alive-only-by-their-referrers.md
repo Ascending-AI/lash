@@ -23,7 +23,7 @@ those claims owns the root predicate.
 The shared `ArtifactReferrer` holds artifacts and attachments alike; it
 keeps its name. Its claims, canonical codec, permanent fence
 (`referrer_fences`) and cleanup obligation are ADR 0113's, cited here and
-not restated.
+not repeated.
 
 Six kinds may hold an attachment (`ArtifactReferrerKind::holds_attachments`):
 
@@ -252,8 +252,7 @@ a stand-in for its own id.
   `crates/lash-postgres-store/src/postgres/attachments.rs` implement them.
 - `crates/lash-core-execution/src/runtime/attachment_delivery.rs` chooses
   the receiver's claim and acquires terminal and start input references.
-- `crates/lash-restate/src/durable_wait/process_terminal.rs` acquires before
-  sealing the receiving source. `crates/lash-core-execution/src/runtime/process/start_staging.rs`
+- `crates/lash-core-execution/src/runtime/process/start_staging.rs`
   stages input before registration and acquires the process record afterward.
   `crates/lash-core/src/runtime/artifact_cleanup.rs` completes that
   acquisition before staging ends during recovery.

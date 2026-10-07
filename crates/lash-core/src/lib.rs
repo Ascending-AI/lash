@@ -659,8 +659,8 @@ pub use runtime::TestProcessRegistryWriteExt;
 pub use runtime::fail_parent_end_once;
 pub use runtime::{ObservationSource, work_with_observations};
 
-// This block includes the effect / process-control types consumed by external
-// effect hosts (e.g. lash-restate's workflows) and their integration tests —
+// This block includes the effect / process-control types consumed by host
+// process engines and their integration tests —
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
 /// Intent realization publishes the execution environment a declared trigger

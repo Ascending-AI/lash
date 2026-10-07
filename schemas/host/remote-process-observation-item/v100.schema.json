@@ -2388,7 +2388,7 @@
       "type": "object"
     },
     "TraceLanguageExecutionMap": {
-      "description": "The static graph of an execution, carried once on\n[`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity\n(`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the\nenclosing [`TraceLanguageExecutionIdentity`]; the map never restates it.",
+      "description": "The static graph of an execution, carried once on\n[`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity\n(`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the\nenclosing [`TraceLanguageExecutionIdentity`]; the map never repeats it.",
       "properties": {
         "edges": {
           "default": [],

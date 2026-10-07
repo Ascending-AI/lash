@@ -30,14 +30,13 @@ impl LeaseOwnerIdentity {
     ///
     /// Construction and recognition share this single representation so a
     /// formatting drift cannot silently turn a continuation into a fresh
-    /// execution. The `restate:` owner-id spelling is durable: it is already
-    /// written into lease rows and process start records, so it stays even
-    /// though the constructor name no longer names an engine.
+    /// execution. The `process:` owner-id spelling is durable: it is written
+    /// into lease rows and process start records.
     pub fn engine_process_execution(
         process_id: &ProcessId,
         execution_id: impl Into<String>,
     ) -> LeaseOwnerIdentity {
-        Self::opaque(format!("restate:{process_id}"), execution_id)
+        Self::opaque(format!("process:{process_id}"), execution_id)
     }
 
     pub fn engine_process_execution_id(&self, process_id: &ProcessId) -> Option<&str> {

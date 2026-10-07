@@ -2,8 +2,7 @@
 //! explicit SQLite and PostgreSQL variants.
 //!
 //! The terminal transaction arms the process row's obligation; the execution
-//! that stored the terminal publishes it itself (the Restate double's laws own
-//! that immediate attempt). These cases take the relay's side of every way the
+//! that stored the terminal publishes it itself. These cases take the relay's side of every way the
 //! immediate attempt can be lost, executing the real registry, ledger and
 //! [`ProcessTerminalRelay`] under a virtual clock and a reconcile tick of
 //! `T` = 10 s ±10%, and assert each bound the ADR states:

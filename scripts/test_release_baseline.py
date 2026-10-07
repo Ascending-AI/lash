@@ -422,7 +422,7 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
 
             # After the reset every store is at version 1 in compat.rs alone,
             # schema.sql states it, and the catalogs are numbered in it. An
-            # artifact that keeps an old number, a backend that restates the
+            # artifact that keeps an old number, a backend that repeats the
             # version, and a catalog step numbered past it are red.
             self.assertEqual(baseline.sqlite_stamp_mismatches(repo), [])
             self.assertEqual(baseline.postgres_stamp_mismatches(repo), [])
@@ -482,7 +482,7 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             reset_schema = schema.read_text()
             schema.write_text(reset_schema + "\nconst PROCESS_SCHEMA_VERSION: i32 = 44;\n")
             errors = baseline.sqlite_stamp_mismatches(repo)
-            self.assertTrue(errors and all("PROCESS_SCHEMA_VERSION" in error and "restated" in error
+            self.assertTrue(errors and all("PROCESS_SCHEMA_VERSION" in error and "repeated" in error
                                            for error in errors), errors)
             schema.write_text(reset_schema)
             catalog = repo / "crates/lash-sqlite-store/src/migration.rs"

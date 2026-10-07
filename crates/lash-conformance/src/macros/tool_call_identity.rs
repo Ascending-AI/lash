@@ -63,7 +63,7 @@ macro_rules! tool_call_identity_tests {
 /// process lifecycle on beside the process controls.
 ///
 /// The law's worker runs in the test process, so a tier whose process
-/// workflow runs a deployment's own engine (live Restate) cannot carry it.
+/// engine runs in another deployment cannot carry it.
 #[macro_export]
 macro_rules! tool_call_identity_process_tests {
     ($(#[$attr:meta])* $fixture:block) => {

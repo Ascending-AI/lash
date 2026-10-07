@@ -6,7 +6,7 @@ use crate::runtime_error::{RuntimeError, RuntimeErrorClass, RuntimeErrorCode};
 /// engine-neutral divergence.
 #[test]
 fn retired_replacement_abort_wire_codes_are_not_aliased() {
-    for retired in ["worker_replacement_abort", "restate_effect_hash_mismatch"] {
+    for retired in ["worker_replacement_abort", "engine_effect_hash_mismatch"] {
         let code = RuntimeErrorCode::from_wire_code(retired);
         assert!(
             matches!(code, RuntimeErrorCode::ForeignCode(_)),

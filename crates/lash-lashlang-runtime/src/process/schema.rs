@@ -1,4 +1,4 @@
-/// Restates a lash type as the JSON Schema a tool contract carries.
+/// Re-expresses a lash type as the JSON Schema a tool contract carries.
 ///
 /// The conversion lives in lashlang beside its inverse so the two cannot
 /// drift: a process or a trigger handle is spelled in the `x-lash` keyword

@@ -161,7 +161,7 @@ pub(crate) async fn read_component_version(
     Ok(ComponentVersion::Readable(version))
 }
 
-/// The expected types come from the shape artifact rather than being restated here,
+/// The expected types come from the shape artifact rather than being repeated here,
 /// so a probe cannot drift from the schema it probes. Any mismatch is already
 /// reported as column drift by the structural diff; this only decides whether it is
 /// safe to execute the typed statement.

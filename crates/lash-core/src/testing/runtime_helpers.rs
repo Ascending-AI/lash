@@ -35,9 +35,9 @@ pub fn default_state() -> RuntimeSessionState {
 /// A turn-executing test must bind its scope to the host the turn runs on: the
 /// execution context publishes recorded environments to that host's store,
 /// and group executors use the admitted controller's authority.
-/// `scoped_static` returns `None` for hosts that lend no `'static` controller
-/// (a Restate `ctx`-bound one); there the caller's own bound controller is the
-/// scope and this helper does not apply.
+/// `scoped_static` returns `None` for hosts that lend no `'static`
+/// controller; there the caller's own bound controller is the scope and this
+/// helper does not apply.
 pub fn host_admitted_scope(
     config: &crate::RuntimeHostConfig,
     admitted: crate::AdmittedScope,

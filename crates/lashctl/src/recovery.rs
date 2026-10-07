@@ -160,7 +160,7 @@ pub(super) fn durable_backend(stores: Arc<dyn lash::StoreSet>) -> Result<lash::B
 impl Invocation {
     async fn core(&self) -> Result<lash::LashCore, CliError> {
         let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
-        // This core sends control intents through Restate. It serves no model,
+        // This core sends control intents through the store. It serves no model,
         // starts no host turn, and does not install an HTTP handler endpoint.
         lash::LashCore::standard_builder(backend)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

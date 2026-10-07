@@ -14,11 +14,10 @@
 //! cleanup holds the retained input before ending staging. The starter makes
 //! this claim independent of earlier uses of a pruned host key.
 //!
-//! Every engine runs this one sequence. The local executor runs it inline; the
-//! Restate controller runs it inside one journaled step, so a replay of the
-//! parent reads the recorded result and never registers again (ADR 0107: the
-//! registrar mints an id once per start, and a replay after the process was
-//! pruned must still see that id).
+//! Every engine runs this one sequence, inline in the local executor. The
+//! start's recorded result is state, so a resumed parent reads it and never
+//! registers again (ADR 0107: the registrar mints an id once per start, and a
+//! parent resumed after the process was pruned must still see that id).
 
 use std::sync::Arc;
 
@@ -292,7 +291,7 @@ pub struct ProcessStartStores<'a> {
     /// A host's child validation and environment publication, executed
     /// before staging and skipped by journal replay.
     pub session_turn_admission: Option<&'a SessionTurnAdmission>,
-    /// Names the executor in a refusal, e.g. "Restate process start".
+    /// Names the executor in a refusal, e.g. "local process start".
     pub executor: &'static str,
     /// The journal of the scope running the start: the authority of the
     /// start's `AwaitStart` guard (ADR 0113 §3.3).

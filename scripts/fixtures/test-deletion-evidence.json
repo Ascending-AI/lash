@@ -28,9 +28,9 @@
       "surviving_coverage": "sim.oracle.process-wake-at-most-once-runtime-turn.v1"
     },
     {
-      "property": "Restate replay-cut threshold",
-      "coverage": "covered",
-      "surviving_coverage": "restate_segment_transition_replay_matrix_preserves_lineage_invariants"
+      "property": "engine journal replay-cut threshold",
+      "coverage": "unclaimed",
+      "surviving_coverage": "deleted with the engine journal (ADR 0132)"
     },
     {
       "property": "keyed successor-send idempotence and retry-resume continuation stability",

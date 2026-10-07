@@ -5,8 +5,8 @@
 //! writer connection and a fixed pool of WAL readers. It implements
 //! [`DeploymentStore`] and [`AttachmentReferrers`].
 //!
-//! It provides a `SqliteStoreSet` and storage ports for an effect engine such
-//! as Restate. SQLite uses WAL (`-wal`/`-shm` sidecars) for concurrent
+//! It provides a `SqliteStoreSet`, the one database file the durable engine
+//! persists its state through (ADR 0132 §1). SQLite uses WAL (`-wal`/`-shm` sidecars) for concurrent
 //! readers and a single writer.
 //!
 //! ## Why this is "the durable backend" not just "an option"

@@ -337,7 +337,7 @@ pub enum ConfigFault {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ConfigTransactionOutcome {
     /// Every command applied: the config moved from `base_revision` to
-    /// `revision` (one step, even for a restatement), and `outputs` holds
+    /// `revision` (one step, even when it sets the same values), and `outputs` holds
     /// each command's typed output in order.
     Applied {
         base_revision: u64,

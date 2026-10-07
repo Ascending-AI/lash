@@ -86,7 +86,7 @@ impl ConfigOwner for CounterOwner {
         Ok(())
     }
 
-    /// A run restates the count, within the limit it names.
+    /// A run sets the count again, within the limit it names.
     fn apply_run_options(
         &self,
         recorded: &CounterConfig,
@@ -633,11 +633,11 @@ fn run_options_are_the_owners_typed_options_and_only_the_owner_applies_them() {
         "the owner applied its run options over the recorded namespace"
     );
 
-    for restated in [
+    for with_label in [
         serde_json::json!({ "count": 7, "limit": 9, "label": "root" }),
         serde_json::json!({ "count": 7, "limit": 9, "label": "other" }),
     ] {
-        let refused = apply(restated).expect_err("the label is no run option");
+        let refused = apply(with_label).expect_err("the label is no run option");
         assert!(
             matches!(
                 &refused,

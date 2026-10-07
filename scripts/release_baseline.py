@@ -273,7 +273,7 @@ def sqlite_stamp_mismatches(repo: Path):
 
     A SQLite deployment is one database file: its `lash_compat` row, its
     descriptor and its catalog steps are in the one constant compat.rs
-    declares for its component. The backend must not restate that number,
+    declares for its component. The backend must not repeat that number,
     every catalog step must lie inside the version's own range, and the
     synthetic-next build's steps must carry the database from the constant
     to the version after it.
@@ -284,7 +284,7 @@ def sqlite_stamp_mismatches(repo: Path):
     if len(components) != 1 or components[0] not in versions:
         raise BaselineError("cannot read the SQLite database's component")
     errors = [
-        f"{SQLITE_SCHEMA}:{match['name']}: a SQLite schema version is restated outside {STORE_VERSIONS}"
+        f"{SQLITE_SCHEMA}:{match['name']}: a SQLite schema version is repeated outside {STORE_VERSIONS}"
         for match in definitions(schema) if match["name"].endswith("SCHEMA_VERSION")
     ]
     catalog = without_comments((repo / SQLITE_CATALOG).read_text())
@@ -343,7 +343,7 @@ def postgres_stamp_mismatches(repo: Path):
 
 
 def postgres_schema_at(text: str, version: int):
-    """`schema.sql` restated at `version`: its header and its seed row's stamp."""
+    """`schema.sql` rewritten at `version`: its header and its seed row's stamp."""
     header, seed = POSTGRES_HEADER.match(text), POSTGRES_SEED.search(text)
     if header is None or len(POSTGRES_SEED.findall(text)) != 1:
         raise BaselineError(f"cannot read the component version {POSTGRES_SCHEMA} states")

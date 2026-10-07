@@ -423,7 +423,7 @@ fn material_references_refuse_typed_and_retention_keeps_identity() {
     let local = run_material(MaterialRole::AttemptOutput);
     assert!(!local.crosses_segments());
     let artifact = ArtifactName {
-        store: ArtifactStoreId::Engine("restate".into()),
+        store: ArtifactStoreId::Engine("engine-store".into()),
         artifact_ref: "bundle-1".into(),
     };
     let retained = local.retained(artifact.clone());
@@ -434,7 +434,7 @@ fn material_references_refuse_typed_and_retention_keeps_identity() {
     );
     assert_eq!(
         serde_json::to_value(&retained.location).unwrap(),
-        json!({"location": "retained_artifact", "artifact": {"store": {"store": "engine", "kind": "restate"}, "artifact_ref": "bundle-1"}})
+        json!({"location": "retained_artifact", "artifact": {"store": {"store": "engine", "kind": "engine-store"}, "artifact_ref": "bundle-1"}})
     );
 
     let owner = MaterialOwner::Run { opener: opener() };

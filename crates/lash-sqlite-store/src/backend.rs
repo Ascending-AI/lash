@@ -60,10 +60,10 @@ impl SqliteStoreSetOptions {
 }
 
 /// Every persistence port of one SQLite substrate:
-/// the [`StoreSet`](lash_core_execution::StoreSet) a Restate backend
-/// journals its effects beside (ADR 0102, D2).
+/// the [`StoreSet`](lash_core_execution::StoreSet) the durable engine
+/// persists its state through (ADR 0102, D2; ADR 0132 §1).
 ///
-/// The effect engine owns its journal. Cloning shares the store set.
+/// Cloning shares the store set.
 #[derive(Clone)]
 pub struct SqliteStoreSet {
     inner: Arc<StoreParts>,

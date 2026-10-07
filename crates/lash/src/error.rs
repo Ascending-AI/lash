@@ -254,10 +254,8 @@ impl EmbedError {
     /// is its refusal (FIG-3571, FIG-3619): at a session's open, at a turn's
     /// admission, or at a store call.
     ///
-    /// A durable engine's turn handler that meets it on a redrive of a turn
-    /// still in flight parks the turn rather than ending the invocation
-    /// where its journal holds the next command (FIG-3735): see
-    /// `lash_restate::park_generation_refused_turn`.
+    /// The durable engine parks a turn still in flight that meets it on
+    /// resume, rather than ending the turn (FIG-3735).
     pub fn session_state_version_refusal(&self) -> Option<lash_core::SessionStateVersionRefusal> {
         match self {
             Self::Store(error) | Self::Session(SessionError::Store { source: error, .. }) => {
@@ -293,7 +291,7 @@ impl EmbedError {
     ///
     /// Runtime failures delegate to the closed
     /// [`RuntimeErrorCode`](lash_core::RuntimeErrorCode) taxonomy. Its
-    /// retryable set includes idempotent store contention, Restate ingress,
+    /// retryable set includes idempotent store contention, engine ingress,
     /// session-refresh, and bounded-wait operations, plus
     /// [`SessionExecutionLaneBusy`](lash_core::RuntimeErrorCode::SessionExecutionLaneBusy),
     /// the one Busy outcome that is a public runtime error: a durable workflow

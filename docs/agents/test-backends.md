@@ -94,7 +94,7 @@ Each row names the deletion commit, not merely the ADR that proposed it.
 | Turn-input and queued-work claim tokens, `queued_runs` ledger | Retired in `671a616419`. Admission binds inputs and work; run identity keys settlement. |
 | Await-event signing material | Retired in `7ab7707a8f`. Wait keys are identities; a host owns any authorization policy. |
 | Runtime-owned tool-intent admission | Retired in `0417b7f48b`. The engine realizes intents and the submission ledger retains their binding and outcome. |
-| The Restate engine, its server double and its live suites | Retired in `5ad9641f9e` (FIG-5190). Lash's durable engine replaces it ([ADR 0132](../adr/0132-durability-is-state-first-over-the-lash-store.md)); each test law that went with it has a row in `docs/testing/substrate-port-ledger.toml`. |
+| The external journaling engine, its server double and its live suites | Deleted in `5ad9641f9e` (FIG-5190). Lash's durable engine replaces it ([ADR 0132](../adr/0132-durability-is-state-first-over-the-lash-store.md)); each test law that went with it has a row in `docs/testing/substrate-port-ledger.toml`. |
 | Local rewind after worker loss | Retired in `9c1bbd2189`. The parent settles the admitted operation and fails retryable so the execution substrate redrives from the checkpoint. Parking a live VM is a different, surviving operation. |
 | Runtime-operation effect journals outside turn/session scope | Retired in `caa1f7efe3`. Engine-owned workflows/objects carry durable waits and operation scopes. |
 | Orchestrating tools and their registry lane | Retired in `501f323f61`. Tools are opaque providers; a Pending result can declare a child start. |

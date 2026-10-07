@@ -1,6 +1,6 @@
 //! [`PostgresStoreSet`]: every persistence port of one PostgreSQL database
-//! (ADR 0102, D2). PostgreSQL is storage only: a deployment journals its
-//! effects on Restate, beside this store set (ADR 0104).
+//! (ADR 0102, D2). The durable engine persists its state through this store
+//! set (ADR 0132 §1).
 //!
 //! PostgreSQL keeps no attachment bytes, so the store set takes an attachment
 //! backend at construction: a store set with no attachment port is not one.
@@ -15,8 +15,8 @@ use crate::{
 };
 
 /// Every persistence port of one PostgreSQL database: the
-/// [`StoreSet`](lash_core_execution::StoreSet) a Restate backend
-/// journals its effects beside.
+/// [`StoreSet`](lash_core_execution::StoreSet) the durable engine persists
+/// its state through.
 ///
 /// The session-store factory declares the registry shared, because it is: the
 /// registry is this database's. Cloning shares the store set.

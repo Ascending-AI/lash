@@ -1,14 +1,11 @@
 //! Where a turn-executing law runs its turn.
 //!
-//! The in-process tiers scope a turn on the host the runtime runs on and execute
-//! it in the test task. A Restate turn exists only inside a handler: its
-//! effects journal on a `ctx`-bound controller, and the deployment-level host
-//! refuses every effect that has not entered one. A law that executes a real
-//! turn therefore takes the turn as a [`ConformanceTurnAttempt`] and hands it
-//! to the tier's [`ConformanceTurnRunner`], which supplies the scoped
-//! controller the turn runs on — the host's own on the in-process tiers, a
-//! handler-bound one on Restate — so one law body states the contract on
-//! every tier.
+//! A tier scopes a turn on the host the runtime runs on and executes it in the
+//! test task. The deployment-level host refuses every effect that has not
+//! entered a scoped controller, so a law that executes a real turn takes the
+//! turn as a [`ConformanceTurnAttempt`] and hands it to the tier's
+//! [`ConformanceTurnRunner`], which supplies the scoped controller the turn
+//! runs on, so one law body states the contract on every tier.
 //!
 //! # Crashing a turn
 //!
@@ -30,10 +27,9 @@
 //!   [`ConformanceTurnRunner::run_turn`] of the same scope, which is the tier's
 //!   recovery of the crashed turn.
 //!
-//! The recovery is the tier's own. In process it is a fresh driver over the
-//! same host and store. On Restate it is a redelivery of the same invocation,
-//! which replays the journal the crashed execution left. The law asserts only
-//! the outcome both must reach.
+//! The recovery is the tier's own: a fresh driver over the same host and
+//! store, which resumes from the state the crashed execution committed. The
+//! law asserts only the outcome recovery must reach.
 //!
 //! # Process segments
 //!
@@ -79,13 +75,11 @@ impl ConformanceTurnEnd {
 }
 
 /// One attempt at a turn, run on the scoped controller the tier supplies.
-/// Restate re-runs a handler from the top whenever it replays the invocation
-/// (after a suspension or a failed attempt), so an attempt is a factory: every
+/// A recovered turn runs its attempt again, so an attempt is a factory: every
 /// run of it builds its turn afresh from inputs that outlive the run (the
-/// runtime is rebuilt; the durable store and host are shared), so every run
-/// issues the same journaled commands. It reports what it observed through
-/// its own channel — only a run that ends reports — and answers how its turn
-/// ended.
+/// runtime is rebuilt; the durable store and host are shared). It reports
+/// what it observed through its own channel — only a run that ends reports —
+/// and answers how its turn ended.
 pub type ConformanceTurnAttempt = Arc<
     dyn Fn(crate::ActorContext) -> Pin<Box<dyn Future<Output = ConformanceTurnEnd> + Send>>
         + Send
@@ -96,7 +90,7 @@ pub type ConformanceTurnAttempt = Arc<
 /// attempt, at a point the law chose (see the module docs).
 ///
 /// Cloning shares the trigger, and it fires once. Every execution of the
-/// crashing attempt races the same trigger, because Restate may run an
+/// crashing attempt races the same trigger, because a tier may run an
 /// attempt more than once before it dies.
 #[derive(Clone, Debug, Default)]
 pub struct ConformanceCrash {
@@ -141,20 +135,18 @@ pub enum SegmentRecovery {
 #[async_trait::async_trait]
 pub trait ConformanceTurnRunner: Send + Sync {
     /// Runs `attempt` to its end on a controller admitted for `admitted`,
-    /// once per execution the tier gives it: once in process, once per
-    /// replay of the handler on Restate.
+    /// once per execution the tier gives it.
     async fn run_turn(&self, admitted: crate::AdmittedScope, attempt: ConformanceTurnAttempt);
 
     /// Runs `attempt` on every retry the tier's engine gives a turn that
     /// parks on each run, until the engine rests the turn, and returns how
     /// many times it ran. A parked turn leaves its execution open (see
     /// [`ConformanceTurnEnd`]); nothing in process retries it, so there it
-    /// runs once. On Restate every retry of the open invocation re-runs it,
-    /// and the turn handler's retry policy pauses the invocation after its
-    /// attempt budget: the runner returns once the invocation is paused, and
-    /// panics when a run settled instead of parking. Only a run that returned
-    /// is counted: an engine that fails an attempt inside a step ends that
-    /// run beneath the attempt, which then reports nothing.
+    /// runs once. A tier whose engine retries a parked turn runs it on every
+    /// retry until its attempt budget rests the turn, returns once the turn
+    /// rests, and panics when a run settled instead of parking. Only a run
+    /// that returned is counted: an engine that fails an attempt inside a
+    /// step ends that run beneath the attempt, which then reports nothing.
     async fn run_parking_turn_until_rested(
         &self,
         admitted: crate::AdmittedScope,
@@ -166,8 +158,8 @@ pub trait ConformanceTurnRunner: Send + Sync {
 
     /// Runs one turn across a crash: `crashing` must panic before its turn
     /// commits, and the tier then redelivers the same turn to `redrive` the
-    /// way it recovers a crashed turn — a fresh driver over the same host in
-    /// process, a retried handler invocation replaying its journal on Restate.
+    /// way it recovers a crashed turn: a fresh driver over the same host and
+    /// store.
     async fn run_crashed_then_redriven_turn(
         &self,
         admitted: crate::AdmittedScope,
@@ -178,8 +170,8 @@ pub trait ConformanceTurnRunner: Send + Sync {
     /// Runs `attempt` until `crash` fires, then kills that execution where it
     /// stands, the way the process running it dies, and leaves the turn to
     /// the tier's recovery: the law's next [`run_turn`](Self::run_turn) of the
-    /// same scope recovers it — a fresh driver over the same host in process,
-    /// a redelivery of the same invocation replaying its journal on Restate.
+    /// same scope recovers it with a fresh driver over the same host and
+    /// store.
     /// Panics when the attempt ended before the crash fired. A runner that
     /// cannot crash a turn says so by panicking.
     async fn run_turn_until_crash(
@@ -228,11 +220,10 @@ pub trait ConformanceTurnRunner: Send + Sync {
 
     /// Kills every execution of a process segment the tier is running now,
     /// the way the worker running it dies, and leaves each to the tier's
-    /// recovery: a redelivery of the same invocation replaying its journal
-    /// on Restate. Answers how many executions it killed; a segment that is
-    /// suspended on its engine has no execution to kill, and its next
-    /// resumption replays its journal all the same. A runner that cannot
-    /// kill a process's worker says so by panicking.
+    /// recovery, which resumes it from its committed state. Answers how many
+    /// executions it killed; a segment that is waiting on its engine has no
+    /// execution to kill, and resumes from its committed state all the same.
+    /// A runner that cannot kill a process's worker says so by panicking.
     async fn kill_process_workers(&self) -> usize {
         panic!("this tier's turn runner cannot kill a process's worker");
     }
@@ -268,7 +259,7 @@ pub trait ConformanceTurnRunner: Send + Sync {
     }
 
     /// The process-work wiring for a runtime whose process segments run on
-    /// `worker`: the tier's engine (Restate's process workflow) serves them
+    /// `worker`: the tier's engine serves them
     /// with `worker` and hands back a port that only observes `watched`. A
     /// runner that cannot run process segments says so by panicking.
     fn process_work(

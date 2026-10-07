@@ -66,7 +66,7 @@ otherwise ([D1](#decisions)). The rows below are the lash parts only.
 
 Figments runs lash work inside its own Restate objects, with lash's Restate
 controller as the effect context. On 1.0 the host submits and lash's engine
-runs ([guide §1](durable-hosting.md#no-restate-deployment)).
+runs ([guide §1](durable-hosting.md#no-engine-server)).
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |

@@ -803,7 +803,7 @@ impl SqliteConnection {
     /// and held until the transaction ends (FIG-3975): writers in this process
     /// wait on it instead of contending through `busy_timeout`, which remains
     /// for other processes' writers. It is never held across an `.await`, so a
-    /// caller whose future is suspended mid-call (a Restate handler) cannot
+    /// caller whose future is suspended mid-call cannot
     /// keep it: the transaction runs to its end on the connection thread
     /// whether or not the caller is polled again.
     pub(crate) async fn write<T, F>(&self, f: F) -> rusqlite::Result<T>

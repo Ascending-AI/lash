@@ -443,8 +443,7 @@ fn recreate_trust_domain_remedy() -> String {
     "Drain the affected sessions and recreate the whole Lash trust domain with this build: drop \
      the schema lash owns (`DROP SCHEMA ... CASCADE`) or recreate the database, provision it with \
      `lash migrate` or this build's schema.sql artifact (`PostgresStorage::schema_ddl()`, \
-     committed as crates/lash-postgres-store/schema.sql), and reset the Restate state with it — \
-     Restate left behind still refers to sessions the recreated database does not have. An older \
+     committed as crates/lash-postgres-store/schema.sql). An older \
      build's catalog can hold tables this build's teardown no longer names, so this build's \
      `teardown_ddl()` does not clear it. \
      docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md records why \

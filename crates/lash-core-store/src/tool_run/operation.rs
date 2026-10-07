@@ -2,8 +2,8 @@
 //! implements it).
 //!
 //! The operation uses the Run follow/cancel/result vocabulary with its own
-//! input kind, driven by the session's existing keyed turn service: no new
-//! Restate service. The host command returns once the operation Run is
+//! input kind, driven by the session actor: no new engine service. The host
+//! command returns once the operation Run is
 //! admitted and its drive obligation is durable. The Run owns every call
 //! and handle until explicit completion and Closing, and cannot settle while
 //! owned work is live. Tool-free administration stays an administrative

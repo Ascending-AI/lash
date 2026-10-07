@@ -114,8 +114,8 @@ impl RlmSessionReadViewExt for lash_core::SessionReadView {
 ///
 /// A session's RLM facts are baked in when it is created, from the creator's
 /// plugin options keyed by [`RLM_PROTOCOL_PLUGIN_ID`], and neither a reopen
-/// nor a config command changes them (FIG-4099, FIG-4379): a turn restates
-/// them through its run's protocol turn options. The RLM settings a session
+/// nor a config command changes them (FIG-4099, FIG-4379): a turn states
+/// them again through its run's protocol turn options. The RLM settings a session
 /// changes are its render preferences, through the config command
 /// [`SetRlmRender`], and its prompt config ([`RlmPrompt`]), through
 /// [`SetRlmPrompt`] and [`SetRlmPromptContext`]. A host that wants a fact

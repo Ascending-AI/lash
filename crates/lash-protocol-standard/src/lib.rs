@@ -153,7 +153,7 @@ impl StandardProtocolConfig {
 /// The standard-protocol behaviour a session records at creation
 /// (FIG-4398): the discovery operation, the batch choice and the configured
 /// render its driver runs under. It is pinned: no config command changes it, a run override cannot
-/// restate it, and a session opened, redriven or resumed by a deployment
+/// state it again, and a session opened, redriven or resumed by a deployment
 /// configured otherwise still runs under it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

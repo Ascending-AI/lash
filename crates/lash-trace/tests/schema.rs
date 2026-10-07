@@ -448,7 +448,6 @@ fn trace_event_vocabulary_names_no_seam_implementation() {
     const IMPLEMENTATIONS: &[&str] = &[
         "rlm",
         "lashlang",
-        "restate",
         "temporal",
         "sqlite",
         "postgres",

@@ -1832,7 +1832,7 @@ impl AttachmentReferrers for SlowManifest {
 /// FIG-3076 (succeeding FIG-3073's bridge regression): a manifest write must
 /// not stop the caller's runtime.
 ///
-/// The worker that wedged in the Restate workers E2E had one attachment write
+/// The worker that wedged in the multi-worker E2E had one attachment write
 /// in flight and nothing else could run — not the session-lease renewal, not
 /// the h2 accept loop, not an unrelated `/health` listener on its own port.
 /// This reproduces that shape at the async boundary the manifest now exposes:

@@ -2,25 +2,24 @@
 
 ## Status
 
-Accepted. The substrate lanes implement it. The ADR set states this end state;
-the gap between it and code on main is the substrate lanes' open work, and the
-Restate deletion lane removes the Restate path.
+Accepted.
 
 ## Context
 
-Lash runs agent turns, tool rounds, long processes and one heap VM. Restate
-journals them by position and replays handler code against that journal. The
-workload does not fit that model: long tool bodies meet silence timers,
-suspension is refused while an awaited run executes, and every kernel change
-pays for journal determinism (`JOURNAL_LOGIC_EPOCH`, generation lanes, the
-replay corpus, forced-replay legs). Lash also keeps two sources of durable
-truth, the SQL stores and the Restate journal, joined by an obligation relay
-because a store commit and an engine send cannot be atomic.
+Lash runs agent turns, tool rounds, long processes and one heap VM. An
+external journaling workflow engine records them by position and replays
+handler code against that journal. The workload does not fit that model: long
+tool bodies meet silence timers, suspension is refused while an awaited run
+executes, and every kernel change pays for journal determinism (a journal
+logic epoch, generation lanes, a replay corpus, forced-replay legs). Such an
+engine also makes two sources of durable truth, the SQL stores and the
+engine's journal, joined by an obligation relay because a store commit and an
+engine send cannot be atomic.
 
 A store-backed replay engine is not the answer either. The SQL replay driver
 deleted in commits `4f03596847` and `476264fbea` re-ran async code against
-outcomes keyed by `(scope_id, replay_key)`. It kept a second engine equivalent
-to Restate and mirrored 293 statements across two dialects.
+outcomes keyed by `(scope_id, replay_key)`. It kept a second journal-replay
+engine and mirrored 293 statements across two dialects.
 
 ## Decision
 
@@ -28,8 +27,8 @@ to Restate and mirrored 293 statements across two dialects.
 
 Lash's own runtime is the only durable engine. It persists state through the
 lash store: PostgreSQL for multi-node deployments, and one SQLite database file
-for a single node. Both run the same engine code. Restate, the server double
-and the SDK fork are deleted, and so is the pluggable `EffectEngine` seam:
+for a single node. Both run the same engine code. There is no external
+engine and no pluggable `EffectEngine` seam:
 `Backend` builds the durable engine directly over its store set.
 
 Engine SQL is written once per dialect, in one module, behind a gate that
@@ -183,8 +182,8 @@ The execution record splits into a start and an outcome.
 
 ### 7. Execution policy and budgets
 
-The policy layer of spec v3 Parts B, C and E carries over, minus every Restate
-window.
+The policy layer of spec v3 Parts B, C and E carries over, minus every
+journal-engine window.
 
 - `ExecutionPolicy::{Once, Repeatable { retry: BoundedRetry }}` and
   `AttemptOutcome::{Completed, Waiting, Failed, Interrupted, TimedOut,
@@ -346,9 +345,9 @@ guarantee is "at most once, except on loss of acknowledged commits".
   owners over one store.
 - lash-sim's crash matrix enumerates commit labels.
 - Storage laws run on SQLite file, SQLite memory and PostgreSQL.
-- Tests of the Restate path are ported by purpose: domain laws stay, protocol
-  and journal-index tests are deleted, and every deleted law gets a written
-  disposition.
+- Tests are kept by purpose: domain laws stay, protocol and journal-index
+  tests have no subject, and every deleted law has a written disposition in
+  `docs/testing/substrate-port-ledger.toml`.
 
 ### 15. Kill criteria
 
@@ -365,22 +364,21 @@ answered by adding a replay fallback.
 
 ## Scope
 
-This decision replaces ADR 0104 and ADR 0103, and with Restate it retires
-ADR 0111, ADR 0043 and ADR 0025. ADR 0130's separate realization execution is
-replaced by §5. The decision rules of ADRs 0105, 0109 and 0110 are restated on
-top of this decision: run admission's binding of rows and base head and the
+This decision replaces ADR 0104 and ADR 0103 and retires ADR 0111. Intent
+realization's store half commits with its tool result under §5. The decision
+rules of ADRs 0105, 0109 and 0110 apply on top of this decision: run admission's binding of rows and base head and the
 Run's ownership of concurrent calls (ADR 0105), the two deferred-work kinds
 `SessionDelete` and `ArtifactCleanup` (ADR 0109), and input ownership, abandon
 writers and operator controls (ADR 0110).
 
-`JOURNAL_LOGIC_EPOCH`, generation lanes and the build-generation sentinel go
-with Restate. Changing kernel code never requires a drain; changing a durable
+There is no journal logic epoch, generation lane or build-generation
+sentinel. Changing kernel code never requires a drain; changing a durable
 format does, under [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md).
 
 ## Rejected alternatives
 
-- **Keep Restate behind the `EffectEngine` seam.** Two sources of durable truth
-  stay, joined by a relay, and positional determinism keeps taxing every
+- **Keep an external journaling engine behind an `EffectEngine` seam.** Two
+  sources of durable truth stay, joined by a relay, and positional determinism keeps taxing every
   kernel change.
 - **A store-backed engine that replays by key.** The shape of the deleted SQL
   replay driver. It rebuilds journal replay over SQL.
@@ -403,8 +401,8 @@ format does, under [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain
 - Zero-infra is one SQLite file with no server process.
 - Host process engines and projection hosts change API: engines implement
   `advance`, and projections become registered providers.
-- The determinism allowlists, journal budgets, segment cuts, forced-replay legs
-  and the Restate server double are deleted with Restate.
+- There are no determinism allowlists, journal budgets, segment cuts,
+  forced-replay legs or engine server double.
 
 ## Design sources
 

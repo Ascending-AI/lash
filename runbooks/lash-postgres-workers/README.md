@@ -23,7 +23,7 @@ proof follows once the facade serves durable nodes (L13, FIG-5193).
 
 It is the cross-process proof of ADR 0132 §3 (actors, node liveness, the
 epoch fence) and of L8's notifier, liveness lock and failover bound
-(FIG-5178). It replaces the deleted `runbooks/restate-postgres-workers`
+(FIG-5178). It replaces the deleted engine-workers runbook
 (FIG-5190); the [row-disposition table](#row-disposition-table) accounts for
 every live row of that runbook.
 
@@ -154,10 +154,10 @@ docker compose -f runbooks/lash-postgres-workers/docker-compose.yml down -v
 
 ## Row-disposition table
 
-Every live row of `runbooks/restate-postgres-workers` at its last revision
+Every live row of the deleted engine-workers runbook at its last revision
 (`5ad9641f9e^`): its README's gates, faults, laws and ledgers, its runner's
-30-row `WORKFLOW_INVENTORY`, and its `tests/`. "Deleted: Restate mechanics"
-rows tested a mechanism lash no longer has; other rows name the case here or
+30-row `WORKFLOW_INVENTORY`, and its `tests/`. "Deleted: engine mechanics"
+rows tested a mechanism of the deleted journaling engine that lash no longer has; other rows name the case here or
 the law elsewhere that now carries the property.
 
 ### Failover, crash and restart rows
@@ -167,36 +167,36 @@ the law elsewhere that now carries the property.
 | `e2e-failover` (a worker exits mid-turn; a peer finishes) | `a_turn_killed_mid_model_call_finishes_on_another_node`, `a_once_step_killed_mid_body_settles_interrupted_on_another_node` |
 | `e2e-failover-wake` (the failed-over turn's wake delivered once) | `a_turn_killed_mid_model_call_finishes_on_another_node` (one `turn.commit`); wake delivery is mail in the producer's transaction (ADR 0132 §12), `mail_from_another_node_reaches_a_hot_owner_through_its_hint` and `mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll` (`lash-postgres-store` durable signals laws) |
 | `e2e-tool-batch-failover`, "loss after commit" fault (worker exits after the receiver commits, before the reply) | `a_once_step_killed_mid_body_settles_interrupted_on_another_node`; the in-process cut at every label: `a_once_member_never_starts_twice_across_every_cut` (`lash-durable-test` `round_crash_matrix`) |
-| "replay over completed effects" (`crash_once` after `Promise.all`) | deleted: Restate mechanics. No code re-runs against a recorded history (ADR 0132 §2); the property it guarded, a completed effect is not run again, is the `Once` law of every case here |
-| `e2e-engine-restart-suspended-sleep`, `e2e-engine-restart-cancel`, `e2e-engine-restart-complete`, "cluster restart" fault (SIGKILL both workers, restart Restate) | the store-restart half: `a_postgres_restart_strands_no_work_and_reaps_no_node`; the node-restart half: the kill cases; a sleeping actor survives its owner: `a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state`, `a_wait_survives_its_owners_death_with_the_same_key_and_deadline` (wait laws). Restarting the Restate server itself: deleted: Restate mechanics |
+| "replay over completed effects" (`crash_once` after `Promise.all`) | deleted: engine mechanics. No code re-runs against a recorded history (ADR 0132 §2); the property it guarded, a completed effect is not run again, is the `Once` law of every case here |
+| `e2e-engine-restart-suspended-sleep`, `e2e-engine-restart-cancel`, `e2e-engine-restart-complete`, "cluster restart" fault (SIGKILL both workers, restart the engine server) | the store-restart half: `a_postgres_restart_strands_no_work_and_reaps_no_node`; the node-restart half: the kill cases; a sleeping actor survives its owner: `a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state`, `a_wait_survives_its_owners_death_with_the_same_key_and_deadline` (wait laws). Restarting the engine server itself: deleted: engine mechanics |
 | `e2e-frame-switch-crash` (a crash mid frame switch) | not a failover row: a frame switch is a session phase (L3, FIG-5172; L3s, FIG-5196); its crash cuts belong to the turn's crash matrix (`turn_phases`) |
 | `e2e-turn-cancel-crash-recovery` (cancellation replayed by a peer after the original worker exits) | `a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it` (`lash-durable-test` `turn_phases`: any node finalizes an accepted cancel from its row) |
-| `e2e-process-llm-query-replay` (a process's model query replayed after a worker exit) | deleted: Restate mechanics (journal replay of a process's query). A process step that survives its node: `a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state` |
+| `e2e-process-llm-query-replay` (a process's model query replayed after a worker exit) | deleted: engine mechanics (journal replay of a process's query). A process step that survives its node: `a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state` |
 | `tests/process_operations_replacement.rs` (`start_key_feed_and_plugin_state_survive_worker_replacement`) | `a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state`: start key, event feed and engine state (the host engine's state is what plugin state was) survive a node kill |
 | Recovery law 1, durable-result stability and recovery progress | every case: the terminal is in the store, and the unfinished work finishes after the fault |
 | Recovery law 2, logical-effect identity (one commit per key, retries send identical bytes) | the `Once` law of every case; identical re-sent bytes: `a_turn_of_two_model_calls_resumes_at_every_label_without_replay` (`turn_phases`) |
 | Recovery law 3, causal identity | every witness row names its call and its node; the cases check each against the store's run records |
-| Recovery law 4, replay equivalence | deleted: Restate mechanics (it compared a replay with the original run); its property is the `Once` law and the zombie law here |
+| Recovery law 4, replay equivalence | deleted: engine mechanics (it compared a replay with the original run); its property is the `Once` law and the zombie law here |
 | Law 5, fencing (deferred there for want of an external authority token) | the zombie law: `a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses`, judged from the store's `written_epoch` and the zombie's empty commit record after the partition; the refusal of a zombie that does write is `lash-durable-test`'s fencing laws |
-| Witness ledgers (separate database, insert-only role, database clock) | `witness.sql`: `witness_effects`, `witness_model_attempts`, `witness_nemesis`. Submissions, acknowledgements, client terminals and provider receipts were Restate ingress and HTTP output: deleted: Restate mechanics; the store's own terminal rows replace them |
+| Witness ledgers (separate database, insert-only role, database clock) | `witness.sql`: `witness_effects`, `witness_model_attempts`, `witness_nemesis`. Submissions, acknowledgements, client terminals and provider receipts were engine ingress and HTTP output: deleted: engine mechanics; the store's own terminal rows replace them |
 | `tests.rs` checker fixtures (legal histories, one fixture per rule, property tests) | deleted with the checkers: the laws here are direct assertions over one case's rows, with nothing to fixture |
 
-### Rows that tested Restate itself
+### Rows that tested the deleted engine itself
 
 | Old row | Disposition |
 |---|---|
-| Break-glass gate (Restate Admin invocation hard-kill stays break-glass) | deleted: Restate mechanics (there is no invocation to kill; an operator cancel is a cancel request row) |
-| "Deployment upgrades" (ADR 0043 pin-and-drain, RT0016 journal mismatches, `drain_status` of a deployment) | deleted: Restate mechanics; a node drains by releasing its actors (`a_cleanly_stopped_node_hands_its_turn_over_at_once`), and format drains are L11's (FIG-5187) |
-| `fig1126_pending_tool_redrives_after_worker_loss_and_resumes_once` (endpoint-protocol journal splice) | deleted: Restate mechanics |
-| Stall watchdog (unfinished Restate invocations after 240 s) | deleted: Restate mechanics; every wait in the cases has its own timeout |
-| Coverage scoring (`write_completed_workflow_manifest`, `EXPECTED_WORKFLOW_INVENTORY_LEN`, `scripts/check_restate_workers_e2e_coverage.py`) | deleted: Restate mechanics (it scored segments of the Restate workflow inventory); each case here is its own test |
+| Break-glass gate (engine-admin invocation hard-kill stays break-glass) | deleted: engine mechanics (there is no invocation to kill; an operator cancel is a cancel request row) |
+| "Deployment upgrades" (deployment pin-and-drain, RT0016 journal mismatches, `drain_status` of a deployment) | deleted: engine mechanics; a node drains by releasing its actors (`a_cleanly_stopped_node_hands_its_turn_over_at_once`), and format drains are L11's (FIG-5187) |
+| `fig1126_pending_tool_redrives_after_worker_loss_and_resumes_once` (endpoint-protocol journal splice) | deleted: engine mechanics |
+| Stall watchdog (unfinished engine invocations after 240 s) | deleted: engine mechanics; every wait in the cases has its own timeout |
+| Coverage scoring (`write_completed_workflow_manifest`, `EXPECTED_WORKFLOW_INVENTORY_LEN` and its coverage-check script) | deleted: engine mechanics (it scored segments of the engine's workflow inventory); each case here is its own test |
 | "Local Postgres conformance" (`with-service.sh pg16` for the registry conformance) | not a runbook row: the PostgreSQL store's own laws run on its hermetic server (`//crates/lash-postgres-store`) |
 | Load witness contracts (`src/load/*`, `just loadtest-ledger`) | not a failover row: load measurement is L12b's (FIG-5188) |
 | The session-operator paragraph (withdrawal, running cancel, parked redrive/cancel/fork, lost-reply repeat) | not covered here: owed by the `runbooks/session-operator/runbook.md` ledger row |
 
 ### Functional workflow rows
 
-These rows exercised features end to end through Restate workflows. They are
+These rows exercised features end to end through the deleted engine's workflows. They are
 not failover rows; each names where its property is held now.
 
 | Old row | Disposition |
@@ -207,9 +207,9 @@ not failover rows; each names where its property is held now.
 | `e2e-async-completion`, `e2e-durable-input`, `e2e-parent-durable-input-after-child` | completion keys and waits: `an_unresolved_wait_suspends_and_resumes_on_resolution`, `a_completion_before_the_await_is_already_resolved`, `the_first_resolution_wins` (wait laws, L5) |
 | `e2e-process-llm-query` | a process step through the admitted-execution primitive: `a_process_cut_at_every_label_runs_no_step_before_its_state_commits` (`process_crash_proof`) |
 | `e2e-tool-batch` | rounds: `round_crash_matrix` (L4, FIG-5174) |
-| `e2e-segment-loop` | deleted: Restate mechanics (segment cuts kept a journal bounded; ADR 0132 deletes them) |
+| `e2e-segment-loop` | deleted: engine mechanics (segment cuts kept a journal bounded; ADR 0132 deletes them) |
 | `e2e-frame-switch-queued`, `e2e-frame-switch-prepared`, `e2e-frame-switch-cancel` | frame switches are session phases: L3 (FIG-5172) and L3s (FIG-5196) |
 | `e2e-suspended-sleep-cancel` | `the_awaiters_cancel_ends_its_wait` (wait laws) |
 | `e2e-turn-cancel-late-normal`, `e2e-turn-cancel-before-start`, `e2e-turn-cancel-cross-process`, `e2e-turn-cancel-seal-race` | turn cancel is a first-winner row: `a_turn_cancel_is_a_first_winner_row_with_a_wake` (store law), `a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it` and `an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary` (`turn_phases`, requested from outside the actor) |
 | Queued-work tombstone redelivery check | deleted with the wake outbox (L6, FIG-5175): delivery is the append's own transaction |
-| `tests/provider_stream_bounds.rs` (real provider parsing through Restate turns) | deleted: Restate mechanics; provider parsing has its own crate laws |
+| `tests/provider_stream_bounds.rs` (real provider parsing through engine turns) | deleted: engine mechanics; provider parsing has its own crate laws |

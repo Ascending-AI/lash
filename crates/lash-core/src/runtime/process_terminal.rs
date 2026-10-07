@@ -2,11 +2,9 @@
 //! engine waiters its terminal.
 //!
 //! Every transaction that makes a process terminal arms the obligation on the
-//! process row. The execution that stored the terminal publishes it itself —
-//! on Restate it resolves the process's terminal promise in the journal that
-//! stored the terminal — and settles the row delivered. When that execution
-//! stops between the terminal commit and the publication (killed, paused, or
-//! its journal refused), the waiters parked on the engine would be stranded:
+//! process row. The execution that stored the terminal publishes it itself
+//! and settles the row delivered. When that execution stops between the
+//! terminal commit and the publication (killed or paused), the waiters parked on the engine would be stranded:
 //! this relay takes the due row and publishes the stored terminal through the
 //! engine's port instead.
 //!

@@ -115,7 +115,7 @@ reason = "the v2 model-facing composition hash was superseded by v3"
 
 [[retired_hash_domain]]
 name = "lash-journal-payload/v1"
-reason = "FIG-5190: the Restate journal payload identity went with lash-restate"
+reason = "FIG-5190: the engine journal payload identity was deleted with its engine"
 
 [[retired_hash_domain]]
 name = "lash-build-generation/v1"

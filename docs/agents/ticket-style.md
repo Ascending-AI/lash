@@ -91,7 +91,7 @@ Two durability rules keep the comment thread from swallowing the decision:
 
 ## Titles
 
-A plain sentence naming the outcome. `Process registry listing is unbounded and needs a cursor` reads at a glance. A 20-word RCA clause like `non-Restate AwaitEvent is process-local; SQLite hosts advertise Durable for a sticky path` is a line out of the investigation, not a title. The key rides inside the linked title; never refer to a ticket by bare `FIG-123`.
+A plain sentence naming the outcome. `Process registry listing is unbounded and needs a cursor` reads at a glance. A 20-word RCA clause like `non-durable AwaitEvent is process-local; SQLite hosts advertise Durable for a sticky path` is a line out of the investigation, not a title. The key rides inside the linked title; never refer to a ticket by bare `FIG-123`.
 
 ## Every non-trivial ticket has an orienting parent
 
@@ -118,6 +118,6 @@ Draft, then edit; the first draft is material, not the ticket. Run this pass bef
 7. **Strip the AI tells.** They read as machine-drafted and cost the reader's trust:
    - *Em-dashes.* Don't use the em dash as your default connector. Most become a period, comma, colon, or parentheses. Aim for at most one per paragraph.
    - *Phrasebank words.* leverage, robust, seamless, crucial, pivotal, streamline, delve, harness, foster, underscore, "ever-evolving". Use the plain word.
-   - *Antithesis / false reframe.* "not just X, it's Y"; "this isn't a bug fix, it's a redesign". If Y only restates X, drop the frame.
+   - *Antithesis / false reframe.* "not just X, it's Y"; "this isn't a bug fix, it's a redesign". If Y only repeats X, drop the frame.
    - *Chat fossils and decoration.* "Great question", "I hope this helps", "Let me break this down", sycophantic openers, decorative emoji on headings or bullets. Delete outright.
 8. **Length gate.** Shorter without losing a decision-relevant fact? Omit needless words; don't omit needed ones.

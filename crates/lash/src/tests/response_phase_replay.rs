@@ -1,32 +1,9 @@
 //! FIG-4390: a run's response phase plan is recorded with its paid
-//! completion, so adding or removing an assistant-response hook between a
-//! run's first attempt and its replay never changes the response the run
-//! serves (ADR 0105 §1).
-//!
-//! Each law executes one run on the Restate server double. Its first attempt
-//! journals the LLM call's phases and dies before the step after them; the
-//! core that ran it is dropped as it dies, and a second core over the same
-//! stores, with the other hook set, installs its `SessionShifts` and replays
-//! the run:
-//!
-//! - **removed**: the first core had a response hook, so the first attempt
-//!   journaled phase 2's derived response. The replay, with no hook
-//!   installed, serves that derived response from the journal.
-//! - **added**: the first core had none, so the first attempt journaled no
-//!   phase 2. The replay, with a hook installed, serves the raw completion
-//!   and never runs the hook.
-//!
-//! Each runs with and without forced replay (every await suspends and
-//! replays the journal from the start), over SQLite memory, SQLite file and
-//! PostgreSQL. The PostgreSQL legs are ignored in ordinary runs and require
-//! `LASH_POSTGRES_DATABASE_URL` when selected with `--include-ignored`
-//! inside a PostgreSQL gate.
-//!
-//! The `live_*` laws run the same run on a live `restate-server`, over the
-//! live backend's SQLite memory store set: the first attempt's death is the
-//! deployment dying at the checkpoint's journal frame, and the deployment
-//! that comes back serves the second core. The `recorded-runs` suite
-//! of `scripts/restate-suites.toml` runs them on its live and replay legs.
+//! completion, so the assistant-response callbacks a resumed run applies are
+//! the recorded plan's, in recorded order, whatever the resuming core has
+//! installed (ADR 0105 §1). A recorded callback the resuming core lacks
+//! refuses before any callback runs, and a recorded callback revision never
+//! runs a substitute.
 
 use super::*;
 

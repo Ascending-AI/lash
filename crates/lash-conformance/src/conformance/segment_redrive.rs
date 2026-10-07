@@ -388,9 +388,9 @@ impl Scenario {
         })
     }
 
-    /// The child's segment body runs a journaled effect under the child's
-    /// scope, then settles the child. Restate may re-enter this body after a
-    /// suspension; only the effect executor counts as another run.
+    /// The child's segment body runs a durable effect under the child's
+    /// scope, then settles the child. The engine may run this body again
+    /// after the child waits; only the effect executor counts as another run.
     fn child_body(&self) -> ConformanceTurnAttempt {
         let scenario = self.clone();
         Arc::new(move |scoped: ActorContext| {

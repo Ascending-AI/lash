@@ -66,8 +66,8 @@ impl crate::ToolProvider for SignalIntentProvider {
 
 /// Runs a literal parked-signal law through a real provider, coordinator, and
 /// runtime turn over the supplied durable effect host and store set.
-/// The turn runs where the tier runs turns (`turn_runner`): scoped on the host
-/// in process, inside a handler on Restate.
+/// The turn runs where the tier runs turns (`turn_runner`), scoped on the
+/// host.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -212,9 +212,8 @@ pub async fn public_signal_intent_wakes_parked_process(
     )
     .expect("build the public signal-intent process worker");
     let tier_process_work = turn_runner.process_work(watched, worker);
-    // Restate re-runs the turn's handler from the top on every replay, so
-    // each execution builds its runtime afresh from these inputs, which
-    // outlive it; the store is the durable state they share.
+    // Each execution of the turn builds its runtime afresh from these
+    // inputs, which outlive it; the store is the durable state they share.
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let admitted = admit(crate::ExecutionScope::turn(&session_id, &turn_id));
     let mut input = crate::TurnInput::text("signal the parked process");

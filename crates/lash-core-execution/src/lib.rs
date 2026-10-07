@@ -741,8 +741,8 @@ pub(crate) use runtime::default_queued_drain_policy;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::fail_parent_end_once;
 
-// This block includes the effect / process-control types consumed by external
-// effect hosts (e.g. lash-restate's workflows) and their integration tests —
+// This block includes the effect / process-control types consumed by host
+// process engines and their integration tests —
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
 pub use runtime::ExecutionOwner;

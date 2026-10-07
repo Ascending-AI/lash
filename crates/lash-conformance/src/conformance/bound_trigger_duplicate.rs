@@ -843,7 +843,7 @@ fn increment_subscription(
     }
 }
 
-/// The emission reports one attempt recorded, in run order: Restate may run
+/// The emission reports one attempt recorded, in run order: a tier may run
 /// an attempt more than once.
 #[derive(Default)]
 struct Reports(Mutex<Vec<TriggerEmitReport>>);

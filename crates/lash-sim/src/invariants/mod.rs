@@ -36,7 +36,7 @@
 //! Where the checkers run: every generated-world seed (search and evidence
 //! lanes, as the run-only oracle [`GLOBAL_INVARIANTS_ORACLE`]), every
 //! crash-matrix cell and seed once its end state holds, every chaos-soak
-//! epoch, and the pending-tool scenario on the Restate server double.
+//! epoch, and the pending-tool scenario.
 //!
 //! A violation prints its seed, its invariant, the trace records and the store
 //! rows that show it. The seed names the run's inputs; it does not reproduce

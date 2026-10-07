@@ -39,7 +39,7 @@ mod structural_validation;
 /// Off-by-one is the version a fence actually meets in production — the
 /// deploy that straddles a bump — and it is the one a fence written as
 /// `< SOME_FLOOR` or `!= 0` would wave through. Both the structural
-/// validator and the wire decoder are checked; `resume_from` restates the
+/// validator and the wire decoder are checked; `resume_from` re-checks the
 /// same comparison a third time.
 // Pins N's version and bytes; the synthetic N+1 moves them.
 #[cfg(not(feature = "synthetic-next"))]

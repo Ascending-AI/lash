@@ -325,7 +325,7 @@ a build-tool comment. The integration keeps upstream's registry-worker and
 explicit protocol-version changes and removes the retired VM fingerprint build
 scripts. It does not restore obsolete source behavior to match an earlier build.
 All 7,137 configured labels passed dependency analysis. Sync, 13 graph contracts,
-worker runfile/helper, Cargo binary, UI, confidence, packaging and Restate script
+worker runfile/helper, Cargo binary, UI, confidence, packaging and engine script
 contracts passed on the joined source.
 
 The named Cargo Git-consumer gate passed on exact `9445ac6a52` in 2m13s, with

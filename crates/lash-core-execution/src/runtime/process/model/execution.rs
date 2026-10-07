@@ -41,8 +41,8 @@ impl ProcessStarted {
     }
 }
 
-/// Correctness fence presented by the engine invocation that writes process
-/// lifecycle facts. Restate successors within one attempt share the root
+/// Correctness fence presented by the engine execution that writes process
+/// lifecycle facts. Successor segments within one attempt share the root
 /// execution id, so this authority fences attempts rather than segments.
 #[derive(Clone, Debug)]
 pub struct ProcessExecutionWriteAuthority {

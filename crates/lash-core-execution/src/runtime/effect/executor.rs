@@ -55,9 +55,8 @@ pub struct RuntimeAwaitEventOptions {
     pub cancellation: CancellationToken,
 
     pub clock: Arc<dyn crate::Clock>,
-    /// Selects the durable turn-cancel race shape. Restate-backed callers must
-    /// keep this stable for a wait's lifetime; see
-    /// `docs/adr/0012-durable-waits-via-effect-host-engines.md`.
+    /// Selects the durable turn-cancel race shape. Callers keep this stable
+    /// for a wait's lifetime (ADR 0132 §6).
     pub observe_turn_cancel: bool,
     pub turn_cancel_scope: Option<crate::ExecutionScope>,
 }
@@ -65,9 +64,8 @@ pub struct RuntimeAwaitEventOptions {
 /// Host controls attached to one sleep effect.
 pub struct RuntimeSleepOptions {
     pub cancellation: CancellationToken,
-    /// Selects the durable turn-cancel race shape. Restate-backed callers must
-    /// keep this stable for a wait's lifetime; see
-    /// `docs/adr/0012-durable-waits-via-effect-host-engines.md`.
+    /// Selects the durable turn-cancel race shape. Callers keep this stable
+    /// for a wait's lifetime (ADR 0132 §6).
     pub observe_turn_cancel: bool,
     pub turn_cancel_scope: Option<crate::ExecutionScope>,
     /// The clock the sleep was dispatched under. A deadline-bearing sleep is
@@ -132,9 +130,8 @@ pub struct ProcessLocalExecution {
     /// through (ADR 0109 §1.5): claim the armed row and deliver it now, so a
     /// registered process starts here instead of waiting for the reconcile
     /// tick. `None` where no ProcessStart ledger is bound — the reconcile
-    /// pass still retries the armed row. Public because a journaled engine
-    /// (Restate) delivers a start through its own journaled send and settles
-    /// the row itself.
+    /// pass still retries the armed row. Public because an engine that
+    /// delivers a start through its own send settles the row itself.
     pub process_starts: Option<Arc<crate::runtime::process_start::ProcessStartRelay>>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     /// The required registry that admits every engine start inside its recorded step.
@@ -533,8 +530,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// This is a replay-shape switch, not a live policy toggle. A Restate
-    /// invocation must reconstruct the same value on every attempt.
+    /// This is a wait-shape switch, not a live policy toggle: every attempt
+    /// of one wait constructs the same value.
     pub fn with_turn_cancel_observation(mut self, observe_turn_cancel: bool) -> Self {
         if let RuntimeEffectLocalExecutorState::Target(
             LocalTarget::SleepOnly { controls, .. }

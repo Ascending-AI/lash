@@ -12,7 +12,7 @@ PRs are a code-review surface, not a request surface; work items live in Linear 
 Title: imperative, one sentence, readable without opening the ticket.
 
 ## Why
-Link the FIG ticket, and restate the goal in one or two sentences so the
+Link the FIG ticket, and state the goal again in one or two sentences so the
 reviewer needn't open it. The ticket has the full context; this orients.
 
 ## What changed
@@ -38,7 +38,7 @@ Blast radius, anything deliberately out of scope, follow-ups filed as tickets.
 
 - **The first line is load-bearing.** It becomes the squash commit title in `git log`, so write it imperative, one sentence, standalone: `Add cursor pagination to the process registry listing`, never `Fixes`, `WIP`, or `Phase 1`.
 - **Lead with the summary.** A reviewer reads the first paragraph and knows what the PR does and why. Depth follows; it doesn't open the PR.
-- **Link the ticket, don't restate it.** One or two orienting sentences, then the link. The PR carries the *how*; the ticket carries the *what/why*. Don't copy the ticket body in.
+- **Link the ticket, don't repeat it.** One or two orienting sentences, then the link. The PR carries the *how*; the ticket carries the *what/why*. Don't copy the ticket body in.
 - **Prove it, per the Definition of Done.** Run focused regressions for behavior changes and cheap relevant checks for mechanical changes. Add a targeted live check only for a named durability or behavior risk absent from current CI coverage ([way-of-working.md](way-of-working.md)). Say what actually ran, including its scope and intentional omissions.
 - **Match the diff.** The PR body describes what the diff does. No aspirational claims for code that isn't there, no stale description after a force-push.
 - **Follow-ups are tickets, not TODOs.** Work discovered but out of scope gets a FIG issue and a link, not a buried comment.

@@ -17,7 +17,7 @@ pub async fn later_segment_recovery_refuses_without_terminal_mutation(
         .set_external_ref(
             &id,
             crate::ProcessExternalRef {
-                backend: "restate".into(),
+                backend: "workflow-engine".into(),
                 id: "segment-2".into(),
                 metadata: None,
                 segment_ordinal: Some(2),

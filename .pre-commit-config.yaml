@@ -87,12 +87,20 @@ repos:
         pass_filenames: false
 
       # Mirrors CI Lint "Check substrate port ledger": every test that uses the
-      # Restate server double has a ledger row (ADR 0132 §14).
+      # deleted engine's server double has a ledger row (ADR 0132 §14).
       - id: substrate-port-ledger
         name: substrate port ledger
         language: system
         entry: python3 scripts/check-substrate-port-ledger.py
         files: '^(\.pre-commit-config\.yaml|docs/testing/substrate-port-ledger\.toml|(crates|examples|runbooks)/.*(\.rs|Cargo\.toml)|scripts/(check-substrate-port-ledger|test_check_substrate_port_ledger)\.py)$'
+        pass_filenames: false
+
+      # Mirrors CI repo-gates: no tracked path or text names the deleted engine
+      # outside the gate's listed exceptions (ADR 0132 §1, FIG-5192).
+      - id: no-restate
+        name: No Restate mention
+        language: system
+        entry: python3 scripts/check-no-restate.py
         pass_filenames: false
 
       # Mirrors CI Lint "Check substrate stub lane tags": every substrate

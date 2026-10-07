@@ -190,6 +190,9 @@ run_rust_source_guards() {
   step "Substrate port ledger"
   python3 scripts/check-substrate-port-ledger.py
 
+  step "No Restate mention"
+  python3 scripts/check-no-restate.py
+
   step "Substrate stub lane tags"
   python3 scripts/check-substrate-todos.py
 

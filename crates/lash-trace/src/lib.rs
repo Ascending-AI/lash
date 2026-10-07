@@ -151,7 +151,7 @@ pub use telemetry::{
 /// Trace failures retain typed terminal and provider-failure vocabularies,
 /// plus one namespaced failure code. OTel derives `error.type` from the kind.
 /// Version 27 (FIG-3460) unifies workflow node identity and adds structured
-/// execution sites, language-node/tool cross-links, and Restate correlation.
+/// execution sites, language-node/tool cross-links, and engine correlation.
 /// Version 28 (FIG-3461) adds generation-qualified observation identity,
 /// typed child process identity, and replay-stable bounded graph snapshots.
 /// Version 29 (FIG-1961) renames the compaction decision fields from
@@ -943,7 +943,7 @@ impl TraceTurnOutcome {
     }
 
     /// The `status` tag serde writes for this variant, read back from serde
-    /// rather than restated by hand so a rename cannot leave a second,
+    /// rather than repeated by hand so a rename cannot leave a second,
     /// drifting spelling behind.
     pub fn status_tag(&self) -> String {
         self.string_field("status").unwrap_or_default()
@@ -1310,7 +1310,7 @@ pub enum TraceBranchSelection {
 /// The static graph of an execution, carried once on
 /// [`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity
 /// (`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the
-/// enclosing [`TraceLanguageExecutionIdentity`]; the map never restates it.
+/// enclosing [`TraceLanguageExecutionIdentity`]; the map never repeats it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLanguageExecutionMap {
     #[serde(default)]

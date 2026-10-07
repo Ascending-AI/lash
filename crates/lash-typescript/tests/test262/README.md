@@ -235,6 +235,6 @@ The script refuses a checkout whose commit differs from the pin. `check` is
 non-mutating. It regenerates every derived file in memory and fails on any
 difference, byte for byte: the `inventory/` and `skip-register/` shards, the
 sample and count files, the vendored tests, the harness files and the
-license. The Rust checks also restate the selection rule over the vendored
+license. The Rust checks also re-check the selection rule over the vendored
 files themselves, so no selected test can touch a census row that is not
 accepted.

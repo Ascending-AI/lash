@@ -501,9 +501,8 @@ pub trait DeploymentStore:
     /// session is durably deleted, and that owner is fenced in the same
     /// transaction, so a resubmission is refused rather than realized again.
     ///
-    /// SQL stores reclaim their retained storage evidence here. Effect scopes,
-    /// journal entries, groups and promises belong to Restate, so this sweep
-    /// does not retire engine scopes or decide whether an invocation is live.
+    /// SQL stores reclaim their retained storage evidence here. This sweep
+    /// does not retire engine scopes or decide whether an execution is live.
     async fn reclaim_retained_evidence(
         &self,
         bound: crate::store::RetentionBound,

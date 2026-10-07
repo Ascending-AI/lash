@@ -2,7 +2,7 @@ use super::*;
 use crate::ast::CoercingBinaryOp;
 
 #[test]
-fn linked_module_accepts_restate_board_process_with_imported_schemas() {
+fn linked_module_accepts_board_process_with_imported_schemas() {
     let mut catalog = LashlangHostCatalog::new();
     let read_input = crate::json_schema_to_type_expr(&serde_json::json!({
         "type": "object",
@@ -54,7 +54,7 @@ fn linked_module_accepts_restate_board_process_with_imported_schemas() {
     // }
     // handle = start play_center_once(board_tool: board)
     // result = (await handle)?
-    // finish "done via Restate E2E"
+    // finish "done via board E2E"
     let program = builders::module(
         vec![builders::process(
             "play_center_once",
@@ -118,12 +118,12 @@ fn linked_module_accepts_restate_board_process_with_imported_schemas() {
                 "result",
                 builders::unwrap(builders::await_expr(builders::var("handle"))),
             ),
-            builders::finish(builders::string("done via Restate E2E")),
+            builders::finish(builders::string("done via board E2E")),
         ],
     );
 
     LinkedModule::link(program, environment.clone())
-        .expect("link Restate board process with imported schemas");
+        .expect("link board process with imported schemas");
 
     // await board.play({ cell: 4.5 })?
     let fractional = builders::program(vec![builders::module_call(

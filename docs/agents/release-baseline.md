@@ -85,7 +85,7 @@ its stamp, its release-stamp entry and its catalog's step numbers all read it.
 The synthetic-next build writes the version after it, so its catalog steps are
 written as `CONSTANT` to `CONSTANT + 1` and follow the reset without an edit.
 `schema.sql` states the PostgreSQL version in its header and its seed row;
-`release_reset.py` restates both with the patterns the check reads them by. `release_baseline.py check` and
+`release_reset.py` rewrites both with the patterns the check reads them by. `release_baseline.py check` and
 `release_reset.py --apply` hold the artifact, the backends and the catalogs to
 the constants on every tree, before and after the cut, and the scratch reset
 law proves it on the reset tree with red mutants.

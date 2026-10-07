@@ -54,7 +54,6 @@ The generated region below is checked against the live filenames and headings.
 | 0008 | [Confidence gate](0008-confidence-gate.md) |
 | 0009 | [Randomized simulation harness](0009-deterministic-simulation-harness.md) |
 | 0011 | [Self-contained processes capture their environment at creation](0011-self-contained-processes.md) |
-| 0012 | [Durable waits use effect-host engines and engine-owned journals](0012-durable-waits-via-effect-host-engines.md) |
 | 0013 | [Protocol capabilities enter through the plugin contract](0013-protocol-capabilities-enter-through-the-plugin-contract.md) |
 | 0014 | [Operational policy stays with the host and Lash exposes levers](0014-operational-policy-stays-with-the-host.md) |
 | 0015 | [Admission control lives in provider decorators](0015-admission-control-lives-in-provider-decorators.md) |
@@ -66,7 +65,6 @@ The generated region below is checked against the live filenames and headings.
 | 0022 | [Host originators carry named scopes](0022-host-originators-carry-named-scopes.md) |
 | 0023 | [Retention stays a parameterized host lever](0023-retention-stays-a-parameterized-host-lever.md) |
 | 0024 | [Drainage reads over artifact references](0024-drainage-reads-over-artifact-refcounts.md) |
-| 0025 | [Bounded journals are an effect-controller obligation](0025-bounded-journals-are-an-effect-controller-obligation.md) |
 | 0026 | [Model capability is host-supplied data and providers are executors](0026-model-capability-is-host-supplied-data.md) |
 | 0027 | [Process completion carries explicit authority](0027-unleased-completion-carries-explicit-authority.md) |
 | 0028 | [Attachments have blob storage, reference tracking and host lifecycle policy](0028-attachments-are-three-layers-blob-reference-lifecycle.md) |
@@ -83,7 +81,6 @@ The generated region below is checked against the live filenames and headings.
 | 0040 | [Retried model attempts retract live text by correlation](0040-retried-model-attempts-retract-live-text-by-correlation.md) |
 | 0041 | [Child-turn and driver stack growth have canonical seams](0041-child-turn-and-driver-stack-growth-have-canonical-seams.md) |
 | 0042 | [Tool attempts are atomic](0042-tool-attempts-are-atomic.md) |
-| 0043 | [Hosts register immutable deployments](0043-hosts-register-immutable-deployments.md) |
 | 0044 | [Tests must be independent of what they test](0044-tests-must-be-independent-of-what-they-test.md) |
 | 0045 | [Services are stateless; the store owns continuation](0045-services-are-stateless-substrates-own-continuation.md) |
 | 0046 | [Process transitions are events; the record is a fold](0046-process-transitions-are-events-record-is-a-fold.md) |
@@ -165,7 +162,6 @@ The generated region below is checked against the live filenames and headings.
 | 0127 | [Usage is result data; hosts meter spend](0127-usage-is-result-data-hosts-meter-spend.md) |
 | 0128 | [Tool hooks compose as transforms, then checks](0128-tool-hooks-compose-as-transforms-then-checks.md) |
 | 0129 | [The transcript row stream is the only chat projection](0129-the-transcript-row-stream-is-the-only-chat-projection.md) |
-| 0130 | [Protected realization runs in its own invocation](0130-protected-realization-runs-in-its-own-invocation.md) |
 | 0131 | [Durable types declare their version surface](0131-durable-types-declare-their-version-surface.md) |
 | 0132 | [Durability is state-first over the lash store: actors, epoch fences, no replay](0132-durability-is-state-first-over-the-lash-store.md) |
 <!-- adr-index:end -->
@@ -178,12 +174,8 @@ every decision from 0001 to 0131.
 
 | Number | Status | Owner |
 | --- | --- | --- |
-| 0012 | Replaced | ADR 0132 §6 and ADR 0003 |
-| 0025 | Retired: segment journal budgets | ADR 0116 §1.7 owns the intent budget |
-| 0043 | Retired: deployment pinning for replay | ADR 0106 §1 owns drain |
 | 0059 | Replaced | ADR 0128 |
 | 0103 | Replaced | ADR 0132 §8 |
 | 0104 | Replaced | ADR 0132 |
-| 0111 | Retired: Restate service names | ADR 0102 D2 owns deployment separation |
+| 0111 | Retired: engine service names | ADR 0102 D2 owns deployment separation |
 | 0125 | Replaced | ADR 0127 |
-| 0130 | Replaced | ADR 0132 §5 |

@@ -25,7 +25,7 @@ pub async fn external_ref_is_written_compare_and_set_by_segment_ordinal(
         .expect("register process")
         .id;
     let reference = |ordinal: Option<u64>, id: &str| crate::ProcessExternalRef {
-        backend: "restate".to_string(),
+        backend: "workflow-engine".to_string(),
         id: id.to_string(),
         metadata: None,
         segment_ordinal: ordinal,
@@ -97,7 +97,7 @@ pub async fn external_ref_is_written_compare_and_set_by_segment_ordinal(
             )
             .await,
         &format!(
-            "process `{process_id}` external ref conflict: existing restate / workflow#2, requested other-backend / workflow#9"
+            "process `{process_id}` external ref conflict: existing workflow-engine / workflow#2, requested other-backend / workflow#9"
         ),
     );
     let record = registry

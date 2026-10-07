@@ -438,8 +438,7 @@ finalize, rolls, finalizes, and fences: the live N worker's write, a fresh N pro
 N's operator are refused. The load verifier's witness classes judge no lost or
 duplicated effects, stale writers fenced after finalize, the rollback
 restoring N, and every session settling turns through each step
-(`scripts/loadtest_upgrade.py`,
-`runbooks/restate-postgres-workers/src/load/upgrade_verify.rs`). It runs on
+(`scripts/loadtest_upgrade.py`). It runs on
 demand and sets no performance baseline.
 
 ### 7. Release-cut guardrails

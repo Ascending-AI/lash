@@ -7,12 +7,10 @@ use std::future::Future;
 /// is still executed to its end: the released members drain, and the expiry is
 /// how the scenario ended.
 ///
-/// The turn is never cut short at the expiry. On a journaling tier the turn
-/// runs inside a handler that Restate may run again from the top, and a
-/// handler whose journaled path depended on when a wall-clock budget fired
-/// would diverge from its own journal on the next execution: a host stall
-/// that fired the budget before the turn's first command made one execution
-/// return where the next one ran the turn (FIG-4309).
+/// The turn is never cut short at the expiry: a turn whose path depended on
+/// when a wall-clock budget fired would differ between executions, and a host
+/// stall that fired the budget before the turn's first command would make one
+/// execution return where the next one ran the turn (FIG-4309).
 pub(super) async fn run_with_activation_budget<F: Future>(
     turn: F,
     rendezvous: &Rendezvous,

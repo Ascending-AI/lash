@@ -45,14 +45,14 @@ impl std::str::FromStr for BoundaryKind {
 
 /// The `input_state` a queued active-turn input lands in.
 ///
-/// A deliberate vocabulary restatement of the production state name (ADR 0044:
+/// A deliberate vocabulary copy of the production state name (ADR 0044:
 /// the model never derives its expectation by calling the implementation).
 /// Declared once so readers compare for equality instead of prefix-matching
 /// `"pending"`, which would also accept any future state that merely starts
 /// with it.
 pub const ACTIVE_TURN_INPUT_STATE: &str = "pending_active";
 
-/// The `input_state` a queued next-turn input lands in. Same restatement rule
+/// The `input_state` a queued next-turn input lands in. Same vocabulary-copy rule
 /// as [`ACTIVE_TURN_INPUT_STATE`].
 pub const NEXT_TURN_INPUT_STATE: &str = "deferred_next_turn";
 

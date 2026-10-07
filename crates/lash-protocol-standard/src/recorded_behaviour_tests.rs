@@ -2,12 +2,6 @@
 //! recorded at creation — its discovery operation and its `batch` choice and
 //! maximum — never under the configuration of the deployment that opens,
 //! redrives or resumes it (ADR 0105 §1).
-//!
-//! The redrive law crashes a run after its config is resolved and before
-//! its first model call on the deployment that created the session, then
-//! redrives it on a deployment that withholds `batch`. It runs over SQLite
-//! file, SQLite memory and PostgreSQL, each on the Restate server double
-//! plain and always-replay.
 
 use super::*;
 

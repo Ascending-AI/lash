@@ -44,11 +44,8 @@
 //! # Feature gating is honest, not incidental
 //!
 //! The Lashlang VM and RLM formats exist only when the `rlm` feature is on,
-//! and the effect engine's journal and object-state formats only when the
-//! `restate` feature is on, because the crates that define them are optional
-//! dependencies — the engine contributes its own rows through
-//! `lash::restate` rather than being named here (ADR 0104 §2). A build
-//! without a feature writes none of its formats, so
+//! because the crates that define them are optional dependencies. A build
+//! without the feature writes none of its formats, so
 //! [`durable_formats`] does not list them. Module artifacts are different: their durable surface and
 //! semantic identity are owned by non-optional `lash-sansio`, so the format is
 //! listed in every build even when the optional verifier is absent.
@@ -557,8 +554,7 @@ fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
 /// The manifest row for one format, when this build carries it.
 ///
 /// `None` means the format is not part of this build — the Lashlang and RLM
-/// rows are absent without the `rlm` feature and the engine's rows without
-/// `restate` — which is a different answer from
+/// rows are absent without the `rlm` feature — which is a different answer from
 /// "version zero" and is reported as such.
 pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
     durable_formats().find(|entry| entry.format == format)

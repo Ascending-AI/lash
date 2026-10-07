@@ -60,7 +60,7 @@ fn default_lashlang_language_features() -> RlmLanguageFeatures {
 /// choices its driver, prompt and interpreter run under. It is created from
 /// the creating deployment's [`RlmProtocolPluginConfig`], recorded in the
 /// session's RLM namespace, and pinned there: no config command changes it,
-/// a run override cannot restate it, and a session opened, redriven or
+/// a run override cannot state it again, and a session opened, redriven or
 /// resumed by a deployment configured otherwise still runs under it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

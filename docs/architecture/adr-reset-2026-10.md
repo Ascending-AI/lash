@@ -25,7 +25,7 @@ state-first durability. Numbers without a row have no file and are not reused.
 | --- | --- | --- | --- | --- |
 | [0001](../adr/0001-context-management-uses-views-or-frames.md) | Context management uses views or frames | AMEND | Compaction records its base and frame under the session actor's epoch; the summarizer is a `Repeatable` model call. | — |
 | [0002](../adr/0002-session-observation-uses-cursors-and-bounded-live-replay.md) | Session observation uses cursors and bounded live replay | AMEND | A re-sent model call opens a new live incarnation; activity keys are not replay keys. | — |
-| [0003](../adr/0003-keyed-promise-is-scope-agnostic.md) | Durable waits are scoped wait rows with a first winner | AMEND | Durable waits are wait rows with a first winner and HMAC completion keys; absorbs ADR 0012's surviving rules. | — |
+| [0003](../adr/0003-keyed-promise-is-scope-agnostic.md) | Durable waits are scoped wait rows with a first winner | AMEND | Durable waits are wait rows with a first winner and HMAC completion keys; absorbs the surviving rules of 0012. | — |
 | [0004](../adr/0004-process-environments-carry-plugin-options-not-product-metadata.md) | Process environments carry plugin options, not product metadata | AMEND | Resume refusals use stored formats, and process actors resume from committed state. | — |
 | [0005](../adr/0005-tool-catalog-membership-replaces-availability-tiers.md) | Tool Catalog membership defines availability | AMEND | Frozen catalog outcomes commit with the VM snapshot instead of a journaled `ExecCode` address. | — |
 | [0006](../adr/0006-rlm-history-renders-in-emission-format.md) | RLM history renders in the emission format | KEEP | No durability mechanics; the decision stands as written. | — |
@@ -33,7 +33,7 @@ state-first durability. Numbers without a row have no file and are not reused.
 | [0008](../adr/0008-confidence-gate.md) | Confidence gate | AMEND | Folds its dated amendment into present tense (main-red narration) and replaces the Restate host tier. | — |
 | [0009](../adr/0009-deterministic-simulation-harness.md) | Randomized simulation harness | AMEND | lash-sim runs the production runtime with commit-label cuts instead of `SimEngine` on the server double. | — |
 | [0011](../adr/0011-self-contained-processes.md) | Self-contained processes capture their environment at creation | AMEND | Process recovery is the actor's committed state, not an engine journal. | — |
-| [0012](../adr/0012-durable-waits-via-effect-host-engines.md) | Durable waits use effect-host engines and engine-owned journals | SUPERSEDE | Engine-owned keyed promises are replaced by wait rows. | ADR 0132 §6, ADR 0003 |
+| 0012 | Durable waits use effect-host engines and engine-owned journals | SUPERSEDE | Engine-owned keyed promises are replaced by wait rows. | ADR 0132 §6, ADR 0003 |
 | [0013](../adr/0013-protocol-capabilities-enter-through-the-plugin-contract.md) | Protocol capabilities enter through the plugin contract | AMEND | Durability claims belong to the host's store topology; nodes reconstruct plugin capabilities. | — |
 | [0014](../adr/0014-operational-policy-stays-with-the-host.md) | Operational policy stays with the host and Lash exposes levers | AMEND | Shutdown releases actors; wait revocation is on wait rows; recovery leadership is gone. | — |
 | [0015](../adr/0015-admission-control-lives-in-provider-decorators.md) | Admission control lives in provider decorators | KEEP | No durability mechanics; the decision stands as written. | — |
@@ -45,7 +45,7 @@ state-first durability. Numbers without a row have no file and are not reused.
 | [0022](../adr/0022-host-originators-carry-named-scopes.md) | Host originators carry named scopes | KEEP | No durability mechanics; the decision stands as written. | — |
 | [0023](../adr/0023-retention-stays-a-parameterized-host-lever.md) | Retention stays a parameterized host lever | AMEND | Drops segment and Restate journal retention; SQLite sweeps run in one database. | — |
 | [0024](../adr/0024-drainage-reads-over-artifact-refcounts.md) | Drainage reads over artifact references | KEEP | No durability mechanics; the decision stands as written. | — |
-| [0025](../adr/0025-bounded-journals-are-an-effect-controller-obligation.md) | Bounded journals are an effect-controller obligation | RETIRE | Segment journal budgets and handovers go with Restate; the intent budget moves to ADR 0116 §1.7. | ADR 0116 §1.7, ADR 0132 §5 and §8 |
+| 0025 | Bounded journals are an effect-controller obligation | RETIRE | Segment journal budgets and handovers go with Restate; the intent budget moves to ADR 0116 §1.7. | ADR 0116 §1.7, ADR 0132 §5 and §8 |
 | [0026](../adr/0026-model-capability-is-host-supplied-data.md) | Model capability is host-supplied data and providers are executors | KEEP | No durability mechanics; the decision stands as written. | — |
 | [0027](../adr/0027-unleased-completion-carries-explicit-authority.md) | Process completion carries explicit authority | AMEND | Completion authority is the actor's epoch fence or a forced cancel terminal; `ExternalOwner` is gone. | — |
 | [0028](../adr/0028-attachments-are-three-layers-blob-reference-lifecycle.md) | Attachments have blob storage, reference tracking and host lifecycle policy | AMEND | Turn puts are held by the turn's execution, not a journal. | — |
@@ -62,7 +62,7 @@ state-first durability. Numbers without a row have no file and are not reused.
 | [0040](../adr/0040-retried-model-attempts-retract-live-text-by-correlation.md) | Retried model attempts retract live text by correlation | KEEP | No durability mechanics; the decision stands as written. | — |
 | [0041](../adr/0041-child-turn-and-driver-stack-growth-have-canonical-seams.md) | Child-turn and driver stack growth have canonical seams | AMEND | Drops the handler controller proxy; effect tasks commit nothing. | — |
 | [0042](../adr/0042-tool-attempts-are-atomic.md) | Tool attempts are atomic | AMEND | Attempt recovery follows `Once`/`Repeatable` execution policy. | — |
-| [0043](../adr/0043-hosts-register-immutable-deployments.md) | Hosts register immutable deployments | RETIRE | Deployment pinning for journal replay is deleted; only formats drain. | ADR 0106 §1, ADR 0132 §2 |
+| 0043 | Hosts register immutable deployments | RETIRE | Deployment pinning for journal replay is deleted; only formats drain. | ADR 0106 §1, ADR 0132 §2 |
 | [0044](../adr/0044-tests-must-be-independent-of-what-they-test.md) | Tests must be independent of what they test | AMEND | Durability tests cut at labelled commits and count executions; the Restate host matrix is gone. | — |
 | [0045](../adr/0045-services-are-stateless-substrates-own-continuation.md) | Services are stateless; the store owns continuation | AMEND | The store owns continuation through actors, epochs and phase rows; segment rebuild is deleted. | — |
 | [0046](../adr/0046-process-transitions-are-events-record-is-a-fold.md) | Process transitions are events; the record is a fold | AMEND | Observer mutations use idempotency keys; VM continuation is the snapshot. | — |
@@ -144,5 +144,5 @@ state-first durability. Numbers without a row have no file and are not reused.
 | [0127](../adr/0127-usage-is-result-data-hosts-meter-spend.md) | Usage is result data; hosts meter spend | AMEND | Removes the supersedes narration (main-red); resume and `Repeatable` guarantees. | — |
 | [0128](../adr/0128-tool-hooks-compose-as-transforms-then-checks.md) | Tool hooks compose as transforms, then checks | AMEND | Resume wording replaces recorded replay. | — |
 | [0129](../adr/0129-the-transcript-row-stream-is-the-only-chat-projection.md) | The transcript row stream is the only chat projection | KEEP | No durability mechanics; the decision stands as written. | — |
-| [0130](../adr/0130-protected-realization-runs-in-its-own-invocation.md) | Protected realization runs in its own invocation | SUPERSEDE | The store half of realization commits with the tool result. | ADR 0132 §5 |
+| 0130 | Protected realization runs in its own invocation | SUPERSEDE | The store half of realization commits with the tool result. | ADR 0132 §5 |
 | [0131](../adr/0131-durable-types-declare-their-version-surface.md) | Durable types declare their version surface | AMEND | Record kinds declare surfaces for the format set; the journal-version section is retired. | — |

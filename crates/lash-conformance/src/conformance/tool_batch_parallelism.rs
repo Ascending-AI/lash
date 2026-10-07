@@ -797,13 +797,13 @@ impl Rendezvous {
 
 /// The per-scenario state the leaf provider shares with the law.
 ///
-/// One per scenario, never one per execution of its turn: a Restate handler
-/// runs the turn again from the top on every replay, and each execution builds
-/// its own runtime, but a group child borrows whichever execution's context is
-/// live when it runs — or the one its group pinned. Leaves routed through
-/// different executions must still meet at one rendezvous, and the model
-/// calls an earlier execution made, which a replay reads from the journal
-/// rather than making again, must still be counted (FIG-4070).
+/// One per scenario, never one per execution of its turn: a recovered turn
+/// runs again, and each execution builds its own runtime, but a group child
+/// borrows whichever execution's context is live when it runs — or the one
+/// its group pinned. Leaves routed through different executions must still
+/// meet at one rendezvous, and the model calls an earlier execution made,
+/// which a recovered turn reads from its committed state rather than making
+/// again, must still be counted (FIG-4070).
 #[derive(Debug)]
 struct ScenarioState {
     rendezvous: Arc<Rendezvous>,
@@ -1097,12 +1097,11 @@ async fn run_scenario(
         producer.label, plan.scenario
     ));
     // The turn runs where the tier runs turns: the runner supplies the
-    // controller admitted for the scenario's turn — the host's own in process,
-    // a handler-bound one on Restate — and the observations come back over a
-    // channel because the attempt owns everything it executes. Each execution
-    // of the attempt (every replay, on Restate) builds its runtime afresh,
-    // but every one of them shares the scenario's one state: the leaves of
-    // one group meet at one rendezvous whichever execution routed them.
+    // controller admitted for the scenario's turn, and the observations come
+    // back over a channel because the attempt owns everything it executes.
+    // Each execution of the attempt builds its runtime afresh, but every one
+    // of them shares the scenario's one state: the leaves of one group meet
+    // at one rendezvous whichever execution routed them.
     let scenario = session_id.to_string();
     let started = Instant::now();
     let admitted = admit(crate::ExecutionScope::turn(
@@ -1160,12 +1159,11 @@ async fn run_scenario(
     observed
 }
 
-/// The line prefix the Restate suite runner reads as a completed step
-/// (`PROGRESS_MARKER` in `scripts/ci/restate_suite.py`): its bound on a law is
-/// time without progress, so a law of many scenarios is bounded per scenario
+/// The line prefix that marks a completed scenario: a runner that bounds a
+/// law by time without progress bounds a law of many scenarios per scenario
 /// rather than by its whole workload, which a starved host stretches past any
 /// fixed bound (FIG-4309).
-const PROGRESS_MARKER: &str = "[restate-suite progress] ";
+const PROGRESS_MARKER: &str = "[law progress] ";
 
 /// Writes one scenario's progress line: the runner's step marker, and where
 /// the scenario's time went. Activation runs from the scenario's start to the
@@ -1198,8 +1196,8 @@ fn report_progress(
 
 /// The `run_scenario` body with the session and turn controller chosen by the
 /// caller. A host whose `scoped()` already yields the right controller passes
-/// `None` and lets `execute_turn` scope it; a handler-bound tier — Restate,
-/// whose controller only exists inside the handler — scopes its controller to
+/// `None` and lets `execute_turn` scope it; a tier whose turn controller
+/// exists only inside its own runner scopes its controller to
 /// [`tool_batch_turn_id`] itself and hands it in (FIG-3398).
 #[expect(
     clippy::too_many_arguments,
@@ -1621,8 +1619,8 @@ pub struct ToolBatchMeasurement {
 /// The plan is the plain one: every leaf takes the catalogue route, so the
 /// number measured is the group itself, not a deferred settle.
 /// `turn_controller` is `None` on hosts whose `scoped()` yields the turn's
-/// controller; a handler-bound tier — Restate, whose controller exists only
-/// inside a handler — scopes its own controller to
+/// controller; a tier whose turn controller exists only inside its own
+/// runner scopes its own controller to
 /// `ExecutionScope::turn(session_id, tool_batch_turn_id(..))` and passes it in.
 ///
 /// Panics, as the law's fixture does, if the turn does not finish: a tier

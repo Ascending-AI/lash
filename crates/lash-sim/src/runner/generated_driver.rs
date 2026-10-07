@@ -14,9 +14,8 @@ pub(crate) async fn run_generated_workload_for_fixture(
     Ok(trace)
 }
 
-/// Execute a generated workload. Generated worlds ran on the Restate server
-/// double's scheduler, which is gone; L9f (FIG-5184) rebuilds them on the
-/// durable runtime, and until then every generated workload is refused.
+/// Execute a generated workload. L9f (FIG-5184) runs generated worlds on the
+/// durable runtime; until then every generated workload is refused.
 pub(super) async fn run_generated_workload(
     workload: GeneratedWorkload,
     _script_bundle_hash: &str,

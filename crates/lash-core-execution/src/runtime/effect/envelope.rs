@@ -589,10 +589,9 @@ impl RuntimeEffectCommand {
     /// True for [`ExecCode`](Self::ExecCode) only. A code cell's outcome is
     /// not the whole of its effect: the cell also mutates interpreter globals
     /// and deferred-resolution records, which the turn's final commit
-    /// snapshots. A recorded `ExecResponse` cannot rebuild that state, so
-    /// replay re-runs the cell deterministically, and the cell's own LLM, tool
-    /// and durable effects answer from their journal rows. Restate maps the
-    /// command to a direct local call; the journal-row hosts skip the claim.
+    /// snapshots. A recorded `ExecResponse` cannot rebuild that state, so the
+    /// cell resumes from its VM snapshot (ADR 0132 §8) rather than from a
+    /// recorded response, and the host skips the claim.
     pub fn replays_by_reexecution(&self) -> bool {
         matches!(self, Self::ExecCode { .. })
     }

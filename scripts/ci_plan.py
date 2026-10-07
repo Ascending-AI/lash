@@ -504,9 +504,9 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     "scripts/test_landing_gates.py": "run on the lander beside scripts/ci/landing-gates.sh; it needs `kiln` on PATH, which the repository-gates runners do not have",
     "scripts/generate-process-env-identity-golden.py": "run by hand to rewrite the process-environment identity fixture from the ignored generator's test log",
     "scripts/release-rehearsal.sh": "run by hand in a disposable Kiln fork through its private PostgreSQL gate to rehearse the 1.0 baseline reset",
-    "scripts/e2e-workbench-operation.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
-    "scripts/e2e-workbench-recovery.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
-    "scripts/e2e-workbench-weather.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
+    "scripts/e2e-workbench-operation.py": "its engine E2E caller was deleted (FIG-5190); L9h (FIG-5186) rewires it",
+    "scripts/e2e-workbench-recovery.py": "its engine E2E caller was deleted (FIG-5190); L9h (FIG-5186) rewires it",
+    "scripts/e2e-workbench-weather.py": "its engine E2E caller was deleted (FIG-5190); L9h (FIG-5186) rewires it",
 }
 
 # Directories a CI script reads whole, one file per change -- the
