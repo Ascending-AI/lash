@@ -289,7 +289,6 @@ impl World {
             formats: Vec::new(),
             stores: layered,
             settings,
-            secrets: Some(lash_core_execution::CompletionKeySecrets::for_testing()),
             engines,
             providers: Arc::new(lash_core_execution::NoProjectionProviders),
         })

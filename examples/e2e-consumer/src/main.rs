@@ -13,8 +13,6 @@ use lash::{InputId, LashCore, SessionCreation, SessionId, SessionSpec, TurnId, T
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-#[path = "../../shared/completion_secrets.rs"]
-mod completion_secrets;
 mod fixture;
 mod telemetry;
 mod telemetry_scenario;
@@ -208,9 +206,6 @@ async fn main() -> Result<()> {
         store => anyhow::bail!("unsupported consumer store {store}"),
     });
     let backend = lash::durable::DurableBackendBuilder::new(stores.clone())
-        .completion_secrets(completion_secrets::completion_secrets(Some(
-            &root.join("completion-secret"),
-        ))?)
         .build()
         .context("build the durable backend")?;
     let controls = Arc::new(fixture::Controls::default());

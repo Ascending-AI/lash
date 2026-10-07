@@ -59,7 +59,6 @@ impl ActorContext {
         let mut tx = self.begin().await.map_err(durable_refusal)?;
         let (timer, _) = waits::pin(
             &mut tx,
-            self.backend().completion_secrets(),
             WaitSpec {
                 kind: WaitKind::Timer,
                 scope: waits::wait_scope(self),

@@ -389,7 +389,6 @@ async fn build_observer(stores_dir: &Path) -> Result<lash::LashCore> {
 /// The durable engine's backend over `stores`.
 fn durable_backend(stores: lash::sqlite::SqliteStoreSet) -> Result<lash::Backend> {
     lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .completion_secrets(lash::durable::CompletionKeySecrets::for_testing())
         .build()
         .map_err(|error| anyhow::anyhow!("build the durable backend: {error}"))
 }

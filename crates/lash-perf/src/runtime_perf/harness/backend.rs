@@ -43,7 +43,6 @@ impl From<PerfBackend> for Backend {
 /// The durable engine's backend over `stores`.
 pub(crate) fn durable_backend(stores: Arc<dyn lash_core::StoreSet>) -> anyhow::Result<Backend> {
     lash::durable::DurableBackendBuilder::new(stores)
-        .completion_secrets(lash::durable::CompletionKeySecrets::for_testing())
         .build()
         .map_err(|err| anyhow::anyhow!(err.to_string()))
 }

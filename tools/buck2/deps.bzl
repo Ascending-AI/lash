@@ -47,8 +47,7 @@ PACKAGE_DEPS = {
             "reqwest": "//third-party/rust:p0277",
             "serde": "//third-party/rust:p0307",
             "serde_json": "//third-party/rust:p0313",
-            "tokio": "//third-party/rust:p0371",
-            "uuid": "//third-party/rust:p0409"
+            "tokio": "//third-party/rust:p0371"
         }
     },
     "integrator-contract": {
@@ -1179,8 +1178,7 @@ PACKAGE_DEPS = {
             "sha2": "//third-party/rust:p0319",
             "tokio": "//third-party/rust:p0371",
             "tracing": "//third-party/rust:p0386",
-            "tracing_subscriber": "//third-party/rust:p0390",
-            "uuid": "//third-party/rust:p0409"
+            "tracing_subscriber": "//third-party/rust:p0390"
         }
     },
     "transcript-contract": {

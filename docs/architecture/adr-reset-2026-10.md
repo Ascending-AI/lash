@@ -25,7 +25,7 @@ state-first durability. Numbers without a row have no file and are not reused.
 | --- | --- | --- | --- | --- |
 | [0001](../adr/0001-context-management-uses-views-or-frames.md) | Context management uses views or frames | AMEND | Compaction records its base and frame under the session actor's epoch; the summarizer is a `Repeatable` model call. | — |
 | [0002](../adr/0002-session-observation-uses-cursors-and-bounded-live-replay.md) | Session observation uses cursors and bounded live replay | AMEND | A re-sent model call opens a new live incarnation; activity keys are not replay keys. | — |
-| [0003](../adr/0003-keyed-promise-is-scope-agnostic.md) | Durable waits are scoped wait rows with a first winner | AMEND | Durable waits are wait rows with a first winner and HMAC completion keys; absorbs the surviving rules of 0012. | — |
+| [0003](../adr/0003-keyed-promise-is-scope-agnostic.md) | Durable waits are scoped wait rows with a first winner | AMEND | Durable waits are wait rows with a first winner and random-id completion keys; absorbs the surviving rules of 0012. | — |
 | [0004](../adr/0004-process-environments-carry-plugin-options-not-product-metadata.md) | Process environments carry plugin options, not product metadata | AMEND | Resume refusals use stored formats, and process actors resume from committed state. | — |
 | [0005](../adr/0005-tool-catalog-membership-replaces-availability-tiers.md) | Tool Catalog membership defines availability | AMEND | Frozen catalog outcomes commit with the VM snapshot instead of a journaled `ExecCode` address. | — |
 | [0006](../adr/0006-rlm-history-renders-in-emission-format.md) | RLM history renders in the emission format | KEEP | No durability mechanics; the decision stands as written. | — |

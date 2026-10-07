@@ -19,7 +19,7 @@ use lash_core_execution::{
 use lash_durable::{DurableStore, Notifier};
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet};
 use lash_postgres_workers::events::{Command, Event, Report};
-use lash_postgres_workers::node::{secrets, settings};
+use lash_postgres_workers::node::settings;
 use lash_postgres_workers::process::WorkerEngine;
 use lash_postgres_workers::witness::Hold;
 use sqlx::postgres::PgPool;
@@ -30,7 +30,6 @@ use tokio::sync::Notify;
 use super::postgres::Server;
 
 const STEP_WAIT: Duration = Duration::from_secs(30);
-const SECRET: &str = "lash-postgres-workers-completion-secret-0001";
 
 /// One report line, as the test received it.
 #[derive(Clone, Debug)]
@@ -126,7 +125,6 @@ impl Cluster {
             formats: Vec::new(),
             stores: Arc::new(stores),
             settings: settings(notifier),
-            secrets: Some(secrets(SECRET).expect("the secret is long enough")),
             engines: vec![Arc::new(WorkerEngine)],
             providers: Arc::new(NoProjectionProviders),
         })
@@ -171,7 +169,6 @@ impl Cluster {
             )
             .env("LASH_WORKERS_NOTIFIER", notifier)
             .env("LASH_WORKERS_HOLD", self.hold.name())
-            .env("LASH_WORKERS_COMPLETION_SECRET", SECRET)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

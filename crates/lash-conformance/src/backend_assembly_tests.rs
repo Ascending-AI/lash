@@ -5,8 +5,8 @@ use std::any::Any;
 use std::sync::Arc;
 
 use lash_core::{
-    Backend, BackendParts, CompletionKeySecrets, DurableBuildError, DurableSettings,
-    NoProjectionProviders, ProjectionProviders,
+    Backend, BackendParts, DurableBuildError, DurableSettings, NoProjectionProviders,
+    ProjectionProviders,
 };
 
 fn parts() -> BackendParts {
@@ -14,7 +14,6 @@ fn parts() -> BackendParts {
         formats: Vec::new(),
         stores: crate::conformance::StoreLawBackend::stores(),
         settings: DurableSettings::default(),
-        secrets: Some(CompletionKeySecrets::for_testing()),
         engines: Vec::new(),
         providers: Arc::new(NoProjectionProviders),
     }
@@ -25,18 +24,6 @@ fn refusal(parts: BackendParts) -> DurableBuildError {
         Ok(_) => panic!("the backend assembled"),
         Err(error) => error,
     }
-}
-
-#[test]
-fn a_backend_without_completion_secrets_is_refused() {
-    let refused = refusal(BackendParts {
-        secrets: None,
-        ..parts()
-    });
-    assert!(matches!(
-        refused,
-        DurableBuildError::MissingCompletionSecrets
-    ));
 }
 
 #[test]

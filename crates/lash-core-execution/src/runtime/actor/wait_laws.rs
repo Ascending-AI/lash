@@ -15,15 +15,14 @@ use lash_durable::{
     ActorKey, ClaimCause, CommitLabel, DurableError, DurableInstant, Epoch, FormatSet, MailKind,
     MailTx, NodeId, NodeLease, NodeSpec, Release,
 };
-use sha2::{Digest as _, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use super::ActorContext;
 use super::waits::{
-    self, CompletionKeySecrets, HostKeyCheck, KeyVersion, PinnedKey, ProcessWaitOutcome,
-    RaceWinner, ResolveAnswer, SecretBytes, WaitDeadline, WaitKind, WaitRef, WaitSpec,
+    self, PinnedKey, ProcessWaitOutcome, RaceWinner, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
+    WaitRef, WaitSpec,
 };
-use crate::{AdmittedScope, Backend, BackendParts, DurableSettings, ProcessId, Resolution};
+use crate::{AdmittedScope, Backend, DurableSettings, ProcessId, Resolution};
 
 /// A broken law: what was expected, and what happened.
 #[derive(Debug)]
@@ -74,30 +73,6 @@ pub fn settings() -> DurableSettings {
 
 fn formats() -> FormatSet {
     FormatSet::new("wait-laws")
-}
-
-fn secrets(versions: &[(u16, u8)], current: u16) -> Result<CompletionKeySecrets, LawBroken> {
-    CompletionKeySecrets::new(
-        KeyVersion(current),
-        versions
-            .iter()
-            .map(|(version, fill)| (KeyVersion(*version), SecretBytes::new(vec![*fill; 32])))
-            .collect(),
-    )
-    .map_err(|refusal| LawBroken(refusal.to_string()))
-}
-
-/// `backend`'s store set under other completion secrets.
-fn with_secrets(backend: &Backend, secrets: CompletionKeySecrets) -> Result<Backend, LawBroken> {
-    Backend::assemble(BackendParts {
-        formats: Vec::new(),
-        stores: backend.stores(),
-        settings: settings(),
-        secrets: Some(secrets),
-        engines: Vec::new(),
-        providers: Arc::new(super::projection::NoProjectionProviders),
-    })
-    .map_err(|error| LawBroken(error.to_string()))
 }
 
 async fn node(backend: &Backend, name: &str, ttl_millis: i64) -> Result<NodeLease, LawBroken> {
@@ -178,7 +153,6 @@ async fn pin(
     let mut tx = cx.begin().await?;
     let pinned = waits::pin(
         &mut tx,
-        cx.backend().completion_secrets(),
         WaitSpec {
             kind,
             scope: waits::wait_scope(cx),
@@ -223,68 +197,48 @@ async fn send_cancel(backend: &Backend, actor: &ActorKey) -> LawResult {
     Ok(())
 }
 
-/// K1 (FIG-5161): every forged key reaches the MAC check and is refused,
-/// writing nothing: a key recomputed from public ids, a flipped kind, a
-/// truncated or altered MAC, another deployment's secret and an
-/// unconfigured key version. A verified key of a kind a host may not
-/// resolve (a signal, a process terminal, a timer, a child session) answers
-/// `ReservedKind` and writes nothing, at the host resolve and at the store.
-/// The genuine key still resolves afterwards.
+/// K1 (FIG-5161, FIG-5217): a completion key is its wait's id, and a key
+/// that is not an issued wait id is refused `Unknown` and writes nothing: an
+/// id never issued, the key with one digit changed, a truncated key, an
+/// empty key and a spelling that is no id at all. A key of a kind a host
+/// may not resolve (a signal, a process terminal, a timer, a child session)
+/// answers `ReservedKind` and writes nothing, at the host resolve and at the
+/// store. The genuine key still resolves afterwards.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn k1_forged_keys_are_refused_and_write_nothing(backend: &Backend) -> LawResult {
+pub async fn k1_a_key_that_is_not_an_issued_wait_id_is_refused_and_writes_nothing(
+    backend: &Backend,
+) -> LawResult {
     let lease = node(backend, "k1", TTL_MILLIS).await?;
     let cx = own(backend, &lease, &session_actor("k1")?, turn_scope("k1")).await?;
     let (tool, key) = pin(&cx, WaitKind::ToolCompletion, None, Some(LONG)).await?;
     let key = key_of(key)?;
-    let before = row(backend, &tool).await?;
-    let id = tool.id();
-    let deployment = backend.completion_secrets();
-    let current = deployment
-        .secret(deployment.current())
-        .ok_or_else(|| LawBroken("no current secret".into()))?;
-    let public = Sha256::digest(
-        [
-            b"wk1".as_slice(),
-            &id.0,
-            WaitKind::ToolCompletion.as_str().as_bytes(),
-        ]
-        .concat(),
+    ensure!(
+        WaitId::parse_hex(&key) == Some(tool.id()),
+        "the key {key} is not its wait's id {}",
+        tool.id()
     );
+    let before = row(backend, &tool).await?;
+    let never_issued = WaitId([0x5a; 16]);
     let mut altered = key.clone().into_bytes();
     let last = altered.len() - 1;
     altered[last] = if altered[last] == b'0' { b'1' } else { b'0' };
-    let foreign = SecretBytes::new(vec![0x5a; 32]);
     let forgeries = [
+        ("an id never issued", never_issued.to_hex()),
         (
-            "recomputed from public ids",
-            waits::render_key(&id, &public),
-        ),
-        (
-            "a flipped kind",
-            waits::render_key(&id, &waits::mac(current, &id, WaitKind::Custom)),
-        ),
-        ("a truncated MAC", key[..key.len() - 2].to_owned()),
-        (
-            "an altered MAC",
+            "one digit changed",
             String::from_utf8(altered).map_err(|error| LawBroken(error.to_string()))?,
         ),
-        (
-            "another deployment's secret",
-            waits::render_key(&id, &waits::mac(&foreign, &id, WaitKind::ToolCompletion)),
-        ),
+        ("a truncated key", key[..key.len() - 2].to_owned()),
+        ("an empty key", String::new()),
+        ("no id at all", format!("wk1.{key}.00")),
     ];
     for (case, forged) in &forgeries {
-        let check = waits::check_host_key(backend, forged).await?;
-        ensure!(
-            check == HostKeyCheck::MacMismatch,
-            "{case}: the key did not reach a refused MAC check: {check:?}"
-        );
         let answered = waits::resolve_host(backend, forged, answer("forged")).await?;
         ensure!(
-            answered == ResolveAnswer::UnknownOrRevoked,
+            answered == ResolveAnswer::Unknown,
             "{case}: answered {answered:?}"
         );
         ensure!(
@@ -292,20 +246,25 @@ pub async fn k1_forged_keys_are_refused_and_write_nothing(backend: &Backend) -> 
             "{case}: the wait row changed"
         );
     }
-    let rotated = with_secrets(backend, secrets(&[(2, 9)], 2)?)?;
-    let check = waits::check_host_key(&rotated, &key).await?;
+    let mut tx = MailTx::new();
+    tx.write(MailDomainWrite::ResolveWait(WaitResolution {
+        id: never_issued,
+        by_host: true,
+        digest: "forged".into(),
+        resolution_ref: "{}".into(),
+    }));
+    let commit = backend
+        .durable()
+        .commit_mail(tx, CommitLabel::WAIT_RESOLVE)
+        .await?;
     ensure!(
-        check == HostKeyCheck::UnknownVersion(KeyVersion(1)),
-        "an unconfigured key version: {check:?}"
+        commit.answers == [MailAnswer::ResolveWait(ResolveAnswer::Unknown)],
+        "the store answered an id never issued with {:?}",
+        commit.answers
     );
-    let answered = waits::resolve_host(&rotated, &key, answer("forged")).await?;
     ensure!(
-        answered == ResolveAnswer::UnknownOrRevoked,
-        "an unconfigured key version answered {answered:?}"
-    );
-    ensure!(
-        row(backend, &tool).await? == before,
-        "an unconfigured key version changed the wait row"
+        backend.durable().wait(&never_issued).await?.is_none(),
+        "resolving an id never issued stored a wait"
     );
     let target = ProcessId::fixture("k1-target");
     for (kind, target) in [
@@ -320,13 +279,7 @@ pub async fn k1_forged_keys_are_refused_and_write_nothing(backend: &Backend) -> 
         let (wait, minted) = pin(&cx, kind, target, Some(LONG)).await?;
         ensure!(minted.is_none(), "a {kind:?} wait was minted a host key");
         let reserved_before = row(backend, &wait).await?;
-        let leaked = waits::render_key(&wait.id(), &waits::mac(current, &wait.id(), kind));
-        let check = waits::check_host_key(backend, &leaked).await?;
-        ensure!(
-            matches!(check, HostKeyCheck::Verified(_)),
-            "a correctly MACed {kind:?} key did not verify: {check:?}"
-        );
-        let answered = waits::resolve_host(backend, &leaked, answer("forged")).await?;
+        let answered = waits::resolve_host(backend, &wait.id().to_hex(), answer("forged")).await?;
         ensure!(
             answered == ResolveAnswer::ReservedKind,
             "a host resolve of a {kind:?} wait answered {answered:?}"
@@ -363,7 +316,7 @@ pub async fn k1_forged_keys_are_refused_and_write_nothing(backend: &Backend) -> 
 /// First winner: a resolution before, during and after the await counts
 /// once. A repeat with the same digest answers `AlreadyResolved`, with
 /// another `Conflict`; a resolution after a timeout won answers
-/// `UnknownOrRevoked`; and a timeout racing a resolution leaves one
+/// `Revoked`; and a timeout racing a resolution leaves one
 /// committed winner that both sides agree on.
 ///
 /// # Errors
@@ -438,7 +391,7 @@ pub async fn the_first_resolution_wins(backend: &Backend) -> LawResult {
     );
     let late = waits::resolve_host(backend, &key, answer("late")).await?;
     ensure!(
-        late == ResolveAnswer::UnknownOrRevoked,
+        late == ResolveAnswer::Revoked,
         "a resolution after the timeout answered {late:?}"
     );
     ensure!(
@@ -462,7 +415,7 @@ pub async fn the_first_resolution_wins(backend: &Backend) -> LawResult {
         let stored = row(backend, &wait).await?;
         let agreed = match resolved {
             ResolveAnswer::Resolved => stored.state == WaitState::Resolved,
-            ResolveAnswer::UnknownOrRevoked => stored.state == WaitState::TimedOut,
+            ResolveAnswer::Revoked => stored.state == WaitState::TimedOut,
             _ => false,
         };
         ensure!(
@@ -786,7 +739,7 @@ pub async fn a_timeout_racing_a_completion_has_one_winner(backend: &Backend) -> 
             (RaceWinner::Resolved { resolution, .. }, ResolveAnswer::Resolved) => {
                 *resolution == answer("racing")
             }
-            (RaceWinner::TimedOut(_), ResolveAnswer::UnknownOrRevoked) => true,
+            (RaceWinner::TimedOut(_), ResolveAnswer::Revoked) => true,
             _ => false,
         };
         ensure!(
@@ -957,60 +910,6 @@ pub async fn await_process_is_bounded_and_cancellable(backend: &Backend) -> LawR
     ensure!(
         ended == ProcessWaitOutcome::Cancelled,
         "the cancelled await saw {ended:?}"
-    );
-    Ok(())
-}
-
-/// Rotation: a key minted under version 1 still resolves after version 2
-/// becomes current, while version 1 stays configured; new keys mint under
-/// version 2. With version 1 removed, a version-1 key answers
-/// `UnknownOrRevoked` and writes nothing.
-///
-/// # Errors
-///
-/// The first rule broken.
-pub async fn keys_verify_under_their_own_version_until_it_is_removed(
-    backend: &Backend,
-) -> LawResult {
-    let v1 = with_secrets(backend, secrets(&[(1, 1)], 1)?)?;
-    let lease = node(&v1, "rotation", TTL_MILLIS).await?;
-    let cx = own(
-        &v1,
-        &lease,
-        &session_actor("rotation")?,
-        turn_scope("rotation"),
-    )
-    .await?;
-    let (kept, kept_key) = pin(&cx, WaitKind::ToolCompletion, None, Some(LONG)).await?;
-    let (dropped, dropped_key) = pin(&cx, WaitKind::Custom, None, Some(LONG)).await?;
-
-    let rotated = with_secrets(backend, secrets(&[(1, 1), (2, 2)], 2)?)?;
-    let answered = waits::resolve_host(&rotated, &key_of(kept_key)?, answer("v1")).await?;
-    ensure!(
-        answered == ResolveAnswer::Resolved,
-        "a version-1 key after rotation answered {answered:?}"
-    );
-    let rotated_cx = context(&rotated, cx.actor(), cx.epoch(), turn_scope("rotation"));
-    let (fresh, _) = pin(&rotated_cx, WaitKind::ToolCompletion, None, Some(LONG)).await?;
-    ensure!(
-        row(backend, &fresh).await?.key_version == Some(KeyVersion(2)),
-        "a key minted after rotation is not under version 2"
-    );
-    ensure!(
-        row(backend, &kept).await?.key_version == Some(KeyVersion(1)),
-        "the version-1 wait's key version moved"
-    );
-
-    let removed = with_secrets(backend, secrets(&[(2, 2)], 2)?)?;
-    let before = row(backend, &dropped).await?;
-    let answered = waits::resolve_host(&removed, &key_of(dropped_key)?, answer("v1")).await?;
-    ensure!(
-        answered == ResolveAnswer::UnknownOrRevoked,
-        "a key of a removed version answered {answered:?}"
-    );
-    ensure!(
-        row(backend, &dropped).await? == before,
-        "a key of a removed version changed its wait"
     );
     Ok(())
 }

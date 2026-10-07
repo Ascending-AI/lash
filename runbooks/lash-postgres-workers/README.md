@@ -60,8 +60,7 @@ and `bin/pg_ctl`).
 A node reads its configuration from its environment (`LASH_WORKERS_NODE`,
 `LASH_WORKERS_DATABASE_URL`, `LASH_WORKERS_WITNESS_URL`,
 `LASH_WORKERS_NOTIFIER` = `after-commit` or `poll-only`, `LASH_WORKERS_HOLD`,
-`LASH_WORKERS_COMPLETION_SECRET`, and `LASH_WORKERS_ADMIT_TURN` for runs by
-hand), its commands from stdin (`stop`, `block-heartbeat`,
+and `LASH_WORKERS_ADMIT_TURN` for runs by hand), its commands from stdin (`stop`, `block-heartbeat`,
 `unblock-heartbeat`; end of input stops it) and writes one JSON report per
 line to stdout.
 
@@ -143,7 +142,6 @@ port=$(docker compose -f runbooks/lash-postgres-workers/docker-compose.yml port 
 kiln build //crates/lash-postgres-workers:lash-postgres-workers-node__bin
 export LASH_WORKERS_DATABASE_URL=postgres://lash@127.0.0.1:$port/lash \
   LASH_WORKERS_WITNESS_URL=postgres://lash_witness_writer@127.0.0.1:$port/lash_witness \
-  LASH_WORKERS_COMPLETION_SECRET=lash-postgres-workers-completion-secret-0001 \
   LASH_WORKERS_HOLD=model
 LASH_WORKERS_NODE=a LASH_WORKERS_ADMIT_TURN=1 <node binary> &   # admits the turn and holds its model call
 LASH_WORKERS_NODE=b <node binary> &

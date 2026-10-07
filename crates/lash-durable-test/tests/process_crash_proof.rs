@@ -50,11 +50,11 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    Ancestry, Backend, BackendParts, CancelOrigin, CompletionKeySecrets, DurableSettings,
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, LifetimeDecision,
-    NoProjectionProviders, ProcessEngine, ProcessId, ProcessInfraError, ProcessInput,
-    ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration, ScopeGrant, ScopeId,
-    StepName, StepRequest, ToolCallId, ToolCallOutput, ToolCancellation,
+    Ancestry, Backend, BackendParts, CancelOrigin, DurableSettings, EngineAction, EngineEvent,
+    EngineState, EngineStateFormat, LifetimeDecision, NoProjectionProviders, ProcessEngine,
+    ProcessId, ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
+    ProcessRegistration, ScopeGrant, ScopeId, StepName, StepRequest, ToolCallId, ToolCallOutput,
+    ToolCancellation,
 };
 use lash_core_store::tool_run::{
     AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
@@ -493,7 +493,6 @@ impl Scenario for Proof {
             formats: Vec::new(),
             stores: Arc::new(stores),
             settings: settings(),
-            secrets: Some(CompletionKeySecrets::for_testing()),
             engines: vec![Arc::new(ProofEngine {
                 log: Arc::clone(&self.log),
             })],

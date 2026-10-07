@@ -14,8 +14,7 @@ use lash_core::runtime::durable::node::{NodeServe, serve};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::{
-    Backend, BackendParts, CompletionKeySecrets, DurableSettings, KeyVersion,
-    NoProjectionProviders, SecretBytes, StoreSet,
+    Backend, BackendParts, DurableSettings, NoProjectionProviders, StoreSet,
 };
 use lash_durable::runner::{Drain, Stopped};
 use lash_durable::{DurableError, NoProbe, NodeId};
@@ -70,18 +69,6 @@ impl Node {
         }
         Ok(stopped)
     }
-}
-
-/// The completion secret every node verifies keys under.
-fn secrets() -> Result<CompletionKeySecrets> {
-    CompletionKeySecrets::new(
-        KeyVersion(1),
-        vec![(
-            KeyVersion(1),
-            SecretBytes::new(b"durable-substrate-bench-secret-0123456789abcdef".to_vec()),
-        )],
-    )
-    .map_err(|refusal| anyhow::anyhow!("{refusal}"))
 }
 
 /// The pool each PostgreSQL node opens.
@@ -164,7 +151,6 @@ impl Deployment {
         let backend = Backend::assemble(BackendParts {
             stores: Arc::new(recorded),
             settings: self.settings,
-            secrets: Some(secrets()?),
             engines: vec![Arc::new(BenchEngine::new(Arc::clone(&self.board)))],
             providers: Arc::new(NoProjectionProviders),
             // Its cells run on the RLM worker path: actors hold the VM's state.

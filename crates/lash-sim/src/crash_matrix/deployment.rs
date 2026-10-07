@@ -19,9 +19,7 @@ use std::time::Duration;
 
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::{
-    Backend, BackendParts, CompletionKeySecrets, DurableSettings, NoProjectionProviders,
-};
+use lash_core_execution::{Backend, BackendParts, DurableSettings, NoProjectionProviders};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorDispatch, ActorKey, DurableStore, LeaseConfig};
 use lash_durable_test::{Cut, Scenario, SimClock, SimNodes, SimNodesConfig};
@@ -209,8 +207,8 @@ pub async fn sqlite(clock: Arc<SimClock>) -> Result<(Backend, Arc<dyn DurableSto
     Ok((backend, database))
 }
 
-/// The deployment's backend over `stores`: its settings, the testing
-/// completion secrets and the simulator's process engine.
+/// The deployment's backend over `stores`: its settings and the simulator's
+/// process engine.
 ///
 /// # Errors
 ///
@@ -219,7 +217,6 @@ pub fn assemble(stores: Arc<dyn lash_core_execution::StoreSet>) -> Result<Backen
     Backend::assemble(BackendParts {
         stores,
         settings: settings(),
-        secrets: Some(CompletionKeySecrets::for_testing()),
         engines: vec![Arc::new(SimProcessEngine)],
         providers: Arc::new(NoProjectionProviders),
         // Its cells run on the RLM worker path: actors hold the VM's state.

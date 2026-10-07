@@ -1,6 +1,3 @@
-#[path = "../../shared/completion_secrets.rs"]
-mod completion_secrets;
-
 use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
@@ -15,12 +12,10 @@ async fn main() -> Result<()> {
         .context("invalid WORKFLOW_GRAPH_ADDR")?;
     let database = std::env::var("WORKFLOW_GRAPH_SQLITE_PATH")
         .unwrap_or_else(|_| ".workflow-graph/lash.db".into());
-    let secret = std::path::Path::new(&database).with_extension("completion-secret");
     let stores = lash::sqlite::SqliteStoreSet::open(database)
         .await
         .context("open workflow SQLite stores")?;
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .completion_secrets(completion_secrets::completion_secrets(Some(&secret))?)
         .build()
         .context("build the durable backend")?;
     let core = workflow_core(backend)?;

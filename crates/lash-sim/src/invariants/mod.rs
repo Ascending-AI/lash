@@ -466,14 +466,10 @@ pub async fn check_engine(
     Ok(check(&history))
 }
 
-/// A completion key as a history names it: its wait id, never its MAC.
+/// A completion key as a history names it: its wait id, which is the key.
 #[must_use]
 pub fn completion_key_label(key: &lash_core::PinnedKey) -> String {
-    key.as_str()
-        .split('.')
-        .nth(1)
-        .unwrap_or_default()
-        .to_owned()
+    key.as_str().to_owned()
 }
 
 /// Record that a host start requested under `requested` was answered with

@@ -46830,8 +46830,7 @@
         "reqwest",
         "serde",
         "serde_json",
-        "tokio",
-        "uuid"
+        "tokio"
       ],
       "doc": null,
       "manifest": "examples/e2e-consumer/Cargo.toml",
@@ -46911,8 +46910,7 @@
         "sha2",
         "tokio",
         "tracing",
-        "tracing-subscriber",
-        "uuid"
+        "tracing-subscriber"
       ],
       "doc": null,
       "manifest": "examples/toolbench/Cargo.toml",

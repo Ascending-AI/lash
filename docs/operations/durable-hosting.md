@@ -53,9 +53,7 @@ controller or work driver for it to call.
 
 ```rust,ignore
 use std::sync::Arc;
-use lash::durable::{
-    CompletionKeySecrets, DurableBackendBuilder, DurableSettings, KeyVersion, SecretBytes,
-};
+use lash::durable::{DurableBackendBuilder, DurableSettings};
 
 let stores: Arc<dyn lash::StoreSet> = Arc::new(lash::postgres::PostgresStoreSet::new(
     &storage,
@@ -63,10 +61,6 @@ let stores: Arc<dyn lash::StoreSet> = Arc::new(lash::postgres::PostgresStoreSet:
 ));
 let backend = DurableBackendBuilder::new(stores)
     .config(DurableSettings::default())
-    .completion_secrets(CompletionKeySecrets::new(
-        KeyVersion(1),
-        vec![(KeyVersion(1), SecretBytes::new(secret_bytes))],
-    )?)
     .process_engine(Arc::new(CiEngine))
     .projection_provider(Arc::new(TicketProvider::new(client)))
     .build()?;
@@ -83,7 +77,6 @@ let core = lash::LashCore::builder(backend)
 | `InvalidConfig(DurableConfigError)` | A `DurableSettings` field breaks a rule ([§5](#durableconfig)). |
 | `DuplicateEngine { kind }` | Two process engines declare one kind. |
 | `DuplicateProvider { projection }` | Two projection providers answer one type, or a host provider claims the lash-provided `history` type. |
-| `MissingCompletionSecrets` | No `completion_secrets` were given. There is no default. |
 
 `projection_provider` exists with the facade's `rlm` feature.
 
@@ -490,7 +483,7 @@ Each crash case reads from committed state:
 - **A crash during the submit:** the started `Once` step settles
   `Interrupted`. The engine reports a failure and resubmits nothing. CI may
   have received the job; it ran under the same key, so a late resolution
-  answers `UnknownOrRevoked` once the process has ended.
+  answers `Revoked` once the process has ended.
 - **A crash while waiting:** the process holds nothing. The wait row and its
   deadline survive, and any node resumes it when CI resolves or at the
   deadline.
@@ -504,43 +497,24 @@ not register it: the RLM protocol plugin factory contributes it, with a
 
 ## 5. Completion keys
 
-A host-resolvable wait has a completion key, `wk1.<wait_id>.<mac>`. `wait_id`
-is 128 random bits, and `mac` is HMAC-SHA256 under the deployment's secret
-over `"wk1" ‖ wait_id ‖ kind`. The key carries no scope or kind in plaintext.
-It is a credential: whoever holds it can resolve its wait.
+A host-resolvable wait has a completion key: its wait id, 128 random bits from
+the operating system's CSPRNG, spelled as 32 lowercase hex digits
+(`lash::durable::PinnedKey`). The key carries no scope or kind, and lash keeps
+no completion secret: there is nothing to provision, rotate or share between
+nodes.
 
-### Provisioning, versions and rotation
-
-`lash::durable::CompletionKeySecrets::new(current, secrets)` takes the version
-new keys mint under and every configured `(KeyVersion, SecretBytes)`. It
-refuses with `SecretsRefusal`:
-
-- `TooShort(version)`: a secret is under 32 bytes;
-- `DuplicateVersion(version)`: a version is configured twice;
-- `CurrentMissing(version)`: the current version has no secret.
-
-There is no default and no derived fallback. A backend built without secrets
-is refused `MissingCompletionSecrets`. Keep the secret out of the store and
-out of logs; `SecretBytes` never prints. Every node of a deployment needs the
-same secrets, or a key minted on one node fails to verify on another.
-
-Each wait row stores the version its key was minted under. To rotate:
-
-1. Deploy the new secret as a new version beside the old one, with the new
-   version current. New keys mint under it; live keys still verify under
-   theirs.
-2. Keep the old version configured until every wait minted under it has
-   resolved, timed out or been revoked. The longest a wait stays open is its
-   deadline, at most `wait_ceiling`.
-3. Remove the old version. A key of a removed version answers
-   `UnknownOrRevoked`.
+The key is a bearer capability: whoever holds it can resolve its wait. Who may
+finish a pending wait is authorization, and the host owns it. Authenticate and
+authorize the caller (your API authentication, your webhook signatures) before
+resolving on its behalf, hand a key only to callers you have authorized, and
+keep keys out of logs and URLs others can read.
 
 ### Resolving
 
 `LashCore::completions()` returns `lash::admin::Completions`:
 
 - `outstanding(session_id)` lists the session's unresolved host-resolvable
-  keys (`lash::durable::PinnedKey`), rebuilt from their rows.
+  keys (`lash::durable::PinnedKey`), read from their rows.
 - `resolve(key, resolution)` resolves the key's wait, first writer wins, and
   answers `lash::durable::ResolveAnswer`:
 
@@ -549,14 +523,16 @@ Each wait row stores the version its key was minted under. To rotate:
 | `Resolved` | This resolution won; the owner was woken. |
 | `AlreadyResolved` | An earlier resolution with the same digest won. Safe to treat as success. |
 | `Conflict` | An earlier resolution with a different digest won. |
-| `ReservedKind` | The key verified but names a kind a host may not resolve. Nothing was written. |
-| `UnknownOrRevoked` | The key does not verify, or its wait is unknown, revoked or timed out. Nothing was written, and the answer reveals nothing about which waits exist. |
+| `ReservedKind` | The key names a kind a host may not resolve. Nothing was written. |
+| `Unknown` | No wait has this key. Nothing was written. |
+| `Revoked` | The key's wait was revoked, or timed out, first. Nothing was written. |
 
 Hosts resolve only the `tool_completion` and `custom` kinds. Signals, turn
 cancellation, process terminals, timers and child-session ends have their own
 admission paths, and a host resolution of them answers `ReservedKind`. Lash
-applies no authorization of its own: authenticate the caller before resolving
-on its behalf ([ADR 0014](../adr/0014-operational-policy-stays-with-the-host.md)).
+applies no authorization of its own: authenticate and authorize the caller
+before resolving on its behalf
+([ADR 0014](../adr/0014-operational-policy-stays-with-the-host.md)).
 A webhook that receives callbacks retries until it gets an answer and treats
 `AlreadyResolved` as done.
 

@@ -162,13 +162,14 @@ The execution record splits into a start and an outcome.
   minting, so a resolution that arrives before the owner awaits finds it.
 - **First winner.** Resolution is a conditional update from `pending`. A
   second resolution with the same digest answers `AlreadyResolved`; with a
-  different digest, `Conflict`; on a revoked or unknown wait,
-  `UnknownOrRevoked`.
-- **Completion keys.** A host-resolvable key is `wk1.<wait_id>.<mac>`, where
-  `wait_id` is 128 random bits and `mac = HMAC-SHA256(deployment secret,
-  "wk1" ‖ wait_id ‖ kind)`. The secret is host configuration with a
-  key-version prefix for rotation. The key carries no scope or kind in
-  plaintext. Hosts resolve only the `tool_completion` and `custom` kinds; a
+  different digest, `Conflict`; on a revoked or timed-out wait, `Revoked`;
+  with a key that names no wait, `Unknown`.
+- **Completion keys.** A host-resolvable key is its wait's id: 128 random
+  bits from the operating system's CSPRNG. It is a bearer capability, and
+  lash keeps no completion secret: who may finish a pending wait is
+  authorization, which the host owns (its API authentication, its webhook
+  signatures), so it hands a key only to callers it has authorized
+  (FIG-5217). The key carries no scope or kind. Hosts resolve only the `tool_completion` and `custom` kinds; a
   host resolution of any other kind answers `ReservedKind` and writes nothing.
   Signals, turn cancellation and process terminals have their own admission
   paths.

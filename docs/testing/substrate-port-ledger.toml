@@ -19408,7 +19408,7 @@ lane = "L5"
 laws = ["await_event_identity_golden_corpus"]
 disposition = "subject-deleted"
 status = "deleted"
-note = "the public await-event identity hash is deleted (L5, FIG-5173): wait keys are HMAC-minted over a random wait id (K1)"
+note = "the public await-event identity hash is deleted (L5, FIG-5173): a wait's key is its random wait id (K1, FIG-5217)"
 
 [[row]]
 path = "crates/lash-core-store/src/tool_run/tests.rs"

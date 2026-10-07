@@ -439,17 +439,10 @@ impl RoundTools for ProductionRoundTools {
         let may_retry = execution.attempt() < pinned.max_attempts()
             && self.policies().permits_repeat(&tool, pinned);
         let execution = execution.clone();
-        let key = execution.draft().pinned_wait().and_then(|wait| {
-            waits::host_key(
-                self.context
-                    .dispatch()
-                    .effect_controller
-                    .backend()
-                    .completion_secrets(),
-                &wait.wait(),
-                wait.version,
-            )
-        });
+        let key = execution
+            .draft()
+            .pinned_wait()
+            .and_then(|wait| waits::host_key(&wait.wait()));
         Box::new(move |token| {
             Box::pin(async move {
                 let Some(ordinal) = ordinal else {

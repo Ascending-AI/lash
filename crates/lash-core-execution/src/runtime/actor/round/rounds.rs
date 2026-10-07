@@ -11,12 +11,12 @@ use super::{
     AdmissionRefusal, AdmittedExecution, AdmittedRound, BodyOutput, PinnedWait, Presentation,
     RoundDraft, RunFold, SettleRefusal, admit, check_drafts,
 };
-use crate::runtime::actor::waits::{self, CompletionKeySecrets, WaitKind, WaitSpec};
+use crate::runtime::actor::waits::{self, WaitKind, WaitSpec};
 
 /// Admit a tool round inside the `model.done` transaction: its membership,
 /// pinned policies, limits and wait deadlines, and an `x_start` for every
 /// member. A member that may park gets its tool completion wait pinned in
-/// the same transaction, under `secrets` and revoked with `scope`, so its
+/// the same transaction, revoked with `scope`, so its
 /// key exists before its body can hand it out, and a rerun of the body is
 /// handed the same key. No member's body starts before that transaction
 /// commits.
@@ -26,7 +26,6 @@ use crate::runtime::actor::waits::{self, CompletionKeySecrets, WaitKind, WaitSpe
 /// [`AdmissionRefusal`]; nothing is recorded.
 pub fn admit_round(
     tx: &mut ActorTx,
-    secrets: &CompletionKeySecrets,
     scope: &lash_durable::domain::ScopeKey,
     round: RoundDraft,
 ) -> Result<AdmittedRound, AdmissionRefusal> {
@@ -37,7 +36,6 @@ pub fn admit_round(
             Some(deadline) => {
                 let (wait, _) = waits::pin(
                     tx,
-                    secrets,
                     WaitSpec {
                         kind: WaitKind::ToolCompletion,
                         scope: scope.clone(),
@@ -45,10 +43,7 @@ pub fn admit_round(
                         deadline: Some(deadline),
                     },
                 )?;
-                Some(PinnedWait {
-                    id: wait.id(),
-                    version: secrets.current(),
-                })
+                Some(PinnedWait { id: wait.id() })
             }
             None => None,
         };

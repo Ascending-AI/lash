@@ -65,7 +65,7 @@ use lash_sansio::{ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause}
 use tokio_util::sync::CancellationToken;
 
 use super::ActorContext;
-use super::waits::{KeyVersion, WaitDeadline, WaitId, WaitKind, WaitRef};
+use super::waits::{WaitDeadline, WaitId, WaitKind, WaitRef};
 use crate::{ToolCallId, ToolId};
 
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
@@ -94,14 +94,11 @@ pub use tools::{
 use records::{OutcomeBody, append, encode, first_start};
 
 /// The tool completion wait a round pinned for a member that may defer,
-/// with its admission: the wait, and the secret version its key was minted
-/// under.
+/// with its admission: its id is also its completion key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PinnedWait {
     /// The wait.
     pub id: WaitId,
-    /// Its key's secret version.
-    pub version: KeyVersion,
 }
 
 impl PinnedWait {

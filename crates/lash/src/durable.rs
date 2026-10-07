@@ -2,7 +2,7 @@
 //! builder's full shape, and L3 (FIG-5172) makes a built backend serve.
 //!
 //! `docs/operations/durable-hosting.md` is the host guide: node identity,
-//! topology, the completion secret, `DurableSettings` and the process-engine
+//! topology, completion keys, `DurableSettings` and the process-engine
 //! contract.
 
 use std::sync::Arc;
@@ -13,20 +13,18 @@ use std::sync::Arc;
 pub use lash_core::durable_port::*;
 use lash_core::{Backend, ProcessEngine, StoreSet};
 pub use lash_core::{
-    BackendParts, CompletionKeySecrets, DurableBuildError, KeyVersion, NoProjectionProviders,
-    PinnedKey, ProjectionProviders, ResolveAnswer, SecretBytes, SecretsRefusal,
+    BackendParts, DurableBuildError, NoProjectionProviders, PinnedKey, ProjectionProviders,
+    ResolveAnswer,
 };
 
 /// Builds the one [`Backend`] a [`LashCore`](crate::LashCore) takes: lash's
 /// own durable engine over one store set.
 ///
 /// [`build`](Self::build) refuses settings that break a rule, two process
-/// engines of one kind, two projection providers of one type, and a backend
-/// without completion secrets.
+/// engines of one kind and two projection providers of one type.
 pub struct DurableBackendBuilder {
     stores: Arc<dyn StoreSet>,
     settings: DurableSettings,
-    secrets: Option<CompletionKeySecrets>,
     engines: Vec<Arc<dyn ProcessEngine>>,
     #[cfg(feature = "rlm")]
     providers: Vec<Arc<dyn lashlang::ProjectionProvider>>,
@@ -39,7 +37,6 @@ impl DurableBackendBuilder {
         Self {
             stores,
             settings: DurableSettings::default(),
-            secrets: None,
             engines: Vec::new(),
             #[cfg(feature = "rlm")]
             providers: Vec::new(),
@@ -50,13 +47,6 @@ impl DurableBackendBuilder {
     #[must_use]
     pub fn config(mut self, settings: DurableSettings) -> Self {
         self.settings = settings;
-        self
-    }
-
-    /// The keys completion keys are signed with. Required.
-    #[must_use]
-    pub fn completion_secrets(mut self, secrets: CompletionKeySecrets) -> Self {
-        self.secrets = Some(secrets);
         self
     }
 
@@ -87,7 +77,6 @@ impl DurableBackendBuilder {
             providers: Arc::new(NoProjectionProviders),
             stores: self.stores,
             settings: self.settings,
-            secrets: self.secrets,
             engines: self.engines,
             formats: crate::formats::actor_state_surfaces(),
         })

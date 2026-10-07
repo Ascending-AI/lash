@@ -12,15 +12,18 @@
 //!   commit fences its own actor row first, so on PostgreSQL a resolve and
 //!   an owner's `Due` can deadlock; the database aborts one, and every
 //!   writer here retries a contended transaction unchanged.
-//! - A durable backend built without completion secrets is refused
-//!   (`DurableBuildError::MissingCompletionSecrets`).
+//! - A host-resolvable wait's completion key is its wait id: 128 random
+//!   bits from the operating system's CSPRNG. It is a bearer capability:
+//!   lash keeps no completion secret, and the host decides who may resolve
+//!   (its API authentication, its webhook signatures) and hands the key
+//!   only to callers it has authorized.
+//! - A key that names no wait answers `Unknown` and writes nothing.
 //! - Every await races the awaiter's own cancel mail; there is no
 //!   `HandedOver`: failover keeps the same row, key and deadline.
 //! - A due wait settles in an owner transaction (`wait.timeout`) before
 //!   anything acts on it, and that transaction re-checks the row under the
 //!   same lock, so a resolution committed first wins.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use lash_durable::domain::{
@@ -37,31 +40,36 @@ use super::ActorContext;
 use crate::{Backend, ExecutionScope, ProcessId, ProcessOutcome};
 
 pub use lash_core_effect::Resolution;
-pub use lash_durable::domain::{KeyVersion, ResolveAnswer, WaitId, WaitKind};
-
-/// The key format's version prefix.
-const KEY_PREFIX: &str = "wk1";
-
-/// The shortest completion secret: one SHA-256 block's worth of key
-/// material is what HMAC-SHA256 is keyed with.
-const MIN_SECRET_BYTES: usize = 32;
+pub use lash_durable::domain::{ResolveAnswer, WaitId, WaitKind};
 
 /// How many times a resolve or a due settlement tries a contended
 /// transaction.
 const RESOLVE_ATTEMPTS: usize = 3;
 
-/// A host-resolvable wait's key: `wk1.<wait_id>.<mac>`, where the MAC is
-/// HMAC-SHA256 under the deployment's completion secret of the row's key
-/// version over `"wk1" ‖ wait_id ‖ kind`. It carries no scope or kind in
-/// plaintext.
+/// A host-resolvable wait's completion key: its wait id's 32 lowercase hex
+/// digits. The id is 128 random bits, so the key is unguessable, and whoever
+/// holds it may resolve the wait: it is a bearer capability, and the host
+/// hands it only to callers it has authorized. It carries no scope or kind.
 #[derive(Clone, PartialEq, Eq)]
 pub struct PinnedKey(String);
 
 impl PinnedKey {
-    /// A key as minted.
+    /// A key as a host stored it.
     #[must_use]
     pub fn new(key: String) -> Self {
         Self(key)
+    }
+
+    /// The key of wait `id`.
+    #[must_use]
+    pub fn of(id: &WaitId) -> Self {
+        Self(id.to_hex())
+    }
+
+    /// The wait this key names; `None` when it is not a key's spelling.
+    #[must_use]
+    pub fn wait(&self) -> Option<WaitId> {
+        WaitId::parse_hex(&self.0)
     }
 
     /// The key a host is handed.
@@ -74,117 +82,6 @@ impl PinnedKey {
 impl std::fmt::Debug for PinnedKey {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("PinnedKey(..)")
-    }
-}
-
-/// One completion secret's bytes. Never printed.
-#[derive(Clone, PartialEq, Eq)]
-pub struct SecretBytes(Vec<u8>);
-
-impl SecretBytes {
-    /// Wrap secret bytes.
-    #[must_use]
-    pub fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-
-    /// The bytes, for the MAC.
-    #[must_use]
-    pub fn expose(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for SecretBytes {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("SecretBytes(..)")
-    }
-}
-
-/// The deployment's completion secrets: one or more versions, one current.
-/// New keys are minted under the current version; a live wait verifies under
-/// its stored version for as long as that version is configured.
-#[derive(Clone, PartialEq, Eq)]
-pub struct CompletionKeySecrets {
-    current: KeyVersion,
-    secrets: BTreeMap<KeyVersion, SecretBytes>,
-}
-
-impl std::fmt::Debug for CompletionKeySecrets {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("CompletionKeySecrets")
-            .field("current", &self.current)
-            .field("versions", &self.secrets.keys().collect::<Vec<_>>())
-            .finish()
-    }
-}
-
-/// Refused completion secrets.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum SecretsRefusal {
-    /// The current version has no secret.
-    #[error("the current key version {0:?} has no secret")]
-    CurrentMissing(KeyVersion),
-    /// A version is configured twice.
-    #[error("key version {0:?} is configured twice")]
-    DuplicateVersion(KeyVersion),
-    /// A secret is too short to key an HMAC-SHA256 safely.
-    #[error("the secret of key version {0:?} is too short")]
-    TooShort(KeyVersion),
-}
-
-impl CompletionKeySecrets {
-    /// Validate `secrets`, with `current` the version new keys mint under.
-    /// Each secret is at least 32 bytes; there is no default and no derived
-    /// fallback.
-    ///
-    /// # Errors
-    ///
-    /// [`SecretsRefusal`].
-    pub fn new(
-        current: KeyVersion,
-        secrets: Vec<(KeyVersion, SecretBytes)>,
-    ) -> Result<Self, SecretsRefusal> {
-        let mut versions = BTreeMap::new();
-        for (version, secret) in secrets {
-            if secret.expose().len() < MIN_SECRET_BYTES {
-                return Err(SecretsRefusal::TooShort(version));
-            }
-            if versions.insert(version, secret).is_some() {
-                return Err(SecretsRefusal::DuplicateVersion(version));
-            }
-        }
-        if !versions.contains_key(&current) {
-            return Err(SecretsRefusal::CurrentMissing(current));
-        }
-        Ok(Self {
-            current,
-            secrets: versions,
-        })
-    }
-
-    /// One fixed 32-byte secret under version 1, for tests: never a
-    /// deployment's.
-    #[cfg(any(test, feature = "testing"))]
-    #[must_use]
-    pub fn for_testing() -> Self {
-        Self {
-            current: KeyVersion(1),
-            secrets: BTreeMap::from([(KeyVersion(1), SecretBytes::new(vec![7; 32]))]),
-        }
-    }
-
-    /// The version new keys mint under.
-    #[must_use]
-    pub fn current(&self) -> KeyVersion {
-        self.current
-    }
-
-    /// The secret of `version`, if it is configured.
-    #[must_use]
-    pub fn secret(&self, version: KeyVersion) -> Option<&SecretBytes> {
-        self.secrets.get(&version)
     }
 }
 
@@ -370,33 +267,14 @@ pub fn settled(row: &WaitRow) -> Result<Option<WaitSettled>, DurableError> {
     })
 }
 
-/// What checking a host key found, before anything is written.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum HostKeyCheck {
-    /// Not a `wk1.<wait_id>.<mac>` key.
-    Malformed,
-    /// No wait has the key's id.
-    UnknownWait,
-    /// The wait's key version is not configured any more.
-    UnknownVersion(KeyVersion),
-    /// The MAC is not the wait's under its key version.
-    MacMismatch,
-    /// The MAC verified: the key names this wait.
-    Verified(Box<WaitRow>),
-}
-
-/// Mint a wait on `tx`: insert its row pending, and for a host-resolvable
-/// kind mint its key under `secrets`' current version. The key exists only
-/// once `tx` commits, before any step that submits it.
+/// Mint a wait on `tx`: insert its row pending under a fresh random id, and
+/// for a host-resolvable kind hand back its key, the id. The key names a
+/// wait only once `tx` commits, before any step that submits it.
 ///
 /// # Errors
 ///
 /// [`PinRefusal`]; nothing is recorded.
-pub fn pin(
-    tx: &mut ActorTx,
-    secrets: &CompletionKeySecrets,
-    spec: WaitSpec,
-) -> Result<(WaitRef, Option<PinnedKey>), PinRefusal> {
+pub fn pin(tx: &mut ActorTx, spec: WaitSpec) -> Result<(WaitRef, Option<PinnedKey>), PinRefusal> {
     let targeted = matches!(
         spec.kind,
         WaitKind::ProcessTerminal | WaitKind::ChildSession
@@ -408,54 +286,24 @@ pub fn pin(
         return Err(PinRefusal::TimerWithoutDeadline);
     }
     let id = fresh_wait_id();
-    let key_version = spec.kind.host_resolvable().then(|| secrets.current());
-    let key = key_version.and_then(|version| {
-        secrets
-            .secret(version)
-            .map(|secret| PinnedKey::new(render_key(&id, &mac(secret, &id, spec.kind))))
-    });
+    let key = spec.kind.host_resolvable().then(|| PinnedKey::of(&id));
     tx.write(DomainWrite::Wait(WaitWrite::Pin {
         id,
         scope: spec.scope,
         kind: spec.kind,
         target_process: spec.target_process,
         deadline: spec.deadline.map(WaitDeadline::at),
-        key_version,
     }));
     Ok((WaitRef::new(id, spec.kind), key))
 }
 
-/// Check `key` against its wait row: parse it, load the row, and verify the
-/// MAC in constant time under the row's key version (a kind that carries no
-/// key version is checked under the current one). Nothing is written.
+/// A host's resolve of `key`: resolve the wait it names from `pending` and
+/// wake the owner, in one mailbox transaction. The store refuses a reserved
+/// kind with `ReservedKind`, and the first resolution wins.
 ///
-/// # Errors
-///
-/// A store failure.
-pub async fn check_host_key(backend: &Backend, key: &str) -> Result<HostKeyCheck, DurableError> {
-    let Some((id, offered)) = parse_key(key) else {
-        return Ok(HostKeyCheck::Malformed);
-    };
-    let Some(row) = backend.durable().wait(&id).await? else {
-        return Ok(HostKeyCheck::UnknownWait);
-    };
-    let secrets = backend.completion_secrets();
-    let version = row.key_version.unwrap_or_else(|| secrets.current());
-    let Some(secret) = secrets.secret(version) else {
-        return Ok(HostKeyCheck::UnknownVersion(version));
-    };
-    if !constant_time_eq(&mac(secret, &id, row.kind), &offered) {
-        return Ok(HostKeyCheck::MacMismatch);
-    }
-    Ok(HostKeyCheck::Verified(Box::new(row)))
-}
-
-/// A host's resolve of `key`: parse it, verify its MAC in constant time under
-/// its row's key version, refuse a reserved kind, then resolve from
-/// `pending` and wake the owner, in one mailbox transaction.
-///
-/// A key that does not verify answers `UnknownOrRevoked`: it learns nothing
-/// about which waits exist.
+/// A key that names no wait answers `Unknown` and writes nothing. Lash does
+/// not decide who may resolve: whoever holds the key may, and the host
+/// authorizes its callers before it calls this.
 ///
 /// # Errors
 ///
@@ -465,21 +313,14 @@ pub async fn resolve_host(
     key: &str,
     resolution: Resolution,
 ) -> Result<ResolveAnswer, DurableError> {
-    let row = match check_host_key(backend, key).await? {
-        HostKeyCheck::Verified(row) => row,
-        HostKeyCheck::Malformed
-        | HostKeyCheck::UnknownWait
-        | HostKeyCheck::UnknownVersion(_)
-        | HostKeyCheck::MacMismatch => return Ok(ResolveAnswer::UnknownOrRevoked),
+    let Some(id) = WaitId::parse_hex(key) else {
+        return Ok(ResolveAnswer::Unknown);
     };
-    if !row.kind.host_resolvable() {
-        return Ok(ResolveAnswer::ReservedKind);
-    }
     let (digest, resolution_ref) = encode_resolution(&resolution)?;
     resolve_row(
         backend,
         WaitResolution {
-            id: row.id,
+            id,
             by_host: true,
             digest,
             resolution_ref,
@@ -730,7 +571,6 @@ pub async fn pin_process_terminal(
     let mut tx = cx.begin().await?;
     let (wait, _) = pin(
         &mut tx,
-        cx.backend().completion_secrets(),
         WaitSpec {
             kind: WaitKind::ProcessTerminal,
             scope,
@@ -839,29 +679,18 @@ pub fn revoke_scope(tx: &mut ActorTx, scope: &ScopeKey) {
     tx.write(DomainWrite::Wait(WaitWrite::RevokeScope(scope.clone())));
 }
 
-/// The host key of `wait`, minted under `version`, rebuilt as [`pin`]
-/// minted it: what an owner hands a body that runs again under the wait it
-/// pinned before. `None` for a kind no host resolves, or a version that is
-/// no longer configured.
+/// The host key of `wait`, as [`pin`] minted it: what an owner hands a body
+/// that runs again under the wait it pinned before. `None` for a kind no
+/// host resolves.
 #[must_use]
-pub fn host_key(
-    secrets: &CompletionKeySecrets,
-    wait: &WaitRef,
-    version: KeyVersion,
-) -> Option<PinnedKey> {
-    if !wait.kind().host_resolvable() {
-        return None;
-    }
-    let secret = secrets.secret(version)?;
-    Some(PinnedKey::new(render_key(
-        &wait.id(),
-        &mac(secret, &wait.id(), wait.kind()),
-    )))
+pub fn host_key(wait: &WaitRef) -> Option<PinnedKey> {
+    wait.kind()
+        .host_resolvable()
+        .then(|| PinnedKey::of(&wait.id()))
 }
 
-/// The host-resolvable keys of `owner`'s pending waits, rebuilt from their
-/// rows under each row's key version: what an operator lists. A wait whose
-/// version is no longer configured has no key to list.
+/// The keys of `owner`'s pending host-resolvable waits: what an operator
+/// lists.
 ///
 /// # Errors
 ///
@@ -870,20 +699,13 @@ pub async fn outstanding_keys(
     backend: &Backend,
     owner: &lash_durable::ActorKey,
 ) -> Result<Vec<PinnedKey>, DurableError> {
-    let secrets = backend.completion_secrets();
     Ok(backend
         .durable()
         .pending_waits(owner)
         .await?
         .into_iter()
         .filter(|row| row.kind.host_resolvable())
-        .filter_map(|row| {
-            let secret = secrets.secret(row.key_version?)?;
-            Some(PinnedKey::new(render_key(
-                &row.id,
-                &mac(secret, &row.id, row.kind),
-            )))
-        })
+        .map(|row| PinnedKey::of(&row.id))
         .collect())
 }
 
@@ -914,7 +736,9 @@ fn actor_scope(actor: &lash_durable::ActorKey) -> ScopeKey {
     }
 }
 
-/// 128 random bits: two v4 UUIDs' randomness, hashed down.
+/// 128 random bits: two v4 UUIDs' randomness (244 bits from the operating
+/// system's CSPRNG), hashed down, so the id is unguessable and its key a
+/// capability.
 fn fresh_wait_id() -> WaitId {
     let mut hasher = Sha256::new();
     hasher.update(uuid::Uuid::new_v4().as_bytes());
@@ -923,70 +747,6 @@ fn fresh_wait_id() -> WaitId {
     let mut id = [0_u8; 16];
     id.copy_from_slice(&digest[..16]);
     WaitId(id)
-}
-
-/// The key MAC: HMAC-SHA256 under `secret` over `"wk1" ‖ wait_id ‖ kind`.
-pub(super) fn mac(secret: &SecretBytes, id: &WaitId, kind: WaitKind) -> [u8; 32] {
-    hmac_sha256(
-        secret.expose(),
-        &[KEY_PREFIX.as_bytes(), &id.0, kind.as_str().as_bytes()],
-    )
-}
-
-/// HMAC-SHA256 (RFC 2104) of the concatenated `message` parts.
-fn hmac_sha256(secret: &[u8], message: &[&[u8]]) -> [u8; 32] {
-    const BLOCK: usize = 64;
-    let mut key = [0_u8; BLOCK];
-    if secret.len() > BLOCK {
-        key[..32].copy_from_slice(&Sha256::digest(secret));
-    } else {
-        key[..secret.len()].copy_from_slice(secret);
-    }
-    let pad = |byte: u8| key.map(|k| k ^ byte);
-    let mut inner = Sha256::new();
-    inner.update(pad(0x36));
-    for part in message {
-        inner.update(part);
-    }
-    let mut outer = Sha256::new();
-    outer.update(pad(0x5c));
-    outer.update(inner.finalize());
-    outer.finalize().into()
-}
-
-pub(super) fn render_key(id: &WaitId, mac: &[u8]) -> String {
-    format!("{KEY_PREFIX}.{}.{}", id.to_hex(), hex(mac))
-}
-
-/// A key's wait id and offered MAC bytes; `None` when it is not a `wk1` key.
-fn parse_key(key: &str) -> Option<(WaitId, Vec<u8>)> {
-    let mut parts = key.split('.');
-    let (Some(KEY_PREFIX), Some(id), Some(mac), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next())
-    else {
-        return None;
-    };
-    let id = WaitId::parse_hex(id)?;
-    if mac.len() % 2 != 0 || !mac.is_ascii() {
-        return None;
-    }
-    let bytes = (0..mac.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(mac.get(at..at + 2)?, 16).ok())
-        .collect::<Option<Vec<u8>>>()?;
-    Some((id, bytes))
-}
-
-/// Compare authentication bytes without branching on their contents. Length
-/// is folded into the result and the loop covers the longer input.
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    let mut difference = left.len() ^ right.len();
-    for index in 0..left.len().max(right.len()) {
-        let left_byte = left.get(index).copied().unwrap_or_default();
-        let right_byte = right.get(index).copied().unwrap_or_default();
-        difference |= usize::from(left_byte ^ right_byte);
-    }
-    difference == 0
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -1072,7 +832,3 @@ fn stopped(cx: &ActorContext) -> DurableError {
         current: None,
     })
 }
-
-#[cfg(test)]
-#[path = "waits_tests.rs"]
-mod tests;

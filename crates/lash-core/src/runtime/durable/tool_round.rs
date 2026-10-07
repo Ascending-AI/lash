@@ -137,7 +137,6 @@ pub(super) async fn run(
             }));
             let admitted: AdmittedRound = round::admit_round(
                 &mut tx,
-                cx.backend().completion_secrets(),
                 &lash_core_execution::runtime::actor::waits::wait_scope(cx),
                 RoundDraft {
                     owner: owner.clone(),

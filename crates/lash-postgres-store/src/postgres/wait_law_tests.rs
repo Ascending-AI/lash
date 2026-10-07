@@ -1,4 +1,4 @@
-//! The first-winner and T1 laws of waits
+//! The K1, first-winner and T1 laws of waits
 //! (`lash_core_execution::runtime::actor::wait_laws`; L5, FIG-5173) over
 //! PostgreSQL, each on its own isolated database.
 
@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::wait_laws;
-use lash_core_execution::{Backend, BackendParts, CompletionKeySecrets, NoProjectionProviders};
+use lash_core_execution::{Backend, BackendParts, NoProjectionProviders};
 
 use crate::testing::IsolatedDatabase;
 use crate::{PostgresStorage, PostgresStoreSet};
@@ -33,7 +33,6 @@ macro_rules! law {
                     Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
                 )),
                 settings: wait_laws::settings(),
-                secrets: Some(CompletionKeySecrets::for_testing()),
                 engines: Vec::new(),
                 providers: Arc::new(NoProjectionProviders),
             })
@@ -46,6 +45,7 @@ macro_rules! law {
 }
 
 law!(
+    k1_a_key_that_is_not_an_issued_wait_id_is_refused_and_writes_nothing,
     the_first_resolution_wins,
     a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll,
 );

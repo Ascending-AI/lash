@@ -139,7 +139,8 @@ pub(crate) async fn decide_approval(
                 "approval `{key_id}` already has the opposite decision"
             )));
         }
-        lash::durable::ResolveAnswer::UnknownOrRevoked
+        lash::durable::ResolveAnswer::Unknown
+        | lash::durable::ResolveAnswer::Revoked
         | lash::durable::ResolveAnswer::ReservedKind => {
             return Err(AppError::bad_request(format!(
                 "approval `{key_id}` no longer names an active durable wait"
@@ -188,7 +189,8 @@ pub(crate) async fn reconcile_decided_approvals(state: &AppState) {
             Ok(
                 lash::durable::ResolveAnswer::Resolved
                 | lash::durable::ResolveAnswer::AlreadyResolved
-                | lash::durable::ResolveAnswer::UnknownOrRevoked
+                | lash::durable::ResolveAnswer::Unknown
+                | lash::durable::ResolveAnswer::Revoked
                 | lash::durable::ResolveAnswer::ReservedKind,
             ) => {}
             Ok(lash::durable::ResolveAnswer::Conflict) => eprintln!(

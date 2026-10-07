@@ -35,10 +35,9 @@ use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::ToolBody;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    ActorContext, AdmittedScope, Backend, BackendParts, CompletionKeySecrets, DurableSettings,
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, NoProjectionProviders,
-    ProcessEngine, ProcessInfraError, ProcessRecord, StepRequest, StoreSet, ToolCallId,
-    TriggerOccurrenceRequest,
+    ActorContext, AdmittedScope, Backend, BackendParts, DurableSettings, EngineAction, EngineEvent,
+    EngineState, EngineStateFormat, NoProjectionProviders, ProcessEngine, ProcessInfraError,
+    ProcessRecord, StepRequest, StoreSet, ToolCallId, TriggerOccurrenceRequest,
 };
 use lash_durable::runner::{Activation, Owned};
 use lash_durable::{
@@ -393,7 +392,6 @@ impl Scenario for Proof {
         let backend = Backend::assemble(BackendParts {
             stores,
             settings: DurableSettings::default(),
-            secrets: Some(CompletionKeySecrets::for_testing()),
             engines: vec![Arc::new(EndsAtOnce)],
             providers: Arc::new(NoProjectionProviders),
             formats: Vec::new(),

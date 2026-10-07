@@ -31,10 +31,10 @@ use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::ToolBody;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    Backend, BackendParts, CompletionKeySecrets, DurableSettings, HostArtifactPin,
-    LifetimeDecision, NoProjectionProviders, ProcessId, ProcessInput, ProcessProvenance,
-    ProcessRecord, ProcessRegistration, SessionCreateRequest, SessionStartPoint,
-    SessionTurnOutcome, StepRequest, StoreSet, ToolCallId,
+    Backend, BackendParts, DurableSettings, HostArtifactPin, LifetimeDecision,
+    NoProjectionProviders, ProcessId, ProcessInput, ProcessProvenance, ProcessRecord,
+    ProcessRegistration, SessionCreateRequest, SessionStartPoint, SessionTurnOutcome, StepRequest,
+    StoreSet, ToolCallId,
 };
 use lash_durable::runner::Activation;
 use lash_durable::{
@@ -225,7 +225,6 @@ impl Scenario for ChildTurn {
         let backend = Backend::assemble(BackendParts {
             stores,
             settings: DurableSettings::default(),
-            secrets: Some(CompletionKeySecrets::for_testing()),
             engines: Vec::new(),
             providers: Arc::new(NoProjectionProviders),
             formats: lash::formats::actor_state_surfaces(),

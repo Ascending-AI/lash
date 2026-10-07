@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::process_laws;
-use lash_core_execution::{Backend, BackendParts, CompletionKeySecrets, NoProjectionProviders};
+use lash_core_execution::{Backend, BackendParts, NoProjectionProviders};
 
 use crate::testing::IsolatedDatabase;
 use crate::{PostgresStorage, PostgresStoreSet};
@@ -33,7 +33,6 @@ macro_rules! law {
                     Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
                 )),
                 settings: process_laws::settings(),
-                secrets: Some(CompletionKeySecrets::for_testing()),
                 engines: Vec::new(),
                 providers: Arc::new(NoProjectionProviders),
             })

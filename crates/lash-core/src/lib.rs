@@ -33,8 +33,7 @@ pub use lash_core_execution::process_id_from_handle_json;
 /// Durable tool-effect format versions, re-exported for the format manifest.
 pub use lash_core_execution::waits;
 pub use lash_core_execution::{
-    CompletionKeySecrets, KeyVersion, NoProjectionProviders, PinnedKey, ProjectionProviders,
-    ResolveAnswer, SecretBytes, SecretsRefusal,
+    NoProjectionProviders, PinnedKey, ProjectionProviders, ResolveAnswer,
 };
 pub use lash_core_ids::operational_metrics;
 pub use lash_core_llm::llm;

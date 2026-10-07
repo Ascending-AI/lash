@@ -40,7 +40,7 @@ otherwise ([D1](#decisions)). The rows below are the lash parts only.
 | [ ] | `apps/lash-runtime/src/config.rs:4` | `WORK_ITEM_SERVICE` and `CRON_JOB_SERVICE` Restate service names. | Delete, or keep for Figments-owned objects under D1. | decision needed |
 | [ ] | `apps/lash-runtime/src/state.rs:20` | `AppState` holds `process_work_driver`, `turn_effect_host: Arc<RestateEffectHost>` and `turn_work_driver`, and at `:28` the Restate clients. | Hold one `lash::LashCore` (over one `Backend`). | mechanical |
 | [ ] | `k8s/helm/figments/templates/lash-runtime.yaml:20` | Service port `restate`; container port at `:67`. | Remove: a lash node exposes no handler endpoint. | mechanical |
-| [ ] | `k8s/helm/figments/templates/lash-runtime.yaml:87` | Env `RESTATE_BIND_ADDR`, `RESTATE_INGRESS_URL`, `RESTATE_ADMIN_URL`. | Remove for lash. Add the completion secret (row [K1](#completion-keys-and-resolve-webhooks)). | mechanical |
+| [ ] | `k8s/helm/figments/templates/lash-runtime.yaml:87` | Env `RESTATE_BIND_ADDR`, `RESTATE_INGRESS_URL`, `RESTATE_ADMIN_URL`. | Remove for lash. There is no completion secret to add (row [K1](#completion-keys-and-resolve-webhooks)). | mechanical |
 | [ ] | `k8s/helm/figments/values.yaml:595` | `lashRuntime.service.restatePort: 9082`. | Remove. | mechanical |
 | [ ] | `k8s/helm/figments/templates/restate-registration.yaml:56` | Registers the lash-runtime endpoint and submits `LashBootstrap`; `:33` waits on the lash-runtime rollout. | Remove the lash-runtime entry, unless lash-runtime keeps Figments-owned objects (D1). | decision needed |
 | [ ] | `k8s/helm/figments/files/restate-handlers.json:185` | Handler contracts for `LashWorkItem` (`:185`), `LashProcessWorkflow` (`:188`), `LashCronJob` (`:194`), `LashDurableWaitWorkflow` (`:203`), `LashDurableWaitIndex` (`:208`), `LashBootstrap` (`:215`). | Delete the lash-owned rows (`:188`, `:203`, `:208`); the Figments-owned rows follow D1. | decision needed |
@@ -55,7 +55,7 @@ otherwise ([D1](#decisions)). The rows below are the lash parts only.
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
-| [ ] | <a id="backend-construction"></a>B1 `apps/lash-runtime/src/main.rs:403` | Connects `PostgresStorage` through `figments_lash_postgres::connect_postgres_storage` (`crates/figments-lash-postgres/src/storage_pool.rs:11`), then hands out each store separately (`session_store_factory`, attachments, artifacts, env store, process registry, trigger store, `:460`–`:487`). | Build one `lash::postgres::PostgresStoreSet::new(&storage, attachments)` and one `Backend` with `DurableBackendBuilder::new(stores).config(..).completion_secrets(..).build()`. The store ports come from the backend. | contract change |
+| [ ] | <a id="backend-construction"></a>B1 `apps/lash-runtime/src/main.rs:403` | Connects `PostgresStorage` through `figments_lash_postgres::connect_postgres_storage` (`crates/figments-lash-postgres/src/storage_pool.rs:11`), then hands out each store separately (`session_store_factory`, attachments, artifacts, env store, process registry, trigger store, `:460`–`:487`). | Build one `lash::postgres::PostgresStoreSet::new(&storage, attachments)` and one `Backend` with `DurableBackendBuilder::new(stores).config(..).build()`. The store ports come from the backend. | contract change |
 | [ ] | `apps/lash-runtime/src/engine.rs:33` | `build_process_worker_core` builds a process `LashCore` with `.store_factory`, `.child_store_factory`, `.attachment_store`, `.process_env_store`, `.effect_host`, `.process_work_driver`, `.trigger_store` and `.live_replay_store`. | `LashCore::builder(backend)`; the store, effect-host and work-driver setters are gone. | mechanical |
 | [ ] | `apps/lash-runtime/src/turns.rs:712` | `run_agent_turn` builds a fresh `LashCore` per work item, with that item's provider, model, `max_turns` and plugins, over the shared Restate effect host. | One `LashCore` per node over one `Backend`. Per-turn provider, model and limits move into the session's `SessionSpec` and the send's `RunSpec`. Another node may run the turn, so nothing a turn needs may live only in the per-item core. | contract change |
 | [ ] | `apps/lash-runtime/src/main.rs:208` | `RuntimeIdentity::from_env` (`LASH_RUNTIME_INSTANCE_ID`, else `HOSTNAME`, set to the pod name) and a fresh incarnation UUID at `:209`. | Serve the lash node as `NodeId` = the pod name. Each pod start is a new boot; two live pods must never share a name. | mechanical |
@@ -118,8 +118,7 @@ does not change.
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
-| [ ] | <a id="completion-keys-and-resolve-webhooks"></a>K1 `k8s/helm/figments/templates/lash-runtime.yaml:70` | Env from the chart's config map and secret; no completion secret. | Provision a completion secret of at least 32 bytes, the same on every lash-runtime pod, and pass it to `CompletionKeySecrets::new` with a key version. A backend built without it is refused. Plan rotation as a second version ([guide §5](durable-hosting.md#5-completion-keys)). | decision needed |
-| [ ] | `apps/lash-runtime/src/main.rs:363` | Reads `LASH_DATABASE_URL` and the pool settings; nothing reads a completion secret. | Read the secret beside the database URL and pass it to the builder. | mechanical |
+| [ ] | <a id="completion-keys-and-resolve-webhooks"></a>K1 `k8s/helm/figments/templates/lash-runtime.yaml:70` | Env from the chart's config map and secret; no completion secret. | Nothing to configure: lash keeps no completion secrets. A completion key is its wait's random 128-bit id and a bearer capability, so the callback endpoint authenticates and authorizes its caller before it resolves, and hands keys only to callers it has authorized ([guide §5](durable-hosting.md#5-completion-keys)). | mechanical |
 
 When Figments adds a Pending tool or a process that waits on an external
 system, its callback endpoint calls `Completions::resolve(key, resolution)`,
@@ -192,12 +191,10 @@ Figments' own ADRs that describe lash on Restate need superseding notes:
   weakened guarantee written down.
 - **D3. Pooler mode** for the lash listener connection: direct or session
   mode, or `Notifier::PollOnly`.
-- **D4. Completion secret provisioning and rotation:** which secret store,
-  how all pods get the same value, and when a retired version is removed.
-- **D5. Adaptive admission against `model_total`:** raise `model_total` to
+- **D4. Adaptive admission against `model_total`:** raise `model_total` to
   cover the 840 s admission budget, or admit before `send()`.
-- **D6. Session ownership and observation:** delete the Figments owner lease
+- **D5. Session ownership and observation:** delete the Figments owner lease
   and sticky routing in favour of lash's actor ownership and a shared live
   replay store.
-- **D7. Workflow run completion:** the process terminal, or the empty
+- **D6. Workflow run completion:** the process terminal, or the empty
   `live_until_descendants` subtree.

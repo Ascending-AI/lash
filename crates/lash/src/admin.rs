@@ -20,15 +20,14 @@ pub struct Completions {
 
 impl Completions {
     /// The completion keys of `session_id`'s unresolved host-resolvable
-    /// waits (`tool_completion` and `custom`), rebuilt from their rows under
-    /// each row's key version.
+    /// waits (`tool_completion` and `custom`): each wait's id.
     ///
     /// This administrative read is scoped to exactly `session_id`. It returns
     /// a snapshot: another resolver may settle a returned key concurrently,
     /// so callers must handle [`lash_core::ResolveAnswer::AlreadyResolved`],
-    /// `Conflict` or `UnknownOrRevoked` from [`Self::resolve`]. A returned
-    /// key carries the authority needed to resolve its wait; the caller is
-    /// responsible for authorizing this read and the later resolution.
+    /// `Conflict` or `Revoked` from [`Self::resolve`]. A returned key is a
+    /// bearer capability: it alone authorizes resolving its wait, so the host
+    /// authorizes this read and hands the keys only to callers it trusts.
     pub async fn outstanding(&self, session_id: &SessionId) -> Result<Vec<lash_core::PinnedKey>> {
         let backend = self.core.env.core.control.effect_host.backend();
         let owner = lash_core::durable_port::ActorKey::session(session_id.as_str())
@@ -40,11 +39,17 @@ impl Completions {
 
     /// Resolve the wait `key` names, first writer wins.
     ///
-    /// The key's MAC is verified under the deployment's completion secret of
-    /// the version its wait was minted under. A key that does not verify, or
-    /// whose wait was revoked, timed out or is unknown, answers
-    /// `UnknownOrRevoked`; a verified key of a kind a host may not resolve
-    /// answers `ReservedKind`. Neither writes anything.
+    /// A completion key is its wait's random 128-bit id, and a bearer
+    /// capability: whoever holds it may resolve its wait. Lash keeps no
+    /// completion secret and does not decide who may call this; the host
+    /// authenticates and authorizes its callers (its API authentication, its
+    /// webhook signatures) and hands a key only to callers it has
+    /// authorized.
+    ///
+    /// A key that names no wait answers `Unknown`; a wait that was revoked or
+    /// timed out answers `Revoked`; a key of a kind a host may not resolve
+    /// (anything but `tool_completion` and `custom`) answers `ReservedKind`.
+    /// None of them writes anything.
     pub async fn resolve(
         &self,
         key: &str,

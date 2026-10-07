@@ -1013,7 +1013,6 @@ impl ProcessActivation {
                 };
                 let (wait, key) = waits::pin(
                     tx,
-                    self.backend.completion_secrets(),
                     WaitSpec {
                         kind,
                         scope: ScopeKey::Process(process.clone()),
@@ -1051,7 +1050,6 @@ impl ProcessActivation {
                 };
                 let (wait, _) = waits::pin(
                     tx,
-                    self.backend.completion_secrets(),
                     WaitSpec {
                         kind: WaitKind::ProcessTerminal,
                         scope: ScopeKey::Process(process.clone()),

@@ -994,8 +994,8 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
 -- Waits, keyed promises and timers (L5, FIG-5173; ADR 0132 §6): one row per
 -- wait from its minting. The deadline is written once; a resolution is a
 -- conditional update from 'pending', so the first one wins. Only
--- tool_completion and custom waits are host resolvable, and only they carry
--- the completion-secret version their key was minted under.
+-- tool_completion and custom waits are host resolvable: their completion key
+-- is the wait id, 128 random bits.
 CREATE TABLE IF NOT EXISTS lash_waits (
     wait_id TEXT COLLATE "C" PRIMARY KEY,
     owner_actor TEXT COLLATE "C" NOT NULL,
@@ -1010,10 +1010,8 @@ CREATE TABLE IF NOT EXISTS lash_waits (
     resolution_digest TEXT,
     resolution_ref TEXT,
     resolved_at_ms BIGINT,
-    key_version INTEGER,
     created_epoch BIGINT NOT NULL,
     CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'custom'))),
-    CONSTRAINT ck_waits_key CHECK ((key_version IS NOT NULL) = host_resolvable),
     CONSTRAINT ck_waits_target
         CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
     CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL))

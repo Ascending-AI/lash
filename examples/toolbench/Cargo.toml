@@ -17,7 +17,6 @@ workspace = true
 axum = "0.8"
 futures-util = { workspace = true }
 anyhow = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
 clap = { workspace = true, features = ["derive", "env"] }
 dotenvy = "0.15"
 lash = { workspace = true, features = ["rlm", "sqlite", "openai"] }

@@ -17,10 +17,10 @@ use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::{BodyOutput, ToolBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    Backend, BackendParts, CompletionKeySecrets, DurableSettings, EngineAction, EngineEvent,
-    EngineState, EngineStateFormat, JsonSchema, LifetimeDecision, NoProjectionProviders,
-    ProcessEngine, ProcessEventLogTestSupport as _, ProcessEventSemanticsSpec, ProcessEventType,
-    ProcessId, ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
+    Backend, BackendParts, DurableSettings, EngineAction, EngineEvent, EngineState,
+    EngineStateFormat, JsonSchema, LifetimeDecision, NoProjectionProviders, ProcessEngine,
+    ProcessEventLogTestSupport as _, ProcessEventSemanticsSpec, ProcessEventType, ProcessId,
+    ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
     ProcessRegistration, ProcessSignal, ProcessSignalIdentity, ProcessStatus, ProjectionWatermark,
     StartKey, StepName, StepRequest, ToolCallId, ToolCallOutput, ToolCancellation,
 };
@@ -317,7 +317,6 @@ impl World {
         let backend = Backend::assemble(BackendParts {
             stores: Arc::new(stores),
             settings: DurableSettings::default(),
-            secrets: Some(CompletionKeySecrets::for_testing()),
             engines: vec![Arc::new(LawEngine {
                 log: Arc::clone(&log),
                 refuse: Arc::clone(&refuse),

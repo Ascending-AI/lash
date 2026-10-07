@@ -33,9 +33,9 @@ use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::{BodyOutput, ToolBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    Backend, BackendParts, CompletionKeySecrets, DurableSettings, EngineAction, EngineEvent,
-    EngineState, EngineStateFormat, LifetimeDecision, NoProjectionProviders, ProcessEngine,
-    ProcessId, ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
+    Backend, BackendParts, DurableSettings, EngineAction, EngineEvent, EngineState,
+    EngineStateFormat, LifetimeDecision, NoProjectionProviders, ProcessEngine, ProcessId,
+    ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
     ProcessRegistration, StepName, StepRequest, ToolCallId, ToolCallOutput,
 };
 use lash_core_store::tool_run::{
@@ -295,7 +295,6 @@ impl Scenario for Drain {
             formats: Vec::new(),
             stores,
             settings: DurableSettings::default(),
-            secrets: Some(CompletionKeySecrets::for_testing()),
             engines: vec![Arc::new(DrainEngine)],
             providers: Arc::new(NoProjectionProviders),
         })

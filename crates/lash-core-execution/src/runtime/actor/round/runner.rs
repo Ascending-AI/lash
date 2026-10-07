@@ -592,7 +592,6 @@ impl RoundRunner {
         if let (AttemptOutcome::Waiting(source), Some(process)) = (&mut output.outcome, terminal) {
             let (wait, _) = waits::pin(
                 tx,
-                self.cx.backend().completion_secrets(),
                 waits::WaitSpec {
                     kind: WaitKind::ProcessTerminal,
                     scope: waits::wait_scope(&self.cx),

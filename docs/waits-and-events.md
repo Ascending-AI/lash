@@ -3,21 +3,24 @@
 A durable wait is a row with a kind, an owner and a deadline written once at
 creation
 ([ADR 0132 §6](adr/0132-durability-is-state-first-over-the-lash-store.md#6-waits-and-timers-are-rows)).
-A host-resolvable wait (`tool_completion` or `custom`) has a completion key,
-`wk1.<wait_id>.<mac>`, signed with the deployment's completion secret. The key
-is a credential: whoever holds it can resolve its wait.
+A host-resolvable wait (`tool_completion` or `custom`) has a completion key:
+its wait id, 128 random bits from the operating system's CSPRNG, as 32 hex
+digits. The key is a bearer capability: whoever holds it can resolve its wait.
+Lash keeps no completion secret.
 
 `LashCore::completions()` lists a session's outstanding keys
 (`outstanding(session_id)`) and settles one (`resolve(key, resolution)`),
 first writer wins. A second resolution answers `AlreadyResolved` (same
-digest) or `Conflict` (another digest). A key that does not verify, or whose
-wait is unknown, revoked or timed out, answers `UnknownOrRevoked`. A key of
-any other kind answers `ReservedKind`. Neither writes anything.
+digest) or `Conflict` (another digest). A key that names no wait answers
+`Unknown`; one whose wait was revoked or timed out answers `Revoked`. A key of
+any other kind answers `ReservedKind`. None of them writes anything.
 
-Lash applies no authorization to wait resolution. The host authenticates a
-caller before it resolves a wait on the caller's behalf — see
+Lash applies no authorization to wait resolution. Who may finish a pending
+wait is the host's decision: it authenticates and authorizes a caller (its API
+authentication, its webhook signatures) before it resolves a wait on the
+caller's behalf, and hands a key only to callers it has authorized — see
 [ADR 0014](adr/0014-operational-policy-stays-with-the-host.md) and
 [ADR 0046 §3](adr/0046-process-transitions-are-events-record-is-a-fold.md).
 
 The [host guide](operations/durable-hosting.md#5-completion-keys) covers
-provisioning and rotating the completion secret, and every resolve answer.
+completion keys and every resolve answer.

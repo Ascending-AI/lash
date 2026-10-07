@@ -557,7 +557,6 @@ table lash_waits
   column created_epoch bigint not-null
   column deadline_ms bigint nullable
   column host_resolvable boolean not-null
-  column key_version integer nullable
   column kind text not-null
   column owner_actor text not-null
   column owner_scope text not-null

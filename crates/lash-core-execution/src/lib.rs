@@ -753,9 +753,7 @@ pub use runtime::TurnCancelWait;
 pub use runtime::actor::ActorContext;
 pub use runtime::actor::projection::{NoProjectionProviders, ProjectionProviders};
 pub use runtime::actor::waits;
-pub use runtime::actor::waits::{
-    CompletionKeySecrets, KeyVersion, PinnedKey, ResolveAnswer, SecretBytes, SecretsRefusal,
-};
+pub use runtime::actor::waits::{PinnedKey, ResolveAnswer};
 /// Intent realization publishes the execution environment a declared trigger
 /// subscription names, under the realizing scope's artifact owner (FIG-3116).
 pub use runtime::publish_process_execution_env;

@@ -2,7 +2,7 @@
 //! process.
 //!
 //! The node connects to the lash database, assembles the durable backend
-//! with the runbook's engine and completion secret, and serves sessions and
+//! with the runbook's engine, and serves sessions and
 //! processes through `lash_core::runtime::durable::node::serve` until it is
 //! told to stop on stdin, stdin ends, or it loses its lease. It reports on
 //! stdout ([`crate::events`]).
@@ -13,8 +13,7 @@ use lash_core::runtime::durable::node::{NodeServe, serve};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::{
-    Backend, BackendParts, CompletionKeySecrets, DurableSettings, KeyVersion,
-    NoProjectionProviders, SecretBytes, StoreSet,
+    Backend, BackendParts, DurableSettings, NoProjectionProviders, StoreSet,
 };
 use lash_durable::runner::Stopped;
 use lash_durable::{NoProbe, NodeId, Notifier};
@@ -40,9 +39,6 @@ pub struct NodeConfig {
     pub notifier: Notifier,
     /// `LASH_WORKERS_HOLD`: where the workload holds ([`Hold`]).
     pub hold: Hold,
-    /// `LASH_WORKERS_COMPLETION_SECRET`: the deployment's completion secret,
-    /// at least 32 bytes.
-    pub secret: String,
     /// `LASH_WORKERS_ADMIT_TURN=1`: admit the runbook's turn at boot unless
     /// its session exists, for runs by hand. The cases admit it themselves.
     pub admit_turn: bool,
@@ -71,7 +67,6 @@ impl NodeConfig {
             witness_url: required("LASH_WORKERS_WITNESS_URL")?,
             notifier,
             hold,
-            secret: required("LASH_WORKERS_COMPLETION_SECRET")?,
             admit_turn: var("LASH_WORKERS_ADMIT_TURN").as_deref() == Some("1"),
         })
     }
@@ -85,19 +80,6 @@ pub fn settings(notifier: Notifier) -> DurableSettings {
         notifier,
         ..DurableSettings::default()
     }
-}
-
-/// The completion secrets of a deployment whose one secret is `secret`.
-///
-/// # Errors
-///
-/// The secret is too short.
-pub fn secrets(secret: &str) -> Result<CompletionKeySecrets, String> {
-    CompletionKeySecrets::new(
-        KeyVersion(1),
-        vec![(KeyVersion(1), SecretBytes::new(secret.as_bytes().to_vec()))],
-    )
-    .map_err(|refusal| refusal.to_string())
 }
 
 /// Serve as `config` says until told to stop, stdin ends, or the lease is
@@ -122,7 +104,6 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         formats: lash::formats::actor_state_surfaces(),
         stores: Arc::new(recorded),
         settings: settings(config.notifier),
-        secrets: Some(secrets(&config.secret)?),
         engines: vec![Arc::new(WorkerEngine)],
         providers: Arc::new(NoProjectionProviders),
     })

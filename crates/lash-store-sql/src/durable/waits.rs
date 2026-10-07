@@ -5,8 +5,8 @@
 //! file in each dialect are the only places its SQL may appear
 //! (`scripts/check-durable-sql.py`).
 //!
-//! A wait's `deadline_ms`, `kind`, `owner_actor` and `key_version` are
-//! written once, by `pin`; every other statement changes a row only while it
+//! A wait's `deadline_ms`, `kind` and `owner_actor` are written once, by
+//! `pin`; every other statement changes a row only while it
 //! is `pending`, so the first resolution wins.
 
 /// The table's unprefixed name.
@@ -16,12 +16,12 @@ crate::statements! {
     /// `waits` statements both backends issue verbatim.
     pub struct WaitStatements @ "durable_wait" {
         /// Pin wait `?1` of owner `?2` in scope `?3`: kind `?4`, host
-        /// resolvable `?5`, target process `?6`, deadline `?7`, key version
-        /// `?8`, minted at epoch `?9`.
+        /// resolvable `?5`, target process `?6`, deadline `?7`, minted at
+        /// epoch `?8`.
         pin = "INSERT INTO waits
                  (wait_id, owner_actor, owner_scope, kind, host_resolvable, target_process,
-                  state, deadline_ms, key_version, created_epoch)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8, ?9)";
+                  state, deadline_ms, created_epoch)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8)";
 
         /// Settle owner `?2`'s pending wait `?1` whose deadline passed by
         /// `?4`: a timer resolves with digest `?3`, any other kind times out.
@@ -65,14 +65,14 @@ crate::statements! {
         /// Owner `?1`'s pending waits.
         pending = "SELECT wait_id, owner_actor, owner_scope, kind, target_process, state,
                     deadline_ms, resolution_digest, resolution_ref, resolved_at_ms,
-                    key_version, created_epoch
+                    created_epoch
              FROM waits WHERE owner_actor = ?1 AND state = 'pending'
              ORDER BY wait_id";
 
         /// Wait `?1`.
         one = "SELECT wait_id, owner_actor, owner_scope, kind, target_process, state,
                     deadline_ms, resolution_digest, resolution_ref, resolved_at_ms,
-                    key_version, created_epoch
+                    created_epoch
              FROM waits WHERE wait_id = ?1";
     }
 }

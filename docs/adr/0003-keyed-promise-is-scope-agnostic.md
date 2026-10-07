@@ -23,12 +23,13 @@ The row exists from minting, so a resolution that arrives before the owner
 awaits finds it. Resolution is a conditional update from `pending`; the first
 terminal resolution wins and is retained. A repeated resolution with the same
 digest answers `AlreadyResolved`, one with a different digest answers
-`Conflict`, and a revoked or unknown wait answers `UnknownOrRevoked`, distinct
-from runtime failures. A deadline that passes resolves the wait
+`Conflict`, a revoked or timed-out wait answers `Revoked` and a key that names
+no wait answers `Unknown`, distinct from runtime failures. A deadline that passes resolves the wait
 `TimedOut { WaitDeadline }` before anything acts on it.
 
-A host-resolvable key is `wk1.<wait_id>.<mac>`, an HMAC under the deployment
-secret that carries no scope or kind in plaintext. Hosts resolve only the
+A host-resolvable key is its wait's id, 128 random bits: a bearer capability
+that carries no scope or kind. Lash keeps no completion secret; the host
+authorizes who may resolve and hands keys only to those callers. Hosts resolve only the
 `tool_completion` and `custom` kinds; signals, turn cancellation and process
 terminals have their own admission paths. Named signals carry declared schemas
 and validate their payloads. Waiting is a facet on a running process, mirrored

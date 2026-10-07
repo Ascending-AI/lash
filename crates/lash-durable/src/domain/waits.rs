@@ -22,15 +22,17 @@ pub const CANCEL_MAIL: &str = "cancel";
 /// version_guard(
 ///     items(
 ///         path = "crates/lash-durable/src/domain/waits.rs",
-///         WaitRow, WaitKind, WaitState, WaitId, KeyVersion,
+///         WaitRow, WaitKind, WaitState, WaitId,
 ///     ),
 /// )
 /// version_surface = "drain"
 /// format_manifest = "WaitRow"
 pub const WAIT_ROW_FORMAT_VERSION: u32 = 1;
 
-/// A wait's identity: 128 random bits, minted by the owner in the
-/// transaction that pins the wait.
+/// A wait's identity: 128 random bits from the operating system's CSPRNG,
+/// minted by the owner in the transaction that pins the wait. A
+/// host-resolvable wait's completion key is this id: it is unguessable, so
+/// holding it is the capability to resolve the wait.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WaitId(pub [u8; 16]);
 
@@ -67,12 +69,6 @@ impl std::fmt::Display for WaitId {
     }
 }
 
-/// The version of the completion secret a host-resolvable key was minted
-/// under. The row stores it, so a key verifies under its own version for as
-/// long as that version is configured.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct KeyVersion(pub u16);
-
 /// What a wait waits for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WaitKind {
@@ -99,7 +95,7 @@ impl WaitKind {
         matches!(self, Self::ToolCompletion | Self::Custom)
     }
 
-    /// The stored spelling, which the key's MAC also covers.
+    /// The stored spelling.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -188,8 +184,6 @@ pub struct WaitRow {
     pub resolution_ref: Option<String>,
     /// When it was resolved.
     pub resolved_at: Option<DurableInstant>,
-    /// For a host-resolvable wait, its key's secret version.
-    pub key_version: Option<KeyVersion>,
     /// The epoch of the commit that minted it.
     pub created_epoch: Epoch,
 }
@@ -210,8 +204,6 @@ pub enum WaitWrite {
         target_process: Option<ProcessId>,
         /// Its deadline.
         deadline: Option<DurableInstant>,
-        /// For a host-resolvable wait, its key's secret version.
-        key_version: Option<KeyVersion>,
     },
     /// Settle a pending wait of the committing owner whose deadline passed
     /// as of the commit: a timer resolves with [`TIMER_DIGEST`], any other
@@ -273,6 +265,9 @@ pub enum ResolveAnswer {
     Conflict,
     /// A host resolved a kind it may not; nothing was written.
     ReservedKind,
-    /// No such pending or resolved wait: unknown, revoked or timed out.
-    UnknownOrRevoked,
+    /// No wait has this id: nothing was written.
+    Unknown,
+    /// The wait was revoked, or timed out, before this resolution; nothing
+    /// was written.
+    Revoked,
 }

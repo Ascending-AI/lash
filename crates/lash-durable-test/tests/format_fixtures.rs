@@ -35,9 +35,9 @@ use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::{BodyOutput, ToolBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    Backend, CompletionKeySecrets, EngineStepRun, EngineSteps as _, LifetimeDecision, ProcessId,
-    ProcessIdMint, ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    StepRequest, StoreSet, ToolCallId,
+    Backend, EngineStepRun, EngineSteps as _, LifetimeDecision, ProcessId, ProcessIdMint,
+    ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration, StepRequest, StoreSet,
+    ToolCallId,
 };
 use lash_durable::runner::{Activation, Stopped};
 use lash_durable::{ActorKey, ActorKind, ActorState, CommitLabel, DurableStore, LeaseConfig};
@@ -72,7 +72,6 @@ fn build(stores: Arc<dyn StoreSet>) -> (Backend, Arc<LashlangProcessEngine>) {
         LashlangSurface::default(),
     ));
     let backend = lash::durable::DurableBackendBuilder::new(stores)
-        .completion_secrets(CompletionKeySecrets::for_testing())
         .process_engine(Arc::clone(&engine) as _)
         .build()
         .expect("the shipped backend builds");

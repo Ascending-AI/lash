@@ -1,6 +1,4 @@
 mod accounting;
-#[path = "../../shared/completion_secrets.rs"]
-mod completion_secrets;
 mod grading;
 mod provenance;
 mod provider_log;

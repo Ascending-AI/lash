@@ -321,7 +321,6 @@ impl RunSubstrate {
             .await
             .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
         let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-            .completion_secrets(crate::completion_secrets::completion_secrets(None)?)
             .build()
             .context("build the durable backend")?;
         Ok(Self { backend })

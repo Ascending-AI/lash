@@ -154,7 +154,6 @@ impl ProcessActivation {
             // the turn always finds it.
             let (wait, _) = waits::pin(
                 &mut tx,
-                self.backend.completion_secrets(),
                 WaitSpec {
                     kind: WaitKind::ChildSession,
                     scope: ScopeKey::Process(process.clone()),

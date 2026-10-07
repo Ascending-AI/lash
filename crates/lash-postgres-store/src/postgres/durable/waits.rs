@@ -10,8 +10,8 @@
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    KeyVersion, ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitResolution, WaitRow,
-    WaitState, WaitWrite,
+    ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitResolution, WaitRow, WaitState,
+    WaitWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, Woken};
 use lash_store_sql::Dialect;
@@ -27,7 +27,7 @@ lash_store_sql::statements! {
         /// Wait `?1`, locked for the rest of the transaction.
         lock = "SELECT wait_id, owner_actor, owner_scope, kind, target_process, state,
                     deadline_ms, resolution_digest, resolution_ref, resolved_at_ms,
-                    key_version, created_epoch
+                    created_epoch
              FROM waits WHERE wait_id = ?1
              FOR UPDATE";
     }
@@ -55,7 +55,6 @@ pub(super) async fn apply(
             kind,
             target_process,
             deadline,
-            key_version,
         } => {
             sqlx::query(SQL.waits.pin.sql())
                 .bind(id.to_hex())
@@ -69,7 +68,6 @@ pub(super) async fn apply(
                         .map(|process| process.as_str().to_owned()),
                 )
                 .bind(deadline.map(|deadline| deadline.0))
-                .bind(key_version.map(|version| i32::from(version.0)))
                 .bind(commit.epoch.0)
                 .execute(&mut *tx)
                 .await
@@ -166,7 +164,7 @@ pub(super) async fn resolve(
         .await
         .map_err(sqlx_failure)?;
     let Some(row) = row.as_ref().map(decode).transpose()? else {
-        return Ok((ResolveAnswer::UnknownOrRevoked, None));
+        return Ok((ResolveAnswer::Unknown, None));
     };
     if let Some(answer) = settled_answer(&row, resolution) {
         return Ok((answer, None));
@@ -180,7 +178,7 @@ pub(super) async fn resolve(
         .await
         .map_err(sqlx_failure)?;
     if owner.is_none() {
-        return Ok((ResolveAnswer::UnknownOrRevoked, None));
+        return Ok((ResolveAnswer::Revoked, None));
     }
     match wake_within(tx, &row.owner, false, now).await {
         Ok((woken, _)) => Ok((ResolveAnswer::Resolved, Some(woken))),
@@ -203,7 +201,7 @@ fn settled_answer(row: &WaitRow, resolution: &WaitResolution) -> Option<ResolveA
             Some(ResolveAnswer::AlreadyResolved)
         }
         WaitState::Resolved => Some(ResolveAnswer::Conflict),
-        WaitState::TimedOut | WaitState::Revoked => Some(ResolveAnswer::UnknownOrRevoked),
+        WaitState::TimedOut | WaitState::Revoked => Some(ResolveAnswer::Revoked),
     }
 }
 
@@ -237,7 +235,6 @@ fn decode(row: &PgRow) -> Result<WaitRow, DurableError> {
     let kind: String = get(row, 3)?;
     let target: Option<String> = get(row, 4)?;
     let state: String = get(row, 5)?;
-    let key_version: Option<i32> = get(row, 10)?;
     Ok(WaitRow {
         id: WaitId::parse_hex(&id).ok_or_else(|| corrupt("wait id", &id))?,
         owner: actor_key(&get::<String>(row, 1)?)?,
@@ -254,13 +251,6 @@ fn decode(row: &PgRow) -> Result<WaitRow, DurableError> {
         resolution_digest: get(row, 7)?,
         resolution_ref: get(row, 8)?,
         resolved_at: get::<Option<i64>>(row, 9)?.map(DurableInstant),
-        key_version: key_version
-            .map(|version| {
-                u16::try_from(version)
-                    .map(KeyVersion)
-                    .map_err(|_| corrupt("wait key version", &version.to_string()))
-            })
-            .transpose()?,
-        created_epoch: Epoch(get(row, 11)?),
+        created_epoch: Epoch(get(row, 10)?),
     })
 }

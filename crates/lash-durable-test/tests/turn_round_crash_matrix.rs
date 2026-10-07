@@ -632,12 +632,8 @@ impl RoundTools for Catalog {
                     Tool::Defer => {
                         let pinned = pinned.expect("a parking member's wait is pinned");
                         let backend = services.backend();
-                        let key = waits::host_key(
-                            backend.completion_secrets(),
-                            &pinned.wait(),
-                            pinned.version,
-                        )
-                        .expect("a tool completion wait has a host key");
+                        let key = waits::host_key(&pinned.wait())
+                            .expect("a tool completion wait has a host key");
                         world.write(&call, attempt);
                         let answer = host_answer(&call);
                         tokio::spawn(async move {

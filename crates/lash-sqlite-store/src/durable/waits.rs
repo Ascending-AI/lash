@@ -10,8 +10,8 @@
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    KeyVersion, ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitResolution, WaitRow,
-    WaitState, WaitWrite,
+    ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitResolution, WaitRow, WaitState,
+    WaitWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, Woken};
 use lash_store_sql::durable::waits::WaitStatements;
@@ -36,10 +36,8 @@ CREATE TABLE IF NOT EXISTS waits (
     resolution_digest TEXT,
     resolution_ref TEXT,
     resolved_at_ms INTEGER,
-    key_version INTEGER,
     created_epoch INTEGER NOT NULL,
     CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'custom'))),
-    CONSTRAINT ck_waits_key CHECK ((key_version IS NOT NULL) = (host_resolvable = 1)),
     CONSTRAINT ck_waits_target
         CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
     CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL))
@@ -63,7 +61,6 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
             kind,
             target_process,
             deadline,
-            key_version,
         } => {
             cached_execute(
                 tx,
@@ -78,7 +75,6 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
                         .as_ref()
                         .map(|process| process.as_str().to_owned()),
                     deadline.map(|deadline| deadline.0),
-                    key_version.map(|version| i64::from(version.0)),
                     commit.epoch.0
                 ],
             )?;
@@ -179,7 +175,7 @@ pub(super) fn resolve(
     now: DurableInstant,
 ) -> Answer<(ResolveAnswer, Option<Woken>)> {
     let Some(row) = read_one(tx, &resolution.id)? else {
-        return Ok(Ok((ResolveAnswer::UnknownOrRevoked, None)));
+        return Ok(Ok((ResolveAnswer::Unknown, None)));
     };
     let row = match row {
         Ok(row) => row,
@@ -201,7 +197,7 @@ pub(super) fn resolve(
         )
         .optional()?;
     if owner.is_none() {
-        return Ok(Ok((ResolveAnswer::UnknownOrRevoked, None)));
+        return Ok(Ok((ResolveAnswer::Revoked, None)));
     }
     match wake_within(tx, &row.owner, false, now)? {
         Ok((woken, _)) => Ok(Ok((ResolveAnswer::Resolved, Some(woken)))),
@@ -224,7 +220,7 @@ pub(super) fn settled_answer(row: &WaitRow, resolution: &WaitResolution) -> Opti
             Some(ResolveAnswer::AlreadyResolved)
         }
         WaitState::Resolved => Some(ResolveAnswer::Conflict),
-        WaitState::TimedOut | WaitState::Revoked => Some(ResolveAnswer::UnknownOrRevoked),
+        WaitState::TimedOut | WaitState::Revoked => Some(ResolveAnswer::Revoked),
     }
 }
 
@@ -263,7 +259,6 @@ struct Stored {
     digest: Option<String>,
     resolution_ref: Option<String>,
     resolved_at: Option<i64>,
-    key_version: Option<i64>,
     created_epoch: i64,
 }
 
@@ -279,8 +274,7 @@ fn stored_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stored> {
         digest: row.get(7)?,
         resolution_ref: row.get(8)?,
         resolved_at: row.get(9)?,
-        key_version: row.get(10)?,
-        created_epoch: row.get(11)?,
+        created_epoch: row.get(10)?,
     })
 }
 
@@ -303,14 +297,6 @@ fn decode(stored: Stored) -> Result<WaitRow, DurableError> {
         resolution_digest: stored.digest,
         resolution_ref: stored.resolution_ref,
         resolved_at: stored.resolved_at.map(DurableInstant),
-        key_version: stored
-            .key_version
-            .map(|version| {
-                u16::try_from(version)
-                    .map(KeyVersion)
-                    .map_err(|_| corrupt("wait key version", &version.to_string()))
-            })
-            .transpose()?,
         created_epoch: Epoch(stored.created_epoch),
     })
 }

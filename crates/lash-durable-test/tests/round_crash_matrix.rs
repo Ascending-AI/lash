@@ -40,7 +40,7 @@ use lash_core_execution::runtime::actor::round::{
     RoundDraft, RoundRunner, RunFold,
 };
 use lash_core_execution::runtime::actor::waits::{
-    self, HostKeyCheck, Resolution, ResolveAnswer, WaitDeadline, WaitKind,
+    self, Resolution, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
 };
 use lash_core_execution::{ActorContext, AdmittedScope, Backend};
 use lash_core_store::effect_opener::EffectOpener;
@@ -292,8 +292,7 @@ impl Catalog {
             .draft()
             .pinned_wait()
             .expect("a member that may park has its completion wait pinned");
-        let key = waits::host_key(backend.completion_secrets(), &pinned.wait(), pinned.version)
-            .expect("a tool completion wait has a host key");
+        let key = waits::host_key(&pinned.wait()).expect("a tool completion wait has a host key");
         Box::new(move |_token| {
             Box::pin(async move {
                 world.write(&call, attempt);
@@ -383,7 +382,6 @@ impl RoundOwner {
             let mut tx = cx.begin().await.map_err(Pass::from)?;
             let admitted = round::admit_round(
                 &mut tx,
-                cx.backend().completion_secrets(),
                 &waits::wait_scope(cx),
                 RoundDraft {
                     owner: owner(),
@@ -657,38 +655,34 @@ impl Scenario for RoundScenario {
     }
 }
 
-/// K: a key a parking body was handed verifies as its call's tool
-/// completion wait under the deployment's secret, and every forgery of it
-/// reaches the MAC check, is refused, and resolves nothing.
+/// K: a key a parking body was handed is its call's tool completion wait's
+/// id, and a key that is not an issued wait id is refused `Unknown` and
+/// resolves nothing.
 async fn key_laws(backend: &Backend, call: &ToolCallId, key: &str) -> Vec<String> {
     let mut violations = Vec::new();
-    match waits::check_host_key(backend, key).await {
-        Ok(HostKeyCheck::Verified(row)) if row.kind == WaitKind::ToolCompletion => {}
-        other => violations.push(format!("K: {call}'s key did not verify: {other:?}")),
+    let named = match WaitId::parse_hex(key) {
+        Some(id) => backend.durable().wait(&id).await,
+        None => Ok(None),
+    };
+    match named {
+        Ok(Some(row)) if row.kind == WaitKind::ToolCompletion => {}
+        other => violations.push(format!(
+            "K: {call}'s key names no tool completion wait: {other:?}"
+        )),
     }
-    let (prefix, mac) = key.rsplit_once('.').expect("a wk1 key has a MAC");
     let flipped = |text: &str| {
         let mut chars: Vec<char> = text.chars().collect();
-        let last = chars.last_mut().expect("a non-empty part");
+        let last = chars.last_mut().expect("a non-empty key");
         *last = if *last == '0' { '1' } else { '0' };
         chars.into_iter().collect::<String>()
     };
-    let (_, id) = prefix.split_once('.').expect("a wk1 key has a wait id");
     let forgeries = [
-        // Another MAC for the same wait.
-        format!("{prefix}.{}", flipped(mac)),
-        // The same MAC for another wait.
-        format!("wk1.{}.{mac}", flipped(id)),
-        // No MAC at all.
-        prefix.to_owned(),
+        // Another id, never issued.
+        flipped(key),
+        // Not an id at all.
+        key[..key.len() - 2].to_owned(),
     ];
     for forged in forgeries {
-        match waits::check_host_key(backend, &forged).await {
-            Ok(HostKeyCheck::Verified(_)) | Err(_) => {
-                violations.push(format!("K: a forgery of {call}'s key verified"));
-            }
-            Ok(_) => {}
-        }
         match waits::resolve_host(
             backend,
             &forged,
@@ -696,7 +690,7 @@ async fn key_laws(backend: &Backend, call: &ToolCallId, key: &str) -> Vec<String
         )
         .await
         {
-            Ok(ResolveAnswer::UnknownOrRevoked) => {}
+            Ok(ResolveAnswer::Unknown) => {}
             other => violations.push(format!(
                 "K: a forgery of {call}'s key resolved as {other:?}"
             )),

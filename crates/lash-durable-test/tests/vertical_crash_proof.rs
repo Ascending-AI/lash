@@ -55,7 +55,7 @@ use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlock
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
 use lash_core_execution::{
-    Backend, BackendParts, CompletionKeySecrets, DurableSettings, NoProjectionProviders, StoreSet,
+    Backend, BackendParts, DurableSettings, NoProjectionProviders, StoreSet,
 };
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
@@ -292,7 +292,6 @@ fn shipped_backend(stores: Arc<dyn StoreSet>) -> Backend {
     Backend::assemble(BackendParts {
         stores,
         settings: DurableSettings::default(),
-        secrets: Some(CompletionKeySecrets::for_testing()),
         engines: Vec::new(),
         providers: Arc::new(NoProjectionProviders),
         formats: lash::formats::actor_state_surfaces(),

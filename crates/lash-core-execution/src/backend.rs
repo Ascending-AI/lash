@@ -42,10 +42,6 @@ impl std::fmt::Display for StoreBindingId {
 /// Why a durable backend was not built.
 #[derive(Debug, thiserror::Error)]
 pub enum DurableBuildError {
-    /// No completion secrets were configured: host-resolvable wait keys
-    /// cannot be minted or verified, and there is no default.
-    #[error("the durable backend needs completion secrets; there is no default")]
-    MissingCompletionSecrets,
     /// Two process engines declare one kind.
     #[error("two process engines declare kind `{kind}`")]
     DuplicateEngine {
@@ -69,8 +65,6 @@ pub struct BackendParts {
     pub stores: Arc<dyn StoreSet>,
     /// The substrate parameters, validated by assembly.
     pub settings: DurableSettings,
-    /// The completion secrets; required.
-    pub secrets: Option<crate::runtime::actor::waits::CompletionKeySecrets>,
     /// The host process engines, one per kind.
     pub engines: Vec<Arc<dyn crate::ProcessEngine>>,
     /// The projection providers' catalog.
@@ -82,8 +76,7 @@ pub struct BackendParts {
 }
 
 /// The one value a runtime takes every port from: the store set, its
-/// durable store, the substrate's parameters, the completion secrets, the
-/// host process engines and the projection providers (ADR 0132 §1).
+/// durable store, the substrate's parameters, the host process engines and the projection providers (ADR 0132 §1).
 ///
 /// It is the unit ADR 0102 rules on: no API assembles ports from different
 /// substrates by hand. Every accessor hands out a handle on the store set's
@@ -101,7 +94,6 @@ struct BackendInner {
     /// that serves no durable store is never asked for one.
     durable: std::sync::OnceLock<Arc<dyn DurableStore>>,
     config: DurableConfig,
-    secrets: crate::runtime::actor::waits::CompletionKeySecrets,
     engines: BTreeMap<String, Arc<dyn crate::ProcessEngine>>,
     providers: Arc<dyn ProjectionProviders>,
     /// The format sets this build writes and decodes.
@@ -118,7 +110,7 @@ impl Backend {
     /// # Errors
     ///
     /// [`DurableBuildError`]: invalid settings, duplicate engines or
-    /// providers, then missing completion secrets.
+    /// providers.
     pub fn assemble(parts: BackendParts) -> Result<Self, DurableBuildError> {
         let config = parts.settings.validate()?;
         let mut engines = BTreeMap::new();
@@ -135,9 +127,6 @@ impl Backend {
                 return Err(DurableBuildError::DuplicateProvider { projection });
             }
         }
-        let secrets = parts
-            .secrets
-            .ok_or(DurableBuildError::MissingCompletionSecrets)?;
         let engine_formats: Vec<_> = engines
             .values()
             .map(|engine| engine.state_format())
@@ -148,7 +137,6 @@ impl Backend {
                 stores: parts.stores,
                 durable: std::sync::OnceLock::new(),
                 config,
-                secrets,
                 engines,
                 providers,
                 formats,
@@ -157,8 +145,8 @@ impl Backend {
         })
     }
 
-    /// A backend over `stores` with the default settings, testing completion
-    /// secrets, no engines and no projection providers.
+    /// A backend over `stores` with the default settings, no engines and no
+    /// projection providers.
     #[cfg(any(test, feature = "testing"))]
     #[expect(
         clippy::expect_used,
@@ -169,7 +157,6 @@ impl Backend {
         Self::assemble(BackendParts {
             stores,
             settings: DurableSettings::default(),
-            secrets: Some(crate::runtime::actor::waits::CompletionKeySecrets::for_testing()),
             engines: Vec::new(),
             providers: Arc::new(crate::runtime::actor::projection::NoProjectionProviders),
             formats: Vec::new(),
@@ -178,7 +165,7 @@ impl Backend {
     }
 
     /// This backend over `stores` instead, with the same configuration,
-    /// secrets, engines and providers: what a test that decorates store
+    /// engines and providers: what a test that decorates store
     /// ports builds.
     #[cfg(any(test, feature = "testing"))]
     #[must_use]
@@ -188,7 +175,6 @@ impl Backend {
                 stores,
                 durable: std::sync::OnceLock::new(),
                 config: self.inner.config,
-                secrets: self.inner.secrets.clone(),
                 engines: self.inner.engines.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 formats: self.inner.formats.clone(),
@@ -220,11 +206,6 @@ impl Backend {
     /// The substrate's parameters.
     pub fn config(&self) -> &DurableConfig {
         &self.inner.config
-    }
-
-    /// The completion secrets wait keys are minted and verified under.
-    pub fn completion_secrets(&self) -> &crate::runtime::actor::waits::CompletionKeySecrets {
-        &self.inner.secrets
     }
 
     /// The host process engine of `kind`.

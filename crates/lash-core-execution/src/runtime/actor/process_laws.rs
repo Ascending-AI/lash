@@ -28,11 +28,11 @@ use super::wait_laws::{LawBroken, LawResult};
 use crate::runtime::actor::round::ToolBody;
 use crate::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use crate::{
-    Ancestry, Backend, BackendParts, CancelOrigin, CompletionKeySecrets, DurableSettings,
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, LifetimeDecision, ProcessEngine,
-    ProcessId, ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ProcessSignal, ProcessSignalIdentity, ScopeGrant, ScopeId, StepName,
-    StepRequest, ToolCallId, ToolCallOutput, ToolCancellation,
+    Ancestry, Backend, BackendParts, CancelOrigin, DurableSettings, EngineAction, EngineEvent,
+    EngineState, EngineStateFormat, LifetimeDecision, ProcessEngine, ProcessId, ProcessInfraError,
+    ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessSignal, ProcessSignalIdentity, ScopeGrant, ScopeId, StepName, StepRequest, ToolCallId,
+    ToolCallOutput, ToolCancellation,
 };
 
 macro_rules! ensure {
@@ -96,7 +96,6 @@ fn with_engines(
         formats: Vec::new(),
         stores: backend.stores(),
         settings: settings(),
-        secrets: Some(CompletionKeySecrets::for_testing()),
         engines,
         providers: Arc::new(super::projection::NoProjectionProviders),
     })
