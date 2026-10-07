@@ -207,9 +207,13 @@ impl FaultStore {
                 answer
             }
             Fault::Zombie => {
+                // The write is already on its way: it enters the store when
+                // the node resumes, even if the resumed node stops itself
+                // and drops the call that sent it.
                 self.life.pause();
-                self.life.running().await;
-                self.store(entry, write).await
+                let life = Arc::clone(&self.life);
+                self.send(async move { life.running().await }, entry, write)
+                    .await
             }
             Fault::LostWake => {
                 let mut answer = self.store(entry, write).await;
@@ -230,8 +234,20 @@ impl FaultStore {
         entry: Entry,
         write: Call<T>,
     ) -> Result<T, DurableError> {
+        self.send(std::future::ready(()), entry, write).await
+    }
+
+    /// [`Self::store`], with the write entering the store only once `held`
+    /// is done.
+    async fn send<T: Effect + Send + 'static>(
+        &self,
+        held: impl Future<Output = ()> + Send + 'static,
+        entry: Entry,
+        write: Call<T>,
+    ) -> Result<T, DurableError> {
         let activity = Arc::clone(&self.activity);
         let sent = tokio::spawn(async move {
+            held.await;
             let answer = activity.call(write).await;
             entry.finish(match &answer {
                 Ok(answer) => Stored::Committed {

@@ -4,7 +4,7 @@
 //!
 //! - **F1, fencing:** no owner write ever commits under a stale epoch, a
 //!   zombie's paused commit is refused once it resumes, a stale owner's
-//!   later commits are refused, and a node that lost its lease stops.
+//!   later commits are refused, and a node paused past its lease stops itself.
 //! - **O1, owner cache:** mail reaches its actor's owner within the hint or
 //!   the poll, whether the actor is hot or idle and whether the wake is
 //!   lost, and an owner that lost its actor keeps nothing of it.
@@ -243,12 +243,14 @@ impl Scenario for Fencing {
                 }
                 _ => {}
             }
-            // A node paused before it registered held no lease to lose.
+            // A node paused before it registered held no lease to lose. Any
+            // other was paused past `self_stop_after`, so it stops itself
+            // unrenewed as soon as it resumes, before it can see its reap.
             if cut.fault.pauses() && cut.point.label != CommitLabel::NODE_REGISTER {
                 match nodes.stopped(&cut.node).await {
-                    Some(Ok(lash_durable::runner::Stopped::LeaseLost)) => {}
+                    Some(Ok(lash_durable::runner::Stopped::Unrenewed)) => {}
                     other => violations.push(format!(
-                        "F1: paused node {} kept serving after its lease was reaped ({other:?})",
+                        "F1: paused node {} did not stop itself unrenewed on resume ({other:?})",
                         cut.node
                     )),
                 }
