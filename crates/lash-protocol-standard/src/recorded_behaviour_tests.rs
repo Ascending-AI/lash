@@ -5,11 +5,9 @@
 
 use super::*;
 
-/// A recorded namespace under `render` options, with the built-in prompt and
-/// the default behaviour.
+/// A recorded namespace under `render` options, with the default behaviour.
 fn recorded_under(render: Option<StandardRenderConfig>) -> StandardRecordedConfig {
     StandardRecordedConfig {
-        prompt: StandardPrompt::default(),
         render,
         behaviour: StandardProtocolConfig::default().recorded_behaviour(),
     }
@@ -82,7 +80,7 @@ fn run_options_apply_over_the_recorded_render_field_by_field() {
             render: applied.render.clone(),
             ..recorded.clone()
         },
-        "the prompt and the behaviour stay as recorded"
+        "the behaviour stays as recorded"
     );
     assert_eq!(
         standard_owner()
@@ -136,7 +134,7 @@ fn a_refused_render_is_typed_and_an_unreadable_namespace_is_corruption() {
         .resolve_render(&lash_core::ProtocolTurnOptions::from_payload(
             serde_json::json!({ "render": { "defaults": {} } }),
         ))
-        .expect_err("a namespace without its prompt and behaviour is unreadable");
+        .expect_err("a namespace without its behaviour is unreadable");
     assert!(
         matches!(
             &corrupt,

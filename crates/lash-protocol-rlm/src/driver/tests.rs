@@ -100,7 +100,6 @@ pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
     RlmContextProjector {
         prompt_features: Default::default(),
         max_output_chars,
-        max_budget_tokens: None,
         dialect: Arc::new(SessionDialect::prompt_only(
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
@@ -108,7 +107,7 @@ pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
     }
 }
 
-fn rendered_bound_variables(
+pub(crate) fn rendered_bound_variables(
     cache: &mut crate::rlm_support::BoundVariableRenderCache,
     globals: serde_json::Value,
 ) -> Arc<str> {
@@ -134,17 +133,18 @@ fn project_iteration_request(
     protocol_iteration: usize,
     model: &str,
 ) -> Arc<LlmRequest> {
-    project_iteration_request_with_inputs(
+    project_iteration_request_with_generation(
         projector,
         events,
         protocol_iteration,
         model,
         Default::default(),
         None,
-        &lash_core::sansio::ProjectorTurnInputs::default(),
     )
 }
 
+/// The request a projector renders from history alone: no prompt section is
+/// the projector's to place.
 fn project_iteration_request_with_generation(
     projector: &RlmContextProjector,
     events: &[SessionHistoryRecord],
@@ -152,30 +152,6 @@ fn project_iteration_request_with_generation(
     model: &str,
     generation: lash_core::GenerationOptions,
     max_context_tokens: Option<usize>,
-    projector_turn_inputs: &lash_core::sansio::ProjectorTurnInputs,
-) -> Arc<LlmRequest> {
-    project_iteration_request_with_inputs(
-        projector,
-        events,
-        protocol_iteration,
-        model,
-        generation,
-        max_context_tokens,
-        projector_turn_inputs,
-    )
-}
-
-/// The system prompt of the environment every projection test syncs.
-const TEST_SYSTEM_PROMPT: &str = "stable RLM system prompt";
-
-fn project_iteration_request_with_inputs(
-    projector: &RlmContextProjector,
-    events: &[SessionHistoryRecord],
-    protocol_iteration: usize,
-    model: &str,
-    generation: lash_core::GenerationOptions,
-    max_context_tokens: Option<usize>,
-    projector_turn_inputs: &lash_core::sansio::ProjectorTurnInputs,
 ) -> Arc<LlmRequest> {
     let config = projection_test_config(model, generation, max_context_tokens);
     projector
@@ -186,13 +162,20 @@ fn project_iteration_request_with_inputs(
             turn_causes: &[],
             protocol_iteration,
             use_tools: false,
-            environment: &lash_core::sansio::ExecutionEnvironmentSync {
-                system_prompt: Arc::from(TEST_SYSTEM_PROMPT),
-                projector_turn_inputs: projector_turn_inputs.clone(),
-                ..Default::default()
-            },
+            environment: &lash_core::sansio::ExecutionEnvironmentSync::default(),
         })
         .expect("valid history fixture")
+}
+
+/// A request projected from a one-message history, for the prompt laws
+/// that place sections on it.
+pub(crate) fn projected_request() -> LlmRequest {
+    Arc::unwrap_or_clone(project_iteration_request(
+        &projector(1000),
+        &[user_event("u1", "first")],
+        0,
+        "test-model",
+    ))
 }
 
 #[test]
@@ -265,14 +248,13 @@ fn rlm_projector_suppresses_every_nonempty_caller_stop_list() {
                 ..Default::default()
             },
             None,
-            &lash_core::sansio::ProjectorTurnInputs::default(),
         );
         assert!(request.generation.stop_sequences.is_empty());
         assert!(request.generation.stop_sequences_suppressed_by_protocol());
     }
 }
 
-fn message_text(message: &LlmMessage) -> String {
+pub(crate) fn message_text(message: &LlmMessage) -> String {
     message
         .blocks
         .iter()
@@ -305,11 +287,6 @@ fn folded_step_renders_as_emission_cell_not_history_echo() {
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 1,
-        finalization: &rlm_finalization_prompt(&RlmTermination::default()),
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture");
 
@@ -371,11 +348,6 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 0,
-        finalization: "",
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture");
     let rendered = messages
@@ -463,11 +435,6 @@ fn natural_prose_history_is_byte_unchanged() {
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 0,
-        finalization: "",
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture");
 
@@ -502,11 +469,6 @@ fn committed_transcript_remains_the_rolling_cache_fence() {
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 0,
-        finalization: "finish",
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture");
 
@@ -615,11 +577,6 @@ fn process_wake_history_renders_as_chronological_event_context() {
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 1,
-        finalization: &rlm_finalization_prompt(&RlmTermination::default()),
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture");
     let history = projector.format_history(&events);
@@ -657,11 +614,6 @@ fn active_turn_causes_render_in_current_turn_events_without_history_duplication(
         turn_causes: std::slice::from_ref(&cause),
         max_output_chars: 1000,
         protocol_iteration: 0,
-        finalization: &rlm_finalization_prompt(&RlmTermination::default()),
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture");
 
@@ -724,11 +676,6 @@ fn printed_images_render_as_llm_image_blocks() {
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 1,
-        finalization: &rlm_finalization_prompt(&RlmTermination::default()),
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture");
 
@@ -770,11 +717,6 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 2,
-        finalization: &rlm_finalization_prompt(&RlmTermination::default()),
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture");
 
@@ -819,153 +761,32 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
     ));
 }
 
+/// The current iteration's tail carries the history binding; the bound
+/// values are the protocol's late section, not the projector's.
 #[test]
-fn rlm_instructions_are_stable_while_history_and_globals_change() {
-    let previous_events = vec![user_event("u1", "inspect"), step_event(0, "value = 1", "1")];
-    let mut next_events = previous_events.clone();
-    next_events.push(step_event(1, "scratch_note = \"saved\"", "saved"));
-    let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
-    let previous_bound = rendered_bound_variables(&mut cache, serde_json::json!({}));
-    let next_bound =
-        rendered_bound_variables(&mut cache, serde_json::json!({ "scratch_note": "saved" }));
-    let projector = projector(1000);
-
-    let previous_inputs = lash_core::sansio::ProjectorTurnInputs {
-        bound_variables_prompt: Some(previous_bound),
-        ..Default::default()
-    };
-    let previous = project_iteration_request_with_inputs(
-        &projector,
-        &previous_events,
-        0,
-        "test-model",
-        Default::default(),
-        None,
-        &previous_inputs,
-    );
-    let next_inputs = lash_core::sansio::ProjectorTurnInputs {
-        bound_variables_prompt: Some(next_bound),
-        ..Default::default()
-    };
-    let next = project_iteration_request_with_inputs(
-        &projector,
-        &next_events,
-        1,
-        "test-model",
-        Default::default(),
-        None,
-        &next_inputs,
-    );
-
-    assert_eq!(previous.instructions, next.instructions);
-    assert_eq!(
-        previous.instructions.as_deref(),
-        Some("stable RLM system prompt")
-    );
-    assert!(
-        !previous
-            .instructions
-            .as_deref()
-            .unwrap()
-            .contains("Bound Variables")
-    );
-    assert!(
-        !next
-            .instructions
-            .as_deref()
-            .unwrap()
-            .contains("scratch_note")
-    );
-}
-
-#[test]
-fn bound_variables_render_in_the_volatile_tail_in_name_order() {
+fn the_current_iteration_tail_declares_the_history_binding() {
     let events = vec![
         user_event("u1", "inspect"),
         step_event(0, "value = 1", "1"),
         step_event(1, "scratch_note = \"saved\"", "saved"),
     ];
-    let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
-    let bound_variables = rendered_bound_variables(
-        &mut cache,
-        serde_json::json!({
-            "zeta": 3,
-            "scratch_note": "saved",
-            "alpha": 1
-        }),
-    );
-    let projector = projector(1000);
-    let inputs = lash_core::sansio::ProjectorTurnInputs {
-        bound_variables_prompt: Some(bound_variables),
-        ..Default::default()
-    };
-    let request = project_iteration_request_with_inputs(
-        &projector,
-        &events,
-        1,
-        "test-model",
-        Default::default(),
-        None,
-        &inputs,
-    );
-    let tail = message_text(request.messages.last().expect("volatile tail"));
+    let request = project_iteration_request(&projector(1000), &events, 1, "test-model");
+    let tail = message_text(request.messages.last().expect("current iteration tail"));
 
+    assert!(tail.contains("=== CURRENT ITERATION: 2 ==="), "{tail}");
     assert!(tail.contains("=== BOUND VARIABLES ==="), "{tail}");
-    assert!(tail.contains(r#"- `scratch_note` = "saved""#), "{tail}");
     assert!(
         tail.contains("- `history`: `HistoryItem[]`, read-only, 3 entries"),
         "{tail}"
     );
-    let alpha = tail.find("- `alpha` = 1").expect("alpha row");
-    let scratch = tail
-        .find(r#"- `scratch_note` = "saved""#)
-        .expect("scratch row");
-    let zeta = tail.find("- `zeta` = 3").expect("zeta row");
-    assert!(alpha < scratch && scratch < zeta, "{tail}");
-}
-
-#[test]
-fn rlm_prompt_renders_required_output_block_when_schema_present() {
-    let projector = projector(1000);
-    let events = [user_event("u1", "first")];
-
-    let schema = serde_json::json!({
-        "type": "object",
-        "properties": {
-            "action": { "type": "string", "enum": ["call", "fold"] },
-            "amount": { "type": "integer", "minimum": 0 }
-        },
-        "required": ["action"]
-    });
-
-    let schema_contract = projector.dialect.required_output_contract(&schema);
-    let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
-        images: true,
-        dialect: projector.dialect.as_ref(),
-        events: &events,
-        turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        turn_causes: &[],
-        max_output_chars: 1000,
-        protocol_iteration: 1,
-        finalization: "Call finish",
-        required_output: Some(&schema_contract),
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
-    })
-    .expect("valid history fixture");
-
-    let tail = messages
-        .last()
-        .and_then(|message| message.blocks.first())
-        .and_then(|block| match block {
-            LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
-            _ => None,
-        })
-        .expect("tail block");
-    assert!(tail.contains("=== REQUIRED OUTPUT ==="));
-    assert!(tail.contains("{ action: \"call\" | \"fold\"; amount?: number }"));
-    assert!(tail.contains("Fields:\n- `amount?: number` (>= 0)"));
+    for section in [
+        "scratch_note",
+        "=== FINALIZATION ===",
+        "=== CONTEXT BUDGET ===",
+    ] {
+        assert!(!tail.contains(section), "{section}: {tail}");
+    }
+    assert_eq!(request.instructions, None);
 }
 
 #[test]

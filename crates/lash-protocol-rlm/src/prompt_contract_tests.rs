@@ -81,9 +81,9 @@ fn system_with(
         images: enabled,
         decomposition: enabled,
     };
-    crate::system_prompt::render_system_prompt(
-        dialect,
-        &crate::system_prompt::RlmSystemPromptBehaviour {
+    crate::prompt_sections::testing::compose_rlm(
+        crate::prompt_sections::testing::RlmSections {
+            dialect: std::sync::Arc::new(dialect.clone()),
             channel: if native {
                 crate::plugin::RlmChannel::NativeTool
             } else {
@@ -91,15 +91,15 @@ fn system_with(
             },
             prompt_features: features,
             discovery: None,
+            budget_tokens: None,
         },
-        crate::system_prompt::RlmSystemPromptInput {
-            prompt: &lash_rlm_types::RlmPrompt::default(),
-            tool_catalog: &catalog,
-            bindings: &crate::projection::RlmProjectedBindings::new(),
-            subagent: None,
+        crate::prompt_sections::testing::Call {
+            catalog,
+            ..Default::default()
         },
-        crate::system_prompt::RlmSystemPromptScope::Turn,
     )
+    .initial_instructions
+    .unwrap_or_default()
 }
 
 #[test]

@@ -1908,7 +1908,8 @@ fn stale_response_does_not_cancel_checkpoint_redelivery() {
 
 fn recorded_environment(prompt: &str, tool: &str) -> ExecutionEnvironmentSync {
     ExecutionEnvironmentSync {
-        system_prompt: Arc::from(prompt),
+        instructions: Some(Arc::from(prompt)),
+        current_context: None,
         tool_specs: Arc::new(vec![crate::llm::types::LlmToolSpec {
             name: tool.to_string(),
             description: "desc".to_string(),
@@ -1917,7 +1918,6 @@ fn recorded_environment(prompt: &str, tool: &str) -> ExecutionEnvironmentSync {
             output_schema: crate::SchemaContract::admit(serde_json::json!({ "type": "object" }))
                 .expect("valid declared schema"),
         }]),
-        projector_turn_inputs: ProjectorTurnInputs::default(),
     }
 }
 
@@ -1946,7 +1946,7 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
         0
     );
     assert_eq!(
-        encoded["checkpoint"]["environment"]["sync"]["system_prompt"],
+        encoded["checkpoint"]["environment"]["sync"]["instructions"],
         "recorded prompt"
     );
     let checkpoint: SavedTurn = serde_json::from_value(encoded).expect("checkpoint");
@@ -2018,7 +2018,7 @@ fn a_recorded_sync_failure_fails_the_turn_under_its_own_code() {
         id: sync_id,
         result: Err(ExecutionEnvironmentSyncFailure {
             code: code.clone(),
-            kind: ExecutionEnvironmentSyncFailureKind::SystemPrompt,
+            kind: ExecutionEnvironmentSyncFailureKind::Prompt,
             message: "the prompt template names no dialect".to_string(),
         }),
     });

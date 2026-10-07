@@ -68,10 +68,10 @@ impl RuntimeTurnDriver<'_> {
         machine
     }
 
-    /// The step body of an execution-environment sync: builds the prompt and
-    /// the tool surface over the live registry, and returns both with the
-    /// surface's definitions, which the sync records. It installs nothing: the
-    /// shift installs the surface the sync recorded.
+    /// The step body of an execution-environment sync: composes the prompt
+    /// sections and builds the tool surface over the live registry, and
+    /// returns both with the surface's definitions, which the sync records.
+    /// It installs nothing: the shift installs the surface the sync recorded.
     pub(in crate::runtime) async fn refresh_execution_environment(
         &mut self,
         protocol_iteration: usize,
@@ -85,73 +85,158 @@ impl RuntimeTurnDriver<'_> {
         let execution_environment = self
             .prepare_execution_environment()
             .map_err(|error| SyncFailure::of_plugin_error(SyncFailureKind::ToolSurface, error))?;
-        // The protocol plugin renders the prompt from the running run's
-        // admitted config and the pinned tool surface (FIG-4589): a config
-        // command applied while this run executes reaches the next run, and a
-        // sync redriven after a redeploy renders what the run recorded.
-        let plugin_config = self.session.plugins().admitted_plugin_config();
-        let protocol_session = Arc::clone(self.session.plugins().protocol_session());
-        let system_prompt = protocol_session
-            .render_system_prompt(crate::plugin::SystemPromptContext {
-                plugin_config: &plugin_config,
-                tool_catalog: execution_environment.tool_catalog.as_ref(),
-                subagent: self.turn_pipeline.state().authority.subagent.as_ref(),
-                purpose: crate::plugin::SystemPromptPurpose::Turn,
-            })
-            .await
-            .map_err(|error| SyncFailure::of_session_error(SyncFailureKind::SystemPrompt, error))?;
-        self.trace_prompt_built(protocol_iteration, &system_prompt);
-        let projector_turn_inputs = self.projector_turn_inputs().await.map_err(|error| {
-            SyncFailure::of_session_error(SyncFailureKind::ProjectorInputs, error)
-        })?;
-
+        let composed = self
+            .compose_turn_prompt(protocol_iteration, &execution_environment)
+            .await?;
+        self.trace_prompt_built(protocol_iteration, &composed);
         Ok((
             crate::sansio::ExecutionEnvironmentSync {
-                system_prompt,
+                instructions: composed.initial_instructions.map(Arc::from),
+                current_context: composed.current_context.map(Arc::from),
                 tool_specs: execution_environment
                     .turn_driver_preamble
                     .tool_specs
                     .clone(),
-                projector_turn_inputs,
             },
             execution_environment.tool_definitions,
         ))
     }
 
-    fn trace_prompt_built(&self, protocol_iteration: usize, system_prompt: &str) {
+    /// Compose the iteration's prompt sections (ADR 0133) under the running
+    /// run's admitted plan and config (FIG-4589): a config command applied
+    /// while this run executes reaches the next run, and a sync redriven
+    /// after a redeploy serves what the run recorded. The cut offers the
+    /// pinned tool surface, the session's committed usage and namespaces,
+    /// and the protocol's facts.
+    async fn compose_turn_prompt(
+        &mut self,
+        protocol_iteration: usize,
+        execution_environment: &PreparedExecutionEnvironment,
+    ) -> Result<crate::plugin::prompt::ComposedPrompt, SyncFailure> {
+        use crate::plugin::prompt::{
+            OfferedTools, ProjectedHistoryStats, PromptCall, PromptCut, PromptCutParts,
+            PromptModel, PromptPurpose, PromptRenderPool,
+        };
+        let protocol_facts = self.protocol_prompt_facts().await.map_err(|error| {
+            SyncFailure::of_session_error(SyncFailureKind::ProtocolFacts, error)
+        })?;
+        let plugins = Arc::clone(self.session.plugins());
+        let state = self.turn_pipeline.state();
+        let native = execution_environment
+            .turn_driver_preamble
+            .tool_specs
+            .iter()
+            .map(|spec| spec.name.clone())
+            .collect::<Vec<_>>();
+        let callable = execution_environment
+            .tool_catalog
+            .tool_names()
+            .iter()
+            .filter(|name| !native.contains(name))
+            .cloned()
+            .collect();
+        let history = self.prelude.context.messages.clone();
+        let profile = self.policy.llm_profile_config();
+        let iteration = u32::try_from(protocol_iteration).unwrap_or(u32::MAX);
+        let cut = PromptCut::new(PromptCutParts {
+            call: PromptCall {
+                session_id: self.session_id.clone(),
+                frame: state.current_frame_node_id.clone(),
+                run: None,
+                turn: Some(self.turn_id.clone()),
+                iteration,
+                call: iteration,
+                purpose: PromptPurpose::Turn,
+            },
+            config: plugins.admitted_plugin_config(),
+            session: Some(self.checkpoint_state_view(history.clone(), protocol_iteration)),
+            offered: OfferedTools {
+                native,
+                callable,
+                catalog: Arc::clone(&execution_environment.tool_catalog),
+            },
+            model: PromptModel {
+                profile: Some(profile.key().clone()),
+                context_window_tokens: Some(profile.context_window_tokens() as u64),
+                committed_usage: state.last_prompt_usage.clone(),
+            },
+            history: ProjectedHistoryStats {
+                messages: u32::try_from(history.len()).unwrap_or(u32::MAX),
+                estimated_tokens: 0,
+            },
+            namespaces: plugins.committed_namespaces(),
+        })
+        .with_subagent(state.authority.subagent.clone())
+        .with_protocol_facts(protocol_facts);
+        plugins
+            .prompt_catalog()
+            .compose(
+                &state.authority.prompt_plan,
+                &PromptPurpose::Turn,
+                Arc::new(cut),
+                PromptRenderPool::shared(),
+            )
+            .await
+            .map_err(SyncFailure::of_prompt_error)
+    }
+
+    fn trace_prompt_built(
+        &self,
+        protocol_iteration: usize,
+        composed: &crate::plugin::prompt::ComposedPrompt,
+    ) {
         if !self.trace.is_observed() {
             return;
         }
+        let system_prompt = composed.initial_instructions.as_deref().unwrap_or("");
         let prompt_hash = lash_trace::sha256_hex(system_prompt.as_bytes());
         let prompt_chars = system_prompt.chars().count();
+        let components = composed
+            .snapshot
+            .sections
+            .iter()
+            .filter_map(|section| match &section.value {
+                crate::prompt_sections::RecordedSectionText::Text { text } => {
+                    Some(lash_trace::TracePromptComponent {
+                        id: section.section.to_string(),
+                        kind: match section.placement {
+                            crate::prompt_sections::PromptPlacement::InitialInstructions => {
+                                "initial_instructions".to_string()
+                            }
+                            crate::prompt_sections::PromptPlacement::CurrentContext => {
+                                "current_context".to_string()
+                            }
+                        },
+                        hash: text.blob.0.clone(),
+                        chars: composed
+                            .texts
+                            .get(&text.blob)
+                            .map(|text| text.chars().count()),
+                    })
+                }
+                crate::prompt_sections::RecordedSectionText::Omitted => None,
+            })
+            .collect::<Vec<_>>();
         self.trace.observe(|| {
             (
                 self.trace_context(protocol_iteration),
                 lash_trace::TraceEvent::PromptBuilt {
                     prompt_hash: prompt_hash.clone(),
                     prompt_chars,
-                    components: vec![lash_trace::TracePromptComponent {
-                        id: "system_prompt".to_string(),
-                        kind: "rendered_prompt".to_string(),
-                        hash: prompt_hash,
-                        chars: Some(prompt_chars),
-                    }],
+                    components: components.clone(),
                 },
             )
         });
     }
 
-    /// The projector inputs derived from recorded turn state.
-    ///
-    /// `prompt_usage` is the previous turn's committed usage, held on the
-    /// recorded session state; the bound-variables view is rendered by the
-    /// protocol's session plugin. The results are journaled with each
-    /// execution-environment sync, the machine's only source for them, so a
-    /// redriven iteration replays them rather than re-deriving them from live
-    /// plugin cells (FIG-3538).
-    async fn projector_turn_inputs(
+    /// The protocol's facts for its prompt sections, derived from its
+    /// committed execution state under the run's recorded render. The
+    /// composed text they feed is journaled with each execution-environment
+    /// sync, so a redriven iteration replays it rather than asking again
+    /// (FIG-3538).
+    async fn protocol_prompt_facts(
         &mut self,
-    ) -> Result<crate::sansio::ProjectorTurnInputs, crate::SessionError> {
+    ) -> Result<Option<crate::plugin::prompt::ProtocolPromptFacts>, crate::SessionError> {
         let protocol_session = std::sync::Arc::clone(self.session.plugins().protocol_session());
         let recorded_render = self
             .turn_pipeline
@@ -166,11 +251,7 @@ impl RuntimeTurnDriver<'_> {
         if let Some(recorded_render) = recorded_render {
             context = context.with_recorded_render(recorded_render);
         }
-        let bound_variables_prompt = protocol_session.bound_variables_prompt(context).await?;
-        Ok(crate::sansio::ProjectorTurnInputs {
-            prompt_usage: self.turn_pipeline.state().last_prompt_usage.clone(),
-            bound_variables_prompt,
-        })
+        protocol_session.prompt_facts(context).await
     }
 
     pub(super) fn prepare_execution_environment(

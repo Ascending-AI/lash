@@ -8,10 +8,11 @@ Accepted. The contract of §1 to §5 is on main (FIG-5254):
 and chain contract. The composer, its limits and the content-shared snapshot
 storage of §5 and §7 are on main too (FIG-5256):
 `lash-core-execution/src/plugin/prompt/composer.rs` and the durable `prompts`
-domain. The rest is open work this decision depends on:
+domain. The Standard and RLM protocols contribute their prompt as keyed
+sections, and a turn composes them at each execution-environment sync
+(FIG-5257). The rest is open work this decision depends on:
 
 - FIG-5255: §6 admission at `model.start`;
-- FIG-5257: the protocols' sections;
 - FIG-5258: tools, MCP, add-on plugins and the workbench;
 - FIG-5259: exact provider bodies for every call kind;
 - FIG-5260: deleting every other prompt route (§9).
@@ -47,6 +48,24 @@ the same local key. Keys are 1 to 64 bytes of lowercase letters, digits,
 Tool schemas stay typed declarations. Conversation history and tool results
 stay history. Section text never enters the conversation graph.
 
+The protocols' sections, with their default placements:
+
+- Standard (`standard_protocol`): `intro`, `execution`, `guidance` and
+  `tool_modules`, all in the initial instructions;
+- RLM (`rlm_protocol`, both channels): `intro`, `guidance`, `execution`,
+  `declarations` (over exactly the offered callable surface) and `subagent`
+  in the initial instructions; `bound_variables`, `finalization`,
+  `required_output`, `final_answer_format` and `context_budget` late.
+
+Only `intro` and `guidance` render for a compaction. A protocol has no host
+prompt config: a host adds its text as its own sections and replaces or omits
+a protocol section with a wrapper.
+
+The history a request projects is narrowed by one route only: an
+attachment-omission history policy names attachment parts by message id and
+part index, and core replaces each with one fixed placeholder in the
+request's view. It cannot add text, change a role or touch stored history.
+
 ### 2. Trusted wrapping
 
 Plugins are trusted. Any plugin may register a wrapper over any section, its
@@ -73,7 +92,9 @@ plan its resolved config records. The plan has three parts:
 
 `InitialInstructions` places a section in the provider's instruction field.
 `CurrentContext` places it late, after the projected conversation and outside
-its history. A plugin declares a default placement. The host's placement
+its history: the call's late sections are one runtime-feedback (system-role)
+message after everything the protocol's projector rendered. A projector
+renders history only; it never places a section. A plugin declares a default placement. The host's placement
 wins, and the call records whose choice each placement was
 (`PlacementSource`).
 
@@ -97,8 +118,11 @@ A renderer or wrapper reads only a `PromptInput`. It holds:
 - the plugin's admitted config;
 - a read view of the committed frame;
 - the tools offered to this call;
-- the admitted model, and history statistics measured before any section
-  text is added.
+- the admitted model and the session's committed prompt usage, and history
+  statistics measured before any section text is added;
+- the session's recorded subagent authority;
+- the protocol's facts, derived from its committed execution state (RLM's
+  bound values), typed by the protocol and opaque to everything else.
 
 It holds no writable service, no state commands and no other plugin's
 namespace. A publication that lands while a renderer runs is invisible to it.

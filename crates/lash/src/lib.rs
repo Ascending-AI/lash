@@ -106,10 +106,9 @@ pub mod recoverable_chat;
 /// lists every command the installed owners register.
 ///
 /// The core owner's commands are here; a protocol's are in its module
-/// ([`standard::SetStandardPrompt`], [`standard::SetStandardRender`],
-/// `rlm::SetRlmPrompt` and `rlm::SetRlmRender`). The core has no prompt
-/// command: a session's system prompt is its protocol plugin's recorded
-/// config (FIG-4586).
+/// ([`standard::SetStandardRender`] and `rlm::SetRlmRender`). The prompt is
+/// keyed sections (ADR 0133): plugins register them, and the host orders and
+/// places them with [`SetPromptPlan`].
 pub mod config {
     pub use crate::admin::SessionConfigAdmin;
     pub use crate::admin::config_transactions::{ConfigSettlement, ConfigWrite};
@@ -127,37 +126,32 @@ pub mod config {
     };
 }
 /// The standard protocol's host surface: its creation options, its recorded
-/// namespace, its prompt config and the commands that change it.
+/// namespace and the command that changes it.
 ///
-/// A session's system prompt is recorded config of its protocol plugin
-/// (FIG-4586). A host states the standard protocol's at creation, in the
-/// session spec's plugin options under [`STANDARD_PROTOCOL_PLUGIN_ID`]:
+/// The prompt is not config: the protocol registers keyed sections under
+/// [`STANDARD_PROTOCOL_PLUGIN_ID`] ([`section_keys`]), placed in the initial
+/// instructions unless the host's [`SetPromptPlan`](crate::config::SetPromptPlan)
+/// places them. A host adds its own text as sections of its own plugin, and
+/// replaces or omits a built-in section by wrapping it (ADR 0133):
 ///
 /// ```ignore
-/// let spec = SessionSpec::new(profile_key, turn_budget, max_tool_calls).plugin(
-///     lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-///     lash::standard::StandardTurnOptions {
-///         prompt: Some(lash::standard::StandardPrompt {
-///             intro: Some("You are the support desk's assistant.".to_string()),
-///             ..Default::default()
-///         }),
-///         render: None,
-///     },
+/// reg.prompt().wrap(
+///     PromptWrapSpec::new(key("support-intro"), PromptSectionId::new(
+///         lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+///         key(lash::standard::section_keys::INTRO),
+///     )),
+///     Arc::new(|_: &PromptInput<'_>, _: PromptWrapTarget<'_>, _: SectionText| {
+///         Ok(SectionText::text("You are the support desk's assistant."))
+///     }),
 /// )?;
 /// ```
 ///
-/// The spec is one session's ([`SessionCreation::spec`](crate::SessionCreation::spec)):
-/// a core keeps no default, so a host that wants every session to state the
-/// same prompt keeps the spec value and passes it to each creation.
-/// After creation the prompt changes only through [`SetStandardPrompt`] and
-/// [`SetStandardPromptContext`], which reach the next run. A run's options
-/// are [`StandardRunOptions`]: they cannot state the prompt.
+/// A run's options are [`StandardRunOptions`].
 pub mod standard {
     pub use lash_protocol_standard::{
-        STANDARD_PROTOCOL_PLUGIN_ID, SetStandardPrompt, SetStandardPromptContext,
-        SetStandardRender, StandardConfigOwner, StandardConfigRefusal, StandardPrompt,
-        StandardRecordedBehaviour, StandardRecordedConfig, StandardRenderRefusal,
-        StandardRunOptions, StandardTurnOptions,
+        STANDARD_INTRO, STANDARD_PROTOCOL_PLUGIN_ID, SetStandardRender, StandardConfigOwner,
+        StandardConfigRefusal, StandardRecordedBehaviour, StandardRecordedConfig,
+        StandardRenderRefusal, StandardRunOptions, StandardTurnOptions, section_keys,
     };
 }
 pub mod render {
@@ -846,7 +840,7 @@ pub mod plugins {
     /// renders run on and the composed prompt with its snapshot.
     pub use lash_core::plugin::prompt::{
         ComposedPrompt, ComposedSection, PromptCatalog, PromptCut, PromptCutParts,
-        PromptRenderPool, PromptSectionInfo, ResolvedPromptComposition,
+        PromptRenderPool, PromptSectionInfo, ProtocolPromptFacts, ResolvedPromptComposition,
     };
     /// The tool hook phases (ADR 0128): argument transforms, before-checks
     /// over the prepared call, result transforms, and after-checks over the
@@ -872,6 +866,13 @@ pub mod plugins {
         StaticPluginFactory, ToolCatalogContext, ToolMembershipContribution,
         ToolPresentationPresenter, ToolResultProjectionContext, TurnContributions, TurnHookReport,
     };
+    /// The attachment-omission history policy (ADR 0133): a plugin names the
+    /// attachments of a turn's projected history its request omits, and core
+    /// omits them with one placeholder. It cannot add text or touch history.
+    pub use lash_core::plugin::{
+        AttachmentOmissionContext, AttachmentOmissionPolicy, HistoryPartId,
+        OMITTED_ATTACHMENT_PLACEHOLDER,
+    };
     /// What a plugin factory declares about itself: its behaviour revision
     /// and the formats it reads and writes. The build generation is computed
     /// from every registered factory's declaration, in hook order.
@@ -889,8 +890,8 @@ pub mod plugins {
         PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
         ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
         ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
-        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext,
-        SystemPromptContext, SystemPromptPurpose, TurnFinalization, TurnPreparation,
+        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, TurnFinalization,
+        TurnPreparation,
     };
     /// The registration groups [`PluginRegistrar`]'s accessors return
     /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take
@@ -1262,7 +1263,7 @@ pub mod runtime {
     pub use lash_core_store::turn_input_vocabulary::RunDefinitions;
     pub use lash_sansio::sansio::{
         ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
-        ExecutionEnvironmentSyncFailureKind, ProjectorTurnInputs,
+        ExecutionEnvironmentSyncFailureKind,
     };
     pub use lash_sansio::{CheckpointDelivery, EffectIdentityError};
 

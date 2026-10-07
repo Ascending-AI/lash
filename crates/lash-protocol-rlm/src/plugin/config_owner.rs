@@ -8,16 +8,15 @@
 //! parent's recorded behaviour for a child, this host's configured behaviour
 //! otherwise (FIG-4527). Every open delivers the namespace unchanged.
 //!
-//! A session may change two settings. Its render preferences, through
-//! [`SetRlmRender`]. And its prompt config ([`RlmPrompt`], FIG-4588): the
-//! host's share of the system prompt, which a creator states, a child copies
-//! from its parent, and [`SetRlmPrompt`] and [`SetRlmPromptContext`] replace.
+//! A session may change one setting: its render preferences, through
+//! [`SetRlmRender`]. Its prompt is not config: the protocol contributes keyed
+//! sections, and a host adds or wraps sections of its own (ADR 0133).
 //! The termination and the final-answer format are fixed at creation: no
 //! command changes them, and a turn states them again through its run's options
 //! ([`RlmRunOptions`]), which this owner applies over the recorded namespace.
 //! The channel, the dialect and the behaviour are the session's pins: a
 //! candidate that changes any of them is refused, and a run's options have
-//! no field for them or for the prompt.
+//! no field for them.
 //!
 //! Every reader of the namespace decodes [`RlmRecordedConfig`]: nothing
 //! probes or strips its keys (FIG-4652).
@@ -31,8 +30,7 @@ use lash_core::plugin::{
 };
 use lash_render::RenderParamsPatch;
 use lash_rlm_types::{
-    RlmCreateExtras, RlmFinalAnswerFormat, RlmPrompt, RlmRenderPatch, RlmTermination,
-    RlmTurnOptions,
+    RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmTermination, RlmTurnOptions,
 };
 
 use super::RlmProtocolPluginConfig;
@@ -66,10 +64,6 @@ pub struct RlmRecordedConfig {
     /// The behaviour the session's driver, prompt and interpreter run under.
     #[schemars(with = "serde_json::Value")]
     pub behaviour: RlmRecordedBehaviour,
-    /// The host's share of the session's system prompt: what the protocol
-    /// renders around the declarations it generates.
-    #[schemars(with = "serde_json::Value")]
-    pub prompt: RlmPrompt,
 }
 
 impl RlmRecordedConfig {
@@ -98,8 +92,7 @@ impl RlmRecordedConfig {
 impl RlmRecordedConfig {
     /// The recorded namespace of a session that stated `options`, for a
     /// test that executes the protocol without creating a session: an
-    /// unbounded cell-channel behaviour without process lifecycle, and the
-    /// built-in prompt.
+    /// unbounded cell-channel behaviour without process lifecycle.
     #[expect(
         clippy::expect_used,
         reason = "a recorded RLM namespace is plain data and always encodes"
@@ -117,7 +110,6 @@ impl RlmRecordedConfig {
                 .memory_limit(super::MemoryBound::unbounded())
                 .build()
                 .recorded_behaviour(false),
-            prompt: RlmPrompt::default(),
         })
         .expect("the recorded namespace encodes")
     }
@@ -219,10 +211,7 @@ impl ConfigOwner for RlmConfigOwner {
     /// session defaults to, this host's channel and dialect, and the
     /// session's behaviour. A child inherits its parent's recorded behaviour,
     /// whatever the host creating it is configured with (FIG-4527); a session
-    /// with no recorded parent behaviour records this host's. The prompt is
-    /// the creator's stated one; a creator that states none leaves a child
-    /// its parent's recorded prompt, and a session with no parent the
-    /// built-in default (FIG-4588).
+    /// with no recorded parent behaviour records this host's.
     fn create(
         &self,
         input: Option<RlmCreateConfig>,
@@ -245,10 +234,6 @@ impl ConfigOwner for RlmConfigOwner {
                 RlmFinalAnswerFormat::RawFinalValue
             }
         });
-        let prompt = stated
-            .prompt
-            .or_else(|| facts.parent.map(|parent| parent.prompt.clone()))
-            .unwrap_or_default();
         Ok(Some(RlmRecordedConfig {
             render: stated.render,
             termination: stated.termination,
@@ -256,7 +241,6 @@ impl ConfigOwner for RlmConfigOwner {
             channel: Some(self.channel),
             dialect: Some(self.dialect.to_string()),
             behaviour,
-            prompt,
         }))
     }
 
@@ -298,8 +282,8 @@ impl ConfigOwner for RlmConfigOwner {
 
     /// A stated termination or final-answer format replaces the recorded
     /// one for the run, and stated render preferences apply field by field
-    /// over the recorded ones. The pins and the prompt stay as recorded: a
-    /// run's options cannot name them.
+    /// over the recorded ones. The pins stay as recorded: a run's options
+    /// cannot name them.
     fn apply_run_options(
         &self,
         recorded: &RlmRecordedConfig,
@@ -348,39 +332,6 @@ impl ConfigCommand for SetRlmRender {
     const NAME: &'static str = "set_render";
 }
 
-/// Replace the session's prompt config, whole: the intro, what built-in text
-/// is left out, the host's instructions and its context. The default value
-/// restores the protocol's built-in prompt.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, JsonSchema)]
-#[schemars(crate = "lash_core::facade_support::schemars")]
-#[serde(deny_unknown_fields)]
-pub struct SetRlmPrompt {
-    #[schemars(with = "serde_json::Value")]
-    pub prompt: RlmPrompt,
-}
-
-impl ConfigCommand for SetRlmPrompt {
-    type Owner = RlmConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "set_prompt";
-}
-
-/// Replace the context of the session's prompt config, the part a host
-/// changes between turns, and leave the rest of the prompt as recorded.
-/// An empty list clears it.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, JsonSchema)]
-#[schemars(crate = "lash_core::facade_support::schemars")]
-#[serde(deny_unknown_fields)]
-pub struct SetRlmPromptContext {
-    pub context: Vec<String>,
-}
-
-impl ConfigCommand for SetRlmPromptContext {
-    type Owner = RlmConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "set_prompt_context";
-}
-
 /// The RLM owner's registration: the owner and its commands.
 pub(crate) fn register(
     registrar: &mut ConfigRegistrar,
@@ -396,27 +347,6 @@ pub(crate) fn register(
         Ok(OwnerChange {
             recorded: RlmRecordedConfig {
                 render: (!empty).then_some(render),
-                ..recorded.clone()
-            },
-            output: (),
-        })
-    })?;
-    registrar.command::<SetRlmPrompt>(|recorded, command| {
-        Ok(OwnerChange {
-            recorded: RlmRecordedConfig {
-                prompt: command.prompt,
-                ..recorded.clone()
-            },
-            output: (),
-        })
-    })?;
-    registrar.command::<SetRlmPromptContext>(|recorded, command| {
-        Ok(OwnerChange {
-            recorded: RlmRecordedConfig {
-                prompt: RlmPrompt {
-                    context: command.context,
-                    ..recorded.prompt.clone()
-                },
                 ..recorded.clone()
             },
             output: (),
@@ -571,12 +501,12 @@ mod tests {
         );
     }
 
-    /// FIG-4652: a run's options have no field for a pin or for the prompt,
-    /// so a payload naming one does not decode, even when it repeats the
+    /// FIG-4652: a run's options have no field for a pin, so a payload
+    /// naming one does not decode, even when it repeats the
     /// recorded value. Every recorded field a run cannot state is covered:
     /// the list is the recorded namespace's own keys.
     #[test]
-    fn run_options_have_no_field_for_a_pin_or_the_prompt() {
+    fn run_options_have_no_field_for_a_pin() {
         let recorded = serde_json::to_value(created(
             Some(RlmCreateExtras {
                 render: Some(RlmRenderPatch::default()),
@@ -782,208 +712,6 @@ mod tests {
             created_under(None).expect_err("undeclared lifecycle"),
             RlmConfigRefusal::ProcessLifecycleUndeclared
         );
-    }
-
-    fn host_prompt() -> RlmPrompt {
-        RlmPrompt {
-            intro: lash_rlm_types::RlmPromptIntro::Host {
-                text: "You are the release assistant.".to_string(),
-            },
-            omit_builtin_guidance: true,
-            omit_builtin_execution: false,
-            instructions: vec!["Answer in British English.".to_string()],
-            context: vec!["Release 4.2 freezes on Friday.".to_string()],
-        }
-    }
-
-    /// FIG-4588: a child copies its parent's recorded prompt when its
-    /// creator states none, and records the stated one otherwise.
-    #[test]
-    fn a_child_session_copies_its_parents_prompt() {
-        let parent = created(
-            Some(RlmCreateExtras {
-                prompt: Some(host_prompt()),
-                ..RlmCreateExtras::default()
-            }),
-            true,
-        );
-        let child_of = |input: Option<RlmCreateExtras>| {
-            owner()
-                .create(
-                    input.map(RlmCreateConfig),
-                    CreationFacts {
-                        parent: Some(&parent),
-                        is_root_session: false,
-                    },
-                )
-                .expect("create the child")
-                .expect("the child records its namespace")
-        };
-        assert_eq!(child_of(None).prompt, host_prompt());
-        // A creator that states other facts and no prompt still inherits it.
-        assert_eq!(
-            child_of(Some(RlmCreateExtras {
-                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                ..RlmCreateExtras::default()
-            }))
-            .prompt,
-            host_prompt()
-        );
-        let stated = RlmPrompt {
-            instructions: vec!["Only read; never write.".to_string()],
-            ..RlmPrompt::default()
-        };
-        assert_eq!(
-            child_of(Some(RlmCreateExtras {
-                prompt: Some(stated.clone()),
-                ..RlmCreateExtras::default()
-            }))
-            .prompt,
-            stated
-        );
-    }
-
-    /// FIG-4588: the prompt commands resolve through the registry the
-    /// factory registers. Each applies as one config transaction: the config
-    /// a run was admitted under keeps its revision and its prompt, and the
-    /// published config, which the next run is admitted under, carries the
-    /// next revision and the new prompt. `SetRlmPrompt` replaces the prompt
-    /// whole; `SetRlmPromptContext` replaces its context and nothing else.
-    /// Neither touches another recorded fact.
-    #[test]
-    fn the_prompt_commands_change_the_next_runs_prompt() {
-        let factory = crate::RlmProtocolPluginFactory::new(
-            config(),
-            std::sync::Arc::new(crate::TypescriptDialect),
-            &crate::testing::sqlite_recording_backend_blocking().clone(),
-        )
-        .with_process_lifecycle(false);
-        let registry =
-            lash_core::ConfigRegistry::build(&[std::sync::Arc::new(factory)]).expect("registry");
-        let mut config = lash_core::PersistedSessionConfig::from(&lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        ));
-        config.plugin_config = registry
-            .resolve_creation(
-                Some(crate::RLM_PROTOCOL_PLUGIN_ID),
-                &lash_core::PluginOptions::default(),
-                None,
-                true,
-                &lash_core::store::plugin_writers::PluginAdmission::default(),
-            )
-            .expect("creation");
-        let recorded = |config: &lash_core::PersistedSessionConfig| {
-            serde_json::from_value::<RlmRecordedConfig>(
-                config
-                    .plugin_config
-                    .get(crate::RLM_PROTOCOL_PLUGIN_ID)
-                    .cloned()
-                    .expect("the RLM namespace is recorded"),
-            )
-            .expect("recorded")
-        };
-        fn apply<C: ConfigCommand>(
-            registry: &lash_core::ConfigRegistry,
-            config: &mut lash_core::PersistedSessionConfig,
-            id: &str,
-            command: C,
-        ) {
-            let transaction = lash_core::ConfigTransaction::of(command);
-            let record = registry
-                .admit(
-                    id,
-                    config.config_revision,
-                    registry.entries(&transaction).expect("entries"),
-                )
-                .expect("admitted");
-            let outcome = registry
-                .resolve(
-                    config,
-                    &record,
-                    &lash_core::EmptyLlmProfiles,
-                    &lash_core::store::plugin_writers::PluginAdmission::default(),
-                )
-                .expect("the recorded config reads")
-                .publish(config);
-            assert!(
-                matches!(outcome, lash_core::ConfigTransactionOutcome::Applied { .. }),
-                "{outcome:?}"
-            );
-        }
-        let base = recorded(&config);
-        assert_eq!(base.prompt, RlmPrompt::default());
-
-        // The config the running run was admitted under.
-        let admitted = config.clone();
-        apply(
-            &registry,
-            &mut config,
-            "set-prompt",
-            SetRlmPrompt {
-                prompt: host_prompt(),
-            },
-        );
-        assert_eq!(admitted.config_revision, 0);
-        assert_eq!(recorded(&admitted), base);
-        assert_eq!(config.config_revision, 1);
-        assert_eq!(
-            recorded(&config),
-            RlmRecordedConfig {
-                prompt: host_prompt(),
-                ..base.clone()
-            }
-        );
-
-        let admitted = config.clone();
-        let context = vec!["Release 4.2 shipped.".to_string()];
-        apply(
-            &registry,
-            &mut config,
-            "set-prompt-context",
-            SetRlmPromptContext {
-                context: context.clone(),
-            },
-        );
-        assert_eq!(admitted.config_revision, 1);
-        assert_eq!(recorded(&admitted).prompt, host_prompt());
-        assert_eq!(config.config_revision, 2);
-        assert_eq!(
-            recorded(&config),
-            RlmRecordedConfig {
-                prompt: RlmPrompt {
-                    context,
-                    ..host_prompt()
-                },
-                ..base.clone()
-            }
-        );
-
-        // The default value restores the built-in prompt.
-        apply(
-            &registry,
-            &mut config,
-            "reset-prompt",
-            SetRlmPrompt::default(),
-        );
-        assert_eq!(recorded(&config), base);
-        assert_eq!(config.config_revision, 3);
-    }
-
-    /// FIG-4588: the prompt is not a pin. A candidate that changes it and
-    /// keeps the channel, dialect and behaviour is admitted.
-    #[test]
-    fn a_candidate_may_change_the_prompt() {
-        let base = created(None, true);
-        let candidate = RlmRecordedConfig {
-            prompt: host_prompt(),
-            ..base.clone()
-        };
-        facts_for(|facts| {
-            owner()
-                .validate(&candidate, Some(&base), facts)
-                .expect("the prompt is the session's to change");
-        });
     }
 
     /// The render a deployment configures is recorded behaviour: a session

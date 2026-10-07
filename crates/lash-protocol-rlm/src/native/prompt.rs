@@ -36,6 +36,6 @@ pub(crate) fn execution_section(
     }
 }
 
-pub(super) fn finalization(dialect: &SessionDialect, termination: &RlmTermination) -> String {
+pub(crate) fn finalization(dialect: &SessionDialect, termination: &RlmTermination) -> String {
     dialect.finalization_copy(termination, RlmChannel::NativeTool)
 }

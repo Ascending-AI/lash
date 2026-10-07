@@ -322,12 +322,17 @@ pub struct PromptCall {
 }
 
 /// The tools actually offered to this call, not every installed tool.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct OfferedTools {
     /// Tools offered as native declarations.
     pub native: Vec<String>,
     /// Tools offered as code-callable bindings.
     pub callable: Vec<String>,
+    /// The pinned catalog the call offers: every tool's manifest and
+    /// contract, including the ones a discovery operation keeps out of the
+    /// inline surface. Empty for a call that offers no tools, such as a
+    /// compaction's.
+    pub catalog: Arc<crate::ToolCatalog>,
 }
 
 /// The admitted model the call runs on.
@@ -335,7 +340,15 @@ pub struct OfferedTools {
 pub struct PromptModel {
     pub profile: Option<crate::LlmProfileKey>,
     pub context_window_tokens: Option<u64>,
+    /// The prompt usage the session last committed: the previous turn's,
+    /// constant across one turn's calls. `None` before any call committed.
+    pub committed_usage: Option<crate::TokenUsage>,
 }
+
+/// Facts the session's protocol derives from its committed execution state
+/// for its own sections, such as the values a program has bound. The
+/// protocol owns their type; the runtime carries them opaquely.
+pub type ProtocolPromptFacts = Arc<dyn std::any::Any + Send + Sync>;
 
 /// The call's projected history, measured before any section text is added.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -349,7 +362,7 @@ pub struct ProjectedHistoryStats {
 /// outcomes and namespace publications are durable. Renderers never see it
 /// whole: each gets [`PromptInput`], which exposes only its own namespace
 /// and config.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PromptCut {
     call: PromptCall,
     config: crate::AdmittedPluginConfig,
@@ -358,6 +371,21 @@ pub struct PromptCut {
     model: PromptModel,
     history: ProjectedHistoryStats,
     namespaces: BTreeMap<String, CommittedPluginNamespace>,
+    subagent: Option<crate::SubagentSessionContext>,
+    protocol: Option<ProtocolPromptFacts>,
+}
+
+impl std::fmt::Debug for PromptCut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PromptCut")
+            .field("call", &self.call)
+            .field("offered", &self.offered)
+            .field("model", &self.model)
+            .field("history", &self.history)
+            .field("subagent", &self.subagent)
+            .field("protocol", &self.protocol.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 /// The parts of a [`PromptCut`].
@@ -393,7 +421,23 @@ impl PromptCut {
             model,
             history,
             namespaces,
+            subagent: None,
+            protocol: None,
         }
+    }
+
+    /// The session's recorded subagent authority, when it is a subagent.
+    #[must_use]
+    pub fn with_subagent(mut self, subagent: Option<crate::SubagentSessionContext>) -> Self {
+        self.subagent = subagent;
+        self
+    }
+
+    /// The protocol's committed facts for this call.
+    #[must_use]
+    pub fn with_protocol_facts(mut self, facts: Option<ProtocolPromptFacts>) -> Self {
+        self.protocol = facts;
+        self
     }
 
     /// The input `plugin_id`'s renderers and wrappers read.
@@ -466,6 +510,17 @@ impl PromptInput<'_> {
 
     pub fn history(&self) -> ProjectedHistoryStats {
         self.cut.history
+    }
+
+    /// The session's recorded subagent authority, when it is a subagent.
+    pub fn subagent(&self) -> Option<&crate::SubagentSessionContext> {
+        self.cut.subagent.as_ref()
+    }
+
+    /// The protocol's committed facts for this call, when the session's
+    /// protocol derived facts of type `T`.
+    pub fn protocol_facts<T: std::any::Any>(&self) -> Option<&T> {
+        self.cut.protocol.as_deref()?.downcast_ref::<T>()
     }
 }
 
@@ -870,6 +925,29 @@ impl ResolvedPromptComposition {
             wraps.push((wrap.wrap.clone(), value.clone()));
         }
         Ok(ComposedSection { base, wraps, value })
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl PromptCatalog {
+    /// The sections and wrappers `plugins` register, in order, as a session
+    /// build registers them.
+    ///
+    /// # Errors
+    ///
+    /// The [`PluginError`] a plugin's registration refuses with.
+    pub fn of_plugins(plugins: &[Arc<dyn super::SessionPlugin>]) -> Result<Self, PluginError> {
+        let mut contributions = super::PluginContributions::default();
+        for plugin in plugins {
+            let mut reg = PluginRegistrar::new(PluginRevision::new(
+                plugin.id(),
+                super::BehaviorRevision::ONE,
+            ));
+            reg.contributions = contributions;
+            plugin.register(&mut reg)?;
+            contributions = reg.contributions;
+        }
+        Ok(Self::new(contributions.prompt))
     }
 }
 

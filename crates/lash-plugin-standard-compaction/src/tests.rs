@@ -17,8 +17,8 @@ fn prompt_usage(used_tokens: usize) -> TokenUsage {
     }
 }
 
-/// Mirrors what the transform and the pressure hook ask of the pressure: no
-/// pressure, no decisions.
+/// Mirrors what the pruning policy and the pressure hook ask of the
+/// pressure: no pressure, no decisions.
 fn standard_compaction_decisions(
     usage: Option<&TokenUsage>,
     max_context_tokens: Option<usize>,
@@ -105,14 +105,6 @@ impl RecordingTraces {
     }
 }
 
-fn unavailable_direct_completions() -> lash_core::facade_support::DirectCompletionClient<'static> {
-    lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
-        Err(lash_core::PluginError::Session(
-            "direct completions are unavailable in standard compaction tests".to_string(),
-        ))
-    })
-}
-
 fn test_turn_controller() -> lash_core::ActorContext {
     lash_core::ActorContext::unavailable()
         .scoped(lash_core::AdmittedScope::turn(
@@ -122,20 +114,19 @@ fn test_turn_controller() -> lash_core::ActorContext {
         .expect("test scoped effect controller")
 }
 
-fn build_turn_ctx(
+fn build_omission_ctx(
     state: SessionSnapshot,
     prompt_usage: Option<TokenUsage>,
     max_context_tokens: Option<usize>,
     traces: &Arc<RecordingTraces>,
-) -> TurnTransformContext<'static> {
-    TurnTransformContext {
+) -> AttachmentOmissionContext {
+    AttachmentOmissionContext {
         session_id: SessionId::from("root"),
         state: state.read_view(),
         prompt_usage,
         max_context_tokens,
         traces: traces.emitter(),
-        scoped_effect_controller: test_turn_controller(),
-        direct_completions: unavailable_direct_completions(),
+        trace_context: lash_core::TraceContext::default().for_session(SessionId::from("root")),
         plugin_config: Default::default(),
     }
 }
@@ -386,14 +377,14 @@ async fn pressure_without_committed_history_records_the_need_and_opens_nothing()
     ));
 }
 
-/// The transform is a Prompt View transform only (ADR 0001): at compaction
-/// pressure it prunes the view and neither summarizes nor records the need,
-/// which is the pressure hook's decision.
-#[tokio::test]
-async fn standard_compaction_transform_at_compaction_pressure_only_prunes() {
+/// The pruning policy is an attachment-omission history policy only (ADR
+/// 0133): at compaction pressure it names the old attachments and neither
+/// summarizes nor records the need, which is the pressure hook's decision.
+/// Core omits what it names from the request's view; the history keeps it.
+#[test]
+fn standard_compaction_policy_at_compaction_pressure_only_omits_old_attachments() {
     let traces = Arc::new(RecordingTraces::default());
-    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
-    let ctx = build_turn_ctx(
+    let ctx = build_omission_ctx(
         compactable_state(compactable_messages()),
         Some(prompt_usage(30_000)),
         Some(40_000),
@@ -405,27 +396,38 @@ async fn standard_compaction_transform_at_compaction_pressure_only_prunes() {
         text_message("u2", MessageRole::User, "recent"),
         text_message("u3", MessageRole::User, "latest request"),
     ];
-    let built = transform
-        .transform(
-            &ctx,
-            PreparedContext {
-                messages: messages.into(),
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("transform")
-        .messages;
-
+    let omissions = StandardCompactionAttachmentPolicy
+        .omissions(&ctx, &messages)
+        .expect("the policy decides");
     assert_eq!(
-        built
-            .iter()
+        omissions,
+        [HistoryPartId {
+            message: "u1".into(),
+            part: 0,
+        }]
+        .into_iter()
+        .collect()
+    );
+    let mut view = messages.clone();
+    assert_eq!(
+        lash_core::plugin::apply_attachment_omissions(&mut view, &omissions),
+        1
+    );
+    assert_eq!(
+        view.iter()
             .map(|message| message.id.as_str())
             .collect::<Vec<_>>(),
         ["u1", "a1", "u2", "u3"],
         "the view keeps every message"
     );
-    assert_eq!(built[0].parts[0].content(), PRUNED_ATTACHMENT_PLACEHOLDER);
+    assert_eq!(
+        view[0].parts[0].content(),
+        lash_core::plugin::OMITTED_ATTACHMENT_PLACEHOLDER
+    );
+    assert!(
+        messages[0].parts[0].attachment().is_some(),
+        "the history keeps it"
+    );
     assert_eq!(
         traces
             .events()

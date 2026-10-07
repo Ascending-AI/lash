@@ -1,84 +1,31 @@
-use lash_core::facade_support::JsonSchema;
-use lash_core::plugin::{ConfigCommand, OwnerChange};
+//! The standard protocol's prompt sections (ADR 0133).
+//!
+//! The protocol contributes its prompt as keyed sections under its plugin
+//! id, each placed in the initial instructions unless the host's plan says
+//! otherwise:
+//!
+//! - `intro`: the identity statement;
+//! - `execution`: how to call tools, naming `batch` only when it is offered;
+//! - `guidance`: the behavioural bullets, with the interactive one when the
+//!   offered surface has the `ask` tool;
+//! - `tool_modules`: each offered module's instructions, once.
+//!
+//! `intro` and `guidance` also render for a compaction's summarizer call,
+//! which offers no tools; the tool sections do not. Host text is the host's
+//! own sections, and a host replaces or omits a built-in one by wrapping it.
 
-use crate::{StandardConfigOwner, StandardRecordedConfig, standard_execution_section};
+use std::sync::Arc;
 
-/// The standard protocol's host-authored prompt, recorded at creation and
-/// changed only by its prompt commands. Empty text contributes no section.
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
-)]
-#[schemars(crate = "lash_core::facade_support::schemars")]
-#[serde(default, deny_unknown_fields)]
-pub struct StandardPrompt {
-    /// Replace the built-in intro. `Some("")` omits it.
-    pub intro: Option<String>,
-    pub instructions: Vec<String>,
-    /// Context renders last, after tool modules.
-    pub context: Vec<String>,
-    /// Omit the built-in execution and behavioural guidance, retaining host
-    /// instructions and tool module instructions.
-    pub omit_builtin_guidance: bool,
-}
+use lash_core::plugin::prompt::{
+    PromptInput, PromptPlacement, PromptPurpose, PromptRenderError, PromptSection,
+    PromptSectionKey, PromptSectionSpec, SectionText,
+};
+use lash_core::plugin::{PluginError, PluginRegistrar};
 
-/// Replace the session's entire standard prompt.
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
-)]
-#[schemars(crate = "lash_core::facade_support::schemars")]
-#[serde(deny_unknown_fields)]
-pub struct SetStandardPrompt {
-    pub prompt: StandardPrompt,
-}
+use crate::{BatchSugar, standard_execution_section};
 
-impl ConfigCommand for SetStandardPrompt {
-    type Owner = StandardConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "set_prompt";
-}
-
-/// Replace only the session's standard prompt context.
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
-)]
-#[schemars(crate = "lash_core::facade_support::schemars")]
-#[serde(deny_unknown_fields)]
-pub struct SetStandardPromptContext {
-    pub context: Vec<String>,
-}
-
-impl ConfigCommand for SetStandardPromptContext {
-    type Owner = StandardConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "set_prompt_context";
-}
-
-pub(crate) fn replace_prompt(
-    recorded: &StandardRecordedConfig,
-    command: SetStandardPrompt,
-) -> OwnerChange<StandardRecordedConfig, ()> {
-    OwnerChange {
-        recorded: StandardRecordedConfig {
-            prompt: command.prompt,
-            ..recorded.clone()
-        },
-        output: (),
-    }
-}
-
-pub(crate) fn replace_context(
-    recorded: &StandardRecordedConfig,
-    command: SetStandardPromptContext,
-) -> OwnerChange<StandardRecordedConfig, ()> {
-    let mut recorded = recorded.clone();
-    recorded.prompt.context = command.context;
-    OwnerChange {
-        recorded,
-        output: (),
-    }
-}
-
-const MAIN_AGENT_INTRO: &str = "You are an assistant operating the lash harness.";
+/// The identity statement the prompt opens with.
+pub const STANDARD_INTRO: &str = "You are an assistant operating the lash harness.";
 const GUIDANCE_BASE: &[&str] = &[
     "- Be concise; no filler, hedging, or performative tone.",
     "- Act as soon as the next step is clear; do not restate conclusions.",
@@ -87,73 +34,44 @@ const GUIDANCE_BASE: &[&str] = &[
 const GUIDANCE_INTERACTIVE: &str =
     "- Take initiative when the user's intent is clear. Ask only when progress is blocked.";
 
-impl StandardRecordedConfig {
-    /// Render from the admitted standard namespace and the recorded catalog.
-    /// Replay serves the journaled result instead of invoking this renderer.
-    pub fn render_system_prompt(&self, catalog: &lash_core::ToolCatalog) -> String {
-        self.render(catalog, false)
-    }
+/// The keys the standard protocol registers its sections under.
+pub mod section_keys {
+    pub const INTRO: &str = "intro";
+    pub const EXECUTION: &str = "execution";
+    pub const GUIDANCE: &str = "guidance";
+    pub const TOOL_MODULES: &str = "tool_modules";
+}
 
-    /// Render the system prompt a compaction's summarizer call carries
-    /// (FIG-4589). Its request ships no tools, so the execution prose and
-    /// the tool modules are left out: the intro, the behavioural guidance
-    /// with the host's instructions, and the context remain.
-    pub fn render_compaction_prompt(&self) -> String {
-        self.render(&lash_core::ToolCatalog::default(), true)
-    }
+/// What the sections render under: the behaviour the session's plugin was
+/// built with.
+#[derive(Clone, Debug)]
+pub(crate) struct StandardPromptBehaviour {
+    pub(crate) batch: BatchSugar,
+    pub(crate) discovery: bool,
+}
 
-    fn render(&self, catalog: &lash_core::ToolCatalog, compaction: bool) -> String {
-        let visible_catalog;
-        let catalog = if self.behaviour.discovery_operation.is_some() {
-            visible_catalog = catalog.inline_tools();
-            &visible_catalog
+impl StandardPromptBehaviour {
+    /// The tools the model sees inline: every offered tool, or only the
+    /// inline ones when the session discovers the rest.
+    fn visible(&self, input: &PromptInput<'_>) -> lash_core::ToolCatalog {
+        let catalog = input.offered().catalog.as_ref();
+        if self.discovery {
+            catalog.inline_tools()
         } else {
-            catalog
-        };
-        let mut sections = Vec::new();
-        let intro = self
-            .prompt
-            .intro
-            .as_deref()
-            .unwrap_or(MAIN_AGENT_INTRO)
-            .trim();
-        if !intro.is_empty() {
-            sections.push(intro.to_string());
+            catalog.clone()
         }
-        let mut guidance = Vec::new();
-        if !self.prompt.omit_builtin_guidance {
-            if !compaction {
-                section(
-                    &mut sections,
-                    "Execution",
-                    [standard_execution_section(self.behaviour.batch)],
-                );
-            }
-            let mut bullets = GUIDANCE_BASE.to_vec();
-            if catalog.tools.iter().any(|tool| tool.manifest.name == "ask") {
-                bullets.insert(1, GUIDANCE_INTERACTIVE);
-            }
-            guidance.push(bullets.join("\n"));
-        }
-        guidance.extend(self.prompt.instructions.iter().cloned());
-        section(&mut sections, "Guidance", guidance);
-        if !compaction {
-            section(
-                &mut sections,
-                "Tool modules",
-                catalog.modules().map(|module| module.render_markdown()),
-            );
-        }
-        section(
-            &mut sections,
-            "Context",
-            self.prompt.context.iter().cloned(),
-        );
-        sections.join("\n\n")
     }
 }
 
-fn section(sections: &mut Vec<String>, title: &str, parts: impl IntoIterator<Item = String>) {
+fn key(key: &str) -> PromptSectionKey {
+    #[expect(
+        clippy::expect_used,
+        reason = "the protocol's section keys are constants within the key alphabet"
+    )]
+    PromptSectionKey::new(key).expect("a valid section key")
+}
+
+fn titled(title: &str, parts: impl IntoIterator<Item = String>) -> SectionText {
     let parts = parts
         .into_iter()
         .filter_map(|part| {
@@ -161,7 +79,76 @@ fn section(sections: &mut Vec<String>, title: &str, parts: impl IntoIterator<Ite
             (!text.is_empty()).then(|| text.to_string())
         })
         .collect::<Vec<_>>();
-    if !parts.is_empty() {
-        sections.push(format!("## {title}\n\n{}", parts.join("\n\n")));
+    if parts.is_empty() {
+        SectionText::Omit
+    } else {
+        SectionText::Text(format!("## {title}\n\n{}", parts.join("\n\n")))
     }
+}
+
+fn section(
+    behaviour: &Arc<StandardPromptBehaviour>,
+    render: fn(&StandardPromptBehaviour, &PromptInput<'_>) -> SectionText,
+) -> Arc<dyn PromptSection> {
+    let behaviour = Arc::clone(behaviour);
+    Arc::new(
+        move |input: &PromptInput<'_>| -> Result<SectionText, PromptRenderError> {
+            Ok(render(&behaviour, input))
+        },
+    )
+}
+
+fn intro(_: &StandardPromptBehaviour, _: &PromptInput<'_>) -> SectionText {
+    SectionText::text(STANDARD_INTRO)
+}
+
+fn execution(behaviour: &StandardPromptBehaviour, _: &PromptInput<'_>) -> SectionText {
+    titled("Execution", [standard_execution_section(behaviour.batch)])
+}
+
+fn guidance(behaviour: &StandardPromptBehaviour, input: &PromptInput<'_>) -> SectionText {
+    let mut bullets = GUIDANCE_BASE.to_vec();
+    if behaviour
+        .visible(input)
+        .tools
+        .iter()
+        .any(|tool| tool.manifest.name == "ask")
+    {
+        bullets.insert(1, GUIDANCE_INTERACTIVE);
+    }
+    titled("Guidance", [bullets.join("\n")])
+}
+
+fn tool_modules(behaviour: &StandardPromptBehaviour, input: &PromptInput<'_>) -> SectionText {
+    let visible = behaviour.visible(input);
+    titled(
+        "Tool modules",
+        visible.modules().map(|module| module.render_markdown()),
+    )
+}
+
+/// Register the protocol's sections.
+pub(crate) fn register_sections(
+    reg: &mut PluginRegistrar,
+    behaviour: StandardPromptBehaviour,
+) -> Result<(), PluginError> {
+    let behaviour = Arc::new(behaviour);
+    let both = [PromptPurpose::Turn, PromptPurpose::Compaction];
+    let placement = PromptPlacement::InitialInstructions;
+    reg.prompt().section(
+        PromptSectionSpec::new(key(section_keys::INTRO), placement).purposes(both.clone()),
+        section(&behaviour, intro),
+    )?;
+    reg.prompt().section(
+        PromptSectionSpec::new(key(section_keys::EXECUTION), placement),
+        section(&behaviour, execution),
+    )?;
+    reg.prompt().section(
+        PromptSectionSpec::new(key(section_keys::GUIDANCE), placement).purposes(both),
+        section(&behaviour, guidance),
+    )?;
+    reg.prompt().section(
+        PromptSectionSpec::new(key(section_keys::TOOL_MODULES), placement),
+        section(&behaviour, tool_modules),
+    )
 }

@@ -148,6 +148,10 @@ pub(crate) struct PluginContributions {
     pub(crate) runtime_event_hooks: Vec<RegisteredHook<PluginLifecycleEventHook>>,
     pub(crate) plugin_operations: BTreeMap<String, RegisteredPluginOperation>,
     pub(crate) turn_context_transforms: Vec<(i32, RegisteredHook<Arc<dyn TurnContextTransform>>)>,
+    pub(crate) attachment_omission_policies: Vec<(
+        i32,
+        RegisteredHook<Arc<dyn super::AttachmentOmissionPolicy>>,
+    )>,
     pub(crate) context_compactors: Vec<(i32, RegisteredHook<Arc<dyn ContextCompactor>>)>,
     pub(crate) context_pressure_hooks: Vec<(i32, RegisteredHook<Arc<dyn ContextPressureHook>>)>,
     pub(crate) protocol_session: Option<RegisteredExclusiveHook<Arc<dyn ProtocolSessionPlugin>>>,
@@ -651,6 +655,24 @@ impl ContextRegistrations<'_> {
             transform.id(),
             priority,
             transform,
+        )
+    }
+
+    /// Attachment-omission history policies (ADR 0133): each names the
+    /// attachments of the turn's projected history its request omits; core
+    /// omits the union.
+    pub fn attachment_omissions(
+        self,
+        priority: i32,
+        policy: Arc<dyn super::AttachmentOmissionPolicy>,
+    ) -> Result<(), PluginError> {
+        push_prioritized_keyed_hook(
+            &mut self.reg.contributions.attachment_omission_policies,
+            &self.reg.owner,
+            CallbackSlot::AttachmentOmission,
+            policy.id(),
+            priority,
+            policy,
         )
     }
 

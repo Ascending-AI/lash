@@ -27,6 +27,16 @@ pub(super) fn register_native_plugin(
         Arc::clone(&runtime_state),
     ));
     reg.protocol().session(protocol_session.clone())?;
+    crate::prompt_sections::register_sections(
+        reg,
+        crate::prompt_sections::RlmSectionBehaviour {
+            dialect: Arc::clone(&dialect),
+            channel: config.channel,
+            prompt_features: config.prompt_features,
+            discovery: config.discovery.clone(),
+            budget_tokens: config.continue_as_soft_warn_tokens,
+        },
+    )?;
     reg.execution().code_executor(code_executor)?;
     reg.output()
         .assistant_prose_projector(Arc::new(NativeProseProjector))?;
@@ -173,7 +183,6 @@ impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
             input,
             crate::driver::RlmPreambleConfig {
                 max_output_chars: self.config.max_output_chars,
-                max_budget_tokens: self.config.continue_as_soft_warn_tokens,
                 prompt_features: self.config.prompt_features,
             },
             Arc::clone(&self.dialect),

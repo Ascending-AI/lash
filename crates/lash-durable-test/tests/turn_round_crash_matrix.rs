@@ -543,9 +543,9 @@ impl TurnDrive for L4Drive {
                     .handle_response(Response::ExecutionEnvironmentSynced {
                         id,
                         result: Ok(ExecutionEnvironmentSync {
-                            system_prompt: Arc::from("l4t"),
+                            instructions: Some(Arc::from("l4t")),
+                            current_context: None,
                             tool_specs: Arc::new(Vec::new()),
-                            projector_turn_inputs: Default::default(),
                         }),
                     });
             }

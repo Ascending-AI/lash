@@ -19,11 +19,6 @@ pub(super) struct RlmHistoryRenderInput<'a> {
     pub(super) turn_causes: &'a [lash_core::TurnCause],
     pub(super) max_output_chars: usize,
     pub(super) protocol_iteration: usize,
-    pub(super) finalization: &'a str,
-    pub(super) required_output: Option<&'a str>,
-    pub(super) final_answer_format: Option<&'a str>,
-    pub(super) budget_suffix: Option<&'a str>,
-    pub(super) bound_variables: &'a str,
 }
 
 #[derive(Clone, Copy)]
@@ -35,11 +30,6 @@ pub(super) struct CurrentIterationMessageInput<'a> {
     pub(super) history_has_structure: bool,
     pub(super) protocol_iteration: usize,
     pub(super) turn_causes: &'a [lash_core::TurnCause],
-    pub(super) finalization: &'a str,
-    pub(super) required_output: Option<&'a str>,
-    pub(super) final_answer_format: Option<&'a str>,
-    pub(super) budget_suffix: Option<&'a str>,
-    pub(super) bound_variables: &'a str,
 }
 
 /// Standalone assistant prose buffered until the next chronological boundary.
@@ -86,11 +76,6 @@ pub(super) fn build_rlm_history_messages_from_turn(
             history_has_structure,
             protocol_iteration: input.protocol_iteration,
             turn_causes: input.turn_causes,
-            finalization: input.finalization,
-            required_output: input.required_output,
-            final_answer_format: input.final_answer_format,
-            budget_suffix: input.budget_suffix,
-            bound_variables: input.bound_variables,
         },
     );
     Ok(messages)
@@ -335,6 +320,9 @@ fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<Pend
     }
 }
 
+/// The current iteration's history facts: its number, the turn's causes and
+/// the `history` binding. The protocol's instructions for the call are its
+/// prompt sections, placed by the host's plan (ADR 0133).
 fn append_current_iteration_message(
     messages: &mut Vec<LlmMessage>,
     input: CurrentIterationMessageInput<'_>,
@@ -364,24 +352,6 @@ fn append_current_iteration_message(
     if input.history_has_structure {
         current_prompt.push_str("\n\nSchema:\n");
         current_prompt.push_str(&input.dialect.history_item_definition(input.images));
-    }
-    if !input.bound_variables.is_empty() {
-        current_prompt.push_str("\n\n");
-        current_prompt.push_str(input.bound_variables);
-    }
-    current_prompt.push_str("\n\n\n=== FINALIZATION ===\n\n");
-    current_prompt.push_str(input.finalization);
-    if let Some(block) = input.required_output {
-        current_prompt.push_str("\n\n=== REQUIRED OUTPUT ===\n\n");
-        current_prompt.push_str(block);
-    }
-    if let Some(guidance) = input.final_answer_format {
-        current_prompt.push_str("\n\n=== FINAL ANSWER FORMAT ===\n\n");
-        current_prompt.push_str(guidance);
-    }
-    if let Some(suffix) = input.budget_suffix {
-        current_prompt.push_str("\n\n=== CONTEXT BUDGET ===\n\n");
-        current_prompt.push_str(suffix);
     }
     messages.push(LlmMessage::new(
         LlmRole::User,

@@ -161,7 +161,8 @@ fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
 fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
     drain_with_prompt(machine, "")
 }
-/// As [`drain`], with each sync recording `prompt` as the system prompt.
+/// As [`drain`], with each sync recording `prompt` as the composed initial
+/// instructions.
 fn drain_with_prompt(machine: &mut TurnMachine, prompt: &str) -> Vec<Effect> {
     let mut effects = Vec::new();
     while let Some(effect) = machine.poll_effect() {
@@ -169,7 +170,7 @@ fn drain_with_prompt(machine: &mut TurnMachine, prompt: &str) -> Vec<Effect> {
             machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
                 id,
                 result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
-                    system_prompt: Arc::from(prompt),
+                    instructions: (!prompt.is_empty()).then(|| Arc::from(prompt)),
                     ..Default::default()
                 }),
             });
@@ -1270,11 +1271,7 @@ fn cell_channel_tool_call_repair_lets_the_next_cell_finish() {
 #[test]
 fn configured_prompt_is_instructions_on_both_channels() {
     for native in [false, true] {
-        for (prompt, expected) in [
-            ("  configured prompt\n", Some("configured prompt")),
-            ("", None),
-            (" \n\t", None),
-        ] {
+        for (prompt, expected) in [("configured prompt", Some("configured prompt")), ("", None)] {
             let mut machine = TurnMachine::new(
                 config(native, RlmTermination::Natural { schema: None }),
                 Vec::new(),

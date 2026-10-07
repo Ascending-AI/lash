@@ -211,11 +211,9 @@ the old session as still live. Rotation is required after success because a
 deleted session id is permanently retired and cannot be reopened in the same
 store.
 
-Connected inbox accounts are recorded RLM prompt context. Adding or removing
-an account, or clearing accounts on reset, applies `SetRlmPromptContext` to
-live sessions. New sessions record the current accounts at creation. Every
-turn source uses that config, while a running run and its replay keep their
-recorded render.
+Connected inbox accounts are a workbench prompt section: every model call
+renders the accounts connected at that moment, and a call's recorded prompt
+keeps what it was sent.
 
 Six low-frequency data utilities under `text`, `json`, and `list` are kept out
 of the resident RLM tool catalog. The prompt carries only a capped catalogue

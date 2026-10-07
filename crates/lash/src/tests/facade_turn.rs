@@ -939,3 +939,131 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
         crate::CancelReceipt::UnknownOrRevoked
     ));
 }
+
+/// A host's prompt plugin: it replaces the standard protocol's intro with a
+/// wrapper and adds a late section of its own (ADR 0133).
+struct HostSections;
+
+impl PluginFactory for HostSections {
+    fn id(&self) -> &'static str {
+        "host_sections"
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::plugin::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
+    {
+        Ok(Arc::new(HostSections))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for HostSections {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("host_sections")
+    }
+}
+
+impl lash_core::plugin::SessionPlugin for HostSections {
+    fn id(&self) -> &'static str {
+        "host_sections"
+    }
+
+    fn register(
+        &self,
+        reg: &mut lash_core::plugin::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        use crate::plugins::{
+            PromptInput, PromptSectionSpec, PromptWrapSpec, PromptWrapTarget, SectionText,
+        };
+        use crate::prompt::{PromptPlacement, PromptSectionId, PromptSectionKey, PromptWrapKey};
+        reg.prompt().wrap(
+            PromptWrapSpec::new(
+                PromptWrapKey::new("intro").expect("valid wrap key"),
+                PromptSectionId::new(
+                    crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                    PromptSectionKey::new(crate::standard::section_keys::INTRO)
+                        .expect("valid section key"),
+                ),
+            ),
+            Arc::new(
+                |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, _: SectionText| {
+                    Ok(SectionText::text("You are the release desk."))
+                },
+            ),
+        )?;
+        reg.prompt().section(
+            PromptSectionSpec::new(
+                PromptSectionKey::new("release").expect("valid section key"),
+                PromptPlacement::CurrentContext,
+            ),
+            Arc::new(|_: &PromptInput<'_>| Ok(SectionText::text("Release 4.2 freezes on Friday."))),
+        )
+    }
+}
+
+/// FIG-5257: a turn composes its sections at the iteration's sync and places
+/// them on the model request: the standard protocol's in the instructions,
+/// over the offered tools, with a host wrapper's replacement intro, and a
+/// host's late section after the projected conversation, outside it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_turns_request_carries_its_sections_where_they_are_placed() {
+    let sent: Arc<StdMutex<Vec<LlmRequest>>> = Arc::new(StdMutex::new(Vec::new()));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("prompt-sections")
+        .complete({
+            let sent = Arc::clone(&sent);
+            move |request: LlmRequest| {
+                sent.lock_recover().push(request.clone());
+                async move { Ok(text_response("noted")) }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
+    .tools(Arc::new(AccountTools {
+        names: Arc::new(StdMutex::new(vec!["ask".to_owned()])),
+    }))
+    .plugin(Arc::new(HostSections))
+    .build(crate::testing::runtime_lease_owner())
+    .expect("standard core");
+    let session_id = lash_sansio::SessionId::try_from("prompt-sections".to_owned()).expect("id");
+    let session = core
+        .session(session_id)
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    let output = session
+        .send(crate::TurnInput::text("hello"))
+        .output()
+        .await
+        .expect("the turn answers");
+    assert!(output.is_success(), "{output:?}");
+
+    let request = sent
+        .lock_recover()
+        .first()
+        .cloned()
+        .expect("one model call");
+    let instructions = request.instructions.as_deref().expect("instructions");
+    assert!(
+        instructions.starts_with("You are the release desk.\n\n## Execution\n\n"),
+        "{instructions}"
+    );
+    assert!(
+        instructions.contains("Ask only when progress is blocked."),
+        "the offered `ask` tool reaches the guidance: {instructions}"
+    );
+    assert!(!instructions.contains("Release 4.2"), "{instructions}");
+    let late = request.messages.last().expect("the late context");
+    assert_eq!(late.role, LlmRole::System);
+    assert!(matches!(
+        late.blocks.as_slice(),
+        [LlmContentBlock::Text { text, .. }] if text.as_ref() == "Release 4.2 freezes on Friday."
+    ));
+    assert_eq!(last_user_text(&request), "hello");
+    core.shutdown().await.expect("shutdown");
+}

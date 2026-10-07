@@ -30,6 +30,16 @@ pub(super) fn register_rlm_protocol_plugin(
         Arc::clone(&runtime_state),
     ));
     reg.protocol().session(protocol_session.clone())?;
+    crate::prompt_sections::register_sections(
+        reg,
+        crate::prompt_sections::RlmSectionBehaviour {
+            dialect: Arc::clone(&dialect),
+            channel: config.channel,
+            prompt_features: config.prompt_features,
+            discovery: config.discovery.clone(),
+            budget_tokens: config.continue_as_soft_warn_tokens,
+        },
+    )?;
     reg.output().transcript_projector(
         lash_core::hook_key!("rlm-transcript"),
         Arc::new(crate::projection::transcript::RlmTranscriptProjector),

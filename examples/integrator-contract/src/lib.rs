@@ -86,10 +86,10 @@ impl ProtocolSessionPlugin for Integrator {
     ) -> Result<Option<ProtocolLlmCallAction>, PluginError> {
         unreachable!("external signature witness")
     }
-    async fn bound_variables_prompt(
+    async fn prompt_facts(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<Option<Arc<str>>, SessionError> {
+    ) -> Result<Option<lash::plugins::ProtocolPromptFacts>, SessionError> {
         unreachable!("external signature witness")
     }
 }

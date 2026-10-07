@@ -43,7 +43,6 @@ impl ProtocolDriverPlugin for RlmProtocolDriver {
             input,
             RlmPreambleConfig {
                 max_output_chars: self.config.max_output_chars,
-                max_budget_tokens: self.config.continue_as_soft_warn_tokens,
                 prompt_features: self.config.prompt_features,
             },
             Arc::clone(&self.dialect),

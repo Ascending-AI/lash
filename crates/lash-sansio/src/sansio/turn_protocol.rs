@@ -422,38 +422,39 @@ pub enum Response<I = ()> {
     },
 }
 
-/// The projector inputs that vary across a turn's protocol iterations.
-///
-/// Every value here is derived from recorded turn state — the committed
-/// usage record and the journaled execution-environment sync — never read
-/// live at projection time. They reach the machine only inside a journaled
-/// [`ExecutionEnvironmentSync`], so a redriven iteration replays the recorded
-/// inputs instead of re-deriving them from plugin cells (FIG-3538).
-#[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
-pub struct ProjectorTurnInputs {
-    /// The turn's recorded prompt-usage figure: the previous turn's committed
-    /// usage, constant across this turn's iterations.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt_usage: Option<TokenUsage>,
-    /// The protocol-rendered view of execution-bound variables, refreshed at
-    /// each iteration boundary. `None` means the protocol exposes no such
-    /// surface.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bound_variables_prompt: Option<Arc<str>>,
-}
-
 /// The environment one protocol iteration's model call is built from: the
-/// system prompt, the tool specs and the projector's recorded-state inputs.
-/// The host journals it as the iteration's sync outcome, and the machine
-/// holds it as [`SyncedEnvironment`]; it has no other home.
+/// composed prompt sections and the tool specs. The host journals it as the
+/// iteration's sync outcome, and the machine holds it as
+/// [`SyncedEnvironment`]; it has no other home.
+///
+/// The projector renders history only. [`DriverContextView::project_llm_request`]
+/// places the sections: `instructions` in the request's instruction field,
+/// and `current_context` late, after the projected conversation and outside
+/// history, as runtime feedback (ADR 0133).
 #[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionEnvironmentSync {
-    pub system_prompt: Arc<str>,
+    /// The final text of the call's `InitialInstructions` sections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<Arc<str>>,
+    /// The final text of the call's `CurrentContext` sections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_context: Option<Arc<str>>,
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
-    /// The projector's recorded-state inputs for this iteration, journaled
-    /// with the rest of the sync so a redrive replays them verbatim.
-    pub projector_turn_inputs: ProjectorTurnInputs,
+}
+
+impl ExecutionEnvironmentSync {
+    /// Place the composed sections on `request`, which a projector rendered
+    /// from history alone.
+    pub fn place_prompt(&self, request: &mut LlmRequest) {
+        request.instructions = self.instructions.clone();
+        if let Some(context) = &self.current_context {
+            request.messages.push(crate::llm::types::LlmMessage::text(
+                crate::llm::types::LlmRole::System,
+                Arc::clone(context),
+            ));
+        }
+    }
 }
 
 /// The environment a machine holds, and the protocol iteration it was synced
@@ -472,9 +473,9 @@ pub enum ExecutionEnvironmentSyncFailureKind {
     /// The turn's tool surface could not be pinned.
     ToolSurface,
     /// The protocol could not render the system prompt.
-    SystemPrompt,
-    /// The protocol could not render the projector's recorded-state inputs.
-    ProjectorInputs,
+    Prompt,
+    /// The protocol could not derive its prompt facts.
+    ProtocolFacts,
 }
 
 /// The recorded failure of an execution-environment sync: deterministic over
@@ -771,11 +772,13 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
 }
 
 impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
+    /// The iteration's model request: the projector's history, with the
+    /// synced prompt sections placed where the plan put them.
     pub fn project_llm_request(
         &self,
         use_tools: bool,
     ) -> Result<Arc<LlmRequest>, crate::StoredDataCorruption> {
-        self.config.projector.project(ProjectorContext {
+        let projected = self.config.projector.project(ProjectorContext {
             config: self.config,
             messages: self.prompt_messages,
             events: self.events,
@@ -783,7 +786,10 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
             protocol_iteration: self.protocol_iteration,
             use_tools,
             environment: self.environment,
-        })
+        })?;
+        let mut request = Arc::unwrap_or_clone(projected);
+        self.environment.place_prompt(&mut request);
+        Ok(Arc::new(request))
     }
 
     pub fn protocol_iteration(&self) -> usize {
@@ -854,9 +860,10 @@ pub struct ProjectorContext<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub turn_causes: &'a [TurnCause],
     pub protocol_iteration: usize,
     pub use_tools: bool,
-    /// The environment the iteration's journaled sync recorded: the system
-    /// prompt, the tool specs and the projector's recorded-state inputs. A
-    /// redrive projects from the same record (FIG-3538).
+    /// The environment the iteration's journaled sync recorded. A projector
+    /// reads its tool specs; the composed prompt sections are placed after
+    /// projection, never by the projector. A redrive projects from the same
+    /// record (FIG-3538).
     pub environment: &'a ExecutionEnvironmentSync,
 }
 
@@ -889,8 +896,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
         }
 
         Ok(Arc::new(LlmRequest {
-            instructions: (!ctx.environment.system_prompt.trim().is_empty())
-                .then(|| Arc::from(ctx.environment.system_prompt.trim())),
+            instructions: None,
             model: ctx.config.model.clone(),
             messages,
             resolved_stored: Default::default(),

@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted. The only RLM writes after creation are the typed render and prompt
-commands of [ADR 0126](0126-session-config-changes-are-typed-owner-commands.md):
-`SetRlmRender`, `SetRlmPrompt` and `SetRlmPromptContext`.
+Accepted. The only RLM write after creation is the typed render command of
+[ADR 0126](0126-session-config-changes-are-typed-owner-commands.md):
+`SetRlmRender`.
 
 ## Context
 
@@ -59,11 +59,11 @@ that commit leaves a session that opens with what its creation recorded.
 ### No write after creation
 
 The RLM owner registers `SetRlmRender`, which replaces the recorded print and
-preview render and clears it when empty, and two prompt commands (FIG-4588):
-`SetRlmPrompt` replaces the recorded prompt config whole, and
-`SetRlmPromptContext` replaces its context. Moving protocol prompt text into
-sections that the host's `SetPromptPlan` orders and places is open work of
-[ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md) §9 (FIG-5257). Termination, the
+preview render and clears it when empty. The prompt is not recorded config:
+the protocol contributes keyed sections that the host's `SetPromptPlan`
+orders and places, and a host adds or wraps sections of its own
+([ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md),
+FIG-5257). Termination, the
 final-answer format, the channel and the dialect have no command, so a
 transaction cannot name them: a host that states one is refused
 `UnknownCommand` at submission. The owner's validation refuses a candidate
@@ -105,8 +105,7 @@ Hosts that need a particular presentation format state it at creation.
 - [Recorded facts](../../crates/lash-rlm-types/src/lib.rs#L960) define the two
   fields.
 - [The RLM owner](../../crates/lash-protocol-rlm/src/plugin/config_owner.rs)
-  creates, validates and registers `SetRlmRender`, `SetRlmPrompt` and
-  `SetRlmPromptContext`.
+  creates, validates and registers `SetRlmRender`.
 - [Facade creation](../../crates/lash/src/session.rs#L257) records the config head;
   [opening](../../crates/lash/src/session.rs#L167) reads an existing session.
 - [Session-fact laws](../../crates/lash/src/tests/core_session_builder/rlm_session_facts.rs#L1)

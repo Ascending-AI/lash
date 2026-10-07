@@ -481,9 +481,8 @@ pub mod sansio {
         ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, ContextProjector,
         EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
         ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, LlmCallError,
-        ModelToolCalls, PendingToolCall, PendingWork, ProjectorTurnInputs, ProtocolDriverHandle,
-        ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine,
-        render_turn_causes_prompt,
+        ModelToolCalls, PendingToolCall, PendingWork, ProtocolDriverHandle, ResponseToolCalls,
+        SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine, render_turn_causes_prompt,
     };
 }
 

@@ -32,7 +32,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
     "blocks": [
       {
         "Text": {
-          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\n- `history`: `HistoryItem[]`, read-only, 2 entries\n\n\n=== FINALIZATION ===\n\nNatural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step in an `execute_code` call. Prefer prose for the final answer. Call `finish(value)` inside the program only when the answer is a value the program built for this request, never to hand back a tool's raw result.",
+          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\n- `history`: `HistoryItem[]`, read-only, 2 entries",
           "response_meta": null,
           "cache_breakpoint": false
         }

@@ -552,9 +552,9 @@ impl TurnDrive for SimDrive {
                     .handle_response(Response::ExecutionEnvironmentSynced {
                         id,
                         result: Ok(ExecutionEnvironmentSync {
-                            system_prompt: Arc::from("lash-sim"),
+                            instructions: Some(Arc::from("lash-sim")),
+                            current_context: None,
                             tool_specs: Arc::new(Vec::new()),
-                            projector_turn_inputs: Default::default(),
                         }),
                     });
             }

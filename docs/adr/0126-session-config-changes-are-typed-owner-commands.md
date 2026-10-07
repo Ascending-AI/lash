@@ -46,13 +46,13 @@ by the reserved `core` owner, whose commands include `SetLlmProfile`,
 the host's prompt plan (ADR 0133 §3). `SetChargeSafety` refuses a
 policy accepting more unsafe retries than the provider handle ever buys. The
 RLM and standard protocols register one render command each
-(`SetRlmRender`, `SetStandardRender`) and its prompt commands
-(`SetRlmPrompt` and `SetRlmPromptContext`, `SetStandardPrompt` and
-`SetStandardPromptContext`). Moving that prompt text into sections is open
-work of [ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md) §9 (FIG-5257). The system prompt has no core command: it is
-the protocol's recorded config (ADR 0030, FIG-4589). A run's options are the
-owner's `RunOptions` type (`RlmTurnOptions`, `StandardRunOptions`), which has
-no field for the prompt, the behaviour or a pin: a payload that names one
+(`SetRlmRender`, `SetStandardRender`). The prompt is not protocol config:
+the protocols contribute keyed sections, plugins add and wrap sections, and
+the host orders and places them with `SetPromptPlan`
+([ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md),
+FIG-5257). A run's options are the owner's `RunOptions` type
+(`RlmTurnOptions`, `StandardRunOptions`), which has no field for the
+behaviour or a pin: a payload that names one
 does not decode and refuses the run's shape, whatever value it states
 (FIG-4652). An owner whose namespace no run overrides uses `NoRunOptions`.
 The core owner is one: a run states its core overrides (model, reasoning,

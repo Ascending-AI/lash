@@ -594,7 +594,6 @@ pub(crate) async fn add_account(
         "api.accounts.add",
         json!({ "slug": summary.slug, "authority": summary.authority }),
     );
-    record_accounts_context(&state).await?;
     Box::pin(enqueue_tool_catalog_refresh(&state, "account_added")).await?;
     state.push_message(
         "event",
@@ -612,7 +611,6 @@ pub(crate) async fn delete_account(
         .remove_account(&slug)
         .map_err(AppError::not_found)?;
     state.trace("api.accounts.remove", json!({ "slug": slug }));
-    record_accounts_context(&state).await?;
     Box::pin(enqueue_tool_catalog_refresh(&state, "account_removed")).await?;
     state.push_message("event", format!("removed mock account `inbox.{slug}`"));
     Ok(Json(CommandAccepted { accepted: true }))
@@ -829,7 +827,6 @@ pub(crate) async fn settle_retired_slot(
         state.messages.lock_recover().clear();
         state.lashlang_execution.clear();
         state.mail_world.clear();
-        record_accounts_context(state).await?;
     }
     state
         .create_or_open_session(successor_session_id, surface)

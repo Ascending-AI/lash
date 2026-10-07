@@ -158,8 +158,10 @@ impl LashRuntime {
         let system_prompt: crate::plugin::CompactionSystemPrompt<'_> = {
             let input = super::super::compaction_prompt::CompactionPromptInput {
                 session_id: self.state.session_id.clone(),
-                protocol_session: Arc::clone(plugin_session.protocol_session()),
+                plugins: Arc::clone(&plugin_session),
                 plugin_config: self.state.admitted_plugin_config(),
+                prompt_plan: self.state.authority.prompt_plan.clone(),
+                frame: self.state.current_frame_node_id.clone(),
                 subagent: self.state.authority.subagent.clone(),
             };
             let controller = scoped_effect_controller.clone();

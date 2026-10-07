@@ -394,9 +394,9 @@ impl TurnDrive for L3Drive {
                     .handle_response(Response::ExecutionEnvironmentSynced {
                         id,
                         result: Ok(ExecutionEnvironmentSync {
-                            system_prompt: Arc::from("l3"),
+                            instructions: Some(Arc::from("l3")),
+                            current_context: None,
                             tool_specs: Arc::new(Vec::new()),
-                            projector_turn_inputs: Default::default(),
                         }),
                     });
             }

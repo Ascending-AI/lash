@@ -94,11 +94,6 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 0,
-        finalization: "",
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture")
 }
@@ -545,15 +540,10 @@ fn history_teaching_follows_indexable_entries() {
             turn_causes: &[],
             max_output_chars: 1000,
             protocol_iteration: 1,
-            finalization: "finish",
-            required_output: None,
-            final_answer_format: None,
-            budget_suffix: None,
-            bound_variables: "",
         })
         .expect("valid history fixture");
         let tail = observation_text(messages.last().unwrap());
-        assert_eq!(tail.matches("=== FINALIZATION ===").count(), 1);
+        assert!(!tail.contains("=== FINALIZATION ==="), "{tail}");
         assert!(tail.contains("`history`: `HistoryItem[]`, read-only, 1 entry"));
         assert_eq!(tail.contains("type HistoryItem ="), structured);
         assert!(!tail.contains("truncated"));
@@ -599,11 +589,6 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 1,
-        finalization: "finish",
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture");
 

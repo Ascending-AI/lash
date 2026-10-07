@@ -60,62 +60,20 @@ pub trait ProtocolSessionPlugin: Send + Sync {
         Ok(None)
     }
 
-    /// Render the protocol's bound-variables view for the context projector,
-    /// if the protocol exposes one.
-    ///
-    /// The runtime calls this only where the result becomes a recorded
-    /// projector input — the turn-machine build and each journaled
-    /// execution-environment sync — so a redriven iteration replays the
-    /// recorded render instead of re-reading live plugin state (FIG-3538).
-    /// `None` (the default) means the protocol has no bound-variables surface.
-    async fn bound_variables_prompt(
+    /// The protocol's facts for its own prompt sections (ADR 0133), derived
+    /// from its committed execution state: RLM's bound variables, say. The
+    /// runtime calls this where it builds a model call's prompt cut, and
+    /// every section renderer of that call reads the result through
+    /// [`PromptInput::protocol_facts`](super::prompt::PromptInput::protocol_facts).
+    /// The composed text, not these facts, is what a call records, so a
+    /// redriven call never asks again. `None` (the default) means the
+    /// protocol derives none.
+    async fn prompt_facts(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<Option<Arc<str>>, crate::SessionError> {
+    ) -> Result<Option<super::prompt::ProtocolPromptFacts>, crate::SessionError> {
         Ok(None)
     }
-
-    /// Render the session's system prompt (FIG-4586). The prompt is the
-    /// protocol plugin's own: its host data is the plugin's recorded
-    /// namespace in [`SystemPromptContext::plugin_config`], and its shape,
-    /// built-in text and section order are the plugin's.
-    ///
-    /// The runtime calls this only where the text becomes a recorded value:
-    /// the journaled execution-environment sync of a turn, and the recorded
-    /// render step of a compaction. A replay serves the recorded text and
-    /// never calls this again, so a fresh render may use current code.
-    /// The default is a protocol with no system prompt.
-    async fn render_system_prompt(
-        &self,
-        _ctx: SystemPromptContext<'_>,
-    ) -> Result<Arc<str>, crate::SessionError> {
-        Ok(Arc::from(""))
-    }
-}
-
-/// What a system-prompt render is for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SystemPromptPurpose {
-    /// A turn's model call: the whole prompt.
-    Turn,
-    /// A compaction's summarizer call. Its request ships no tools, so the
-    /// render leaves out the tools and the execution prose.
-    Compaction,
-}
-
-/// What a protocol plugin renders its system prompt from: recorded data only.
-#[derive(Clone, Copy)]
-pub struct SystemPromptContext<'a> {
-    /// The plugin configuration the running run was admitted under, or the
-    /// head's for a compaction no run executes. Never the plugin's construction
-    /// options: config commands change the prompt between runs.
-    pub plugin_config: &'a super::AdmittedPluginConfig,
-    /// The tool surface the render describes: the turn's pinned catalog, and
-    /// an empty one for a compaction.
-    pub tool_catalog: &'a crate::ToolCatalog,
-    /// The session's recorded subagent authority, when it is a subagent.
-    pub subagent: Option<&'a crate::SubagentSessionContext>,
-    pub purpose: SystemPromptPurpose,
 }
 
 /// The protocol-owned inputs needed to restore a session.

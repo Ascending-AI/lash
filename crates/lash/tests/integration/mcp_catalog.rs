@@ -7,6 +7,52 @@ use std::sync::Arc;
 use lash::mcp::{McpPluginFactory, McpServerConfig, McpStdioTransport};
 use lash::plugins::PluginFactory;
 
+/// The session's prompt sections composed for a turn call that offers
+/// `catalog` (ADR 0133).
+#[expect(
+    clippy::expect_used,
+    reason = "a test helper fails loudly on a prompt that does not compose"
+)]
+async fn turn_prompt(
+    session: &lash_core::plugin::PluginSession,
+    catalog: &lash_core::ToolCatalog,
+) -> String {
+    use lash::plugins::{OfferedTools, PromptCall, PromptCut, PromptCutParts, PromptRenderPool};
+    use lash::prompt::{PromptPlan, PromptPurpose};
+    let cut = PromptCut::new(PromptCutParts {
+        call: PromptCall {
+            session_id: lash::SessionId::from("advertised-surface"),
+            frame: None,
+            run: None,
+            turn: None,
+            iteration: 0,
+            call: 0,
+            purpose: PromptPurpose::Turn,
+        },
+        config: session.admitted_plugin_config(),
+        session: None,
+        offered: OfferedTools {
+            catalog: Arc::new(catalog.clone()),
+            ..OfferedTools::default()
+        },
+        model: Default::default(),
+        history: Default::default(),
+        namespaces: Default::default(),
+    });
+    session
+        .prompt_catalog()
+        .compose(
+            &PromptPlan::default(),
+            &PromptPurpose::Turn,
+            Arc::new(cut),
+            PromptRenderPool::shared(),
+        )
+        .await
+        .expect("the prompt composes")
+        .initial_instructions
+        .unwrap_or_default()
+}
+
 /// L3 (FIG-4859): a reopened session's recorded tool surface is not rewritten
 /// when the server's advertised tools changed since it was recorded — the
 /// recorded catalog still serves and every missing or moved entry is judged
@@ -133,16 +179,7 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
     // The prompt renders module headers, not tool names; the recorded module
     // carries the creating peer's instructions, so rendering the recorded
     // catalog serves them while the live catalog serves the successor's.
-    let recorded_prompt = reopened
-        .protocol_session()
-        .render_system_prompt(lash::plugins::SystemPromptContext {
-            plugin_config: &reopened.admitted_plugin_config(),
-            tool_catalog: &restored,
-            subagent: None,
-            purpose: lash::plugins::SystemPromptPurpose::Turn,
-        })
-        .await
-        .expect("the prompt renders from the recorded surface");
+    let recorded_prompt = turn_prompt(&reopened, &restored).await;
     assert!(
         recorded_prompt.contains("the lookup-era peer instructions"),
         "the record is served: {recorded_prompt}"
@@ -151,16 +188,7 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
         !recorded_prompt.contains("the search-era peer instructions"),
         "the advertisement does not leak in"
     );
-    let live_prompt = reopened
-        .protocol_session()
-        .render_system_prompt(lash::plugins::SystemPromptContext {
-            plugin_config: &reopened.admitted_plugin_config(),
-            tool_catalog: &live,
-            subagent: None,
-            purpose: lash::plugins::SystemPromptPurpose::Turn,
-        })
-        .await
-        .expect("the live catalog renders its own surface");
+    let live_prompt = turn_prompt(&reopened, &live).await;
     assert!(
         live_prompt.contains("the search-era peer instructions"),
         "the live surface is the advertisement's own"

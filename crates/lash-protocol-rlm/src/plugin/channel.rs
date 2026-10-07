@@ -112,7 +112,6 @@ mod tests {
                 .memory_limit(super::super::MemoryBound::unbounded())
                 .build()
                 .recorded_behaviour(false),
-            prompt: Default::default(),
         }
     }
 

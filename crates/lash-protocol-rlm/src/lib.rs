@@ -15,9 +15,9 @@ mod native;
 mod plugin;
 pub use native::{NATIVE_EXECUTE_TOOL_NAME, NATIVE_TRANSPORT_VERSION, RlmNativeToolPlugin};
 mod projection;
+mod prompt_sections;
 mod protocol;
-mod system_prompt;
-pub use system_prompt::{RLM_BUILTIN_INTRO, RlmSystemPromptInput, render_rlm_system_prompt};
+pub use prompt_sections::{RLM_BUILTIN_INTRO, section_id, section_keys};
 pub mod render;
 pub use render::{BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ResolvedRlmRender};
 mod rlm_support;
@@ -53,8 +53,8 @@ pub use plugin::{
     RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmConfigOwner, RlmConfigRefusal,
     RlmCreateConfig, RlmLanguageFeatures, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
     RlmProtocolPluginFactory, RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal,
-    RlmRunOptions, RlmSessionConfigDecodeError, SetRlmPrompt, SetRlmPromptContext, SetRlmRender,
-    UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_protocol_config, rlm_session_config,
+    RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel,
+    rlm_lashlang_surface, rlm_protocol_config, rlm_session_config,
 };
 pub use projection::{
     HISTORY_PROJECTION, RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed,

@@ -1,7 +1,6 @@
 use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 use crate::dialect::SessionDialect;
-use crate::driver::{RlmPreambleConfig, final_answer_format_prompt, required_output_block};
-use crate::rlm_support::{decode_rlm_options, effective_budget_tokens};
+use crate::driver::RlmPreambleConfig;
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
@@ -23,7 +22,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
             projector: Arc::new(NativeContextProjector {
                 prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
-                max_budget_tokens: config.max_budget_tokens,
                 dialect: Arc::clone(&dialect),
             }),
         },
@@ -36,43 +34,14 @@ pub(crate) fn build_rlm_preamble_with_dialect(
 struct NativeContextProjector {
     prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
-    max_budget_tokens: Option<usize>,
     dialect: Arc<SessionDialect>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
-    #[expect(
-        clippy::expect_used,
-        reason = "recorded turn options are validated by the plugin at session open; decode_rlm_options only errs on options that validation already refused"
-    )]
     fn project(
         &self,
         ctx: ProjectorContext<'_>,
     ) -> Result<Arc<LlmRequest>, lash_core::StoredDataCorruption> {
-        let options = decode_rlm_options(&ctx.config.termination)
-            .expect("RLM turn options are validated before prompt projection");
-        let termination = options.effective_termination();
-        let finalization = super::prompt::finalization(self.dialect.as_ref(), &termination);
-        let required_output = required_output_block(&self.dialect, &termination);
-        let vocabulary = self.dialect.prompt_vocabulary();
-        let final_answer_format = final_answer_format_prompt(&options, vocabulary);
-        let budget_suffix = crate::rlm_support::format_budget_suffix_with_vocabulary(
-            ctx.protocol_iteration + 1,
-            ctx.environment.projector_turn_inputs.prompt_usage.as_ref(),
-            effective_budget_tokens(
-                self.max_budget_tokens,
-                Some(ctx.config.model.context_window_tokens()),
-            ),
-            vocabulary,
-            self.prompt_features.decomposition,
-        );
-        let bound_variables_prompt = ctx
-            .environment
-            .projector_turn_inputs
-            .bound_variables_prompt
-            .as_deref()
-            .unwrap_or("");
-
         let mut messages = Vec::new();
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
@@ -83,11 +52,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
                 turn_causes: ctx.turn_causes,
                 max_output_chars: self.max_output_chars,
                 protocol_iteration: ctx.protocol_iteration + 1,
-                finalization: &finalization,
-                required_output: required_output.as_deref(),
-                final_answer_format: final_answer_format.as_deref(),
-                budget_suffix: budget_suffix.as_deref(),
-                bound_variables: bound_variables_prompt,
             },
         )?);
 
@@ -98,8 +62,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
 
         Ok(Arc::new(LlmRequest {
             model: ctx.config.model.clone(),
-            instructions: (!ctx.environment.system_prompt.trim().is_empty())
-                .then(|| Arc::from(ctx.environment.system_prompt.trim())),
+            instructions: None,
             messages,
             resolved_stored: Default::default(),
             tools: Arc::new(vec![super::tool::tool_spec(self.dialect.as_ref())]),

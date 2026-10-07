@@ -10,6 +10,7 @@ use lash_core_store::tool_run::{AttributedVerdict, CheckRecord};
 use super::*;
 
 mod directives;
+mod prompt_inputs;
 mod tools;
 pub use tools::ResolvedToolSurface;
 

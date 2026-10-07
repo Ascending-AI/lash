@@ -1851,39 +1851,26 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
 }
 
 /// FIG-3538: a crash before the iteration-2 LLM commit must redrive into a
-/// byte-identical journaled envelope. Per-iteration projector inputs ride the
-/// journaled execution-environment sync, so replay — which rebuilds the
-/// machine from recorded state — cannot leak divergent live plugin state into
-/// the request.
+/// byte-identical journaled envelope. Each iteration's composed prompt
+/// sections ride the journaled execution-environment sync, so replay — which
+/// rebuilds the machine from recorded state — cannot leak divergent live
+/// plugin state into the request.
 #[test]
 fn rlm_redrive_projects_identical_llm_envelope() {
-    // What the host journaled at the iteration-1 boundary: the committed
-    // prompt usage plus the bound-variables render recorded with the sync.
-    let journaled_inputs = sansio::ProjectorTurnInputs {
-        prompt_usage: Some(lash_core::TokenUsage {
-            input_tokens: 700,
-            ..Default::default()
-        }),
-        bound_variables_prompt: Some(Arc::from("rlm-bound-vars: step_total = 41")),
-    };
+    // What the host journaled at the iteration-1 boundary: the composed
+    // sections, the late bound-variables text among them.
     let journaled_sync = sansio::ExecutionEnvironmentSync {
-        system_prompt: Arc::from("journaled system prompt"),
+        instructions: Some(Arc::from("journaled system prompt")),
+        current_context: Some(Arc::from("rlm-bound-vars: step_total = 41")),
         tool_specs: Arc::new(Vec::new()),
-        projector_turn_inputs: journaled_inputs,
     };
 
-    let recorded_initial =
-        drive_rlm_to_second_llm_request(sansio::ProjectorTurnInputs::default(), &journaled_sync);
+    let recorded_initial = drive_rlm_to_second_llm_request(None, &journaled_sync);
     // A different protocol-start record — deliberately stale here — changes
     // iteration 1 only: each iteration projects from the sync journaled at
     // its own boundary and carries nothing over from the one before.
-    let redriven = drive_rlm_to_second_llm_request(
-        sansio::ProjectorTurnInputs {
-            prompt_usage: None,
-            bound_variables_prompt: Some(Arc::from("rlm-bound-vars: STALE")),
-        },
-        &journaled_sync,
-    );
+    let redriven =
+        drive_rlm_to_second_llm_request(Some(Arc::from("rlm-bound-vars: STALE")), &journaled_sync);
 
     assert_ne!(
         serde_json::to_vec(&recorded_initial.0).expect("first request serializes"),
@@ -1893,7 +1880,7 @@ fn rlm_redrive_projects_identical_llm_envelope() {
     assert_eq!(
         serde_json::to_vec(&recorded_initial.1).expect("second request serializes"),
         serde_json::to_vec(&redriven.1).expect("second request serializes"),
-        "the journaled sync pins iteration 2's projector inputs on redrive"
+        "the journaled sync pins iteration 2's prompt sections on redrive"
     );
     let encoded = serde_json::to_string(&redriven.1).expect("second request serializes");
     assert!(
@@ -1902,17 +1889,18 @@ fn rlm_redrive_projects_identical_llm_envelope() {
     );
     assert!(
         !encoded.contains("STALE"),
-        "the stale protocol-start inputs must not survive the journaled boundary"
+        "the stale protocol-start sections must not survive the journaled boundary"
     );
 }
 
 /// Execute an RLM machine through one executed cell and return the two projected
-/// LLM requests. The protocol-start sync records `initial_inputs`, and the
-/// iteration boundary's `SyncExecutionEnvironment` is answered with
+/// LLM requests. The protocol-start sync records `initial_context` as its late
+/// sections, and the iteration boundary's `SyncExecutionEnvironment` is
+/// answered with
 /// `journaled_sync` — the recorded outcome a redrive replays verbatim instead
 /// of re-deriving.
 fn drive_rlm_to_second_llm_request(
-    initial_inputs: sansio::ProjectorTurnInputs,
+    initial_context: Option<Arc<str>>,
     journaled_sync: &sansio::ExecutionEnvironmentSync,
 ) -> (LlmRequest, LlmRequest) {
     let preamble = lash_protocol_rlm::build_rlm_preamble(
@@ -1922,12 +1910,7 @@ fn drive_rlm_to_second_llm_request(
             trigger_events: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         },
-        lash_protocol_rlm::RlmProjectorConfig {
-            max_budget_tokens: Some(1_000),
-            ..lash_protocol_rlm::RlmProjectorConfig::new(Arc::new(
-                lash_protocol_rlm::TypescriptDialect,
-            ))
-        },
+        lash_protocol_rlm::RlmProjectorConfig::new(Arc::new(lash_protocol_rlm::TypescriptDialect)),
     );
     let mut config = test_config();
     config.protocol_driver = preamble.config.protocol;
@@ -1949,7 +1932,7 @@ fn drive_rlm_to_second_llm_request(
             Effect::SyncExecutionEnvironment { id } => {
                 let result = Ok(if requests.is_empty() {
                     sansio::ExecutionEnvironmentSync {
-                        projector_turn_inputs: initial_inputs.clone(),
+                        current_context: initial_context.clone(),
                         ..Default::default()
                     }
                 } else {

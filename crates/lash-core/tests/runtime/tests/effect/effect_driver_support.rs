@@ -56,7 +56,7 @@ struct EffectControllerTestProtocolSession;
 #[async_trait::async_trait]
 impl ProtocolSessionPlugin for EffectControllerTestProtocolSession {}
 
-/// A protocol whose session cannot render its system prompt: every
+/// A protocol whose prompt section refuses to render: every
 /// execution-environment sync of its turns fails the same way.
 pub(super) struct PromptRefusingProtocolFactory;
 
@@ -94,23 +94,23 @@ impl lash_core::facade_support::SessionPlugin for PromptRefusingProtocolPlugin {
     ) -> Result<(), lash_core::PluginError> {
         registrar
             .protocol()
-            .session(Arc::new(PromptRefusingProtocolSession))?;
+            .session(Arc::new(EffectControllerTestProtocolSession))?;
+        registrar.prompt().section(
+            lash_core::plugin::prompt::PromptSectionSpec::new(
+                lash_core::prompt_sections::PromptSectionKey::new("intro")
+                    .expect("valid section key"),
+                lash_core::prompt_sections::PromptPlacement::InitialInstructions,
+            ),
+            Arc::new(|_: &lash_core::plugin::prompt::PromptInput<'_>| {
+                Err(lash_core::plugin::prompt::PromptRenderError::new(
+                    PROMPT_REFUSAL,
+                ))
+            }),
+        )?;
         registrar
             .protocol()
             .protocol_driver(Arc::new(EffectControllerTestProtocolDriver))?;
         Ok(())
-    }
-}
-
-struct PromptRefusingProtocolSession;
-
-#[async_trait::async_trait]
-impl ProtocolSessionPlugin for PromptRefusingProtocolSession {
-    async fn render_system_prompt(
-        &self,
-        _ctx: lash_core::plugin::SystemPromptContext<'_>,
-    ) -> Result<Arc<str>, lash_core::SessionError> {
-        Err(lash_core::PluginError::Invoke(PROMPT_REFUSAL.to_string()).into())
     }
 }
 

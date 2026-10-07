@@ -15,7 +15,6 @@ use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
 use crate::dialect::SessionDialect;
 #[cfg(test)]
 use crate::projection::rlm_protocol_event;
-use crate::rlm_support::{decode_rlm_options, effective_budget_tokens};
 
 #[cfg(any(test, feature = "testing"))]
 use history::render_history_messages;
@@ -26,16 +25,13 @@ use history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 #[derive(Clone)]
 pub struct RlmProjectorConfig {
     pub dialect: Arc<dyn crate::dialect::Dialect>,
-    pub discovery: Option<lash_core::ToolDiscovery>,
     pub max_output_chars: usize,
-    pub max_budget_tokens: Option<usize>,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub lashlang_surface: LashlangSurface,
 }
 
 pub(crate) struct RlmPreambleConfig {
     pub(crate) max_output_chars: usize,
-    pub(crate) max_budget_tokens: Option<usize>,
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
 }
 
@@ -44,9 +40,7 @@ impl RlmProjectorConfig {
     pub fn new(dialect: Arc<dyn crate::dialect::Dialect>) -> Self {
         Self {
             dialect,
-            discovery: None,
             max_output_chars: 10_000,
-            max_budget_tokens: None,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             lashlang_surface: LashlangSurface::default(),
         }
@@ -65,7 +59,6 @@ pub fn build_rlm_preamble(
         input,
         RlmPreambleConfig {
             max_output_chars: config.max_output_chars,
-            max_budget_tokens: config.max_budget_tokens,
             prompt_features: config.prompt_features,
         },
         dialect,
@@ -87,7 +80,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
             projector: Arc::new(RlmContextProjector {
                 prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
-                max_budget_tokens: config.max_budget_tokens,
                 dialect: Arc::clone(&dialect),
             }),
         },
@@ -100,45 +92,14 @@ pub(crate) fn build_rlm_preamble_with_dialect(
 struct RlmContextProjector {
     prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
-    max_budget_tokens: Option<usize>,
     dialect: Arc<SessionDialect>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
-    #[expect(
-        clippy::expect_used,
-        reason = "recorded turn options are validated by the plugin at session open; decode_rlm_options only errs on options that validation already refused"
-    )]
     fn project(
         &self,
         ctx: ProjectorContext<'_>,
     ) -> Result<Arc<LlmRequest>, lash_core::StoredDataCorruption> {
-        let options = decode_rlm_options(&ctx.config.termination)
-            .expect("RLM turn options are validated before prompt projection");
-        let termination = options.effective_termination();
-        let finalization = self
-            .dialect
-            .finalization_copy(&termination, crate::plugin::RlmChannel::Cell);
-        let required_output = required_output_block(&self.dialect, &termination);
-        let vocabulary = self.dialect.prompt_vocabulary();
-        let final_answer_format = final_answer_format_prompt(&options, vocabulary);
-        let budget_suffix = crate::rlm_support::format_budget_suffix_with_vocabulary(
-            ctx.protocol_iteration + 1,
-            ctx.environment.projector_turn_inputs.prompt_usage.as_ref(),
-            effective_budget_tokens(
-                self.max_budget_tokens,
-                Some(ctx.config.model.context_window_tokens()),
-            ),
-            vocabulary,
-            self.prompt_features.decomposition,
-        );
-        let bound_variables_prompt = ctx
-            .environment
-            .projector_turn_inputs
-            .bound_variables_prompt
-            .as_deref()
-            .unwrap_or("");
-
         let mut messages = Vec::new();
 
         messages.extend(build_rlm_history_messages_from_turn(
@@ -150,11 +111,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
                 turn_causes: ctx.turn_causes,
                 max_output_chars: self.max_output_chars,
                 protocol_iteration: ctx.protocol_iteration + 1,
-                finalization: &finalization,
-                required_output: required_output.as_deref(),
-                final_answer_format: final_answer_format.as_deref(),
-                budget_suffix: budget_suffix.as_deref(),
-                bound_variables: bound_variables_prompt,
             },
         )?);
 
@@ -166,8 +122,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         generation.suppress_stop_sequences_for_protocol();
 
         Ok(Arc::new(LlmRequest {
-            instructions: (!ctx.environment.system_prompt.trim().is_empty())
-                .then(|| Arc::from(ctx.environment.system_prompt.trim())),
+            instructions: None,
             model: ctx.config.model.clone(),
             messages,
             resolved_stored: Default::default(),
@@ -239,15 +194,6 @@ pub(crate) fn final_answer_format_prompt(
     }
 }
 
-#[cfg(test)]
-fn rlm_finalization_prompt(termination: &RlmTermination) -> String {
-    SessionDialect::prompt_only(
-        Arc::new(crate::dialect::TypescriptDialect),
-        LashlangSurface::default(),
-    )
-    .finalization_copy(termination, crate::plugin::RlmChannel::Cell)
-}
-
 impl RlmContextProjector {
     #[cfg(test)]
     fn format_history(&self, events: &[lash_core::SessionHistoryRecord]) -> String {
@@ -259,11 +205,6 @@ impl RlmContextProjector {
             turn_causes: &[],
             max_output_chars: self.max_output_chars,
             protocol_iteration: 0,
-            finalization: "",
-            required_output: None,
-            final_answer_format: None,
-            budget_suffix: None,
-            bound_variables: "",
         })
         .expect("valid history fixture");
         messages
@@ -300,11 +241,6 @@ pub(crate) fn render_conformance_history_message(
         turn_causes: &[],
         max_output_chars: 10_000,
         protocol_iteration: 0,
-        finalization: "",
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .map_err(|error| error.to_string())?;
     let attachment_count = rendered
@@ -323,8 +259,4 @@ pub(crate) fn render_conformance_history_message(
 }
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-#[path = "driver_runtime_feedback_tests.rs"]
-mod runtime_feedback_tests;
+pub(crate) mod tests;

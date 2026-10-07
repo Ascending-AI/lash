@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1577 rows over 853 files, 3929 laws.
-# By class: mechanical 163, semantic 111, delete 852, replace 451.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 67, L9c 342, L9d 79, L9e 130, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
-# By status: todo 406, ported 89, deleted 1082.
+# 1583 rows over 855 files, 3938 laws.
+# By class: mechanical 163, semantic 111, delete 858, replace 451.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 130, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
+# By status: todo 405, ported 90, deleted 1088.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -3260,13 +3260,60 @@ needs = ["turn"]
 class = "mechanical"
 lane = "L9b"
 laws = [
-  "creation_override_is_recorded_and_children_inherit_it",
-  "prompt_commands_apply_only_to_the_next_run",
-  "omitting_builtin_guidance_keeps_tool_modules_and_context",
-  "compaction_prompt_retains_host_sections_without_execution",
+  "the_standard_sections_compose_the_protocol_prompt",
+  "the_tool_sections_describe_exactly_the_offered_tools",
+  "a_host_replaces_the_intro_omits_guidance_and_adds_context",
+  "the_compaction_prompt_keeps_intro_and_guidance_without_execution",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5257 rewrote the file against the keyed prompt sections: the Standard prompt is composed from its sections with no engine, and the prompt commands and recorded prompt it tested are deleted"
+
+[[row]]
+path = "crates/lash-protocol-standard/src/prompt_tests.rs"
+test = "creation_override_is_recorded_and_children_inherit_it"
+area = "prompts"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = ["creation_override_is_recorded_and_children_inherit_it"]
+disposition = "covered-by:crates/lash-protocol-standard/src/prompt_tests.rs::a_host_replaces_the_intro_omits_guidance_and_adds_context"
+status = "deleted"
+note = "FIG-5257 deleted the recorded Standard prompt: a host's text is a section replacement in the prompt plan, which a child inherits with the core's config"
+
+[[row]]
+path = "crates/lash-protocol-standard/src/prompt_tests.rs"
+test = "omitting_builtin_guidance_keeps_tool_modules_and_context"
+area = "prompts"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = ["omitting_builtin_guidance_keeps_tool_modules_and_context"]
+disposition = "covered-by:crates/lash-protocol-standard/src/prompt_tests.rs::a_host_replaces_the_intro_omits_guidance_and_adds_context"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-protocol-standard/src/prompt_tests.rs"
+test = "compaction_prompt_retains_host_sections_without_execution"
+area = "prompts"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = ["compaction_prompt_retains_host_sections_without_execution"]
+disposition = "covered-by:crates/lash-protocol-standard/src/prompt_tests.rs::the_compaction_prompt_keeps_intro_and_guidance_without_execution"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-protocol-standard/src/prompt_tests.rs"
+test = "prompt_commands_apply_only_to_the_next_run"
+area = "prompts"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = ["prompt_commands_apply_only_to_the_next_run"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5257 deleted SetStandardPrompt and its sibling commands"
 
 [[row]]
 path = "crates/lash-protocol-standard/src/recorded_behaviour_tests.rs"
@@ -25213,3 +25260,32 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "deleted by FIG-5225 with call_tool_batch, its content-addressed batch identity and its settlement order: no host batch runs outside an admitted round or cell"
+
+[[row]]
+path = "crates/lash-protocol-rlm/src/driver_runtime_feedback_tests.rs"
+test = "*"
+area = "prompts"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = ["runtime_feedback_projectors_trim_configured_instructions"]
+disposition = "covered-by:crates/lash-protocol-rlm/src/prompt_sections/tests.rs::a_section_renders_the_same_text_wherever_the_host_places_it"
+status = "deleted"
+note = "FIG-5257: the projectors no longer render instructions or a late tail; the protocol's late blocks are CurrentContext sections, lowered by the core"
+
+[[row]]
+path = "crates/lash-protocol-rlm/src/system_prompt/tests.rs"
+test = "*"
+area = "prompts"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = [
+  "a_customised_prompt_renders_the_hosts_text_around_the_declarations",
+  "each_built_in_text_is_omitted_on_its_own",
+  "discovery_is_a_declaration",
+  "blank_host_text_renders_no_section",
+]
+disposition = "covered-by:crates/lash-protocol-rlm/src/prompt_sections/tests.rs::a_host_replaces_or_omits_each_built_in_text_and_keeps_the_declarations"
+status = "deleted"
+note = "FIG-5257 moved the file to prompt_sections/tests.rs; discovery_is_a_declaration is covered by the_declarations_describe_exactly_the_offered_callable_tools and blank_host_text_renders_no_section by a_section_with_nothing_to_say_renders_nothing"

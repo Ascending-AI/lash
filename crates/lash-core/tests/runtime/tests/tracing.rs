@@ -13,19 +13,6 @@ use tracing_subscriber::{Layer, Registry};
 
 const SEED: u64 = 0x5_f50a;
 
-/// A protocol session whose rendered system prompt is the text it holds.
-struct SwitchablePrompt(Arc<std::sync::Mutex<&'static str>>);
-
-#[async_trait::async_trait]
-impl lash_core::plugin::ProtocolSessionPlugin for SwitchablePrompt {
-    async fn render_system_prompt(
-        &self,
-        _ctx: lash_core::plugin::SystemPromptContext<'_>,
-    ) -> Result<Arc<str>, lash_core::SessionError> {
-        Ok(Arc::from(*self.0.lock().expect("prompt lock")))
-    }
-}
-
 struct SchemaChangingTool {
     revision: Mutex<u64>,
 }

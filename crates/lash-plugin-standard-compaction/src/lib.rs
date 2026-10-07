@@ -1,16 +1,18 @@
 //! Default standard-compaction plugin.
 //!
 //! Owns the standard protocol's context policies: old-attachment pruning in
-//! the prompt view, compaction — an explicit administrative compaction or at
+//! the request's view of history, compaction — an explicit administrative compaction or at
 //! the context-pressure threshold — and context-overflow recovery. Every
 //! compaction starts a fresh frame seeded with its summary (FIG-4029): a
 //! frame is the context window.
 //!
-//! Pruning is a Prompt View transform and stays ephemeral (ADR 0001). The
-//! durable policies return decisions core writes: `compact_context` through
-//! the [`ContextCompactor`], and the pressure threshold and overflow recovery
+//! Pruning is an attachment-omission history policy and stays ephemeral (ADR
+//! 0133): it names old attachments, core omits them from the request with
+//! one placeholder, and the history keeps them. The durable policies return
+//! decisions core writes: `compact_context` through the
+//! [`ContextCompactor`], and the pressure threshold and overflow recovery
 //! through the [`ContextPressureHook`], which core calls once per turn before
-//! the transforms (FIG-4110).
+//! the history policies (FIG-4110).
 //!
 //! The standard protocol's plugin only: RLM switches frames through the
 //! model-driven `continue_as`.
@@ -31,11 +33,12 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 
-use lash_core::facade_support::{ModelToolReturnPart, PreparedContext};
+use lash_core::facade_support::ModelToolReturnPart;
 use lash_core::plugin::{
-    CompactionContext, ContextCompaction, ContextCompactor, ContextError, ContextPressureContext,
-    ContextPressureDecision, ContextPressureHook, PluginError, PluginFactory, PluginRegistrar,
-    PluginSessionContext, SessionPlugin, TurnContextTransform, TurnTransformContext,
+    AttachmentOmissionContext, AttachmentOmissionPolicy, CompactionContext, ContextCompaction,
+    ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
+    ContextPressureHook, HistoryPartId, PluginError, PluginFactory, PluginRegistrar,
+    PluginSessionContext, SessionPlugin, omit_part_attachments,
 };
 use lash_core::{Message, MessageOrigin, MessageRole, Part, PartKind, SessionSnapshot, TokenUsage};
 
@@ -48,7 +51,6 @@ const PRUNE_CONTEXT_THRESHOLD: f64 = 0.6;
 pub(crate) const STANDARD_COMPACTION_PLUGIN_ID: &str = "standard_compaction";
 pub(crate) const COMPACTION_SUMMARY_TITLE: &str = "Compaction summary:";
 const COMPACTION_PROMPT: &str = "Provide a detailed summary of the conversation above so a later session can continue the work without the full history.\n\nUse this template:\n---\n## Goal\n[What is the user trying to accomplish?]\n\n## Instructions\n- [Relevant instructions or constraints]\n\n## Discoveries\n[Important findings, failures, or decisions]\n\n## Accomplished\n[What is done, what is in progress, what remains]\n\n## Relevant files / directories\n[List important files or directories]\n---";
-const PRUNED_ATTACHMENT_PLACEHOLDER: &str = "[Attachment omitted from older context]";
 const COMPACTED_ATTACHMENT_PLACEHOLDER: &str = "[Attachment omitted during compaction]";
 
 /// Maximum summarization attempts one open context-overflow recovery may
@@ -114,60 +116,45 @@ pub(crate) fn approx_token_count(text: &str) -> usize {
     text.len().div_ceil(4)
 }
 
-/// Elide the attachments a part carries, leaving `placeholder` where each
-/// sat: an attachment part keeps its slot empty with the placeholder as its
-/// text, and a tool result's attachment blocks become placeholder text in
-/// place, so the result stays one part in its original order.
-fn strip_attachment(part: &mut Part, placeholder: &str) -> bool {
-    if let Some(blocks) = part.tool_result_content_mut() {
-        let mut changed = false;
-        for block in blocks.iter_mut() {
-            if block.attachment().is_some() {
-                *block = ModelToolReturnPart::text(placeholder);
-                changed = true;
-            }
-        }
-        return changed;
-    }
-    if !matches!(part.kind(), PartKind::Attachment) || part.attachment().is_none() {
-        return false;
-    }
-    if let Some(slot) = part.attachment_mut() {
-        *slot = None;
-    }
-    if let Some(content) = part.content_mut() {
-        *content = placeholder.to_string();
-    }
-    true
-}
-
-fn prune_old_attachments(messages: &mut [Message]) -> usize {
-    let mut pruned = 0usize;
+/// The attachment parts of `messages` older than the recent user turns,
+/// back to the latest compaction summary.
+fn old_attachment_parts(messages: &[Message]) -> std::collections::BTreeSet<HistoryPartId> {
+    let mut parts = std::collections::BTreeSet::new();
     let mut recent_user_turns = 0usize;
-
-    'scan: for msg_idx in (0..messages.len()).rev() {
-        if is_compaction_summary_message(&messages[msg_idx]) {
-            break 'scan;
+    for message in messages.iter().rev() {
+        if is_compaction_summary_message(message) {
+            break;
         }
-        if messages[msg_idx].role == MessageRole::User {
+        if message.role == MessageRole::User {
             recent_user_turns += 1;
         }
         if recent_user_turns < PRUNE_RECENT_USER_TURNS {
             continue;
         }
-        for part in std::sync::Arc::make_mut(&mut messages[msg_idx].parts).iter_mut() {
-            pruned += usize::from(strip_attachment(part, PRUNED_ATTACHMENT_PLACEHOLDER));
+        for (index, part) in message.parts.iter().enumerate() {
+            if carries_attachment(part) {
+                parts.insert(HistoryPartId {
+                    message: message.id.clone(),
+                    part: index,
+                });
+            }
         }
     }
+    parts
+}
 
-    pruned
+fn carries_attachment(part: &Part) -> bool {
+    match part.tool_result_content() {
+        Some(blocks) => blocks.iter().any(|block| block.attachment().is_some()),
+        None => matches!(part.kind(), PartKind::Attachment) && part.attachment().is_some(),
+    }
 }
 
 fn strip_all_attachments(messages: &mut [Message], placeholder: &str) -> bool {
     let mut changed = false;
     for message in messages {
         for part in std::sync::Arc::make_mut(&mut message.parts).iter_mut() {
-            changed |= strip_attachment(part, placeholder);
+            changed |= omit_part_attachments(part, placeholder);
         }
     }
     changed
@@ -701,10 +688,8 @@ impl SessionPlugin for StandardCompactionPlugin {
             100,
             Arc::new(StandardCompactionPressureHook::new(config.clone())),
         )?;
-        reg.context().prepare_turn(
-            100,
-            Arc::new(StandardCompactionTurnTransform::new(config.clone())),
-        )?;
+        reg.context()
+            .attachment_omissions(100, Arc::new(StandardCompactionAttachmentPolicy))?;
         reg.context()
             .compact(100, Arc::new(StandardContextCompactor::new(config)))?;
         reg.turn().after(
@@ -717,8 +702,8 @@ impl SessionPlugin for StandardCompactionPlugin {
     }
 }
 
-/// The durable context policies, decided once per turn before the Prompt
-/// View transforms: a pending context-overflow recovery first (the third
+/// The durable context policies, decided once per turn before the history
+/// policies: a pending context-overflow recovery first (the third
 /// context policy), then the context-pressure threshold. Each returns a
 /// decision; core writes it and opens the frame (FIG-4110).
 struct StandardCompactionPressureHook;
@@ -817,47 +802,40 @@ impl ContextPressureHook for StandardCompactionPressureHook {
     }
 }
 
-/// Old-attachment pruning: the one ephemeral policy, a Prompt View
-/// transform. It writes nothing durable.
-struct StandardCompactionTurnTransform;
+/// Old-attachment pruning: the one ephemeral policy, an attachment-omission
+/// history policy (ADR 0133). It names attachments; it writes nothing.
+struct StandardCompactionAttachmentPolicy;
 
-impl StandardCompactionTurnTransform {
-    fn new(_config: StandardCompactionConfig) -> Self {
-        Self
-    }
-}
-
-#[async_trait]
-impl TurnContextTransform for StandardCompactionTurnTransform {
+impl AttachmentOmissionPolicy for StandardCompactionAttachmentPolicy {
     fn id(&self) -> &'static str {
-        "standard_compaction.prepare_turn"
+        "standard_compaction.attachment_omissions"
     }
 
-    async fn transform(
+    fn omissions(
         &self,
-        ctx: &TurnTransformContext<'_>,
-        mut input: PreparedContext,
-    ) -> Result<PreparedContext, ContextError> {
+        ctx: &AttachmentOmissionContext,
+        history: &[Message],
+    ) -> Result<std::collections::BTreeSet<HistoryPartId>, PluginError> {
         let Some(pressure) =
             ContextPressure::derive(ctx.prompt_usage.as_ref(), ctx.max_context_tokens)
         else {
-            return Ok(input);
+            return Ok(Default::default());
         };
         if !pressure.pruning_needed() {
-            return Ok(input);
+            return Ok(Default::default());
         }
-        let pruned_attachments = prune_old_attachments(input.messages.make_mut());
-        if pruned_attachments > 0 {
+        let omissions = old_attachment_parts(history);
+        if !omissions.is_empty() {
             ctx.traces.emit(
-                turn_trace_context(&ctx.session_id, &ctx.scoped_effect_controller),
+                ctx.trace_context.clone(),
                 lash_core::TraceEvent::PromptViewAttachmentsPruned {
                     used_tokens: pressure.used_tokens,
                     max_context_tokens: pressure.max_context_tokens,
-                    pruned_attachments,
+                    pruned_attachments: omissions.len(),
                 },
             );
         }
-        Ok(input)
+        Ok(omissions)
     }
 }
 

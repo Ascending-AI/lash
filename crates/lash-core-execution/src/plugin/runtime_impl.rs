@@ -585,6 +585,9 @@ impl PluginHost {
             .turn_context_transforms
             .sort_by_key(|entry| std::cmp::Reverse(entry.0));
         contributions
+            .attachment_omission_policies
+            .sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        contributions
             .context_compactors
             .sort_by_key(|entry| std::cmp::Reverse(entry.0));
         contributions

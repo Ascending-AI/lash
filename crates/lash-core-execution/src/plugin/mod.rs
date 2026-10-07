@@ -19,6 +19,7 @@ pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginCo
 pub use lash_sansio::{CheckpointKind, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution};
 
 mod actions;
+mod attachment_omission;
 pub mod config;
 mod error;
 #[cfg(test)]
@@ -60,6 +61,10 @@ pub use actions::{
     PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
     ProcessReadService, SessionParam, SessionReadService,
 };
+pub use attachment_omission::{
+    AttachmentOmissionContext, AttachmentOmissionPolicy, HistoryPartId,
+    OMITTED_ATTACHMENT_PLACEHOLDER, apply_attachment_omissions, omit_part_attachments,
+};
 pub use config::{
     AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,
     ConfigCommandDescriptor, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, ConfigRegistry,
@@ -94,8 +99,8 @@ pub use protocol::{
     CodeExecutorPlugin, EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionLeafName,
     ExecutionStateCapture, HydratedExecutionState, InvalidExecutionLeafName, LeafChange,
     PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
-    ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView, SystemPromptContext,
-    SystemPromptPurpose, TranscriptRowProjectorPlugin,
+    ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
+    TranscriptRowProjectorPlugin,
 };
 pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,

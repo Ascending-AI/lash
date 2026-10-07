@@ -55,29 +55,6 @@ impl RlmRuntimeState {
         )))
     }
 
-    /// The system prompt over the session's current bindings.
-    pub(crate) async fn system_prompt(
-        &self,
-        behaviour: &crate::system_prompt::RlmSystemPromptBehaviour<'_>,
-        prompt: &lash_rlm_types::RlmPrompt,
-        tool_catalog: &lash_core::ToolCatalog,
-        subagent: Option<&lash_core::SubagentSessionContext>,
-        scope: crate::system_prompt::RlmSystemPromptScope,
-    ) -> Arc<str> {
-        let bindings = self.session_projected_bindings.lock().await;
-        Arc::from(crate::system_prompt::render_system_prompt(
-            &self.dialect,
-            behaviour,
-            crate::system_prompt::RlmSystemPromptInput {
-                prompt,
-                tool_catalog,
-                bindings: &bindings,
-                subagent,
-            },
-            scope,
-        ))
-    }
-
     /// The declaration of the session's read-only variables, as its system
     /// prompt renders it.
     #[cfg(test)]
@@ -86,29 +63,37 @@ impl RlmRuntimeState {
         self.dialect.read_only_variables_prompt(&bindings)
     }
 
-    /// Render the current bound-variables view on demand.
+    /// The facts the session's prompt sections render (ADR 0133): the
+    /// current bound-variables view and the read-only variables.
     ///
-    /// The runtime calls this only where the result becomes a recorded input
-    /// — the turn-machine build and each journaled execution-environment sync
-    /// — so the projector never reads this state directly and a redrive
-    /// replays the recorded render (FIG-3538).
-    pub(crate) async fn bound_variables_prompt(
+    /// The runtime asks only where it composes a call's prompt, and journals
+    /// the composed text with the execution-environment sync, so a redrive
+    /// replays the recorded text and never reads this state (FIG-3538).
+    pub(crate) async fn prompt_facts(
         &self,
         recorded: Option<&lash_core::RecordedRender>,
-    ) -> Result<Arc<str>, SessionError> {
+    ) -> Result<crate::prompt_sections::RlmPromptFacts, SessionError> {
         let renderer = self.dialect.renderer();
         let recorded = lash_core::RecordedRender::require_available(recorded, renderer.0.id())
             .map_err(|code| SessionError::Protocol(code.to_string()))?;
         let params: crate::render::ResolvedRlmRender =
             serde_json::from_value(recorded.params.clone())
                 .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        let read_only_variables = {
+            let bindings = self.session_projected_bindings.lock().await;
+            self.dialect.read_only_variables_prompt(&bindings)
+        };
         let exclude = self.protected_projected_binding_names().await;
-        Ok(self
+        let bound_variables = self
             .execution
             .lock()
             .await
             .prepare_bound_variables_prompt(&exclude, params.preview)?
-            .render())
+            .render();
+        Ok(crate::prompt_sections::RlmPromptFacts {
+            bound_variables,
+            read_only_variables,
+        })
     }
 
     async fn protected_projected_binding_names(&self) -> BTreeSet<String> {
@@ -1123,9 +1108,10 @@ mod tests {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
                 let render = crate::testing::recorded_test_render();
                 let prompt = state
-                    .bound_variables_prompt(Some(&render))
+                    .prompt_facts(Some(&render))
                     .await
-                    .expect("bound variables prompt");
+                    .expect("prompt facts")
+                    .bound_variables;
                 assert!(!prompt.contains("scratch_note"));
 
                 execute_cell(
@@ -1138,9 +1124,10 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .bound_variables_prompt(Some(&render))
+                    .prompt_facts(Some(&render))
                     .await
-                    .expect("bound variables prompt");
+                    .expect("prompt facts")
+                    .bound_variables;
                 assert!(prompt.contains(r#"- `scratch_note` = "after execution""#));
             });
     }
@@ -1166,9 +1153,10 @@ mod tests {
                     .await
                     .expect("execute cell before late cancellation");
                 let rendered = state
-                    .bound_variables_prompt(Some(&render))
+                    .prompt_facts(Some(&render))
                     .await
-                    .expect("bound variables prompt");
+                    .expect("prompt facts")
+                    .bound_variables;
                 assert!(rendered.contains("cancelled_tail"));
 
                 state
@@ -1176,9 +1164,10 @@ mod tests {
                     .await
                     .expect("cancel second cell");
                 let rendered = state
-                    .bound_variables_prompt(Some(&render))
+                    .prompt_facts(Some(&render))
                     .await
-                    .expect("bound variables prompt");
+                    .expect("prompt facts")
+                    .bound_variables;
                 assert!(rendered.contains("survives"));
                 assert!(!rendered.contains("cancelled_tail"));
             });

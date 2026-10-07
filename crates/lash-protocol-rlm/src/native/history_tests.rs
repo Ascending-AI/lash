@@ -63,11 +63,6 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<LlmMessage> {
         turn_causes: &[],
         max_output_chars: 1000,
         protocol_iteration: 1,
-        finalization: "",
-        required_output: None,
-        final_answer_format: None,
-        budget_suffix: None,
-        bound_variables: "",
     })
     .expect("valid history fixture")
 }
@@ -207,11 +202,6 @@ fn second_round_history_teaches_images_only_when_enabled() {
             turn_causes: &[],
             max_output_chars: 1000,
             protocol_iteration: 2,
-            finalization: "finish",
-            required_output: None,
-            final_answer_format: None,
-            budget_suffix: None,
-            bound_variables: "",
         })
         .expect("valid history fixture");
         let tail = messages

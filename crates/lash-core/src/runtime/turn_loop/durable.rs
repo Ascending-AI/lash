@@ -234,11 +234,37 @@ impl LashRuntime {
         let messages =
             crate::MessageSequence::from_base_and_delta(base_read_model.messages, turn_delta)
                 .with_base_render_cache(base_read_model.prompt_render_cache);
+        // The attachment-omission history policies (ADR 0133) narrow the
+        // request's view only: `messages` stays the turn's history.
+        let mut request_messages = messages.clone();
+        let trace_context = {
+            let context =
+                lash_trace::TraceContext::default().for_session(self.state.session_id.clone());
+            match controller.turn_id() {
+                Some(turn_id) => context.for_turn(turn_id),
+                None => context,
+            }
+        };
+        let omissions = plugins
+            .attachment_omissions(
+                &crate::plugin::AttachmentOmissionContext {
+                    session_id: self.state.session_id.clone(),
+                    plugin_config: turn_ctx.plugin_config.clone(),
+                    state: turn_ctx.state.clone(),
+                    prompt_usage: previous_prompt_usage.clone(),
+                    max_context_tokens: turn_ctx.max_context_tokens,
+                    traces: turn_ctx.traces.clone(),
+                    trace_context,
+                },
+                &request_messages,
+            )
+            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
+        crate::plugin::apply_attachment_omissions(request_messages.make_mut(), &omissions);
         let prepared_context = plugins
             .prepare_turn_context(
                 &turn_ctx,
                 crate::session_model::context::PreparedContext {
-                    messages: messages.clone(),
+                    messages: request_messages,
                     ..Default::default()
                 },
                 self.turn_phase_probe.clone(),
