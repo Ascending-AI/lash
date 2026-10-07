@@ -307,7 +307,7 @@ impl PromptPlan {
 
     /// Check the plan on its own: no section ordered or placed twice, and a
     /// per-section limit within the total. Whether each named section is
-    /// registered is judged when a call resolves the plan.
+    /// registered is judged when the host sets the plan.
     ///
     /// # Errors
     ///
@@ -386,6 +386,10 @@ pub struct ResolvedPromptPlan {
     pub sections: Vec<ResolvedPromptSection>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub absent_targets: Vec<ResolvedPromptWrap>,
+    /// Host order or placement overrides whose section is no longer registered,
+    /// once per section in key order. They are skipped rather than failing a call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub absent_overrides: Vec<PromptSectionId>,
     pub limits: PromptLimits,
 }
 

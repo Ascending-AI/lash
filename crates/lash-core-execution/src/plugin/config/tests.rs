@@ -361,6 +361,7 @@ fn a_stale_transaction_runs_no_reducer_and_publishes_nothing() {
             &transaction,
             &crate::EmptyLlmProfiles,
             &crate::store::plugin_writers::PluginAdmission::default(),
+            &crate::plugin::prompt::PromptCatalog::default(),
         )
         .expect("the recorded config reads");
     assert_eq!(
@@ -403,6 +404,7 @@ fn ordered_commands_of_two_owners_publish_together_with_one_revision_step() {
             &transaction,
             &crate::EmptyLlmProfiles,
             &crate::store::plugin_writers::PluginAdmission::default(),
+            &crate::plugin::prompt::PromptCatalog::default(),
         )
         .expect("the recorded config reads");
     let mut published = base.clone();
@@ -446,6 +448,7 @@ fn a_refused_member_refuses_the_whole_transaction() {
             &transaction,
             &crate::EmptyLlmProfiles,
             &crate::store::plugin_writers::PluginAdmission::default(),
+            &crate::plugin::prompt::PromptCatalog::default(),
         )
         .expect("the recorded config reads");
     let mut published = base.clone();
@@ -492,6 +495,7 @@ fn the_final_candidate_is_validated_by_every_touched_owner() {
             &transaction,
             &crate::EmptyLlmProfiles,
             &crate::store::plugin_writers::PluginAdmission::default(),
+            &crate::plugin::prompt::PromptCatalog::default(),
         )
         .expect("the recorded config reads");
     let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
@@ -521,6 +525,7 @@ fn refused_over(
             &transaction,
             &crate::EmptyLlmProfiles,
             &crate::store::plugin_writers::PluginAdmission::default(),
+            &crate::plugin::prompt::PromptCatalog::default(),
         )
         .expect("the recorded config reads");
     let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
@@ -759,6 +764,7 @@ fn resolve_core(
             &transaction,
             models,
             &crate::store::plugin_writers::PluginAdmission::default(),
+            &crate::plugin::prompt::PromptCatalog::default(),
         )
         .expect("the recorded config reads")
 }
@@ -998,7 +1004,13 @@ fn config_namespaces_are_written_in_the_admissions_recorded_format() {
         .expect("admitted");
     let publish = |writers: &crate::store::plugin_writers::PluginAdmission| {
         let resolution = registry
-            .resolve(&base, &transaction, &crate::EmptyLlmProfiles, writers)
+            .resolve(
+                &base,
+                &transaction,
+                &crate::EmptyLlmProfiles,
+                writers,
+                &crate::plugin::prompt::PromptCatalog::default(),
+            )
             .expect("the recorded config reads");
         let mut published = base.clone();
         assert!(matches!(

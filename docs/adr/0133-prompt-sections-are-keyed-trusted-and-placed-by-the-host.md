@@ -127,14 +127,18 @@ providers lower late text into tagged user content.
 
 A plan that orders or places a section twice, or whose per-section limit
 exceeds its total, is refused as `CoreConfigRefusal::PromptPlanRefused`. A
-plan naming a section no installed plugin registers fails the call that
-resolves it, with `PromptPlanError::UnknownSection`; a key under a family's
-prefix counts as registered.
+plan naming a section no installed plugin registers is refused when
+`SetPromptPlan` resolves, with the typed `PromptPlanError::UnknownSection`
+naming the id; a key under a family's prefix counts as registered. If a
+plugin has since been removed, a call skips its recorded plan's overrides
+and records their section ids under `absent_overrides`. Such an override
+never fails a turn.
 
 A host reads its plan and catalog back through `session.admin().prompt()`:
 `plan()` returns the recorded plan, `catalog()` the installed sections,
 families and wrappers, and `preview(purpose, offered)` the resolution a call
-offered those tools would record, without rendering.
+offered those tools would record, without rendering. `snapshot(run, call)`
+reads that session's retained snapshot and verified text for a model call.
 
 ### 4. Render input is a committed cut
 
@@ -162,7 +166,7 @@ a trusted-code contract, not a sandbox.
 A call records a `ResolvedPromptPlan`. It holds the purpose, every selected
 section in plan order with its owner revision and resolved placement, each
 wrapper chain with owner revisions and ordinals, the wrappers whose target is
-absent, and the limits.
+absent, the plan overrides whose sections are no longer registered, and the limits.
 
 It also records a version-1 `PromptSnapshot`. For each section, the snapshot
 holds the base text, each applied wrapper's output in chain order, and the

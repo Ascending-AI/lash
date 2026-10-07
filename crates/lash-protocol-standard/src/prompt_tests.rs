@@ -41,10 +41,7 @@ async fn compose(
         },
         config: Default::default(),
         session: None,
-        offered: OfferedTools {
-            catalog: Arc::new(catalog),
-            ..OfferedTools::default()
-        },
+        offered: OfferedTools::new(Arc::new(catalog), false),
         model: Default::default(),
         history: Default::default(),
         namespaces: Default::default(),

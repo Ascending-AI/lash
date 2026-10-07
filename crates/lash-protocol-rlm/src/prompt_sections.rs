@@ -197,7 +197,7 @@ fn guidance(
     // only the tools shown inline.
     let interactive = input
         .offered()
-        .catalog
+        .catalog()
         .tool_names()
         .iter()
         .any(|name| name == "ask");
@@ -211,7 +211,7 @@ fn execution(
     behaviour: &RlmSectionBehaviour,
     input: &PromptInput<'_>,
 ) -> Result<SectionText, PromptRenderError> {
-    let ExecutionSection { prose, .. } = execution_section(behaviour, &input.offered().catalog);
+    let ExecutionSection { prose, .. } = execution_section(behaviour, input.offered().catalog());
     let title = behaviour.dialect.prompt_vocabulary().execution_title;
     Ok(match text_or_omit(prose) {
         SectionText::Text(prose) => SectionText::Text(format!("## {title}\n\n{prose}")),
@@ -224,7 +224,7 @@ fn declarations(
     input: &PromptInput<'_>,
 ) -> Result<SectionText, PromptRenderError> {
     let ExecutionSection { declarations, .. } =
-        execution_section(behaviour, &input.offered().catalog);
+        execution_section(behaviour, input.offered().catalog());
     let mut parts = Vec::new();
     let declarations = declarations.trim();
     if !declarations.is_empty() {

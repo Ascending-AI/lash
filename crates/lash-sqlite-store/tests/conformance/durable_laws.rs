@@ -22,6 +22,21 @@ fn durable_host(backend: &TestBackend) -> ActorContext {
     ActorContext::detached(backend.as_backend())
 }
 
+#[tokio::test]
+async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
+    store
+        .admit_session(&root_session_request("ingress-callback-state"))
+        .await
+        .expect("admit the callback's session");
+    lash_conformance::ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint(
+        store,
+        durable_host(&backend),
+    )
+    .await;
+}
+
 /// The deployment-store fixture: a fresh substrate per store, and the durable
 /// host over one more.
 macro_rules! session_store_factory_fixture {

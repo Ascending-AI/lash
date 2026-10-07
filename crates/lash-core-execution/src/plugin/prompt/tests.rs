@@ -336,7 +336,7 @@ fn a_host_placement_overrides_the_plugin_default_and_the_record_keeps_it() {
     assert!(matches!(
         catalog(plugins(PromptPlacement::CurrentContext))
             .unwrap()
-            .resolve(&unknown, &PromptPurpose::Turn, &OfferedTools::default()),
+            .validate_plan(&unknown),
         Err(PromptPlanError::UnknownSection { .. })
     ));
 }
@@ -548,14 +548,10 @@ fn module_tool(name: &str, module: &str) -> crate::ToolDefinition {
 
 /// A call offering `tools` natively, from their pinned catalog.
 fn offering(tools: Vec<crate::ToolDefinition>) -> OfferedTools {
-    OfferedTools {
-        native: tools
-            .iter()
-            .map(|tool| tool.manifest.name.clone())
-            .collect(),
-        callable: Vec::new(),
-        catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(tools)),
-    }
+    OfferedTools::new(
+        Arc::new(crate::ToolCatalog::from_tool_definitions(tools)),
+        false,
+    )
 }
 
 /// OFFERED: tool guidance is selected only when its surface is offered. A
@@ -626,7 +622,67 @@ fn a_family_section_is_selected_only_when_its_tools_are_offered() {
         ..PromptPlan::default()
     };
     assert!(matches!(
-        catalog.resolve(&unknown, &PromptPurpose::Turn, &offered),
+        catalog.validate_plan(&unknown),
         Err(PromptPlanError::UnknownSection { .. })
     ));
+}
+
+/// REMOVED-SECTION: a plan admitted before a plugin was removed remains usable.
+#[test]
+fn a_removed_plugins_override_is_skipped_instead_of_failing_the_call() {
+    let catalog = catalog(vec![]).expect("empty catalog");
+    let plan = PromptPlan {
+        order: vec![id("removed", "notes")],
+        placements: vec![PromptSectionPlacement {
+            section: id("removed", "notes"),
+            placement: PromptPlacement::CurrentContext,
+        }],
+        ..PromptPlan::default()
+    };
+    let resolution = catalog.resolve(&plan, &PromptPurpose::Turn, &OfferedTools::default());
+    let resolution = resolution.expect("a removed section cannot brick a turn");
+    assert!(resolution.record().sections.is_empty());
+    assert_eq!(
+        resolution.record().absent_overrides,
+        vec![id("removed", "notes")]
+    );
+}
+
+/// OFFERED: discovery-hidden tools remain discoverable in the pinned catalog,
+/// but contribute neither inline callable bindings nor prompt guidance.
+#[test]
+fn discovery_hidden_tools_are_absent_from_the_offered_surface() {
+    let visible = module_tool("search", "github");
+    let mut hidden = module_tool("private_search", "slack");
+    hidden.manifest.inline = false;
+    let catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![
+        visible, hidden,
+    ]));
+    let offered = OfferedTools::new(Arc::clone(&catalog), true);
+    assert_eq!(
+        offered
+            .manifests()
+            .map(|manifest| manifest.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["search"]
+    );
+    assert!(offered.offers("search"));
+    assert!(!offered.offers("private_search"));
+    assert!(
+        offered.catalog().has_callable_tool("private_search"),
+        "discovery retains execution authority"
+    );
+    assert_eq!(
+        ModuleGuidance
+            .sections(&offered)
+            .iter()
+            .map(|section| section.suffix.as_str())
+            .collect::<Vec<_>>(),
+        vec!["github"]
+    );
+    let undiscovered = OfferedTools::new(catalog, false);
+    assert!(
+        undiscovered.offers("private_search"),
+        "without discovery every member is inline"
+    );
 }

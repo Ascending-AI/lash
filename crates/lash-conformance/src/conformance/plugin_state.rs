@@ -31,6 +31,7 @@ mod registration;
 pub use boundary::plugin_state_boundary_trace;
 use fixtures::{MockPlugin, Registration, owner_key};
 use formats::{FormatPlugin, plugin_format_boundary};
+pub use lifecycle::ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint;
 use lifecycle::runtime_plugin_state_park_law;
 use refusal::plugin_state_corrupt_boundary;
 use registration::registration_state_law;

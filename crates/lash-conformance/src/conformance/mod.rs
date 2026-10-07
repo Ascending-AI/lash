@@ -103,7 +103,9 @@ pub use lineage::*;
 pub use live_replay::*;
 pub use obligation_relay::*;
 pub use observer_intent::*;
-pub use plugin_state::plugin_state_boundary_trace;
+pub use plugin_state::{
+    ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint, plugin_state_boundary_trace,
+};
 pub use process_change_horizon::*;
 pub use process_prune_reclaim::*;
 pub use process_prune_start_staging::*;

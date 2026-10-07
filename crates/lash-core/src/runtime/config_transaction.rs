@@ -190,6 +190,7 @@ impl LashRuntime {
                 &record,
                 self.host.core.providers.models.as_ref(),
                 &crate::store::plugin_writers::PluginAdmission::default(),
+                &self.prompt_catalog()?,
             )
             .map_err(|corrupt| {
                 crate::RuntimeEffectControllerError::from(corrupt.into_store_error())
@@ -307,6 +308,7 @@ impl LashRuntime {
         );
         let runner = ResolveConfigTransactionRunner {
             registry,
+            prompts: self.prompt_catalog()?,
             plugin_host: self
                 .session
                 .as_ref()
@@ -366,6 +368,7 @@ fn publish_config_resolution(
 /// session and the transaction.
 struct ResolveConfigTransactionRunner {
     registry: Arc<crate::ConfigRegistry>,
+    prompts: crate::plugin::prompt::PromptCatalog,
     /// The plugins whose writer formats the step chooses from the fleet
     /// record (FIG-4747). The choice is part of the recorded resolution, so
     /// a replay publishes the formats the first execution chose.
@@ -421,6 +424,7 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
                 &self.transaction,
                 self.models.as_ref(),
                 &writers,
+                &self.prompts,
             )
             .map_err(crate::RecordedNamespaceCorrupt::into_store_error)?;
         if let (Some(host), crate::ConfigResolutionDecision::Applied { namespaces, .. }) =

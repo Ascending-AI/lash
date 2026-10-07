@@ -46,7 +46,7 @@ impl StandardPromptBehaviour {
     /// The tools the model sees inline: every offered tool, or only the
     /// inline ones when the session discovers the rest.
     fn visible(&self, input: &PromptInput<'_>) -> lash_core::ToolCatalog {
-        let catalog = input.offered().catalog.as_ref();
+        let catalog = input.offered().catalog().as_ref();
         if self.discovery {
             catalog.inline_tools()
         } else {

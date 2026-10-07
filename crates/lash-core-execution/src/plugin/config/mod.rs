@@ -972,10 +972,11 @@ impl ConfigRegistry {
         transaction: &ConfigTransactionRecord,
         models: &dyn crate::LlmProfiles,
         writers: &crate::store::plugin_writers::PluginAdmission,
+        prompts: &super::prompt::PromptCatalog,
     ) -> Result<ConfigResolution, RecordedNamespaceCorrupt> {
         let base_revision = base.config_revision;
         let result = if transaction.expected_revision == base_revision {
-            match self.reduce(base, transaction, models, writers) {
+            match self.reduce(base, transaction, models, writers, prompts) {
                 Ok(applied) => applied,
                 Err(ConfigFault::Refused(refusal)) => ConfigResolutionDecision::Refused { refusal },
                 Err(ConfigFault::RecordedCorrupt(corrupt)) => return Err(corrupt),
@@ -1000,6 +1001,7 @@ impl ConfigRegistry {
         transaction: &ConfigTransactionRecord,
         models: &dyn crate::LlmProfiles,
         writers: &crate::store::plugin_writers::PluginAdmission,
+        prompts: &super::prompt::PromptCatalog,
     ) -> Result<ConfigResolutionDecision, ConfigFault> {
         let mut decoded_base = base.clone();
         decoded_base.plugin_config =
@@ -1049,6 +1051,18 @@ impl ConfigRegistry {
             };
             match command.reduce(&recorded, from, &entry.args, models) {
                 Ok((next, output)) => {
+                    if entry.owner == CORE_CONFIG_OWNER
+                        && entry.command == core::SetPromptPlan::NAME
+                    {
+                        let core = serde_json::from_value::<CoreConfig>(next.clone()).map_err(
+                            |error| refuse(unreadable(ConfigValueRole::Candidate, error)),
+                        )?;
+                        prompts.validate_plan(&core.prompt_plan).map_err(|error| {
+                            refuse(ConfigRefusalReason::by_owner(
+                                &CoreConfigRefusal::PromptPlanRefused { error },
+                            ))
+                        })?;
+                    }
                     candidate.insert(entry.owner.clone(), next);
                     outputs.push(output);
                 }

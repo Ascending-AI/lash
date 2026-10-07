@@ -252,14 +252,10 @@ fn guidance_sections(tools: Vec<lash_core::ToolDefinition>) -> Vec<(String, Stri
     use lash_core::plugin::prompt::{
         OfferedTools, PromptCall, PromptCut, PromptCutParts, PromptPurpose, PromptSectionSource,
     };
-    let offered = OfferedTools {
-        native: tools
-            .iter()
-            .map(|tool| tool.manifest.name.clone())
-            .collect(),
-        callable: Vec::new(),
-        catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(tools)),
-    };
+    let offered = OfferedTools::new(
+        Arc::new(lash_core::ToolCatalog::from_tool_definitions(tools)),
+        false,
+    );
     let cut = PromptCut::new(PromptCutParts {
         call: PromptCall {
             session_id: lash_core::SessionId::from("mcp-cut"),

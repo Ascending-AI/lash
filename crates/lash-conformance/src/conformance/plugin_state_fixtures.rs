@@ -12,6 +12,7 @@ pub(super) enum Registration {
 #[derive(Clone, Default)]
 pub(super) struct MockPlugin {
     pub(super) writes_on_ready: bool,
+    pub(super) writes_on_before: bool,
     pub(super) registration: Registration,
     pub(super) ready_values:
         Arc<Mutex<std::collections::BTreeMap<String, Option<serde_json::Value>>>>,
@@ -63,6 +64,19 @@ impl SessionPlugin for MockPlugin {
                         Err(PluginError::Session(
                             "deliberate hook failure before any command".into(),
                         ))
+                    })
+                }),
+            )?;
+        }
+        if self.writes_on_before {
+            registrar.turn().before(
+                crate::hook_key!("ingress-writer"),
+                Arc::new(|_| {
+                    Box::pin(async {
+                        Ok(crate::plugin::TurnContributions {
+                            state: StateCommands::new().set("counter", serde_json::json!(17)),
+                            ..Default::default()
+                        })
                     })
                 }),
             )?;

@@ -14,6 +14,28 @@ pub struct SessionPromptAdmin {
 }
 
 impl SessionPromptAdmin {
+    /// Read the retained snapshot of model call `call` in turn `run` from
+    /// this session. Call ordinals start at one. This runs no renderer or
+    /// wrapper and returns `None` when the snapshot is absent or released.
+    pub async fn snapshot(
+        &self,
+        run: &crate::TurnId,
+        call: u32,
+    ) -> Result<Option<crate::prompt::LoadedPromptSnapshot>> {
+        let context = self.control.target.context().await?;
+        let key = crate::prompt::PromptCallKey {
+            session: context.parts.session_id,
+            run: run.clone(),
+            call,
+        };
+        lash_core::plugin::prompt::load_prompt_snapshot(
+            context.parts.effect_host.backend().durable().as_ref(),
+            &key,
+        )
+        .await
+        .map_err(EmbedError::PromptSnapshotLoad)
+    }
+
     /// The prompt plan the session's durable head records: what the next run
     /// executes under. A plan is changed only by
     /// [`SetPromptPlan`](crate::config::SetPromptPlan).

@@ -757,14 +757,18 @@ pub mod persistence {
 ///
 /// [`SessionPromptAdmin`] reads a session's recorded plan and registered
 /// catalog, and previews the plan's resolution for a call without admitting
-/// one.
+/// one. Its `snapshot(run, call)` reads a retained model call's snapshot
+/// with its exact text, without rendering again.
 ///
 /// A call records its [`ResolvedPromptPlan`] and a version-1
 /// [`PromptSnapshot`]: each section's base text, each wrapper's output and
 /// the final text, as content-addressed [`PromptTextRef`]s.
 pub mod prompt {
-    pub use crate::admin::SessionPromptAdmin;
-    pub use lash_core::plugin::prompt::{PromptCompositionError, PromptRenderSite};
+    pub use crate::admin::prompt::SessionPromptAdmin;
+    pub use lash_core::durable_port::domain::PromptCallKey;
+    pub use lash_core::plugin::prompt::{
+        LoadedPromptSnapshot, PromptCompositionError, PromptRenderSite, PromptSnapshotLoadError,
+    };
     pub use lash_core::prompt_sections::{
         AppliedPromptWrap, PROMPT_KEY_MAX_BYTES, PlacementSource, PromptKeyError, PromptLimits,
         PromptPlacement, PromptPlan, PromptPlanError, PromptPurpose, PromptSectionId,

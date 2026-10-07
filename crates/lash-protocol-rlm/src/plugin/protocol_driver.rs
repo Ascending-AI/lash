@@ -38,6 +38,13 @@ impl ProtocolDriverPlugin for RlmProtocolDriver {
         }))
     }
 
+    fn prompt_tools(
+        &self,
+        catalog: Arc<lash_core::ToolCatalog>,
+    ) -> lash_core::plugin::prompt::OfferedTools {
+        lash_core::plugin::prompt::OfferedTools::new(catalog, self.config.discovery.is_some())
+    }
+
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         build_rlm_preamble_with_dialect(
             input,

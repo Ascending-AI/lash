@@ -1018,8 +1018,8 @@ mod process_admin;
 
 pub(crate) mod config_transactions;
 mod host_commands;
-mod prompt;
-pub use prompt::SessionPromptAdmin;
+pub(crate) mod prompt;
+pub(crate) use prompt::SessionPromptAdmin;
 mod tool_state;
 use host_commands::{HostPluginOperation, SubmittedCommand, unsettled_command_error};
 pub use tool_state::{PendingToolStateChange, SessionToolState};

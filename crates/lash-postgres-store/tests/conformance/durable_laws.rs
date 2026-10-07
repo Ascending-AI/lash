@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use lash_conformance::ReopenableRuntimeStore;
 use lash_core_execution::store::ConformanceDeployment;
-use lash_core_execution::{ActorContext, StoreSet};
+use lash_core_execution::{ActorContext, SessionCatalogStore as _, StoreSet};
 
 use super::*;
 
@@ -17,6 +17,25 @@ use super::*;
 /// `stores`, owning no actor.
 fn durable_host(stores: &Arc<dyn StoreSet>) -> ActorContext {
     ActorContext::detached(lash_conformance::backend_over(Arc::clone(stores)))
+}
+
+#[tokio::test]
+async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint() {
+    let (_database_fixture, storage) = storage()
+        .await
+        .expect("PostgreSQL law requires its isolated database");
+    reset(storage.pool()).await;
+    let (_attachments, stores) = pg_law_stores(&storage);
+    let store = Arc::new(storage.store());
+    store
+        .admit_session(&root_session_request("ingress-callback-state"))
+        .await
+        .expect("admit the callback's session");
+    lash_conformance::ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint(
+        store,
+        durable_host(&stores),
+    )
+    .await;
 }
 
 fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCreateRequest {

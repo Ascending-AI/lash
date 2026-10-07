@@ -19,7 +19,7 @@ use lash::plugins::{
 };
 use lash::prompt::{
     PlacementSource, PromptPlacement, PromptPlan, PromptPlanError, PromptPurpose, PromptSectionId,
-    PromptSectionKey, PromptSectionPlacement, PromptSnapshot, PromptWrapKey, RecordedSectionText,
+    PromptSectionKey, PromptSectionPlacement, PromptWrapKey, RecordedSectionText,
 };
 
 const PLUGIN: &str = "prompt-witness";
@@ -141,7 +141,15 @@ async fn witness_core(registered: Arc<AtomicBool>) -> lash::LashCore {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open a memory store set");
-    lash::LashCore::standard_builder(lash_conformance::backend_over(Arc::new(stores)))
+    witness_core_over(registered, Arc::new(stores), true).await
+}
+
+async fn witness_core_over(
+    registered: Arc<AtomicBool>,
+    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    installed: bool,
+) -> lash::LashCore {
+    let builder = lash::LashCore::standard_builder(lash_conformance::backend_over(stores))
         .llm_profiles(Arc::new(
             lash::LlmProfileRegistry::new()
                 .register(
@@ -168,11 +176,14 @@ async fn witness_core(registered: Arc<AtomicBool>) -> lash::LashCore {
                 )
                 .expect("register the test model"),
         ))
-        .plugin(Arc::new(Witness {
-            registered: Arc::clone(&registered),
-        }))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024));
+    let builder = if installed {
+        builder.plugin(Arc::new(Witness { registered }))
+    } else {
+        builder
+    };
+    builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "prompt-witness-worker",
             "prompt-witness-boot",
@@ -241,8 +252,52 @@ async fn a_host_registers_sections_sets_the_plan_and_decodes_a_snapshot_through_
         })
     );
 
+    for (index, plan) in [
+        PromptPlan {
+            order: vec![id("typo")],
+            ..PromptPlan::default()
+        },
+        PromptPlan {
+            placements: vec![PromptSectionPlacement {
+                section: id("typo"),
+                placement: PromptPlacement::Excluded,
+            }],
+            ..PromptPlan::default()
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let revision = config.revision().await.expect("revision");
+        let outcome = config
+            .apply(
+                lash::config::ConfigWrite::new(format!("unknown-plan-{index}"), revision),
+                lash::config::ConfigTransaction::of(lash::config::SetPromptPlan { plan }),
+            )
+            .await
+            .expect("the refusal settles");
+        let lash::config::ConfigTransactionOutcome::Refused { refusal } = outcome else {
+            panic!("an unknown section id is refused when the plan is set: {outcome:?}");
+        };
+        assert_eq!(
+            refusal.owner_refusal::<lash::config::CoreConfigRefusal>(),
+            Some(lash::config::CoreConfigRefusal::PromptPlanRefused {
+                error: PromptPlanError::UnknownSection {
+                    section: id("typo")
+                },
+            })
+        );
+        assert_eq!(
+            config.revision().await.expect("revision"),
+            revision,
+            "a refusal publishes no config"
+        );
+    }
+
+    let run = lash::TurnId::parse("prompt-witness-call").expect("run id");
     let turn = session
         .send(lash::TurnInput::text("build the plugin session"))
+        .id(run.clone())
         .output()
         .await
         .expect("the turn answers");
@@ -252,44 +307,26 @@ async fn a_host_registers_sections_sets_the_plan_and_decodes_a_snapshot_through_
         "the plugin's section and wrapper registered"
     );
 
-    let snapshot: PromptSnapshot = serde_json::from_value(serde_json::json!({
-        "version": 1,
-        "plan": {
-            "purpose": { "kind": "turn" },
-            "sections": [{
-                "section": { "owner": PLUGIN, "key": "notes" },
-                "owner": { "plugin": PLUGIN, "behavior_revision": 1 },
-                "placement": "initial_instructions",
-                "placement_source": "host",
-                "wraps": [{
-                    "wrap": { "owner": PLUGIN, "key": "frame" },
-                    "owner": { "plugin": PLUGIN, "behavior_revision": 1 },
-                    "target": { "owner": PLUGIN, "key": "notes" },
-                    "ordinal": 0
-                }]
-            }],
-            "limits": {
-                "max_sections": 128,
-                "max_wrappers": 256,
-                "max_section_bytes": 32768,
-                "max_total_bytes": 262144,
-                "render_budget_ms": 2000
-            }
-        },
-        "sections": [{
-            "section": { "owner": PLUGIN, "key": "notes" },
-            "placement": "initial_instructions",
-            "base": { "kind": "omitted" },
-            "wraps": [{
-                "wrap": { "owner": PLUGIN, "key": "frame" },
-                "output": { "kind": "omitted" }
-            }],
-            "value": { "kind": "omitted" }
-        }]
-    }))
-    .expect("a version-1 snapshot decodes through the facade");
-    assert_eq!(snapshot.plan.sections[0].section, notes());
-    assert_eq!(snapshot.sections[0].value, RecordedSectionText::Omitted);
+    let loaded = session
+        .admin()
+        .prompt()
+        .snapshot(&run, 1)
+        .await
+        .expect("the recorded snapshot reads through the facade")
+        .expect("the call retains a snapshot");
+    let note = loaded
+        .snapshot
+        .sections
+        .iter()
+        .find(|section| section.section == notes())
+        .expect("notes was recorded");
+    assert_eq!(note.placement, PromptPlacement::InitialInstructions);
+    assert_eq!(loaded.text(&note.base), Some("0 notes"));
+    assert_eq!(
+        loaded.text(&note.wraps[0].output),
+        Some("<notes>0 notes</notes>")
+    );
+    assert_eq!(loaded.text(&note.value), Some("<notes>0 notes</notes>"));
     core.shutdown().await.expect("shutdown");
 }
 
@@ -310,14 +347,10 @@ fn module_tool(name: &str, module: &str) -> lash::tools::ToolDefinition {
 
 /// A call offering `tools` natively, from their pinned catalog.
 fn offering(tools: Vec<lash::tools::ToolDefinition>) -> OfferedTools {
-    OfferedTools {
-        native: tools
-            .iter()
-            .map(|tool| tool.manifest.name.clone())
-            .collect(),
-        callable: Vec::new(),
-        catalog: Arc::new(lash::plugins::ToolCatalog::from_tool_definitions(tools)),
-    }
+    OfferedTools::new(
+        Arc::new(lash::plugins::ToolCatalog::from_tool_definitions(tools)),
+        false,
+    )
 }
 
 /// HOST: a host registers sections, a family and a wrapper, states a plan
@@ -439,6 +472,118 @@ async fn a_host_reads_back_its_plan_and_the_catalog_and_previews_the_resolution(
             .iter()
             .all(|section| section.section != id("module.github")),
         "no offered module, no guidance section"
+    );
+    let run = lash::TurnId::parse("prompt-excluded-call").expect("run id");
+    let turn = session
+        .send(lash::TurnInput::text("read without notes"))
+        .id(run.clone())
+        .output()
+        .await
+        .expect("the turn answers");
+    assert!(turn.is_success(), "{turn:?}");
+    let loaded = prompt
+        .snapshot(&run, 1)
+        .await
+        .expect("snapshot read")
+        .expect("recorded call");
+    let note = loaded
+        .snapshot
+        .sections
+        .iter()
+        .find(|section| section.section == notes())
+        .expect("excluded section recorded");
+    assert_eq!(note.placement, PromptPlacement::Excluded);
+    assert_eq!(note.base, RecordedSectionText::Omitted);
+    assert_eq!(note.value, RecordedSectionText::Omitted);
+    assert!(
+        loaded.texts.values().all(|text| !text.contains("0 notes")),
+        "excluded text never renders"
+    );
+    core.shutdown().await.expect("shutdown");
+}
+
+/// REMOVED-SECTION: a host removes a plugin after admitting a plan. The
+/// next turn succeeds and its recorded call reports the skipped overrides.
+#[tokio::test]
+async fn a_removed_plugins_plan_override_is_recorded_and_the_turn_succeeds() {
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("stores"),
+    );
+    let core = witness_core_over(Arc::new(AtomicBool::new(false)), Arc::clone(&stores), true).await;
+    let session = crate::created_session(&core, MODEL, "removed-prompt-session")
+        .await
+        .open()
+        .await
+        .expect("open");
+    let config = session.admin().config();
+    let plan = PromptPlan {
+        order: vec![notes()],
+        placements: vec![PromptSectionPlacement {
+            section: notes(),
+            placement: PromptPlacement::CurrentContext,
+        }],
+        ..PromptPlan::default()
+    };
+    let applied = config
+        .apply(
+            lash::config::ConfigWrite::new(
+                "before-removal",
+                config.revision().await.expect("revision"),
+            ),
+            lash::config::ConfigTransaction::of(lash::config::SetPromptPlan { plan: plan.clone() }),
+        )
+        .await
+        .expect("plan settles");
+    assert!(
+        matches!(
+            applied,
+            lash::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{applied:?}"
+    );
+    core.shutdown().await.expect("shutdown before redeploy");
+    drop(session);
+    drop(core);
+
+    let core = witness_core_over(Arc::new(AtomicBool::new(false)), stores, false).await;
+    let session = core
+        .session(lash::SessionId::from("removed-prompt-session"))
+        .open()
+        .await
+        .expect("open without plugin");
+    assert_eq!(
+        session
+            .admin()
+            .prompt()
+            .plan()
+            .await
+            .expect("plan retained"),
+        plan
+    );
+    let run = lash::TurnId::parse("removed-prompt-call").expect("run id");
+    let turn = session
+        .send(lash::TurnInput::text("continue without the plugin"))
+        .id(run.clone())
+        .output()
+        .await
+        .expect("turn answers");
+    assert!(turn.is_success(), "{turn:?}");
+    let loaded = session
+        .admin()
+        .prompt()
+        .snapshot(&run, 1)
+        .await
+        .expect("snapshot read")
+        .expect("recorded call");
+    assert_eq!(loaded.snapshot.plan.absent_overrides, vec![notes()]);
+    assert!(
+        loaded
+            .snapshot
+            .sections
+            .iter()
+            .all(|section| section.section.owner != PLUGIN)
     );
     core.shutdown().await.expect("shutdown");
 }

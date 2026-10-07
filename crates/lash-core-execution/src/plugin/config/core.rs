@@ -310,7 +310,9 @@ impl ConfigCommand for SetToolAccess {
 /// 0133): the section order, the placements that override plugin defaults,
 /// and the composition limits. A plan that orders or places a section twice,
 /// or states a per-section limit above its total, is refused. Whether each
-/// named section is registered is judged when a call resolves the plan.
+/// named section is registered is judged against the session's catalog when
+/// the command resolves. A removed section in an already recorded plan is
+/// skipped and recorded when a call resolves it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetPromptPlan {

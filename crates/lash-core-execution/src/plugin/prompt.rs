@@ -374,43 +374,40 @@ pub struct PromptCall {
     pub purpose: PromptPurpose,
 }
 
-/// The tools actually offered to this call, not every installed tool. A
-/// section reads their pinned manifests; it never consults a live provider.
+/// The tools actually offered to this call, derived from one pinned catalog.
+/// Discovery keeps non-inline members available in the catalog without
+/// offering their declarations or guidance in this call's inline surface.
 #[derive(Clone, Debug, Default)]
 pub struct OfferedTools {
-    /// Tools offered as native declarations.
-    pub native: Vec<String>,
-    /// Tools offered as code-callable bindings.
-    pub callable: Vec<String>,
-    /// The pinned catalog the call offers: every tool's manifest and
-    /// contract, including the ones a discovery operation keeps out of the
-    /// inline surface. Empty for a call that offers no tools, such as a
-    /// compaction's.
-    pub catalog: Arc<crate::ToolCatalog>,
+    catalog: Arc<crate::ToolCatalog>,
+    discovery: bool,
 }
 
 impl OfferedTools {
-    /// The pinned manifest of every offered tool: the native ones, then the
-    /// callable ones. An offered name the catalog does not pin has none.
-    pub fn manifests(&self) -> impl Iterator<Item = &crate::ToolManifest> {
-        self.native
-            .iter()
-            .chain(&self.callable)
-            .filter_map(|name| {
-                self.catalog
-                    .tools
-                    .iter()
-                    .find(|entry| entry.manifest.name == *name)
-            })
-            .map(|entry| &entry.manifest)
+    /// A pinned catalog with its protocol's discovery policy. Without discovery,
+    /// every member is offered; with discovery, only inline members are offered.
+    pub fn new(catalog: Arc<crate::ToolCatalog>, discovery: bool) -> Self {
+        Self { catalog, discovery }
     }
 
-    /// Whether a tool named `name` is offered.
-    pub fn offers(&self, name: &str) -> bool {
-        self.native
+    /// The complete pinned catalog, including discovery-hidden members.
+    pub fn catalog(&self) -> &Arc<crate::ToolCatalog> {
+        &self.catalog
+    }
+
+    /// The manifests offered as native declarations or code-callable bindings.
+    /// Discovery-hidden tools are absent from both views.
+    pub fn manifests(&self) -> impl Iterator<Item = &crate::ToolManifest> {
+        self.catalog
+            .tools
             .iter()
-            .chain(&self.callable)
-            .any(|offered| offered == name)
+            .map(|entry| &entry.manifest)
+            .filter(|manifest| !self.discovery || manifest.inline)
+    }
+
+    /// Whether a tool named `name` is offered in the inline surface.
+    pub fn offers(&self, name: &str) -> bool {
+        self.manifests().any(|manifest| manifest.name == name)
     }
 }
 
@@ -933,18 +930,37 @@ impl PromptCatalog {
         Ok(selected)
     }
 
+    /// Validate a new host plan against the registered catalog. A key under
+    /// a registered family's prefix is admitted even when this call offers
+    /// none of that family's tools.
+    pub fn validate_plan(&self, plan: &PromptPlan) -> Result<(), PromptPlanError> {
+        plan.validate()?;
+        for section in plan
+            .order
+            .iter()
+            .chain(plan.placements.iter().map(|p| &p.section))
+        {
+            if !self.0.knows(section) {
+                return Err(PromptPlanError::UnknownSection {
+                    section: section.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Resolve `plan` for a `purpose` call offered `offered`: the sections
     /// that render for it (each family contributing the sections its source
     /// derives from `offered`), the plan's order first and the rest in
     /// registration order, each with the host's placement or its plugin's
     /// default, and each with its wrapper chain. An excluded section keeps
     /// its place in the record but no chain: its wrappers are recorded as
-    /// absent.
+    /// absent. Overrides whose section is no longer registered are skipped
+    /// and recorded under `absent_overrides`.
     ///
     /// # Errors
     ///
-    /// [`PromptPlanError`] when the plan breaks its own rules, names a
-    /// section no plugin registers or a family holds, a source contributes
+    /// [`PromptPlanError`] when the plan breaks its own rules, a source contributes
     /// an invalid section, or the call would exceed its section or wrapper
     /// count.
     pub fn resolve(
@@ -954,17 +970,15 @@ impl PromptCatalog {
         offered: &OfferedTools,
     ) -> Result<ResolvedPromptComposition, PromptPlanError> {
         plan.validate()?;
-        for section in plan
+        let absent_overrides = plan
             .order
             .iter()
-            .chain(plan.placements.iter().map(|placed| &placed.section))
-        {
-            if !self.0.knows(section) {
-                return Err(PromptPlanError::UnknownSection {
-                    section: section.clone(),
-                });
-            }
-        }
+            .chain(plan.placements.iter().map(|p| &p.section))
+            .filter(|section| !self.0.knows(section))
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         let mut selected = self
             .select(purpose, offered)?
             .into_iter()
@@ -1042,6 +1056,7 @@ impl PromptCatalog {
                 purpose: purpose.clone(),
                 sections: records,
                 absent_targets: absent.into_iter().map(|(resolved, _)| resolved).collect(),
+                absent_overrides,
                 limits: plan.limits,
             },
             sections,

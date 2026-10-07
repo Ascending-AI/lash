@@ -1,6 +1,87 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+/// INGRESS-STATE (FIG-5274): an ingress callback's accepted state is published
+/// before its result is returned, and survives the caller's checkpoint commit.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law asserts its callback and checkpoint boundaries"
+)]
+pub async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint(
+    store: Arc<dyn RuntimeStore>,
+    context: crate::ActorContext,
+) {
+    let id = "ingress-callback-state";
+    let fixture = MockPlugin {
+        writes_on_before: true,
+        ..Default::default()
+    };
+    let plugins = support::construct(&fixture.host(), id, None, Default::default()).await;
+    let policy = crate::testing::mock_session_policy();
+    let mut state = RuntimeSessionState {
+        session_id: id.into(),
+        ..RuntimeSessionState::new(policy.clone())
+    };
+    let hook_context = crate::plugin::TurnHookContext {
+        session_id: id.into(),
+        plugin_config: plugins.admitted_plugin_config(),
+        state: crate::SessionReadView::from_runtime_state(&state, policy, Default::default()),
+        sessions: Arc::new(crate::testing::MockSessionManager::default()),
+        turn_context: Default::default(),
+    };
+    let callbacks = Arc::clone(&plugins);
+    let recorded = crate::plugin::record_plugin_callbacks(
+        &context,
+        crate::RuntimeAttribution::for_session(id),
+        "ingress-state-law".into(),
+        crate::plugin::RecordedCallbackPhase::BeforeTurn,
+        Arc::clone(&plugins),
+        Box::pin(async move {
+            callbacks
+                .dispatch(None)
+                .before_turn_decisions(hook_context)
+                .await
+        }),
+    )
+    .await
+    .expect("the ingress returns the callback result")
+    .expect("the callback succeeds");
+    assert!(
+        recorded
+            .iter()
+            .any(|contribution| contribution.plugin_id == MOCK)
+    );
+    assert_eq!(
+        fixture.state(id).get("counter"),
+        Some(serde_json::json!(17))
+    );
+    assert_eq!(fixture.state(id).generation(), 1);
+    state
+        .refresh_plugin_states(&plugins)
+        .expect("capture the published state");
+    commit(&store, &mut state).await;
+    assert_eq!(
+        state.plugin_state().expect("committed state").plugins[MOCK].values["counter"],
+        serde_json::json!(17)
+    );
+    let rebuilt = MockPlugin::default();
+    let reconstructed = support::construct(
+        &rebuilt.host(),
+        id,
+        state.plugin_state(),
+        SessionAuthorityContext {
+            plugin_config: state.admitted_plugin_config(),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(
+        rebuilt.state(id).get("counter"),
+        Some(serde_json::json!(17))
+    );
+    assert_eq!(reconstructed.export_state(), plugins.export_state());
+}
+
 #[expect(
     clippy::expect_used,
     clippy::unwrap_used,

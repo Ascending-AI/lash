@@ -5,6 +5,9 @@ use lash_sansio::SessionId;
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
+    /// A retained prompt snapshot or its content-addressed text could not be read.
+    #[error(transparent)]
+    PromptSnapshotLoad(#[from] lash_core::plugin::prompt::PromptSnapshotLoadError),
     #[error(
         "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(backend)/LashCore::rlm_builder(backend, ...)"
     )]
@@ -329,6 +332,12 @@ impl EmbedError {
             // A busy or unreachable store, or a lost acknowledgement: the
             // same mailbox write is safe to repeat.
             Self::Durable(error) => durable_error_is_retryable(error),
+            Self::PromptSnapshotLoad(error) => match error {
+                lash_core::plugin::prompt::PromptSnapshotLoadError::Store(error) => {
+                    durable_error_is_retryable(error)
+                }
+                _ => false,
+            },
             Self::MissingProtocolPlugin
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
@@ -402,6 +411,12 @@ impl EmbedError {
             Self::Send(_) => false,
             Self::Store(err) => store_error_is_terminal(err),
             Self::Durable(error) => durable_error_is_terminal(error),
+            Self::PromptSnapshotLoad(error) => match error {
+                lash_core::plugin::prompt::PromptSnapshotLoadError::Store(error) => {
+                    durable_error_is_terminal(error)
+                }
+                _ => true,
+            },
             Self::Runtime(err) => err.is_terminal(),
             Self::Control(err) => err.is_terminal(),
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_terminal(),

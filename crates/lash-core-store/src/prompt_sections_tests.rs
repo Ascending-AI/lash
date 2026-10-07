@@ -76,6 +76,7 @@ fn a_prompt_snapshot_decodes_only_at_version_one() {
                 wraps: Vec::new(),
             }],
             absent_targets: Vec::new(),
+            absent_overrides: Vec::new(),
             limits: PromptLimits::DEFAULT,
         },
         sections: vec![RenderedPromptSection {

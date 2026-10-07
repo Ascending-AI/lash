@@ -1720,7 +1720,8 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
                 &config,
                 &transaction,
                 models.as_ref(),
-                &crate::store::plugin_writers::PluginAdmission::default()
+                &crate::store::plugin_writers::PluginAdmission::default(),
+                &crate::plugin::prompt::PromptCatalog::default(),
             )
             .expect("the recorded config reads")
             .publish(&mut config),

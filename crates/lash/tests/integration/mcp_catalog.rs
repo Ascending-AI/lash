@@ -31,11 +31,7 @@ async fn turn_prompt(
         },
         config: session.admitted_plugin_config(),
         session: None,
-        offered: OfferedTools {
-            native: catalog.tool_names().to_vec(),
-            callable: Vec::new(),
-            catalog: Arc::new(catalog.clone()),
-        },
+        offered: OfferedTools::new(Arc::new(catalog.clone()), false),
         model: Default::default(),
         history: Default::default(),
         namespaces: Default::default(),

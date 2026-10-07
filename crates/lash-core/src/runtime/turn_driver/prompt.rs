@@ -82,22 +82,7 @@ impl RuntimeTurnDriver<'static> {
             }
         };
         let state = self.turn_pipeline.state();
-        let native = request
-            .tools
-            .iter()
-            .map(|tool| tool.name.clone())
-            .collect::<Vec<_>>();
-        let callable = offered_catalog
-            .tool_names()
-            .iter()
-            .filter(|name| !native.contains(name))
-            .cloned()
-            .collect();
-        let offered = OfferedTools {
-            native,
-            callable,
-            catalog: offered_catalog,
-        };
+        let offered = plugins.protocol_driver().prompt_tools(offered_catalog);
         let profile = self.policy.llm_profile_config();
         let cut = PromptCut::new(PromptCutParts {
             call: PromptCall {

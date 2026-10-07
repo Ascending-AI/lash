@@ -4,6 +4,8 @@
 //! `TurnContributions.messages` entry was committed to graph history. That
 //! field is deleted; its replacement, a registered section, stays out of the
 //! graph, out of the next turn's history and out of a compaction's seed.
+//! Before-turn, checkpoint, after-tool and after-turn observers all publish
+//! their model-facing text as namespace state rendered by the same section.
 
 #![expect(
     clippy::expect_used,
@@ -21,6 +23,23 @@ use lash::prompt::{PromptPlacement, PromptSectionKey};
 const PLUGIN: &str = "section-leak";
 const MODEL: &str = "section-leak-model";
 const LEAK_MARKER: &str = "standing instruction 7c1f";
+const CHANNELS: [&str; 4] = ["before-turn", "checkpoint", "after-tool", "after-turn"];
+
+fn commands(channel: &str) -> lash::plugins::StateCommands {
+    lash::plugins::StateCommands::new().set(
+        channel,
+        serde_json::json!(format!("{LEAK_MARKER} {channel}")),
+    )
+}
+
+struct Ping;
+
+#[lash::async_trait]
+impl lash::tools::StaticToolExecute for Ping {
+    async fn execute(&self, _: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        lash::tools::ToolOutcome::ok(serde_json::json!("pong")).into()
+    }
+}
 
 #[derive(Clone)]
 struct Instruction;
@@ -53,13 +72,65 @@ impl lash::plugins::SessionPlugin for Instruction {
         &self,
         reg: &mut lash::plugins::PluginRegistrar,
     ) -> Result<(), lash::plugins::PluginError> {
+        reg.turn().before(
+            lash::hook_key!("before"),
+            Arc::new(|_| {
+                Box::pin(async {
+                    Ok(lash::plugins::TurnContributions {
+                        state: commands("before-turn"),
+                        ..Default::default()
+                    })
+                })
+            }),
+        )?;
+        reg.turn().checkpoint(
+            lash::hook_key!("checkpoint"),
+            Arc::new(|_| {
+                Box::pin(async {
+                    Ok(lash::plugins::TurnContributions {
+                        state: commands("checkpoint"),
+                        ..Default::default()
+                    })
+                })
+            }),
+        )?;
+        reg.tool_calls().check_result(
+            lash::hook_key!("after-tool"),
+            Arc::new(|_| {
+                Box::pin(async {
+                    Ok(lash::plugins::AfterToolContributions {
+                        state: commands("after-tool"),
+                        ..Default::default()
+                    })
+                })
+            }),
+        )?;
+        reg.turn().after(
+            lash::hook_key!("after"),
+            Arc::new(|_| {
+                Box::pin(async {
+                    Ok(lash::plugins::AfterTurnContributions {
+                        state: commands("after-turn"),
+                        ..Default::default()
+                    })
+                })
+            }),
+        )?;
         reg.prompt().section(
             PromptSectionSpec::new(
                 PromptSectionKey::new("instruct").expect("valid section key"),
                 PromptPlacement::InitialInstructions,
             ),
-            Arc::new(|_: &PromptInput<'_>| {
-                Ok::<_, PromptRenderError>(SectionText::text(LEAK_MARKER))
+            Arc::new(|input: &PromptInput<'_>| {
+                let text = CHANNELS
+                    .iter()
+                    .map(|channel| input.state().get_as::<String>(channel))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Ok::<_, PromptRenderError>(SectionText::text(text))
             }),
         )
     }
@@ -74,17 +145,39 @@ fn carries_marker(message: &lash::messages::Message) -> bool {
 
 #[tokio::test]
 async fn section_text_never_enters_history_or_a_compaction_seed() {
-    let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let provider = {
         let seen = Arc::clone(&seen);
         lash_core::testing::TestProvider::builder()
             .kind("section-leak")
+            .requires_streaming(true)
             .complete(move |request| {
                 let seen = Arc::clone(&seen);
                 async move {
                     let body = serde_json::to_string(&request.messages)
                         .expect("the request's messages encode");
-                    seen.lock().expect("request log").push(body);
+                    let mut requests = seen.lock().expect("request log");
+                    let first = requests.is_empty();
+                    requests.push((
+                        request
+                            .instructions
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_string(),
+                        body,
+                    ));
+                    drop(requests);
+                    if first {
+                        return Ok(lash_core::llm::types::LlmResponse {
+                            parts: vec![lash_core::llm::types::LlmOutputPart::ToolCall {
+                                call_id: "section-leak-ping".to_string(),
+                                tool_name: "ping".to_string(),
+                                input_json: "{}".to_string(),
+                                replay: None,
+                            }],
+                            ..Default::default()
+                        });
+                    }
                     Ok(lash_core::llm::types::LlmResponse {
                         parts: vec![lash_core::llm::types::LlmOutputPart::Text {
                             text: "acknowledged".to_string(),
@@ -115,6 +208,19 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
                 )
                 .expect("register the test model"),
         ))
+        .tools(Arc::new(lash::tools::StaticToolProvider::new(
+            vec![
+                lash::tools::ToolDefinition::raw(
+                    "ping",
+                    "ping",
+                    "Ping",
+                    serde_json::json!({"type":"object"}),
+                    serde_json::json!({"type":"string"}),
+                )
+                .expect("tool schema"),
+            ],
+            Ping,
+        )))
         .plugin(Arc::new(Instruction))
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -194,14 +300,23 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
     );
     let requests = seen.lock().expect("request log").clone();
     assert!(
-        requests.len() >= 3,
-        "two turns and a summarizer each sent a request: {}",
+        requests.len() >= 4,
+        "two turns, an after-tool call and a summarizer each sent a request: {}",
         requests.len()
     );
     assert!(
-        requests.iter().all(|body| !body.contains(LEAK_MARKER)),
+        requests.iter().all(|(_, body)| !body.contains(LEAK_MARKER)),
         "no request carries section text as history, the next turn's and the summarizer's \
          included"
     );
+    for channel in CHANNELS {
+        let marker = format!("{LEAK_MARKER} {channel}");
+        assert!(
+            requests
+                .iter()
+                .any(|(instructions, _)| instructions.contains(&marker)),
+            "{channel}'s published section text reached a model call, outside history"
+        );
+    }
     core.shutdown().await.expect("shutdown");
 }

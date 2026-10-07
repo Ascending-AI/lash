@@ -339,6 +339,12 @@ pub trait AssistantProseProjectorPlugin: Send + Sync {
 pub trait ProtocolDriverPlugin: Send + Sync {
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble;
 
+    /// The call's offered tools over its pinned catalog, using this protocol's
+    /// discovery policy for native declarations and code-callable bindings alike.
+    fn prompt_tools(&self, catalog: Arc<crate::ToolCatalog>) -> super::prompt::OfferedTools {
+        super::prompt::OfferedTools::new(catalog, false)
+    }
+
     /// The render a run's results present with, resolved from `namespace`,
     /// the protocol namespace the run executes under, which the driver reads
     /// as its owner's recorded type. A render it refuses is the run's

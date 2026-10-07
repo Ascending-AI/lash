@@ -115,10 +115,7 @@ pub(crate) fn compose(plugins: &[Arc<dyn SessionPlugin>], call: Call) -> Compose
         },
         config: lash_core::AdmittedPluginConfig::new(config, 0),
         session: None,
-        offered: OfferedTools {
-            catalog: Arc::new(call.catalog),
-            ..OfferedTools::default()
-        },
+        offered: OfferedTools::new(Arc::new(call.catalog), false),
         model: PromptModel {
             profile: None,
             context_window_tokens: call.context_window_tokens,

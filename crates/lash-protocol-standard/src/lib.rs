@@ -613,6 +613,13 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
         }))
     }
 
+    fn prompt_tools(
+        &self,
+        catalog: Arc<lash_core::ToolCatalog>,
+    ) -> lash_core::plugin::prompt::OfferedTools {
+        lash_core::plugin::prompt::OfferedTools::new(catalog, self.config.discovery.is_some())
+    }
+
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let tool_names = input.tool_catalog.tool_names();
         let visible_catalog;
