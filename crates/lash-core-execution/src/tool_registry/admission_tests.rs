@@ -283,25 +283,6 @@ impl LeafToolSourceExecutor for RoutedAdmissionSource {
     }
 }
 
-struct RoutedProvider {
-    result: &'static str,
-}
-
-#[async_trait::async_trait]
-impl ToolProvider for RoutedProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        vec![MutableAdmissionSource::manifest("alpha")]
-    }
-
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
-        None
-    }
-
-    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        ToolOutcome::ok(json!(self.result)).into()
-    }
-}
-
 /// The projection asserts the outcome carries no declared intents before unwrapping the
 /// completed result.
 async fn execute_leaf_by_id(
@@ -586,28 +567,6 @@ async fn binding_only_refresh_routes_to_the_new_source_and_fences_stale_work() {
     )
     .await;
     assert_eq!(result.value_for_projection(), json!("source-b"));
-}
-
-#[tokio::test]
-async fn identical_context_overlay_routes_to_the_context_provider() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(RoutedProvider { result: "base" }))
-        .expect("base registry");
-    let before = registry.export_state();
-
-    let composed = registry
-        .compose_session_catalog(vec![Arc::new(RoutedProvider { result: "context" })])
-        .expect("identical context overlay");
-
-    assert_eq!(composed.generation(), before.generation());
-    assert_eq!(composed.export_state().entries(), before.entries());
-    let result = execute_leaf_by_id(
-        &composed,
-        &ToolId::from("tool:alpha"),
-        &json!({}),
-        &test_attempt_context(),
-    )
-    .await;
-    assert_eq!(result.value_for_projection(), json!("context"));
 }
 
 #[test]

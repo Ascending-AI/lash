@@ -112,7 +112,6 @@ pub async fn finalize_tool_result_with_execution_context(
     };
     let mut observations = context.observation_cursor("checks:after");
     for contribution in checks.contributions {
-        context.checkpoint_messages.enqueue(contribution.messages);
         crate::plugin::observe_plugin_runtime_events(
             &mut observations,
             context.observer.as_ref(),

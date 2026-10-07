@@ -167,7 +167,18 @@ impl SessionPlugin for McpSessionPlugin {
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         reg.tools().provider(Arc::new(McpToolProvider {
             pool: Arc::clone(&self.pool),
-        }) as Arc<dyn ToolProvider>)
+        }) as Arc<dyn ToolProvider>)?;
+        let family = lash_core::plugin::prompt::PromptSectionKey::new(
+            crate::pool::guidance::McpGuidanceSections::FAMILY,
+        )
+        .map_err(|error| PluginError::Registration(error.to_string()))?;
+        reg.prompt().family(
+            lash_core::plugin::prompt::PromptSectionFamilySpec::new(
+                family,
+                lash_core::plugin::prompt::PromptPlacement::InitialInstructions,
+            ),
+            Arc::new(crate::pool::guidance::McpGuidanceSections),
+        )
     }
 }
 

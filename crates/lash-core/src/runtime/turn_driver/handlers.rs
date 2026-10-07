@@ -290,14 +290,6 @@ impl RuntimeTurnDriver<'_> {
             .read(self.host.core.durability.turn_prelude_store.as_ref())
             .await
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        let providers = self
-            .session
-            .plugins()
-            .resolve_context_tool_bindings(&prelude.context.tool_providers)
-            .map_err(|error| error.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
-        self.session
-            .set_context_overlay(providers)
-            .map_err(|error| error.into_turn_failure(RuntimeErrorCode::SessionToolRegistry))?;
         machine.adopt_committed_messages(prelude.history.clone());
         machine.adopt_prepared_messages(prelude.context.messages.clone(), id.0 == 1);
         self.prelude = prelude;

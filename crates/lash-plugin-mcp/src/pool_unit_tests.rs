@@ -73,7 +73,7 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
         let mut defective = serde_json::to_value(&with_schema).expect("encode tool");
         defective[field] = json!({"type":"unknown"});
         let defective = serde_json::from_value(defective).expect("wire tool");
-        let error = import_tools("test", vec![defective], None)
+        let error = import_tools("test", vec![defective])
             .err()
             .expect("unusable schema refused at discovery");
         assert!(matches!(
@@ -118,7 +118,7 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
             Some(lash_core::ToolFailureCause::ToolSchemaAdmission { source: retained }) if retained.as_ref() == &source));
     }
     let without_schema = advertised_tool("plain");
-    let tools = import_tools("test", vec![with_schema, without_schema], None).expect("imports");
+    let tools = import_tools("test", vec![with_schema, without_schema]).expect("imports");
     for tool in tools.values() {
         let schema = tool.definition.contract.output_schema.canonical.as_value();
         assert_eq!(schema["required"], json!(["content"]));
@@ -268,7 +268,6 @@ fn import_refuses_a_forced_final_name_collision_without_overwriting() {
     let result = import_tools_with_name_builder(
         "directory",
         vec![advertised_tool("get-user"), advertised_tool("get_user")],
-        None,
         |_, tool| names[tool].clone(),
     );
     let error = match result {
@@ -286,7 +285,7 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
     let pool = Arc::new(McpConnectionPool::empty());
     let server_name = "abcdefghijklmno-one";
     let forced_catalog = |server: &str, tool: &str| {
-        import_tools_with_name_builder(server, vec![advertised_tool(tool)], None, |_, _| {
+        import_tools_with_name_builder(server, vec![advertised_tool(tool)], |_, _| {
             forced_publication_name()
         })
         .expect("one-tool forced catalog")
@@ -376,12 +375,9 @@ async fn advertised_tools_snapshot_never_combines_colliding_catalog_generations(
     pool.install(second.server_name.clone(), Arc::clone(&second))
         .unwrap_or_else(|(_, error)| panic!("install second server: {error}"));
     let forced_catalog = |server: &str| {
-        import_tools_with_name_builder(
-            server,
-            vec![advertised_tool("abcdefghijklmnop")],
-            None,
-            |_, _| forced_publication_name(),
-        )
+        import_tools_with_name_builder(server, vec![advertised_tool("abcdefghijklmnop")], |_, _| {
+            forced_publication_name()
+        })
         .expect("one-tool catalog")
     };
     first

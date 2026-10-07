@@ -7,11 +7,11 @@
 //! - `intro`: the identity statement;
 //! - `execution`: how to call tools, naming `batch` only when it is offered;
 //! - `guidance`: the behavioural bullets, with the interactive one when the
-//!   offered surface has the `ask` tool;
-//! - `tool_modules`: each offered module's instructions, once.
+//!   offered surface has the `ask` tool.
 //!
-//! `intro` and `guidance` also render for a compaction's summarizer call,
-//! which offers no tools; the tool sections do not. Host text is the host's
+//! A tool's own guidance is a section its plugin registers. `intro` and
+//! `guidance` also render for a compaction's summarizer call, which offers
+//! no tools; `execution` does not. Host text is the host's
 //! own sections, and a host replaces or omits a built-in one by wrapping it.
 
 use std::sync::Arc;
@@ -39,7 +39,6 @@ pub mod section_keys {
     pub const INTRO: &str = "intro";
     pub const EXECUTION: &str = "execution";
     pub const GUIDANCE: &str = "guidance";
-    pub const TOOL_MODULES: &str = "tool_modules";
 }
 
 /// What the sections render under: the behaviour the session's plugin was
@@ -119,14 +118,6 @@ fn guidance(behaviour: &StandardPromptBehaviour, input: &PromptInput<'_>) -> Sec
     titled("Guidance", [bullets.join("\n")])
 }
 
-fn tool_modules(behaviour: &StandardPromptBehaviour, input: &PromptInput<'_>) -> SectionText {
-    let visible = behaviour.visible(input);
-    titled(
-        "Tool modules",
-        visible.modules().map(|module| module.render_markdown()),
-    )
-}
-
 /// Register the protocol's sections.
 pub(crate) fn register_sections(
     reg: &mut PluginRegistrar,
@@ -146,9 +137,5 @@ pub(crate) fn register_sections(
     reg.prompt().section(
         PromptSectionSpec::new(key(section_keys::GUIDANCE), placement).purposes(both),
         section(&behaviour, guidance),
-    )?;
-    reg.prompt().section(
-        PromptSectionSpec::new(key(section_keys::TOOL_MODULES), placement),
-        section(&behaviour, tool_modules),
     )
 }

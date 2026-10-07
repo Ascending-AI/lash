@@ -1,34 +1,5 @@
 use super::*;
 
-impl From<lash_core::MessageRole> for RemoteMessageRole {
-    fn from(value: lash_core::MessageRole) -> Self {
-        match value {
-            lash_core::MessageRole::User => Self::User,
-            lash_core::MessageRole::Assistant => Self::Assistant,
-            lash_core::MessageRole::System => Self::System,
-            lash_core::MessageRole::Event => Self::Event,
-        }
-    }
-}
-impl From<lash_core::PartKind> for RemotePartKind {
-    fn from(value: lash_core::PartKind) -> Self {
-        lash_sansio::core_support::fold_part_kind(
-            value,
-            [
-                Self::Text,
-                Self::Attachment,
-                Self::Code,
-                Self::Output,
-                Self::Error,
-                Self::Prose,
-                Self::ToolCall,
-                Self::ToolResult,
-                Self::Reasoning,
-            ],
-        )
-    }
-}
-
 impl From<lash_core::runtime::AdmissionBoundary> for RemoteAdmissionBoundary {
     fn from(value: lash_core::runtime::AdmissionBoundary) -> Self {
         match value {
@@ -85,15 +56,6 @@ impl From<lash_core::MessageOrigin> for RemoteMessageOrigin {
     }
 }
 
-impl From<lash_core::session_model::message::PartAttachment> for RemotePartAttachment {
-    fn from(value: lash_core::session_model::message::PartAttachment) -> Self {
-        let lash_core::session_model::message::PartAttachment { source } = value;
-        Self {
-            source: source.into(),
-        }
-    }
-}
-
 impl From<lash_core::TurnCause> for RemoteTurnCause {
     fn from(value: lash_core::TurnCause) -> Self {
         let lash_core::TurnCause {
@@ -107,48 +69,6 @@ impl From<lash_core::TurnCause> for RemoteTurnCause {
             event_type,
             origin: origin.into(),
             text,
-        }
-    }
-}
-
-impl From<lash_core::PluginMessage> for RemotePluginMessage {
-    fn from(value: lash_core::PluginMessage) -> Self {
-        let lash_core::PluginMessage {
-            id,
-            role,
-            origin,
-            parts,
-        } = value;
-        Self {
-            id,
-            role: role.into(),
-            origin: origin.map(Into::into),
-            parts: parts.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl From<lash_core::Part> for RemotePart {
-    fn from(value: lash_core::Part) -> Self {
-        // Part is non-exhaustive outside its owning crate; project through
-        // its public accessors.
-        Self {
-            id: value.id().to_string(),
-            kind: value.kind().into(),
-            content: value
-                .tool_result_content()
-                .is_none()
-                .then(|| value.content().into_owned()),
-            blocks: value
-                .tool_result_content()
-                .map(|blocks| blocks.iter().cloned().map(Into::into).collect()),
-            attachment: value.attachment().cloned().map(Into::into),
-            call_id: value.call_id().cloned(),
-            provider_call_id: value.provider_call_id().map(str::to_string),
-            tool_name: value.tool_name().map(str::to_string),
-            tool_replay: value.tool_replay().cloned().map(Into::into),
-            reasoning_meta: value.reasoning_meta().cloned().map(Into::into),
-            response_meta: value.response_meta().cloned().map(Into::into),
         }
     }
 }

@@ -78,7 +78,7 @@ fn enclose(name: &'static str) -> Arc<dyn PromptSectionWrap> {
 
 fn compose_one(catalog: &PromptCatalog, plan: &PromptPlan) -> ComposedSection {
     let composition = catalog
-        .resolve(plan, &PromptPurpose::Turn)
+        .resolve(plan, &PromptPurpose::Turn, &OfferedTools::default())
         .expect("plan resolves");
     composition
         .compose_section(0, &cut(BTreeMap::new()))
@@ -155,7 +155,11 @@ fn a_section_key_registers_once_per_plugin_and_any_plugin_wraps_any_section() {
         vec![id("lash.protocol", "intro"), id("other", "intro")]
     );
     let composition = catalog
-        .resolve(&PromptPlan::default(), &PromptPurpose::Turn)
+        .resolve(
+            &PromptPlan::default(),
+            &PromptPurpose::Turn,
+            &OfferedTools::default(),
+        )
         .expect("plan resolves");
     let protocol = composition
         .compose_section(0, &cut(BTreeMap::new()))
@@ -270,7 +274,7 @@ fn a_host_placement_overrides_the_plugin_default_and_the_record_keeps_it() {
     };
     let resolved = catalog(plugins(PromptPlacement::CurrentContext))
         .unwrap()
-        .resolve(&plan, &PromptPurpose::Turn)
+        .resolve(&plan, &PromptPurpose::Turn, &OfferedTools::default())
         .expect("plan resolves");
     let placed = |record: &ResolvedPromptPlan| {
         record
@@ -314,7 +318,7 @@ fn a_host_placement_overrides_the_plugin_default_and_the_record_keeps_it() {
 
     let redeployed = catalog(plugins(PromptPlacement::InitialInstructions))
         .unwrap()
-        .resolve(&plan, &PromptPurpose::Turn)
+        .resolve(&plan, &PromptPurpose::Turn, &OfferedTools::default())
         .expect("plan resolves");
     assert_eq!(
         placed(redeployed.record()),
@@ -332,7 +336,7 @@ fn a_host_placement_overrides_the_plugin_default_and_the_record_keeps_it() {
     assert!(matches!(
         catalog(plugins(PromptPlacement::CurrentContext))
             .unwrap()
-            .resolve(&unknown, &PromptPurpose::Turn),
+            .resolve(&unknown, &PromptPurpose::Turn, &OfferedTools::default()),
         Err(PromptPlanError::UnknownSection { .. })
     ));
 }
@@ -394,7 +398,11 @@ fn a_renderer_reads_one_namespace_generation() {
     )])
     .unwrap();
     let composed = catalog
-        .resolve(&PromptPlan::default(), &PromptPurpose::Turn)
+        .resolve(
+            &PromptPlan::default(),
+            &PromptPurpose::Turn,
+            &OfferedTools::default(),
+        )
         .unwrap()
         .compose_section(0, &frozen)
         .unwrap();
@@ -410,4 +418,215 @@ fn a_renderer_reads_one_namespace_generation() {
     );
     assert_eq!(view.generation(), 2, "the live namespace did move");
     assert_eq!(composed.value, SectionText::text("keys: t"));
+}
+
+/// EXCLUDE: the plan is the host's, so the host can drop any section. A
+/// section the plan places `Excluded` is recorded with that placement, as the
+/// host's choice; neither its renderer nor a wrapper over it runs, the
+/// wrapper is recorded as absent, and the section composes to an omission.
+#[test]
+fn a_host_excluded_section_is_recorded_and_its_renderer_never_runs() {
+    let rendered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let wrapped = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counting_renderer = {
+        let rendered = Arc::clone(&rendered);
+        Arc::new(move |_: &PromptInput<'_>| {
+            rendered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(SectionText::text("protocol intro"))
+        }) as Arc<dyn PromptSection>
+    };
+    let counting_wrapper = {
+        let wrapped = Arc::clone(&wrapped);
+        Arc::new(
+            move |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, previous: SectionText| {
+                wrapped.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(previous)
+            },
+        ) as Arc<dyn PromptSectionWrap>
+    };
+    let catalog = catalog(vec![
+        (
+            "protocol",
+            Box::new(move |reg| {
+                reg.prompt().section(
+                    PromptSectionSpec::new(key("intro"), PromptPlacement::InitialInstructions),
+                    counting_renderer.clone(),
+                )
+            }),
+        ),
+        (
+            "addon",
+            Box::new(move |reg| {
+                reg.prompt().wrap(
+                    PromptWrapSpec::new(wrap_key("tag"), id("protocol", "intro")),
+                    counting_wrapper.clone(),
+                )
+            }),
+        ),
+    ])
+    .unwrap();
+    let plan = PromptPlan {
+        placements: vec![PromptSectionPlacement {
+            section: id("protocol", "intro"),
+            placement: PromptPlacement::Excluded,
+        }],
+        ..PromptPlan::default()
+    };
+
+    let composition = catalog
+        .resolve(&plan, &PromptPurpose::Turn, &OfferedTools::default())
+        .unwrap();
+    let composed = composition
+        .compose_section(0, &cut(BTreeMap::new()))
+        .unwrap();
+
+    let record = composition.record();
+    assert_eq!(record.sections.len(), 1, "the exclusion is recorded");
+    assert_eq!(record.sections[0].placement, PromptPlacement::Excluded);
+    assert_eq!(record.sections[0].placement_source, PlacementSource::Host);
+    assert!(record.sections[0].wraps.is_empty(), "no chain runs over it");
+    assert_eq!(
+        record
+            .absent_targets
+            .iter()
+            .map(|wrap| wrap.target.clone())
+            .collect::<Vec<_>>(),
+        vec![id("protocol", "intro")],
+        "its wrapper is recorded as absent"
+    );
+    assert_eq!(composed.base, SectionText::Omit);
+    assert_eq!(composed.value, SectionText::Omit);
+    assert_eq!(
+        rendered.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the renderer never runs"
+    );
+    assert_eq!(
+        wrapped.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the wrapper never runs"
+    );
+}
+
+/// A family source contributing one section per offered tool module, as
+/// tool guidance does.
+struct ModuleGuidance;
+
+impl PromptSectionSource for ModuleGuidance {
+    fn sections(&self, offered: &OfferedTools) -> Vec<PromptFamilySection> {
+        let modules = offered
+            .manifests()
+            .filter_map(|manifest| manifest.module.as_deref())
+            .map(|module| module.name.clone())
+            .collect::<BTreeSet<_>>();
+        modules
+            .into_iter()
+            .map(|module| PromptFamilySection {
+                suffix: key(&module),
+                renderer: Arc::new(move |_: &PromptInput<'_>| {
+                    Ok(SectionText::Text(format!("guidance for {module}")))
+                }),
+            })
+            .collect()
+    }
+}
+
+fn module_tool(name: &str, module: &str) -> crate::ToolDefinition {
+    let mut tool = crate::ToolDefinition::raw(
+        name,
+        name,
+        "",
+        serde_json::json!({"type": "object"}),
+        serde_json::json!({}),
+    )
+    .expect("tool schema admits");
+    tool.manifest.module = Some(Arc::new(crate::ToolModule {
+        name: module.into(),
+    }));
+    tool
+}
+
+/// A call offering `tools` natively, from their pinned catalog.
+fn offering(tools: Vec<crate::ToolDefinition>) -> OfferedTools {
+    OfferedTools {
+        native: tools
+            .iter()
+            .map(|tool| tool.manifest.name.clone())
+            .collect(),
+        callable: Vec::new(),
+        catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(tools)),
+    }
+}
+
+/// OFFERED: tool guidance is selected only when its surface is offered. A
+/// family contributes a section for each offered module and none for a
+/// module the call does not offer. The host may order, place and wrap a
+/// family section by its key, and may name one this call does not offer;
+/// a key outside every family is still unknown.
+#[test]
+fn a_family_section_is_selected_only_when_its_tools_are_offered() {
+    let catalog = catalog(vec![(
+        "tools",
+        Box::new(|reg| {
+            reg.prompt().family(
+                PromptSectionFamilySpec::new(key("module"), PromptPlacement::InitialInstructions),
+                Arc::new(ModuleGuidance),
+            )
+        }),
+    )])
+    .unwrap();
+    let plan = PromptPlan {
+        placements: vec![
+            PromptSectionPlacement {
+                section: id("tools", "module.github"),
+                placement: PromptPlacement::CurrentContext,
+            },
+            PromptSectionPlacement {
+                section: id("tools", "module.slack"),
+                placement: PromptPlacement::Excluded,
+            },
+        ],
+        ..PromptPlan::default()
+    };
+
+    let none = catalog
+        .resolve(&plan, &PromptPurpose::Turn, &OfferedTools::default())
+        .unwrap();
+    assert!(
+        none.record().sections.is_empty(),
+        "no offered tools, no guidance"
+    );
+
+    let offered = offering(vec![module_tool("search", "github")]);
+    let github = catalog
+        .resolve(&plan, &PromptPurpose::Turn, &offered)
+        .unwrap();
+    let record = &github.record().sections;
+    assert_eq!(
+        record
+            .iter()
+            .map(|section| (section.section.clone(), section.placement))
+            .collect::<Vec<_>>(),
+        vec![(
+            id("tools", "module.github"),
+            PromptPlacement::CurrentContext
+        )],
+        "only the offered module's section, placed by the host"
+    );
+    assert_eq!(
+        github
+            .compose_section(0, &cut(BTreeMap::new()))
+            .unwrap()
+            .value,
+        SectionText::text("guidance for github")
+    );
+
+    let unknown = PromptPlan {
+        order: vec![id("tools", "other")],
+        ..PromptPlan::default()
+    };
+    assert!(matches!(
+        catalog.resolve(&unknown, &PromptPurpose::Turn, &offered),
+        Err(PromptPlanError::UnknownSection { .. })
+    ));
 }

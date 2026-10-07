@@ -253,7 +253,6 @@ pub(super) fn turn_effect_executor(
         // Work this executor withholds from a terminal checkpoint travels
         // back on the journalled admitted set, not on the driver copy.
         withheld_terminal_work: Default::default(),
-        checkpoint_messages: driver.checkpoint_messages.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
         protocol_reply: Default::default(),
         opener_state: driver.opener_state.clone(),

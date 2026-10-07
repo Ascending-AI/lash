@@ -6,13 +6,13 @@ error[E0609]: no field `scoped_effect_controller` on type `&PluginCommandContext
   |
   = note: available fields are: `session_id`, `sessions`, `session_lifecycle`, `session_graph`, `processes`
 
-error[E0609]: no field `tools` on type `&TurnTransformContext<'_>`
+error[E0609]: no field `tools` on type `&AttachmentOmissionContext`
  --> tests/ui/administrative_contexts_have_no_tool_dispatch.rs:8:18
   |
 8 |     let _ = &ctx.tools;
   |                  ^^^^^ unknown field
   |
-  = note: available fields are: `session_id`, `plugin_config`, `state`, `prompt_usage`, `max_context_tokens` ... and 3 others
+  = note: available fields are: `session_id`, `plugin_config`, `state`, `prompt_usage`, `max_context_tokens` ... and 2 others
 
 error[E0609]: no field `tools` on type `&CompactionContext<'_>`
   --> tests/ui/administrative_contexts_have_no_tool_dispatch.rs:12:18

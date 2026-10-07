@@ -86,7 +86,7 @@ pub struct ExecutionSection {
     /// shape, the worked example and the host API every session has.
     pub prose: String,
     /// What this session's catalog and host generate: the tool declarations,
-    /// with each module's instructions once, and the host surface. Empty when
+    /// grouped under each module's heading, and the host surface. Empty when
     /// the session has neither.
     pub declarations: String,
 }

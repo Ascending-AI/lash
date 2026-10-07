@@ -61,7 +61,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// cancellation's undelivered disposition (FIG-3531) and releases withheld
     /// wakes (FIG-3543).
     pub(super) withheld_terminal_work: super::logical_turn::WithheldTerminalWork,
-    pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     /// Names the reply the protocol driver materialized, for the boundary's
     /// terminal materialization to recognize by identity.

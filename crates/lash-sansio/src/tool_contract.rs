@@ -342,30 +342,15 @@ fn is_inline(value: &bool) -> bool {
     *value
 }
 
-/// Guidance shared by the tools of one module. Providers give every tool in
-/// the module the same metadata; the catalog and hosts present it once.
-/// It is recorded with the manifest, independently of execution bindings.
+/// The module a tool belongs to: a grouping name the catalog and hosts
+/// present its tools under. Guidance about a module is a prompt section its
+/// plugin registers, never manifest metadata.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
+#[serde(deny_unknown_fields)]
 pub struct ToolModule {
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<String>,
-}
-
-impl ToolModule {
-    pub fn render_markdown(&self) -> String {
-        let heading = format!("#### {}", self.name);
-        match self
-            .instructions
-            .as_deref()
-            .filter(|text| !text.trim().is_empty())
-        {
-            Some(instructions) => format!("{heading}\n\n{instructions}"),
-            None => heading,
-        }
-    }
 }
 
 /// Tool metadata exposed to prompts, catalogs, and UI. Catalog membership —

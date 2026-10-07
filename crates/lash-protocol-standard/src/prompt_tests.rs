@@ -65,7 +65,7 @@ fn instructions(composed: &ComposedPrompt) -> &str {
     composed.initial_instructions.as_deref().unwrap_or("")
 }
 
-fn tool(name: &str, module: &str, instructions: &str, inline: bool) -> lash_core::ToolDefinition {
+fn tool(name: &str, module: &str, inline: bool) -> lash_core::ToolDefinition {
     let mut tool = lash_core::ToolDefinition::raw(
         name,
         name,
@@ -77,17 +77,15 @@ fn tool(name: &str, module: &str, instructions: &str, inline: bool) -> lash_core
     tool.manifest.inline = inline;
     tool.manifest.module = Some(Arc::new(lash_core::ToolModule {
         name: module.into(),
-        instructions: Some(instructions.into()),
     }));
     tool
 }
 
 fn module_tools() -> Vec<lash_core::ToolDefinition> {
-    let issues = "Search before reading an issue. Use cursors for pagination.";
     vec![
-        tool("issue_search", "issues", issues, true),
-        tool("issue_read", "issues", issues, true),
-        tool("hidden", "deferred", "Deferred module instructions.", false),
+        tool("issue_search", "issues", true),
+        tool("issue_read", "issues", true),
+        tool("hidden", "deferred", false),
     ]
 }
 
@@ -102,7 +100,8 @@ fn module_catalog() -> lash_core::ToolCatalog {
 }
 
 /// The protocol's sections compose in registration order, every one in the
-/// initial instructions: intro, execution, guidance and the offered modules.
+/// initial instructions: intro, execution and guidance. A tool's guidance is
+/// its own plugin's section, not the protocol's.
 #[tokio::test]
 async fn the_standard_sections_compose_the_protocol_prompt() {
     let composed = compose(
@@ -124,47 +123,17 @@ async fn the_standard_sections_compose_the_protocol_prompt() {
     - Be concise; no filler, hedging, or performative tone.
     - Act as soon as the next step is clear; do not restate conclusions.
     - Prefer the simplest correct solution.
-
-    ## Tool modules
-
-    #### issues
-
-    Search before reading an issue. Use cursors for pagination.
-
-    #### deferred
-
-    Deferred module instructions.
     ");
 }
 
 /// OFFERED (FIG-5257): the tool sections describe exactly the call's offered
-/// surface. A discovery session shows only its inline tools' modules, the
-/// interactive bullet follows an offered `ask`, and a call that offers no
-/// tools renders no tool section. A trusted wrapper may replace that text.
+/// surface. The interactive bullet follows an `ask` the model sees: an
+/// offered inline one, not one a discovery session keeps out of the inline
+/// surface, and none in a call that offers no tools.
 #[tokio::test]
 async fn the_tool_sections_describe_exactly_the_offered_tools() {
-    let discovering = standard(StandardProtocolConfig {
-        discovery: Some(lash_core::ToolDiscovery {
-            operation: "issue_search".into(),
-        }),
-        ..StandardProtocolConfig::default()
-    });
-    let text = compose(
-        std::slice::from_ref(&discovering),
-        PromptPurpose::Turn,
-        module_catalog(),
-    )
-    .await;
-    let text = instructions(&text);
-    assert_eq!(text.matches("Search before reading an issue.").count(), 1);
-    assert!(!text.contains("Deferred module instructions."), "{text}");
-    assert!(
-        !text.contains("Ask only when progress is blocked"),
-        "{text}"
-    );
-
     let mut with_ask = module_tools();
-    with_ask.push(tool("ask", "user", "Ask the user.", true));
+    with_ask.push(tool("ask", "user", true));
     let asking = compose(
         &[standard(StandardProtocolConfig::default())],
         PromptPurpose::Turn,
@@ -173,47 +142,32 @@ async fn the_tool_sections_describe_exactly_the_offered_tools() {
     .await;
     assert!(instructions(&asking).contains("Ask only when progress is blocked"));
 
+    let mut deferred_ask = module_tools();
+    deferred_ask.push(tool("ask", "user", false));
+    let discovering = compose(
+        &[standard(StandardProtocolConfig {
+            discovery: Some(lash_core::ToolDiscovery {
+                operation: "issue_search".into(),
+            }),
+            ..StandardProtocolConfig::default()
+        })],
+        PromptPurpose::Turn,
+        recorded(deferred_ask),
+    )
+    .await;
+    let text = instructions(&discovering);
+    assert!(
+        !text.contains("Ask only when progress is blocked"),
+        "{text}"
+    );
+
     let empty = compose(
         &[standard(StandardProtocolConfig::default())],
         PromptPurpose::Turn,
         lash_core::ToolCatalog::default(),
     )
     .await;
-    assert!(!instructions(&empty).contains("## Tool modules"));
-
-    struct HostModules;
-    impl SessionPlugin for HostModules {
-        fn id(&self) -> &'static str {
-            "host"
-        }
-        fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            reg.prompt().wrap(
-                PromptWrapSpec::new(
-                    PromptWrapKey::new("modules").expect("valid wrap key"),
-                    standard_section(section_keys::TOOL_MODULES),
-                ),
-                Arc::new(
-                    |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, _: SectionText| {
-                        Ok(SectionText::text(
-                            "## Tool modules\n\nThe host's own module notes.",
-                        ))
-                    },
-                ),
-            )
-        }
-    }
-    let wrapped = compose(
-        &[
-            standard(StandardProtocolConfig::default()),
-            Arc::new(HostModules),
-        ],
-        PromptPurpose::Turn,
-        module_catalog(),
-    )
-    .await;
-    let text = instructions(&wrapped);
-    assert!(text.contains("The host's own module notes."), "{text}");
-    assert!(!text.contains("Search before reading an issue."), "{text}");
+    assert!(!instructions(&empty).contains("Ask only when progress is blocked"));
 }
 
 /// A host adds its own text as sections of its own plugin, and replaces or
@@ -269,7 +223,6 @@ async fn a_host_replaces_the_intro_omits_guidance_and_adds_context() {
         "{text}"
     );
     assert!(!text.contains("Be concise"), "{text}");
-    assert_eq!(text.matches("Search before reading an issue.").count(), 1);
     assert!(text.ends_with("Working directory: /project"), "{text}");
 
     // Compaction keeps the host's sections and the protocol's text that

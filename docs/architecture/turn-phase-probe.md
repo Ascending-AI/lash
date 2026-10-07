@@ -72,8 +72,8 @@ The runtime binds `PluginSession::dispatch` to that resolved probe. Its borrowed
 clones the probe only for concurrent lifecycle hooks. The context borrows the
 session rather than cloning its contributions, performs no registry lookup,
 and adds no shared mutable instrumentation state to plugin sessions. Binding
-`None` preserves uninstrumented dispatch. Context transforms and pressure
-hooks retain their own phase inputs.
+`None` preserves uninstrumented dispatch. Pressure hooks retain their own
+phase inputs.
 
 ## Callback obligations
 

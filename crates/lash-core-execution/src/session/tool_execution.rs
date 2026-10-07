@@ -381,17 +381,11 @@ impl RuntimeExecutionContext<'_> {
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            let messages = outcome
-                .captures
-                .iter()
-                .flat_map(|capture| capture.messages.iter().cloned())
-                .collect::<Vec<_>>();
             this.incorporate_tool_facts(
                 crate::session::SettlementSource::Invocation {
                     call_id: call_id.clone(),
                 },
                 &possession,
-                &messages,
                 &outcome.triggers,
             )?;
             for intent_outcome in crate::tool_dispatch::model_visible_intent_outcomes(&outcome) {
@@ -570,17 +564,13 @@ impl RuntimeExecutionContext<'_> {
         resolution: crate::Resolution,
         resolver: Option<&crate::PendingResolver>,
         attempts: Vec<lash_trace::TraceRetryAttempt>,
-        mut captures: Vec<crate::runtime::ToolAttemptCapture>,
         mut triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
     ) -> ToolDispatchOutcome {
-        // The resume's own producers — the after-checks' contributions —
-        // write into buffers fresh to this resume, so what they commit is
-        // captured into the outcome rather than into a buffer a sibling
-        // attempt may still be writing into.
+        // The resume's own producers write into buffers fresh to this
+        // resume, so what they commit is captured into the outcome rather
+        // than into a buffer a sibling attempt may still be writing into.
         let mut resumed_dispatch = (*self.dispatch).clone();
         resumed_dispatch.observation_call_key = Some(self.call_observation_key(call_key));
-        resumed_dispatch.checkpoint_messages =
-            crate::tool_dispatch::CheckpointMessageBuffer::default();
         resumed_dispatch.trigger_outcomes =
             crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         // The parked row keeps the call's name, not its tool id: the catalog
@@ -609,13 +599,6 @@ impl RuntimeExecutionContext<'_> {
         )
         .await;
         triggers.extend(resumed_dispatch.trigger_outcomes.drain());
-        let capture = crate::runtime::ToolAttemptCapture {
-            messages: resumed_dispatch.checkpoint_messages.drain(),
-        };
-        if !capture.is_empty() {
-            captures.push(capture);
-        }
-        outcome.captures = captures;
         outcome.triggers = triggers;
         outcome
     }

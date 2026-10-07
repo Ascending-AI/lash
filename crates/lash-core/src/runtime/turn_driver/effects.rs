@@ -272,14 +272,6 @@ impl RuntimeTurnDriver<'_> {
             turn_inputs,
             incorporation,
         } = admitted;
-        // A replayed checkpoint is the authority for everything the turn
-        // incorporated and enqueued before it. The cells before it re-run on
-        // replay (ADR 0103) and re-incorporate the same settlements, which
-        // refills the checkpoint message buffer the live checkpoint drained.
-        // The recorded delivery already carries those messages, so the refill
-        // is discarded here; after a live checkpoint the buffer is already
-        // empty and this drains nothing.
-        self.checkpoint_messages.drain();
         self.opener_state.absorb_ledger(incorporation);
         // The recorded admitted set is the only way the checkpoint's rows
         // reach this driver: the step body ran on a copy of it. It is folded
@@ -424,8 +416,6 @@ impl RuntimeTurnDriver<'_> {
         ),
         RuntimeError,
     > {
-        let mut committed = self.checkpoint_messages.drain();
-        let mut transient_messages = Vec::new();
         let mut committed_user_messages = Vec::new();
         let mut turn_causes = Vec::new();
         let crate::store::CheckpointAdmission {
@@ -507,38 +497,11 @@ impl RuntimeTurnDriver<'_> {
             })
             .await
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint))?;
-        committed.extend(applied.messages);
         emit_session_events(event_tx, applied.events);
-        normalize_plugin_message_attachments(
-            &mut committed,
-            self.host.core.durability.attachment_store.as_ref(),
-            self.host.core.attachment_source_policy.as_ref(),
-        )
-        .await?;
-        normalize_plugin_message_attachments(
-            &mut transient_messages,
-            self.host.core.durability.attachment_store.as_ref(),
-            self.host.core.attachment_source_policy.as_ref(),
-        )
-        .await?;
-
-        if !committed.is_empty() {
-            self.turn_observations.observe(
-                event_tx,
-                crate::engine::ObservedEvent::Session(
-                    SessionStreamEvent::InjectedMessagesCommitted {
-                        messages: committed.clone(),
-                        checkpoint,
-                    },
-                ),
-            );
-        }
 
         Ok((
             crate::CheckpointDelivery {
                 committed_user_messages,
-                messages: committed,
-                transient_messages,
                 turn_causes,
             },
             applied.session,
@@ -583,45 +546,4 @@ impl RuntimeTurnDriver<'_> {
             None => Ok(result),
         }
     }
-}
-
-pub(in crate::runtime) async fn normalize_plugin_message_attachments(
-    messages: &mut [crate::PluginMessage],
-    attachment_store: &crate::RuntimeAttachmentStore,
-    policy: &dyn crate::AttachmentSourcePolicy,
-) -> Result<(), RuntimeError> {
-    for message in messages {
-        for part in &mut message.parts {
-            for source in part.attachment_sources_mut() {
-                normalize_plugin_attachment_source(source, attachment_store, policy).await?;
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn normalize_plugin_attachment_source(
-    source: &mut crate::AttachmentSource,
-    attachment_store: &crate::RuntimeAttachmentStore,
-    policy: &dyn crate::AttachmentSourcePolicy,
-) -> Result<(), RuntimeError> {
-    policy
-        .authorize(&crate::AttachmentProducer::Host, source)
-        .map_err(|err| RuntimeError::new(RuntimeErrorCode::PluginCheckpoint, err.to_string()))?;
-    if let crate::AttachmentSource::Inline { media_type, bytes } = source {
-        let attachment_ref = attachment_store
-            .put(
-                bytes.clone(),
-                crate::AttachmentCreateMeta::new(media_type.clone(), None, None),
-            )
-            .await
-            .map_err(|err| {
-                RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    format!("failed to store inline checkpoint attachment: {err}"),
-                )
-            })?;
-        *source = crate::AttachmentSource::stored(attachment_ref);
-    }
-    Ok(())
 }

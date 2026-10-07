@@ -273,7 +273,6 @@ pub async fn complete_tool_output(
                 attempts: Vec::new(),
                 intents: crate::ToolIntents::default(),
                 intent_outcomes: Vec::new(),
-                captures: Vec::new(),
                 triggers: Vec::new(),
             },
             "test:call",

@@ -72,16 +72,6 @@ impl ProductionToolHandlers<'_> {
             })
             .chain(started.map(|descriptor| descriptor.process_id))
             .collect::<Vec<_>>();
-        let messages = captured
-            .as_ref()
-            .into_iter()
-            .flat_map(|captured| captured.messages.clone())
-            .chain(
-                contributions
-                    .iter()
-                    .flat_map(|contribution| contribution.messages.clone()),
-            )
-            .collect::<Vec<_>>();
         let triggers = captured
             .as_ref()
             .map(|capture| capture.triggers.clone())
@@ -91,7 +81,6 @@ impl ProductionToolHandlers<'_> {
                 call_id: call_id.clone(),
             },
             &possession,
-            &messages,
             &triggers,
         )?;
         if observe {

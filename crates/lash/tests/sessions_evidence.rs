@@ -162,10 +162,6 @@ fn drain_area_witnesses() {
     fn trait_witness_0057<T: lash::plugins::SessionGraphService>() {}
     // W0059: lash::plugins::SessionStateService [trait]
     fn trait_witness_0059<T: lash::plugins::SessionStateService>() {}
-    // W0060: lash::plugins::TurnTransformContext::scoped_effect_controller [field]
-    field_witness(|value: &lash::plugins::TurnTransformContext| {
-        let _ = &value.scoped_effect_controller;
-    });
     // W0063: lash::runtime::AssembledTurn [struct]
     type_witness::<lash::runtime::AssembledTurn>();
     // W0064: lash::runtime::AssembledTurn::assistant_output [field]

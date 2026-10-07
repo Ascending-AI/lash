@@ -721,33 +721,6 @@ impl PluginSession {
             .is_empty()
     }
 
-    /// Chain registered turn-context transforms, piping each one's output
-    /// into the next in priority order.
-    pub async fn prepare_turn_context(
-        &self,
-        ctx: &TurnTransformContext<'_>,
-        input: crate::session_model::context::PreparedContext,
-        phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    ) -> Result<crate::session_model::context::PreparedContext, ContextError> {
-        self.validate_recorded_admission()?;
-        let mut current = input;
-        for (_, registered) in &self.capabilities().contributions.turn_context_transforms {
-            let phase_name = plugin_hook_phase_name(
-                "context_transform",
-                registered.identity.owner.plugin.as_str(),
-            );
-            if let Some(probe) = phase_probe.as_ref() {
-                probe.begin_named(&phase_name);
-            }
-            let result = registered.hook.transform(ctx, current).await;
-            if let Some(probe) = phase_probe.as_ref() {
-                probe.end_named(&phase_name);
-            }
-            current = result?;
-        }
-        Ok(current)
-    }
-
     pub fn has_context_pressure_hooks(&self) -> bool {
         !self
             .capabilities()
@@ -948,7 +921,6 @@ impl PluginSession {
             let verdict = match reply {
                 Ok(AfterToolContributions {
                     verdict,
-                    messages,
                     events,
                     state,
                 }) => {
@@ -966,10 +938,9 @@ impl PluginSession {
                             state,
                         ));
                     }
-                    if !messages.is_empty() || !events.is_empty() {
+                    if !events.is_empty() {
                         contributions.push(AttributedContributions {
                             plugin_id: registered.identity.owner.plugin.clone(),
-                            messages,
                             events,
                         });
                     }

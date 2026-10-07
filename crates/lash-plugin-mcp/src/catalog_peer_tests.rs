@@ -246,19 +246,72 @@ async fn http_catalog_refuses_cycles_and_each_limit_plus_one() {
     }
 }
 
+/// The `mcp/server.*` sections a call offered `tools` renders, as
+/// (section key, text).
+fn guidance_sections(tools: Vec<lash_core::ToolDefinition>) -> Vec<(String, String)> {
+    use lash_core::plugin::prompt::{
+        OfferedTools, PromptCall, PromptCut, PromptCutParts, PromptPurpose, PromptSectionSource,
+    };
+    let offered = OfferedTools {
+        native: tools
+            .iter()
+            .map(|tool| tool.manifest.name.clone())
+            .collect(),
+        callable: Vec::new(),
+        catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(tools)),
+    };
+    let cut = PromptCut::new(PromptCutParts {
+        call: PromptCall {
+            session_id: lash_core::SessionId::from("mcp-cut"),
+            frame: None,
+            run: None,
+            turn: None,
+            iteration: 0,
+            call: 0,
+            purpose: PromptPurpose::Turn,
+        },
+        config: lash_core::AdmittedPluginConfig::default(),
+        session: None,
+        offered: offered.clone(),
+        model: Default::default(),
+        history: Default::default(),
+        namespaces: BTreeMap::new(),
+    });
+    guidance::McpGuidanceSections
+        .sections(&offered)
+        .into_iter()
+        .map(|section| {
+            let text = section
+                .renderer
+                .render(&cut.input_for("mcp"))
+                .expect("pinned guidance renders");
+            (
+                format!(
+                    "{}.{}",
+                    guidance::McpGuidanceSections::FAMILY,
+                    section.suffix
+                ),
+                text.as_text().expect("guidance text").to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// MCP-CUT: server guidance is an admitted catalog resource. Every catalog
+/// the pool advertises pins its server's guidance; a refresh keeps it and a
+/// reconnect captures the new initialize response. The server's section
+/// renders exactly the guidance of the catalog a call was offered, and
+/// rendering never contacts the server: every render runs after the pool
+/// has shut down and the server is gone.
 #[tokio::test]
-async fn http_server_instructions_follow_catalog_refresh_and_reconnect() {
+async fn mcp_guidance_renders_the_offered_catalogs_revision_without_the_server() {
     tokio::time::timeout(Duration::from_secs(20), async {
         let fixture = HttpPeer::start(Scenario::Valid).await;
         let pool =
             McpConnectionPool::connect(BTreeMap::from([("http".to_string(), fixture.config())]))
                 .await
                 .expect("connected HTTP entry");
-        let instructions = || {
-            serde_json::to_value(&pool.advertised_tools()[0].manifest).expect("manifest record")
-                ["module"]["instructions"].clone()
-        };
-        let mut observed = vec![instructions()];
+        let connected = pool.advertised_tools();
         let entry = pool.entries.read_recover()["http"].clone();
         let generation = entry.service_snapshot().expect("HTTP service").generation;
         entry.request_tool_refresh(generation);
@@ -267,29 +320,51 @@ async fn http_server_instructions_follow_catalog_refresh_and_reconnect() {
         {
             tokio::task::yield_now().await;
         }
-        observed.push(instructions());
-        assert!(entry.mark_disconnected("instruction reconnect witness".to_string(), generation));
-        observed.push(instructions());
+        let refreshed = pool.advertised_tools();
+        assert!(entry.mark_disconnected("guidance reconnect witness".to_string(), generation));
         while entry
             .service_snapshot()
             .is_none_or(|service| service.generation == generation)
         {
             tokio::task::yield_now().await;
         }
-        observed.push(instructions());
+        let reconnected = pool.advertised_tools();
         pool.shutdown_all().await;
+        let initializations = fixture.state.initializations.load(Ordering::SeqCst);
+        drop(fixture);
+
+        let section =
+            |text: &str| vec![("server.http".to_string(), format!("#### http\n\n{text}"))];
         assert_eq!(
-            observed,
-            [
-                json!("HTTP guidance generation 1"),
-                json!("HTTP guidance generation 1"),
-                json!("HTTP guidance generation 1"),
-                json!("HTTP guidance generation 2")
-            ]
+            guidance_sections(connected.clone()),
+            section("HTTP guidance generation 1")
+        );
+        assert_eq!(
+            guidance_sections(refreshed),
+            section("HTTP guidance generation 1"),
+            "a tool refresh keeps the connection's guidance"
+        );
+        assert_eq!(
+            guidance_sections(reconnected),
+            section("HTTP guidance generation 2"),
+            "a reconnect pins the new initialize response"
+        );
+        assert_eq!(
+            guidance_sections(connected),
+            section("HTTP guidance generation 1"),
+            "the first catalog still renders its own revision"
+        );
+        assert_eq!(
+            initializations, 2,
+            "only the two connections met the server"
+        );
+        assert!(
+            guidance_sections(Vec::new()).is_empty(),
+            "no offered server, no section"
         );
     })
     .await
-    .expect("bounded instruction lifecycle witness");
+    .expect("bounded guidance witness");
 }
 
 #[tokio::test]

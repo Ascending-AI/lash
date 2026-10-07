@@ -6,9 +6,9 @@ The durable session graph is append-only. Context management either computes an 
 
 ## Rules and guarantees
 
-Prompt View transforms and compactors hold read-only session views, effect controllers, direct completions and trace emitters. They cannot append nodes or open frames. A context-pressure hook returns `Continue`, `Record` or `OpenFrame`; core writes its decision. Hooks run in priority order before Prompt View transforms, once per physical turn, and the first frame opening ends the round. Hook identity includes both plugin and hook ids.
+The Prompt View's attachment-omission policies hold a read-only session view and a trace emitter and return the attachments the request omits ([ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md)). Compactors hold read-only session views, effect controllers, direct completions and trace emitters. Neither can append nodes or open frames. A context-pressure hook returns `Continue`, `Record` or `OpenFrame`; core writes its decision. Hooks run in priority order before the Prompt View's policies, once per physical turn, and the first frame opening ends the round. Hook identity includes both plugin and hook ids.
 
-Instruction text a model call carries is a prompt section ([ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md)), not a Prompt View. A Prompt View reshapes retained history; moving the transforms that append instruction text into sections is open work of ADR 0133 §9 (FIG-5258, FIG-5260).
+Instruction text a model call carries is a prompt section ([ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md)), not a Prompt View. A Prompt View reshapes retained history; the workbench's context transform became a section, and `TurnContextTransform` is deleted (FIG-5258).
 
 A pressure frame commits the outgoing records, frame, seed, artifact carries and execution-state reset together before the turn's model call. A later turn failure leaves that frame durable. Every accepted frame open clears stored execution state and prompt usage and restarts the live protocol from the seed. Initial-frame construction is the bootstrap exception. A staged open refuses a seed carrying artifacts because it cannot commit their transfer.
 

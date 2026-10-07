@@ -1,1 +1,0 @@
-{"id":"event-seed","role":"Event","origin":{"kind":"process","process_id":"p_0f79ed3be7fb7bdcad4f342245395564","event_type":"progress","sequence":7,"wake_id":"wake-seed","caused_by":{"type":"turn","session_id":"session-seed","turn_id":"turn-seed"}},"parts":[{"id":"part-output","kind":"Output","content":"process output"}]}

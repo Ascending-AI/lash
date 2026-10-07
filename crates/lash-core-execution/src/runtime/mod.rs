@@ -67,8 +67,8 @@ pub use effect::{
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
     RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
-    ToolAttemptCapture, ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
-    TurnPrelude, TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution, TurnPrelude,
+    TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{

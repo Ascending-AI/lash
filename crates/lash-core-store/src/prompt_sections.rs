@@ -174,6 +174,9 @@ pub enum PromptPlacement {
     /// Late in the request, after the projected conversation and outside the
     /// conversation history.
     CurrentContext,
+    /// Nowhere: the section is recorded, but neither its renderer nor any
+    /// wrapper over it runs, and the request carries none of its text.
+    Excluded,
 }
 
 /// What a model call is for. A section declares the purposes it renders for.
@@ -271,6 +274,14 @@ pub enum PromptPlanError {
     DuplicatePlacement { section: PromptSectionId },
     #[error("the plan names section `{section}`, which no installed plugin registers")]
     UnknownSection { section: PromptSectionId },
+    /// A section source contributed a section outside its family, or twice,
+    /// or one another registration already owns.
+    #[error("section source `{family}` contributed `{section}`: {reason}")]
+    SourceSectionRefused {
+        family: PromptSectionId,
+        section: String,
+        reason: String,
+    },
     #[error("the per-section limit {section} exceeds the total limit {total}")]
     SectionLimitAboveTotal { section: u32, total: u32 },
     #[error("{count} sections exceed the limit of {limit}")]

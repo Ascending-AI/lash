@@ -10,10 +10,12 @@ storage of §5 and §7 are on main too (FIG-5256):
 `lash-core-execution/src/plugin/prompt/composer.rs` and the durable `prompts`
 domain. The Standard and RLM protocols contribute their prompt as keyed
 sections, and a turn composes them at each execution-environment sync
-(FIG-5257). The rest is open work this decision depends on:
+(FIG-5257). Tool and MCP guidance, host exclusion and readback, and the
+workbench's sections are on main (FIG-5258), and §9's plugin message and
+context-overlay routes and `TurnContextTransform` are deleted. The rest is
+open work this decision depends on:
 
 - FIG-5255: §6 admission at `model.start`;
-- FIG-5258: tools, MCP, add-on plugins and the workbench;
 - FIG-5259: exact provider bodies for every call kind;
 - FIG-5260: deleting every other prompt route (§9).
 
@@ -25,8 +27,9 @@ callbacks append messages, and a prompt-view transform appends text to
 history. Each route has its own owner, timing and durability, and none
 records what a given call carried. A plugin that keeps state, such as a
 memory, cannot say "render my current value before every call" without
-appending a message. Such a message can enter committed history:
-`runner::before_turn_leak_tests` in `lash-sim` pins that bug.
+appending a message. Such a message could enter committed history; the
+`prompt_section_leak` integration law in `lash` pins that section text never
+does, compaction included.
 
 ## Decision
 
@@ -45,13 +48,23 @@ one key twice in one plugin is refused. Plugins with different ids may use
 the same local key. Keys are 1 to 64 bytes of lowercase letters, digits,
 `_`, `-` and `.`.
 
+A plugin whose sections follow the offered surface registers a family
+instead (`PromptRegistrations::family`): a key prefix and a
+`PromptSectionSource` that derives each call's sections from the call's
+`OfferedTools`, keyed `prefix.suffix`. A section exists only for a call that
+offers its surface. A tool plugin's guidance is a family over the offered
+manifests. MCP guidance is the `mcp/server.<server>` family: each imported
+manifest pins its server's guidance by digest at admission, and rendering
+reads the stored text and never contacts the server. A family's prefix may
+not overlap another family's prefix or a section's key in the same plugin.
+
 Tool schemas stay typed declarations. Conversation history and tool results
 stay history. Section text never enters the conversation graph.
 
 The protocols' sections, with their default placements:
 
-- Standard (`standard_protocol`): `intro`, `execution`, `guidance` and
-  `tool_modules`, all in the initial instructions;
+- Standard (`standard_protocol`): `intro`, `execution` and `guidance`, all
+  in the initial instructions;
 - RLM (`rlm_protocol`, both channels): `intro`, `guidance`, `execution`,
   `declarations` (over exactly the offered callable surface) and `subagent`
   in the initial instructions; `bound_variables`, `finalization`,
@@ -94,8 +107,11 @@ plan its resolved config records. The plan has three parts:
 `CurrentContext` places it late, after the projected conversation and outside
 its history: the call's late sections are one runtime-feedback (system-role)
 message after everything the protocol's projector rendered. A projector
-renders history only; it never places a section. A plugin declares a default placement. The host's placement
-wins, and the call records whose choice each placement was
+renders history only; it never places a section. `Excluded` drops a section:
+the call records the section and its placement like any other, but neither
+its renderer nor a wrapper over it runs, and those wrappers are recorded
+under `absent_targets`. A plugin declares a default placement. The host's
+placement wins, and the call records whose choice each placement was
 (`PlacementSource`).
 
 Lash sets no placement policy. The trade-off belongs to the host. A section
@@ -106,7 +122,13 @@ providers lower late text into tagged user content.
 A plan that orders or places a section twice, or whose per-section limit
 exceeds its total, is refused as `CoreConfigRefusal::PromptPlanRefused`. A
 plan naming a section no installed plugin registers fails the call that
-resolves it, with `PromptPlanError::UnknownSection`.
+resolves it, with `PromptPlanError::UnknownSection`; a key under a family's
+prefix counts as registered.
+
+A host reads its plan and catalog back through `session.admin().prompt()`:
+`plan()` returns the recorded plan, `catalog()` the installed sections,
+families and wrappers, and `preview(purpose, offered)` the resolution a call
+offered those tools would record, without rendering.
 
 ### 4. Render input is a committed cut
 
@@ -212,9 +234,10 @@ following are deleted:
 
 - protocol system-prompt renderers;
 - `StandardPrompt` and the protocol prompt commands;
-- `ToolModule.instructions`;
-- the `messages` fields of turn, after-turn and after-tool contributions;
-- `TurnContextTransform`;
+- `ToolModule.instructions` (deleted, FIG-5258);
+- the `messages` fields of turn, after-turn and after-tool contributions
+  (deleted, FIG-5258);
+- `TurnContextTransform` (deleted, FIG-5258);
 - `RenderCompactionPrompt`;
 - the direct-call instruction fields.
 

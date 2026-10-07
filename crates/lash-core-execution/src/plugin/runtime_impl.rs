@@ -517,6 +517,41 @@ impl PluginHost {
         Ok(())
     }
 
+    /// The prompt sections, families and wrappers the installed plugins
+    /// register for a session recorded under `plugin_config`, built for a
+    /// host to inspect: the plugins are built over empty state, and no
+    /// session is materialized or registered.
+    ///
+    /// # Errors
+    ///
+    /// A plugin's build or registration error.
+    pub fn inspect_prompt_catalog(
+        &self,
+        owner: RuntimeOwner,
+        tool_access: crate::SessionToolAccess,
+        subagent: Option<crate::SubagentSessionContext>,
+        plugin_config: super::AdmittedPluginConfig,
+    ) -> Result<super::prompt::PromptCatalog, PluginError> {
+        let ctx = PluginSessionContext {
+            tracing: self.trace_runtime.clone(),
+            trace: None,
+            owner,
+            tool_access,
+            subagent,
+            plugin_config,
+            materialization: PluginSessionMaterialization::Rematerialization,
+            extensions: self.extensions.clone(),
+            parent_session_id: None,
+        };
+        let built = self.build_session_contributions(
+            &ctx,
+            Arc::new(StdMutex::new(PluginStateRegistry::from_snapshot(None))),
+        )?;
+        Ok(super::prompt::PromptCatalog::new(
+            built.contributions.prompt,
+        ))
+    }
+
     fn build_session_contributions(
         &self,
         ctx: &PluginSessionContext,
@@ -581,9 +616,6 @@ impl PluginHost {
         })?;
         contributions.protocol_session = Some(protocol_session);
         contributions.protocol_driver = Some(protocol_driver);
-        contributions
-            .turn_context_transforms
-            .sort_by_key(|entry| std::cmp::Reverse(entry.0));
         contributions
             .attachment_omission_policies
             .sort_by_key(|entry| std::cmp::Reverse(entry.0));

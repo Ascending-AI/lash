@@ -167,9 +167,7 @@ pub mod usage {
     };
 
     pub use lash_remote_protocol::queued_events::{
-        RemoteAdmissionBoundary, RemoteMessageOrigin, RemoteMessageRole, RemotePart,
-        RemotePartAttachment, RemotePartKind, RemotePluginMessage, RemoteTurnCause,
-        RemoteTurnOutputSource,
+        RemoteAdmissionBoundary, RemoteMessageOrigin, RemoteTurnCause, RemoteTurnOutputSource,
     };
     pub use lash_remote_protocol::usage_activity::{
         RemoteTurnActivity, RemoteTurnEvent, RemoteUsage,

@@ -8,7 +8,7 @@ pub use transition::{
 };
 
 use crate::runtime::AssembledTurn;
-use crate::{MessageRole, SessionPolicy, ToolManifest, ToolProvider};
+use crate::{SessionPolicy, ToolManifest, ToolProvider};
 
 pub use lash_core_store::store::plugin_writers::{
     PluginCallbackIdentity, PluginExecutionRefusal, PluginRevision,
@@ -79,7 +79,7 @@ pub use error::{
 pub use history::{
     CompactionContext, CompactionSystemPrompt, ContextCompaction, ContextCompactor, ContextError,
     ContextPressureContext, ContextPressureDecision, ContextPressureHook, DecidedContextPressure,
-    PluginTraceEmitter, SessionReadView, TurnContextTransform, TurnTransformContext,
+    PluginTraceEmitter, SessionReadView,
 };
 pub use hook_key::HookKey;
 pub(crate) use hooks::owner_trace_context;

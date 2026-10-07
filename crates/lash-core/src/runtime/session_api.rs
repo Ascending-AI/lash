@@ -495,6 +495,33 @@ impl LashRuntime {
         .await
     }
 
+    /// The prompt sections, families and wrappers this session's installed
+    /// plugins register (ADR 0133): its built plugins' registrations, or,
+    /// before this runtime built them, an inspection build under the
+    /// session's recorded config.
+    ///
+    /// # Errors
+    ///
+    /// A plugin's build or registration error.
+    pub fn prompt_catalog(&self) -> Result<crate::plugin::prompt::PromptCatalog, RuntimeError> {
+        if let Some(catalog) = self
+            .plugin_session()
+            .and_then(|plugins| plugins.built_prompt_catalog())
+        {
+            return Ok(catalog);
+        }
+        self.services
+            .plugins
+            .host()
+            .inspect_prompt_catalog(
+                crate::RuntimeOwner::Session(self.state.session_id.clone()),
+                self.state.authority.tool_access.clone(),
+                self.state.authority.subagent.clone(),
+                self.state.admitted_plugin_config(),
+            )
+            .map_err(|error| RuntimeError::new(RuntimeErrorCode::Plugin, error.to_string()))
+    }
+
     /// The plugin session bound to the currently active runtime session, if any.
     pub fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
         match self.resident_session.validity() {

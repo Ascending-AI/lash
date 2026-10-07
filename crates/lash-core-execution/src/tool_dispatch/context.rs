@@ -10,23 +10,6 @@ use crate::{
     ToolProvider,
 };
 
-#[derive(Clone, Default)]
-pub struct CheckpointMessageBuffer {
-    queue: Arc<Mutex<Vec<crate::PluginMessage>>>,
-}
-
-impl CheckpointMessageBuffer {
-    pub fn enqueue(&self, messages: Vec<crate::PluginMessage>) {
-        let mut queue = self.queue.lock_recover();
-        queue.extend(messages);
-    }
-
-    pub fn drain(&self) -> Vec<crate::PluginMessage> {
-        let mut queue = self.queue.lock_recover();
-        queue.drain(..).collect()
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ToolTriggerEffectOutcome {
     pub source_type: String,
@@ -100,7 +83,6 @@ pub struct ToolDispatchContext<'run> {
     /// emits (ADR 0099 §3's live half of the split); a dispatch that serves no
     /// turn stream carries [`NullObservationSink`](crate::engine::NullObservationSink).
     pub observer: Arc<dyn crate::engine::ObservationSink>,
-    pub checkpoint_messages: CheckpointMessageBuffer,
     pub trigger_outcomes: ToolTriggerOutcomeBuffer,
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
@@ -219,7 +201,6 @@ impl<'run> ToolDispatchContext<'run> {
             execution_env_spec: self.execution_env_spec.clone(),
             owner: self.owner.clone(),
             observer: Arc::clone(&self.observer),
-            checkpoint_messages: self.checkpoint_messages.clone(),
             trigger_outcomes: self.trigger_outcomes.clone(),
             attachment_store: Arc::clone(&self.attachment_store),
             attachment_source_policy: Arc::clone(&self.attachment_source_policy),
@@ -240,12 +221,8 @@ pub struct ToolDispatchOutcome {
     pub intents: crate::ToolIntents,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
-    /// Committed message facts in attempt order, applied exactly once at
-    /// the opener's incorporation boundary.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub captures: Vec<crate::runtime::ToolAttemptCapture>,
-    /// Trigger receipts the attempts emitted, carried to the same
-    /// incorporation boundary the captures are.
+    /// Trigger receipts the attempts emitted, applied exactly once at the
+    /// opener's incorporation boundary.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
 }
@@ -308,7 +285,6 @@ pub(super) fn outcome(
         attempts: Vec::new(),
         intents: crate::ToolIntents::default(),
         intent_outcomes: Vec::new(),
-        captures: Vec::new(),
         triggers: Vec::new(),
     }
 }

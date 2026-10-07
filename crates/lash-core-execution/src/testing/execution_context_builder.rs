@@ -559,7 +559,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
                     .expect("test frame identity is non-empty"),
             },
             observer: Arc::new(crate::engine::NullObservationSink),
-            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.attachment_store),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),

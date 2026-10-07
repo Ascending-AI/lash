@@ -55,26 +55,6 @@ impl std::fmt::Debug for PluginTraceEmitter {
     }
 }
 
-/// Context passed to a turn-context transform.
-///
-/// A transform is a Prompt View transform (ADR 0001): its output is
-/// ephemeral and it holds no write service, so it can neither append nodes
-/// nor open a frame. Durable context decisions belong to a
-/// [`ContextPressureHook`], whose decision core writes.
-#[derive(Clone)]
-pub struct TurnTransformContext<'run> {
-    pub session_id: SessionId,
-    /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running run's admitted configuration and its revision.
-    pub plugin_config: super::AdmittedPluginConfig,
-    pub state: SessionReadView,
-    pub prompt_usage: Option<crate::TokenUsage>,
-    pub max_context_tokens: Option<usize>,
-    pub traces: PluginTraceEmitter,
-    pub scoped_effect_controller: crate::ActorContext,
-    pub direct_completions: crate::DirectCompletionClient<'run>,
-}
-
 /// Context passed to an explicit compactor.
 ///
 /// A compactor returns seed nodes and core opens the frame; it holds no
@@ -225,18 +205,6 @@ impl ContextCompaction {
     pub fn is_empty(&self) -> bool {
         self.initial_nodes.is_empty()
     }
-}
-
-/// Prepares the ephemeral turn context presented to the model (a Prompt
-/// View transform, ADR 0001).
-#[async_trait::async_trait]
-pub trait TurnContextTransform: Send + Sync {
-    fn id(&self) -> &'static str;
-    async fn transform(
-        &self,
-        ctx: &TurnTransformContext<'_>,
-        input: crate::session_model::context::PreparedContext,
-    ) -> Result<crate::session_model::context::PreparedContext, ContextError>;
 }
 
 #[async_trait::async_trait]

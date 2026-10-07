@@ -83,8 +83,6 @@ pub fn plugin_runtime_event_from_protocol(
         .map_err(|error| corrupt(error.to_string()))
 }
 
-pub(crate) use lash_core_store::message_projection::plugin_message_to_message;
-
 /// The lazy binding of one recorded model to the transport that executes it
 /// on this worker (FIG-4404).
 ///

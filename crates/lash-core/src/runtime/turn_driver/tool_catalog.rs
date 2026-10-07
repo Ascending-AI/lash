@@ -206,6 +206,9 @@ impl RuntimeTurnDriver<'_> {
                             crate::prompt_sections::PromptPlacement::CurrentContext => {
                                 "current_context".to_string()
                             }
+                            crate::prompt_sections::PromptPlacement::Excluded => {
+                                "excluded".to_string()
+                            }
                         },
                         hash: text.blob.0.clone(),
                         chars: composed

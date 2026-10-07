@@ -370,7 +370,7 @@ async fn l07_mcp_required_remote_tasks_refuse_during_admission() {
         "execution": {"taskSupport": "required"},
     }))
     .unwrap();
-    let imported = import_tools("mock", vec![remote], None).unwrap();
+    let imported = import_tools("mock", vec![remote]).unwrap();
     let service = entry.service_snapshot().unwrap();
     let imported = admission::bind_imported_tools(imported, &entry, &service.peer).unwrap();
     entry.replace_imported_tools(imported).unwrap();

@@ -394,15 +394,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         id
     }
 
-    fn next_synthetic_message_id(&mut self, scope: &str) -> String {
-        let id = format!(
-            "m_sansio_{}_{}_{}",
-            self.protocol_run_offset, scope, self.next_synthetic_message_id
-        );
-        self.next_synthetic_message_id += 1;
-        id
-    }
-
     fn emit(&mut self, event: SessionStreamEvent) {
         self.side_effect_outbox.push_back(Effect::Emit(event));
     }
@@ -715,34 +706,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
-    fn append_checkpoint_messages(&mut self, plugin_messages: &[PluginMessage], transient: bool) {
-        let mut appended = Vec::new();
-        for message in plugin_messages
-            .iter()
-            .filter(|message| matches!(message.role, MessageRole::User | MessageRole::System))
-        {
-            let message_id = self.next_synthetic_message_id("checkpoint");
-            let mut parts = message.parts.clone();
-            reassign_part_ids(&message_id, &mut parts);
-            appended.push(Message {
-                id: message_id.clone(),
-                role: message.role,
-                parts: Arc::new(parts),
-                origin: message.origin.clone().or_else(|| {
-                    Some(MessageOrigin::Plugin {
-                        plugin_id: "plugin".to_string(),
-                        transient,
-                    })
-                }),
-                reply_marker: None,
-            });
-        }
-        if !appended.is_empty() {
-            self.prompt_messages.extend(appended.clone());
-            self.messages.extend(appended);
-        }
-    }
-
     fn append_turn_causes(&mut self, causes: Vec<TurnCause>) {
         if causes.is_empty() {
             return;
@@ -768,16 +731,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
         on_empty: CheckpointResumeAction,
         delivery: CheckpointDelivery,
     ) {
-        if !delivery.committed_user_messages.is_empty()
-            || !delivery.messages.is_empty()
-            || !delivery.transient_messages.is_empty()
-            || !delivery.turn_causes.is_empty()
-        {
+        if !delivery.committed_user_messages.is_empty() || !delivery.turn_causes.is_empty() {
             self.prompt_messages
                 .extend(delivery.committed_user_messages.clone());
             self.messages.extend(delivery.committed_user_messages);
-            self.append_checkpoint_messages(&delivery.messages, false);
-            self.append_checkpoint_messages(&delivery.transient_messages, true);
             self.append_turn_causes(delivery.turn_causes);
             if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
                 self.protocol_iteration += 1;

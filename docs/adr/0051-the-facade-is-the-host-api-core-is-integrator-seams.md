@@ -74,14 +74,12 @@ protocol contracts and the types needed to implement them. Operations use
 outcomes. Hosts invoke those operations through `lash::admin`. The facade's
 single general prelude is `lash::prelude`.
 
-`TurnContextTransform::transform` receives and returns `PreparedContext`.
 `TurnContext` carries runtime correlation; per-send prompt overrides belong to
 `RunSpec`. A plugin receives runtime-provided services rather than assembling
 the runtime's authority.
 
 Prompt sections follow [ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md): `lash::plugins` carries the section and wrapper
 contracts, and `lash::prompt` the host's plan and the recorded snapshots.
-Deleting `TurnContextTransform` is open work of ADR 0133 §9.
 
 ### Read-only handles
 

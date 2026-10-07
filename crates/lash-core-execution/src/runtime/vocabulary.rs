@@ -368,10 +368,6 @@ pub enum TurnEvent {
     QueuedInputAccepted {
         applications: Vec<crate::TurnInputApplication>,
     },
-    QueuedMessagesCommitted {
-        messages: Vec<crate::PluginMessage>,
-        checkpoint: crate::CheckpointKind,
-    },
     Error {
         message: String,
     },

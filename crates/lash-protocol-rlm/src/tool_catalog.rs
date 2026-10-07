@@ -82,9 +82,9 @@ pub(crate) fn rlm_prompt_tool_docs(
         }
     }
     entries.extend(
-        modules.into_values().map(|(module, tools)| {
-            format!("{}\n\n{}", module.render_markdown(), tools.join("\n\n"))
-        }),
+        modules
+            .into_values()
+            .map(|(module, tools)| format!("#### {}\n\n{}", module.name, tools.join("\n\n"))),
     );
     entries.join("\n\n")
 }

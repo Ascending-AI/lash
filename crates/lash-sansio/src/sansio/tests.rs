@@ -1485,7 +1485,7 @@ fn content_filter_and_provider_error_still_stop_as_provider_error() {
 }
 
 #[test]
-fn checkpoint_messages_resume_prepare_protocol_iteration() {
+fn checkpoint_user_messages_resume_prepare_protocol_iteration() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
     let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
@@ -1511,7 +1511,7 @@ fn checkpoint_messages_resume_prepare_protocol_iteration() {
     machine.handle_response(Response::Checkpoint {
         id: checkpoint_id,
         delivery: CheckpointDelivery {
-            messages: vec![PluginMessage::text(MessageRole::User, "one more thing")],
+            committed_user_messages: vec![user_message("one more thing")],
             ..CheckpointDelivery::default()
         },
     });

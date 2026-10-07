@@ -226,11 +226,9 @@ pub mod facade_support {
     pub use crate::plugin::ToolPresentationPresenter;
     pub use crate::plugin::ToolPresentationStep;
     pub use crate::plugin::ToolResultProjectionContext;
-    pub use crate::plugin::TurnContextTransform;
     pub use crate::plugin::TurnHookContext;
     pub use crate::plugin::TurnHookReport;
     pub use crate::plugin::TurnResultHookContext;
-    pub use crate::plugin::TurnTransformContext;
     pub use crate::plugin::{
         AfterToolContributions, AfterToolDecision, BeforeToolDecision, CachedToolSuccess, HookKey,
         PluginAbort, PluginRecordContribution, PreparedCallReadView, ToolArgsCheckInput,

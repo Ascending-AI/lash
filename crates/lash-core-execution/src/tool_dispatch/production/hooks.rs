@@ -90,13 +90,11 @@ impl ProductionToolHandlers<'_> {
                             crate::plugin::ToolHookOccurrence::Cached,
                             ToolIntents::default(),
                             Vec::new(),
-                            Vec::new(),
                         )
                         .await
                     } else {
                         Ok(Captured {
                             output,
-                            messages: Vec::new(),
                             triggers: Vec::new(),
                             original: None,
                             occurrence: crate::plugin::ToolHookOccurrence::Cached,
@@ -185,7 +183,6 @@ impl ProductionToolHandlers<'_> {
                 .into_iter()
                 .map(|contribution| CheckContribution {
                     plugin_id: contribution.plugin_id,
-                    messages: contribution.messages,
                     events: contribution.events,
                 })
                 .collect(),
@@ -249,7 +246,6 @@ impl ProductionToolHandlers<'_> {
                     Some(capture),
                 )
                 .map_err(fault)?,
-                messages: Vec::new(),
                 triggers: Vec::new(),
                 occurrence: crate::plugin::ToolHookOccurrence::Attempt {
                     attempt: AttemptOrdinal::FIRST,

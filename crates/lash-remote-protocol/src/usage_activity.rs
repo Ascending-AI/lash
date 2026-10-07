@@ -7,9 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::{RemoteLlmCallRecord, validate_llm_call_record};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
-use crate::{
-    RemoteAdmissionBoundary, RemotePluginMessage, RemoteTurnCause, RemoteTurnInputCheckpoint,
-};
+use crate::{RemoteAdmissionBoundary, RemoteTurnCause};
 
 // Wire mirror of the runtime usage counters. This is a deliberately versioned
 // protocol boundary, kept independent of the internal types so the wire format
@@ -197,10 +195,6 @@ pub enum RemoteTurnEvent {
         boundary: RemoteAdmissionBoundary,
         batch_ids: Vec<String>,
         causes: Vec<RemoteTurnCause>,
-    },
-    QueuedMessagesCommitted {
-        messages: Vec<RemotePluginMessage>,
-        checkpoint: RemoteTurnInputCheckpoint,
     },
     /// A run's restore of the session's persisted tool state that some
     /// persisted id had no registered source for (FIG-5134).

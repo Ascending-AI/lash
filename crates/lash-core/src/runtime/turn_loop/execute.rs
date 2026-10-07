@@ -4,13 +4,11 @@
 use super::*;
 use crate::ActorContext;
 
-/// The preamble step of the execute phase: the plugin prepare-turn hooks and
-/// the context transform that produce the message sequence the driver runs.
+/// The preamble step of the execute phase: the plugin before-turn hooks.
 pub(super) struct TurnPreambleContext<'preamble, 'run> {
     pub(super) plugins: &'preamble Arc<crate::PluginSession>,
     pub(super) scoped_effect_controller: &'preamble ActorContext,
     pub(super) manager: &'preamble Arc<RuntimeSessionServices>,
-    pub(super) messages: crate::MessageSequence,
     pub(super) turn_policy: &'preamble crate::SessionPolicy,
     pub(super) effective_protocol_turn_options: &'preamble crate::ProtocolTurnOptions,
     pub(super) turn_context: &'preamble crate::TurnContext,
@@ -32,7 +30,6 @@ impl LashRuntime {
             plugins,
             scoped_effect_controller,
             manager,
-            messages,
             turn_policy,
             effective_protocol_turn_options,
             turn_context,
@@ -73,7 +70,7 @@ impl LashRuntime {
         } else {
             Vec::new()
         };
-        let prepared = crate::PluginSession::apply_before_turn(recorded, messages, turn_scope_id);
+        let prepared = crate::PluginSession::apply_before_turn(recorded);
         self.mark_phase_end(RuntimeTurnPhase::BeforeTurnHooks);
         Ok(prepared)
     }

@@ -753,11 +753,17 @@ pub mod persistence {
 /// prefix. [`PromptPlacement::CurrentContext`] puts it late, after the
 /// conversation and outside its history, which keeps the history prefix
 /// stable but may reach the model in a different role.
+/// [`PromptPlacement::Excluded`] drops it: its renderer never runs.
+///
+/// [`SessionPromptAdmin`] reads a session's recorded plan and registered
+/// catalog, and previews the plan's resolution for a call without admitting
+/// one.
 ///
 /// A call records its [`ResolvedPromptPlan`] and a version-1
 /// [`PromptSnapshot`]: each section's base text, each wrapper's output and
 /// the final text, as content-addressed [`PromptTextRef`]s.
 pub mod prompt {
+    pub use crate::admin::SessionPromptAdmin;
     pub use lash_core::plugin::prompt::{PromptCompositionError, PromptRenderSite};
     pub use lash_core::prompt_sections::{
         AppliedPromptWrap, PROMPT_KEY_MAX_BYTES, PlacementSource, PromptKeyError, PromptLimits,
@@ -785,7 +791,7 @@ pub mod plugins {
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
         AttemptStream, AttemptStreamChannel, AttemptStreamEvent, AttemptStreamTruncation,
-        DecodedStreamEvent, ToolAttemptCapture,
+        DecodedStreamEvent,
     };
     pub use lash_core::session::{
         CompletedProtocolToolCall, Incorporated, IncorporationLedger, SettlementSource,
@@ -817,6 +823,8 @@ pub mod plugins {
 
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
+    /// A turn's prepared request history, as its prelude records it.
+    pub use lash_core::facade_support::PreparedContext;
     /// Durable session-lifecycle operations a hook context carries, alongside
     /// [`SessionStateService`] and [`SessionGraphService`]; runtime-implemented.
     pub use lash_core::facade_support::SessionLifecycleService;
@@ -832,8 +840,9 @@ pub mod plugins {
     /// and its admitted config. The host's plan and the recorded snapshots
     /// are in [`prompt`](crate::prompt).
     pub use lash_core::plugin::prompt::{
-        CommittedPluginNamespace, OfferedTools, ProjectedHistoryStats, PromptCall, PromptInput,
-        PromptModel, PromptRegistrations, PromptRenderError, PromptSection, PromptSectionSpec,
+        CommittedPluginNamespace, OfferedTools, ProjectedHistoryStats, PromptCall,
+        PromptFamilySection, PromptInput, PromptModel, PromptRegistrations, PromptRenderError,
+        PromptSection, PromptSectionFamilySpec, PromptSectionSource, PromptSectionSpec,
         PromptSectionWrap, PromptWrapSpec, PromptWrapTarget, SectionText,
     };
     /// A session's registered sections and the one-call composition the
@@ -842,7 +851,8 @@ pub mod plugins {
     /// renders run on and the composed prompt with its snapshot.
     pub use lash_core::plugin::prompt::{
         ComposedPrompt, ComposedSection, PromptCatalog, PromptCut, PromptCutParts,
-        PromptRenderPool, PromptSectionInfo, ProtocolPromptFacts, ResolvedPromptComposition,
+        PromptRenderPool, PromptSectionFamilyInfo, PromptSectionInfo, ProtocolPromptFacts,
+        ResolvedPromptComposition,
     };
     /// The tool hook phases (ADR 0128): argument transforms, before-checks
     /// over the prepared call, result transforms, and after-checks over the
@@ -1034,13 +1044,6 @@ pub mod plugins {
     /// idempotent output and schedule reconciliation independently of hooks.
     pub use lash_core::{
         facade_support::PluginLifecycleEvent, facade_support::SessionConfigChangedContext,
-    };
-    /// Per-turn context assembly: the prepared messages, prompt contributions,
-    /// and tool providers a [`TurnContextTransform`] may rewrite before the
-    /// model call, and the read-only context the transform is handed.
-    pub use lash_core::{
-        facade_support::PreparedContext, facade_support::TurnContextTransform,
-        facade_support::TurnTransformContext,
     };
     pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};
     /// Default chat projector installed by [`TurnDriverConfig::chat`].

@@ -17,8 +17,6 @@ pub use attempt_stream::{
     ATTEMPT_STREAM_BYTE_BUDGET, AttemptStream, AttemptStreamBuilder, AttemptStreamChannel,
     AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation, DecodedStreamEvent,
 };
-mod tool_attempt_capture;
-pub use tool_attempt_capture::ToolAttemptCapture;
 mod outcome;
 mod session_outcome;
 mod validation;

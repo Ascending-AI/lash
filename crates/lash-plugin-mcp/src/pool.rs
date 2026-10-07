@@ -17,6 +17,7 @@ mod result_schema;
 use result_schema::mcp_result_schema;
 mod admission;
 mod attempt;
+pub(crate) mod guidance;
 mod lifecycle_actor;
 pub(crate) use admission::admitted_binding;
 use admission::{McpToolBinding, RemoteCompletion};
@@ -1204,29 +1205,24 @@ impl Drop for AbortOnDrop {
 fn import_tools(
     server_name: &str,
     tools: Vec<rmcp::model::Tool>,
-    instructions: Option<String>,
 ) -> Result<BTreeMap<String, ImportedTool>, McpError> {
     let raw_names = tools
         .iter()
         .map(|tool| tool.name.as_ref())
         .collect::<Vec<_>>();
     let names = naming::build_catalog_names(server_name, &raw_names);
-    import_tools_with_name_builder(server_name, tools, instructions, |_, raw| {
-        names[raw].clone()
-    })
+    import_tools_with_name_builder(server_name, tools, |_, raw| names[raw].clone())
 }
 
 fn import_tools_with_name_builder(
     server_name: &str,
     mut tools: Vec<rmcp::model::Tool>,
-    instructions: Option<String>,
     mut build_name: impl FnMut(&str, &str) -> (String, lash_tool_support::ToolBinding),
 ) -> Result<BTreeMap<String, ImportedTool>, McpError> {
     tools.sort_by(|left, right| left.name.cmp(&right.name));
     let mut imported = BTreeMap::new();
     let module = Arc::new(lash_core::ToolModule {
         name: server_name.to_string(),
-        instructions,
     });
     for tool in tools {
         let tool_digest = admission::tool_digest(&tool)?;

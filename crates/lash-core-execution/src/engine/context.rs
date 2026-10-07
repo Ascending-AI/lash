@@ -75,13 +75,6 @@ pub fn activity_projection(event: &SessionStreamEvent) -> Option<TurnEvent> {
             plugin_id: plugin_id.clone(),
             event: event.clone(),
         }),
-        SessionStreamEvent::InjectedMessagesCommitted {
-            messages,
-            checkpoint,
-        } => Some(TurnEvent::QueuedMessagesCommitted {
-            messages: messages.clone(),
-            checkpoint: *checkpoint,
-        }),
         SessionStreamEvent::Error { message, .. } => Some(TurnEvent::Error {
             message: message.clone(),
         }),

@@ -197,7 +197,7 @@ executions. A plugin's live mutable memory is not the authority for a resumed
 decision.
 
 Hooks receive read views and return decisions; core owns the resulting writes.
-The context-pressure hook runs before Prompt View transforms with the
+The context-pressure hook runs before the Prompt View's policies with the
 committed view, previous prompt usage and context window. `Record` nodes join
 the turn's append draft. `OpenFrame` performs its own fenced, idempotent commit
 before the turn's model call. The frame key and operation identity derive

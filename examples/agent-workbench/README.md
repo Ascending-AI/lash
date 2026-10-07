@@ -211,9 +211,16 @@ the old session as still live. Rotation is required after success because a
 deleted session id is permanently retired and cannot be reopened in the same
 store.
 
-Connected inbox accounts are a workbench prompt section: every model call
-renders the accounts connected at that moment, and a call's recorded prompt
-keeps what it was sent.
+The workbench's prompt is prompt sections of its `agent_workbench` plugin:
+it replaces the standard protocol's intro with its own identity, renders
+`instructions` and `accounts` from the host text the session records in the
+plugin's `agent_workbench` config, and adds `context_budget`, which reports
+the prepared history's size late in the call. Connected inbox accounts are
+recorded prompt context. Adding or removing an account, or clearing accounts
+on reset, applies `SetWorkbenchPromptContext` to live sessions. New sessions
+record the current accounts at creation. Every turn source uses that config,
+while a running run and its replay keep their recorded config, and a call's
+recorded prompt keeps what it was sent.
 
 Six low-frequency data utilities under `text`, `json`, and `list` are kept out
 of the resident RLM tool catalog. The prompt carries only a capped catalogue

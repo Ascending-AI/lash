@@ -1,14 +1,11 @@
-//! Context-preparation vocabulary shared between the runtime and the
-//! plugin host. Rolling strategies are dispatched through the
-//! [`TurnContextTransform`](crate::plugin::TurnContextTransform) prompt-view
-//! hook. Durable compaction is an explicit Agent Frame transition, not a
-//! rewrite of this prepared context.
+//! The turn's prepared context. Its messages are the turn's history as the
+//! request sees it, after the attachment-omission history policies (ADR
+//! 0133). Durable compaction is an explicit Agent Frame transition, not a
+//! rewrite of this prepared context. Tool availability is catalog
+//! membership, never a prepared-context choice.
 
-/// Output of the per-turn context transform pipeline — the messages and
-/// tool providers the runtime hands to the
-/// LLM call.
+/// The messages the runtime hands to the LLM call.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct PreparedContext {
     pub messages: crate::MessageSequence,
-    pub tool_providers: Vec<crate::plugin::PluginCallbackIdentity>,
 }

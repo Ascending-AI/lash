@@ -104,7 +104,6 @@ impl RuntimeSessionServices {
             // A process's steps have no host lane: the dispatch observes
             // nowhere.
             observer: crate::engine::NullObservationSink::arc(),
-            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.current.host.core.durability.attachment_store),
             attachment_source_policy: Arc::clone(&self.current.host.core.attachment_source_policy),

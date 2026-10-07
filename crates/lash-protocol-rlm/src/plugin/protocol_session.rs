@@ -70,7 +70,6 @@ impl RlmProtocolSession {
             return Ok(TurnContributions::default());
         }
         Ok(TurnContributions {
-            messages: Vec::new(),
             events: vec![lash_core::PluginRuntimeEvent::Status {
                 key: BUDGET_WARNING_STATUS.to_string(),
                 label: "context budget".to_string(),
@@ -334,7 +333,7 @@ mod tests {
                 plugin_config: Default::default(),
             })
             .expect("warning contributions");
-        assert!(directives.events.is_empty() && directives.messages.is_empty());
+        assert!(directives.events.is_empty());
     }
 
     #[test]
@@ -380,10 +379,6 @@ mod tests {
             })
             .expect("warning contributions");
 
-        assert!(
-            directives.messages.is_empty(),
-            "budget warning must be a runtime event"
-        );
         let events = &directives.events;
         let lash_core::PluginRuntimeEvent::Status { detail, .. } = &events[0] else {
             panic!("budget warning should use a typed status runtime event");
@@ -432,10 +427,6 @@ mod tests {
     }
 
     fn statuses(contributions: &TurnContributions) -> Vec<lash_core::PluginRuntimeEvent> {
-        assert!(
-            contributions.messages.is_empty(),
-            "the budget warning emits runtime events only"
-        );
         contributions.events.clone()
     }
 

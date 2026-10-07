@@ -68,6 +68,7 @@ pub(super) fn bind_imported_tools(
                 .map_err(|error| McpError::Config(format!("cannot record MCP binding: {error}")))?,
         );
     }
+    super::guidance::pin_guidance(&mut tools, entry, peer)?;
     Ok(tools)
 }
 

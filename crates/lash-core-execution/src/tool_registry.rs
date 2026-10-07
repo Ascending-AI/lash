@@ -30,9 +30,7 @@ mod rebind;
 mod registry_impl;
 mod restore_execute;
 use rebind::{
-    ReconcileMode, export_tool_state_entries, insert_advertised_entry,
-    manifest_with_compact_contract, reconcile_tool_state_entries, surfaces_publicly_equal,
-    validate_unique_manifests,
+    ReconcileMode, export_tool_state_entries, reconcile_tool_state_entries, surfaces_publicly_equal,
 };
 #[cfg(test)]
 mod pinning_tests;

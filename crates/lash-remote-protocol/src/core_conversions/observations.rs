@@ -359,13 +359,6 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                     applications: applications.iter().map(Into::into).collect(),
                 })
             }
-            lash_core::TurnEvent::QueuedMessagesCommitted {
-                messages,
-                checkpoint,
-            } => Ok(Self::QueuedMessagesCommitted {
-                messages: messages.into_iter().map(Into::into).collect(),
-                checkpoint: checkpoint.into(),
-            }),
             lash_core::TurnEvent::ToolRestoreReported { report } => {
                 Ok(Self::ToolRestoreReported { report })
             }

@@ -43,7 +43,7 @@ pub use crate::store::{
     load_session_window_state,
 };
 pub use crate::tool_dispatch::{
-    CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer, execute_final_tool_intents,
+    ToolCallLaunch, ToolTriggerOutcomeBuffer, execute_final_tool_intents,
     resolve_callable_manifest_by_id,
 };
 /// The kernel's single-call entries under the dispatch state a [`crate::testing::ToolCallFixture`]

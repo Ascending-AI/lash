@@ -16,7 +16,6 @@ fn catalog(names: &[&str]) -> lash_core::ToolCatalog {
                         .expect("tool")
                 })
                 .collect(),
-            None,
         )
         .expect("catalog imports")
         .into_values()

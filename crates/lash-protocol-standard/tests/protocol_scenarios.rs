@@ -224,10 +224,18 @@ impl StandardProtocolScenario {
                     machine.handle_response(Response::Checkpoint {
                         id: checkpoint_id,
                         delivery: sansio::CheckpointDelivery {
-                            messages: vec![lash_core::PluginMessage::text(
-                                MessageRole::User,
-                                *message,
-                            )],
+                            committed_user_messages: vec![lash_core::Message {
+                                id: "checkpoint-user".to_string(),
+                                role: MessageRole::User,
+                                parts: vec![lash_core::Part::text(
+                                    "checkpoint-user.p0".to_string(),
+                                    (*message).to_string(),
+                                    None,
+                                )]
+                                .into(),
+                                origin: None,
+                                reply_marker: None,
+                            }],
                             ..sansio::CheckpointDelivery::default()
                         },
                     });

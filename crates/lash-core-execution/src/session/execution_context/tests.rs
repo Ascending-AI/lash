@@ -119,7 +119,6 @@ fn test_execution_context_with_env_store(
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         },
         observer: std::sync::Arc::new(crate::engine::NullObservationSink),
-        checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),

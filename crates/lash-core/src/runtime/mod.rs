@@ -208,8 +208,7 @@ pub use effect::TurnCancelWait;
 pub use effect::{
     ATTEMPT_STREAM_BYTE_BUDGET, AttemptStream, AttemptStreamBuilder, AttemptStreamChannel,
     AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation, CompactionBase,
-    DecodedStreamEvent, PresentationBinding, ProcessDefinitionLocalExecution, ToolAttemptCapture,
-    ToolPresentation,
+    DecodedStreamEvent, PresentationBinding, ProcessDefinitionLocalExecution, ToolPresentation,
 };
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{

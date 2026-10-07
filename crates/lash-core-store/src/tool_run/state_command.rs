@@ -95,7 +95,6 @@ callback_slots! {
     PresentationPresenter => "presentation_presenter", DecisionOnly;
     RuntimeEvent => "runtime_event", DecisionOnly;
     Operation => "operation", DecisionOnly;
-    TurnContextTransform => "turn_context_transform", DecisionOnly;
     /// Attachment-omission history policies (ADR 0133).
     AttachmentOmission => "attachment_omission", DecisionOnly;
     ContextCompactor => "context_compactor", DecisionOnly;

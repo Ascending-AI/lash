@@ -21,7 +21,6 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 use super::llm_outcome::{AssistantResponsePlan, AssistantStreamHookState, LlmStreamRecord};
-use super::tool_attempt_capture::ToolAttemptCapture;
 
 /// Effect-specific header whose address is present by construction.
 ///
@@ -972,12 +971,6 @@ pub struct ToolAttemptEffectOutcome {
     pub launch: ToolAttemptLaunch,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<ToolTriggerEffectOutcome>,
-    /// The attempt-local `EnqueueMessages` facts and managed LLM usage this
-    /// attempt produced, journaled with it and restored into the dispatch
-    /// buffers by whoever consumes this outcome — identically whether it was
-    /// just executed or served by replay (ADR 0099 §6, §13).
-    #[serde(default)]
-    pub capture: ToolAttemptCapture,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1076,15 +1069,6 @@ pub enum RuntimeEffectOutcome {
         launch: Box<ToolAttemptLaunch>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         triggers: Vec<ToolTriggerEffectOutcome>,
-        /// The attempt-local facts the attempt produced: tool result check
-        /// messages and managed LLM usage. Journaled with the attempt so a
-        /// replay restores them rather than re-running their producers — a
-        /// crash after the attempt committed but before its invocation settled
-        /// would otherwise drop them (ADR 0099 §13). Absent when the attempt
-        /// captured nothing, so attempts that produced no facts serialize
-        /// exactly as they did before this field existed.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        capture: Option<Box<ToolAttemptCapture>>,
     },
 
     /// What the [`PresentToolResult`](RuntimeEffectCommand::PresentToolResult)

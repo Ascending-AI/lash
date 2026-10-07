@@ -34,11 +34,11 @@ pub use singleton_run::{
 
 pub(crate) use atomic_attempt::AtomicToolAttempt;
 pub use attempt_coordinator::{ToolAttemptLineage, coordinate_tool_invocation};
-#[cfg(feature = "testing")]
-pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
-#[cfg(not(feature = "testing"))]
-pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 pub use context::{ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome};
+#[cfg(feature = "testing")]
+pub use context::{ToolCallLaunch, ToolTriggerOutcomeBuffer};
+#[cfg(not(feature = "testing"))]
+pub use context::{ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub use hooks::finalize_tool_result_with_execution_context;

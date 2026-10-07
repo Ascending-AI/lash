@@ -151,7 +151,7 @@ impl ComposedPrompt {
 
 impl PromptCatalog {
     /// Compose a `purpose` call's prompt over `cut` under the host's `plan`:
-    /// resolve the plan, render each section and its wrapper chain on
+    /// resolve the plan for the tools `cut` offers, render each section and its wrapper chain on
     /// `pool` within the plan's render budget, and assemble the result in
     /// plan order.
     ///
@@ -168,7 +168,7 @@ impl PromptCatalog {
         pool: &PromptRenderPool,
     ) -> Result<ComposedPrompt, PromptCompositionError> {
         let composition = Arc::new(
-            self.resolve(plan, purpose)
+            self.resolve(plan, purpose, cut.offered())
                 .map_err(|error| PromptCompositionError::Plan { error })?,
         );
         composition.render(cut, pool).await
@@ -259,6 +259,7 @@ impl ResolvedPromptComposition {
                 match resolved.placement {
                     PromptPlacement::InitialInstructions => initial.push(text),
                     PromptPlacement::CurrentContext => current.push(text),
+                    PromptPlacement::Excluded => {}
                 }
             }
             sections.push(section.record(resolved));

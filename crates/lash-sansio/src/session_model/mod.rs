@@ -678,11 +678,6 @@ pub enum SessionStreamEvent {
         inputs: Vec<AcceptedInjectedTurnInput>,
         checkpoint: CheckpointKind,
     },
-    #[serde(rename = "injected_messages_committed")]
-    InjectedMessagesCommitted {
-        messages: Vec<PluginMessage>,
-        checkpoint: CheckpointKind,
-    },
     #[serde(rename = "plugin_event")]
     PluginEvent {
         plugin_id: String,

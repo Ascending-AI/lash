@@ -15,7 +15,7 @@ use super::{
     PluginOperationSpec, PluginQuery, PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar,
     PluginTask, PluginTaskHandler, SessionToolAccess, SubagentSessionContext, ToolArgsCheckHook,
     ToolArgsTransformHook, ToolCatalogContributor, ToolPresentationStep, ToolResultCheckHook,
-    ToolResultTransformHook, TurnContextTransform,
+    ToolResultTransformHook,
 };
 use crate::ToolProvider;
 
@@ -100,7 +100,6 @@ pub struct PluginSpec {
     pub presentation_steps: Vec<(HookKey, ToolPresentationStep)>,
     pub runtime_event_hooks: Vec<(HookKey, PluginLifecycleEventHook)>,
     pub(crate) plugin_operations: Vec<PluginOperationRegistration>,
-    pub turn_context_transforms: Vec<(i32, Arc<dyn TurnContextTransform>)>,
     pub context_compactors: Vec<(i32, Arc<dyn ContextCompactor>)>,
     pub context_pressure_hooks: Vec<(i32, Arc<dyn ContextPressureHook>)>,
     /// The pure reducers a [`StateCommands::apply`](super::StateCommands::apply)
@@ -389,15 +388,6 @@ impl PluginSpec {
             let fut = handler(ctx, args);
             async move { fut.await.map(PluginOperationOutcome::new) }
         })
-    }
-
-    pub fn with_turn_context_transform(
-        mut self,
-        priority: i32,
-        transform: Arc<dyn TurnContextTransform>,
-    ) -> Self {
-        self.turn_context_transforms.push((priority, transform));
-        self
     }
 
     pub fn with_context_compactor(
@@ -1112,10 +1102,6 @@ impl SessionPlugin for SpecPlugin {
         }
         for operation in &self.spec.plugin_operations {
             reg.operations().register(operation.clone())?;
-        }
-        for (priority, transform) in &self.spec.turn_context_transforms {
-            reg.context()
-                .prepare_turn(*priority, Arc::clone(transform))?;
         }
         for (priority, compactor) in &self.spec.context_compactors {
             reg.context().compact(*priority, Arc::clone(compactor))?;

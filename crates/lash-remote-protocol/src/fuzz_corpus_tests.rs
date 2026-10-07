@@ -24,7 +24,7 @@
 //! ```
 
 use super::*;
-use lash_sansio::{ProcessId, SessionId, ToolCallId, TurnId};
+use lash_sansio::{SessionId, ToolCallId, TurnId};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -79,30 +79,20 @@ const CORPUS_TARGETS: &[CorpusTarget] = &[
     },
     CorpusTarget {
         dir: "plugin_payload",
-        classes: &[
-            CorpusClass {
-                prefix: "plugin_message",
-                decode: |bytes| {
-                    serde_json::from_slice::<RemotePluginMessage>(bytes)
-                        .map(|_| ())
-                        .map_err(|error| error.to_string())
-                },
-            },
-            CorpusClass {
-                prefix: "tool_grants",
-                decode: |bytes| {
-                    let grants = serde_json::from_slice::<Vec<RemoteToolGrant>>(bytes)
+        classes: &[CorpusClass {
+            prefix: "tool_grants",
+            decode: |bytes| {
+                let grants = serde_json::from_slice::<Vec<RemoteToolGrant>>(bytes)
+                    .map_err(|error| error.to_string())?;
+                RemoteToolGrant::validate_all(&grants).map_err(|error| error.to_string())?;
+                for grant in &grants {
+                    grant
+                        .call_path_bindings()
                         .map_err(|error| error.to_string())?;
-                    RemoteToolGrant::validate_all(&grants).map_err(|error| error.to_string())?;
-                    for grant in &grants {
-                        grant
-                            .call_path_bindings()
-                            .map_err(|error| error.to_string())?;
-                    }
-                    Ok(())
-                },
+                }
+                Ok(())
             },
-        ],
+        }],
     },
 ];
 
@@ -503,115 +493,6 @@ fn seed_turn_report_full() -> RemoteTurnReport {
 
 fn plugin_payload_seeds() -> Vec<(&'static str, String, Vec<u8>)> {
     vec![
-        (
-            "plugin_payload",
-            "plugin_message-user".to_string(),
-            serde_json::to_vec(&RemotePluginMessage {
-                id: Some("message-seed".to_string()),
-                role: RemoteMessageRole::User,
-                origin: None,
-                parts: vec![RemotePart {
-                    id: "part-text".to_string(),
-                    kind: RemotePartKind::Text,
-                    content: Some("seed question".to_string()),
-                    blocks: None,
-                    attachment: None,
-                    call_id: None,
-                    provider_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }],
-            })
-            .expect("encode plugin message"),
-        ),
-        (
-            "plugin_payload",
-            "plugin_message-tool-exchange".to_string(),
-            serde_json::to_vec(&RemotePluginMessage {
-                id: None,
-                role: RemoteMessageRole::Assistant,
-                origin: Some(RemoteMessageOrigin::Plugin {
-                    plugin_id: "plugin-seed".to_string(),
-                    transient: false,
-                }),
-                parts: vec![
-                    RemotePart {
-                        id: "part-call".to_string(),
-                        kind: RemotePartKind::ToolCall,
-                        content: None,
-                        blocks: None,
-                        attachment: None,
-                        call_id: Some(ToolCallId::fixture("seed-call")),
-                        provider_call_id: Some("provider-call-seed".to_string()),
-                        tool_name: Some("search".to_string()),
-                        tool_replay: None,
-                        reasoning_meta: None,
-                        response_meta: None,
-                    },
-                    RemotePart {
-                        id: "part-result".to_string(),
-                        kind: RemotePartKind::ToolResult,
-                        content: None,
-                        blocks: Some(vec![
-                            RemoteToolResultBlock::Text {
-                                text: "result text".to_string(),
-                            },
-                            RemoteToolResultBlock::Attachment {
-                                source: Box::new(RemoteAttachmentSource::Stored {
-                                    attachment_ref: seed_attachment_ref("attachment-result"),
-                                }),
-                            },
-                            RemoteToolResultBlock::Retained {
-                                witness: "witness-seed".to_string(),
-                                reference: seed_attachment_ref("attachment-retained"),
-                            },
-                        ]),
-                        attachment: None,
-                        call_id: Some(ToolCallId::fixture("seed-call")),
-                        provider_call_id: None,
-                        tool_name: Some("search".to_string()),
-                        tool_replay: None,
-                        reasoning_meta: None,
-                        response_meta: None,
-                    },
-                ],
-            })
-            .expect("encode plugin message"),
-        ),
-        (
-            "plugin_payload",
-            "plugin_message-event-origin".to_string(),
-            serde_json::to_vec(&RemotePluginMessage {
-                id: Some("event-seed".to_string()),
-                role: RemoteMessageRole::Event,
-                origin: Some(RemoteMessageOrigin::Process {
-                    process_id: ProcessId::fixture("process-seed"),
-                    event_type: "progress".to_string(),
-                    sequence: 7,
-                    wake_id: Some("wake-seed".to_string()),
-                    caused_by: Some(RemoteCausalRef::Turn {
-                        session_id: SessionId::from("session-seed"),
-                        turn_id: TurnId::from("turn-seed"),
-                    }),
-                }),
-                parts: vec![RemotePart {
-                    id: "part-output".to_string(),
-                    kind: RemotePartKind::Output,
-                    content: Some("process output".to_string()),
-                    blocks: None,
-                    attachment: None,
-                    call_id: None,
-                    provider_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }],
-            })
-            .expect("encode plugin message"),
-        ),
         (
             "plugin_payload",
             "tool_grants-minimal".to_string(),

@@ -77,7 +77,7 @@ impl PluginSession {
         let registry = Arc::new(
             self.capabilities()
                 .tool_registry
-                .pin_session_surface(Vec::new())
+                .pin_session_surface()
                 .map_err(|error| {
                     PluginError::Session(format!("failed to pin direct tool surface: {error}"))
                 })?,

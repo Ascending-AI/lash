@@ -39,12 +39,10 @@ fn tool(
     .with_tool_binding(ToolBinding::new([module], operation))
 }
 
-/// Two tools of one MCP-style module that carries instructions, and one tool
-/// of no module.
+/// Two tools of one MCP-style module, and one tool of no module.
 fn catalog() -> lash_core::ToolCatalog {
     let module = Arc::new(lash_core::ToolModule {
         name: "tracker".to_string(),
-        instructions: Some("Search before you open an issue.".to_string()),
     });
     let mut search = tool("tracker_search", "tracker", "search", "Search issues.");
     search.manifest.module = Some(Arc::clone(&module));
@@ -144,8 +142,6 @@ const DECLARATIONS: &str = r##"### Tools
 Search file contents.
 
 #### tracker
-
-Search before you open an issue.
 
 `tracker.search({ query: string }): Promise<string>`
 Search issues.
@@ -273,17 +269,14 @@ fn a_host_replaces_or_omits_each_built_in_text_and_keeps_the_declarations() {
     );
 }
 
-/// A module's instructions render once, above its tools, however many tools
-/// it has (FIG-4548).
+/// A module's tools render under one heading, however many tools it has
+/// (FIG-4548).
 #[test]
-fn a_modules_instructions_render_once() {
+fn a_modules_tools_render_under_one_heading() {
     let catalog = catalog();
     let composed = compose_rlm(sections(&catalog), turn(catalog));
     let rendered = initial(&composed);
-    assert_eq!(
-        rendered.matches("Search before you open an issue.").count(),
-        1
-    );
+    assert_eq!(rendered.matches("#### tracker").count(), 1);
     let module = rendered.find("#### tracker").expect("module heading");
     for call in ["tracker.search(", "tracker.open("] {
         assert!(rendered.find(call).expect("declared tool") > module);
@@ -308,10 +301,6 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
     let rendered = initial(&rendered);
     assert!(rendered.contains("files.grep("), "{rendered}");
     assert!(!rendered.contains("tracker.search("), "{rendered}");
-    assert!(
-        !rendered.contains("Search before you open an issue."),
-        "{rendered}"
-    );
 
     let mut hidden = tool("hidden", "files", "hidden", "A tool found by search.");
     hidden.manifest.inline = false;

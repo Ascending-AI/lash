@@ -554,7 +554,7 @@ async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_fli
         }))
         .expect("register blocking live provider");
     let captured = Arc::new(
-        root.compose_session_catalog(Vec::new())
+        root.pin_session_surface()
             .expect("compose pre-removal session snapshot"),
     );
     let executing = crate::task::spawn({
@@ -579,7 +579,7 @@ async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_fli
     root.remove_source(&handle)
         .expect("remove provider from root registry");
     let refreshed = root
-        .compose_session_catalog(Vec::new())
+        .pin_session_surface()
         .expect("compose post-removal session snapshot");
     assert!(
         refreshed.resolve_contract("blocking_live").is_none(),
@@ -885,7 +885,7 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
         )))
         .expect("source registered");
     let registry = registry
-        .compose_session_catalog(Vec::new())
+        .pin_session_surface()
         .expect("resident catalog with live grant sources");
 
     assert!(!registry.export_state().contains(&tool_id("host_only")));
@@ -975,7 +975,7 @@ async fn run_tool_granted_honors_the_granted_source_binding() {
         )))
         .expect("source registered");
     let registry = registry
-        .compose_session_catalog(Vec::new())
+        .pin_session_surface()
         .expect("resident catalog with live grant sources");
 
     let grant = crate::ToolExecutionGrant::from_definition(
@@ -1088,7 +1088,7 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
     ])
     .expect("registry");
     let registry = registry
-        .compose_session_catalog(Vec::new())
+        .pin_session_surface()
         .expect("resident snapshot keeps hidden providers out of its admitted source");
     let grant = crate::ToolExecutionGrant::from_definition(
         crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
@@ -1160,7 +1160,7 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
 
     let registry = ToolRegistry::from_tool_provider(Arc::new(IntentProvider))
         .expect("intent provider registry")
-        .compose_session_catalog(Vec::new())
+        .pin_session_surface()
         .expect("pinned intent provider registry");
     let id = tool_id("intent_route");
     let args = json!({});
@@ -1269,7 +1269,7 @@ async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_adver
     let before = serde_json::to_value(registry.export_state()).expect("serialize state");
 
     mismatched.store(true, Ordering::SeqCst);
-    let pin = registry.compose_session_catalog(Vec::new());
+    let pin = registry.pin_session_surface();
     let error = pin.err().map(|error| error.to_string());
     let after = serde_json::to_value(registry.export_state()).expect("serialize state");
     let advertised = execute_leaf_by_id(

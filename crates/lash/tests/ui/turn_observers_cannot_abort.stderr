@@ -4,4 +4,4 @@ error[E0560]: struct `TurnContributions` has no field named `abort`
 5 |         abort: Some("before-turn and checkpoint observers cannot abort"),
   |         ^^^^^ `TurnContributions` does not have this field
   |
-  = note: available fields are: `messages`, `events`, `state`, `session`
+  = note: available fields are: `events`, `state`, `session`

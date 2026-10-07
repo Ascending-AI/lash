@@ -233,11 +233,9 @@ pub mod facade_support {
     pub use crate::plugin::ToolPresentationPresenter;
     pub use crate::plugin::ToolPresentationStep;
     pub use crate::plugin::ToolResultProjectionContext;
-    pub use crate::plugin::TurnContextTransform;
     pub use crate::plugin::TurnHookContext;
     pub use crate::plugin::TurnHookReport;
     pub use crate::plugin::TurnResultHookContext;
-    pub use crate::plugin::TurnTransformContext;
     pub use crate::plugin::{
         AfterToolContributions, AfterToolDecision, BeforeToolDecision, CachedToolSuccess, HookKey,
         PluginAbort, PluginRecordContribution, PreparedCallReadView, SessionContributions,
@@ -471,7 +469,7 @@ pub(crate) use facade_support::*;
 // twelve had test-only consumers, so their public path is `test_support` and
 // only their crate-internal short path lives here: `test_support` is
 // feature-gated and `crate::X` has to resolve in every build.
-pub(crate) use crate::attachments::{AttachmentProducer, AttachmentSourcePolicy};
+pub(crate) use crate::attachments::AttachmentProducer;
 pub(crate) use crate::plugin::RuntimeServices;
 
 pub mod sansio {

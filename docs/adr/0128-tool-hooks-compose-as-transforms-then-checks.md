@@ -109,14 +109,14 @@ registration error. Context hooks use their trait's `id()` as the key.
 | `tool_calls().check_args` | Every check on one prepared call; reduce per §2. |
 | `tool_calls().transform_result` | Chain once in recorded order over original and current. |
 | `tool_calls().check_result` | Every check on one final result; Allow, Deny, Cancel or AbortRun; reduce per §2. |
-| `turn().before`, `turn().after`, `turn().checkpoint` | Ordered observers returning declared contributions (messages, events, tool membership and graph appends; after-turn also records). No abort or veto. A callback error fails the phase. |
+| `turn().before`, `turn().after`, `turn().checkpoint` | Ordered observers returning declared contributions (events, tool membership and graph appends; after-turn also records). No abort or veto. A callback error fails the phase. |
 | `output().stream` | Ordered chunk transforms; a stop request is sticky. |
 | `output().stream_finished` | Ordered collection of end-of-stream state; a response reads the state of the finished callback it names. |
 | `output().response` | Ordered full-response transforms. `stream_state_from` names one finished callback of the same plugin, validated at registration. |
 | `tool_results().presentation_step` | Presenter first, then ordered steps, with the existing retry and fallback rule. Changes representation, never the result or Run control. |
 | `tool_results().presenter` | One exclusive renderer. |
 | `session().on_event` | Read-only observers delivered sequentially in registration order. A failure cannot retract a commit. |
-| `context().prepare_turn` | Descending priority chain. |
+| `context().attachment_omissions` | Every policy by descending priority; core omits the union. |
 | `context().compact` | First substantive decision by descending priority, ties by recorded order. |
 | `context().pressure` | Record contributions accumulate; the first OpenFrame stops. |
 | `tool_catalog().contribute` | Union of removals; no priorities or terminal decision. |

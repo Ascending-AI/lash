@@ -1,26 +1,26 @@
-error[E0609]: no field `session_graph` on type `&TurnTransformContext<'_>`
+error[E0609]: no field `session_graph` on type `&AttachmentOmissionContext`
   --> tests/ui/context_hooks_hold_no_write_service.rs:10:18
    |
 10 |     let _ = &ctx.session_graph;
    |                  ^^^^^^^^^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `state`, `prompt_usage`, `max_context_tokens` ... and 3 others
+   = note: available fields are: `session_id`, `plugin_config`, `state`, `prompt_usage`, `max_context_tokens` ... and 2 others
 
-error[E0609]: no field `session_lifecycle` on type `&TurnTransformContext<'_>`
+error[E0609]: no field `session_lifecycle` on type `&AttachmentOmissionContext`
   --> tests/ui/context_hooks_hold_no_write_service.rs:11:18
    |
 11 |     let _ = &ctx.session_lifecycle;
    |                  ^^^^^^^^^^^^^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `state`, `prompt_usage`, `max_context_tokens` ... and 3 others
+   = note: available fields are: `session_id`, `plugin_config`, `state`, `prompt_usage`, `max_context_tokens` ... and 2 others
 
-error[E0609]: no field `sessions` on type `&TurnTransformContext<'_>`
+error[E0609]: no field `sessions` on type `&AttachmentOmissionContext`
   --> tests/ui/context_hooks_hold_no_write_service.rs:12:18
    |
 12 |     let _ = &ctx.sessions;
    |                  ^^^^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `state`, `prompt_usage`, `max_context_tokens` ... and 3 others
+   = note: available fields are: `session_id`, `plugin_config`, `state`, `prompt_usage`, `max_context_tokens` ... and 2 others
 
 error[E0609]: no field `session_graph` on type `&CompactionContext<'_>`
   --> tests/ui/context_hooks_hold_no_write_service.rs:16:18

@@ -218,6 +218,14 @@ impl SessionAdmin {
         }
     }
 
+    /// The session's prompt sections: the recorded plan, the registered
+    /// catalog and an unadmitted preview of their resolution (ADR 0133).
+    pub fn prompt(&self) -> SessionPromptAdmin {
+        SessionPromptAdmin {
+            control: self.clone(),
+        }
+    }
+
     pub fn tools(&self) -> ToolAdmin {
         ToolAdmin {
             control: self.clone(),
@@ -1010,6 +1018,8 @@ mod process_admin;
 
 pub(crate) mod config_transactions;
 mod host_commands;
+mod prompt;
+pub use prompt::SessionPromptAdmin;
 mod tool_state;
 use host_commands::{HostPluginOperation, SubmittedCommand, unsettled_command_error};
 pub use tool_state::{PendingToolStateChange, SessionToolState};

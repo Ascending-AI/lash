@@ -217,20 +217,6 @@ impl LashRuntime {
                 .plugins(),
         );
         let base_read_model = self.state.read_model();
-        let prepare_read_view = self.read_view();
-        let turn_ctx = crate::TurnTransformContext {
-            session_id: self.state.session_id.clone(),
-            plugin_config: self.state.admitted_plugin_config(),
-            state: prepare_read_view,
-            prompt_usage: previous_prompt_usage.clone(),
-            max_context_tokens: LashRuntime::max_context_tokens(self).ok(),
-            traces: manager.trace_emitter(),
-            scoped_effect_controller: controller.clone(),
-            direct_completions: manager.direct_completion_client(
-                controller.clone(),
-                Some(turn_phase_id(run, "prepare-turn")),
-            ),
-        };
         let messages =
             crate::MessageSequence::from_base_and_delta(base_read_model.messages, turn_delta)
                 .with_base_render_cache(base_read_model.prompt_render_cache);
@@ -249,29 +235,20 @@ impl LashRuntime {
             .attachment_omissions(
                 &crate::plugin::AttachmentOmissionContext {
                     session_id: self.state.session_id.clone(),
-                    plugin_config: turn_ctx.plugin_config.clone(),
-                    state: turn_ctx.state.clone(),
+                    plugin_config: self.state.admitted_plugin_config(),
+                    state: self.read_view(),
                     prompt_usage: previous_prompt_usage.clone(),
-                    max_context_tokens: turn_ctx.max_context_tokens,
-                    traces: turn_ctx.traces.clone(),
+                    max_context_tokens: LashRuntime::max_context_tokens(self).ok(),
+                    traces: manager.trace_emitter(),
                     trace_context,
                 },
                 &request_messages,
             )
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
         crate::plugin::apply_attachment_omissions(request_messages.make_mut(), &omissions);
-        let prepared_context = plugins
-            .prepare_turn_context(
-                &turn_ctx,
-                crate::session_model::context::PreparedContext {
-                    messages: request_messages,
-                    ..Default::default()
-                },
-                self.turn_phase_probe.clone(),
-            )
-            .await
-            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
-        drop(turn_ctx);
+        let prepared_context = crate::session_model::context::PreparedContext {
+            messages: request_messages,
+        };
         let mut prelude = Box::new(crate::runtime::effect::TurnPrelude {
             configuration: crate::EffectAddress::new(
                 controller.execution_scope().clone(),
@@ -284,33 +261,17 @@ impl LashRuntime {
             context: prepared_context.clone(),
             before_turn: None,
         });
-        if let Some(session) = self.session.as_mut() {
-            session
-                .set_context_overlay(
-                    plugins
-                        .resolve_context_tool_bindings(&prepared_context.tool_providers)
-                        .map_err(|error| {
-                            error.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn)
-                        })?,
-                )
-                .map_err(|err| {
-                    RuntimeError::new(RuntimeErrorCode::SessionToolRegistry, err.to_string())
-                })?;
-        }
         self.state.last_prompt_usage = None;
 
-        // The before-turn hooks: real inputs, appended to the prompt view
-        // without entering the history the commit writes.
+        // The before-turn hooks: their session changes and events.
         let turn_policy = self.state.effective_policy().clone();
         let effective_protocol_turn_options = self.state.effective_protocol_turn_options();
-        let history_len = messages.len();
         let mut prepared = self
             .prepare_turn_preamble(execute::TurnPreambleContext {
                 run: std::marker::PhantomData,
                 plugins: &plugins,
                 scoped_effect_controller: &controller,
                 manager: &manager,
-                messages,
                 turn_policy: &turn_policy,
                 effective_protocol_turn_options: &effective_protocol_turn_options,
                 turn_context: &input.turn_context,
@@ -320,14 +281,6 @@ impl LashRuntime {
         turn_graph_appends
             .apply_session_contributions(&self.state.session_id, &plugins, &prepared.session)
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
-        if prepared.messages.len() > history_len {
-            prelude
-                .context
-                .messages
-                .make_mut()
-                .extend(prepared.messages.iter().skip(history_len).cloned());
-        }
-        prelude.history = prepared.messages.clone();
         if plugins.has_before_turn_hooks() {
             prelude.before_turn = Some(
                 crate::EffectAddress::new(
@@ -365,7 +318,7 @@ impl LashRuntime {
             .prepared_checkpoint(
                 turn_policy.clone(),
                 turn_index,
-                &prepared.messages,
+                &messages,
                 self.session.as_mut(),
             )
             .await
@@ -401,7 +354,6 @@ impl LashRuntime {
             pending_turn_inputs: admissions.turn_inputs,
             pending_checkpoint_turn_inputs: None,
             withheld_terminal_work: Default::default(),
-            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             turn_phase_probe: self.turn_phase_probe.clone(),
             protocol_reply: Default::default(),
             opener_state: crate::session::OpenerState::default(),
@@ -411,7 +363,7 @@ impl LashRuntime {
         });
         Ok(DurableTurn {
             driver,
-            messages: prepared.messages,
+            messages,
             invalid_input,
         })
     }

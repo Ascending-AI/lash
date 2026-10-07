@@ -74,13 +74,13 @@ pub struct ToolMembershipContribution {
     pub present: bool,
 }
 
-/// What one before-turn or checkpoint observer contributes: messages the
-/// turn sees, runtime events the session publishes, and commands against
-/// its own plugin state namespace. Contributions are applied at the turn's
-/// owned boundary; an observer has no veto.
+/// What one before-turn or checkpoint observer contributes: runtime events
+/// the session publishes, commands against its own plugin state namespace,
+/// and session changes. Contributions are applied at the turn's owned
+/// boundary; an observer has no veto. Model-facing text is a prompt section
+/// (ADR 0133), never a contribution.
 #[derive(Clone, Debug, Default)]
 pub struct TurnContributions {
-    pub messages: Vec<PluginMessage>,
     pub events: Vec<PluginRuntimeEvent>,
     /// Published with the callback's recorded decision (K10).
     pub state: super::StateCommands,
@@ -91,7 +91,6 @@ pub struct TurnContributions {
 /// final commit.
 #[derive(Clone, Debug, Default)]
 pub struct AfterTurnContributions {
-    pub messages: Vec<PluginMessage>,
     pub events: Vec<PluginRuntimeEvent>,
     /// Durable plugin records appended to the turn's graph, outside the
     /// conversation.
@@ -117,8 +116,6 @@ pub struct PluginRecordContribution {
 pub struct RecordedTurnContribution {
     pub plugin_id: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub messages: Vec<PluginMessage>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<PluginRuntimeEvent>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<PluginRecordContribution>,
@@ -129,14 +126,12 @@ pub struct RecordedTurnContribution {
 #[derive(Clone, Debug, Default)]
 pub struct TurnPreparation {
     pub session: Vec<SessionContributions>,
-    pub messages: crate::MessageSequence,
     pub events: Vec<crate::SessionStreamEvent>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct CheckpointApplication {
     pub session: Vec<SessionContributions>,
-    pub messages: Vec<PluginMessage>,
     pub events: Vec<crate::SessionStreamEvent>,
 }
 

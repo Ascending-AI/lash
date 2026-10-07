@@ -5687,15 +5687,6 @@
         }
       ]
     },
-    "RemoteMessageRole": {
-      "enum": [
-        "User",
-        "Assistant",
-        "System",
-        "Event"
-      ],
-      "type": "string"
-    },
     "RemoteNormalizedError": {
       "properties": {
         "class": {
@@ -5856,157 +5847,6 @@
         "reason",
         "since_ms",
         "attempts"
-      ],
-      "type": "object"
-    },
-    "RemotePart": {
-      "additionalProperties": false,
-      "properties": {
-        "attachment": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RemotePartAttachment"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "blocks": {
-          "description": "A tool result's ordered text and attachment blocks.",
-          "items": {
-            "$ref": "#/$defs/RemoteToolResultBlock"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "call_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "content": {
-          "description": "The part's text; absent on a tool result, whose content is `blocks`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
-          "type": "string"
-        },
-        "kind": {
-          "$ref": "#/$defs/RemotePartKind"
-        },
-        "provider_call_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reasoning_meta": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RemoteProviderReasoningReplay"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "response_meta": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RemoteResponseTextMeta"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "tool_name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "tool_replay": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RemoteProviderReplayMeta"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "kind"
-      ],
-      "type": "object"
-    },
-    "RemotePartAttachment": {
-      "properties": {
-        "source": {
-          "$ref": "#/$defs/RemoteAttachmentSource"
-        }
-      },
-      "required": [
-        "source"
-      ],
-      "type": "object"
-    },
-    "RemotePartKind": {
-      "enum": [
-        "Text",
-        "Attachment",
-        "Code",
-        "Output",
-        "Error",
-        "Prose",
-        "ToolCall",
-        "ToolResult",
-        "Reasoning"
-      ],
-      "type": "string"
-    },
-    "RemotePluginMessage": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "origin": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RemoteMessageOrigin"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "parts": {
-          "items": {
-            "$ref": "#/$defs/RemotePart"
-          },
-          "type": "array"
-        },
-        "role": {
-          "$ref": "#/$defs/RemoteMessageRole"
-        }
-      },
-      "required": [
-        "role",
-        "parts"
       ],
       "type": "object"
     },
@@ -7217,49 +7057,6 @@
       ],
       "type": "object"
     },
-    "RemoteProviderReasoningReplay": {
-      "properties": {
-        "encrypted_content": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "item_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "origin": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RemoteProviderRouteIdentity"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Exact LLM Provider route that minted the reasoning replay state."
-        },
-        "redacted": {
-          "type": "boolean"
-        },
-        "signature": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "summary": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
     "RemoteProviderReplayDrop": {
       "properties": {
         "kind": {
@@ -7304,34 +7101,6 @@
       ],
       "type": "string"
     },
-    "RemoteProviderReplayMeta": {
-      "properties": {
-        "item_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "opaque": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "origin": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RemoteProviderRouteIdentity"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Exact LLM Provider route that minted the opaque replay state."
-        }
-      },
-      "type": "object"
-    },
     "RemoteProviderRouteIdentity": {
       "description": "Exact configured LLM Provider route that owns opaque replay state.",
       "properties": {
@@ -7351,45 +7120,6 @@
         "endpoint",
         "model"
       ],
-      "type": "object"
-    },
-    "RemoteResponseTextMeta": {
-      "properties": {
-        "id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "origin": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RemoteProviderRouteIdentity"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "phase": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider_payload": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "status": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
       "type": "object"
     },
     "RemoteRetryDecision": {
@@ -8703,63 +8433,6 @@
         }
       ]
     },
-    "RemoteToolResultBlock": {
-      "description": "One ordered block of a tool result: text, an attachment at the position\nthe tool's value placed it, or output retained out of history: the\nbounded witness shown in its place and the attachment holding it whole.",
-      "oneOf": [
-        {
-          "properties": {
-            "text": {
-              "type": "string"
-            },
-            "type": {
-              "const": "text",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "text"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "source": {
-              "$ref": "#/$defs/RemoteAttachmentSource"
-            },
-            "type": {
-              "const": "attachment",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "source"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "reference": {
-              "$ref": "#/$defs/RemoteAttachmentRef"
-            },
-            "type": {
-              "const": "retained",
-              "type": "string"
-            },
-            "witness": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "witness",
-            "reference"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "RemoteTriggerDeliveryEmitOutcome": {
       "oneOf": [
         {
@@ -9705,29 +9378,6 @@
             "boundary",
             "batch_ids",
             "causes"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "checkpoint": {
-              "$ref": "#/$defs/RemoteTurnInputCheckpoint"
-            },
-            "messages": {
-              "items": {
-                "$ref": "#/$defs/RemotePluginMessage"
-              },
-              "type": "array"
-            },
-            "type": {
-              "const": "queued_messages_committed",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "messages",
-            "checkpoint"
           ],
           "type": "object"
         },

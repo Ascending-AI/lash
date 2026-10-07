@@ -17,6 +17,9 @@ mod multi_session_tests;
 #[path = "tests/product_event_persistence.rs"]
 mod product_event_persistence_tests;
 #[cfg(test)]
+#[path = "tests/prompt_sections.rs"]
+mod prompt_sections_tests;
+#[cfg(test)]
 #[path = "tests/recoverable_chat_failures.rs"]
 mod recoverable_chat_failures_tests;
 #[cfg(test)]

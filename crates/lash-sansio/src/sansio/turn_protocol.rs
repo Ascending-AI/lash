@@ -134,8 +134,6 @@ pub struct CheckpointDelivery {
     /// starts a turn.
     #[serde(default)]
     pub committed_user_messages: Vec<Message>,
-    pub messages: Vec<PluginMessage>,
-    pub transient_messages: Vec<PluginMessage>,
     pub turn_causes: Vec<TurnCause>,
 }
 

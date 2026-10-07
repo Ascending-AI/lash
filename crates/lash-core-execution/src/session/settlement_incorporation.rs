@@ -2,8 +2,8 @@
 //!
 //! One operation — [`RuntimeExecutionContext::incorporate_tool_facts`] —
 //! applies every logical semantic channel exactly once per
-//! [`SettlementSource`]: possession is granted, committed checkpoint messages
-//! are enqueued and trigger receipts are restored as evidence. It never
+//! [`SettlementSource`]: possession is granted and trigger receipts are
+//! restored as evidence. It never
 //! executes a declaration, never emits a delivery, never re-runs a projector,
 //! and never meters spend: hosts meter provider attempts (ADR 0127).
 //!
@@ -29,7 +29,6 @@ pub use lash_core_store::effect_opener::{IncorporationLedger, SettlementSource};
 pub struct Incorporated {
     pub source: Option<SettlementSource>,
     pub possession: Vec<ProcessId>,
-    pub messages: usize,
     pub triggers: usize,
 }
 
@@ -42,7 +41,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
         source: SettlementSource,
         possession: &[ProcessId],
-        messages: &[crate::PluginMessage],
         triggers: &[crate::tool_dispatch::ToolTriggerEffectOutcome],
     ) -> Result<Incorporated, RuntimeEffectControllerError> {
         let mut ledger = self.incorporation_ledger().lock_recover();
@@ -54,13 +52,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
         // The caller supplies the identities realized by recorded declarations.
         self.restore_started_process_ids(possession);
-        self.dispatch.checkpoint_messages.enqueue(messages.to_vec());
         self.restore_tool_trigger_outcomes(triggers.to_vec());
         ledger.incorporated.insert(source.clone());
         Ok(Incorporated {
             source: Some(source),
             possession: possession.to_vec(),
-            messages: messages.len(),
             triggers: triggers.len(),
         })
     }

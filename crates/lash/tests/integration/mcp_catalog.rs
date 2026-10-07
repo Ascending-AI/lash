@@ -7,8 +7,8 @@ use std::sync::Arc;
 use lash::mcp::{McpPluginFactory, McpServerConfig, McpStdioTransport};
 use lash::plugins::PluginFactory;
 
-/// The session's prompt sections composed for a turn call that offers
-/// `catalog` (ADR 0133).
+/// The session's prompt sections composed for a turn call that offers every
+/// tool of `catalog` natively (ADR 0133).
 #[expect(
     clippy::expect_used,
     reason = "a test helper fails loudly on a prompt that does not compose"
@@ -32,8 +32,9 @@ async fn turn_prompt(
         config: session.admitted_plugin_config(),
         session: None,
         offered: OfferedTools {
+            native: catalog.tool_names().to_vec(),
+            callable: Vec::new(),
             catalog: Arc::new(catalog.clone()),
-            ..OfferedTools::default()
         },
         model: Default::default(),
         history: Default::default(),
@@ -176,9 +177,10 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
     let drift = lash_core::ToolSurfaceDrift::judge(&recorded_definition, &live)
         .expect("a recorded tool the advertisement dropped drifts");
     assert_eq!(drift.kind, lash_core::ToolSurfaceDriftKind::Missing);
-    // The prompt renders module headers, not tool names; the recorded module
-    // carries the creating peer's instructions, so rendering the recorded
-    // catalog serves them while the live catalog serves the successor's.
+    // The server's guidance section renders the guidance the offered
+    // manifests pin: the recorded catalog carries the creating peer's
+    // instructions, so rendering it serves them while the live catalog
+    // serves the successor's.
     let recorded_prompt = turn_prompt(&reopened, &restored).await;
     assert!(
         recorded_prompt.contains("the lookup-era peer instructions"),

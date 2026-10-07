@@ -991,7 +991,6 @@ fn tool_attempt_outcome(outcome: crate::ToolAttemptEffectOutcome) -> RuntimeEffe
     RuntimeEffectOutcome::ToolAttempt {
         launch: Box::new(outcome.launch),
         triggers: outcome.triggers,
-        capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
     }
 }
 

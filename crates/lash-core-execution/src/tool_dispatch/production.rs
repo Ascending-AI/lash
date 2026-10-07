@@ -67,7 +67,6 @@ struct Prepared {
 struct Captured {
     original: Option<ToolCallOutput>,
     output: ToolCallOutput,
-    messages: Vec<crate::PluginMessage>,
     triggers: Vec<super::ToolTriggerEffectOutcome>,
     occurrence: crate::plugin::ToolHookOccurrence,
     intents: ToolIntents,
@@ -80,7 +79,6 @@ struct Captured {
 #[derive(Clone, Serialize, Deserialize)]
 struct CheckContribution {
     plugin_id: String,
-    messages: Vec<crate::PluginMessage>,
     events: Vec<crate::PluginRuntimeEvent>,
 }
 
@@ -259,7 +257,6 @@ impl<'run> ProductionToolHandlers<'run> {
         output: ToolCallOutput,
         occurrence: crate::plugin::ToolHookOccurrence,
         intents: ToolIntents,
-        messages: Vec<crate::PluginMessage>,
         triggers: Vec<super::ToolTriggerEffectOutcome>,
     ) -> Result<Captured, String> {
         let dispatch = self.dispatch(&prepared.input).await?;
@@ -287,7 +284,6 @@ impl<'run> ProductionToolHandlers<'run> {
             output: outcome.record.output,
             occurrence,
             intents,
-            messages,
             triggers,
             start_refusal: None,
         })
@@ -502,7 +498,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .map_err(|error| error.to_string())?;
         let mut dispatch = self.dispatch(&prepared.input).await?;
         dispatch.observer = attempt.stream.clone();
-        dispatch.checkpoint_messages = Default::default();
         dispatch.trigger_outcomes = Default::default();
         dispatch.tools = dispatch
             .plugins
@@ -650,7 +645,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             let capture = Captured {
                 original: None,
                 output: ToolCallOutput::cancelled(cancellation.with_origin(origin)),
-                messages: Vec::new(),
                 triggers: Vec::new(),
                 occurrence: crate::plugin::ToolHookOccurrence::Attempt {
                     attempt: attempt.attempt,
@@ -705,7 +699,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 attempt: attempt.attempt,
                             },
                             ToolIntents::default(),
-                            dispatch.checkpoint_messages.drain(),
                             dispatch.trigger_outcomes.drain(),
                         )
                         .await?;
@@ -733,7 +726,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 attempt: attempt.attempt,
                             },
                             ToolIntents::default(),
-                            dispatch.checkpoint_messages.drain(),
                             dispatch.trigger_outcomes.drain(),
                         )
                         .await?;
@@ -755,7 +747,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 attempt: attempt.attempt,
                             },
                             ToolIntents::default(),
-                            dispatch.checkpoint_messages.drain(),
                             dispatch.trigger_outcomes.drain(),
                         )
                         .await?;
@@ -780,7 +771,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                         attempt: attempt.attempt,
                                     },
                                     ToolIntents::default(),
-                                    dispatch.checkpoint_messages.drain(),
                                     dispatch.trigger_outcomes.drain(),
                                 )
                                 .await?;
@@ -815,7 +805,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                             attempt: attempt.attempt,
                                         },
                                         ToolIntents::default(),
-                                        dispatch.checkpoint_messages.drain(),
                                         dispatch.trigger_outcomes.drain(),
                                     )
                                     .await?;
@@ -873,7 +862,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                             attempt: attempt.attempt,
                         },
                         intents,
-                        dispatch.checkpoint_messages.drain(),
                         dispatch.trigger_outcomes.drain(),
                     )
                     .await?;

@@ -149,16 +149,6 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
                     .attr(Attr::debug_token("checkpoint", checkpoint)),
             );
         }
-        SessionStreamEvent::InjectedMessagesCommitted {
-            messages,
-            checkpoint,
-        } => {
-            transcript.record(
-                Entry::new(Kind::Commit, session(), "injected_messages.committed")
-                    .attr(Attr::int("messages", messages.len() as u64))
-                    .attr(Attr::debug_token("checkpoint", checkpoint)),
-            );
-        }
         SessionStreamEvent::TurnOutcome { outcome } => {
             transcript.record(outcome_entry(session(), outcome));
         }

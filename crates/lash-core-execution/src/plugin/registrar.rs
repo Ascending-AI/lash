@@ -147,7 +147,6 @@ pub(crate) struct PluginContributions {
     pub(crate) presentation_presenter: Option<RegisteredExclusiveHook<ToolPresentationPresenter>>,
     pub(crate) runtime_event_hooks: Vec<RegisteredHook<PluginLifecycleEventHook>>,
     pub(crate) plugin_operations: BTreeMap<String, RegisteredPluginOperation>,
-    pub(crate) turn_context_transforms: Vec<(i32, RegisteredHook<Arc<dyn TurnContextTransform>>)>,
     pub(crate) attachment_omission_policies: Vec<(
         i32,
         RegisteredHook<Arc<dyn super::AttachmentOmissionPolicy>>,
@@ -642,22 +641,6 @@ pub struct ContextRegistrations<'a> {
 /// Context hooks are keyed by their trait's `id()`. Higher priority runs
 /// first; equal priorities keep recorded registration order.
 impl ContextRegistrations<'_> {
-    /// Transforms chain, each receiving the previous one's context.
-    pub fn prepare_turn(
-        self,
-        priority: i32,
-        transform: Arc<dyn TurnContextTransform>,
-    ) -> Result<(), PluginError> {
-        push_prioritized_keyed_hook(
-            &mut self.reg.contributions.turn_context_transforms,
-            &self.reg.owner,
-            CallbackSlot::TurnContextTransform,
-            transform.id(),
-            priority,
-            transform,
-        )
-    }
-
     /// Attachment-omission history policies (ADR 0133): each names the
     /// attachments of the turn's projected history its request omits; core
     /// omits the union.

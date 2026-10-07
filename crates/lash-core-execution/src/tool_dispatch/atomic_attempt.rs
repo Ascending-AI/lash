@@ -1,7 +1,7 @@
 //! Executes one prepared, opaque tool attempt without a child request or host.
 //!
 //! Coordination owns journal commands, retries and cancellation. This runner
-//! owns validation, body execution and the captures returned to that journal.
+//! owns validation, body execution and the receipts returned to that journal.
 //! Providers receive only the sealed `AttemptContext`: no recursive durable
 //! dispatch, unmanaged process spawn or generic process administration.
 
@@ -33,7 +33,6 @@ impl<'run> AtomicToolAttempt<'run> {
             .with_tool_attempt_parent_invocation(invocation.clone())
             .with_effect_attempt(effect_attempt);
         dispatch.trigger_outcomes = super::ToolTriggerOutcomeBuffer::default();
-        dispatch.checkpoint_messages = super::CheckpointMessageBuffer::default();
         let dispatch = Arc::new(dispatch);
         let mut tool_context =
             tool_context.with_attempt_dispatch(Arc::clone(&dispatch), invocation);
@@ -84,14 +83,7 @@ impl<'run> AtomicToolAttempt<'run> {
             }
         };
         let triggers = context.trigger_outcomes.drain();
-        let capture = crate::runtime::ToolAttemptCapture {
-            messages: context.checkpoint_messages.drain(),
-        };
-        Ok(crate::ToolAttemptEffectOutcome {
-            launch,
-            triggers,
-            capture,
-        })
+        Ok(crate::ToolAttemptEffectOutcome { launch, triggers })
     }
 }
 

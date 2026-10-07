@@ -19,9 +19,9 @@ use std::collections::BTreeSet;
 use lash_core::runtime::AdmissionBoundary;
 use lash_core::{
     AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, MessageOrigin,
-    MessageRole, PluginMessage, PluginRuntimeEvent, ProtocolPosition, TokenUsage, ToolCallOutput,
-    ToolFailure, ToolFailureClass, ToolIntentExecutionOutcome, ToolIntentIdentity, TurnActivity,
-    TurnActivityId, TurnCause, TurnEvent, TurnInputApplication,
+    PluginRuntimeEvent, ProtocolPosition, TokenUsage, ToolCallOutput, ToolFailure,
+    ToolFailureClass, ToolIntentExecutionOutcome, ToolIntentIdentity, TurnActivity, TurnActivityId,
+    TurnCause, TurnEvent, TurnInputApplication,
 };
 use serde_json::json;
 
@@ -66,7 +66,6 @@ turn_event_tags! {
     RetryStatus => "retry_status",
     PluginRuntime => "plugin_runtime",
     QueuedInputAccepted => "queued_input_accepted",
-    QueuedMessagesCommitted => "queued_messages_committed",
     Error => "error",
 }
 
@@ -577,18 +576,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                     "committed_message_id": "message-1",
                     "checkpoint": "after_work",
                 }],
-            }),
-        ),
-        (
-            "queued_messages_committed",
-            TurnEvent::QueuedMessagesCommitted {
-                messages: vec![PluginMessage::text(MessageRole::Assistant, "done")],
-                checkpoint: CheckpointKind::BeforeCompletion,
-            },
-            json!({
-                "type": "queued_messages_committed",
-                "messages": [{ "role": "Assistant", "parts": [{"id":"", "kind":"Text", "content":"done"}] }],
-                "checkpoint": "before_completion",
             }),
         ),
         (

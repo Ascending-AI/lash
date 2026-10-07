@@ -217,6 +217,58 @@ where
     }
 }
 
+/// A family of sections a plugin derives from the tools offered to each
+/// call, such as one section per offered MCP server. Every section it
+/// contributes is keyed `<prefix>.<suffix>` under the registering plugin, and
+/// behaves like a registered section: the host orders, places and excludes
+/// it, and any plugin may wrap it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PromptSectionFamilySpec {
+    pub prefix: PromptSectionKey,
+    pub default_placement: PromptPlacement,
+    pub purposes: Vec<PromptPurpose>,
+}
+
+impl PromptSectionFamilySpec {
+    /// A family for turn calls, with `default_placement` unless the host
+    /// places a member.
+    pub fn new(prefix: PromptSectionKey, default_placement: PromptPlacement) -> Self {
+        Self {
+            prefix,
+            default_placement,
+            purposes: vec![PromptPurpose::Turn],
+        }
+    }
+
+    /// Render for exactly `purposes`.
+    #[must_use]
+    pub fn purposes(mut self, purposes: impl IntoIterator<Item = PromptPurpose>) -> Self {
+        self.purposes = purposes.into_iter().collect();
+        self
+    }
+
+    fn holds(&self, key: &PromptSectionKey) -> bool {
+        key.as_str()
+            .strip_prefix(self.prefix.as_str())
+            .is_some_and(|rest| rest.starts_with('.'))
+    }
+}
+
+/// One section a [`PromptSectionSource`] contributes: the suffix of its key
+/// and its base renderer.
+pub struct PromptFamilySection {
+    pub suffix: PromptSectionKey,
+    pub renderer: Arc<dyn PromptSection>,
+}
+
+/// The sections a family contributes to one call. A section is selected only
+/// when the surface it describes is offered, so a source reads the call's
+/// offered tools and nothing else. It must be repeat-safe.
+pub trait PromptSectionSource: Send + Sync {
+    /// The family's sections for a call offered `offered`, in order.
+    fn sections(&self, offered: &OfferedTools) -> Vec<PromptFamilySection>;
+}
+
 /// The section a wrapper is applied to, as the call resolved it.
 #[derive(Clone, Copy, Debug)]
 pub struct PromptWrapTarget<'a> {
@@ -321,7 +373,8 @@ pub struct PromptCall {
     pub purpose: PromptPurpose,
 }
 
-/// The tools actually offered to this call, not every installed tool.
+/// The tools actually offered to this call, not every installed tool. A
+/// section reads their pinned manifests; it never consults a live provider.
 #[derive(Clone, Debug, Default)]
 pub struct OfferedTools {
     /// Tools offered as native declarations.
@@ -333,6 +386,31 @@ pub struct OfferedTools {
     /// inline surface. Empty for a call that offers no tools, such as a
     /// compaction's.
     pub catalog: Arc<crate::ToolCatalog>,
+}
+
+impl OfferedTools {
+    /// The pinned manifest of every offered tool: the native ones, then the
+    /// callable ones. An offered name the catalog does not pin has none.
+    pub fn manifests(&self) -> impl Iterator<Item = &crate::ToolManifest> {
+        self.native
+            .iter()
+            .chain(&self.callable)
+            .filter_map(|name| {
+                self.catalog
+                    .tools
+                    .iter()
+                    .find(|entry| entry.manifest.name == *name)
+            })
+            .map(|entry| &entry.manifest)
+    }
+
+    /// Whether a tool named `name` is offered.
+    pub fn offers(&self, name: &str) -> bool {
+        self.native
+            .iter()
+            .chain(&self.callable)
+            .any(|offered| offered == name)
+    }
 }
 
 /// The admitted model the call runs on.
@@ -440,6 +518,11 @@ impl PromptCut {
         self
     }
 
+    /// The tools offered to the call, which select its family sections.
+    pub fn offered(&self) -> &OfferedTools {
+        &self.offered
+    }
+
     /// The input `plugin_id`'s renderers and wrappers read.
     pub fn input_for<'a>(&'a self, plugin_id: &'a str) -> PromptInput<'a> {
         PromptInput {
@@ -538,6 +621,30 @@ impl RegisteredPromptSection {
 }
 
 #[derive(Clone)]
+struct RegisteredPromptFamily {
+    owner: PluginRevision,
+    spec: PromptSectionFamilySpec,
+    source: Arc<dyn PromptSectionSource>,
+}
+
+impl RegisteredPromptFamily {
+    fn id(&self) -> PromptSectionId {
+        PromptSectionId::new(self.owner.plugin.clone(), self.spec.prefix.clone())
+    }
+
+    fn holds(&self, section: &PromptSectionId) -> bool {
+        self.owner.plugin == section.owner && self.spec.holds(&section.key)
+    }
+}
+
+/// A section or a family, in registration order.
+#[derive(Clone)]
+enum RegisteredPromptEntry {
+    Section(RegisteredPromptSection),
+    Family(RegisteredPromptFamily),
+}
+
+#[derive(Clone)]
 struct RegisteredPromptWrap {
     owner: PluginRevision,
     spec: PromptWrapSpec,
@@ -553,15 +660,39 @@ impl RegisteredPromptWrap {
     }
 }
 
-/// Every section and wrapper the installed plugins registered, in plugin
-/// registration order, then declaration order.
+/// Every section, family and wrapper the installed plugins registered, in
+/// plugin registration order, then declaration order.
 #[derive(Clone, Default)]
 pub(crate) struct PromptRegistry {
-    sections: Vec<RegisteredPromptSection>,
+    entries: Vec<RegisteredPromptEntry>,
     wraps: Vec<RegisteredPromptWrap>,
 }
 
-/// Registers the plugin's prompt sections and wrappers.
+impl PromptRegistry {
+    fn sections(&self) -> impl Iterator<Item = &RegisteredPromptSection> {
+        self.entries.iter().filter_map(|entry| match entry {
+            RegisteredPromptEntry::Section(section) => Some(section),
+            RegisteredPromptEntry::Family(_) => None,
+        })
+    }
+
+    fn families(&self) -> impl Iterator<Item = &RegisteredPromptFamily> {
+        self.entries.iter().filter_map(|entry| match entry {
+            RegisteredPromptEntry::Family(family) => Some(family),
+            RegisteredPromptEntry::Section(_) => None,
+        })
+    }
+
+    /// Whether `section` names a registered section or a key a registered
+    /// family holds.
+    fn knows(&self, section: &PromptSectionId) -> bool {
+        self.sections()
+            .any(|registered| &registered.id() == section)
+            || self.families().any(|family| family.holds(section))
+    }
+}
+
+/// Registers the plugin's prompt sections, families and wrappers.
 pub struct PromptRegistrations<'a> {
     pub(super) reg: &'a mut PluginRegistrar,
 }
@@ -572,7 +703,7 @@ impl PromptRegistrations<'_> {
     /// # Errors
     ///
     /// [`PluginError::Registration`] when this plugin already registered a
-    /// section under the key.
+    /// section under the key, or a family that holds it.
     pub fn section(
         self,
         spec: PromptSectionSpec,
@@ -580,21 +711,61 @@ impl PromptRegistrations<'_> {
     ) -> Result<(), PluginError> {
         let owner = self.reg.owner.clone();
         let registry = &mut self.reg.contributions.prompt;
-        if registry
-            .sections
-            .iter()
-            .any(|section| section.owner.plugin == owner.plugin && section.spec.key == spec.key)
-        {
+        let id = PromptSectionId::new(owner.plugin.clone(), spec.key.clone());
+        if registry.knows(&id) {
             return Err(PluginError::Registration(format!(
-                "duplicate prompt section `{}/{}`",
-                owner.plugin, spec.key
+                "duplicate prompt section `{id}`"
             )));
         }
-        registry.sections.push(RegisteredPromptSection {
-            owner,
-            spec,
-            renderer,
+        registry
+            .entries
+            .push(RegisteredPromptEntry::Section(RegisteredPromptSection {
+                owner,
+                spec,
+                renderer,
+            }));
+        Ok(())
+    }
+
+    /// Register a family of sections keyed `<spec.prefix>.<suffix>` under
+    /// this plugin's id, which `source` derives from each call's offered
+    /// tools.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Registration`] when the family's keys overlap a
+    /// section or another family this plugin registered.
+    pub fn family(
+        self,
+        spec: PromptSectionFamilySpec,
+        source: Arc<dyn PromptSectionSource>,
+    ) -> Result<(), PluginError> {
+        let owner = self.reg.owner.clone();
+        let registry = &mut self.reg.contributions.prompt;
+        let overlaps = registry.entries.iter().any(|entry| match entry {
+            RegisteredPromptEntry::Section(section) => {
+                section.owner.plugin == owner.plugin && spec.holds(&section.spec.key)
+            }
+            RegisteredPromptEntry::Family(family) => {
+                family.owner.plugin == owner.plugin
+                    && (family.spec.prefix == spec.prefix
+                        || family.spec.holds(&spec.prefix)
+                        || spec.holds(&family.spec.prefix))
+            }
         });
+        if overlaps {
+            return Err(PluginError::Registration(format!(
+                "prompt section family `{}/{}` overlaps a registered section or family",
+                owner.plugin, spec.prefix
+            )));
+        }
+        registry
+            .entries
+            .push(RegisteredPromptEntry::Family(RegisteredPromptFamily {
+                owner,
+                spec,
+                source,
+            }));
         Ok(())
     }
 
@@ -641,9 +812,27 @@ pub struct PromptSectionInfo {
     pub purposes: Vec<PromptPurpose>,
 }
 
-/// A session's registered sections and wrappers. Read-only.
+/// A registered section family as the host sees it: `family` is the owner
+/// and the prefix every member key starts with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PromptSectionFamilyInfo {
+    pub family: PromptSectionId,
+    pub owner: PluginRevision,
+    pub default_placement: PromptPlacement,
+    pub purposes: Vec<PromptPurpose>,
+}
+
+/// A session's registered sections, families and wrappers. Read-only.
 #[derive(Clone, Default)]
 pub struct PromptCatalog(Arc<PromptRegistry>);
+
+/// A section selected for one call, before placement.
+struct SelectedSection {
+    id: PromptSectionId,
+    owner: PluginRevision,
+    default_placement: PromptPlacement,
+    renderer: Arc<dyn PromptSection>,
+}
 
 impl PromptCatalog {
     pub(crate) fn new(registry: PromptRegistry) -> Self {
@@ -653,13 +842,25 @@ impl PromptCatalog {
     /// Every registered section, in registration order.
     pub fn sections(&self) -> Vec<PromptSectionInfo> {
         self.0
-            .sections
-            .iter()
+            .sections()
             .map(|section| PromptSectionInfo {
                 section: section.id(),
                 owner: section.owner.clone(),
                 default_placement: section.spec.default_placement,
                 purposes: section.spec.purposes.clone(),
+            })
+            .collect()
+    }
+
+    /// Every registered section family, in registration order.
+    pub fn families(&self) -> Vec<PromptSectionFamilyInfo> {
+        self.0
+            .families()
+            .map(|family| PromptSectionFamilyInfo {
+                family: family.id(),
+                owner: family.owner.clone(),
+                default_placement: family.spec.default_placement,
+                purposes: family.spec.purposes.clone(),
             })
             .collect()
     }
@@ -680,56 +881,105 @@ impl PromptCatalog {
             .collect()
     }
 
-    /// Resolve `plan` for a `purpose` call: the sections that render for
-    /// it, the plan's order first and the rest in registration order, each
-    /// with the host's placement or its plugin's default, and each with its
-    /// wrapper chain.
+    /// The sections that render for a `purpose` call offered `offered`, in
+    /// registration order, each family expanded in place.
+    fn select(
+        &self,
+        purpose: &PromptPurpose,
+        offered: &OfferedTools,
+    ) -> Result<Vec<SelectedSection>, PromptPlanError> {
+        let mut selected = Vec::new();
+        for entry in &self.0.entries {
+            match entry {
+                RegisteredPromptEntry::Section(section) => {
+                    if section.spec.purposes.contains(purpose) {
+                        selected.push(SelectedSection {
+                            id: section.id(),
+                            owner: section.owner.clone(),
+                            default_placement: section.spec.default_placement,
+                            renderer: Arc::clone(&section.renderer),
+                        });
+                    }
+                }
+                RegisteredPromptEntry::Family(family) => {
+                    if !family.spec.purposes.contains(purpose) {
+                        continue;
+                    }
+                    let refused =
+                        |section: String, reason: &str| PromptPlanError::SourceSectionRefused {
+                            family: family.id(),
+                            section,
+                            reason: reason.into(),
+                        };
+                    let mut members = BTreeSet::new();
+                    for member in family.source.sections(offered) {
+                        let key = format!("{}.{}", family.spec.prefix, member.suffix);
+                        let key = PromptSectionKey::new(key.clone())
+                            .map_err(|error| refused(key, &error.to_string()))?;
+                        if !members.insert(key.clone()) {
+                            return Err(refused(key.to_string(), "contributed twice"));
+                        }
+                        selected.push(SelectedSection {
+                            id: PromptSectionId::new(family.owner.plugin.clone(), key),
+                            owner: family.owner.clone(),
+                            default_placement: family.spec.default_placement,
+                            renderer: member.renderer,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(selected)
+    }
+
+    /// Resolve `plan` for a `purpose` call offered `offered`: the sections
+    /// that render for it (each family contributing the sections its source
+    /// derives from `offered`), the plan's order first and the rest in
+    /// registration order, each with the host's placement or its plugin's
+    /// default, and each with its wrapper chain. An excluded section keeps
+    /// its place in the record but no chain: its wrappers are recorded as
+    /// absent.
     ///
     /// # Errors
     ///
-    /// [`PromptPlanError`] when the plan breaks its own rules, names an
-    /// unregistered section, or the call would exceed its section or
-    /// wrapper count.
+    /// [`PromptPlanError`] when the plan breaks its own rules, names a
+    /// section no plugin registers or a family holds, a source contributes
+    /// an invalid section, or the call would exceed its section or wrapper
+    /// count.
     pub fn resolve(
         &self,
         plan: &PromptPlan,
         purpose: &PromptPurpose,
+        offered: &OfferedTools,
     ) -> Result<ResolvedPromptComposition, PromptPlanError> {
         plan.validate()?;
-        let registered = self
-            .0
-            .sections
-            .iter()
-            .map(RegisteredPromptSection::id)
-            .collect::<BTreeSet<_>>();
         for section in plan
             .order
             .iter()
             .chain(plan.placements.iter().map(|placed| &placed.section))
         {
-            if !registered.contains(section) {
+            if !self.0.knows(section) {
                 return Err(PromptPlanError::UnknownSection {
                     section: section.clone(),
                 });
             }
         }
-        let selected = self
-            .0
-            .sections
-            .iter()
-            .filter(|section| section.spec.purposes.contains(purpose))
+        let mut selected = self
+            .select(purpose, offered)?
+            .into_iter()
+            .map(Some)
             .collect::<Vec<_>>();
         let mut ordered = Vec::with_capacity(selected.len());
         for section in &plan.order {
-            if let Some(found) = selected.iter().find(|candidate| &candidate.id() == section) {
-                ordered.push(*found);
+            if let Some(found) = selected
+                .iter_mut()
+                .find(|candidate| candidate.as_ref().is_some_and(|c| &c.id == section))
+                .and_then(Option::take)
+            {
+                ordered.push(found);
             }
         }
-        for section in &selected {
-            if !plan.order.contains(&section.id()) {
-                ordered.push(section);
-            }
-        }
+        ordered.extend(selected.into_iter().flatten());
         let count = u32::try_from(ordered.len()).unwrap_or(u32::MAX);
         if count > plan.limits.max_sections.get() {
             return Err(PromptPlanError::TooManySections {
@@ -737,15 +987,26 @@ impl PromptCatalog {
                 limit: plan.limits.max_sections.get(),
             });
         }
-        let ids = ordered
+        let placed = ordered
+            .into_iter()
+            .map(|section| {
+                let (placement, source) = match plan.placement(&section.id) {
+                    Some(placement) => (placement, PlacementSource::Host),
+                    None => (section.default_placement, PlacementSource::PluginDefault),
+                };
+                (section, placement, source)
+            })
+            .collect::<Vec<_>>();
+        let composed = placed
             .iter()
-            .map(|section| section.id())
+            .filter(|(_, placement, _)| *placement != PromptPlacement::Excluded)
+            .map(|(section, _, _)| section.id.clone())
             .collect::<BTreeSet<_>>();
-        let all_wraps = self.wraps();
-        let (applied, absent): (Vec<_>, Vec<_>) = all_wraps
+        let (applied, absent): (Vec<_>, Vec<_>) = self
+            .wraps()
             .into_iter()
             .zip(self.0.wraps.iter())
-            .partition(|(resolved, _)| ids.contains(&resolved.target));
+            .partition(|(resolved, _)| composed.contains(&resolved.target));
         let wrap_count = u32::try_from(applied.len()).unwrap_or(u32::MAX);
         if wrap_count > plan.limits.max_wrappers.get() {
             return Err(PromptPlanError::TooManyWrappers {
@@ -753,30 +1014,22 @@ impl PromptCatalog {
                 limit: plan.limits.max_wrappers.get(),
             });
         }
-        let mut sections = Vec::with_capacity(ordered.len());
-        let mut records = Vec::with_capacity(ordered.len());
-        for section in ordered {
-            let id = section.id();
-            let (placement, placement_source) = match plan.placement(&id) {
-                Some(placement) => (placement, PlacementSource::Host),
-                None => (
-                    section.spec.default_placement,
-                    PlacementSource::PluginDefault,
-                ),
-            };
+        let mut sections = Vec::with_capacity(placed.len());
+        let mut records = Vec::with_capacity(placed.len());
+        for (section, placement, placement_source) in placed {
             let chain = applied
                 .iter()
-                .filter(|(resolved, _)| resolved.target == id)
+                .filter(|(resolved, _)| resolved.target == section.id)
                 .collect::<Vec<_>>();
             records.push(ResolvedPromptSection {
-                section: id,
-                owner: section.owner.clone(),
+                section: section.id,
+                owner: section.owner,
                 placement,
                 placement_source,
                 wraps: chain.iter().map(|(resolved, _)| resolved.clone()).collect(),
             });
             sections.push(ResolvedSectionRenderers {
-                base: Arc::clone(&section.renderer),
+                base: section.renderer,
                 wraps: chain
                     .iter()
                     .map(|(_, registered)| Arc::clone(&registered.wrapper))
@@ -861,7 +1114,9 @@ impl ResolvedPromptComposition {
     /// each wrapper in chain order, each over the previous output. For base
     /// `R` and wrappers `A` then `B`, the final text is `B(A(R))`. Every
     /// output is normalized ([`SectionText::normalized`]) and held to the
-    /// per-section limit; a refusal or panic is attributed to its site.
+    /// per-section limit; a refusal or panic is attributed to its site. A
+    /// section the host excluded composes to an omission without running its
+    /// renderer.
     ///
     /// # Errors
     ///
@@ -878,6 +1133,13 @@ impl ResolvedPromptComposition {
     ) -> Result<ComposedSection, PromptCompositionError> {
         let resolved = &self.record.sections[index];
         let renderers = &self.sections[index];
+        if resolved.placement == PromptPlacement::Excluded {
+            return Ok(ComposedSection {
+                base: SectionText::Omit,
+                wraps: Vec::new(),
+                value: SectionText::Omit,
+            });
+        }
         let limit = self.record.limits.max_section_bytes.get();
         let within = |site: &dyn Fn() -> Box<PromptRenderSite>, text: &SectionText| {
             let bytes = text.as_text().map_or(0, str::len) as u64;
@@ -952,9 +1214,18 @@ impl PromptCatalog {
 }
 
 impl super::PluginSession {
-    /// The prompt sections and wrappers this session's plugins registered.
+    /// The prompt sections, families and wrappers this session's plugins
+    /// registered.
     pub fn prompt_catalog(&self) -> PromptCatalog {
         PromptCatalog::new(self.capabilities().contributions.prompt.clone())
+    }
+
+    /// [`Self::prompt_catalog`], or `None` before the session's plugins are
+    /// built: a session builds them for its first run.
+    pub fn built_prompt_catalog(&self) -> Option<PromptCatalog> {
+        self.capabilities
+            .get()
+            .map(|capabilities| PromptCatalog::new(capabilities.contributions.prompt.clone()))
     }
 }
 

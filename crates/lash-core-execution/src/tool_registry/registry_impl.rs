@@ -228,25 +228,10 @@ impl ToolRegistry {
         })
     }
 
-    pub(crate) fn compose_session_catalog(
-        &self,
-        context_providers: Vec<Arc<dyn ToolProvider>>,
-    ) -> Result<Self, ReconfigureError> {
-        let registry = self.refresh_and_pin_sources()?;
-        registry.upsert_overlay_source(Arc::new(ToolProviderSource::new(
-            "context",
-            context_providers,
-        )))?;
-        Ok(registry)
-    }
-
-    /// Admit each live source once, compose the session overlay, and freeze
-    /// the resulting surface for one model request.
-    pub(crate) fn pin_session_surface(
-        &self,
-        context_providers: Vec<Arc<dyn ToolProvider>>,
-    ) -> Result<Self, ReconfigureError> {
-        self.compose_session_catalog(context_providers)
+    /// Admit each live source once and freeze the resulting surface for
+    /// one model request.
+    pub(crate) fn pin_session_surface(&self) -> Result<Self, ReconfigureError> {
+        self.refresh_and_pin_sources()
     }
 
     pub(crate) fn upsert_source(
@@ -303,88 +288,6 @@ impl ToolRegistry {
         drop(retired);
         drop(retired_granted);
         Ok(generation)
-    }
-
-    fn upsert_overlay_source(
-        &self,
-        source: Arc<dyn ToolSourceExecutor>,
-    ) -> Result<u64, ReconfigureError> {
-        let live_source = Arc::clone(&source);
-        let source = source
-            .capture_execution_source()?
-            .freeze(&BTreeSet::new())?;
-        let source_key = source.source_key();
-        debug_assert_eq!(live_source.source_key(), source_key);
-        let manifests = source
-            .advertised_tools()
-            .into_iter()
-            .map(|manifest| manifest_with_compact_contract(source.as_ref(), manifest))
-            .collect::<Vec<_>>();
-        validate_unique_manifests(&manifests)?;
-
-        loop {
-            let (write_revision, mut next_state) = {
-                let authority = self.inner.read_recover();
-                (authority.write_revision, authority.state.clone())
-            };
-            let rebuilt = (|| {
-                let curated = next_state
-                    .surface
-                    .by_id
-                    .iter()
-                    .map(|(id, entry)| (id.clone(), entry.member))
-                    .collect::<BTreeMap<_, _>>();
-                let next_surface = Arc::make_mut(&mut next_state.surface);
-                for manifest in manifests.iter().cloned() {
-                    let id = manifest.id.clone();
-                    insert_advertised_entry(
-                        next_surface,
-                        &source_key,
-                        manifest,
-                        Some(&source_key),
-                    )?;
-                    if let Some(member) = curated.get(&id)
-                        && let Some(entry) = next_surface.get_mut(&id)
-                    {
-                        entry.member = *member;
-                    }
-                }
-                next_surface.debug_assert_invariant();
-                Ok::<_, ReconfigureError>(())
-            })();
-            if let Err(error) = rebuilt {
-                if self.inputs_changed(write_revision) {
-                    continue;
-                }
-                return Err(error);
-            }
-
-            let mut authority = self.inner.write_recover();
-            if authority.write_revision != write_revision {
-                continue;
-            }
-            let public_changed =
-                !surfaces_publicly_equal(&authority.state.surface, &next_state.surface);
-            let private_changed = authority.state.surface != next_state.surface;
-            debug_assert!(!public_changed || private_changed);
-            let generation = reconciled_generation(authority.state.generation, public_changed)?;
-            authority.commit()?;
-            let retired = authority
-                .sources
-                .insert(source_key.clone(), Arc::clone(&source));
-            let retired_granted = authority
-                .granted_sources
-                .as_mut()
-                .and_then(|sources| sources.insert(source_key.clone(), Arc::clone(&live_source)));
-            if private_changed {
-                authority.state.surface = next_state.surface;
-                authority.state.generation = generation;
-            }
-            drop(authority);
-            drop(retired);
-            drop(retired_granted);
-            return Ok(generation);
-        }
     }
 
     fn reconcile_source(

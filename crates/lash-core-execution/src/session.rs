@@ -36,7 +36,6 @@ pub use tool_execution::{CompletedProtocolToolCall, ToolInvocation, ToolInvocati
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ToolCatalogCacheKey {
-    context_overlay_revision: u64,
     tool_generation: u64,
     plugin_generations: std::collections::BTreeMap<String, u64>,
     authority_fingerprint: [u8; 32],
@@ -443,8 +442,6 @@ pub struct ExecRequest {
 pub struct Session {
     session_id: SessionId,
     services: RuntimeServices,
-    context_overlay_revision: u64,
-    context_tools: Vec<Arc<dyn ToolProvider>>,
     tool_registry: Arc<crate::ToolRegistry>,
     tool_catalog_cache: Arc<std::sync::Mutex<Option<(ToolCatalogCacheKey, ToolCatalogHandle)>>>,
     composition_tool_fingerprint_cache: CompositionToolFingerprintCache,
@@ -463,8 +460,6 @@ impl Session {
         let session = Self {
             session_id: session_id.clone(),
             services,
-            context_overlay_revision: 0,
-            context_tools: Vec::new(),
             tool_registry,
             tool_catalog_cache: Arc::new(std::sync::Mutex::new(None)),
             composition_tool_fingerprint_cache: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -486,8 +481,6 @@ impl Session {
         Self {
             session_id: self.session_id.clone(),
             services: self.services.clone(),
-            context_overlay_revision: self.context_overlay_revision,
-            context_tools: self.context_tools.clone(),
             tool_registry: Arc::clone(&self.tool_registry),
             tool_catalog_cache: Arc::clone(&self.tool_catalog_cache),
             composition_tool_fingerprint_cache: Arc::clone(
@@ -518,34 +511,6 @@ impl Session {
         &self.services.plugins
     }
 
-    pub fn set_context_overlay(
-        &mut self,
-        tool_providers: Vec<Arc<dyn ToolProvider>>,
-    ) -> Result<(), crate::PluginError> {
-        let tool_providers_unchanged = self.context_tools.len() == tool_providers.len()
-            && self
-                .context_tools
-                .iter()
-                .zip(&tool_providers)
-                .all(|(current, next)| Arc::ptr_eq(current, next));
-        let registry = self
-            .services
-            .plugins
-            .tool_registry()
-            .compose_session_catalog(tool_providers.clone())
-            .map(Arc::new)
-            .map_err(|err| {
-                crate::PluginError::Session(format!("failed to build session tool registry: {err}"))
-            })?;
-        if !tool_providers_unchanged {
-            self.context_overlay_revision = self.context_overlay_revision.wrapping_add(1);
-        }
-        self.context_tools = tool_providers;
-        self.tool_registry = registry;
-        *self.tool_catalog_cache.lock_recover() = None;
-        Ok(())
-    }
-
     pub fn history_store(&self) -> Option<crate::store::SessionStore> {
         self.services.store.clone()
     }
@@ -566,7 +531,6 @@ impl Session {
         tool_generation: u64,
     ) -> ToolCatalogCacheKey {
         ToolCatalogCacheKey {
-            context_overlay_revision: self.context_overlay_revision,
             tool_generation,
             plugin_generations: self.plugins().state_generations(),
             authority_fingerprint: tool_catalog_authority_fingerprint(tool_access),
@@ -751,7 +715,7 @@ impl Session {
     fn pin_live_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, crate::PluginError> {
         self.plugins()
             .tool_registry()
-            .pin_session_surface(self.context_tools.clone())
+            .pin_session_surface()
             .map(Arc::new)
             .map_err(|err| {
                 crate::PluginError::Session(format!("failed to pin session tool surface: {err}"))
@@ -814,7 +778,6 @@ impl Session {
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
         execution_env_spec: crate::ProcessExecutionEnvSpec,
-        checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
         attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     ) -> Result<RuntimeExecutionContext<'run>, crate::PluginError> {
         let tool_surface = self.active_tool_surface_entry()?;
@@ -844,7 +807,6 @@ impl Session {
                 agent_frame_id,
             },
             observer,
-            checkpoint_messages,
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.services.attachment_store),
             attachment_source_policy,
@@ -883,7 +845,7 @@ impl Session {
             .services
             .plugins
             .tool_registry()
-            .compose_session_catalog(self.context_tools.clone())
+            .pin_session_surface()
             .map(Arc::new)
             .map_err(|err| SessionError::Protocol(format!("tool reconfigure failed: {err}")))?;
         *self.tool_catalog_cache.lock_recover() = None;

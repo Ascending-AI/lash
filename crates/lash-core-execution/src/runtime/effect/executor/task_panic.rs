@@ -30,7 +30,6 @@ pub(super) fn map_effect_task_join(
                 intents: crate::ToolIntents::default(),
             }),
             triggers: Vec::new(),
-            capture: None,
         }),
         None => Err(RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::EffectPanicked,

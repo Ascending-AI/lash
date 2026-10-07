@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1583 rows over 855 files, 3938 laws.
-# By class: mechanical 163, semantic 111, delete 858, replace 451.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 130, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49.
-# By status: todo 405, ported 90, deleted 1088.
+# 1590 rows over 862 files, 3945 laws.
+# By class: mechanical 163, semantic 111, delete 863, replace 453.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 130, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 7.
+# By status: todo 405, ported 90, deleted 1095.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -430,7 +430,7 @@
 # - L9h: examples/agent-workbench/src/main_sections/tests/done_stream_items.rs
 #   done stream items are transient and not snapshotted; and 1 more law(s) of the file, by test name
 # - L9h: examples/agent-workbench/src/main_sections/tests/facade_homes.rs::workbench_context_transform_shapes_the_prompt_the_provider_receives
-#   workbench context transform shapes the prompt the provider receives
+#   workbench prompt sections shape the prompt the provider receives
 # - L9h: examples/agent-workbench/src/main_sections/tests/facade_homes.rs::workbench_plugin_observes_session_config_policy_transition
 #   workbench plugin observes session config policy transition
 # - L9h: examples/agent-workbench/src/main_sections/tests/mail_payload.rs::inject_message_scopes_emission_to_requested_session
@@ -16010,8 +16010,8 @@ laws = [
 ]
 disposition = "owed"
 status = "todo"
-owed = "workbench context transform shapes the prompt the provider receives"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
+owed = "workbench prompt sections shape the prompt the provider receives"
+note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5258 replaced the workbench context transform with the agent_workbench sections; agent-workbench tests/prompt_sections.rs::workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budget pins their rendered text, and the provider-request half is owed by FIG-5260"
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/mail_payload.rs"
@@ -25289,3 +25289,103 @@ laws = [
 disposition = "covered-by:crates/lash-protocol-rlm/src/prompt_sections/tests.rs::a_host_replaces_or_omits_each_built_in_text_and_keeps_the_declarations"
 status = "deleted"
 note = "FIG-5257 moved the file to prompt_sections/tests.rs; discovery_is_a_declaration is covered by the_declarations_describe_exactly_the_offered_callable_tools and blank_host_text_renders_no_section by a_section_with_nothing_to_say_renders_nothing"
+
+[[row]]
+path = "crates/lash-core-execution/src/plugin/session_obj/directives.rs"
+test = "*"
+area = "plugins"
+needs = ["turn"]
+class = "delete"
+lane = "P4"
+laws = [
+  "plugin_fallback_message_id_is_scoped_to_the_turn_phase",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5258 with the messages field of turn and after-turn contributions: no plugin message exists to take a fallback id"
+
+[[row]]
+path = "crates/lash-core-execution/src/tool_registry/admission_tests.rs"
+test = "*"
+area = "tool-surface"
+needs = ["turn"]
+class = "delete"
+lane = "P4"
+laws = [
+  "identical_context_overlay_routes_to_the_context_provider",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5258 with PreparedContext.tool_providers and the session context overlay: a turn context offers no tools, so nothing routes to a context provider"
+
+[[row]]
+path = "crates/lash-plugin-mcp/src/catalog_peer_tests.rs"
+test = "*"
+area = "mcp"
+needs = []
+class = "replace"
+lane = "P4"
+laws = [
+  "http_server_instructions_follow_catalog_refresh_and_reconnect",
+]
+disposition = "replaced-by:crates/lash-plugin-mcp/src/catalog_peer_tests.rs::mcp_guidance_renders_the_offered_catalogs_revision_without_the_server"
+status = "deleted"
+owed = "a server's guidance follows the catalog revision a call is offered, across refresh and reconnect, and renders without contacting the server"
+note = "FIG-5258 (MCP-CUT): guidance is no longer tool-module metadata; each imported manifest pins its server's guidance by digest and the mcp/server.<server> section renders the pinned text after the server is gone"
+
+[[row]]
+path = "crates/lash-remote-protocol/src/queued_events_tests.rs"
+test = "*"
+area = "observations"
+needs = []
+class = "delete"
+lane = "P4"
+laws = [
+  "legacy_queued_message_and_part_fields_are_rejected",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "deleted by FIG-5258 with RemotePluginMessage, RemotePart and queued_messages_committed: the remote protocol carries no plugin message whose legacy fields could be refused"
+
+[[row]]
+path = "crates/lash-sim/src/runner/before_turn_leak_tests.rs"
+test = "*"
+area = "prompts"
+needs = ["turn"]
+class = "replace"
+lane = "P4"
+laws = [
+  "before_turn_instruction_never_enters_graph_history",
+]
+disposition = "replaced-by:crates/lash/tests/integration/prompt_section_leak.rs::section_text_never_enters_history_or_a_compaction_seed"
+status = "deleted"
+owed = "instruction text a plugin contributes before a turn never enters committed history or a compaction seed"
+note = "FIG-5258 (NO-LEAK): before-turn messages are deleted; the law now pins a section's text against committed history, every request's history and the compaction seed. The request and recorded-snapshot halves are owed by FIG-5260"
+
+[[row]]
+path = "crates/lash-protocol-rlm/src/prompt_sections/tests.rs"
+test = "*"
+area = "lash-protocol-rlm"
+needs = []
+class = "delete"
+lane = "P4"
+laws = [
+  "a_modules_instructions_render_once",
+]
+disposition = "covered-by:crates/lash-protocol-rlm/src/prompt_sections/tests.rs::a_modules_tools_render_under_one_heading"
+status = "deleted"
+note = "FIG-5258 deleted ToolModule.instructions; the instruction half is subject-deleted (a tool's guidance is its plugin's section family, a_family_section_is_selected_only_when_its_tools_are_offered), and the heading half is the renamed law"
+
+[[row]]
+path = "crates/lash-sansio/src/sansio/tests.rs"
+test = "*"
+area = "checkpoints"
+needs = ["turn"]
+class = "delete"
+lane = "P4"
+laws = [
+  "checkpoint_messages_resume_prepare_protocol_iteration",
+]
+disposition = "covered-by:crates/lash-sansio/src/sansio/tests.rs::checkpoint_user_messages_resume_prepare_protocol_iteration"
+status = "deleted"
+note = "FIG-5258 deleted CheckpointDelivery's plugin messages; the law is renamed to the committed user messages a checkpoint still delivers"

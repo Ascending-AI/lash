@@ -1,10 +1,10 @@
-use lash::plugins::{CompactionContext, ContextPressureContext, PluginCommandContext, TurnTransformContext};
+use lash::plugins::{AttachmentOmissionContext, CompactionContext, ContextPressureContext, PluginCommandContext};
 
 fn command(ctx: &PluginCommandContext) {
     let _ = &ctx.scoped_effect_controller;
 }
 
-fn transform(ctx: &TurnTransformContext<'_>) {
+fn omission(ctx: &AttachmentOmissionContext) {
     let _ = &ctx.tools;
 }
 

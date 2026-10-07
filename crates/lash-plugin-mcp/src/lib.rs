@@ -27,10 +27,13 @@
 //! refresh closes its service at the startup timeout and reconnects, retaining
 //! the last catalog while clearing unanswered protocol requests.
 //!
-//! Initialize instructions are captured as each server's tool-module metadata.
-//! Tool refreshes retain them; reconnects capture the new initialize response.
-//! Hosts can read them from advertised manifests for discovery. Standard and
-//! RLM prompts render them once per visible module from the recorded catalog.
+//! Initialize instructions are server guidance, an admitted catalog resource:
+//! every imported manifest pins its server's text, so a recorded catalog
+//! carries the guidance it was admitted with. Tool refreshes retain it;
+//! reconnects capture the new initialize response. The plugin's `server`
+//! prompt section family contributes one section per offered server,
+//! `mcp/server.<prefix>`, rendering the guidance the offered manifests pin
+//! without contacting the server.
 //!
 //! Preparation seals the manifest's server, native tool, transport and peer
 //! identity, tool contract, timeout policy and inline completion capability

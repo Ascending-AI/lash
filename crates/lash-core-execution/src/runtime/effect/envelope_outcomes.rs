@@ -32,18 +32,10 @@ impl RuntimeEffectOutcome {
         self,
     ) -> Result<ToolAttemptEffectOutcome, RuntimeEffectControllerError> {
         match self {
-            Self::ToolAttempt {
-                launch,
+            Self::ToolAttempt { launch, triggers } => Ok(ToolAttemptEffectOutcome {
+                launch: *launch,
                 triggers,
-                capture,
-            } => {
-                let capture = capture.map(|capture| *capture).unwrap_or_default();
-                Ok(ToolAttemptEffectOutcome {
-                    launch: *launch,
-                    triggers,
-                    capture,
-                })
-            }
+            }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::ToolAttempt,
                 other.kind(),

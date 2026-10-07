@@ -249,15 +249,13 @@ impl RankedVerdict for AfterToolDecision {
     }
 }
 
-/// An after-check's reply: its verdict, plus the checkpoint messages and
-/// runtime events it declares and the commands it returns against its own
-/// plugin state namespace. The runtime applies those once the check phase
+/// An after-check's reply: its verdict, plus the runtime events it declares
+/// and the commands it returns against its own plugin state namespace. The runtime applies those once the check phase
 /// completes, whatever the verdict; the commands publish with the check's
 /// recorded decision (K10).
 #[derive(Clone, Debug, Default)]
 pub struct AfterToolContributions {
     pub verdict: AfterToolDecision,
-    pub messages: Vec<PluginMessage>,
     pub events: Vec<PluginRuntimeEvent>,
     pub state: super::StateCommands,
 }
@@ -280,10 +278,9 @@ pub type ToolResultTransformHook =
 pub type ToolResultCheckHook =
     Arc<dyn Fn(ToolResultCheckInput) -> PluginFuture<AfterToolContributions> + Send + Sync>;
 
-/// One after-check's declared messages and events, attributed.
+/// One after-check's declared events, attributed.
 pub(crate) struct AttributedContributions {
     pub(crate) plugin_id: String,
-    pub(crate) messages: Vec<PluginMessage>,
     pub(crate) events: Vec<PluginRuntimeEvent>,
 }
 
