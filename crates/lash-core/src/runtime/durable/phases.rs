@@ -59,28 +59,34 @@ fn encode_phase(
         saved,
         plugin_state: drive.plugin_state()?,
         delivered: drive.delivered_inputs(),
+        delivered_work: drive.delivered_work(),
     };
     serde_json::to_string(&checkpoint)
         .map_err(|error| TurnError::Exec(format!("the turn checkpoint does not encode: {error}")))
 }
 
-/// The bind of the steering input `drive`'s checkpoints delivered to its
-/// run, written in every phase commit that records the delivery (ADR 0132
-/// §4): the first binds the rows, and a later one finds them bound to the
-/// run already. A row no longer open refuses the commit, which the turn
-/// then recomputes without it.
+/// The bind of the steering input and queued turn work `drive`'s
+/// checkpoints delivered to its run, written in every phase commit that
+/// records the delivery (ADR 0132 §4): the first binds the rows, and a later
+/// one finds them bound to the run already. A row no longer open refuses
+/// the commit, which the turn then recomputes without it.
 fn bind_delivered(drive: &dyn TurnDrive, session: &SessionId, run: &TurnId) -> Option<DomainWrite> {
     let inputs = drive
         .delivered_inputs()
         .iter()
         .flat_map(crate::AdmittedTurnInputs::input_ids)
         .collect::<Vec<_>>();
-    (!inputs.is_empty()).then(|| {
+    let batches = drive
+        .delivered_work()
+        .iter()
+        .flat_map(crate::AdmittedQueuedWork::batch_ids)
+        .collect::<Vec<_>>();
+    (!inputs.is_empty() || !batches.is_empty()).then(|| {
         DomainWrite::SessionMail(SessionMailWrite::Admit {
             session: session.clone(),
             run: run.clone(),
             inputs,
-            batches: Vec::new(),
+            batches,
         })
     })
 }

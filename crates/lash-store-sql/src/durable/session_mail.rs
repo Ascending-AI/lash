@@ -90,11 +90,14 @@ crate::statements! {
                  terminal_cause = 'cancelled', terminal_at_ms = ?3
              WHERE session_id = ?1 AND admitted_run = ?2 AND terminal_cause IS NULL";
 
-        /// Bind batch `?2` of session `?1` to run `?3`, its admitting owner;
-        /// no row when it is no longer open and unbound.
+        /// Bind batch `?2` of session `?1` to run `?3`, its admitting owner,
+        /// or keep it bound there: a running run's every phase rebinds the
+        /// queued turn work its checkpoints delivered. No row when it is no
+        /// longer open, or another run holds it.
         bind_batch = "UPDATE queued_work_batches
              SET admitted_run = ?3, admitted_by = ?3
-             WHERE session_id = ?1 AND batch_id = ?2 AND admitted_run IS NULL
+             WHERE session_id = ?1 AND batch_id = ?2
+               AND (admitted_run IS NULL OR admitted_run = ?3)
                AND terminal_cause IS NULL
              RETURNING batch_id";
     }

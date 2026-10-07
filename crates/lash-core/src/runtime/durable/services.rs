@@ -153,22 +153,11 @@ impl RuntimeTurnServices {
         let turn = runtime
             .prepare_durable_turn(&controller, &row.run, admissions, &observer)
             .await?;
-        // The turn's commit settles its inputs from the driver once it
-        // finishes: those its run took, with the application evidence
-        // preparation recorded (FIG-5288), and those its checkpoints
-        // delivered (FIG-5293).
-        let settlement = crate::store::IngressSettlement {
-            run: row.run.clone(),
-            completed_inputs: Vec::new(),
-            completed_batches: turn
-                .driver
-                .pending_queued
-                .iter()
-                .map(crate::AdmittedQueuedWork::completion)
-                .collect(),
-            released: Vec::new(),
-            dropped: Vec::new(),
-        };
+        // The turn's commit settles its inputs and queued work from the
+        // driver once it finishes: those its run took, the inputs with the
+        // application evidence preparation recorded (FIG-5288), and those
+        // its checkpoints delivered (FIG-5293, FIG-5294).
+        let settlement = crate::store::IngressSettlement::new(row.run.clone());
         Ok((
             turn,
             DriveParts {

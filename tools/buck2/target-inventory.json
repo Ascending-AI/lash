@@ -44724,7 +44724,9 @@
           "clippy_label": "//crates/lash-durable-test:steering_crash_laws__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:steering_crash_laws__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:tool_activity__test",
@@ -48116,6 +48118,7 @@
       "//crates/lash-durable-test:process_tool_call_crash_laws__test",
       "//crates/lash-durable-test:process_tool_calls__test",
       "//crates/lash-durable-test:session_send__test",
+      "//crates/lash-durable-test:steering_crash_laws__test",
       "//crates/lash-durable-test:tool_activity__test",
       "//crates/lash-durable-test:tool_batches__test",
       "//crates/lash-durable-test:tool_call_identity__test",

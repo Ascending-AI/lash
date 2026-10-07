@@ -1813,6 +1813,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         saved: machine.checkpoint(),
         plugin_state: None,
         delivered: Vec::new(),
+        delivered_work: Vec::new(),
     })
     .expect("checkpoint encodes");
 

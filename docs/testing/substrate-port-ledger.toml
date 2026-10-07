@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1590 rows over 862 files, 3945 laws.
-# By class: mechanical 163, semantic 111, delete 863, replace 453.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 130, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 7.
-# By status: todo 405, ported 90, deleted 1095.
+# 1591 rows over 862 files, 3945 laws.
+# By class: mechanical 163, semantic 111, delete 863, replace 454.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 7.
+# By status: todo 404, ported 90, deleted 1097.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -207,8 +207,6 @@
 #   trimmed gap replacement cursor preserves unseen auxiliary event
 # - L9c: crates/lash/src/tests/turn_streaming/observations/attempt_reset.rs
 #   remote reset and transcript projection agree
-# - L9c: crates/lash/src/tests/withheld_follow_on.rs
-#   a stopped turn runs withheld input in a follow on
 # - L9c: crates/lash/tests/facade_host_wrappers.rs
 #   a facade host wraps the rlm factory and its stores on sqlite memory; and 2 more law(s) of the file, by test name
 # - L9c: crates/lashctl/tests/operator_json_contract.rs::operator_json_contract_postgres
@@ -256,7 +254,7 @@
 # - L9e: crates/lash/src/tests/aggregate_oracle/timer_identity.rs
 #   sqlite each timer aggregate in a cell waits on its own; and 1 more law(s) of the file, by test name
 # - L9e: crates/lash/src/tests/turn_streaming/control_and_cancel.rs
-#   turn stream finish returns committed assistant prose; and 9 more law(s) of the file, by test name
+#   turn stream finish returns committed assistant prose; and 8 more law(s) of the file, by test name
 # - L9f: crates/lash-sim/src/backend_fault.rs::generated_backend_failure_seed_records_script_evidence
 #   generated backend failure seed records script evidence
 # - L9f: crates/lash-sim/src/cache_regression.rs::rlm_live_bound_state_is_prefix_stable_for_every_serializer
@@ -15400,13 +15398,25 @@ laws = [
   "active_steer_after_last_call_defers_to_next_turn_first_call",
   "accepted_active_steer_interrupt_is_not_requeued",
   "checkpoint_admitted_steer_cancel_reaches_its_run",
-  "rlm_active_input_reaches_the_next_provider_iteration",
   "turn_event_fanout_streams_to_collector_and_live_sink",
 ]
 disposition = "owed"
 status = "todo"
-owed = "turn stream finish returns committed assistant prose; and 9 more law(s) of the file, by test name"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+owed = "turn stream finish returns committed assistant prose; and 8 more law(s) of the file, by test name"
+note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet. Steering delivery itself is covered by crates/lash-durable-test/tests/steering_crash_laws.rs (FIG-5293, FIG-5294): the steer laws left here owe its interplay with a run cancel (the Defer and interrupt dispositions, a cancel addressed to a checkpoint-admitted input)."
+
+[[row]]
+path = "crates/lash/src/tests/turn_streaming/control_and_cancel.rs"
+test = "rlm_active_input_reaches_the_next_provider_iteration"
+area = "lash"
+needs = ["cell"]
+class = "replace"
+lane = "L9e"
+laws = ["rlm_active_input_reaches_the_next_provider_iteration"]
+disposition = "replaced-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_steer_sent_during_a_round_is_delivered_at_the_next_work_checkpoint"
+status = "deleted"
+owed = "active input addressed to a running turn reaches its next provider iteration"
+note = "FIG-5293, FIG-5294: on the production session activation, a steer sent during a round is delivered by the next work checkpoint and the model's next request holds it, on SQLite memory, SQLite file and PostgreSQL, also killed at every label (fail-before, ack-hidden, zombie, abort, commit-then-abort). The checkpoint admission is the turn driver's and does not depend on the protocol; the law runs the standard protocol's tool rounds, not RLM cells."
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/control_and_cancel.rs"
@@ -15787,10 +15797,10 @@ lane = "L9c"
 laws = [
   "a_stopped_turn_runs_withheld_input_in_a_follow_on",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_steer_at_the_terminal_checkpoint_is_withheld_and_runs_next"
+status = "deleted"
 owed = "a stopped turn runs withheld input in a follow on"
-note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+note = "Superseded by FIG-5293's next-run decision (6b69a8765a, its report's decision (b)): a durable run is one physical turn, so there is no follow-on physical turn inside a run. Input the terminal checkpoint withholds is never bound by the turn and stays session mail; it runs as the session's next run under its own id, however the turn ended. The replacing law proves it, killed at every label on three tiers; a_process_wake_after_the_last_work_checkpoint_runs_next (FIG-5294) proves the same for a process wake."
 
 [[row]]
 path = "crates/lash/tests/facade_host_wrappers.rs"

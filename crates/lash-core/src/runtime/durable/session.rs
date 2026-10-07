@@ -193,6 +193,13 @@ pub trait TurnDrive: Send {
         Vec::new()
     }
 
+    /// The queued turn work, such as a process wake, the turn's checkpoints
+    /// delivered (ADR 0101 §5). Every phase commits and binds it as it does
+    /// [`delivered_inputs`](Self::delivered_inputs).
+    fn delivered_work(&self) -> Vec<crate::AdmittedQueuedWork> {
+        Vec::new()
+    }
+
     /// The plugin state the turn has published: every namespace with its
     /// frontier, as a commit records it. Each phase commits it with its
     /// checkpoint, the pending checkpoint-callback decisions among it, and
@@ -742,8 +749,8 @@ pub struct ComposedCall {
 /// What a phase row's checkpoint holds: the machine's saved turn, the
 /// plugin state the turn had published when the phase committed, which a
 /// resume reinstalls before it restores the machine, and the steering input
-/// its checkpoints delivered, which the phase bound to the run. Encoded by
-/// the phase runner, its owner.
+/// and queued turn work its checkpoints delivered, which the phase bound to
+/// the run. Encoded by the phase runner, its owner.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhaseCheckpoint {
@@ -757,6 +764,10 @@ pub struct PhaseCheckpoint {
     /// application evidence ([`TurnDrive::delivered_inputs`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub delivered: Vec<crate::AdmittedTurnInputs>,
+    /// The queued turn work the turn's checkpoints delivered
+    /// ([`TurnDrive::delivered_work`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delivered_work: Vec<crate::AdmittedQueuedWork>,
 }
 
 /// A turn restored from its rows: the machine, the effect it re-delivers,
@@ -770,6 +781,9 @@ pub struct RestoredTurn {
     /// The steering input the turn's checkpoints delivered before its last
     /// phase committed, which the resumed drive settles with its commit.
     pub delivered: Vec<crate::AdmittedTurnInputs>,
+    /// The queued turn work the turn's checkpoints delivered before its last
+    /// phase committed, which the resumed drive settles with its commit.
+    pub delivered_work: Vec<crate::AdmittedQueuedWork>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
     pub pending: Option<Effect>,
     /// The turn's row.
@@ -975,6 +989,7 @@ impl<'a> TurnRestore<'a> {
             saved,
             plugin_state,
             delivered,
+            delivered_work,
         } = serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
             run: row.run.clone(),
             reason: error.to_string(),
@@ -998,6 +1013,7 @@ impl<'a> TurnRestore<'a> {
             machine,
             plugin_state,
             delivered,
+            delivered_work,
             pending,
             row: row.clone(),
         })
