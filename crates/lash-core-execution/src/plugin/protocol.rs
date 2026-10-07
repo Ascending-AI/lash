@@ -113,6 +113,7 @@ pub struct ProtocolSessionContext<'a> {
     session_id: &'a SessionId,
     fleet_format: crate::FleetFormat,
     recorded_render: Option<&'a crate::RecordedRender>,
+    prompt_history: Option<&'a SessionReadView>,
 }
 
 impl<'a> ProtocolSessionContext<'a> {
@@ -121,12 +122,23 @@ impl<'a> ProtocolSessionContext<'a> {
             session_id,
             fleet_format,
             recorded_render: None,
+            prompt_history: None,
         }
     }
 
     pub fn with_recorded_render(mut self, recorded: &'a crate::RecordedRender) -> Self {
         self.recorded_render = Some(recorded);
         self
+    }
+
+    /// The committed history view used by this call's prompt cut.
+    pub fn with_prompt_history(mut self, history: &'a SessionReadView) -> Self {
+        self.prompt_history = Some(history);
+        self
+    }
+
+    pub fn prompt_history(&self) -> Option<&SessionReadView> {
+        self.prompt_history
     }
 
     pub fn recorded_render(&self) -> Option<&crate::RecordedRender> {

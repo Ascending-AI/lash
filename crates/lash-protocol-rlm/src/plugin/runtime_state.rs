@@ -66,12 +66,13 @@ impl RlmRuntimeState {
     /// The facts the session's prompt sections render (ADR 0133): the
     /// current bound-variables view and the read-only variables.
     ///
-    /// The runtime asks only where it composes a call's prompt, and journals
-    /// the composed text with the execution-environment sync, so a redrive
-    /// replays the recorded text and never reads this state (FIG-3538).
+    /// The runtime asks only where it composes a call's prompt. An admitted
+    /// call records its prompt, so a resend never reads this state again.
     pub(crate) async fn prompt_facts(
         &self,
         recorded: Option<&lash_core::RecordedRender>,
+        history: Option<&lash_core::SessionReadView>,
+        images: bool,
     ) -> Result<crate::prompt_sections::RlmPromptFacts, SessionError> {
         let renderer = self.dialect.renderer();
         let recorded = lash_core::RecordedRender::require_available(recorded, renderer.0.id())
@@ -91,6 +92,16 @@ impl RlmRuntimeState {
             .prepare_bound_variables_prompt(&exclude, params.preview)?
             .render();
         Ok(crate::prompt_sections::RlmPromptFacts {
+            history_binding: Arc::from(
+                crate::prompt_sections::history_binding(
+                    &self.dialect,
+                    &history
+                        .map(|view| view.chronological_projection())
+                        .unwrap_or_default(),
+                    images,
+                )
+                .map_err(history_corruption)?,
+            ),
             bound_variables,
             read_only_variables,
         })
@@ -1108,7 +1119,7 @@ mod tests {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
                 let render = crate::testing::recorded_test_render();
                 let prompt = state
-                    .prompt_facts(Some(&render))
+                    .prompt_facts(Some(&render), None, true)
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1124,7 +1135,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .prompt_facts(Some(&render))
+                    .prompt_facts(Some(&render), None, true)
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1153,7 +1164,7 @@ mod tests {
                     .await
                     .expect("execute cell before late cancellation");
                 let rendered = state
-                    .prompt_facts(Some(&render))
+                    .prompt_facts(Some(&render), None, true)
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1164,7 +1175,7 @@ mod tests {
                     .await
                     .expect("cancel second cell");
                 let rendered = state
-                    .prompt_facts(Some(&render))
+                    .prompt_facts(Some(&render), None, true)
                     .await
                     .expect("prompt facts")
                     .bound_variables;

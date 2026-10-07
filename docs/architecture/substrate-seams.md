@@ -62,7 +62,7 @@ L13 = FIG-5193, L3t = FIG-5208, L9t = FIG-5210.
 | | `LlmCall` | phase-transaction writes: `model.start` pins the call (its identity, its request with the composed text) together with the turn's plugin state, the pending checkpoint-callback decisions among it, and the call's prompt snapshot (ADR 0133 §6, FIG-5255), `model.done` commits its answer |
 | | `Direct` | admitted execution of the calling tool's body |
 | | `SyncExecutionEnvironment`, `ResolveTurnConfig`, `RecordCompactionBase` | phase-transaction write (`turn.prepare`); the environment sync records the tool specs and composes no prompt: each model call composes its sections at `model.start` (ADR 0133 §6) |
-| | `RenderCompactionPrompt` | deleted (ADR 0133 §8, FIG-5259, FIG-5260): the compaction call composes its sections like any model call, and its snapshot commits with its admission |
+| | `RenderCompactionPrompt` | live until FIG-5259/FIG-5260 delete it (ADR 0133 §8); their replacement compaction call will compose sections and commit its snapshot with admission |
 | | `Checkpoint` | phase-transaction write (the bounded checkpoint ref on the turn row) |
 | | `RecoverFollowOn` | deleted: restore reads the turn row (S3) |
 | | `TraceBoundary` | phase-transaction write (the trace receipt rides the commit) |

@@ -12,7 +12,7 @@
 //! call's `model.start`, so the admitted request never shows state that is
 //! not durable. The composed text is lowered into the request the machine
 //! waits on: `InitialInstructions` as its instructions, `CurrentContext` as
-//! one system message after the conversation, outside its history. A resend
+//! one User message after the conversation, outside its history. A resend
 //! sends the admitted request and composes nothing.
 
 use std::sync::Arc;
@@ -45,6 +45,7 @@ impl RuntimeTurnDriver<'static> {
         call: u32,
         messages: crate::MessageSequence,
         request: Arc<LlmRequest>,
+        has_current_context_prefix: bool,
     ) -> Result<Result<ComposedCall, LlmCallError>, RuntimeError> {
         let plugins = Arc::clone(self.session.plugins());
         let catalog = plugins.prompt_catalog();
@@ -58,7 +59,7 @@ impl RuntimeTurnDriver<'static> {
         // previous round's outcomes and the checkpoint deliveries after it.
         let history = u32::try_from(<[crate::Message]>::len(&messages)).unwrap_or(u32::MAX);
         let view = self.checkpoint_state_view(messages, iteration);
-        let protocol_facts = match self.protocol_prompt_facts().await {
+        let protocol_facts = match self.protocol_prompt_facts(&view).await {
             Ok(facts) => facts,
             Err(error) => {
                 return match SyncFailure::of_session_error(SyncFailureKind::ProtocolFacts, error) {
@@ -177,7 +178,7 @@ impl RuntimeTurnDriver<'static> {
             }
         };
         Ok(Ok(ComposedCall {
-            request: lower(request, composed),
+            request: lower(request, composed, has_current_context_prefix),
             records: vec![record],
         }))
     }
@@ -188,6 +189,7 @@ impl RuntimeTurnDriver<'static> {
     /// rather than asking again (FIG-3538).
     async fn protocol_prompt_facts(
         &self,
+        history: &crate::SessionReadView,
     ) -> Result<Option<crate::plugin::prompt::ProtocolPromptFacts>, crate::SessionError> {
         let protocol_session = Arc::clone(self.session.plugins().protocol_session());
         let recorded_render = self
@@ -199,7 +201,8 @@ impl RuntimeTurnDriver<'static> {
         let mut context = crate::plugin::ProtocolSessionContext::new(
             &self.session_id,
             self.session.fleet_format(),
-        );
+        )
+        .with_prompt_history(history);
         if let Some(recorded_render) = recorded_render {
             context = context.with_recorded_render(recorded_render);
         }
@@ -313,7 +316,11 @@ fn refused(code: FailureCode, message: String, raw: Option<String>) -> LlmCallEr
 
 /// `request` with `composed` lowered onto it ([`crate::sansio::place_prompt`]).
 /// An empty composition leaves `request` as it is.
-fn lower(request: Arc<LlmRequest>, composed: ComposedPrompt) -> Arc<LlmRequest> {
+fn lower(
+    request: Arc<LlmRequest>,
+    composed: ComposedPrompt,
+    has_current_context_prefix: bool,
+) -> Arc<LlmRequest> {
     let ComposedPrompt {
         initial_instructions,
         current_context,
@@ -327,6 +334,7 @@ fn lower(request: Arc<LlmRequest>, composed: ComposedPrompt) -> Arc<LlmRequest> 
         &mut request,
         initial_instructions.map(Arc::from),
         current_context.map(Arc::from),
+        has_current_context_prefix,
     );
     Arc::new(request)
 }

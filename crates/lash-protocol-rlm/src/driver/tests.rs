@@ -98,7 +98,6 @@ fn assistant_prose_event(id: &str, text: &str) -> SessionHistoryRecord {
 
 pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
     RlmContextProjector {
-        prompt_features: Default::default(),
         max_output_chars,
         dialect: Arc::new(SessionDialect::prompt_only(
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
@@ -170,12 +169,54 @@ fn project_iteration_request_with_generation(
 /// A request projected from a one-message history, for the prompt laws
 /// that place sections on it.
 pub(crate) fn projected_request() -> LlmRequest {
-    Arc::unwrap_or_clone(project_iteration_request(
-        &projector(1000),
-        &[user_event("u1", "first")],
-        0,
-        "test-model",
-    ))
+    projected_request_with_facts(crate::RlmChannel::Cell, false, true).0
+}
+
+pub(crate) fn prompt_history_fixture(structured: bool) -> Vec<SessionHistoryRecord> {
+    let mut history = vec![user_event("u1", "first")];
+    if structured {
+        history.push(step_event(0, "let value = 1;", "1"));
+    }
+    history
+}
+
+pub(crate) fn projected_request_with_facts(
+    channel: crate::RlmChannel,
+    structured: bool,
+    images: bool,
+) -> (LlmRequest, crate::prompt_sections::RlmPromptFacts) {
+    let cell = projector(1000);
+    let dialect = Arc::clone(&cell.dialect);
+    let projector: Arc<dyn ContextProjector<lash_core::HostTurnProtocol>> = match channel {
+        crate::RlmChannel::Cell => Arc::new(cell),
+        crate::RlmChannel::NativeTool => crate::native::testing_projector(Arc::clone(&dialect)),
+    };
+    assert!(projector.has_current_context_prefix());
+    let events = prompt_history_fixture(structured);
+    let messages = lash_core::facade_support::MessageSequence::default();
+    let projection =
+        lash_core::facade_support::ChronologicalProjection::from_turn_view(&events, &messages);
+    let facts = crate::prompt_sections::RlmPromptFacts {
+        history_binding: Arc::from(
+            crate::prompt_sections::history_binding(&dialect, &projection, images)
+                .expect("valid history"),
+        ),
+        bound_variables: Arc::from("- `scratch_note` = \"saved\""),
+        read_only_variables: None,
+    };
+    let config = projection_test_config("test-model", Default::default(), None);
+    let request = projector
+        .project(ProjectorContext {
+            config: &config,
+            messages: &messages,
+            events: &events,
+            turn_causes: &[],
+            protocol_iteration: 0,
+            use_tools: false,
+            environment: &Default::default(),
+        })
+        .expect("valid history");
+    (Arc::unwrap_or_clone(request), facts)
 }
 
 #[test]
@@ -222,8 +263,6 @@ pub(super) fn projection_test_config(
             .expect("RLM options"),
     }
 }
-
-mod prompt_features;
 
 #[test]
 fn rlm_projector_sends_no_stop_sequence_without_caller_stops() {
@@ -280,7 +319,6 @@ fn folded_step_renders_as_emission_cell_not_history_echo() {
     ];
 
     let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
-        images: true,
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -341,7 +379,6 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
     ];
 
     let messages = render_history_messages(&RlmHistoryRenderInput {
-        images: true,
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -428,7 +465,6 @@ fn natural_prose_history_is_byte_unchanged() {
     ];
 
     let messages = render_history_messages(&RlmHistoryRenderInput {
-        images: true,
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -462,7 +498,6 @@ fn committed_transcript_remains_the_rolling_cache_fence() {
     ];
 
     let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
-        images: true,
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -570,7 +605,6 @@ fn process_wake_history_renders_as_chronological_event_context() {
     let events = [event];
 
     let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
-        images: true,
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -607,7 +641,6 @@ fn active_turn_causes_render_in_current_turn_events_without_history_duplication(
     let messages = lash_core::facade_support::MessageSequence::from(vec![event_message]);
 
     let rendered = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
-        images: true,
         dialect: projector.dialect.as_ref(),
         events: &[],
         turn_messages: &messages,
@@ -669,7 +702,6 @@ fn printed_images_render_as_llm_image_blocks() {
     let events = [event];
 
     let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
-        images: true,
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -710,7 +742,6 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
     let events = [user_event("u1", "first"), step_event(0, "print 1", "1")];
 
     let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
-        images: true,
         dialect: projector.dialect.as_ref(),
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -759,34 +790,6 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
             ..
         }) if text.contains("=== CURRENT ITERATION: 2 ===")
     ));
-}
-
-/// The current iteration's tail carries the history binding; the bound
-/// values are the protocol's late section, not the projector's.
-#[test]
-fn the_current_iteration_tail_declares_the_history_binding() {
-    let events = vec![
-        user_event("u1", "inspect"),
-        step_event(0, "value = 1", "1"),
-        step_event(1, "scratch_note = \"saved\"", "saved"),
-    ];
-    let request = project_iteration_request(&projector(1000), &events, 1, "test-model");
-    let tail = message_text(request.messages.last().expect("current iteration tail"));
-
-    assert!(tail.contains("=== CURRENT ITERATION: 2 ==="), "{tail}");
-    assert!(tail.contains("=== BOUND VARIABLES ==="), "{tail}");
-    assert!(
-        tail.contains("- `history`: `HistoryItem[]`, read-only, 3 entries"),
-        "{tail}"
-    );
-    for section in [
-        "scratch_note",
-        "=== FINALIZATION ===",
-        "=== CONTEXT BUDGET ===",
-    ] {
-        assert!(!tail.contains(section), "{section}: {tail}");
-    }
-    assert_eq!(request.instructions, None);
 }
 
 #[test]

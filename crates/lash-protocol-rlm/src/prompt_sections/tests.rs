@@ -74,6 +74,7 @@ fn facts() -> RlmPromptFacts {
         .bind_json("current_query", serde_json::json!("open issues"))
         .expect("bind");
     RlmPromptFacts {
+        history_binding: Arc::from(""),
         bound_variables: Arc::from(""),
         read_only_variables: crate::projection::read_only_variables_prompt(
             &bindings,
@@ -328,6 +329,24 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
         assert!(!rendered.contains("A tool found by search."));
     }
 
+    let mut hidden_ask = tool("ask", "user", "ask", "Ask the user.");
+    hidden_ask.manifest.inline = false;
+    let asking = lash_core::ToolCatalog::from_tool_definitions(vec![
+        tool("search_tools", "tools", "search", "Find tools."),
+        hidden_ask,
+    ]);
+    let composed = compose_rlm(
+        RlmSections {
+            discovery: Some(lash_core::ToolDiscovery {
+                operation: "tools.search".to_string(),
+            }),
+            ..sections(&asking)
+        },
+        turn(asking.clone()),
+    );
+    assert!(initial(&composed).contains("Ask only when progress is blocked."));
+    assert!(!initial(&composed).contains("`user.ask("));
+
     let plugins: [Arc<dyn SessionPlugin>; 2] = [
         Arc::new(sections(&full)),
         Arc::new(HostWrappers(vec![(
@@ -376,7 +395,7 @@ fn a_section_with_nothing_to_say_renders_nothing() {
     assert_eq!(
         current(&composed),
         format!(
-            "=== FINALIZATION ===\n\n{}",
+            "\n=== FINALIZATION ===\n\n{}",
             sections(&lash_core::ToolCatalog::default())
                 .dialect
                 .finalization_copy(&RlmTermination::default(), RlmChannel::Cell)
@@ -417,6 +436,7 @@ fn bound_variables_render_late_in_name_order() {
         RlmSections::typescript(),
         Call {
             facts: Some(RlmPromptFacts {
+                history_binding: Arc::from(""),
                 bound_variables,
                 read_only_variables: None,
             }),
@@ -612,19 +632,20 @@ fn a_section_renders_the_same_text_wherever_the_host_places_it() {
     );
 
     // Placed on a request, the late text follows the projected history as
-    // runtime feedback, outside it; the early text is the instructions'.
+    // User context, outside it; the early text is the instructions'.
     let place = |composed: &ComposedPrompt| {
         let mut request = crate::driver::tests::projected_request();
         lash_core::sansio::place_prompt(
             &mut request,
             composed.initial_instructions.as_deref().map(Arc::from),
             composed.current_context.as_deref().map(Arc::from),
+            true,
         );
         request
     };
     let late_request = place(&late_first);
     let tail = late_request.messages.last().expect("the late context");
-    assert!(matches!(tail.role, lash_core::llm::types::LlmRole::System));
+    assert!(matches!(tail.role, lash_core::llm::types::LlmRole::User));
     assert!(crate::driver::tests::message_text(tail).ends_with(&block(10_000)));
     let early_request = place(&early_first);
     assert!(
@@ -656,6 +677,7 @@ fn the_initial_instructions_are_stable_while_globals_change() {
             RlmSections::typescript(),
             Call {
                 facts: Some(RlmPromptFacts {
+                    history_binding: Arc::from(""),
                     bound_variables,
                     read_only_variables: None,
                 }),
@@ -668,4 +690,106 @@ fn the_initial_instructions_are_stable_while_globals_change() {
     assert_eq!(previous.initial_instructions, next.initial_instructions);
     assert!(!initial(&next).contains("scratch_note"));
     assert!(current(&next).contains("scratch_note"));
+}
+
+/// RLM-LATE-LAYOUT (FIG-5271): sections continue the iteration in one User
+/// message, with one headed variables block including the built-in history.
+#[test]
+fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
+    for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {
+        for (structured, images) in [(false, true), (true, true), (true, false)] {
+            let sections = RlmSections {
+                channel,
+                ..RlmSections::typescript()
+            };
+            let options = if images {
+                RlmTurnOptions::default()
+            } else {
+                RlmTurnOptions {
+                    termination: Some(RlmTermination::Natural {
+                        schema: Some(
+                            lash_sansio::JsonSchema::admit(
+                                serde_json::json!({ "type": "integer" }),
+                            )
+                            .expect("valid schema"),
+                        ),
+                    }),
+                    final_answer_format: Some(RlmFinalAnswerFormat::Custom {
+                        guidance: "Write one sentence.".to_string(),
+                    }),
+                    render: None,
+                }
+            };
+            let termination = options.effective_termination();
+            let finalization = sections.dialect.finalization_copy(&termination, channel);
+            let optional = if images {
+                String::new()
+            } else {
+                format!(
+                    "\n\n=== REQUIRED OUTPUT ===\n\n{}\n\n=== FINAL ANSWER FORMAT ===\n\nWrite one sentence.\n\n=== CONTEXT BUDGET ===\n\nTurn: 1 · Tokens: 10000 · frame switch threshold: 200000 (5%).",
+                    crate::driver::required_output_block(&sections.dialect, &termination)
+                        .expect("required output")
+                )
+            };
+            let schema = if structured {
+                format!(
+                    "\n\nSchema:\n{}",
+                    sections.dialect.history_item_definition(images)
+                )
+            } else {
+                String::new()
+            };
+            let (mut request, facts) =
+                crate::driver::tests::projected_request_with_facts(channel, structured, images);
+            let history_messages = request.messages.len() - 1;
+            let composed = compose_rlm(
+                RlmSections {
+                    budget_tokens: Some(200_000),
+                    ..sections
+                },
+                Call {
+                    facts: Some(facts),
+                    options,
+                    committed_usage: (!images).then(|| usage(10_000)),
+                    ..Call::default()
+                },
+            );
+            lash_core::sansio::place_prompt(
+                &mut request,
+                composed.initial_instructions.as_deref().map(Arc::from),
+                composed.current_context.as_deref().map(Arc::from),
+                true,
+            );
+            assert_eq!(
+                request.messages.len(),
+                history_messages + 1,
+                "history plus one late message"
+            );
+            let tail = request.messages.last().expect("late message");
+            assert!(matches!(tail.role, lash_core::llm::types::LlmRole::User));
+            let text = crate::driver::tests::message_text(tail);
+            let count = if structured { "2 entries" } else { "1 entry" };
+            assert_eq!(
+                text,
+                format!(
+                    "\n\n\n=== CURRENT ITERATION: 1 ===\n\n\n=== BOUND VARIABLES ===\n\n\
+                 - `history`: `HistoryItem[]`, read-only, {count}{schema}\n\n\
+                 - `scratch_note` = \"saved\"\n\n\n=== FINALIZATION ===\n\n{finalization}{optional}"
+                )
+            );
+            assert_eq!(text.matches("=== BOUND VARIABLES ===").count(), 1);
+            if !images {
+                assert!(!text.contains("HistoryImage"));
+                assert!(!text.contains("images?"));
+            }
+            assert!(!tail.starts_user_segment, "the late context is synthetic");
+            assert!(matches!(
+                tail.blocks.as_slice(),
+                [lash_core::llm::types::LlmContentBlock::Text {
+                    cache_breakpoint: false,
+                    ..
+                }]
+            ));
+        }
+    }
 }

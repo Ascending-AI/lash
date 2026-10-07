@@ -12,7 +12,6 @@ use lash_rlm_types::RlmAttachmentRef;
 use crate::projection::{decode_rlm_protocol_event, rlm_history_projection};
 
 pub(super) struct RlmHistoryRenderInput<'a> {
-    pub(super) images: bool,
     pub(super) dialect: &'a SessionDialect,
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
     pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
@@ -23,11 +22,6 @@ pub(super) struct RlmHistoryRenderInput<'a> {
 
 #[derive(Clone, Copy)]
 pub(super) struct CurrentIterationMessageInput<'a> {
-    pub(super) dialect: &'a crate::dialect::SessionDialect,
-    pub(super) history_type: &'static str,
-    pub(super) images: bool,
-    pub(super) history_len: usize,
-    pub(super) history_has_structure: bool,
     pub(super) protocol_iteration: usize,
     pub(super) turn_causes: &'a [lash_core::TurnCause],
 }
@@ -44,17 +38,6 @@ pub(super) fn build_rlm_history_messages_from_turn(
 ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
     let mut messages = render_history_messages(&input)?;
     let saw_history = !messages.is_empty();
-    let history = rlm_history_projection(
-        &lash_core::facade_support::ChronologicalProjection::from_turn_view(
-            input.events,
-            input.turn_messages,
-        ),
-    )?;
-    let history_len = history.len();
-    let history_has_structure = history.history().iter().any(|item| match item {
-        lash_rlm_types::RlmHistoryItem::LashlangStep { .. } => true,
-        lash_rlm_types::RlmHistoryItem::Message { attachments, .. } => !attachments.is_empty(),
-    });
     if !saw_history {
         messages.push(LlmMessage::new(
             LlmRole::User,
@@ -69,11 +52,6 @@ pub(super) fn build_rlm_history_messages_from_turn(
     append_current_iteration_message(
         &mut messages,
         CurrentIterationMessageInput {
-            dialect: input.dialect,
-            history_type: input.dialect.prompt_vocabulary().history_type,
-            images: input.images,
-            history_len,
-            history_has_structure,
             protocol_iteration: input.protocol_iteration,
             turn_causes: input.turn_causes,
         },
@@ -320,9 +298,8 @@ fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<Pend
     }
 }
 
-/// The current iteration's history facts: its number, the turn's causes and
-/// the `history` binding. The protocol's instructions for the call are its
-/// prompt sections, placed by the host's plan (ADR 0133).
+/// The current iteration's history prefix: its number and turn causes only.
+/// All instruction text is supplied by prompt sections (ADR 0133).
 fn append_current_iteration_message(
     messages: &mut Vec<LlmMessage>,
     input: CurrentIterationMessageInput<'_>,
@@ -336,22 +313,6 @@ fn append_current_iteration_message(
     {
         current_prompt.push_str("\n\n");
         current_prompt.push_str(&turn_events);
-    }
-    current_prompt.push_str("\n\n\n=== BOUND VARIABLES ===\n\n");
-    let _ = write!(
-        current_prompt,
-        "- `history`: `{}`, read-only, {} {}",
-        input.history_type,
-        input.history_len,
-        if input.history_len == 1 {
-            "entry"
-        } else {
-            "entries"
-        }
-    );
-    if input.history_has_structure {
-        current_prompt.push_str("\n\nSchema:\n");
-        current_prompt.push_str(&input.dialect.history_item_definition(input.images));
     }
     messages.push(LlmMessage::new(
         LlmRole::User,

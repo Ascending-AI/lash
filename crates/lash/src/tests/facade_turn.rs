@@ -1060,12 +1060,19 @@ async fn a_turns_request_carries_its_sections_where_they_are_placed() {
     );
     assert!(!instructions.contains("Release 4.2"), "{instructions}");
     let late = request.messages.last().expect("the late context");
-    assert_eq!(late.role, LlmRole::System);
+    assert_eq!(late.role, LlmRole::User);
     assert!(matches!(
         late.blocks.as_slice(),
         [LlmContentBlock::Text { text, .. }] if text.as_ref() == "Release 4.2 freezes on Friday."
     ));
-    assert_eq!(last_user_text(&request), "hello");
+    assert_eq!(
+        request.messages.len(),
+        2,
+        "one user input and one late context"
+    );
+    assert!(matches!(request.messages[0].blocks.as_slice(),
+        [LlmContentBlock::Text { text, .. }] if text.as_ref() == "hello"));
+    assert!(!late.starts_user_segment);
     core.shutdown().await.expect("shutdown");
 }
 

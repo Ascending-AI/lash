@@ -34,9 +34,9 @@
 //! - **Cache fence.** The last history message is marked with a
 //!   `cache_breakpoint` (`mark_last_history_text_cache_breakpoint`) so the
 //!   provider can reuse the stable history prefix across iterations. Active-turn
-//!   input and the volatile `=== CURRENT ITERATION ===` tail — iteration number,
-//!   turn events, bound variables, finalization, required-output schema, context
-//!   budget — are appended uncached.
+//!   input and the volatile iteration prefix (iteration number and turn causes)
+//!   are appended uncached. The host continues that User message with the
+//!   call's CurrentContext sections, outside stored history.
 //! - **Re-fetch handle.** Inline `history[N].output[M]` is the complete value.
 //!   Archived steps expose `history[N].output_archive.attachment`; an explicit
 //!   `control.read_output` reads all of the step's typed values in order.
@@ -44,9 +44,9 @@
 //!   `projection::context::tests::history_step_output_resolves_full_untruncated_value`.
 //!   `history[N]` uses compact canonical semantic indices, so omitted internal
 //!   entries consume no index and rendered re-fetch handles use the remap.
-//! - **Variables.** The live variable namespace is rendered into the volatile
-//!   current-iteration tail. It is deliberately outside the stable system and
-//!   history prefix while remaining adjacent to the work it describes.
+//! - **Variables.** The `bound_variables` prompt section renders the built-in
+//!   history binding, its schema and the live variable namespace from protocol
+//!   facts. Projectors render none of those instruction lines.
 
 #[cfg(test)]
 mod tests;
@@ -65,7 +65,6 @@ use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
 use crate::projection::{decode_rlm_protocol_event, rlm_history_projection};
 
 pub(super) struct RlmHistoryRenderInput<'a> {
-    pub(super) images: bool,
     pub(super) dialect: &'a SessionDialect,
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
     pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
@@ -76,11 +75,6 @@ pub(super) struct RlmHistoryRenderInput<'a> {
 
 #[derive(Clone, Copy)]
 pub(super) struct CurrentIterationMessageInput<'a> {
-    pub(super) dialect: &'a crate::dialect::SessionDialect,
-    pub(super) history_type: &'static str,
-    pub(super) images: bool,
-    pub(super) history_len: usize,
-    pub(super) history_has_structure: bool,
     pub(super) protocol_iteration: usize,
     pub(super) turn_causes: &'a [lash_core::TurnCause],
 }
@@ -98,17 +92,6 @@ pub(super) fn build_rlm_history_messages_from_turn(
 ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
     let mut messages = render_history_messages(&input)?;
     let saw_history = !messages.is_empty();
-    let history = rlm_history_projection(
-        &lash_core::facade_support::ChronologicalProjection::from_turn_view(
-            input.events,
-            input.turn_messages,
-        ),
-    )?;
-    let history_len = history.len();
-    let history_has_structure = history.history().iter().any(|item| match item {
-        lash_rlm_types::RlmHistoryItem::LashlangStep { .. } => true,
-        lash_rlm_types::RlmHistoryItem::Message { attachments, .. } => !attachments.is_empty(),
-    });
     if !saw_history {
         messages.push(LlmMessage::new(
             LlmRole::User,
@@ -123,11 +106,6 @@ pub(super) fn build_rlm_history_messages_from_turn(
     append_current_iteration_message(
         &mut messages,
         CurrentIterationMessageInput {
-            dialect: input.dialect,
-            history_type: input.dialect.prompt_vocabulary().history_type,
-            images: input.images,
-            history_len,
-            history_has_structure,
             protocol_iteration: input.protocol_iteration,
             turn_causes: input.turn_causes,
         },
@@ -373,10 +351,8 @@ fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<Pend
     }
 }
 
-/// The current iteration's history facts: its number, the turn's causes and
-/// the `history` binding. The protocol's instructions for the call (bound
-/// variables, finalization, output and budget) are its prompt sections,
-/// placed by the host's plan (ADR 0133).
+/// The current iteration's history prefix: its number and turn causes only.
+/// All instruction text is supplied by prompt sections (ADR 0133).
 fn append_current_iteration_message(
     messages: &mut Vec<LlmMessage>,
     input: CurrentIterationMessageInput<'_>,
@@ -390,22 +366,6 @@ fn append_current_iteration_message(
     {
         current_prompt.push_str("\n\n");
         current_prompt.push_str(&turn_events);
-    }
-    current_prompt.push_str("\n\n\n=== BOUND VARIABLES ===\n\n");
-    let _ = write!(
-        current_prompt,
-        "- `history`: `{}`, read-only, {} {}",
-        input.history_type,
-        input.history_len,
-        if input.history_len == 1 {
-            "entry"
-        } else {
-            "entries"
-        }
-    );
-    if input.history_has_structure {
-        current_prompt.push_str("\n\nSchema:\n");
-        current_prompt.push_str(&input.dialect.history_item_definition(input.images));
     }
     messages.push(LlmMessage::new(
         LlmRole::User,

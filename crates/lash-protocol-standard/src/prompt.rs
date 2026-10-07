@@ -25,14 +25,7 @@ use lash_core::plugin::{PluginError, PluginRegistrar};
 use crate::{BatchSugar, standard_execution_section};
 
 /// The identity statement the prompt opens with.
-pub const STANDARD_INTRO: &str = "You are an assistant operating the lash harness.";
-const GUIDANCE_BASE: &[&str] = &[
-    "- Be concise; no filler, hedging, or performative tone.",
-    "- Act as soon as the next step is clear; do not restate conclusions.",
-    "- Prefer the simplest correct solution.",
-];
-const GUIDANCE_INTERACTIVE: &str =
-    "- Take initiative when the user's intent is clear. Ask only when progress is blocked.";
+pub use lash_core::facade_support::PROTOCOL_INTRO as STANDARD_INTRO;
 
 /// The keys the standard protocol registers its sections under.
 pub mod section_keys {
@@ -106,16 +99,15 @@ fn execution(behaviour: &StandardPromptBehaviour, _: &PromptInput<'_>) -> Sectio
 }
 
 fn guidance(behaviour: &StandardPromptBehaviour, input: &PromptInput<'_>) -> SectionText {
-    let mut bullets = GUIDANCE_BASE.to_vec();
-    if behaviour
+    let interactive = behaviour
         .visible(input)
         .tools
         .iter()
-        .any(|tool| tool.manifest.name == "ask")
-    {
-        bullets.insert(1, GUIDANCE_INTERACTIVE);
-    }
-    titled("Guidance", [bullets.join("\n")])
+        .any(|tool| tool.manifest.name == "ask");
+    titled(
+        "Guidance",
+        [lash_core::facade_support::protocol_guidance(interactive)],
+    )
 }
 
 /// Register the protocol's sections.

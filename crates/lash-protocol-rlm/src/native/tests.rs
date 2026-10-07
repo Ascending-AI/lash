@@ -1289,6 +1289,7 @@ fn configured_prompt_is_instructions_on_both_channels() {
                 &mut request,
                 (!prompt.is_empty()).then(|| Arc::from(prompt)),
                 None,
+                true,
             );
             assert_eq!(request.instructions.as_deref(), expected, "native={native}");
             assert!(

@@ -26,13 +26,11 @@ use history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 pub struct RlmProjectorConfig {
     pub dialect: Arc<dyn crate::dialect::Dialect>,
     pub max_output_chars: usize,
-    pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub lashlang_surface: LashlangSurface,
 }
 
 pub(crate) struct RlmPreambleConfig {
     pub(crate) max_output_chars: usize,
-    pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
 }
 
 impl RlmProjectorConfig {
@@ -41,7 +39,6 @@ impl RlmProjectorConfig {
         Self {
             dialect,
             max_output_chars: 10_000,
-            prompt_features: crate::protocol::RlmPromptFeatures::default(),
             lashlang_surface: LashlangSurface::default(),
         }
     }
@@ -59,7 +56,6 @@ pub fn build_rlm_preamble(
         input,
         RlmPreambleConfig {
             max_output_chars: config.max_output_chars,
-            prompt_features: config.prompt_features,
         },
         dialect,
     )
@@ -78,7 +74,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 &dialect,
             ))),
             projector: Arc::new(RlmContextProjector {
-                prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
                 dialect: Arc::clone(&dialect),
             }),
@@ -90,12 +85,15 @@ pub(crate) fn build_rlm_preamble_with_dialect(
 }
 
 struct RlmContextProjector {
-    prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     dialect: Arc<SessionDialect>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
+    fn has_current_context_prefix(&self) -> bool {
+        true
+    }
+
     fn project(
         &self,
         ctx: ProjectorContext<'_>,
@@ -104,7 +102,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
 
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
-                images: self.prompt_features.images,
                 dialect: self.dialect.as_ref(),
                 events: ctx.events,
                 turn_messages: ctx.messages,
@@ -198,7 +195,6 @@ impl RlmContextProjector {
     #[cfg(test)]
     fn format_history(&self, events: &[lash_core::SessionHistoryRecord]) -> String {
         let messages = render_history_messages(&RlmHistoryRenderInput {
-            images: true,
             dialect: self.dialect.as_ref(),
             events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -234,7 +230,6 @@ pub(crate) fn render_conformance_history_message(
     )];
 
     let rendered = render_history_messages(&RlmHistoryRenderInput {
-        images: true,
         dialect: &dialect,
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),

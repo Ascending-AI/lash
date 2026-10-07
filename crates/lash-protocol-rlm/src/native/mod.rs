@@ -12,3 +12,6 @@ pub use transport::NATIVE_TRANSPORT_VERSION;
 mod finish;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) use projector::testing_projector;

@@ -118,7 +118,11 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
     ) -> Result<Option<lash_core::plugin::prompt::ProtocolPromptFacts>, SessionError> {
         let facts = self
             .runtime_state
-            .prompt_facts(ctx.recorded_render())
+            .prompt_facts(
+                ctx.recorded_render(),
+                ctx.prompt_history(),
+                self.config.prompt_features.images,
+            )
             .await?;
         Ok(Some(Arc::new(facts)))
     }
@@ -270,10 +274,28 @@ mod tests {
         .expect("bind the session's read-only variable");
         let session_id = SessionId::from("rlm-prompt-facts");
         let render = crate::testing::recorded_test_render();
+        let mut snapshot = lash_core::SessionSnapshot::new(
+            session_id.clone(),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(16),
+            ),
+        );
+        snapshot.session_graph.append_node_drafts_at(
+            "prompt-facts",
+            crate::driver::tests::prompt_history_fixture(true)
+                .into_iter()
+                .map(lash_core::session_graph::SessionNodeDraft::event),
+            "2026-01-01T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical timestamp"),
+        );
+        let history = lash_core::SessionReadView::from_snapshot(&snapshot);
         let facts = session
             .prompt_facts(
                 ProtocolSessionContext::new(&session_id, lash_core::FleetFormat::current())
-                    .with_recorded_render(&render),
+                    .with_recorded_render(&render)
+                    .with_prompt_history(&history),
             )
             .await
             .expect("the facts derive")
@@ -286,6 +308,12 @@ mod tests {
             .as_deref()
             .expect("the read-only variables");
         assert!(variables.contains("- `current_query`: `string`, read-only"));
+        assert!(
+            facts
+                .history_binding
+                .starts_with("- `history`: `HistoryItem[]`, read-only, 2 entries\n\nSchema:\n")
+        );
+        assert!(facts.history_binding.contains("HistoryItem"));
     }
 
     #[test]

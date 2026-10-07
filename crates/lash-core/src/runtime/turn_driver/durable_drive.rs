@@ -288,7 +288,13 @@ impl TurnDrive for RuntimeDrive {
         let iteration = self.machine.protocol_iteration();
         let messages = self.machine.prompt_message_sequence();
         self.driver
-            .compose_call(iteration, call, messages, request)
+            .compose_call(
+                iteration,
+                call,
+                messages,
+                request,
+                self.machine.has_current_context_prefix(),
+            )
             .await
             .map_err(runtime)
     }

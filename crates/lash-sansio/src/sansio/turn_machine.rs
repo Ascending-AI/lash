@@ -14,6 +14,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.messages = messages;
     }
 
+    /// Whether this machine's projector contributes a dedicated User prefix
+    /// for the call's current-context sections.
+    pub fn has_current_context_prefix(&self) -> bool {
+        self.config.projector.has_current_context_prefix()
+    }
+
     /// The view used only to project model requests.
     pub fn prompt_message_sequence(&self) -> MessageSequence {
         self.prompt_messages.clone()

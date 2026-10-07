@@ -433,21 +433,36 @@ pub struct ExecutionEnvironmentSync {
 }
 
 /// Lower a call's composed prompt onto `request`, which a projector rendered
-/// from history alone: the `InitialInstructions` text is the request's
-/// instructions, and the `CurrentContext` text one system message late, after
-/// the projected conversation and outside history, as runtime feedback (ADR
-/// 0133). A placement with no text adds nothing.
+/// from history alone. Initial instructions go in the request's instruction
+/// field. Current context continues the projector's dedicated User prefix, or
+/// becomes one trailing User message when it has no prefix (ADR 0133).
+/// A placement with no text adds nothing.
 pub fn place_prompt(
     request: &mut LlmRequest,
     instructions: Option<Arc<str>>,
     current_context: Option<Arc<str>>,
+    has_current_context_prefix: bool,
 ) {
     request.instructions = instructions;
     if let Some(context) = current_context {
-        request.messages.push(crate::llm::types::LlmMessage::text(
-            crate::llm::types::LlmRole::System,
-            context,
-        ));
+        if has_current_context_prefix && let Some(prefix) = request.messages.last_mut() {
+            let blocks = Arc::make_mut(&mut prefix.blocks);
+            match blocks.last_mut() {
+                Some(crate::llm::types::LlmContentBlock::Text { text, .. }) => {
+                    *text = Arc::from(format!("{text}\n\n\n{context}"));
+                }
+                _ => blocks.push(crate::llm::types::LlmContentBlock::Text {
+                    text: Arc::from(format!("\n\n\n{context}")),
+                    response_meta: None,
+                    cache_breakpoint: false,
+                }),
+            }
+        } else {
+            request.messages.push(crate::llm::types::LlmMessage::text(
+                crate::llm::types::LlmRole::User,
+                context,
+            ));
+        }
     }
 }
 
@@ -863,6 +878,13 @@ pub struct ProjectorContext<'a, M: TurnProtocol = UnitTurnProtocol> {
 /// recorded inputs and must reach the same decision. Interior mutability in
 /// an implementor is a contract violation.
 pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
+    /// Whether projection ends in a dedicated, uncached User prefix for the
+    /// call's CurrentContext sections. Ordinary conversation messages never
+    /// count as that prefix.
+    fn has_current_context_prefix(&self) -> bool {
+        false
+    }
+
     fn project(
         &self,
         ctx: ProjectorContext<'_, M>,

@@ -87,7 +87,6 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     render_history_messages(&RlmHistoryRenderInput {
-        images: true,
         dialect: &dialect,
         events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -526,32 +525,6 @@ fn a_surviving_cells_prose_is_not_taken_by_the_scrub() {
 }
 
 #[test]
-fn history_teaching_follows_indexable_entries() {
-    let dialect = crate::dialect::typescript_test_dialect();
-    for (events, structured) in [
-        (vec![assistant_reasoning_event(&[], "current task")], false),
-        (vec![step_event("print 1")], true),
-    ] {
-        let messages = super::build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
-            images: true,
-            dialect: &dialect,
-            events: &events,
-            turn_messages: &lash_core::facade_support::MessageSequence::default(),
-            turn_causes: &[],
-            max_output_chars: 1000,
-            protocol_iteration: 1,
-        })
-        .expect("valid history fixture");
-        let tail = observation_text(messages.last().unwrap());
-        assert!(!tail.contains("=== FINALIZATION ==="), "{tail}");
-        assert!(tail.contains("`history`: `HistoryItem[]`, read-only, 1 entry"));
-        assert_eq!(tail.contains("type HistoryItem ="), structured);
-        assert!(!tail.contains("truncated"));
-        assert!(!tail.contains("Runtime notes"));
-    }
-}
-
-#[test]
 fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
     let events = vec![
         SessionHistoryRecord::Conversation(ConversationRecord {
@@ -582,7 +555,6 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
     ];
     let dialect = crate::dialect::typescript_test_dialect();
     let messages = render_history_messages(&RlmHistoryRenderInput {
-        images: false,
         dialect: &dialect,
         events: &events,
         turn_messages: &Default::default(),

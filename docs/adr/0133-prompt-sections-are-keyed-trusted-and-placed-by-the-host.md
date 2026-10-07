@@ -108,9 +108,12 @@ is configured independently. The plan has three parts:
 
 `InitialInstructions` places a section in the provider's instruction field.
 `CurrentContext` places it late, after the projected conversation and outside
-its history: the call's late sections are one runtime-feedback (system-role)
-message after everything the protocol's projector rendered. A projector
-renders history only; it never places a section. `Excluded` drops a section:
+its history: the call's late sections are one User-role message (FIG-5271,
+D-PSECREV). RLM's projector contributes only its uncached iteration header
+and turn causes as that message's history prefix; placement continues it with
+sections in plan order. Standard has no such prefix and gets one trailing User
+message. A projector renders history only; it never places a section.
+`Excluded` drops a section:
 the call records the section and its placement like any other, but neither
 its renderer nor a wrapper over it runs, and those wrappers are recorded
 under `absent_targets`. A plugin declares a default placement. The host's

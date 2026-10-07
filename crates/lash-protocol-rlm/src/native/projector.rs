@@ -20,7 +20,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 &dialect,
             ))),
             projector: Arc::new(NativeContextProjector {
-                prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
                 dialect: Arc::clone(&dialect),
             }),
@@ -32,12 +31,15 @@ pub(crate) fn build_rlm_preamble_with_dialect(
 }
 
 struct NativeContextProjector {
-    prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     dialect: Arc<SessionDialect>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
+    fn has_current_context_prefix(&self) -> bool {
+        true
+    }
+
     fn project(
         &self,
         ctx: ProjectorContext<'_>,
@@ -45,7 +47,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
         let mut messages = Vec::new();
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
-                images: self.prompt_features.images,
                 dialect: self.dialect.as_ref(),
                 events: ctx.events,
                 turn_messages: ctx.messages,
@@ -82,4 +83,14 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             provider_trace: None,
         }))
     }
+}
+
+#[cfg(test)]
+pub(crate) fn testing_projector(
+    dialect: Arc<SessionDialect>,
+) -> Arc<dyn ContextProjector<lash_core::HostTurnProtocol>> {
+    Arc::new(NativeContextProjector {
+        max_output_chars: 1000,
+        dialect,
+    })
 }

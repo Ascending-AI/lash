@@ -32,7 +32,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
     "blocks": [
       {
         "Text": {
-          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\n- `history`: `HistoryItem[]`, read-only, 2 entries",
+          "text": "\n\n\n=== CURRENT ITERATION: 2 ===",
           "response_meta": null,
           "cache_breakpoint": false
         }

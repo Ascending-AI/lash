@@ -45,18 +45,7 @@ use crate::plugin::{RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmRecordedConfig};
 use crate::rlm_support::{effective_budget_tokens, format_budget_suffix_with_vocabulary};
 
 /// The identity statement a code-mode prompt opens with.
-pub const RLM_BUILTIN_INTRO: &str = "You are an assistant operating the lash harness.";
-
-const BUILTIN_GUIDANCE: &[&str] = &[
-    "- Be concise; no filler, hedging, or performative tone.",
-    "- Act as soon as the next step is clear; do not restate conclusions.",
-    "- Prefer the simplest correct solution.",
-];
-
-/// Advice that needs a user to talk to: it renders only for a call whose
-/// offered surface has the `ask` tool.
-const BUILTIN_GUIDANCE_INTERACTIVE_ONLY: &str =
-    "- Take initiative when the user's intent is clear. Ask only when progress is blocked.";
+pub use lash_core::facade_support::PROTOCOL_INTRO as RLM_BUILTIN_INTRO;
 
 /// The keys the RLM protocol registers its sections under.
 pub mod section_keys {
@@ -76,10 +65,39 @@ pub mod section_keys {
 /// one call: what its programs have bound.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RlmPromptFacts {
+    /// The built-in history binding and, when structured, its item schema.
+    pub(crate) history_binding: Arc<str>,
     /// The bound-variables view under the run's recorded render.
     pub(crate) bound_variables: Arc<str>,
     /// The declaration of the session's read-only variables.
     pub(crate) read_only_variables: Option<String>,
+}
+
+/// The built-in binding and schema, derived before rendering any section.
+pub(crate) fn history_binding(
+    dialect: &SessionDialect,
+    projection: &lash_core::facade_support::ChronologicalProjection,
+    images: bool,
+) -> Result<String, lash_core::StoredDataCorruption> {
+    let history = crate::projection::rlm_history_projection(projection)?;
+    let mut binding = format!(
+        "- `history`: `{}`, read-only, {} {}",
+        dialect.prompt_vocabulary().history_type,
+        history.len(),
+        if history.len() == 1 {
+            "entry"
+        } else {
+            "entries"
+        },
+    );
+    if history.history().iter().any(|item| match item {
+        lash_rlm_types::RlmHistoryItem::LashlangStep { .. } => true,
+        lash_rlm_types::RlmHistoryItem::Message { attachments, .. } => !attachments.is_empty(),
+    }) {
+        binding.push_str("\n\nSchema:\n");
+        binding.push_str(&dialect.history_item_definition(images));
+    }
+    Ok(binding)
 }
 
 /// The session behaviour every section renders under, fixed when the
@@ -91,16 +109,6 @@ pub(crate) struct RlmSectionBehaviour {
     pub(crate) discovery: Option<lash_core::ToolDiscovery>,
     /// The soft context budget the session's plugin was built with.
     pub(crate) budget_tokens: Option<usize>,
-}
-
-/// The built-in guidance bullets for a call with or without an `ask` tool.
-fn builtin_guidance(interactive: bool) -> String {
-    let mut bullets = BUILTIN_GUIDANCE.to_vec();
-    if interactive {
-        // After the "Be concise" lead-in, beside the other core directives.
-        bullets.insert(1, BUILTIN_GUIDANCE_INTERACTIVE_ONLY);
-    }
-    bullets.join("\n")
 }
 
 /// The execution section a session on `behaviour.channel` renders over
@@ -195,7 +203,7 @@ fn guidance(
         .any(|name| name == "ask");
     Ok(SectionText::Text(format!(
         "## Guidance\n\n{}",
-        builtin_guidance(interactive)
+        lash_core::facade_support::protocol_guidance(interactive)
     )))
 }
 
@@ -251,7 +259,14 @@ fn bound_variables(
     Ok(input
         .protocol_facts::<RlmPromptFacts>()
         .map_or(SectionText::Omit, |facts| {
-            text_or_omit(&*facts.bound_variables)
+            let mut bindings = facts.history_binding.to_string();
+            if !facts.bound_variables.is_empty() {
+                if !bindings.is_empty() {
+                    bindings.push_str("\n\n");
+                }
+                bindings.push_str(&facts.bound_variables);
+            }
+            late_block("BOUND VARIABLES", Some(bindings))
         }))
 }
 
@@ -270,7 +285,10 @@ fn finalization(
             crate::native::prompt::finalization(&behaviour.dialect, &termination)
         }
     };
-    Ok(late_block("FINALIZATION", Some(copy)))
+    // The original tail separates finalization from bindings with three newlines.
+    Ok(SectionText::Text(format!(
+        "\n=== FINALIZATION ===\n\n{copy}"
+    )))
 }
 
 fn required_output(
