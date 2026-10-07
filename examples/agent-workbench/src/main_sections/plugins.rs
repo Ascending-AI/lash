@@ -489,7 +489,7 @@ fn register_workbench_prompt_sections(
                 .map_err(|error| PluginError::Registration(error.to_string()))?,
             PromptSectionId::new(
                 lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-                prompt_key(lash::standard::section_keys::INTRO)?,
+                prompt_key(lash::standard::standard_section_keys::INTRO)?,
             ),
         ),
         Arc::new(

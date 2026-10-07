@@ -129,8 +129,9 @@ pub mod config {
 /// namespace and the command that changes it.
 ///
 /// The prompt is not config: the protocol registers keyed sections under
-/// [`STANDARD_PROTOCOL_PLUGIN_ID`] ([`section_keys`]), placed in the initial
-/// instructions unless the host's [`SetPromptPlan`](crate::config::SetPromptPlan)
+/// [`STANDARD_PROTOCOL_PLUGIN_ID`]
+/// ([`standard_section_keys`](standard::standard_section_keys)), placed in the
+/// initial instructions unless the host's [`SetPromptPlan`](crate::config::SetPromptPlan)
 /// places them. A host adds its own text as sections of its own plugin, and
 /// replaces or omits a built-in section by wrapping it (ADR 0133):
 ///
@@ -138,7 +139,7 @@ pub mod config {
 /// reg.prompt().wrap(
 ///     PromptWrapSpec::new(key("support-intro"), PromptSectionId::new(
 ///         lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-///         key(lash::standard::section_keys::INTRO),
+///         key(lash::standard::standard_section_keys::INTRO),
 ///     )),
 ///     Arc::new(|_: &PromptInput<'_>, _: PromptWrapTarget<'_>, _: SectionText| {
 ///         Ok(SectionText::text("You are the support desk's assistant."))
@@ -151,7 +152,8 @@ pub mod standard {
     pub use lash_protocol_standard::{
         STANDARD_INTRO, STANDARD_PROTOCOL_PLUGIN_ID, SetStandardRender, StandardConfigOwner,
         StandardConfigRefusal, StandardRecordedBehaviour, StandardRecordedConfig,
-        StandardRenderRefusal, StandardRunOptions, StandardTurnOptions, section_keys,
+        StandardRenderRefusal, StandardRunOptions, StandardTurnOptions,
+        section_keys as standard_section_keys,
     };
 }
 pub mod render {

@@ -982,7 +982,7 @@ impl lash_core::plugin::SessionPlugin for HostSections {
                 PromptWrapKey::new("intro").expect("valid wrap key"),
                 PromptSectionId::new(
                     crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-                    PromptSectionKey::new(crate::standard::section_keys::INTRO)
+                    PromptSectionKey::new(crate::standard::standard_section_keys::INTRO)
                         .expect("valid section key"),
                 ),
             ),

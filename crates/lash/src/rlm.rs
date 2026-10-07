@@ -118,7 +118,7 @@ impl RlmSessionReadViewExt for lash_core::SessionReadView {
 /// them again through its run's protocol turn options. The RLM setting a
 /// session changes is its render preferences, through the config command
 /// [`SetRlmRender`]. Its prompt is the protocol's keyed sections
-/// ([`section_keys`]), which a host's own sections and wrappers complement or
+/// ([`rlm_section_keys`]), which a host's own sections and wrappers complement or
 /// replace ([`crate::plugins::PromptSection`]). A host that wants a fact
 /// *asserted* compares
 /// [`RlmSessionExt::rlm_config`] against what it requires and refuses
@@ -181,7 +181,9 @@ pub use lash_protocol_rlm::{
 };
 /// The code-mode prompt sections (ADR 0133): the keys the protocol
 /// registers its sections under, and its built-in intro.
-pub use lash_protocol_rlm::{RLM_BUILTIN_INTRO, RlmProjectorConfig, section_id, section_keys};
+pub use lash_protocol_rlm::{
+    RLM_BUILTIN_INTRO, RlmProjectorConfig, section_id, section_keys as rlm_section_keys,
+};
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.
 pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
