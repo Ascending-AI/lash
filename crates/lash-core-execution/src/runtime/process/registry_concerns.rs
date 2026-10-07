@@ -184,10 +184,8 @@ pub trait ProcessRegistrar: Send + Sync {
     /// Registration is the owner of a process scope coming back, so it also
     /// lifts the scope-retirement fence a prune left behind (ADR 0049). A
     /// backend whose fence rows share its database clears the fence in the
-    /// registration transaction itself; every backend additionally lifts the
-    /// fence of each host bound through [`Self::bind_effect_host`] before
-    /// registration reports success, so a registration that fails leaves the
-    /// id fenced and unregistered exactly as before.
+    /// registration transaction itself, so a registration that fails leaves
+    /// the id fenced and unregistered exactly as before.
     async fn register_process_with_observers(
         &self,
         registration: ProcessRegistration,
