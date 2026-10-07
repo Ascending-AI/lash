@@ -362,6 +362,31 @@ impl RoundTools for ProductionRoundTools {
     }
 
     fn refusal(&self, calls: &[crate::sansio::PendingToolCall]) -> Option<Vec<CompletedCall>> {
+        // A step's group is the count the session's `max_tool_calls` caps on
+        // a protocol without cells: a group past it is refused whole, each
+        // member answering the refusal that names the limit (FIG-4546).
+        let limit = self.context.max_tool_calls();
+        if calls.len() > limit.get() {
+            let exceeded = crate::ToolCallLimitExceeded {
+                scope: crate::ToolCallLimitScope::Cell,
+                limit,
+                counted: 0,
+                requested: calls.len(),
+            };
+            return Some(
+                calls
+                    .iter()
+                    .map(|call| {
+                        answered(
+                            call,
+                            ToolCallOutput::failure(
+                                crate::session::tool_execution::tool_call_limit_failure(exceeded),
+                            ),
+                        )
+                    })
+                    .collect(),
+            );
+        }
         let catalog = self.context.tool_catalog();
         let manifests: Vec<_> = calls
             .iter()

@@ -417,6 +417,7 @@ pub use aggregate::{
     ToolRunAggregateCursor, ToolRunAggregatePoll,
 };
 pub use group::ToolAggregateConsumer;
+pub(crate) use group::tool_call_limit_failure;
 
 impl RuntimeExecutionContext<'_> {
     pub fn tool_execution_owner(
