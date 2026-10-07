@@ -219,7 +219,6 @@ pub mod facade_support {
     pub use crate::plugin::SessionObserverIntent;
     pub use crate::plugin::SessionParam;
     pub use crate::plugin::SessionPlugin;
-    pub use crate::plugin::SessionStateChangedContext;
     pub use crate::plugin::ToolCatalogContribution;
     pub use crate::plugin::ToolPresentationArtifacts;
     pub use crate::plugin::ToolPresentationInput;

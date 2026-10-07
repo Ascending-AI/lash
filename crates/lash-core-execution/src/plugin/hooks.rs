@@ -205,25 +205,8 @@ pub struct SessionConfigChangedContext {
 }
 
 #[derive(Clone)]
-pub struct SessionStateChangedContext {
-    pub session_id: SessionId,
-    /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running run's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a run — never today's head
-    /// inside a run.
-    pub plugin_config: super::AdmittedPluginConfig,
-    pub state: SessionReadView,
-    pub sessions: Arc<dyn SessionReadService>,
-}
-
-#[derive(Clone)]
 pub enum PluginLifecycleEvent {
     TurnFinalized(Arc<AssembledTurn>),
-    /// Best-effort observer hook emitted after durable session state advances.
-    ///
-    /// Hook failures cannot affect the commit, which has already completed, but
-    /// they are returned to the host as advisory `lifecycle_hook_failed` turn issues.
-    TurnPersisted(Box<SessionStateChangedContext>),
     SessionRestored(SessionReadView),
     SessionConfigChanged(Box<SessionConfigChangedContext>),
 }

@@ -970,13 +970,15 @@ pub mod plugins {
         facade_support::TurnHookContext, facade_support::TurnResultHookContext,
     };
     /// Lifecycle observation: what a `reg.session().on_event(..)` hook receives
-    /// once durable session state has advanced, and the contexts each event
-    /// carries. [`PluginLifecycleEvent::TurnPersisted`] fires after the commit it
-    /// describes, so a hook observes a session whose head may already have moved
-    /// on.
+    /// when a turn is finalized, a session is restored, or its configuration
+    /// changes, and the contexts each event carries.
+    ///
+    /// Hosts that need durable post-commit work keep a durable progress cursor
+    /// and page through [`DurableSession::history`](crate::DurableSession::history)
+    /// across frame and fork boundaries. Advance progress after successful,
+    /// idempotent output and schedule reconciliation independently of hooks.
     pub use lash_core::{
         facade_support::PluginLifecycleEvent, facade_support::SessionConfigChangedContext,
-        facade_support::SessionStateChangedContext,
     };
     /// Per-turn context assembly: the prepared messages, prompt contributions,
     /// and tool providers a [`TurnContextTransform`] may rewrite before the

@@ -91,7 +91,6 @@ fn plugin_hook_phase_name(hook_kind: &str, plugin_id: &str) -> String {
 fn lifecycle_event_hook_kind(event: &PluginLifecycleEvent) -> &'static str {
     match event {
         PluginLifecycleEvent::TurnFinalized(_) => "turn_finalized",
-        PluginLifecycleEvent::TurnPersisted(_) => "turn_persisted",
         PluginLifecycleEvent::SessionRestored(_) => "session_restored",
         PluginLifecycleEvent::SessionConfigChanged(_) => "session_config_changed",
     }

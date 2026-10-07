@@ -44,7 +44,7 @@ current naming forms:
   when an async future is cancelled or unwinds.
 - Plugin dispatch uses `plugin_hook.{hook_kind}.{plugin_id}`. The current
   kinds are `before_turn`, `after_turn`, `checkpoint`, `context_transform`,
-  `context_pressure`, `turn_finalized`, `turn_persisted`, `session_restored`
+  `context_pressure`, `turn_finalized`, `session_restored`
   and `session_config_changed`. The plugin id is appended verbatim, without
   escaping, case conversion or normalization. It may contain dots; parsers
   must treat everything after the hook-kind separator as the id. For example,

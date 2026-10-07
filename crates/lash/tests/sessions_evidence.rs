@@ -160,10 +160,6 @@ fn drain_area_witnesses() {
     let _ = lash::plugins::SessionAppendNode::message;
     // W0057: lash::plugins::SessionGraphService [trait]
     fn trait_witness_0057<T: lash::plugins::SessionGraphService>() {}
-    // W0058: lash::plugins::SessionStateChangedContext::sessions [field]
-    field_witness(|value: &lash::plugins::SessionStateChangedContext| {
-        let _ = &value.sessions;
-    });
     // W0059: lash::plugins::SessionStateService [trait]
     fn trait_witness_0059<T: lash::plugins::SessionStateService>() {}
     // W0060: lash::plugins::TurnTransformContext::scoped_effect_controller [field]
