@@ -183,6 +183,11 @@ pub trait TurnDrive: Send {
         cell: CodeCell,
     ) -> Result<(), TurnError>;
 
+    /// The turn accepted an `Immediate` cancel while its cell ran, and the
+    /// phase runner dropped the cell: stop what the cell started that its
+    /// future does not own, its tool bodies' cooperative stop among it.
+    fn stop_cell(&mut self);
+
     /// The turn's commit to its session once its machine is done: the next
     /// revision of `head`, the session's head as the owner loaded it, which
     /// `turn.commit` publishes with the turn's terminal. The store refuses
@@ -197,6 +202,13 @@ pub trait TurnDrive: Send {
         done: TurnDone,
         head: &SessionHead,
     ) -> Result<TurnCommit, TurnError>;
+
+    /// The turn's `turn.commit` was acknowledged: publish what the turn held
+    /// back for it, its stop's terminal among it (ADR 0122), and everything
+    /// queued before it. A drive whose commit was refused, or whose
+    /// acknowledgement was lost, is dropped without it and publishes none of
+    /// what it held.
+    async fn committed(&mut self);
 }
 
 /// A code cell's source.

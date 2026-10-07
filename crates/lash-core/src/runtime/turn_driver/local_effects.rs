@@ -258,7 +258,6 @@ pub(super) fn turn_effect_executor(
         turn_phase_probe: driver.turn_phase_probe.clone(),
         protocol_reply: Default::default(),
         opener_state: driver.opener_state.clone(),
-        turn_cancel: driver.turn_cancel.clone(),
         children_stop: driver.children_stop.clone(),
         // The body's own lane, keyed by the effect invocation it runs: the
         // turn cursor is the main driver's alone, and cloning it would put

@@ -94,10 +94,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                         self.logical_run(),
                     ))
                     .with_run_capabilities(run_capabilities)
-                    .with_recorded_turn_cancel(
-                        self.turn_cancel.is_some(),
-                        self.children_stop.clone(),
-                    )
+                    .with_recorded_turn_cancel(self.children_stop.clone())
                     .with_opener_state(self.opener_state.clone())
                     .with_turn_cancel_scope(self.turn_cancel_scope())
                     .with_turn_phase_probe(self.turn_phase_probe.clone())

@@ -12,6 +12,13 @@
 //! orchestration to reach a recorded outcome. On a draining node the turn
 //! stops where it would honour a cancel, before its next model call or cell
 //! starts, and the next build resumes it from its rows.
+//!
+//! A turn cancel is honoured where [`turn_cancel`] says: any accepted request
+//! before a model call starts, so an `AfterStep` request lets the step's
+//! response, round or cell finish first; an `Immediate` one also before a
+//! cell starts, while a call streams or a cell runs, and before
+//! `turn.commit`. The turn's held terminal publishes only once `turn.commit`
+//! is acknowledged ([`TurnDrive::committed`]).
 
 use lash_durable::CommitLabel;
 use lash_durable::DomainWrite;
@@ -133,7 +140,7 @@ pub async fn run_phases(
                 }
             }
             Effect::ExecCode { id, language, code } => {
-                if turn_cancel::requested(cx, &session).await?.is_some() {
+                if turn_cancel::immediate(cx, &session).await? {
                     return Ok(PhaseExit::CancelRequested);
                 }
                 if cx.draining() {
@@ -161,7 +168,14 @@ pub async fn run_phases(
                     }));
                     cx.commit(tx, CommitLabel::MODEL_DONE).await?;
                 }
-                drive.exec_cell(cx, id, CodeCell { language, code }).await?;
+                let cell = drive.exec_cell(cx, id, CodeCell { language, code });
+                match turn_cancel::unless_cancelled(cx, &session, cell).await? {
+                    Some(ran) => ran?,
+                    None => {
+                        drive.stop_cell();
+                        return Ok(PhaseExit::CancelRequested);
+                    }
+                }
             }
             Effect::ToolCalls { id, calls, .. } => {
                 model = None;
@@ -185,6 +199,11 @@ pub async fn run_phases(
                 event_delta,
                 protocol_iteration,
             } => {
+                // An `Immediate` request the turn accepted after its last
+                // step still wins over the commit: the turn backtracks.
+                if turn_cancel::immediate(cx, &session).await? {
+                    return Ok(PhaseExit::CancelRequested);
+                }
                 let done = TurnDone {
                     messages,
                     event_delta,
@@ -218,6 +237,7 @@ pub async fn run_phases(
                 // next pass marks the rest.
                 end_turn_scope(cx, &mut tx, &session, &run).await?;
                 cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
+                drive.committed().await;
                 // The commit moved the head: the next turn loads it again.
                 heads.evict();
                 return Ok(PhaseExit::Committed(terminal));

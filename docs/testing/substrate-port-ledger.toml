@@ -962,6 +962,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "the phase runner's half of a_refused_commit_publishes_none_of_the_stopped_terminal runs at crates/lash-durable-test/tests/turn_round_crash_matrix.rs::a_refused_turn_commit_publishes_no_terminal_event (FIG-5229): a drive is told its turn committed only once turn.commit is acknowledged"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/attachment_continuation.rs"
@@ -1617,7 +1618,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "the model-call half of after_step_stop_mid_model_call runs at crates/lash-durable-test/tests/turn_phases.rs::an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary; its tool half, the tool and retry-sleep laws: blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; the start gate, undelivered dispositions and queued next-turn work: blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!; the next turn's context: fig-5172-prod (the real head commit)"
+note = "the model-call half of after_step_stop_mid_model_call runs at crates/lash-durable-test/tests/turn_phases.rs::an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary, and its tool half at crates/lash-durable-test/tests/turn_round_crash_matrix.rs::an_after_step_cancel_while_the_model_streams_keeps_the_response_and_its_tools (FIG-5229); the tool and retry-sleep laws: blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round; the start gate, undelivered dispositions and queued next-turn work: blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!; the next turn's context: fig-5172-prod (the real head commit)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/active_input_settlement.rs"

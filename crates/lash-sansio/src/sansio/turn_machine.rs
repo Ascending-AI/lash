@@ -199,6 +199,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.events.clone()
     }
 
+    /// The history records the machine has delivered through its progress
+    /// boundaries: its history up to its progress cursor, the history it
+    /// started from leading it. A restored machine's cursor is its
+    /// checkpoint's, so these are the records an earlier owner consumed.
+    pub fn progressed_events(&self) -> &[SessionHistoryRecord<M::Event>] {
+        let events = self.events.as_slice();
+        events.get(..self.progress_event_cursor).unwrap_or(events)
+    }
+
     pub fn message_sequence(&self) -> MessageSequence {
         self.messages.clone()
     }

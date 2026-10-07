@@ -5,11 +5,14 @@
 //! committed by [`request_turn_cancel`](super::session::request_turn_cancel)
 //! from outside the actor. The owner reads it on the turn's row:
 //!
-//! - at every phase boundary of the turn (before a model call or a code cell
-//!   starts), where it honours any accepted request;
-//! - while a model call streams, whenever mail may have arrived (the wake
-//!   hint, or the claim poll), where it honours an `Immediate` request only:
-//!   an `AfterStep` request waits for the boundary that closes the step.
+//! - before a model call starts, where it honours any accepted request: the
+//!   boundary that closes a step, so an `AfterStep` request lets the step's
+//!   response and the round or cell it asked for finish first;
+//! - before a round is admitted or a cell starts, and before the turn's
+//!   `turn.commit`, where it honours an `Immediate` request only;
+//! - while a model call streams, a round runs or a cell runs, whenever mail
+//!   may have arrived (the wake hint, or the claim poll), where it honours an
+//!   `Immediate` request only.
 //!
 //! Honouring it stops the turn's in-memory work and leaves the rest to the
 //! next activation pass, which finds the request on the row and
@@ -44,6 +47,18 @@ pub(super) async fn requested(
         .and_then(|row| row.cancel))
 }
 
+/// Whether the session's unfinished turn accepted an `Immediate` cancel
+/// request, as of now.
+///
+/// # Errors
+///
+/// [`TurnError::Durable`] when the row cannot be read.
+pub(super) async fn immediate(cx: &ActorContext, session: &SessionId) -> Result<bool, TurnError> {
+    Ok(requested(cx, session)
+        .await?
+        .is_some_and(|request| request.mode == TurnCancelMode::Immediate))
+}
+
 /// Run `work` until it finishes or the turn accepts an `Immediate` cancel
 /// request: `None` when the request won, and `work` was dropped.
 ///
@@ -61,10 +76,7 @@ pub(super) async fn unless_cancelled<F: Future>(
             biased;
             output = &mut work => return Ok(Some(output)),
             () = cx.wait_for_mail() => {
-                if requested(cx, session)
-                    .await?
-                    .is_some_and(|request| request.mode == TurnCancelMode::Immediate)
-                {
+                if immediate(cx, session).await? {
                     return Ok(None);
                 }
             }

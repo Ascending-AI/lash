@@ -70,8 +70,8 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
   of it. Framing joins consecutive deltas of one block up to a size cap;
   alternating blocks and non-delta events each keep their own entry, so the
   backlog is bounded by what the turn published, not by a fixed size.
-- The laws `runtime::stop_publication` (a provider failure's error, an
-  `Immediate` cancel's terminal and a refused commit) and the observer laws
+- The publication law of the turn round crash matrix (a refused commit
+  publishes nothing it held, at every cut) and the observer laws
   (a frame delivered whole before a cancellation's terminal, frames cut at
   every other event, hold and release, abandon) enforce decisions 2 and 5.
 - `docs/observing-turns.md` states the contract for hosts.
@@ -81,14 +81,18 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
 - `crates/lash-core/src/runtime/turn_observer/framing.rs` frames each lane's
   deltas; `crates/lash-core/src/runtime/turn_observer.rs` holds, releases and
   abandons terminal observations.
-- `crates/lash-core/src/runtime/turn_loop/commit.rs:349` abandons held
-  terminals on a failed commit. Its accepted-commit path releases them.
+- The phase runner (`crates/lash-core/src/runtime/durable/phases.rs`) calls
+  `TurnDrive::committed` once `turn.commit` is acknowledged; the production
+  drive (`crates/lash-core/src/runtime/turn_driver/durable_drive.rs`)
+  releases its held terminals there and drains its publisher. A drive whose
+  commit was refused is dropped without it, which abandons them.
 - `crates/lash-core/src/runtime/observation/replay.rs:22` defines the
   configurable default event and time window.
 - `crates/lash/src/send/follow.rs:52` bounds the pre-adoption buffer.
-- `crates/lash-core/tests/runtime/stop_publication.rs` pins terminal
-  publication; `crates/lash-core/src/runtime/turn_observer/tests.rs` pins
-  framing, hold, release and abandon.
+- `crates/lash-durable-test/tests/turn_round_crash_matrix.rs` pins
+  publication after an acknowledged commit only, at every cut;
+  `crates/lash-core/src/runtime/turn_observer/tests.rs` pins framing, hold,
+  release and abandon.
 
 A separate durable tail would need another write and retention contract for
 output the host already receives live. This design keeps the last committed

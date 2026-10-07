@@ -74,11 +74,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// loser the turn's end incorporates is charged against the same ledger
     /// the winning cell charged.
     pub(super) opener_state: crate::session::OpenerState,
-    /// The cancellation this turn recorded honouring: the answer of a
-    /// journaled gate peek, and nothing else (FIG-3672 P9). Shift decisions
-    /// that depend on the turn's cancellation read this, never a live token.
-    pub(super) turn_cancel: Option<crate::TurnCancellationEvidence>,
-    /// Cooperative cancellation for recorded tool bodies in this turn.
+    /// Cooperative cancellation for the tool bodies this turn's cells start:
+    /// fired when an accepted `Immediate` cancel stops a running cell.
     pub(super) children_stop: CancellationToken,
     /// The turn-scope observation cursor: every host-facing emission the
     /// driver makes outside an effect body sequences under the turn scope's

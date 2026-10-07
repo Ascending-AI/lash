@@ -183,11 +183,6 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
         }
-        // Name the request that stopped the call before the machine decides a
-        // cancelled terminal reason, so its outcome carries real evidence.
-        if let Some(evidence) = self.turn_cancel.clone() {
-            machine.record_cancellation_evidence(evidence);
-        }
         self.handle_machine_response(
             machine,
             Response::LlmComplete {
@@ -449,16 +444,12 @@ impl RuntimeTurnDriver<'_> {
                         },
                     },
                 );
-                // A cell that aborted stopped for the turn's cancellation only
-                // when the turn recorded one.
-                let cancellation_evidence = self.turn_cancel.clone();
+                // A turn cancel never answers a cell: it stops the turn before
+                // the cell's result reaches the machine, so a cell that
+                // aborted is discarded.
                 if let Some(code_executor) = self.session.plugins().code_executor() {
                     code_executor
-                        .settle_code_execution(if cancellation_evidence.is_some() {
-                            crate::plugin::CodeExecutionOutcome::Cancelled
-                        } else {
-                            crate::plugin::CodeExecutionOutcome::Discarded
-                        })
+                        .settle_code_execution(crate::plugin::CodeExecutionOutcome::Discarded)
                         .await
                         .map_err(|error| {
                             RuntimeError::new(
@@ -467,18 +458,9 @@ impl RuntimeTurnDriver<'_> {
                             )
                         })?;
                 }
-                // A live fault or a session retirement aborts whether or not a
-                // cancel is pending; the effect loop settles a pending cancel as
-                // `Stopped { Cancelled }` after the abort. Any other failure
-                // under a cancel is the cancel's own consequence (FIG-3575).
+                // A live fault or a session retirement aborts the turn.
                 if Self::aborts_turn(&err) {
                     return Err(err.into_runtime_error());
-                }
-                if let Some(evidence) = cancellation_evidence {
-                    machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
-                        evidence,
-                    }));
-                    return Ok(());
                 }
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
@@ -598,9 +580,6 @@ impl RuntimeTurnDriver<'_> {
                 error: error.message.clone(),
             });
         }
-        // Name the cancellation the turn recorded, if any, before the
-        // protocol classifies its typed Stop response.
-        let cancellation_evidence = self.turn_cancel.clone();
         // A cancelled tool call ended the cell as an uncatchable host terminal,
         // so the execution settles as cancelled even without a host cancel
         // request. The protocol then reads the cancelled record off the call
@@ -614,7 +593,7 @@ impl RuntimeTurnDriver<'_> {
         });
         if let Some(code_executor) = self.session.plugins().code_executor() {
             code_executor
-                .settle_code_execution(if cancellation_evidence.is_some() || tool_call_cancelled {
+                .settle_code_execution(if tool_call_cancelled {
                     crate::plugin::CodeExecutionOutcome::Cancelled
                 } else {
                     crate::plugin::CodeExecutionOutcome::Accepted
@@ -626,9 +605,6 @@ impl RuntimeTurnDriver<'_> {
                         error.to_string(),
                     )
                 })?;
-        }
-        if let Some(evidence) = cancellation_evidence {
-            machine.record_cancellation_evidence(evidence);
         }
         self.handle_machine_response(machine, Response::ExecResult { id, result })?;
         Ok(())

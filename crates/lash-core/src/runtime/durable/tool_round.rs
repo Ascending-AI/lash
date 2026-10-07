@@ -14,9 +14,11 @@
 //!   re-delivered calls must be the ones it admitted, a started `Once`
 //!   without an outcome is `Interrupted`, a started `Repeatable` reruns at
 //!   its ordinal, and nothing it recorded runs again.
-//! - **Cancel.** An `Immediate` cancel the turn accepts while the round runs
+//! - **Cancel.** An `Immediate` cancel the turn accepted before the round's
+//!   admission admits none of it, and one it accepts while the round runs
 //!   ends its unfinished members `Cancelled`; the turn then ends as every
-//!   phase does on a cancel ([`RoundExit::CancelRequested`]).
+//!   phase does on a cancel ([`RoundExit::CancelRequested`]). An `AfterStep`
+//!   request lets the round run to its end.
 //! - **Presentation.** The machine is answered with each member's committed
 //!   outcome, in declared order. The round's `present` record rides the
 //!   turn's next commit: `round.present+model.start` when the machine calls
@@ -35,7 +37,7 @@ use tokio_util::sync::CancellationToken;
 use super::session::{TurnDrive, TurnError, TurnPhase, TurnRow};
 use super::turn_cancel;
 use crate::sansio::PendingToolCall;
-use crate::{ActorContext, EffectId, Response, TurnCancelMode};
+use crate::{ActorContext, EffectId, Response};
 
 /// How a tool round left the turn.
 #[derive(Debug)]
@@ -116,7 +118,9 @@ pub(super) async fn run(
             RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
         }
         None => {
-            if turn_cancel::requested(cx, &session).await?.is_some() {
+            // An `AfterStep` request lets the step's round run; the turn
+            // honours it before its next model call.
+            if turn_cancel::immediate(cx, &session).await? {
                 return Ok(RoundExit::CancelRequested);
             }
             let now_ms = u64::try_from(cx.durable_now().await?.0).unwrap_or(0);
@@ -182,10 +186,7 @@ pub(super) async fn run(
             biased;
             end = &mut running => break end.map_err(round_error)?,
             () = cx.wait_for_mail(), if !cancel.is_cancelled() => {
-                if turn_cancel::requested(cx, &session)
-                    .await?
-                    .is_some_and(|request| request.mode == TurnCancelMode::Immediate)
-                {
+                if turn_cancel::immediate(cx, &session).await? {
                     cancel.cancel();
                 }
             }

@@ -380,7 +380,6 @@ impl LashRuntime {
             turn_phase_probe: self.turn_phase_probe.clone(),
             protocol_reply: Default::default(),
             opener_state: crate::session::OpenerState::default(),
-            turn_cancel: None,
             children_stop: CancellationToken::new(),
             turn_observations: turn_observation_cursor(&controller, run, "shift"),
             trace: self.host.core.tracing.turn_execution(&controller),

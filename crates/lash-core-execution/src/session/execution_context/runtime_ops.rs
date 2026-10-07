@@ -60,13 +60,11 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
         event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self;
 
-    /// Starts this execution's recorded turn-cancel fact: `honoured` is
-    /// whether the turn had already recorded a cancellation when it built
-    /// this execution, and `lent` is the stop the turn lends its tool
-    /// children, fired when the fact advances. The turn driver is the only
-    /// caller.
+    /// Starts this execution's recorded turn-cancel fact, unset: `lent` is
+    /// the stop the turn lends its tool children, fired when the fact
+    /// advances. The turn driver is the only caller.
     #[must_use]
-    fn with_recorded_turn_cancel(self, honoured: bool, lent: CancellationToken) -> Self;
+    fn with_recorded_turn_cancel(self, lent: CancellationToken) -> Self;
 
     /// The opener state this context incorporates against and hands groups to.
     #[must_use]
@@ -173,21 +171,17 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         });
         self
     }
-    fn with_recorded_turn_cancel(mut self, honoured: bool, lent: CancellationToken) -> Self {
+    fn with_recorded_turn_cancel(mut self, lent: CancellationToken) -> Self {
         // A tool this execution runs in process cooperates through the same
         // lent stop its group children get: it fires only when the recorded
         // fact advances, so a tool's cancel is never a live read of the gate.
         if self.cancellation_token.is_none() {
             self.cancellation_token = Some(lent.clone());
         }
-        let turn_cancel = RecordedTurnCancel {
+        self.turn_cancel = RecordedTurnCancel {
             observed: Arc::default(),
             lent: Some(lent),
         };
-        if honoured {
-            turn_cancel.note();
-        }
-        self.turn_cancel = turn_cancel;
         self
     }
     fn opener_state(&self) -> OpenerState {

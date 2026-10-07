@@ -23,8 +23,8 @@ pub(in crate::runtime) struct RuntimeDrive {
     settlement: crate::store::IngressSettlement,
     tools: Option<Arc<dyn RoundTools>>,
     live: Arc<dyn crate::LiveReplayStore>,
-    /// Publishes the turn's activity to the live stream until the drive is
-    /// dropped.
+    /// Publishes the turn's activity to the live stream: drained once the
+    /// turn committed, aborted when the drive is dropped without a commit.
     publisher: tokio::task::JoinHandle<()>,
 }
 
@@ -76,6 +76,19 @@ impl RuntimeDrive {
             pending,
             row,
         } = restore.restore(config).await?;
+        // The records the restored machine already delivered through its
+        // progress boundaries reached only the previous owner's draft: they
+        // join this one, so the turn's commit holds the history an uncut run
+        // commits. The draft holds the history the turn started from, which
+        // the machine's leads with.
+        let started = driver.turn_pipeline.active_events().len();
+        driver.turn_pipeline.apply_event_delta(
+            machine
+                .progressed_events()
+                .get(started..)
+                .unwrap_or_default()
+                .to_vec(),
+        );
         // The tool surface a sync before the checkpoint recorded: pinned
         // again from the session's live registry.
         driver.reinstall_tool_surface()?;
@@ -259,6 +272,10 @@ impl TurnDrive for RuntimeDrive {
         .map_err(runtime)
     }
 
+    fn stop_cell(&mut self) {
+        self.driver.children_stop.cancel();
+    }
+
     /// The commit is built over the head the runtime opened at; the store
     /// refuses it once the session's head, `head` among its readers, is
     /// elsewhere.
@@ -292,13 +309,21 @@ impl TurnDrive for RuntimeDrive {
         {
             commit.ingress = Some(self.settlement.clone());
         }
-        // What the turn held back for its commit is published with it.
-        self.observer.release_terminal();
         Ok(TurnCommit {
             expected_head: commit.expected_head_revision,
             commit_json: crate::store::encode_session_commit(&commit)
                 .map_err(|error| TurnError::Exec(error.to_string()))?,
         })
+    }
+
+    /// What the turn held back for its commit is published with it, and the
+    /// publisher ends once everything queued reached the live stream.
+    async fn committed(&mut self) {
+        self.observer.release_terminal();
+        self.observer.close();
+        if let Err(error) = (&mut self.publisher).await {
+            tracing::warn!(%error, "a committed turn's live publisher did not finish");
+        }
     }
 }
 

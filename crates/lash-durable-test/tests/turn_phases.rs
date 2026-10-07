@@ -496,6 +496,12 @@ impl TurnDrive for L3Drive {
     ) -> Result<TurnCommit, TurnError> {
         head.commit(&self.run, done, commit_budget()).await
     }
+
+    /// No cell runs, so none is stopped.
+    fn stop_cell(&mut self) {}
+
+    /// Nothing is held for the commit.
+    async fn committed(&mut self) {}
 }
 
 /// The L3 scenario's catalog: its protocol never calls a tool.

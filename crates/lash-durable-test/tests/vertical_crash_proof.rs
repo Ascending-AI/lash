@@ -34,6 +34,11 @@
 //! - P5: a zombie's writes after its reap are refused;
 //! - P7: the session head advanced exactly once, and no row stays bound to
 //!   the ended run.
+//!
+//! A resumed turn commits the same protocol history as an uncut one: a node
+//! killed after the second model call's `model.start`, whose checkpoint has
+//! consumed the cell's protocol records through a progress boundary, leaves
+//! a turn whose resumed commit holds every one of them (FIG-5229).
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -430,6 +435,61 @@ impl Scenario for V0 {
 }
 
 impl V0 {
+    /// A new process over this deployment's database: the same outside
+    /// world, model and tripwire, nothing else of this deployment.
+    fn cold(&self, postgres_url: Option<String>) -> Self {
+        Self {
+            protocol: self.protocol,
+            dialect: self.dialect,
+            postgres_url,
+            image: None,
+            record_at: None,
+            world: Arc::clone(&self.world),
+            seen: Arc::clone(&self.seen),
+            tripwire: Arc::clone(&self.tripwire),
+            backend: Mutex::new(Some(self.backend())),
+            core: Mutex::default(),
+            keep: Mutex::default(),
+        }
+    }
+
+    /// Step `nodes` until the session is idle, within 600 s of virtual time.
+    async fn run_until_done(&self, nodes: &SimNodes, clock: &SimClock, what: &str) {
+        let horizon = clock.logical_ms() + 600_000;
+        while !self.done(nodes).await {
+            assert!(
+                clock.logical_ms() < horizon,
+                "{what} is not done after 600 s of virtual time:\n{}",
+                nodes.script().rendered_trace()
+            );
+            assert!(
+                nodes.step().await.is_some(),
+                "{what} stalled:\n{}",
+                nodes.script().rendered_trace()
+            );
+        }
+        nodes.quiesce().await;
+    }
+
+    /// The protocol records the session's committed head holds.
+    async fn committed_protocol_records(&self) -> Vec<serde_json::Value> {
+        let view = self
+            .core()
+            .session(session())
+            .durable()
+            .await
+            .expect("the durable session resolves")
+            .read()
+            .await
+            .expect("the session's head reads")
+            .expect("the session has a head");
+        view.active_events()
+            .iter()
+            .filter(|record| matches!(record, lash_core::SessionHistoryRecord::Protocol(_)))
+            .map(|record| serde_json::to_value(record).expect("a record encodes"))
+            .collect()
+    }
+
     /// Create the session and send it the turn's input through the core,
     /// uncut: the host is outside the deployment under test.
     async fn send(&self) -> Result<(), String> {
@@ -825,21 +885,7 @@ async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
         "the turn finished before the deployment died"
     );
 
-    // A new process: the same database and the same outside world and
-    // model, nothing else of the first deployment.
-    let cold = V0 {
-        protocol: Protocol::Code,
-        dialect,
-        postgres_url,
-        image: None,
-        record_at: None,
-        world: Arc::clone(&first.world),
-        seen: Arc::clone(&first.seen),
-        tripwire: Arc::clone(&first.tripwire),
-        backend: Mutex::new(Some(first.backend())),
-        core: Mutex::default(),
-        keep: Mutex::default(),
-    };
+    let cold = first.cold(postgres_url);
     let after = SimNodes::new(
         Arc::clone(&database),
         Arc::clone(&clock),
@@ -848,20 +894,8 @@ async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
         cold.activation(),
     );
     after.start("c");
-    let horizon = clock.logical_ms() + 600_000;
-    while !cold.done(&after).await {
-        assert!(
-            clock.logical_ms() < horizon,
-            "the cold deployment is not done after 600 s of virtual time:\n{}",
-            after.script().rendered_trace()
-        );
-        assert!(
-            after.step().await.is_some(),
-            "the cold deployment stalled:\n{}",
-            after.script().rendered_trace()
-        );
-    }
-    after.quiesce().await;
+    cold.run_until_done(&after, &clock, "the cold deployment")
+        .await;
 
     let mut violations = cold.laws(&after, None).await;
     let counts = first.tripwire.counts();
@@ -924,6 +958,99 @@ async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_postgres() {
         return;
     };
     cold_resume(Dialect::Postgres, Some(url)).await;
+}
+
+/// A12: the code turn, once uncut and once with node A killed right after
+/// the second model call's `model.start` committed. That checkpoint's
+/// progress cursor is past the cell's protocol records, which reached the
+/// turn's draft only through the progress boundary on A; the cold owner that
+/// resumes it must commit them as the uncut owner did.
+async fn resumed_history(dialect: Dialect, postgres_url: Option<String>) {
+    let uncut = V0::new(Protocol::Code, dialect, postgres_url.clone());
+    let clock = SimClock::new();
+    let database = uncut.database(Arc::clone(&clock)).await;
+    let nodes = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        Script::new(),
+        uncut.config(),
+        uncut.activation(),
+    );
+    uncut.send().await.expect("the turn is sent");
+    nodes.start("a");
+    uncut.run_until_done(&nodes, &clock, "the uncut turn").await;
+    let expected = uncut.committed_protocol_records().await;
+    assert!(
+        !expected.is_empty(),
+        "the uncut code turn committed no protocol record"
+    );
+
+    let first = V0::new(Protocol::Code, dialect, postgres_url.clone());
+    let clock = SimClock::new();
+    let database = first.database(Arc::clone(&clock)).await;
+    let script = Script::new();
+    script.cut_on("a", CommitLabel::MODEL_START, 2, Fault::CommitThenAbort);
+    let before = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        script,
+        first.config(),
+        first.activation(),
+    );
+    first.send().await.expect("the turn is sent");
+    before.start("a");
+    before.quiesce().await;
+    while before.script().cuts().is_empty() {
+        // The cut kills A, which leaves no timer armed: the step that cuts
+        // can be the last.
+        let stepped = before.step().await;
+        assert!(
+            stepped.is_some() || !before.script().cuts().is_empty(),
+            "the turn stalled before its second model call started:\n{}",
+            before.script().rendered_trace()
+        );
+    }
+    before.kill("a");
+    before.quiesce().await;
+    let cold = first.cold(postgres_url);
+    let after = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        Script::new(),
+        cold.config(),
+        cold.activation(),
+    );
+    after.start("c");
+    cold.run_until_done(&after, &clock, "the resumed turn")
+        .await;
+    assert_eq!(
+        cold.committed_protocol_records().await,
+        expected,
+        "the resumed turn on {dialect:?} committed other protocol history than the uncut one"
+    );
+}
+
+/// A resumed turn commits the uncut turn's protocol history, on SQLite in
+/// memory.
+#[tokio::test]
+async fn a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_memory() {
+    resumed_history(Dialect::SqliteMemory, None).await;
+}
+
+/// On a SQLite file.
+#[tokio::test]
+async fn a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_file() {
+    resumed_history(Dialect::SqliteFile, None).await;
+}
+
+/// On PostgreSQL.
+#[tokio::test]
+async fn a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_postgres() {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    resumed_history(Dialect::Postgres, Some(url)).await;
 }
 
 /// Re-record the session image (`support/images.rs`): node A runs the turn

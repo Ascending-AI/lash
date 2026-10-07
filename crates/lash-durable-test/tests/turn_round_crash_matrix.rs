@@ -29,10 +29,19 @@
 //! - **Turn cancel:** a cancel requested while a member runs ends the
 //!   unfinished members `Cancelled` and the turn `Cancelled`, with no model
 //!   call after the request.
+//! - **After-step cancel (FIG-5229):** an `AfterStep` cancel requested while
+//!   the model streams keeps the call's response: its round is admitted and
+//!   its tools run, and the turn ends `Cancelled` at the next model call's
+//!   boundary, without calling the model again.
+//! - **Cancel in a cell (FIG-5229):** an `Immediate` cancel requested while
+//!   a code cell runs stops the cell, and the turn ends `Cancelled` promptly.
 //! - **Pending:** a member that parks takes the key of the completion wait
 //!   the turn's `model.done` pinned, is never entered again once its park
 //!   committed, and settles from the host's resolution of that key; the
 //!   model's next call sees that resolution.
+//! - **Publication after the commit (FIG-5229):** a turn publishes what it
+//!   held for its commit at most once, and only once its `turn.commit` was
+//!   acknowledged: a refused commit publishes none of it.
 //! - **F1:** a zombie's writes after its reap are refused.
 
 // Test code.
@@ -86,6 +95,11 @@ use lash_sansio::{
 const SESSION: &str = "l4t-session";
 const RUN: &str = "l4t-turn";
 const RESULTS_MARKER: &str = "l4t-results";
+/// The model's answer that runs a code cell.
+const CELL: &str = "l4t-cell";
+/// How much virtual time an `Immediate` cancel of a running cell may take to
+/// end the turn: a few claim polls, nowhere near the cell's own limits.
+const PROMPT_CANCEL_MS: u64 = 1_000;
 
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
@@ -159,6 +173,12 @@ enum Mode {
     /// The model calls a tool that parks on its completion wait and a quick
     /// `Once` write.
     Pending,
+    /// The model's first call requests an `AfterStep` cancel of the turn
+    /// while it streams, then answers with a quick `Once` write.
+    AfterStepWhileStreaming,
+    /// The model answers with a code cell that requests an `Immediate`
+    /// cancel of the turn and then runs until it is stopped.
+    CancelInCell,
 }
 
 impl Mode {
@@ -171,6 +191,8 @@ impl Mode {
             ],
             Self::CancelWhileRunning => vec![Tool::Hang],
             Self::Pending => vec![Tool::Defer, Tool::Write { millis: 0 }],
+            Self::AfterStepWhileStreaming => vec![Tool::Write { millis: 0 }],
+            Self::CancelInCell => Vec::new(),
         }
     }
 }
@@ -246,6 +268,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         let ids = calls.call_ids(&llm_response);
+        if ids.is_empty() && response_text(&llm_response) == CELL {
+            return vec![DriverAction::Start(PendingWork::Exec {
+                language: "typescript".to_owned(),
+                code: "for (;;) {}".to_owned(),
+                driver_state: lash_core::ProtocolDriverState::new("l4t", serde_json::Value::Null),
+            })];
+        }
         if ids.is_empty() {
             return vec![DriverAction::Finish(TurnOutcome::Finished(
                 TurnFinish::AssistantMessage {
@@ -335,6 +364,12 @@ struct Seen {
     /// Whether a model call started after the turn's cancel was requested.
     called_after_cancel: bool,
     cancel_requested: bool,
+    /// The virtual time the turn's cancel was requested at.
+    requested_at_ms: Option<u64>,
+    /// Model calls that answered after requesting an `AfterStep` cancel.
+    answered_after_request: usize,
+    /// How many times a drive published what its turn held for its commit.
+    published: usize,
 }
 
 #[derive(Clone)]
@@ -448,6 +483,34 @@ impl L4Services {
             .clone()
             .expect("the backend is built")
     }
+
+    fn clock(&self) -> Arc<SimClock> {
+        self.clock.lock_recover().clone().expect("a clock")
+    }
+
+    /// Request the turn's cancel in `mode` from outside the actor, as a host
+    /// would.
+    async fn request_cancel(&self, mode: TurnCancelMode) {
+        let answer = request_turn_cancel(
+            &self.backend(),
+            TurnCancelRequest {
+                session: session(),
+                run: run(),
+                request_id: "l4t-cancel".to_owned(),
+                origin: None,
+                reason: Some("the host cancelled".to_owned()),
+                undelivered: TurnCancelUndeliveredInputPolicy::Defer,
+                mode,
+            },
+        )
+        .await;
+        if answer.is_ok() {
+            let now = self.clock().logical_ms();
+            let mut seen = self.seen.lock_recover();
+            seen.cancel_requested = true;
+            seen.requested_at_ms.get_or_insert(now);
+        }
+    }
 }
 
 /// One turn of the scenario: the scripted model, environment and tools.
@@ -504,9 +567,26 @@ impl TurnDrive for L4Drive {
             }
             seen.requests.push(rendered);
         }
+        let requests_after_step = self.services.mode == Mode::AfterStepWhileStreaming
+            && !second
+            && !self.services.seen.lock_recover().cancel_requested;
+        if requests_after_step {
+            self.services
+                .request_cancel(TurnCancelMode::AfterStep)
+                .await;
+            // Outlive the owner's cancel watch waking on the request: an
+            // after-step request must not stop the call.
+            let clock = self.services.clock();
+            lash_core_ids::clock::Clock::sleep(&*clock, Duration::from_millis(50)).await;
+        }
         let parts = if second {
             vec![LlmOutputPart::Text {
                 text: "done".to_owned(),
+                response_meta: None,
+            }]
+        } else if self.services.mode == Mode::CancelInCell {
+            vec![LlmOutputPart::Text {
+                text: CELL.to_owned(),
                 response_meta: None,
             }]
         } else {
@@ -532,6 +612,9 @@ impl TurnDrive for L4Drive {
             }),
             text_streamed: false,
         });
+        if requests_after_step {
+            self.services.seen.lock_recover().answered_after_request += 1;
+        }
         Ok(())
     }
 
@@ -551,7 +634,14 @@ impl TurnDrive for L4Drive {
         _id: EffectId,
         _cell: CodeCell,
     ) -> Result<(), TurnError> {
-        Err(TurnError::Exec("the L4 scenario runs no cell".to_owned()))
+        if self.services.mode != Mode::CancelInCell {
+            return Err(TurnError::Exec("the L4 scenario runs no cell".to_owned()));
+        }
+        self.services
+            .request_cancel(TurnCancelMode::Immediate)
+            .await;
+        // The cell never ends on its own: only the cancel stops it.
+        std::future::pending().await
     }
 
     async fn finish(
@@ -561,6 +651,14 @@ impl TurnDrive for L4Drive {
         head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
         head.commit(&self.run, done, commit_budget()).await
+    }
+
+    /// The scenario's cell holds nothing outside its future.
+    fn stop_cell(&mut self) {}
+
+    /// The turn publishes what it held for its commit.
+    async fn committed(&mut self) {
+        self.services.seen.lock_recover().published += 1;
     }
 }
 
@@ -664,22 +762,7 @@ impl RoundTools for Catalog {
                     }
                     Tool::Hang => {
                         world.write(&call, attempt);
-                        let answer = request_turn_cancel(
-                            &services.backend(),
-                            TurnCancelRequest {
-                                session: session(),
-                                run: run(),
-                                request_id: "l4t-cancel".to_owned(),
-                                origin: None,
-                                reason: Some("the host cancelled".to_owned()),
-                                undelivered: TurnCancelUndeliveredInputPolicy::Defer,
-                                mode: TurnCancelMode::Immediate,
-                            },
-                        )
-                        .await;
-                        if answer.is_ok() {
-                            services.seen.lock_recover().cancel_requested = true;
-                        }
+                        services.request_cancel(TurnCancelMode::Immediate).await;
                         token.cancelled().await;
                         return MemberResult::from(BodyOutput::from(AttemptOutcome::Cancelled {
                             evidence: Default::default(),
@@ -950,12 +1033,79 @@ impl Scenario for L4 {
                     ));
                 }
             }
+            Mode::AfterStepWhileStreaming => {
+                violations.extend(after_step_laws(
+                    &fold,
+                    &self.world,
+                    &seen,
+                    cut,
+                    committed(CommitLabel::TURN_COMMIT),
+                    committed(CommitLabel::TURN_CANCEL),
+                ));
+            }
+            Mode::CancelInCell => {
+                let commits = committed(CommitLabel::TURN_COMMIT);
+                let cancels = committed(CommitLabel::TURN_CANCEL);
+                if commits != 0 || cancels != 1 {
+                    violations.push(format!(
+                        "cancel in a cell: {commits} head commits and {cancels} cancel terminals"
+                    ));
+                }
+                if seen.called_after_cancel {
+                    violations.push(
+                        "cancel in a cell: a model call started after the request".to_owned(),
+                    );
+                }
+                // Promptly: the uncut turn's cancel commits within a few
+                // claim polls of the request, not at any limit of the cell's.
+                let ended = trace
+                    .iter()
+                    .find(|write| {
+                        write.point.label == CommitLabel::TURN_CANCEL && write.committed()
+                    })
+                    .map(|write| write.at_ms);
+                let prompt = match (seen.requested_at_ms, ended) {
+                    (Some(at), Some(ended)) => ended.saturating_sub(at) <= PROMPT_CANCEL_MS,
+                    _ => false,
+                };
+                if cut.is_none() && !prompt {
+                    violations.push(format!(
+                        "cancel in a cell: requested at {:?} ms, the turn ended at {ended:?} ms",
+                        seen.requested_at_ms
+                    ));
+                }
+            }
         }
 
+        violations.extend(publication_laws(
+            &seen,
+            cut,
+            committed(CommitLabel::TURN_COMMIT),
+        ));
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
         }
         violations
+    }
+}
+
+/// A turn publishes what it held for its commit only once its `turn.commit`
+/// was acknowledged: at most once, never for a commit the store refused, and
+/// exactly once when the turn committed uncut or after a refused attempt.
+/// A commit whose acknowledgement its owner never received publishes
+/// nothing.
+fn publication_laws(seen: &Seen, cut: Option<&Cut>, commits: usize) -> Vec<String> {
+    let refused_commit = cut.is_some_and(|cut| {
+        cut.point.label == CommitLabel::TURN_COMMIT && cut.fault == Fault::FailBefore
+    });
+    let must_publish = commits == 1 && (cut.is_none() || refused_commit);
+    if seen.published > commits || (must_publish && seen.published != 1) {
+        vec![format!(
+            "publication: the turn published its held terminal {} times over {commits} commits",
+            seen.published
+        )]
+    } else {
+        Vec::new()
     }
 }
 
@@ -1158,6 +1308,53 @@ fn cancel_laws(fold: &RunFold, world: &ExternalWorld, seen: &Seen) -> Vec<String
     violations
 }
 
+/// An `AfterStep` cancel requested while the model streams lets the call
+/// answer, and calls the model no more. Uncut, the call's round is admitted
+/// and its write runs and completes before the turn ends `Cancelled`; a cut
+/// before the round committed may lose the answer with its node.
+fn after_step_laws(
+    fold: &RunFold,
+    world: &ExternalWorld,
+    seen: &Seen,
+    cut: Option<&Cut>,
+    commits: usize,
+    cancels: usize,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    if commits != 0 || cancels != 1 {
+        violations.push(format!(
+            "after-step: {commits} head commits and {cancels} cancel terminals"
+        ));
+    }
+    if seen.called_after_cancel {
+        violations.push("after-step: a model call started after the request".to_owned());
+    }
+    if cut.is_some() {
+        return violations;
+    }
+    if seen.answered_after_request != 1 {
+        violations.push(format!(
+            "after-step: {} calls answered after requesting the cancel",
+            seen.answered_after_request
+        ));
+    }
+    let Some((run, _)) = declared(fold) else {
+        violations.push("after-step: the answered call's round was never admitted".to_owned());
+        return violations;
+    };
+    for member in fold.round(run).unwrap().members() {
+        let writes = world.writes(member.call());
+        match member.outcome() {
+            Some(AttemptOutcome::Completed(_)) if writes.len() == 1 => {}
+            other => violations.push(format!(
+                "after-step: {} settled {other:?} after writing {writes:?}",
+                member.call()
+            )),
+        }
+    }
+    violations
+}
+
 /// F1: once a zombie's actors moved, every owner write it attempts is
 /// refused with `OwnershipLost`.
 fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
@@ -1240,6 +1437,50 @@ async fn a_turns_tool_round_resumes_at_every_label_without_replay() {
 async fn a_cancel_while_a_member_runs_ends_the_round_and_the_turn() {
     prove(
         Mode::CancelWhileRunning,
+        &[CommitLabel::MODEL_DONE, CommitLabel::TURN_CANCEL],
+    )
+    .await;
+}
+
+/// A turn whose `turn.commit` the store refuses publishes none of what it
+/// held for it; the attempt that commits publishes it once (FIG-5229).
+#[tokio::test]
+async fn a_refused_turn_commit_publishes_no_terminal_event() {
+    let report = matrix()
+        .labels(&[CommitLabel::TURN_COMMIT])
+        .run(|| L4::new(Mode::Mixed))
+        .await;
+    report.assert_held();
+    assert!(
+        report.cells.iter().any(|cell| {
+            cell.point.label == CommitLabel::TURN_COMMIT && cell.fault == Fault::FailBefore
+        }),
+        "the matrix never refused the turn's commit"
+    );
+}
+
+/// An `AfterStep` cancel requested while the model streams keeps the
+/// response: its round runs, and the turn ends `Cancelled` before the next
+/// model call, at every cut (FIG-5229).
+#[tokio::test]
+async fn an_after_step_cancel_while_the_model_streams_keeps_the_response_and_its_tools() {
+    prove(
+        Mode::AfterStepWhileStreaming,
+        &[
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::TURN_CANCEL,
+        ],
+    )
+    .await;
+}
+
+/// An `Immediate` cancel requested while a code cell runs stops the cell,
+/// and the turn ends `Cancelled` promptly, at every cut (FIG-5229).
+#[tokio::test]
+async fn an_immediate_cancel_during_a_long_cell_ends_the_turn_cancelled_promptly() {
+    prove(
+        Mode::CancelInCell,
         &[CommitLabel::MODEL_DONE, CommitLabel::TURN_CANCEL],
     )
     .await;

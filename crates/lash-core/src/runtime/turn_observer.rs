@@ -266,6 +266,19 @@ impl TurnObserver {
         }
     }
 
+    /// The turn is over: queue every open frame, so the publisher ends once
+    /// it has published everything queued. Later publications are dropped,
+    /// and whatever is still held stays unpublished.
+    pub(in crate::runtime) fn close(&self) {
+        let mut state = self.queue.state.lock_recover();
+        state.seal_frames();
+        state.closed = true;
+        if let Some(publisher) = state.publisher.take() {
+            drop(state);
+            publisher.wake();
+        }
+    }
+
     /// Whether the shift is over and publications are dropped.
     pub(in crate::runtime) fn is_closed(&self) -> bool {
         self.queue.state.lock_recover().closed
