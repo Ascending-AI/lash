@@ -636,3 +636,83 @@ async fn reclaim_markers_require_terminal_owners_when_configured() {
         .await
         .expect("remove isolated fixture");
 }
+
+// FIG-5282: independent cells must not force cluster-wide checkpoints.
+#[tokio::test]
+async fn isolated_cells_do_not_checkpoint_or_share_state() {
+    use lash_postgres_store::testing::{IsolatedDatabase, connect, required_database_url};
+    let url = required_database_url();
+    let mut admin = PgConnection::connect(&url).await.expect("connect admin");
+    let before: i64 = sqlx::query_scalar("SELECT num_requested FROM pg_stat_checkpointer")
+        .fetch_one(&mut admin)
+        .await
+        .expect("read requested checkpoints");
+    let (first, second) = tokio::join!(
+        IsolatedDatabase::create(&url),
+        IsolatedDatabase::create(&url)
+    );
+    let first_storage = connect(first.url())
+        .await
+        .expect("verify first cell catalog");
+    let second_storage = connect(second.url())
+        .await
+        .expect("verify second cell catalog");
+    let first_id: String = sqlx::query_scalar("SELECT catalog_id FROM lash_catalog_identity")
+        .fetch_one(first_storage.pool())
+        .await
+        .expect("first catalog identity");
+    let second_id: String = sqlx::query_scalar("SELECT catalog_id FROM lash_catalog_identity")
+        .fetch_one(second_storage.pool())
+        .await
+        .expect("second catalog identity");
+    assert_ne!(first_id, second_id, "each cell owns an independent catalog");
+    sqlx::query("INSERT INTO lash_blobs (hash, content) VALUES ('cell', 'first'::bytea)")
+        .execute(first_storage.pool())
+        .await
+        .expect("write first cell");
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_blobs")
+        .fetch_one(second_storage.pool())
+        .await
+        .expect("read second cell");
+    assert_eq!(count, 0, "a concurrent cell sees no other cell's rows");
+    // Checkpointer statistics are published asynchronously; no snapshot is
+    // retained while the two cells are made.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    sqlx::query("SELECT pg_stat_clear_snapshot()")
+        .execute(&mut admin)
+        .await
+        .expect("refresh checkpoint statistics");
+    let after: i64 = sqlx::query_scalar("SELECT num_requested FROM pg_stat_checkpointer")
+        .fetch_one(&mut admin)
+        .await
+        .expect("read requested checkpoints");
+    assert_eq!(
+        after, before,
+        "cell setup must not request a cluster checkpoint"
+    );
+    sqlx::query("DROP INDEX idx_lash_process_events_key")
+        .execute(first_storage.pool())
+        .await
+        .expect("damage only the first cell's catalog");
+    assert!(
+        connect(first.url()).await.is_err(),
+        "every open still verifies the catalog"
+    );
+    drop(first_storage);
+    drop(first);
+    let third = IsolatedDatabase::create(&url).await;
+    let third_storage = connect(third.url())
+        .await
+        .expect("verify later cell catalog");
+    let third_id: String = sqlx::query_scalar("SELECT catalog_id FROM lash_catalog_identity")
+        .fetch_one(third_storage.pool())
+        .await
+        .expect("later catalog identity");
+    assert_ne!(third_id, first_id);
+    assert_ne!(third_id, second_id);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_blobs")
+        .fetch_one(third_storage.pool())
+        .await
+        .expect("read later cell");
+    assert_eq!(count, 0, "a later cell sees no previous cell's rows");
+}

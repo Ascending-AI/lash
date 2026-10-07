@@ -25,7 +25,7 @@ pub fn postgres_url() -> Option<String> {
         .filter(|url| !url.trim().is_empty())
 }
 
-/// A fresh isolated PostgreSQL database, provisioned from the schema.
+/// A fresh isolated PostgreSQL database, cloned from the process template.
 ///
 /// It is made on a thread and runtime of its own: its future is not `Send`
 /// for every lifetime, as a scenario's must be, and the simulation runs on
@@ -73,10 +73,16 @@ pub async fn open(
         }
         Dialect::Postgres => {
             let url = postgres_url.expect("a PostgreSQL URL").to_owned();
+            let setup_started = std::time::Instant::now();
             let isolated = isolated_database(url);
+            let setup_ms = setup_started.elapsed().as_secs_f64() * 1000.;
             let storage = lash_postgres_store::testing::connect(isolated.url())
                 .await
                 .expect("the isolated database opens");
+            eprintln!(
+                "Postgres fixture: setup_ms={setup_ms:.3} verified_open_ms={:.3}",
+                setup_started.elapsed().as_secs_f64() * 1000.
+            );
             // Every port reads the virtual clock, the durable store's
             // included: a host's mail is due when the nodes' clock says.
             let stores = lash_postgres_store::PostgresStoreSet::with_clock_for_testing(

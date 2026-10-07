@@ -9,8 +9,8 @@
 //!
 //! [`IsolatedDatabase`] gives a suite a uniquely named, freshly created
 //! database derived from the configured URL, and drops it on teardown.
-//! Creation applies this build's committed `schema.sql` artifact into the new
-//! database — the same provisioning `lash migrate` performs — so a following
+//! Creation clones a process-local template provisioned once from this build's
+//! committed `schema.sql` artifact, so a following
 //! [`PostgresStorage`](crate::PostgresStorage) open verifies a schema it did
 //! not create (FIG-3797).
 
@@ -498,12 +498,67 @@ pub async fn finalize_fleet_epoch(
     HeldFinalize::begin(pool, epoch).await?.commit().await
 }
 
-/// A throwaway Postgres database, created for one test and dropped with it.
+// Only database names survive a setup runtime: a matrix cell creates its
+// database on a new thread/runtime, so caching a connection or pool would bind
+// the next cell to a runtime that has already stopped. Each test action owns
+// its PostgreSQL server; that server's teardown also removes the template.
+static DATABASE_TEMPLATES: tokio::sync::Mutex<std::collections::BTreeMap<String, String>> =
+    tokio::sync::Mutex::const_new(std::collections::BTreeMap::new());
+
+/// The sealed template for this process and maintenance URL. The lock covers
+/// provisioning so simultaneous first cells cannot apply the schema twice.
+async fn database_template(
+    base_url: &str,
+    admin: &mut PgConnection,
+) -> Result<String, sqlx::Error> {
+    let mut templates = DATABASE_TEMPLATES.lock().await;
+    if let Some(name) = templates.get(base_url) {
+        return Ok(name.clone());
+    }
+    let name = format!("lash_template_{}", uuid::Uuid::new_v4().simple());
+    // These identifiers are generated here, never supplied by the caller.
+    // WAL_LOG avoids FILE_COPY's two cluster-wide checkpoints even for the
+    // initial template; the template is small and never accepts cell writes.
+    sqlx::query(&format!(
+        "CREATE DATABASE \"{name}\" WITH STRATEGY = WAL_LOG"
+    ))
+    .execute(&mut *admin)
+    .await?;
+    let provisioned = async {
+        let mut connection = PgConnection::connect(&replace_database_name(base_url, &name)).await?;
+        sqlx::raw_sql(crate::schema::SCHEMA_DDL)
+            .execute(&mut connection)
+            .await?;
+        connection.close().await?;
+        // Cloning requires the source to have no sessions. Seal it after its
+        // provisioning connection closes, before publishing it to any cell.
+        sqlx::query(&format!(
+            "ALTER DATABASE \"{name}\" ALLOW_CONNECTIONS false"
+        ))
+        .execute(&mut *admin)
+        .await?;
+        Ok::<(), sqlx::Error>(())
+    }
+    .await;
+    if let Err(error) = provisioned {
+        let _ = sqlx::query(&format!("DROP DATABASE \"{name}\" WITH (FORCE)"))
+            .execute(&mut *admin)
+            .await;
+        return Err(error);
+    }
+    templates.insert(base_url.to_owned(), name.clone());
+    Ok(name)
+}
+
+/// A throwaway Postgres database, cloned for one test and dropped with it.
 ///
-/// Construction connects to the maintenance database named in the base URL,
-/// issues `CREATE DATABASE`, and hands back a URL pointing at the new
-/// database. `Drop` issues `DROP DATABASE ... WITH (FORCE)`, so a test that
-/// leaves pooled connections open — or panics — still cleans up.
+/// Construction provisions a sealed template once per process and maintenance
+/// URL, then uses `CREATE DATABASE ... TEMPLATE ... STRATEGY = WAL_LOG` for
+/// each cell. The clone has its own catalog identity and still undergoes the
+/// store open's full catalog verification. `Drop` issues
+/// `DROP DATABASE ... WITH (FORCE)`, so a test that leaves pooled connections
+/// open — or panics — still cleans up its cell. The template lives until the
+/// test server is removed; callers supplying a server own that teardown.
 #[derive(Debug)]
 pub struct IsolatedDatabase {
     maintenance_url: String,
@@ -526,18 +581,15 @@ impl IsolatedDatabase {
         let mut connection = PgConnection::connect(base_url)
             .await
             .expect("connect Postgres maintenance database for test isolation");
-        // Identifiers are generated here, never caller-supplied, so the quoted
-        // interpolation cannot carry an injection; `CREATE DATABASE` also
-        // refuses to run as a bound-parameter statement. The FILE_COPY
-        // strategy copies template1's files instead of WAL-logging every copied
-        // block; the harness only ever clones template1, so the semantics a
-        // test observes are unchanged (FIG-4721).
+        let template = database_template(base_url, &mut connection)
+            .await
+            .expect("provision the process's Postgres test template");
         sqlx::query(&format!(
-            "CREATE DATABASE \"{database_name}\" WITH STRATEGY = FILE_COPY"
+            "CREATE DATABASE \"{database_name}\" WITH TEMPLATE = \"{template}\" STRATEGY = WAL_LOG"
         ))
         .execute(&mut connection)
         .await
-        .unwrap_or_else(|error| panic!("create isolated test database {database_name}: {error}"));
+        .unwrap_or_else(|error| panic!("clone isolated test database {database_name}: {error}"));
         connection
             .close()
             .await
@@ -547,20 +599,20 @@ impl IsolatedDatabase {
             database_name,
             url,
         };
-        // Open never provisions: worker startup runs no DDL (FIG-3797), so the
-        // harness applies the committed artifact itself — the same job `lash
-        // migrate` does for a deployment.
+        // Cloning copies seed data as well as the schema. Catalogs must keep
+        // separate identities, even when their initial tables are identical.
+        // Open still verifies the catalog itself; it runs no provisioning DDL.
         let mut connection = PgConnection::connect(&isolated.url)
             .await
-            .expect("connect isolated database for provisioning");
-        sqlx::raw_sql(crate::schema::SCHEMA_DDL)
+            .expect("connect isolated database for its catalog identity");
+        sqlx::query("UPDATE lash_catalog_identity SET catalog_id = gen_random_uuid()::text")
             .execute(&mut connection)
             .await
-            .expect("provision isolated test database from schema.sql");
+            .expect("give the isolated database its own catalog identity");
         connection
             .close()
             .await
-            .expect("close isolated provisioning connection");
+            .expect("close isolated catalog identity connection");
         isolated
     }
 
