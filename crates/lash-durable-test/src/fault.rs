@@ -12,11 +12,11 @@ use crate::clock::SimClock;
 use crate::life::NodeLife;
 use crate::script::{Entry, Fault, Shared, Stored, WriteKind};
 use lash_durable::domain::{
-    ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
-    SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
+    AdmittedId, ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordKind,
+    RunRecordRow, RunRecordWrite, ScopeKey, SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
-    ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
+    ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DomainWrite, DurableError,
     DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit, MailTx,
     NodeLease, NodeSpec, Reaped, StoreFailure, StoreFailureKind,
 };
@@ -168,10 +168,25 @@ impl FaultStore {
         write: Call<T>,
         lose_wake: impl FnOnce(&mut T),
     ) -> Result<T, DurableError> {
+        self.write_carrying(kind, label, actor, Vec::new(), write, lose_wake)
+            .await
+    }
+
+    /// [`Self::write`], recording the `x_start` records it appends.
+    async fn write_carrying<T: Effect + Send + 'static>(
+        &self,
+        kind: WriteKind,
+        label: CommitLabel,
+        actor: Option<&ActorKey>,
+        starts: Vec<AdmittedId>,
+        write: Call<T>,
+        lose_wake: impl FnOnce(&mut T),
+    ) -> Result<T, DurableError> {
         self.life.running().await;
         let entry = self
             .script
             .enter(&self.node, kind, label, actor, self.clock.logical_ms());
+        entry.carrying(starts);
         let Some(fault) = entry.fault else {
             return self.store(entry, write).await;
         };
@@ -398,10 +413,29 @@ impl DurableStore for FaultStore {
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().clone();
-        self.write(
+        let starts = tx
+            .domain()
+            .iter()
+            .filter_map(|write| match write {
+                DomainWrite::RunRecord(RunRecordWrite::Append {
+                    owner,
+                    run,
+                    ordinal,
+                    kind: RunRecordKind::XStart,
+                    ..
+                }) => Some(AdmittedId {
+                    owner: owner.clone(),
+                    run: *run,
+                    ordinal: *ordinal,
+                }),
+                _ => None,
+            })
+            .collect();
+        self.write_carrying(
             WriteKind::Actor,
             label,
             Some(&actor),
+            starts,
             self.call(|store| async move { store.commit(tx, label).await }),
             keep,
         )

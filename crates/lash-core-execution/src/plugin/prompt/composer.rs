@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -36,6 +36,28 @@ use crate::store::BlobRef;
 pub const PROMPT_SECTION_SEPARATOR: &str = "\n\n";
 
 type RenderJob = Box<dyn FnOnce() + Send>;
+
+/// Renders submitted to any pool of the process and not yet ended.
+static RENDERS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+/// Renders of the process that ended, run or dropped unrun.
+static RENDERS_ENDED: AtomicUsize = AtomicUsize::new(0);
+
+/// One submitted render: it ends when its job has run, or is dropped unrun.
+struct RenderInFlight;
+
+impl RenderInFlight {
+    fn begin() -> Self {
+        RENDERS_IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for RenderInFlight {
+    fn drop(&mut self) {
+        RENDERS_ENDED.fetch_add(1, Ordering::SeqCst);
+        RENDERS_IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// A bounded executor for section renderers: a fixed set of worker threads
 /// behind a bounded queue. Renders run off the caller's scheduler; a full
@@ -85,7 +107,24 @@ impl PromptRenderPool {
         })
     }
 
+    /// Whether a render of any pool of the process is in flight, and how
+    /// many have ended: renders run off the caller's runtime, so a
+    /// simulation on a virtual clock waits them out before its clock moves.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn renders_in_flight() -> (bool, usize) {
+        (
+            RENDERS_IN_FLIGHT.load(Ordering::SeqCst) > 0,
+            RENDERS_ENDED.load(Ordering::SeqCst),
+        )
+    }
+
     fn submit(&self, job: RenderJob) -> Result<(), PromptCompositionError> {
+        let render = RenderInFlight::begin();
+        let job: RenderJob = Box::new(move || {
+            job();
+            drop(render);
+        });
         self.queue.try_send(job).map_err(|error| match error {
             TrySendError::Full(_) | TrySendError::Disconnected(_) => {
                 PromptCompositionError::RenderersBusy {

@@ -2,11 +2,12 @@
 //! isolated PostgreSQL database, each with the store set and the durable
 //! store a node runs on.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash_core_execution::StoreSet;
 use lash_durable::DurableStore;
-use lash_durable_test::SimClock;
+use lash_durable_test::{OffClockWork, SimClock};
 use lash_sansio::sync::MutexExt as _;
 
 /// Where a scenario's database lives.
@@ -53,20 +54,13 @@ pub async fn open(
 ) -> (Arc<dyn StoreSet>, Arc<dyn DurableStore>) {
     match dialect {
         Dialect::SqliteMemory => {
-            let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-                .await
-                .expect("an in-memory store set opens");
+            let stores = crate::sim::memory(clock).await;
             let database = Arc::new(stores.durable_store());
             (Arc::new(stores), database)
         }
         Dialect::SqliteFile => {
             let dir = tempfile::tempdir().expect("a temporary directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(
-                dir.path().join("lash.db"),
-                clock,
-            )
-            .await
-            .expect("a file store set opens");
+            let stores = crate::sim::file(dir.path().join("lash.db"), clock).await;
             keep.lock_recover().push(Box::new(dir));
             let database = Arc::new(stores.durable_store());
             (Arc::new(stores), database)
@@ -76,9 +70,13 @@ pub async fn open(
             let setup_started = std::time::Instant::now();
             let isolated = isolated_database(url);
             let setup_ms = setup_started.elapsed().as_secs_f64() * 1000.;
-            let storage = lash_postgres_store::testing::connect(isolated.url())
-                .await
-                .expect("the isolated database opens");
+            let pool = WaitedOutPool::open(isolated.url());
+            clock.wait_out(Arc::clone(&pool) as _);
+            crate::sim::wait_out_renders(&clock);
+            let storage =
+                lash_postgres_store::testing::from_pool(pool.pool.clone(), &pool_config())
+                    .await
+                    .expect("the isolated database opens");
             eprintln!(
                 "Postgres fixture: setup_ms={setup_ms:.3} verified_open_ms={:.3}",
                 setup_started.elapsed().as_secs_f64() * 1000.
@@ -95,4 +93,49 @@ pub async fn open(
             (Arc::new(stores), database)
         }
     }
+}
+
+/// How many connections the PostgreSQL leg's one pool holds: every role
+/// shares it.
+const POOL_CONNECTIONS: u32 = 16;
+
+/// The PostgreSQL leg's pool, which every role of the storage shares. Its
+/// queries answer over the network, which the simulation's runtime does not
+/// see, so the clock waits it out: it is busy while a connection is in use,
+/// and each connection's release ends one piece of its work.
+struct WaitedOutPool {
+    pool: sqlx::PgPool,
+    released: Arc<AtomicUsize>,
+}
+
+impl WaitedOutPool {
+    fn open(url: &str) -> Arc<Self> {
+        let released = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&released);
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(POOL_CONNECTIONS)
+            .min_connections(0)
+            .after_release(move |_, _| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(true) })
+            })
+            .connect_lazy(url)
+            .expect("the isolated database's URL parses");
+        Arc::new(Self { pool, released })
+    }
+}
+
+impl OffClockWork for WaitedOutPool {
+    fn busy(&self) -> bool {
+        self.pool.size() > self.pool.num_idle() as u32
+    }
+
+    fn ended(&self) -> usize {
+        self.released.load(Ordering::SeqCst)
+    }
+}
+
+/// The fixture configuration, its work fitted to the one shared pool.
+fn pool_config() -> lash_postgres_store::PostgresHostConfig {
+    lash_postgres_store::testing::work_pool_of(POOL_CONNECTIONS)
 }

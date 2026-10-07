@@ -10,6 +10,7 @@
 //! cut, and a rule that never fired fails the law when its script drops.
 //! A read rule fails one read of an actor's row the same way.
 
+use lash_durable::domain::AdmittedId;
 use lash_durable::{ActorKey, CommitLabel, DurableError};
 use lash_sansio::sync::MutexExt as _;
 use std::sync::{Arc, Mutex};
@@ -135,6 +136,10 @@ pub struct Write {
     /// The fault a rule cut it with.
     pub cut: Option<Fault>,
     pub stored: Stored,
+    /// The `x_start` records an owner commit appends: the admitted
+    /// executions it authorizes once committed. A later commit may prune
+    /// the records, but never this.
+    pub starts: Vec<AdmittedId>,
 }
 
 impl Write {
@@ -246,6 +251,11 @@ pub(crate) struct Entry {
 }
 
 impl Entry {
+    /// Record the `x_start` records the write appends.
+    pub(crate) fn carrying(&self, starts: Vec<AdmittedId>) {
+        self.shared.state.lock_recover().trace[self.index].starts = starts;
+    }
+
     /// Record what the store did with the write.
     pub(crate) fn finish(&self, stored: Stored) {
         self.shared.state.lock_recover().trace[self.index].stored = stored;
@@ -309,6 +319,7 @@ impl Shared {
                 at_ms,
                 cut: fault,
                 stored: Stored::Pending,
+                starts: Vec::new(),
             });
             (state.trace.len() - 1, fault)
         };

@@ -43684,6 +43684,7 @@
         "lash-internal-vm-broker",
         "lash-runtime",
         "serde_json",
+        "sqlx",
         "tempfile",
         "tokio",
         "tokio-util"
@@ -43729,6 +43730,7 @@
           "clippy_label": "//crates/lash-durable-test:cell_restore_laws__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:cell_restore_laws__test",
+          "shard_count": 4,
           "tags": [
             "hermetic-postgres"
           ]
@@ -43915,6 +43917,7 @@
           "clippy_label": "//crates/lash-durable-test:tool_crash_laws__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:tool_crash_laws__test",
+          "shard_count": 4,
           "tags": [
             "hermetic-postgres"
           ]
@@ -43948,6 +43951,7 @@
           "clippy_label": "//crates/lash-durable-test:turn_phases__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:turn_phases__test",
+          "shard_count": 2,
           "tags": [
             "hermetic-postgres"
           ]
@@ -45634,7 +45638,7 @@
           "clippy_label": "//crates/lash-sim:crash_matrix__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-sim:crash_matrix__test",
-          "shard_count": 4,
+          "shard_count": 8,
           "tags": []
         },
         {

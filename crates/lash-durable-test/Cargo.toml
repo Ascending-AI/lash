@@ -34,11 +34,12 @@ lash-core-store = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-typescript = { workspace = true }
 lash-vm-broker = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 serde_json = { workspace = true }
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true }

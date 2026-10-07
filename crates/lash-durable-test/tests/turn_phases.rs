@@ -53,6 +53,8 @@
 mod dialect;
 #[path = "support/seed.rs"]
 mod seed;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -570,8 +572,10 @@ impl TurnDrive for L3Drive {
                 return std::future::pending().await;
             }
             // Outlive at least one wake of the owner's cancel watch before
-            // answering: an after-step request must not stop the call.
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            // answering: an after-step request must not stop the call. The
+            // wait is on the deployment's virtual clock, so the run's shape
+            // does not turn on the host's load.
+            lash_core_ids::clock::Clock::sleep(&**cx.clock(), Duration::from_millis(50)).await;
             self.services.seen.lock_recover().answered_after_request += 1;
         }
         match self.services.mode {
@@ -725,7 +729,7 @@ impl Scenario for L3 {
             &self.keep,
         )
         .await;
-        *self.backend.lock_recover() = Some(Backend::for_testing(stores));
+        *self.backend.lock_recover() = Some(sim::backend(stores));
         database
     }
 

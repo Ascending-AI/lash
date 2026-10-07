@@ -2164,6 +2164,7 @@ dependencies = [
  "lash-internal-vm-broker",
  "lash-runtime",
  "serde_json",
+ "sqlx",
  "tempfile",
  "tokio",
  "tokio-util",

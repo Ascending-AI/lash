@@ -10,7 +10,7 @@
 use lash_core_ids::clock::Clock;
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -19,19 +19,60 @@ const UNSCHEDULED_STEP_MS: u64 = 5_000;
 /// Yields granted to runnable tasks between two clock moves, so a task woken
 /// by one move arms its next timer before the clock moves again.
 const SETTLE_YIELDS: usize = 32;
+/// How often busy waited-out work is polled, on the wall clock.
+const WAIT_OUT_POLL: Duration = Duration::from_micros(200);
 type SleepWaiter = tokio::sync::oneshot::Sender<()>;
 type SleepersByDeadline = BTreeMap<u64, Vec<SleepWaiter>>;
+
+/// Work in flight off the runtime that the clock waits out without taking a
+/// hold: a database pool's connections in use.
+pub trait OffClockWork: Send + Sync {
+    /// Whether some of the work is in flight.
+    fn busy(&self) -> bool;
+    /// How many pieces of the work ended so far.
+    fn ended(&self) -> usize;
+}
 
 /// Virtual clock shared by the simulated runtime and its stores.
 ///
 /// Scheduled sleeps fast-forward with virtual time. Task interleaving remains
-/// under the Tokio scheduler and is not controlled by this clock.
+/// under the Tokio scheduler and is not controlled by this clock. Work that
+/// runs off the runtime holds the clock while it is in flight: a VM worker's
+/// call takes a [`SimClock::hold`], and a database pool is waited out
+/// ([`SimClock::wait_out`]). The nodes quiesce only once nothing holds it.
 #[derive(Debug)]
 pub struct SimClock {
     logical_ms: AtomicU64,
     monotonic_origin: Instant,
     sleepers: Mutex<SleepersByDeadline>,
     sleep_registered: tokio::sync::Notify,
+    held: AtomicUsize,
+    holds: AtomicUsize,
+    released: tokio::sync::Notify,
+    waited_out: Mutex<Vec<WaitedOut>>,
+}
+
+/// Work the clock waits out.
+struct WaitedOut(Arc<dyn OffClockWork>);
+
+impl std::fmt::Debug for WaitedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WaitedOut")
+    }
+}
+
+/// One hold on a [`SimClock`]: released when dropped, from any thread.
+#[derive(Debug)]
+pub struct ClockHold {
+    clock: Arc<SimClock>,
+}
+
+impl Drop for ClockHold {
+    fn drop(&mut self) {
+        if self.clock.held.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.clock.released.notify_waiters();
+        }
+    }
 }
 
 impl SimClock {
@@ -41,7 +82,62 @@ impl SimClock {
             monotonic_origin: Instant::now(),
             sleepers: Mutex::new(BTreeMap::new()),
             sleep_registered: tokio::sync::Notify::new(),
+            held: AtomicUsize::new(0),
+            holds: AtomicUsize::new(0),
+            released: tokio::sync::Notify::new(),
+            waited_out: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Hold virtual time whenever `work` is busy.
+    pub fn wait_out(&self, work: Arc<dyn OffClockWork>) {
+        self.waited_out.lock_recover().push(WaitedOut(work));
+    }
+
+    /// Hold virtual time for work in flight off the runtime: the nodes do
+    /// not quiesce, so the clock does not move, until the hold drops.
+    pub fn hold(self: &Arc<Self>) -> ClockHold {
+        self.holds.fetch_add(1, Ordering::SeqCst);
+        self.held.fetch_add(1, Ordering::SeqCst);
+        ClockHold {
+            clock: Arc::clone(self),
+        }
+    }
+
+    /// How many holds were taken, and pieces of waited-out work ended, so
+    /// far.
+    pub(crate) fn holds_taken(&self) -> usize {
+        self.holds.load(Ordering::SeqCst)
+            + self
+                .waited_out()
+                .iter()
+                .map(|work| work.ended())
+                .sum::<usize>()
+    }
+
+    /// Wait until nothing holds the clock. Waited-out work signals nothing
+    /// when it ends, so it is polled on the wall clock, which lets the
+    /// runtime's I/O driver run.
+    pub(crate) async fn unheld(&self) {
+        loop {
+            let released = self.released.notified();
+            if self.held.load(Ordering::SeqCst) != 0 {
+                released.await;
+                continue;
+            }
+            if !self.waited_out().iter().any(|work| work.busy()) {
+                return;
+            }
+            tokio::time::sleep(WAIT_OUT_POLL).await;
+        }
+    }
+
+    fn waited_out(&self) -> Vec<Arc<dyn OffClockWork>> {
+        self.waited_out
+            .lock_recover()
+            .iter()
+            .map(|work| Arc::clone(&work.0))
+            .collect()
     }
 
     /// Milliseconds of virtual time since the clock started.

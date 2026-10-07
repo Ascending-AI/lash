@@ -27,7 +27,7 @@ mod script;
 mod testing;
 mod tripwire;
 
-pub use clock::{SimClock, settle};
+pub use clock::{ClockHold, OffClockWork, SimClock, settle};
 pub use fault::FaultStore;
 pub use life::Life;
 pub use matrix::{Cell, CutPoint, Matrix, MatrixReport, Scenario, Verdict};

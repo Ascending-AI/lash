@@ -208,12 +208,44 @@ impl CompiledModule {
     }
 }
 
+/// What holds a simulation's virtual clock while a worker call is in
+/// flight: it is called as each call begins, and what it answers is held
+/// until the worker has answered. A worker runs off the host's runtime, so
+/// a simulation that waits only on its runtime's tasks would move its clock
+/// while the worker still computes.
+#[doc(hidden)]
+#[cfg(feature = "testing")]
+pub type CallHold = Arc<dyn Fn() -> Box<dyn std::any::Any + Send> + Send + Sync>;
+
+/// One worker call's hold, if its service has a [`CallHold`]: released when
+/// dropped.
+pub(crate) struct CallHeld {
+    #[cfg(feature = "testing")]
+    _held: Option<Box<dyn std::any::Any + Send>>,
+}
+
+impl CallHeld {
+    /// The hold of one call through `service`.
+    pub(crate) fn of(service: Option<&Service>) -> Self {
+        #[cfg(not(feature = "testing"))]
+        let _ = service;
+        Self {
+            #[cfg(feature = "testing")]
+            _held: service
+                .and_then(|service| service.call_hold.as_ref())
+                .map(|hold| hold()),
+        }
+    }
+}
+
 /// One host-owned worker service. Its configuration is inspectable and has
 /// no in-parent execution alternative.
 #[derive(Clone)]
 pub struct Service {
     #[cfg(feature = "testing")]
     receipts: Option<Arc<Mutex<Vec<WorkerReceipt>>>>,
+    #[cfg(feature = "testing")]
+    call_hold: Option<CallHold>,
     config: Arc<PoolConfig>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
     budget: Option<ExecutionBudget>,
@@ -233,6 +265,8 @@ impl Service {
         Self {
             #[cfg(feature = "testing")]
             receipts: None,
+            #[cfg(feature = "testing")]
+            call_hold: None,
             config: Arc::new(config),
             pool: Arc::new(Mutex::new(None)),
             budget: None,
@@ -241,6 +275,15 @@ impl Service {
     #[cfg(feature = "testing")]
     pub fn with_worker_receipts(mut self) -> Self {
         self.receipts = Some(Arc::new(Mutex::new(Vec::new())));
+        self
+    }
+
+    /// This service, holding `hold` for each worker call while it is in
+    /// flight. Hidden from docs: simulation support, not dialect surface.
+    #[doc(hidden)]
+    #[cfg(feature = "testing")]
+    pub fn with_call_hold(mut self, hold: CallHold) -> Self {
+        self.call_hold = Some(hold);
         self
     }
 
@@ -391,6 +434,7 @@ pub mod runtime_ops {
         )]
         async fn request_accounted(&self, request: Request) -> Result<Response, PoolError> {
             let service = self.clone();
+            let _held = CallHeld::of(Some(self));
             tokio::task::spawn_blocking(move || service.request_blocking(request))
                 .await
                 .map_err(|error| {
@@ -440,6 +484,7 @@ pub mod runtime_ops {
 
         async fn pool_accounted(&self) -> Result<WorkerPool, PoolError> {
             let service = self.clone();
+            let _held = CallHeld::of(Some(self));
             tokio::task::spawn_blocking(move || service.pool())
                 .await
                 .map_err(|error| {

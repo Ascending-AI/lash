@@ -279,6 +279,7 @@ PACKAGE_DEPS = {
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lashlang": "//crates/lashlang:lashlang",
             "serde_json": "//third-party/rust:p0313",
+            "sqlx": "//third-party/rust:p0333",
             "tempfile": "//third-party/rust:p0362",
             "tokio": "//third-party/rust:p0371",
             "tokio_util": "//third-party/rust:p0377"

@@ -26,6 +26,8 @@
 
 #[path = "support/dialect.rs"]
 mod dialect;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -35,9 +37,7 @@ use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{LlmOutputPart, ToolCall, ToolControl, ToolOutcome};
-use lash_core_execution::{
-    Backend, BackendParts, DurableSettings, NoProjectionProviders, StoreSet,
-};
+use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_core_store::store::{RunCommittedOutcome, RunTerminalCause, RunTerminalKind};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
@@ -240,7 +240,7 @@ impl Scenario for FrameSwitch {
         .await;
         let backend = Backend::assemble(BackendParts {
             stores,
-            settings: DurableSettings::default(),
+            settings: sim::settings(),
             engines: Vec::new(),
             providers: Arc::new(NoProjectionProviders),
             formats: lash::formats::actor_state_surfaces(),

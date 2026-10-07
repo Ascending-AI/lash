@@ -11,6 +11,8 @@
 
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::{Arc, Mutex};
 
@@ -117,13 +119,16 @@ impl lash_core::ToolProvider for Probe {
 async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
     let witness = Arc::clone(witness);
     World::new(tier, move |backend| {
-        lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, None))
-            .plugin(Arc::new(
-                lash::process_controls::SessionProcessAdminPluginFactory::new(
-                    lash_core::lifetime::starter,
-                ),
-            ))
-            .tools(Arc::new(Probe { witness }))
+        lash::LashCore::rlm_builder(
+            backend.clone(),
+            served::rlm(backend, None, sim::untimed_workers()),
+        )
+        .plugin(Arc::new(
+            lash::process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::starter,
+            ),
+        ))
+        .tools(Arc::new(Probe { witness }))
     })
     .await
 }

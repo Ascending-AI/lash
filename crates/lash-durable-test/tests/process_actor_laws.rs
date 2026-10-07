@@ -9,6 +9,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/sim.rs"]
+mod sim;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -328,9 +330,7 @@ struct World {
 impl World {
     async fn new(script: Script) -> Self {
         let clock = SimClock::new();
-        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(Arc::clone(&clock) as _)
-            .await
-            .expect("an in-memory store set opens");
+        let stores = sim::memory(Arc::clone(&clock)).await;
         let database: Arc<dyn lash_durable::DurableStore> = Arc::new(stores.durable_store());
         let log = AdvanceLog::default();
         let refuse = Arc::new(AtomicBool::new(false));

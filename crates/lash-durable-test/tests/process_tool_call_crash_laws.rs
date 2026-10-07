@@ -27,6 +27,8 @@
 mod dialect;
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -142,6 +144,9 @@ struct Holding {
     scripts: Arc<served::Scripts>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<lash::Backend>>,
+    /// The virtual clock the database was built on, which the core's VM
+    /// worker calls hold.
+    clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
     processes: Mutex<BTreeSet<lash_core::ProcessId>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
@@ -158,6 +163,7 @@ impl Holding {
             scripts,
             tripwire: Arc::default(),
             backend: Mutex::default(),
+            clock: Mutex::default(),
             core: Mutex::default(),
             processes: Mutex::default(),
             keep: Mutex::default(),
@@ -175,10 +181,15 @@ impl Holding {
     /// nodes run what its node runs.
     fn core(&self) -> lash::LashCore {
         let backend = self.backend();
+        let clock = self
+            .clock
+            .lock_recover()
+            .clone()
+            .expect("the database is built first");
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
-                lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, None))
+                lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, None, sim::workers(&clock)))
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -306,6 +317,7 @@ impl Holding {
 #[async_trait::async_trait]
 impl Scenario for Holding {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.clock.lock_recover() = Some(Arc::clone(&clock));
         let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) = dialect::open(
             self.dialect,
             self.postgres_url.as_deref(),
@@ -313,7 +325,11 @@ impl Scenario for Holding {
             &self.keep,
         )
         .await;
-        *self.backend.lock_recover() = Some(served::backend(stores));
+        *self.backend.lock_recover() = Some(served::configured_backend(
+            stores,
+            sim::settings(),
+            Vec::new(),
+        ));
         database
     }
 

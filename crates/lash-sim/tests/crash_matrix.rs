@@ -195,13 +195,43 @@ async fn every_emitted_commit_label_is_cut_by_some_case() {
     );
 }
 
-/// Every case's matrix on PostgreSQL.
-#[tokio::test]
-#[ignore = "requires PostgreSQL; select inside a with-service.sh pg gate"]
-async fn the_crash_matrix_holds_on_postgres() {
-    let dialect = Dialect::postgres_from_env().expect("LASH_POSTGRES_DATABASE_URL names a server");
-    for case in Case::ALL {
-        let cells = assert_case_on(case, &dialect).await;
-        eprintln!("{} on PostgreSQL: cells per seed {cells:?}", case.name());
-    }
+/// Each case's matrix on PostgreSQL, one law per case: every cell opens an
+/// isolated database, so one law over every case outlasts a test's bound.
+/// The match keeps a law for every case.
+macro_rules! crash_matrix_on_postgres {
+    ($($name:ident => $case:ident;)*) => {
+        $(
+            #[tokio::test]
+            #[ignore = "requires PostgreSQL; select inside a with-service.sh pg gate"]
+            async fn $name() {
+                let dialect =
+                    Dialect::postgres_from_env().expect("LASH_POSTGRES_DATABASE_URL names a server");
+                let cells = assert_case_on(Case::$case, &dialect).await;
+                eprintln!("{} on PostgreSQL: cells per seed {cells:?}", Case::$case.name());
+            }
+        )*
+
+        #[allow(dead_code)]
+        fn every_case_has_a_postgres_law(case: Case) {
+            match case {
+                $(Case::$case)|* => {}
+            }
+        }
+    };
+}
+
+crash_matrix_on_postgres! {
+    the_crash_matrix_holds_on_postgres_for_a_turn => Turn;
+    the_crash_matrix_holds_on_postgres_for_a_tool_round => Round;
+    the_crash_matrix_holds_on_postgres_for_a_tool_s_effects => Effects;
+    the_crash_matrix_holds_on_postgres_for_a_turn_cancel => Cancel;
+    the_crash_matrix_holds_on_postgres_for_a_code_cell => Cell;
+    the_crash_matrix_holds_on_postgres_for_a_killed_code_cell => CellKilled;
+    the_crash_matrix_holds_on_postgres_for_a_process => Process;
+    the_crash_matrix_holds_on_postgres_for_a_signalled_process => Signal;
+    the_crash_matrix_holds_on_postgres_for_a_session_close => Close;
+    the_crash_matrix_holds_on_postgres_for_a_session_command => Command;
+    the_crash_matrix_holds_on_postgres_for_a_trigger_occurrence => Trigger;
+    the_crash_matrix_holds_on_postgres_for_a_drained_node => Drain;
+    the_crash_matrix_holds_on_postgres_for_a_prompt_composition => Prompt;
 }

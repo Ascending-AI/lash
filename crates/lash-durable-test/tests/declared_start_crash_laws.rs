@@ -37,6 +37,8 @@
 mod dialect;
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -554,7 +556,8 @@ impl Scenario for Spawn {
         } else {
             Vec::new()
         };
-        *self.backend.lock_recover() = Some(served::backend_with(stores, engines));
+        *self.backend.lock_recover() =
+            Some(served::configured_backend(stores, sim::settings(), engines));
         database
     }
 
@@ -672,13 +675,13 @@ const CHILD_LABELS: &[CommitLabel] = &[
     CommitLabel::CASCADE_BATCH,
 ];
 
-/// Where a batch of spawns has settled: the presentation of both children's
-/// answers with the parent's next model step. The batch's park and settle
-/// commits (`round.outcome`) are not cut here: the lifecycle commits them
-/// as its members finish, so their number varies from run to run and a cut
-/// of the uncut run's last one need not recur. The width-1 launch matrix
-/// cuts every `round.outcome`.
-const BATCH_LABELS: &[CommitLabel] = &[CommitLabel::ROUND_PRESENT_MODEL_START];
+/// Where a batch of spawns settles: its members' park and settle commits,
+/// and the presentation of both children's answers with the parent's next
+/// model step.
+const BATCH_LABELS: &[CommitLabel] = &[
+    CommitLabel::ROUND_OUTCOME,
+    CommitLabel::ROUND_PRESENT_MODEL_START,
+];
 
 /// Cut a parent spawning `width` children at every write under `labels` of
 /// its uncut run. A node's lease writes are the runner's, which its own

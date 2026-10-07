@@ -24,6 +24,8 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/sim.rs"]
+mod sim;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -375,20 +377,13 @@ impl Scenario for Proof {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
         let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) = match self.dialect {
             Dialect::SqliteMemory => {
-                let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-                    .await
-                    .expect("an in-memory store set opens");
+                let stores = sim::memory(clock).await;
                 let database = Arc::new(stores.durable_store());
                 (Arc::new(stores), database)
             }
             Dialect::SqliteFile => {
                 let dir = tempfile::tempdir().expect("a temporary directory");
-                let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(
-                    dir.path().join("lash.db"),
-                    clock,
-                )
-                .await
-                .expect("a file store set opens");
+                let stores = sim::file(dir.path().join("lash.db"), clock).await;
                 self.keep.lock_recover().push(Box::new(dir));
                 let database = Arc::new(stores.durable_store());
                 (Arc::new(stores), database)

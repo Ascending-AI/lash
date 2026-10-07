@@ -727,6 +727,9 @@ impl Lifecycle {
             // A start its registrar refused after it was staged refuses
             // every repeat of the commit: the activation ends, and the next
             // owner settles the call as its records say, without the start.
+            // A `Once` is interrupted; a `Repeatable` runs again, and its
+            // start is refused as it stages, so the call settles with the
+            // registrar's typed refusal.
             Err(error @ DurableError::Domain(DomainRefusal::ProcessStartRefused { .. })) => {
                 Err(error.into())
             }

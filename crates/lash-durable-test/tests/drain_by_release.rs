@@ -25,6 +25,8 @@
 #[allow(dead_code)]
 #[path = "support/dialect.rs"]
 mod dialect;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;

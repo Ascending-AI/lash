@@ -97,6 +97,23 @@ targets = ["crash_matrix"]
 serial = true
 env = { LASH_MATRIX_THREADS = "4" }
 
+# The cell restore and tool crash laws (FIG-5249) are fifteen matrices and
+# single cuts each over three tiers: unloaded, one binary ran 129-142 s and
+# its slowest law 37-60 s, and on a loaded pool a binary passed the default
+# bound. The turn phase matrices ran 56 s unloaded and timed out on main.
+# The shards spread the laws over separate actions; the bound is unchanged.
+[[rule]]
+packages = ["lash-internal-durable-test"]
+kinds = ["test"]
+targets = ["cell_restore_laws", "tool_crash_laws"]
+shards = 4
+
+[[rule]]
+packages = ["lash-internal-durable-test"]
+kinds = ["test"]
+targets = ["turn_phases"]
+shards = 2
+
 # The lash-postgres-workers runbook's harness (FIG-5199) owns its PostgreSQL server, so a
 # case can stop and restart it: the pinned tree, and the NSS wrapper `initdb`
 # needs on the pool, are data named to the test by path. Its cases boot node
@@ -398,12 +415,14 @@ compile_data = [
 
 # The crash matrix (FIG-5184) cuts every case at every commit label, mode and
 # seed; whole, its ten cases ran past the 300 s bound on four test threads.
-# The shards keep every cell and spread the cases over separate actions.
+# The shards keep every cell and spread the cases over separate actions. At
+# four shards, two ran 45-100 s unloaded and past 300 s on a loaded pool
+# (FIG-5249).
 [[rule]]
 packages = ["lash-sim"]
 kinds = ["test"]
 targets = ["crash_matrix"]
-shards = 4
+shards = 8
 
 # Its completeness gates read the real store trait definitions with
 # `include_str!`.

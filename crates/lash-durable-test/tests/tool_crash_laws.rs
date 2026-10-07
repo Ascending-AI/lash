@@ -52,6 +52,8 @@
 mod dialect;
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -501,6 +503,9 @@ struct Crash {
     scripts: Arc<served::Scripts>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<lash::Backend>>,
+    /// The virtual clock the database was built on, which the core's VM
+    /// worker calls hold.
+    clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
     /// The host's session and its send, which [`Turn::Activity`] follows.
     host: Mutex<Option<(lash::DurableSession, lash::SendHandle)>>,
@@ -528,6 +533,7 @@ impl Crash {
             scripts,
             tripwire: Arc::default(),
             backend: Mutex::default(),
+            clock: Mutex::default(),
             core: Mutex::default(),
             host: Mutex::default(),
             chat: Mutex::default(),
@@ -546,11 +552,19 @@ impl Crash {
     /// node of its own, the simulated nodes run its sessions' turns.
     fn core(&self) -> lash::LashCore {
         let backend = self.backend();
+        let clock = self
+            .clock
+            .lock_recover()
+            .clone()
+            .expect("the database is built first");
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
                 let builder = if self.turn.code() {
-                    lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, None))
+                    lash::LashCore::rlm_builder(
+                        backend.clone(),
+                        served::rlm(&backend, None, sim::workers(&clock)),
+                    )
                 } else {
                     lash::LashCore::standard_builder(backend.clone())
                 };
@@ -862,6 +876,7 @@ impl lash_core::facade_support::TurnActivitySink for Collected {
 #[async_trait::async_trait]
 impl Scenario for Crash {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.clock.lock_recover() = Some(Arc::clone(&clock));
         let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) = dialect::open(
             self.dialect,
             self.postgres_url.as_deref(),
@@ -869,7 +884,11 @@ impl Scenario for Crash {
             &self.keep,
         )
         .await;
-        *self.backend.lock_recover() = Some(served::backend(stores));
+        *self.backend.lock_recover() = Some(served::configured_backend(
+            stores,
+            sim::settings(),
+            Vec::new(),
+        ));
         database
     }
 

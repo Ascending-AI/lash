@@ -15,6 +15,7 @@
 //! [`invariants`](super::invariants) and the case's own.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use lash_core::runtime::durable::session::SessionActivation;
@@ -22,7 +23,7 @@ use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::{Backend, BackendParts, DurableSettings, NoProjectionProviders};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorDispatch, ActorKey, DurableStore, LeaseConfig};
-use lash_durable_test::{Cut, Scenario, SimClock, SimNodes, SimNodesConfig};
+use lash_durable_test::{Cut, OffClockWork, Scenario, SimClock, SimNodes, SimNodesConfig};
 
 use super::Case;
 use super::engine::{SimProcessEngine, SimSteps};
@@ -142,6 +143,7 @@ async fn postgres(
     clock: Arc<SimClock>,
     keep: &mut Keep,
 ) -> Result<(Backend, Arc<dyn DurableStore>), String> {
+    wait_out_renders(&clock);
     let base = url.to_owned();
     // Made on a thread and runtime of its own: its future is not `Send`
     // for every lifetime, and the deployment's runtime alone observes its
@@ -159,9 +161,14 @@ async fn postgres(
     })
     .join()
     .map_err(|_| "the isolated database's setup panicked".to_owned())??;
-    let storage = lash_postgres_store::testing::connect(isolated.url())
-        .await
-        .map_err(|error| error.to_string())?;
+    let pool = WaitedOutPool::open(isolated.url())?;
+    clock.wait_out(Arc::clone(&pool) as _);
+    let storage = lash_postgres_store::testing::from_pool(
+        pool.pool.clone(),
+        &lash_postgres_store::testing::work_pool_of(POOL_CONNECTIONS),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     // Every port reads the virtual clock, the durable store's included: a
     // host's input row and its actor's wake are due when the nodes' clock
     // says.
@@ -185,6 +192,66 @@ pub fn isolated_url(keep: &Keep) -> Option<String> {
     })
 }
 
+/// How many connections the PostgreSQL deployment's one pool holds: every
+/// role shares it.
+const POOL_CONNECTIONS: u32 = 16;
+
+/// The PostgreSQL deployment's pool, which every role of its storage
+/// shares. Its queries answer over the network, which the deployment's
+/// runtime does not see, so the clock waits it out: it is busy while a
+/// connection is in use, and each connection's release ends one piece of
+/// its work.
+struct WaitedOutPool {
+    pool: sqlx::PgPool,
+    released: Arc<AtomicUsize>,
+}
+
+impl WaitedOutPool {
+    fn open(url: &str) -> Result<Arc<Self>, String> {
+        let released = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&released);
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(POOL_CONNECTIONS)
+            .min_connections(0)
+            .after_release(move |_, _| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(true) })
+            })
+            .connect_lazy(url)
+            .map_err(|error| error.to_string())?;
+        Ok(Arc::new(Self { pool, released }))
+    }
+}
+
+impl OffClockWork for WaitedOutPool {
+    fn busy(&self) -> bool {
+        self.pool.size() > self.pool.num_idle() as u32
+    }
+
+    fn ended(&self) -> usize {
+        self.released.load(Ordering::SeqCst)
+    }
+}
+
+/// The process's prompt renders: they run on the composer's threads, off
+/// the deployment's runtime.
+struct PromptRenders;
+
+impl OffClockWork for PromptRenders {
+    fn busy(&self) -> bool {
+        lash_core_execution::plugin::prompt::PromptRenderPool::renders_in_flight().0
+    }
+
+    fn ended(&self) -> usize {
+        lash_core_execution::plugin::prompt::PromptRenderPool::renders_in_flight().1
+    }
+}
+
+/// Hold `clock` while a prompt render of the process is in flight.
+fn wait_out_renders(clock: &SimClock) {
+    clock.wait_out(Arc::new(PromptRenders));
+}
+
 /// The backend of a deployment over a fresh SQLite memory store set on
 /// `clock`, and the store set's durable store. Each store call runs to its
 /// answer before its caller goes on, so the deployment's one runtime thread
@@ -195,6 +262,7 @@ pub fn isolated_url(keep: &Keep) -> Option<String> {
 ///
 /// The store set does not open or the backend does not assemble.
 pub async fn sqlite(clock: Arc<SimClock>) -> Result<(Backend, Arc<dyn DurableStore>), String> {
+    wait_out_renders(&clock);
     let options = lash_sqlite_store::SqliteStoreSetOptions {
         inline_calls: true,
         ..lash_sqlite_store::SqliteStoreSetOptions::memory()

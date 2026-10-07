@@ -257,6 +257,43 @@ async fn through_next_commit(
     }
 }
 
+/// The updates of `updates` while the call `provider_call_id` holds on
+/// `gate`, up to and including its `ToolCallStarted`; then, with the gate
+/// open, up to and including the next `TerminalReplacement`.
+///
+/// A subscription attaches on its first poll. A subscriber first polled
+/// once the turn ended meets its commit durable but perhaps not yet
+/// published, which is a gap. Held behind the gate, the turn cannot commit
+/// before the subscription attached and streamed the call's start.
+async fn through_the_held_call_s_commit(
+    updates: &mut RecoverableChatSubscription,
+    gate: &Gate,
+    provider_call_id: &str,
+) -> Vec<RecoverableChatUpdate> {
+    let mut seen = Vec::new();
+    loop {
+        let update = next_update(updates).await;
+        let started = matches!(
+            &update,
+            RecoverableChatUpdate::Event { event, .. }
+                if matches!(
+                    &event.payload,
+                    SessionObservationEventPayload::TurnActivity(TurnActivity {
+                        event: TurnEvent::ToolCallStarted { provider_call_id: Some(id), .. },
+                        ..
+                    }) if id == provider_call_id
+                )
+        );
+        seen.push(update);
+        if started {
+            break;
+        }
+    }
+    gate.open();
+    seen.extend(through_next_commit(updates).await);
+    seen
+}
+
 /// The row ids of `view`'s transcript, in order.
 fn row_ids(view: &lash_core::SessionReadView) -> Vec<lash_core_store::transcript::RowId> {
     view.transcript()
@@ -477,7 +514,7 @@ async fn a_presentation_step_presents_every_native_round_call(tier: Tier) {
 async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(tier: Tier) {
     const NAME: &str = "activity law: settle the call";
     const SESSION: &str = "activity-settled";
-    let gate = Gate::new(true);
+    let gate = Gate::new(false);
     let Some(world) = world(tier, &gate, false).await else {
         return;
     };
@@ -505,8 +542,11 @@ async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(ti
         .observe()
         .subscribe_recoverable_chat(snapshot.cursor.clone());
 
-    served::assert_answered("the settled turn", &world.send(&session, NAME).await);
-    let first = through_next_commit(&mut updates).await;
+    let (output, first) = tokio::join!(
+        world.send(&session, NAME),
+        through_the_held_call_s_commit(&mut updates, &gate, "settled-call"),
+    );
+    served::assert_answered("the settled turn", &output);
     let head = session
         .read()
         .await
@@ -588,7 +628,7 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
     const SESSION: &str = "activity-two-nodes";
     let live: Arc<dyn LiveReplayStore> =
         Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::default());
-    let gate = Gate::new(true);
+    let gate = Gate::new(false);
     let Some(world) = world_with(tier, &gate, false, Some(Arc::clone(&live))).await else {
         return;
     };
@@ -610,7 +650,7 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
             served::metadata(),
         )
         .tools(Arc::new(ActivityTools {
-            gate,
+            gate: gate.clone(),
             backend: world.backend.clone(),
         }))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -638,12 +678,16 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         .observe()
         .subscribe_recoverable_chat(snapshot.cursor.clone());
 
-    let output = tokio::time::timeout(WATCHDOG, session.send(lash::TurnInput::text(NAME)).output())
-        .await
-        .expect("deadlock watchdog: the turn never settled")
-        .expect("the turn answers");
+    let (output, seen) = tokio::join!(
+        async {
+            tokio::time::timeout(WATCHDOG, session.send(lash::TurnInput::text(NAME)).output())
+                .await
+                .expect("deadlock watchdog: the turn never settled")
+                .expect("the turn answers")
+        },
+        through_the_held_call_s_commit(&mut updates, &gate, "two-node-call"),
+    );
     served::assert_answered("the two-node turn", &output);
-    let seen = through_next_commit(&mut updates).await;
     let head = session
         .read()
         .await

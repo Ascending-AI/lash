@@ -26,6 +26,8 @@
 
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -338,7 +340,11 @@ impl Producers {
             let builder = if code {
                 lash::LashCore::rlm_builder(
                     backend.clone(),
-                    served::rlm(backend, Some(Arc::new(GrantedLeaves))),
+                    served::rlm(
+                        backend,
+                        Some(Arc::new(GrantedLeaves)),
+                        sim::untimed_workers(),
+                    ),
                 )
             } else {
                 lash::LashCore::standard_builder(backend.clone())

@@ -27,6 +27,8 @@
 
 #[path = "support/images.rs"]
 mod images;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

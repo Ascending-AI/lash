@@ -30,6 +30,8 @@
 // Test code.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/sim.rs"]
+mod sim;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
@@ -533,9 +535,7 @@ impl RoundScenario {
 #[async_trait::async_trait]
 impl Scenario for RoundScenario {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
-        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(Arc::clone(&clock) as _)
-            .await
-            .expect("an in-memory store set opens");
+        let stores = sim::memory(Arc::clone(&clock)).await;
         let database = Arc::new(stores.durable_store());
         *self.backend.lock_recover() = Some((Backend::for_testing(Arc::new(stores)), clock));
         database

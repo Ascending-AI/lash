@@ -49,6 +49,8 @@
 
 #[path = "support/seed.rs"]
 mod seed;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
@@ -864,12 +866,10 @@ impl L4 {
 impl Scenario for L4 {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
         *self.clock.lock_recover() = Some(Arc::clone(&clock));
-        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-            .await
-            .expect("an in-memory store set opens");
+        let stores = sim::memory(clock).await;
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let stores: Arc<dyn StoreSet> = Arc::new(stores);
-        *self.backend.lock_recover() = Some(Backend::for_testing(stores));
+        *self.backend.lock_recover() = Some(sim::backend(stores));
         database
     }
 

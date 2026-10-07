@@ -5,6 +5,7 @@ use lash_vm_broker::{CheckoutRefusal, WorkerCheckout, WorkerRead, WorkerSlots, W
 use lash_vm_protocol::*;
 use tokio::sync::mpsc;
 
+use crate::service::CallHeld;
 use crate::{ExecutionBudget, ParkOutcome, WorkerPool};
 
 /// One admitted run's pool access, with parent-owned accounting shared by all
@@ -42,6 +43,7 @@ impl WorkerSlots for PoolSlots {
             .len()
             .saturating_add(128);
         let budget = self.budget.clone();
+        let held = CallHeld::of(self.service.as_ref());
         let worker =
             tokio::task::spawn_blocking(move || pool.checkout(reservation, epoch, frame, budget))
                 .await
@@ -61,6 +63,7 @@ impl WorkerSlots for PoolSlots {
                         CheckoutRefusal::Infrastructure(error.into_outcome())
                     }
                 })?;
+        drop(held);
         #[cfg(feature = "testing")]
         if let Some(service) = &self.service {
             service
@@ -79,7 +82,9 @@ impl WorkerSlots for PoolSlots {
         let lease = worker.lease();
         let interruptor = worker.interruptor().map_err(|_| CheckoutRefusal::Closed)?;
         let codec = FrameCodec::new(self.pool.config().protocol.decode);
-        let (commands, mut inputs) = mpsc::channel::<Option<Vec<u8>>>(1);
+        // Each command travels with its call's hold, released once the
+        // worker answered it.
+        let (commands, mut inputs) = mpsc::channel::<(Option<Vec<u8>>, CallHeld)>(1);
         let (outputs, messages) = mpsc::channel(2);
         let released = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let actor_released = released.clone();
@@ -107,7 +112,7 @@ impl WorkerSlots for PoolSlots {
                 },
                 &mut outgoing,
             );
-            while let Some(bytes) = inputs.blocking_recv() {
+            while let Some((bytes, _held)) = inputs.blocking_recv() {
                 let Some(bytes) = bytes else {
                     drop(worker);
                     return;
@@ -200,6 +205,7 @@ impl WorkerSlots for PoolSlots {
         Ok(WorkerCheckout {
             lease,
             transport: Box::new(Transport {
+                service: self.service.clone(),
                 commands,
                 messages,
                 actor: Some(actor),
@@ -222,7 +228,9 @@ impl WorkerSlots for PoolSlots {
     }
 }
 struct Transport {
-    commands: mpsc::Sender<Option<Vec<u8>>>,
+    /// The service whose call hold each command carries.
+    service: Option<crate::service::Service>,
+    commands: mpsc::Sender<(Option<Vec<u8>>, CallHeld)>,
     messages: mpsc::Receiver<WorkerRead>,
     actor: Option<tokio::task::JoinHandle<()>>,
     released: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -239,7 +247,10 @@ impl WorkerTransport for Transport {
             return Ok(());
         }
         self.commands
-            .send(if reset { None } else { Some(bytes) })
+            .send((
+                (!reset).then_some(bytes),
+                CallHeld::of(self.service.as_ref()),
+            ))
             .await
             .map_err(|_| SupervisorEvidence::EndOfStream)?;
         if reset && let Some(actor) = self.actor.take() {
@@ -256,7 +267,7 @@ impl WorkerTransport for Transport {
     async fn kill(&mut self) -> SupervisorEvidence {
         self.messages.close();
         let _ = self.interruptor.shutdown(std::net::Shutdown::Both);
-        let _ = self.commands.try_send(None);
+        let _ = self.commands.try_send((None, CallHeld::of(None)));
         if let Some(actor) = self.actor.take() {
             let _ = actor.await;
         }

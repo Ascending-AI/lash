@@ -58,9 +58,7 @@ pub async fn open(
     std::fs::write(&path, inflate(image.db)).expect("the image's database is written");
     std::fs::write(path.with_extension("db-wal"), inflate(image.wal))
         .expect("the image's log is written");
-    let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(&path, clock)
-        .await
-        .expect("the image opens");
+    let stores = crate::sim::file(&path, clock).await;
     (stores, dir)
 }
 

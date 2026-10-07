@@ -36,12 +36,13 @@
 
 #[path = "support/dialect.rs"]
 mod dialect;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash::rlm::Dialect as _;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
@@ -54,10 +55,10 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
-    Backend, BackendParts, DurableSettings, EngineAction, EngineEvent, EngineState,
-    EngineStateFormat, LifetimeDecision, NoProjectionProviders, ProcessEngine, ProcessId,
-    ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, StepRequest, StoreSet, ToolCallOutput, ToolCancellation,
+    Backend, BackendParts, EngineAction, EngineEvent, EngineState, EngineStateFormat,
+    LifetimeDecision, NoProjectionProviders, ProcessEngine, ProcessId, ProcessInfraError,
+    ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    StepRequest, StoreSet, ToolCallOutput, ToolCancellation,
 };
 use lash_durable::domain::WaitKind;
 use lash_durable::runner::Activation;
@@ -86,7 +87,7 @@ const FINAL: &str = "final answer";
 /// lease's failover, so a recovery at its half is long before its end.
 const SLEEP_MS: u64 = 120_000;
 /// How long the awaited process sleeps, in virtual milliseconds: past the
-/// session's idle eviction (60 s), so the parked cell releases its session
+/// session's idle eviction, so the parked cell releases its session
 /// before the process ends, and within `processes.await`'s limit (the 2 min
 /// tool default), which its park never outlives.
 const PROCESS_MS: u64 = 100_000;
@@ -267,19 +268,6 @@ fn model(cell: Cell, requests: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
         .into_handle()
 }
 
-/// The dialect's worker service with its run deadlines off the clock.
-fn untimed_workers() -> lash::rlm::WorkerService {
-    const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-    let mut config = lash::rlm::TypescriptDialect
-        .worker_service()
-        .config()
-        .clone();
-    config.deadlines.compute = OFF_THE_CLOCK;
-    config.deadlines.serialization = OFF_THE_CLOCK;
-    config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
-    lash::rlm::WorkerService::new(config)
-}
-
 // --- the awaited process ----------------------------------------------------
 
 /// The awaited process's engine: it sleeps until its payload's `until_ms`,
@@ -442,6 +430,9 @@ struct CellTurn {
     requests: Arc<Mutex<Vec<String>>>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<Backend>>,
+    /// The virtual clock the database was built on, which the core's VM
+    /// worker calls hold.
+    clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
@@ -456,6 +447,7 @@ impl CellTurn {
             requests: Arc::default(),
             tripwire: Arc::default(),
             backend: Mutex::default(),
+            clock: Mutex::default(),
             core: Mutex::default(),
             keep: Mutex::default(),
         }
@@ -470,6 +462,11 @@ impl CellTurn {
 
     fn core(&self) -> lash::LashCore {
         let backend = self.backend();
+        let clock = self
+            .clock
+            .lock_recover()
+            .clone()
+            .expect("the database is built first");
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
@@ -484,7 +481,7 @@ impl CellTurn {
                         Arc::new(lash::rlm::TypescriptDialect),
                         &backend,
                     )
-                    .with_worker_service(untimed_workers()),
+                    .with_worker_service(sim::workers(&clock)),
                 )
                 .serve_sessions(false)
                 .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -651,7 +648,7 @@ async fn turn_ended(nodes: &SimNodes) -> Vec<String> {
 fn shipped_backend(stores: Arc<dyn StoreSet>) -> Backend {
     Backend::assemble(BackendParts {
         stores,
-        settings: DurableSettings::default(),
+        settings: sim::settings(),
         engines: vec![Arc::new(SleepEngine)],
         providers: Arc::new(NoProjectionProviders),
         formats: lash::formats::actor_state_surfaces(),
@@ -662,6 +659,7 @@ fn shipped_backend(stores: Arc<dyn StoreSet>) -> Backend {
 #[async_trait::async_trait]
 impl Scenario for CellTurn {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.clock.lock_recover() = Some(Arc::clone(&clock));
         let (stores, database) = dialect::open(
             self.dialect,
             self.postgres_url.as_deref(),

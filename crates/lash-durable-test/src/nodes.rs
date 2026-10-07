@@ -331,20 +331,31 @@ impl SimNodes {
         )
     }
 
-    /// Wait until no node waits on the database and every task woken so far
-    /// has reached its next timer or gate.
+    /// Wait until no node waits on the database, nothing holds the clock,
+    /// and every task woken so far has reached its next timer or gate.
     pub async fn quiesce(&self) {
         loop {
-            self.activity.idle().await;
-            let entered = self.activity.entered();
+            self.idle().await;
+            let entered = self.entered();
             settle().await;
-            if self.activity.entered() == entered {
-                self.activity.idle().await;
-                if self.activity.entered() == entered {
+            if self.entered() == entered {
+                self.idle().await;
+                if self.entered() == entered {
                     return;
                 }
             }
         }
+    }
+
+    /// No node waits on the database and nothing holds the clock.
+    async fn idle(&self) {
+        self.activity.idle().await;
+        self.clock.unheld().await;
+    }
+
+    /// How many store calls and clock holds began so far.
+    fn entered(&self) -> usize {
+        self.activity.entered() + self.clock.holds_taken()
     }
 
     /// Quiesce, then move time to the next armed timer and quiesce again.

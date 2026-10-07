@@ -33,6 +33,8 @@
 mod dialect;
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
@@ -393,7 +395,11 @@ impl Scenario for Crash {
             &self.keep,
         )
         .await;
-        *self.backend.lock_recover() = Some(served::backend(stores));
+        *self.backend.lock_recover() = Some(served::configured_backend(
+            stores,
+            sim::settings(),
+            Vec::new(),
+        ));
         database
     }
 

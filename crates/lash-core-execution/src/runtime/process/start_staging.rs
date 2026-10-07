@@ -534,6 +534,24 @@ pub async fn stage_store_local_start(
     }
     let anchor = staging.anchor();
     let (registration, observers, process_id, _, prepared_at_ms) = registration.into_commit(anchor);
+    // The registrar refuses a start whose starter or lifetime scope closed
+    // (FIG-3607 R11) when its rows commit, and with it the commit of its
+    // call's outcome. A closed scope never reopens, so the start is refused
+    // here as the registrar would refuse it, and its call settles with the
+    // typed refusal: a call whose commit was refused stages again on its
+    // next attempt and ends here.
+    for parent in registration.closing_scopes() {
+        if stores
+            .registry
+            .get_parent_end_plan(&parent)
+            .await?
+            .is_some()
+        {
+            let start_key = registration.start_key.clone();
+            staging.abandon(stores).await?;
+            return Err(crate::PluginError::ParentEnded { start_key, parent }.into());
+        }
+    }
     let staged = StagedRegistration {
         registration,
         observers,

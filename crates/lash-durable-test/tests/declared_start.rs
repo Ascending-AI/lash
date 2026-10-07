@@ -16,6 +16,8 @@
 
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -788,7 +790,10 @@ impl World {
                 model(&script),
                 move |backend| {
                     let builder = if shape.producer == Producer::PromiseAll {
-                        lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, None))
+                        lash::LashCore::rlm_builder(
+                            backend.clone(),
+                            served::rlm(backend, None, sim::untimed_workers()),
+                        )
                     } else {
                         lash::LashCore::standard_builder(backend.clone())
                     };

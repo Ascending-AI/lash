@@ -22,6 +22,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/sim.rs"]
+mod sim;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -308,9 +310,7 @@ impl StepProof {
 #[async_trait::async_trait]
 impl Scenario for StepProof {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
-        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-            .await
-            .expect("an in-memory store set opens");
+        let stores = sim::memory(clock).await;
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let stores: Arc<dyn StoreSet> = Arc::new(stores);
         let backend = lash::durable::DurableBackendBuilder::new(stores)

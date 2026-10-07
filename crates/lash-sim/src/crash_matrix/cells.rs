@@ -23,6 +23,7 @@ use lash_core::runtime::durable::session::TurnServices;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
 use lash_core_execution::Backend;
 use lash_durable::domain::{ExecKey, OwnerKey};
+use lash_durable_test::SimClock;
 use lash_sansio::{SessionId, TurnId};
 
 use super::cases::run_of;
@@ -48,11 +49,15 @@ pub fn cell_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
     if let Some(core) = world.cell_core().get() {
         return Ok(core.clone());
     }
-    let built = core(world, &world.backend()?)?;
+    let built = core(world, &world.backend()?, &world.clock()?)?;
     Ok(world.cell_core().get_or_init(|| built).clone())
 }
 
-fn core(world: &Arc<World>, backend: &Backend) -> Result<lash::LashCore, String> {
+fn core(
+    world: &Arc<World>,
+    backend: &Backend,
+    clock: &Arc<SimClock>,
+) -> Result<lash::LashCore, String> {
     lash::LashCore::rlm_builder(
         backend.clone(),
         lash::rlm::RlmProtocolPluginFactory::new(
@@ -64,7 +69,7 @@ fn core(world: &Arc<World>, backend: &Backend) -> Result<lash::LashCore, String>
             Arc::new(lash::rlm::TypescriptDialect),
             backend,
         )
-        .with_worker_service(untimed_workers()),
+        .with_worker_service(untimed_workers(clock)),
     )
     .serve_sessions(false)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -119,8 +124,10 @@ pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> R
 }
 
 /// The dialect's worker service with its run deadlines off the clock: a
-/// held body keeps its cell waiting for as long as the host holds it.
-fn untimed_workers() -> lash::rlm::WorkerService {
+/// held body keeps its cell waiting for as long as the host holds it. A
+/// worker runs off the runtime, so each worker call holds `clock` while it
+/// is in flight.
+fn untimed_workers(clock: &Arc<SimClock>) -> lash::rlm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::rlm::TypescriptDialect
         .worker_service()
@@ -129,7 +136,8 @@ fn untimed_workers() -> lash::rlm::WorkerService {
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
-    lash::rlm::WorkerService::new(config)
+    let clock = Arc::clone(clock);
+    lash::rlm::WorkerService::new(config).with_call_hold(Arc::new(move || Box::new(clock.hold())))
 }
 
 fn metadata() -> Result<lash_core::LlmProfileMetadata, String> {

@@ -20,6 +20,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/sim.rs"]
+mod sim;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -27,9 +29,9 @@ use lash_core::LlmOutputPart;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core_execution::{
-    Backend, BackendParts, DurableSettings, HostArtifactPin, LifetimeDecision,
-    NoProjectionProviders, ProcessId, ProcessInput, ProcessProvenance, ProcessRegistration,
-    SessionCreateRequest, SessionStartPoint, SessionTurnOutcome, StoreSet,
+    Backend, BackendParts, HostArtifactPin, LifetimeDecision, NoProjectionProviders, ProcessId,
+    ProcessInput, ProcessProvenance, ProcessRegistration, SessionCreateRequest, SessionStartPoint,
+    SessionTurnOutcome, StoreSet,
 };
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
@@ -189,14 +191,12 @@ impl ChildTurn {
 #[async_trait::async_trait]
 impl Scenario for ChildTurn {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
-        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-            .await
-            .expect("an in-memory store set opens");
+        let stores = sim::memory(clock).await;
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let stores: Arc<dyn StoreSet> = Arc::new(stores);
         let backend = Backend::assemble(BackendParts {
             stores,
-            settings: DurableSettings::default(),
+            settings: sim::settings(),
             engines: Vec::new(),
             providers: Arc::new(NoProjectionProviders),
             formats: lash::formats::actor_state_surfaces(),

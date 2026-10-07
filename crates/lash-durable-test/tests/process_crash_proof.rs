@@ -40,6 +40,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/sim.rs"]
+mod sim;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -501,9 +503,7 @@ fn find<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 impl Scenario for Proof {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
         *self.clock.lock_recover() = Some(Arc::clone(&clock));
-        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-            .await
-            .expect("an in-memory store set opens");
+        let stores = sim::memory(clock).await;
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let backend = Backend::assemble(BackendParts {
             formats: Vec::new(),

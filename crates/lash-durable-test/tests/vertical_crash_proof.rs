@@ -47,21 +47,20 @@
 mod dialect;
 #[path = "support/images.rs"]
 mod images;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash::rlm::Dialect as _;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
-use lash_core_execution::{
-    Backend, BackendParts, DurableSettings, NoProjectionProviders, StoreSet,
-};
+use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
 use lash_durable_test::{
@@ -240,25 +239,12 @@ fn metadata() -> lash_core::LlmProfileMetadata {
         .expect("the model's metadata")
 }
 
-/// The dialect's worker service with its run deadlines off the clock: a
-/// cell's guest is bounded by its instruction and memory budgets.
-fn untimed_workers() -> lash::rlm::WorkerService {
-    const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-    let mut config = lash::rlm::TypescriptDialect
-        .worker_service()
-        .config()
-        .clone();
-    config.deadlines.compute = OFF_THE_CLOCK;
-    config.deadlines.serialization = OFF_THE_CLOCK;
-    config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
-    lash::rlm::WorkerService::new(config)
-}
-
 /// One deployment's core over `backend`: it serves no node of its own, the
 /// scenario's simulated nodes run its sessions' turns.
 fn core(
     protocol: Protocol,
     backend: &Backend,
+    clock: &Arc<SimClock>,
     world: &Arc<ExternalWorld>,
     seen: &Arc<Mutex<Seen>>,
 ) -> lash::LashCore {
@@ -274,7 +260,7 @@ fn core(
                 Arc::new(lash::rlm::TypescriptDialect),
                 backend,
             )
-            .with_worker_service(untimed_workers()),
+            .with_worker_service(sim::workers(clock)),
         ),
         Protocol::Tools => lash::LashCore::standard_builder(backend.clone()),
     };
@@ -296,7 +282,7 @@ fn core(
 fn shipped_backend(stores: Arc<dyn StoreSet>) -> Backend {
     Backend::assemble(BackendParts {
         stores,
-        settings: DurableSettings::default(),
+        settings: sim::settings(),
         engines: Vec::new(),
         providers: Arc::new(NoProjectionProviders),
         formats: lash::formats::actor_state_surfaces(),
@@ -320,6 +306,9 @@ struct V0 {
     seen: Arc<Mutex<Seen>>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<Backend>>,
+    /// The virtual clock the database was built on, which the core's VM
+    /// worker calls hold.
+    clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
@@ -336,6 +325,7 @@ impl V0 {
             seen: Arc::default(),
             tripwire: Arc::default(),
             backend: Mutex::default(),
+            clock: Mutex::default(),
             core: Mutex::default(),
             keep: Mutex::default(),
         }
@@ -352,9 +342,14 @@ impl V0 {
     /// backend.
     fn core(&self) -> lash::LashCore {
         let backend = self.backend();
+        let clock = self
+            .clock
+            .lock_recover()
+            .clone()
+            .expect("the database is built first");
         self.core
             .lock_recover()
-            .get_or_insert_with(|| core(self.protocol, &backend, &self.world, &self.seen))
+            .get_or_insert_with(|| core(self.protocol, &backend, &clock, &self.world, &self.seen))
             .clone()
     }
 }
@@ -362,6 +357,7 @@ impl V0 {
 #[async_trait::async_trait]
 impl Scenario for V0 {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.clock.lock_recover() = Some(Arc::clone(&clock));
         let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) =
             match (self.image, &self.record_at) {
                 (Some(image), _) => {
@@ -371,9 +367,7 @@ impl Scenario for V0 {
                     (Arc::new(stores), database)
                 }
                 (None, Some(path)) => {
-                    let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(path, clock)
-                        .await
-                        .expect("the recorded store opens");
+                    let stores = sim::file(path, clock).await;
                     let database = Arc::new(stores.durable_store());
                     (Arc::new(stores), database)
                 }
@@ -448,6 +442,7 @@ impl V0 {
             seen: Arc::clone(&self.seen),
             tripwire: Arc::clone(&self.tripwire),
             backend: Mutex::new(Some(self.backend())),
+            clock: Mutex::new(self.clock.lock_recover().clone()),
             core: Mutex::default(),
             keep: Mutex::default(),
         }

@@ -31,7 +31,7 @@ use std::collections::BTreeSet;
 
 use lash_core_execution::runtime::actor::round::SettledOutput;
 use lash_core_execution::runtime::actor::round::{PolicyView, Recovery, fold};
-use lash_durable::domain::{OwnerKey, RunRecordKind};
+use lash_durable::domain::{AdmittedId, OwnerKey};
 use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, Fault, SimNodes, Stored, Write, WriteKind};
 use lash_sansio::ExecutionPolicy;
@@ -49,7 +49,7 @@ pub async fn check(
 ) -> Vec<String> {
     let trace = nodes.script().trace();
     let mut violations = fencing(cut, &trace);
-    violations.extend(once(world, nodes, stale_pause(cut, &trace)).await);
+    violations.extend(once(world, nodes, &trace, stale_pause(cut, &trace)).await);
     violations.extend(no_replay(world, cut, max_restores));
     violations.extend(admission_first(world));
     violations.extend(settled(world, nodes).await);
@@ -122,15 +122,26 @@ fn stale_pause(cut: Option<&Cut>, trace: &[Write]) -> Option<u64> {
 }
 
 /// F2, NR-1, NR-2 and NR-3 over every owner's persisted records, and the
-/// fold that reads them; with `paused_at`, a stale-epoch cut's pause, the
-/// lease law too.
-async fn once(world: &World, nodes: &SimNodes, paused_at: Option<u64>) -> Vec<String> {
+/// fold that reads them; S4 over the `x_start` commits in `trace`; with
+/// `paused_at`, a stale-epoch cut's pause, the lease law too.
+async fn once(
+    world: &World,
+    nodes: &SimNodes,
+    trace: &[Write],
+    paused_at: Option<u64>,
+) -> Vec<String> {
     let mut violations = Vec::new();
     let counts = world.tripwire().counts();
     let ledger = world.ledger().entries();
     let mut owners: BTreeSet<OwnerKey> = ledger.keys().map(|(owner, _)| owner.clone()).collect();
     owners.extend(counts.bodies.keys().map(|id| id.owner.clone()));
-    let mut started = BTreeSet::new();
+    // What the trace saw commit, not what the records hold at the end: a
+    // cell's snapshot prunes the runs no snapshot reaches again.
+    let started: BTreeSet<&AdmittedId> = trace
+        .iter()
+        .filter(|write| write.committed())
+        .flat_map(|write| &write.starts)
+        .collect();
     for owner in owners {
         let rows = match nodes.database().run_records(&owner).await {
             Ok(rows) => rows,
@@ -139,11 +150,6 @@ async fn once(world: &World, nodes: &SimNodes, paused_at: Option<u64>) -> Vec<St
                 continue;
             }
         };
-        started.extend(
-            rows.iter()
-                .filter(|row| row.kind == RunRecordKind::XStart)
-                .map(|row| (row.owner.clone(), row.run, row.ordinal)),
-        );
         let folded = match fold(&rows, &PolicyView::new([])) {
             Ok(folded) => folded,
             Err(refusal) => {
@@ -206,7 +212,7 @@ async fn once(world: &World, nodes: &SimNodes, paused_at: Option<u64>) -> Vec<St
         }
     }
     for (id, entered) in &counts.bodies {
-        if !started.contains(&(id.owner.clone(), id.run, id.ordinal)) {
+        if !started.contains(id) {
             violations.push(format!(
                 "S4: body {id:?} was entered {entered} times with no x_start in the records"
             ));

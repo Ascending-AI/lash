@@ -89,10 +89,29 @@ pub fn backend_with(
     stores: Arc<dyn StoreSet>,
     engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
 ) -> lash::Backend {
+    build(lash::durable::DurableBackendBuilder::new(stores), engines)
+}
+
+/// [`backend_with`] on `settings`: a simulated deployment's.
+pub fn configured_backend(
+    stores: Arc<dyn StoreSet>,
+    settings: lash_core_execution::DurableSettings,
+    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+) -> lash::Backend {
+    build(
+        lash::durable::DurableBackendBuilder::new(stores).config(settings),
+        engines,
+    )
+}
+
+fn build(
+    builder: lash::durable::DurableBackendBuilder,
+    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+) -> lash::Backend {
     engines
         .into_iter()
         .fold(
-            lash::durable::DurableBackendBuilder::new(stores),
+            builder,
             lash::durable::DurableBackendBuilder::process_engine,
         )
         .build()
@@ -249,21 +268,13 @@ pub fn cell(source: &str) -> LlmResponse {
     }])
 }
 
-/// The RLM protocol factory a code law's core runs, its cell budgets
-/// generous and its deadlines off the clock.
+/// The RLM protocol factory a code law's core runs on `workers`, its cell
+/// budgets generous.
 pub fn rlm(
     backend: &lash::Backend,
     resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    workers: lash::rlm::WorkerService,
 ) -> lash::rlm::RlmProtocolPluginFactory {
-    use lash::rlm::Dialect as _;
-    const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-    let mut workers = lash::rlm::TypescriptDialect
-        .worker_service()
-        .config()
-        .clone();
-    workers.deadlines.compute = OFF_THE_CLOCK;
-    workers.deadlines.serialization = OFF_THE_CLOCK;
-    workers.deadlines.cumulative_cpu = OFF_THE_CLOCK;
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -273,7 +284,7 @@ pub fn rlm(
         Arc::new(lash::rlm::TypescriptDialect),
         backend,
     )
-    .with_worker_service(lash::rlm::WorkerService::new(workers));
+    .with_worker_service(workers);
     match resolver {
         Some(resolver) => factory.with_deferred_tool_resolver(resolver),
         None => factory,
