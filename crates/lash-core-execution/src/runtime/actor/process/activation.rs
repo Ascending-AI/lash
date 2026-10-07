@@ -24,8 +24,8 @@ use std::sync::Arc;
 
 use lash_core_store::tool_run::{MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole};
 use lash_durable::domain::{
-    CANCEL_MAIL, ExecKey, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite, RunSeq,
-    SIGNAL_MAIL, ScopeKey, SnapshotRev, SnapshotWrite, WaitState, WaitWrite,
+    AdmittedId, CANCEL_MAIL, ExecKey, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite,
+    RunSeq, SIGNAL_MAIL, ScopeKey, SnapshotRev, SnapshotWrite, WaitState, WaitWrite,
 };
 use lash_durable::runner::{Activation, Owned};
 use lash_durable::{
@@ -82,8 +82,9 @@ enum Pass {
     /// It committed; run another.
     Again,
     /// Steps run and nothing else is due: wait for one to finish, for mail
-    /// or for the next due time.
-    Wait(Option<DurableInstant>),
+    /// or for the next due time. The fold is of the rows as they stand: the
+    /// pass committed nothing after reading them.
+    Wait(RunFold, Option<DurableInstant>),
     /// The actor was released or ended.
     Released,
 }
@@ -94,7 +95,7 @@ struct Live {
     /// The context step bodies run under; its token is the steps' cancel.
     steps_cx: ActorContext,
     steps_token: CancellationToken,
-    running: JoinSet<(StepName, AdmittedExecution, BodyOutput)>,
+    running: JoinSet<(StepName, AdmittedId, BodyOutput)>,
     /// The step each running body's task runs, to release a body whose
     /// task ended without an output.
     tasks: std::collections::HashMap<tokio::task::Id, StepName>,
@@ -155,9 +156,9 @@ impl Activation for ProcessActivation {
         loop {
             match self.pass(&owned, &process, &mut live).await {
                 Ok(Pass::Again) => {}
-                Ok(Pass::Wait(due)) => {
+                Ok(Pass::Wait(fold, due)) => {
                     if let Err(DurableError::OwnershipLost(_)) =
-                        self.wait(&owned, &mut live, due).await
+                        self.wait(&owned, &mut live, &fold, due).await
                     {
                         return;
                     }
@@ -206,10 +207,16 @@ impl ProcessActivation {
 
     /// Wait for a running step to finish (and commit its outcome), for mail
     /// or for `due`.
+    ///
+    /// The outcome takes its run's next ordinal from `fold`, the rows as
+    /// they stand, never from the execution its body ran under: an
+    /// ordinal is spent only by a commit that lands, so a failed commit
+    /// leaves nothing in memory ahead of the rows (ADR 0132 §5).
     async fn wait(
         &self,
         owned: &Owned,
         live: &mut Live,
+        fold: &RunFold,
         due: Option<DurableInstant>,
     ) -> Result<(), DurableError> {
         let clock = Arc::clone(owned.clock());
@@ -235,7 +242,10 @@ impl ProcessActivation {
                 if let Some(name) = task.and_then(|task| live.tasks.remove(&task)) {
                     live.started.remove(&name);
                 }
-                if let Some(Ok((_, (_, admitted, output)))) = finished {
+                if let Some(Ok((_, (_, id, output)))) = finished {
+                    let admitted = fold
+                        .admitted(&id)
+                        .ok_or_else(|| corrupt("a running process step", "its start has no row"))?;
                     let mut tx = owned.begin().await?;
                     round::settle(&mut tx, &admitted, output, None)
                         .map_err(|refusal| corrupt("a process step's outcome", refusal))?;
@@ -378,7 +388,7 @@ impl ProcessActivation {
             Next::Nothing { due } => {
                 self.start_steps(&record, process, &driver, &fold, live);
                 if !live.running.is_empty() {
-                    return Ok(Pass::Wait(due));
+                    return Ok(Pass::Wait(fold, due));
                 }
                 tx.ack_seen().give_up(Release::Waiting { next_due: due });
                 owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
@@ -615,7 +625,7 @@ impl ProcessActivation {
                 let name = name.clone();
                 live.running.spawn(async move {
                     let output = round::run_body(&cx, &admitted, body).await;
-                    (name, admitted, output)
+                    (name, admitted.id().clone(), output)
                 })
             };
             live.tasks.insert(task.id(), name.clone());
@@ -641,8 +651,8 @@ enum Next {
 
 /// The identity of an in-flight step's admitted execution: its owner, its
 /// run and its member's first start.
-fn step_id(process: &ProcessId, step: &InFlight) -> lash_durable::domain::AdmittedId {
-    lash_durable::domain::AdmittedId {
+fn step_id(process: &ProcessId, step: &InFlight) -> AdmittedId {
+    AdmittedId {
         owner: OwnerKey::Process(process.clone()),
         run: RunSeq(step.run),
         ordinal: round::member_ordinal(step.member),

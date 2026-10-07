@@ -23,6 +23,14 @@
 //! - R ended with its timeout, and every child ended `ParentEnded`;
 //! - a zombie's writes after its reap are refused.
 //!
+//! The staggered run is the run scenario with its step bodies answering
+//! in a fixed order on the simulated clock: the `Repeatable` step at once,
+//! the `Once` step ten milliseconds later, and a rerun of the `Repeatable`
+//! twenty milliseconds after it starts. Every `step.outcome` commit is cut
+//! with a transient failure, and one failed commit costs at most the one
+//! outcome it carried: its step reruns or settles `Interrupted`, and every
+//! other step keeps its own outcome (FIG-5175).
+//!
 //! The cascade scenario cancels the root of a tree three levels deep, every
 //! scope with three `Until` children and the cascade batch two, and cuts
 //! every `cascade.batch` commit with a crash before and after it lands: the
@@ -239,6 +247,19 @@ impl World {
 struct ProofSteps {
     world: Arc<World>,
     database: Arc<dyn DurableStore>,
+    /// The clock a staggered run's bodies answer on.
+    stagger: Option<Arc<SimClock>>,
+}
+
+/// How long a staggered run's body of `tool` takes, entered for the
+/// `entry`th time (from 1): the `Repeatable` answers at once and its rerun
+/// after the `Once`, which answers in between.
+fn staggered(tool: &str, entry: usize) -> Duration {
+    match (tool, entry) {
+        (AGAIN, 1) => Duration::ZERO,
+        (AGAIN, _) => Duration::from_millis(20),
+        _ => Duration::from_millis(10),
+    }
 }
 
 fn policy(tool: &ToolId) -> ExecutionPolicy {
@@ -272,13 +293,21 @@ impl ProcessSteps for ProofSteps {
         let process = process.id.clone();
         let tool = step.admitted_tool(KIND).as_str().to_owned();
         let call = call.clone();
+        let stagger = self.stagger.clone();
         Box::new(move |_token| {
             // Entered: noted before anything can stop the body.
-            world
-                .entries
-                .lock_recover()
-                .push((call.clone(), tool.clone()));
+            let entry = {
+                let mut entries = world.entries.lock_recover();
+                entries.push((call.clone(), tool.clone()));
+                entries
+                    .iter()
+                    .filter(|(_, entered)| *entered == tool)
+                    .count()
+            };
             Box::pin(async move {
+                if let Some(clock) = stagger {
+                    lash_core_ids::clock::Clock::sleep(&*clock, staggered(&tool, entry)).await;
+                }
                 let admitted = database
                     .run_records(&OwnerKey::Process(process.clone()))
                     .await
@@ -372,6 +401,9 @@ enum Shape {
 
 struct Proof {
     shape: Shape,
+    /// Whether the step bodies answer in the staggered run's order.
+    staggered: bool,
+    clock: Mutex<Option<Arc<SimClock>>>,
     log: AdvanceLog,
     world: Arc<World>,
     tripwire: Arc<Tripwire>,
@@ -384,12 +416,22 @@ impl Proof {
     fn new(shape: Shape) -> Self {
         Self {
             shape,
+            staggered: false,
+            clock: Mutex::default(),
             log: Arc::default(),
             world: Arc::default(),
             tripwire: Arc::default(),
             backend: Mutex::default(),
             database: Mutex::default(),
             seeded: Mutex::default(),
+        }
+    }
+
+    /// The run scenario with its step bodies staggered.
+    fn staggered() -> Self {
+        Self {
+            staggered: true,
+            ..Self::new(Shape::Run)
         }
     }
 
@@ -444,6 +486,7 @@ fn find<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 #[async_trait::async_trait]
 impl Scenario for Proof {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.clock.lock_recover() = Some(Arc::clone(&clock));
         let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
             .await
             .expect("an in-memory store set opens");
@@ -481,6 +524,11 @@ impl Scenario for Proof {
                     .lock_recover()
                     .clone()
                     .expect("the database is built first"),
+                stagger: if self.staggered {
+                    self.clock.lock_recover().clone()
+                } else {
+                    None
+                },
             }),
             Arc::clone(&self.tripwire) as _,
         ))
@@ -701,6 +749,29 @@ impl Proof {
         if counts.committed_ordinals.values().sum::<usize>() != 0 {
             violations.push("NR-4: a committed ordinal was emitted again".to_owned());
         }
+        // One failed `step.outcome` commit costs at most the outcome it
+        // carried: one `Once` settled `Interrupted` or one `Repeatable`
+        // rerun, never a sibling's outcome too.
+        if self.staggered {
+            let interrupted = fold
+                .recoveries()
+                .iter()
+                .filter(|(_, recovery)| {
+                    matches!(recovery, Recovery::Settled(AttemptOutcome::Interrupted))
+                })
+                .count();
+            let reruns = entries
+                .iter()
+                .filter(|(_, tool)| tool == AGAIN)
+                .count()
+                .saturating_sub(1);
+            if interrupted + reruns > 1 {
+                violations.push(format!(
+                    "one failed outcome commit cost {interrupted} interrupted steps and \
+                     {reruns} reruns"
+                ));
+            }
+        }
         violations
     }
 }
@@ -766,6 +837,26 @@ async fn a_process_cut_at_every_label_runs_no_step_before_its_state_commits() {
             "the matrix never cut {label}"
         );
     }
+}
+
+/// Each `step.outcome` of the staggered run fails transiently: the failed
+/// commit costs its own step's outcome and no sibling's, and every law of
+/// the run holds (FIG-5175).
+#[tokio::test]
+async fn a_failed_step_outcome_commit_costs_no_sibling_its_outcome() {
+    let report = Matrix::new()
+        .faults(&[Fault::FailBefore])
+        .labels(&[CommitLabel::STEP_OUTCOME])
+        .horizon(Duration::from_secs(600))
+        .run(Proof::staggered)
+        .await;
+    eprintln!("staggered run: {} cells", report.cells.len());
+    report.assert_held();
+    assert_eq!(
+        report.cells.len(),
+        2,
+        "the matrix did not cut both step outcomes"
+    );
 }
 
 /// A tree three levels deep, every scope wider than one cascade batch,
