@@ -352,7 +352,7 @@ impl<'run> ProductionToolHandlers<'run> {
                     }
                     if !known && let Some(definition) = definition {
                         calls.push(
-                            self.admit_leaf(
+                            run.alongside(self.admit_leaf(
                                 owner,
                                 &invocation,
                                 definition,
@@ -360,7 +360,7 @@ impl<'run> ProductionToolHandlers<'run> {
                                 &environment_spec,
                                 &attribution,
                                 &mut environment,
-                            )
+                            ))
                             .await?,
                         );
                     }
@@ -379,10 +379,11 @@ impl<'run> ProductionToolHandlers<'run> {
             if let ToolAggregateLeafReply::Tool(reply) = refused_reply(input)
                 && let Some(completed) = &reply.completed
             {
-                self.context
-                    .with_tool_observation_attribution(&attribution)
-                    .report_undispatched_tool_call(completed, completed.call_id.as_str())
-                    .await;
+                let context = self.context.with_tool_observation_attribution(&attribution);
+                run.alongside(
+                    context.report_undispatched_tool_call(completed, completed.call_id.as_str()),
+                )
+                .await;
             }
         }
         self.refused.lock_recover().insert(key.clone(), refused);

@@ -8,6 +8,9 @@
 //! - a member admitted or retried by this activation runs its body; a member
 //!   started by an earlier one recovers as the fold says (a `Once` records
 //!   `Interrupted`, a `Repeatable` reruns at its ordinal);
+//! - each running attempt is a task of its own: what the runner awaits (a
+//!   commit, a read) never stops a member mid-transaction, so members never
+//!   hold the store's connections while the runner waits on one;
 //! - finished members commit in batches (`round.outcome`), one transaction
 //!   per batch, bounded by [`GroupCommit`]'s size and window;
 //! - a `Repeatable` failure the pinned contract repeats records a retry with
@@ -32,8 +35,6 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use futures_util::StreamExt;
-use futures_util::stream::FuturesUnordered;
 use lash_core_store::tool_run::{
     AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, LimitCause,
 };
@@ -41,7 +42,9 @@ use lash_durable::domain::{
     AdmittedId, DomainRefusal, OwnerKey, RunRecordRow, RunRecordWrite, RunSeq,
 };
 use lash_durable::{CommitLabel, DomainWrite, DueSource, DurableError, DurableInstant};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument as _;
 
 use super::super::ActorContext;
 use super::super::waits::{self, RaceWinner, Resolution, WaitId, WaitKind, WaitRef};
@@ -166,8 +169,6 @@ struct Finished {
     result: Result<MemberResult, Stop>,
 }
 
-type Running = Pin<Box<dyn Future<Output = Finished> + Send>>;
-
 /// Runs one admitted round of an owner to its members' final outcomes.
 pub struct RoundRunner {
     cx: ActorContext,
@@ -249,7 +250,8 @@ impl RoundRunner {
     /// inconsistent records, or the activation stopping.
     pub async fn run(mut self) -> Result<RoundEnd, RoundError> {
         let mut rows = self.load().await?;
-        let mut running: FuturesUnordered<Running> = FuturesUnordered::new();
+        // Dropped with the run, it aborts every attempt still running.
+        let mut running: JoinSet<Finished> = JoinSet::new();
         let mut in_flight: BTreeSet<AdmittedId> = BTreeSet::new();
         let mut finished: BTreeMap<AdmittedId, Result<MemberResult, Stop>> = BTreeMap::new();
         let mut batch_opened: Option<std::time::Instant> = None;
@@ -287,7 +289,7 @@ impl RoundRunner {
                 let execution = view.execution(member);
                 if self.fresh.remove(&id) && !cancelled {
                     in_flight.insert(id.clone());
-                    running.push(self.spawn(execution));
+                    self.spawn(&mut running, execution);
                     continue;
                 }
                 match folded
@@ -309,7 +311,7 @@ impl RoundRunner {
                     }
                     Recovery::RerunAtOrdinal(_) => {
                         in_flight.insert(id.clone());
-                        running.push(self.spawn(execution));
+                        self.spawn(&mut running, execution);
                     }
                     Recovery::Vetoed(outcome) => settlements.push((execution, outcome)),
                     Recovery::RetryDue { .. } if cancelled => {
@@ -418,7 +420,16 @@ impl RoundRunner {
                     }
                     batch_opened.get_or_insert_with(|| clock.now());
                 }
-                Some(done) = running.next(), if !running.is_empty() => {
+                Some(joined) = running.join_next(), if !running.is_empty() => {
+                    let done = match joined {
+                        Ok(done) => done,
+                        Err(error) if error.is_panic() => {
+                            std::panic::resume_unwind(error.into_panic())
+                        }
+                        // Only the runtime shutting down cancels an attempt
+                        // the runner still holds.
+                        Err(_) => return Err(RoundError::Stopped),
+                    };
                     in_flight.remove(&done.id);
                     if matches!(done.result, Err(Stop::Activation | Stop::Lapsed)) {
                         return Err(RoundError::Stopped);
@@ -530,11 +541,12 @@ impl RoundRunner {
         }
     }
 
-    fn spawn(&self, execution: AdmittedExecution) -> Running {
+    /// Run `execution`'s attempt as a task of `running`.
+    fn spawn(&self, running: &mut JoinSet<Finished>, execution: AdmittedExecution) {
         let body = self.bodies.body(&execution);
         let cx = self.cx.clone();
         let cancel = self.cancel.clone();
-        Box::pin(async move {
+        let attempt = async move {
             type Carried = (Option<StoreLocalEffect>, Option<crate::ProcessId>);
             let carried: Arc<Mutex<Carried>> = Arc::default();
             let slot = Arc::clone(&carried);
@@ -562,7 +574,8 @@ impl RoundRunner {
                 id: execution.id().clone(),
                 result,
             }
-        })
+        };
+        running.spawn(attempt.instrument(tracing::Span::current()));
     }
 
     /// Record one finished attempt on `tx`: its final outcome with its

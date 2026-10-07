@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 168,
+  "cargo_target_count": 169,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_323c0170[static]",
     "//crates/lash-conformance:lash-conformance__fv_39401c96[static]",
@@ -43053,7 +43053,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 229,
+  "generated_label_count": 230,
   "packages": [
     {
       "declared_features": [
@@ -43787,6 +43787,17 @@
           "clippy_label": "//crates/lash-durable-test:tool_crash_laws__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:tool_crash_laws__test",
+          "tags": [
+            "hermetic-postgres"
+          ]
+        },
+        {
+          "build_label": "//crates/lash-durable-test:tool_group_pool_width__test",
+          "cargo": "tool_group_pool_width",
+          "check_label": "//crates/lash-durable-test:tool_group_pool_width__test[check]",
+          "clippy_label": "//crates/lash-durable-test:tool_group_pool_width__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:tool_group_pool_width__test",
           "tags": [
             "hermetic-postgres"
           ]
@@ -47206,6 +47217,7 @@
     "//crates/lash-durable-test:tool_batches__test": 300,
     "//crates/lash-durable-test:tool_call_identity__test": 300,
     "//crates/lash-durable-test:tool_crash_laws__test": 300,
+    "//crates/lash-durable-test:tool_group_pool_width__test": 300,
     "//crates/lash-durable-test:trigger_start_proof__test": 300,
     "//crates/lash-durable-test:turn_phases__test": 300,
     "//crates/lash-durable-test:turn_round_crash_matrix__test": 300,
@@ -47623,6 +47635,7 @@
     "//crates/lash-durable-test:tool_batches__test",
     "//crates/lash-durable-test:tool_call_identity__test",
     "//crates/lash-durable-test:tool_crash_laws__test",
+    "//crates/lash-durable-test:tool_group_pool_width__test",
     "//crates/lash-durable-test:trigger_start_proof__test",
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
@@ -47854,6 +47867,7 @@
     "//crates/lash-durable-test:tool_batches__test[check]",
     "//crates/lash-durable-test:tool_call_identity__test[check]",
     "//crates/lash-durable-test:tool_crash_laws__test[check]",
+    "//crates/lash-durable-test:tool_group_pool_width__test[check]",
     "//crates/lash-durable-test:trigger_start_proof__test[check]",
     "//crates/lash-durable-test:turn_phases__test[check]",
     "//crates/lash-durable-test:turn_round_crash_matrix__test[check]",
@@ -48084,6 +48098,7 @@
     "//crates/lash-durable-test:tool_batches__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:tool_call_identity__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:tool_crash_laws__test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:tool_group_pool_width__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:trigger_start_proof__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:turn_phases__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:turn_round_crash_matrix__test__clippy[clippy.txt]",
@@ -48314,6 +48329,7 @@
     "//crates/lash-durable-test:tool_batches__test",
     "//crates/lash-durable-test:tool_call_identity__test",
     "//crates/lash-durable-test:tool_crash_laws__test",
+    "//crates/lash-durable-test:tool_group_pool_width__test",
     "//crates/lash-durable-test:trigger_start_proof__test",
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
@@ -48544,6 +48560,7 @@
     "//crates/lash-durable-test:tool_batches__test",
     "//crates/lash-durable-test:tool_call_identity__test",
     "//crates/lash-durable-test:tool_crash_laws__test",
+    "//crates/lash-durable-test:tool_group_pool_width__test",
     "//crates/lash-durable-test:trigger_start_proof__test",
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
@@ -48757,6 +48774,7 @@
     "//crates/lash-durable-test:tool_batches__test",
     "//crates/lash-durable-test:tool_call_identity__test",
     "//crates/lash-durable-test:tool_crash_laws__test",
+    "//crates/lash-durable-test:tool_group_pool_width__test",
     "//crates/lash-durable-test:trigger_start_proof__test",
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
@@ -48864,6 +48882,7 @@
     "//crates/lash-durable-test:tool_batches__test",
     "//crates/lash-durable-test:tool_call_identity__test",
     "//crates/lash-durable-test:tool_crash_laws__test",
+    "//crates/lash-durable-test:tool_group_pool_width__test",
     "//crates/lash-durable-test:trigger_start_proof__test",
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
@@ -48983,6 +49002,7 @@
     "//crates/lash-durable-test:tool_batches__test",
     "//crates/lash-durable-test:tool_call_identity__test",
     "//crates/lash-durable-test:tool_crash_laws__test",
+    "//crates/lash-durable-test:tool_group_pool_width__test",
     "//crates/lash-durable-test:trigger_start_proof__test",
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
@@ -49309,6 +49329,7 @@
     "//crates/lash-durable-test:tool_batches__test",
     "//crates/lash-durable-test:tool_call_identity__test",
     "//crates/lash-durable-test:tool_crash_laws__test",
+    "//crates/lash-durable-test:tool_group_pool_width__test",
     "//crates/lash-durable-test:trigger_start_proof__test",
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",
@@ -49436,6 +49457,7 @@
     "//crates/lash-durable-test:tool_batches__test",
     "//crates/lash-durable-test:tool_call_identity__test",
     "//crates/lash-durable-test:tool_crash_laws__test",
+    "//crates/lash-durable-test:tool_group_pool_width__test",
     "//crates/lash-durable-test:trigger_start_proof__test",
     "//crates/lash-durable-test:turn_phases__test",
     "//crates/lash-durable-test:turn_round_crash_matrix__test",

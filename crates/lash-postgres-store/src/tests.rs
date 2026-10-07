@@ -1268,3 +1268,38 @@ async fn postgres_gc_with_no_roots_sweeps_every_blob_when_configured() {
         .expect("count blobs after the rootless sweep");
     assert_eq!(resident, 0, "no blob survives a rootless sweep");
 }
+
+/// A commit's session-meta preflight never holds a pooled connection while
+/// it acquires another (FIG-5237): on a pool of one connection it answers
+/// instead of waiting out the acquire timeout on itself.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_commit_meta_preflight_answers_on_a_pool_of_one_when_configured() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres pool-of-one preflight: database URL is not set");
+        return;
+    };
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect_with(
+        isolated_database.url(),
+        PostgresStoreConfig {
+            max_connections: 1,
+            acquire_timeout: Duration::from_secs(5),
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("connect pool-of-one storage");
+    let session_id = SessionId::fixture(format!("pool-of-one:{}", uuid::Uuid::new_v4()));
+    let store = storage.store();
+    store
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&session_id),
+        )
+        .await
+        .expect("admit the pool-of-one session");
+    let meta =
+        lash_core_execution::SessionCommitStore::load_session_meta_for_commit(&store, &session_id)
+            .await
+            .expect("the preflight answers on a pool of one");
+    assert!(meta.is_some(), "the admitted session has its metadata");
+}

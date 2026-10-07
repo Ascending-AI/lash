@@ -316,6 +316,20 @@ impl<'a> ToolRun<'a> {
         }
     }
 
+    /// Await `work` while the Run's calls progress beside it. Whatever the
+    /// Run's owner awaits (a store write, an observation) never stops a call
+    /// mid-transaction, so no call holds the store's connections while its
+    /// owner waits on one (FIG-5237).
+    pub async fn alongside<F: Future>(&mut self, work: F) -> F::Output {
+        let mut work = std::pin::pin!(work);
+        loop {
+            tokio::select! {
+                output = &mut work => return output,
+                () = self.next_end() => {}
+            }
+        }
+    }
+
     /// The end of `call_id`, once it ended.
     ///
     /// # Errors

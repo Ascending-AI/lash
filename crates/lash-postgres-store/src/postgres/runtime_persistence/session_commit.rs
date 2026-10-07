@@ -348,10 +348,15 @@ impl SessionCommitStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionMeta>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
+        {
+            // The check's connection goes back to the pool before the load
+            // acquires its own: a caller never holds one while it waits on
+            // another (FIG-5237).
+            let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+            let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+            ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+            tx.commit().await.map_err(store_sqlx_error)?;
+        }
         self.load_session_meta(session_id).await
     }
 }

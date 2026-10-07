@@ -339,6 +339,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-durable-test:tool_batches__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:tool_call_identity__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:tool_crash_laws__test": {"cpu_count": 2, "memory_kb": 524288},
+    "//crates/lash-durable-test:tool_group_pool_width__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:trigger_start_proof__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:turn_phases__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:turn_round_crash_matrix__test": {"cpu_count": 2, "memory_kb": 524288},
