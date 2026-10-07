@@ -13,13 +13,13 @@
 //! on every store that implements the port.
 
 use crate::clock::SimClock;
-use crate::matrix::Scenario;
+use crate::matrix::{Matrix, Scenario};
 use crate::nodes::{SimNodes, SimNodesConfig};
 use crate::script::{Cut, Fault, Stored, WriteKind};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, LeaseConfig,
-    MailKind, MailSeq, MailTx, Release, StateRevision,
+    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, MailKind,
+    MailSeq, MailTx, Release, StateRevision,
 };
 use lash_sansio::sync::MutexExt as _;
 use std::future::Future;
@@ -156,7 +156,7 @@ impl Scenario for Fencing {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: vec![FormatSet::new(FORMATS)],
             max_active: 8,
         }
@@ -349,10 +349,18 @@ mod tests {
     /// F1 and O1 hold on SQLite in memory with every labelled write of the
     /// scenario cut under every fault that applies to it.
     #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test host selects the optional lease proof from its action environment"
+    )]
     async fn the_fencing_laws_hold_at_every_cut_on_sqlite_memory() {
-        let report = Matrix::new()
-            .run(|| Fencing::new(Arc::new(|clock| Box::pin(sqlite(clock)))))
-            .await;
+        let matrix = Matrix::new();
+        let make = || Fencing::new(Arc::new(|clock| Box::pin(sqlite(clock))));
+        let report = if std::env::var("LASH_MATRIX_VERIFY_LEASE").as_deref() == Ok("1") {
+            matrix.run_lease_equivalence(make).await
+        } else {
+            matrix.run(make).await
+        };
         assert_every_label_held(&report);
     }
 

@@ -326,6 +326,8 @@ impl Scenario for Wide {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
+            // This uncut pool-pressure law keeps the production heartbeat
+            // and reap cadence as part of the load on its two-connection pool.
             lease: LeaseConfig::default(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,

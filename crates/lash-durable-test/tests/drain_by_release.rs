@@ -28,6 +28,11 @@ mod dialect;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
@@ -42,7 +47,7 @@ use lash_core_execution::{
 };
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::runner::{Activation, Stopped};
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore, FormatSet, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore, FormatSet};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
@@ -322,7 +327,7 @@ impl Scenario for Drain {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 8,
         }
@@ -482,7 +487,7 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
         ])
         .labels(&[CommitLabel::DRAIN_RELEASE])
         .horizon(Duration::from_secs(600))
-        .run(|| Drain::new(dialect, postgres_url.clone()))
+        .run_test(|| Drain::new(dialect, postgres_url.clone()))
         .await;
     report.assert_held();
     assert_eq!(

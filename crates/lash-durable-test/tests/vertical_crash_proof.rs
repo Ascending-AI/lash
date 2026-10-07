@@ -50,6 +50,11 @@ mod images;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -62,7 +67,7 @@ use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
 use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Life, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored,
     Tripwire, Verdict, WriteKind,
@@ -387,7 +392,7 @@ impl Scenario for V0 {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
@@ -713,7 +718,7 @@ fn matrix() -> Matrix {
 
 async fn prove(protocol: Protocol, dialect: Dialect, postgres_url: Option<String>) {
     let report = matrix()
-        .run(|| V0::new(protocol, dialect, postgres_url.clone()))
+        .run_test(|| V0::new(protocol, dialect, postgres_url.clone()))
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(
@@ -771,7 +776,7 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
 async fn uncut(protocol: Protocol) {
     let report = Matrix::new()
         .faults(&[])
-        .run(|| V0::new(protocol, Dialect::SqliteMemory, None))
+        .run_test(|| V0::new(protocol, Dialect::SqliteMemory, None))
         .await;
     let labels: Vec<CommitLabel> = report
         .baseline

@@ -180,6 +180,15 @@ const HORIZON: Duration = Duration::from_secs(600);
 /// from 0.
 #[must_use]
 pub fn seeds() -> Vec<u64> {
+    // The optional double-profile proof can select one seed per action
+    // without changing the ordinary sweep or its existing timeout.
+    if std::env::var("LASH_MATRIX_VERIFY_LEASE").as_deref() == Ok("1")
+        && let Some(seed) = std::env::var("LASH_CRASH_MATRIX_PROOF_SEED")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+    {
+        return vec![seed];
+    }
     let count = std::env::var("LASH_CRASH_MATRIX_SEEDS")
         .ok()
         .and_then(|seeds| seeds.parse::<u64>().ok())
@@ -235,12 +244,16 @@ pub async fn run_case_on(case: Case, seed: u64, modes: &[Fault], dialect: &Diale
         }
         Err(error) => panic!("read LASH_MATRIX_THREADS: {error}"),
     };
-    let report = Matrix::new()
+    let matrix = Matrix::new()
         .parallelism(parallelism)
         .faults(modes)
-        .horizon(HORIZON)
-        .run(|| Deployment::new(case, seed, dialect.clone()))
-        .await;
+        .horizon(HORIZON);
+    let make = || Deployment::new(case, seed, dialect.clone());
+    let report = if std::env::var("LASH_MATRIX_VERIFY_LEASE").as_deref() == Ok("1") {
+        matrix.run_lease_equivalence(make).await
+    } else {
+        matrix.run(make).await
+    };
     CaseReport { case, seed, report }
 }
 

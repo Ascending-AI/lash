@@ -33,6 +33,11 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 #[path = "support/dialect.rs"]
 mod dialect;
 #[path = "support/served.rs"]
@@ -51,7 +56,7 @@ use lash_core_execution::{
     ProjectionWatermark, StoreSet,
 };
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
     WriteKind,
@@ -563,7 +568,7 @@ impl Scenario for Spawn {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 8,
         }
@@ -701,7 +706,7 @@ async fn prove(width: usize, labels: &[CommitLabel], tier: Tier) {
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run(|| Spawn::new(width, dialect, postgres_url.clone()))
+        .run_test(|| Spawn::new(width, dialect, postgres_url.clone()))
         .await;
     let cut: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(
@@ -907,7 +912,7 @@ async fn public_migrated_tools_redrive_to_literal_outcomes(tier: Tier) {
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run(|| Spawn::migrated(dialect, postgres_url.clone()))
+        .run_test(|| Spawn::migrated(dialect, postgres_url.clone()))
         .await;
     eprintln!(
         "migrated tools on {dialect:?}: {} cells",

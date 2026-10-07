@@ -26,6 +26,12 @@
 
 #[path = "support/sim.rs"]
 mod sim;
+
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -42,8 +48,8 @@ use lash_core_execution::{
 };
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
-    ActorKey, ActorKind, ActorState, CommitLabel, DurableError, DurableStore, FormatSet,
-    LeaseConfig, MailKind, MailTx, Release,
+    ActorKey, ActorKind, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, MailKind,
+    MailTx, Release,
 };
 use lash_durable_test::{Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
 use lash_sansio::sync::MutexExt as _;
@@ -418,7 +424,7 @@ impl Scenario for Proof {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self
                 .backend()
                 .formats()
@@ -644,7 +650,7 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
         .faults(&FAULTS)
         .labels(&[CommitLabel::TRIGGER_START])
         .horizon(Duration::from_secs(600))
-        .run(|| Proof::new(dialect, postgres_url.clone()))
+        .run_test(|| Proof::new(dialect, postgres_url.clone()))
         .await;
     eprintln!("trigger start on {dialect:?}: {} cells", report.cells.len());
     report.assert_held();

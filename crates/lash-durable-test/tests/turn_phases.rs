@@ -56,6 +56,11 @@ mod seed;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -83,7 +88,7 @@ use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnWr
 use lash_durable::runner::Activation;
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite, DurableError, DurableStore,
-    LeaseConfig, MailTx,
+    MailTx,
 };
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
@@ -735,7 +740,7 @@ impl Scenario for L3 {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self
                 .backend
                 .lock_recover()
@@ -1327,9 +1332,17 @@ async fn prove_on(matrix: Matrix, mode: Mode, labels: &[CommitLabel], dialect: D
         },
         Dialect::SqliteMemory | Dialect::SqliteFile => None,
     };
-    let report = matrix
-        .run(|| L3::new(mode, dialect, postgres_url.clone()))
-        .await;
+    let make = || L3::new(mode, dialect, postgres_url.clone());
+    let report = if mode == Mode::ShortDeadline {
+        // L-C1 pins a 5s model deadline that must expire during failover;
+        // keep the default's 17.25s recovery bound for this timing law.
+        matrix
+            .lease(lash_durable::LeaseConfig::default())
+            .run(make)
+            .await
+    } else {
+        matrix.run_test(make).await
+    };
     eprintln!(
         "L3 {mode:?} on {dialect:?}: {} cells over labels {:?}",
         report.cells.len(),
@@ -1598,7 +1611,7 @@ impl Scenario for Poisoned {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
@@ -1680,7 +1693,7 @@ async fn prove_poisoned(dialect: Dialect) {
     let report = Matrix::new()
         .faults(&[])
         .horizon(Duration::from_secs(600))
-        .run(|| Poisoned::new(dialect, postgres_url.clone()))
+        .run_test(|| Poisoned::new(dialect, postgres_url.clone()))
         .await;
     report.assert_held();
 }

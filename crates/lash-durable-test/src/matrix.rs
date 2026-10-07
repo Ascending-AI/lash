@@ -14,7 +14,7 @@ use crate::clock::SimClock;
 use crate::nodes::{SimNodes, SimNodesConfig};
 use crate::script::{Cut, Fault, Script, Stored, Write, WriteKind};
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, CommitLabel, DurableStore};
+use lash_durable::{ActorKey, CommitLabel, DurableStore, LeaseConfig, LeaseSettings};
 use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::num::NonZeroUsize;
@@ -83,6 +83,10 @@ pub struct Cell {
     pub verdict: Verdict,
     /// The run's write trace, rendered.
     pub trace: String,
+    /// Virtual timer steps in this cell.
+    pub steps: usize,
+    /// Timer steps while a fault holds a node paused awaiting failover.
+    pub failover_steps: usize,
     /// Building the database, clock and nodes.
     pub setup: Duration,
     /// Seeding and driving the scenario to completion.
@@ -104,6 +108,10 @@ pub struct MatrixReport {
     /// The uncut run's writes.
     pub baseline: Vec<Write>,
     pub cells: Vec<Cell>,
+    /// Virtual timer steps across the uncut run and every cell.
+    pub steps: usize,
+    /// The actual configured pause before a node may resume after failover.
+    pub failover_wait: Duration,
     /// Wall time of the baseline and all cells, including cleanup.
     pub elapsed: Duration,
 }
@@ -186,6 +194,7 @@ impl MatrixReport {
 }
 
 /// A crash matrix over one scenario.
+#[derive(Clone)]
 pub struct Matrix {
     faults: Vec<Fault>,
     horizon_ms: u64,
@@ -194,6 +203,7 @@ pub struct Matrix {
     activations_first: bool,
     parallelism: Option<NonZeroUsize>,
     census_runs: NonZeroUsize,
+    lease: Option<LeaseConfig>,
 }
 
 impl Default for Matrix {
@@ -203,6 +213,24 @@ impl Default for Matrix {
 }
 
 impl Matrix {
+    /// A short validated lease for crash laws. The heartbeat, self-stop and
+    /// reap retain the default's ratios to TTL; claim polling and backoff
+    /// keep their production bounds. Heartbeat and reap are multiples of
+    /// the 250ms poll, avoiding extra interleaved timer ticks.
+    #[must_use]
+    #[expect(clippy::expect_used, reason = "the fixed test timings must validate")]
+    pub fn test_lease() -> LeaseConfig {
+        LeaseSettings {
+            ttl: Duration::from_millis(3_750),
+            heartbeat_every: Duration::from_millis(750),
+            self_stop_after: Duration::from_millis(2_500),
+            reap_every: Duration::from_millis(500),
+            ..LeaseSettings::default()
+        }
+        .validate()
+        .expect("the matrix test lease respects production lease validation")
+    }
+
     /// Every fault, a 2 s delayed ack, and a ten-minute virtual horizon.
     pub fn new() -> Self {
         Self {
@@ -222,6 +250,7 @@ impl Matrix {
             activations_first: false,
             parallelism: None,
             census_runs: census_runs_from_env(),
+            lease: None,
         }
     }
 
@@ -285,6 +314,13 @@ impl Matrix {
         self
     }
 
+    /// Override the scenario's lease, for a verdict-equivalence proof
+    /// against another timing configuration.
+    pub fn lease(mut self, lease: LeaseConfig) -> Self {
+        self.lease = Some(lease);
+        self
+    }
+
     /// Run `make`'s scenario uncut, then cut at every point under every
     /// fault that applies there.
     pub async fn run<S: Scenario>(&self, make: impl Fn() -> S) -> MatrixReport {
@@ -318,6 +354,8 @@ impl Matrix {
                     fault,
                     verdict: run.verdict,
                     trace: run.trace,
+                    steps: run.steps,
+                    failover_steps: run.failover_steps,
                     setup: factory + run.setup,
                     run: run.run,
                     check: run.check,
@@ -326,10 +364,13 @@ impl Matrix {
             .collect();
         cells.sort_by(|left, right| (&left.point, left.fault).cmp(&(&right.point, right.fault)));
         self.recount(&make, &census, &baseline.trace);
+        let steps = baseline.steps + cells.iter().map(|cell| cell.steps).sum::<usize>();
         let report = MatrixReport {
             baseline: baseline.writes,
             cells,
             elapsed: started.elapsed(),
+            steps,
+            failover_wait: baseline.failover_wait,
         };
         report.print_times(std::thread::current().name().unwrap_or("unnamed"));
         report
@@ -452,6 +493,101 @@ impl Matrix {
         })
     }
 
+    /// FIG-5279: run the same matrix with its scenario lease and the
+    /// production default. Every domain cut identity and verdict must agree.
+    /// Lease mechanics may have different censuses at different cadences,
+    /// but every lease-mechanics cell present in either profile must hold.
+    /// The configured lease-expiry wait must be shorter on the test lease.
+    /// Prints both step counts and wall times for the performance proof.
+    pub async fn run_lease_equivalence<S: Scenario>(&self, make: impl Fn() -> S) -> MatrixReport {
+        let start = Instant::now();
+        let report = self.run(&make).await;
+        eprintln!(
+            "matrix test lease: cells={} steps={} wall={:?}",
+            report.cells.len(),
+            report.steps,
+            start.elapsed(),
+        );
+        // An uncut run has no cell verdicts to compare. Running it twice
+        // would also duplicate any observations the factory retains.
+        if report.cells.is_empty() {
+            return report;
+        }
+        let start = Instant::now();
+        let reference = self.clone().lease(LeaseConfig::default()).run(&make).await;
+        eprintln!(
+            "matrix default lease: cells={} steps={} wall={:?}",
+            reference.cells.len(),
+            reference.steps,
+            start.elapsed(),
+        );
+        for fault in &self.faults {
+            let steps = |report: &MatrixReport| {
+                report
+                    .cells
+                    .iter()
+                    .filter(|cell| cell.fault == *fault)
+                    .map(|cell| cell.steps)
+                    .sum::<usize>()
+            };
+            eprintln!(
+                "matrix {fault}: test steps={} default steps={}",
+                steps(&report),
+                steps(&reference)
+            );
+        }
+        // Domain cuts retain their exact node, label, admitted ordinal,
+        // kind and fault. Lease-mechanics cuts can vary with cadence: a
+        // short heartbeat may land before a fast baseline ends while the
+        // default heartbeat does not. Each such cut must still hold.
+        let verdicts = |report: &MatrixReport| {
+            report
+                .cells
+                .iter()
+                .filter(|cell| cell.point.kind != WriteKind::Lease)
+                .map(|cell| (cell.point.clone(), cell.fault, cell.verdict.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            verdicts(&reference),
+            verdicts(&report),
+            "FIG-5279: changing the lease must preserve every domain cut and verdict"
+        );
+        for (profile, report) in [("default", &reference), ("test", &report)] {
+            for cell in report
+                .cells
+                .iter()
+                .filter(|cell| cell.point.kind == WriteKind::Lease)
+            {
+                assert_eq!(
+                    cell.verdict,
+                    Verdict::Held,
+                    "FIG-5279: every {profile} lease-mechanics cell must hold: {} {}\n  {}",
+                    cell.point,
+                    cell.fault,
+                    cell.trace,
+                );
+            }
+        }
+        let failover_steps = |report: &MatrixReport| {
+            report
+                .cells
+                .iter()
+                .map(|cell| cell.failover_steps)
+                .sum::<usize>()
+        };
+        let before = failover_steps(&reference);
+        let after = failover_steps(&report);
+        eprintln!("matrix lease-expiry waits: test steps={after} default steps={before}");
+        assert!(
+            report.failover_wait < reference.failover_wait,
+            "FIG-5279: the lease-expiry wait must be shorter: test={:?} default={:?}",
+            report.failover_wait,
+            reference.failover_wait
+        );
+        report
+    }
+
     async fn run_one<S: Scenario>(&self, scenario: &S, cut: Option<(&CutPoint, Fault)>) -> Run {
         let started = Instant::now();
         let clock = SimClock::new();
@@ -463,7 +599,10 @@ impl Matrix {
                 None => script.cut(point.label, point.nth, fault),
             };
         }
-        let config = scenario.config();
+        let mut config = scenario.config();
+        if let Some(lease) = self.lease {
+            config.lease = lease;
+        }
         let failover_ms = failover_ms(&config);
         let nodes = Arc::new(SimNodes::new(
             database,
@@ -482,8 +621,11 @@ impl Matrix {
             violations.push(format!("the scenario did not start: {error}"));
         }
         let mut paused_at: BTreeMap<String, u64> = BTreeMap::new();
+        let mut steps = 0;
+        let mut failover_steps = 0;
         while violations.is_empty() {
             let mut resumed = Vec::new();
+            let mut waiting_for_failover = false;
             for node in nodes.paused() {
                 let since = *paused_at.entry(node.clone()).or_insert(clock.logical_ms());
                 if (self.activations_first || clock.logical_ms() >= since + failover_ms)
@@ -491,6 +633,8 @@ impl Matrix {
                 {
                     nodes.resume(&node);
                     resumed.push(node);
+                } else {
+                    waiting_for_failover = true;
                 }
             }
             if !resumed.is_empty() {
@@ -514,6 +658,8 @@ impl Matrix {
                 ));
                 break;
             }
+            steps += 1;
+            failover_steps += usize::from(waiting_for_failover);
             if nodes.step().await.is_none() {
                 violations.push("stalled: no timer is armed and the run is not done".into());
             }
@@ -540,6 +686,9 @@ impl Matrix {
             setup,
             run,
             check: started.elapsed(),
+            steps,
+            failover_steps,
+            failover_wait: Duration::from_millis(failover_ms),
         }
     }
 }
@@ -554,6 +703,9 @@ struct Run {
     setup: Duration,
     run: Duration,
     check: Duration,
+    steps: usize,
+    failover_steps: usize,
+    failover_wait: Duration,
 }
 
 /// `LASH_MATRIX_CENSUS_RUNS`, else one.
@@ -684,7 +836,7 @@ mod tests {
 
         fn config(&self) -> SimNodesConfig {
             SimNodesConfig {
-                lease: LeaseConfig::default(),
+                lease: Matrix::test_lease(),
                 decodes: vec![FormatSet::new(FORMATS)],
                 max_active: 1,
             }

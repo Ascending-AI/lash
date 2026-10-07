@@ -52,6 +52,11 @@ mod seed;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
@@ -81,7 +86,7 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq};
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -875,7 +880,7 @@ impl Scenario for L4 {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self
                 .backend
                 .lock_recover()
@@ -1397,7 +1402,7 @@ fn matrix() -> Matrix {
 }
 
 async fn prove(mode: Mode, labels: &[CommitLabel]) {
-    let report = matrix().run(|| L4::new(mode)).await;
+    let report = matrix().run_test(|| L4::new(mode)).await;
     eprintln!(
         "L4 turn {mode:?}: {} cells over labels {:?}",
         report.cells.len(),
@@ -1453,7 +1458,7 @@ async fn a_cancel_while_a_member_runs_ends_the_round_and_the_turn() {
 async fn a_refused_turn_commit_publishes_no_terminal_event() {
     let report = matrix()
         .labels(&[CommitLabel::TURN_COMMIT])
-        .run(|| L4::new(Mode::Mixed))
+        .run_test(|| L4::new(Mode::Mixed))
         .await;
     report.assert_held();
     assert!(

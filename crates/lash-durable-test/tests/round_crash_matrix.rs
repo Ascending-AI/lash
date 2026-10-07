@@ -32,6 +32,12 @@
 
 #[path = "support/sim.rs"]
 mod sim;
+
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
@@ -53,8 +59,7 @@ use lash_core_store::tool_run::{
 use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, LeaseConfig, MailTx,
-    Release,
+    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, MailTx, Release,
 };
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
@@ -543,7 +548,7 @@ impl Scenario for RoundScenario {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: vec![FormatSet::new(FORMATS)],
             max_active: 4,
         }
@@ -901,7 +906,7 @@ fn mixed_members() -> Vec<Member> {
 }
 
 async fn prove(name: &str, make: impl Fn() -> RoundScenario) {
-    let report = matrix().run(make).await;
+    let report = matrix().run_test(make).await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(
         "L4 {name}: {} cells over {} labels ({}) x 5 faults",
@@ -932,7 +937,9 @@ async fn a_once_member_never_starts_twice_across_every_cut() {
 /// round mixing `Once` and `Repeatable` members, on SQLite in memory.
 #[tokio::test]
 async fn a_mixed_round_holds_once_and_repeatable_rules_across_every_cut() {
-    let report = matrix().run(|| RoundScenario::new(mixed_members())).await;
+    let report = matrix()
+        .run_test(|| RoundScenario::new(mixed_members()))
+        .await;
     eprintln!("L4 mixed round: {} cells", report.cells.len());
     report.assert_held();
     for label in [
@@ -968,7 +975,7 @@ async fn a_pending_member_parks_once_and_its_key_settles_it_across_every_cut() {
     let settled: Arc<Mutex<Vec<SettledOutput>>> = Arc::default();
     let shared = Arc::clone(&settled);
     let report = matrix()
-        .run(move || {
+        .run_test(move || {
             let mut fresh = RoundScenario::new(members.clone());
             fresh.settled = Arc::clone(&shared);
             fresh
@@ -1005,7 +1012,7 @@ async fn a_repeatable_pending_member_reruns_with_the_same_key_across_every_cut()
         tool: Tool::Defer { repeatable: true },
     }];
     let report = matrix()
-        .run(move || RoundScenario::new(members.clone()))
+        .run_test(move || RoundScenario::new(members.clone()))
         .await;
     eprintln!("L4 repeatable pending round: {} cells", report.cells.len());
     report.assert_held();
@@ -1019,7 +1026,7 @@ async fn outcomes_committed_out_of_order_present_in_declared_order() {
     let shared = Arc::clone(&outcomes_in_order);
     let report = Matrix::new()
         .faults(&[])
-        .run(move || {
+        .run_test(move || {
             let mut fresh = RoundScenario::new(mixed_members());
             fresh.outcomes = Arc::clone(&shared);
             fresh
@@ -1067,7 +1074,7 @@ async fn members_finishing_together_commit_in_one_transaction() {
         .collect();
     let report = Matrix::new()
         .faults(&[])
-        .run(|| RoundScenario::new(Vec::clone(&members)))
+        .run_test(|| RoundScenario::new(Vec::clone(&members)))
         .await;
     report.assert_held();
     let outcomes = report
@@ -1094,7 +1101,7 @@ async fn the_attempt_cap_ends_a_repeatable_call() {
     let shared = Arc::clone(&world);
     let report = Matrix::new()
         .faults(&[])
-        .run(move || {
+        .run_test(move || {
             let mut fresh = RoundScenario::new(members.clone());
             fresh.world = Arc::clone(&shared);
             fresh
@@ -1116,7 +1123,7 @@ async fn a_retry_backoff_consumes_the_total_limit() {
     let shared = Arc::clone(&world);
     let report = Matrix::new()
         .faults(&[])
-        .run(move || {
+        .run_test(move || {
             let mut fresh = RoundScenario::new(members.clone()).limit_ms(250);
             fresh.world = Arc::clone(&shared);
             fresh
@@ -1144,6 +1151,9 @@ async fn an_expired_limit_settles_at_once_on_resume_and_is_never_refreshed() {
     // The limit is shorter than a failover, so a resumed rerun finds it
     // expired.
     let report = matrix()
+        // The pinned 5s limit must expire before recovery; the default
+        // 17.25s failover proves that deadline law.
+        .lease(lash_durable::LeaseConfig::default())
         .run(move || {
             let mut fresh = RoundScenario::new(members.clone()).limit_ms(5_000);
             fresh.outcomes = Arc::clone(&shared.0);
@@ -1183,7 +1193,7 @@ async fn a_turn_cancel_ends_unfinished_members_as_cancelled() {
     let shared = Arc::clone(&settled);
     let report = Matrix::new()
         .faults(&[])
-        .run(move || {
+        .run_test(move || {
             let mut fresh = RoundScenario::new(members.clone());
             fresh.cancel_after_ms = Some(1_000);
             fresh.settled = Arc::clone(&shared);
@@ -1217,7 +1227,7 @@ async fn a_cancel_during_a_retry_backoff_starts_no_next_attempt() {
     let shared = (Arc::clone(&world), Arc::clone(&settled));
     let report = Matrix::new()
         .faults(&[])
-        .run(move || {
+        .run_test(move || {
             let mut fresh = RoundScenario::new(members.clone());
             // Attempt 1 fails at 0 and its retry is due at 100.
             fresh.cancel_after_ms = Some(50);

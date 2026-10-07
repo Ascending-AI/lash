@@ -39,6 +39,11 @@ mod dialect;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -63,7 +68,7 @@ use lash_core_execution::{
 use lash_durable::domain::WaitKind;
 use lash_durable::runner::Activation;
 use lash_durable::{
-    ActorDispatch, ActorKey, ActorState, CommitLabel, DurableInstant, DurableStore, LeaseConfig,
+    ActorDispatch, ActorKey, ActorState, CommitLabel, DurableInstant, DurableStore,
 };
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
@@ -673,7 +678,7 @@ impl Scenario for CellTurn {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
@@ -724,16 +729,28 @@ impl Scenario for CellTurn {
 
 /// Cut `cell` at every labelled write under every fault.
 async fn matrix(cell: Cell, dialect: Dialect, postgres_url: Option<String>) {
+    let faults = [
+        Fault::FailBefore,
+        Fault::AckHidden,
+        Fault::Zombie,
+        Fault::Abort,
+        Fault::CommitThenAbort,
+    ];
+    // Split only the optional double-run proof into exhaustive fault batches
+    // so each action retains the existing timeout. Ordinary laws cut all five.
+    let selected = if std::env::var("LASH_MATRIX_VERIFY_LEASE").as_deref() == Ok("1") {
+        match std::env::var("LASH_MATRIX_PROOF_PART").as_deref() {
+            Ok("first") => &faults[..3],
+            Ok("second") => &faults[3..],
+            _ => &faults[..],
+        }
+    } else {
+        &faults[..]
+    };
     let report = Matrix::new()
-        .faults(&[
-            Fault::FailBefore,
-            Fault::AckHidden,
-            Fault::Zombie,
-            Fault::Abort,
-            Fault::CommitThenAbort,
-        ])
+        .faults(selected)
         .horizon(Duration::from_secs(600))
-        .run(|| CellTurn::new(cell, dialect, postgres_url.clone()))
+        .run_test(|| CellTurn::new(cell, dialect, postgres_url.clone()))
         .await;
     eprintln!(
         "{cell:?} on {dialect:?}: {} cells over {} labels",
@@ -842,7 +859,7 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
                 && matches!(write.stored, Stored::Committed { effective: true })
         })
         .map(|write| write.at_ms);
-    let poll = LeaseConfig::default().settings().claim_poll.as_millis() as u64;
+    let poll = Matrix::test_lease().settings().claim_poll.as_millis() as u64;
     match (woke, recovered) {
         (Some(woke), Some(recovered))
             if recovered < deadline && woke >= deadline && woke <= deadline + poll + 5_000 => {}

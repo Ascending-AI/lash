@@ -25,10 +25,14 @@
 
 #[path = "support/dialect.rs"]
 mod dialect;
+#[path = "support/matrix.rs"]
+mod matrix;
 #[path = "support/served.rs"]
 mod served;
 #[path = "support/sim.rs"]
 mod sim;
+
+use matrix::MatrixTestExt as _;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -38,7 +42,7 @@ use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::{ToolCall, ToolOutcome};
 use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -335,7 +339,7 @@ impl Scenario for Holding {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: lash::testing::node_activation(&self.core(), Arc::new(lash_durable::NoProbe))
                 .expect("the core's node activation")
                 .0
@@ -456,7 +460,7 @@ async fn tool_call_limit_counts_what_a_process_holds_across_a_worker_kill(tier: 
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run(|| Holding::new(dialect, postgres_url.clone()))
+        .run_test(|| Holding::new(dialect, postgres_url.clone()))
         .await;
     let cut: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(

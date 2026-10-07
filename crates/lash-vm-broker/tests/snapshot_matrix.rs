@@ -37,8 +37,7 @@ use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
 use lash_durable::domain::{CellId, ExecKey};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, LeaseConfig, MailTx,
-    Release,
+    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, MailTx, Release,
 };
 use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
 use lash_sansio::ToolId;
@@ -176,7 +175,7 @@ impl Scenario for CellScenario {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: vec![FormatSet::new(FORMATS)],
             max_active: 4,
         }
@@ -555,12 +554,20 @@ impl ParentEffects for LawHost {
 /// cell's run cut under every fault, including `cell.snapshot+admit`,
 /// `round.outcome`, `cell.inject` and `cell.snapshot`.
 #[tokio::test]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the test host selects the optional lease proof from its action environment"
+)]
 async fn a_cell_resumes_from_its_quiet_points_at_every_cut_on_sqlite_memory() {
-    let report = Matrix::new()
-        .run(|| CellScenario {
-            shared: Arc::default(),
-        })
-        .await;
+    let matrix = Matrix::new();
+    let make = || CellScenario {
+        shared: Arc::default(),
+    };
+    let report = if std::env::var("LASH_MATRIX_VERIFY_LEASE").as_deref() == Ok("1") {
+        matrix.run_lease_equivalence(make).await
+    } else {
+        matrix.run(make).await
+    };
     report.assert_held();
     let labels = report.labels();
     for label in [

@@ -22,6 +22,12 @@
 
 #[path = "support/sim.rs"]
 mod sim;
+
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -34,7 +40,7 @@ use lash_core_execution::{
     SessionTurnOutcome, StoreSet,
 };
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -208,7 +214,7 @@ impl Scenario for ChildTurn {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
@@ -357,7 +363,7 @@ fn uncut_labels() -> Vec<CommitLabel> {
 /// process ends with its answer.
 #[tokio::test]
 async fn a_child_session_turn_runs_on_its_session_actor() {
-    let report = Matrix::new().faults(&[]).run(ChildTurn::new).await;
+    let report = Matrix::new().faults(&[]).run_test(ChildTurn::new).await;
     let labels: Vec<CommitLabel> = report
         .baseline
         .iter()
@@ -383,7 +389,7 @@ async fn a_child_session_turn_killed_at_every_label_resumes_and_ends_its_process
         // write, which the fault stores do not count.
         .across_nodes()
         .horizon(Duration::from_secs(600))
-        .run(ChildTurn::new)
+        .run_test(ChildTurn::new)
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(

@@ -23,7 +23,7 @@ use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::{Backend, BackendParts, DurableSettings, NoProjectionProviders};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorDispatch, ActorKey, DurableStore, LeaseConfig};
-use lash_durable_test::{Cut, OffClockWork, Scenario, SimClock, SimNodes, SimNodesConfig};
+use lash_durable_test::{Cut, Matrix, OffClockWork, Scenario, SimClock, SimNodes, SimNodesConfig};
 
 use super::Case;
 use super::engine::{SimProcessEngine, SimSteps};
@@ -88,8 +88,8 @@ pub fn nodes_config(backend: &Backend) -> SimNodesConfig {
 /// How long a failover takes: past a dead owner's lease, a reap and a
 /// claim.
 #[must_use]
-pub fn failover() -> Duration {
-    let lease = LeaseConfig::default().settings();
+pub fn failover(lease: LeaseConfig) -> Duration {
+    let lease = lease.settings();
     lease.ttl + lease.reap_every + lease.claim_poll
 }
 
@@ -413,7 +413,11 @@ impl Scenario for Deployment {
         reason = "the matrix builds the database before the config"
     )]
     fn config(&self) -> SimNodesConfig {
-        nodes_config(&self.world.backend().expect("the database is built first"))
+        // The shared factory also serves the soak driver, which keeps the
+        // production lease. Crash cells use the named short test lease.
+        let mut config = nodes_config(&self.world.backend().expect("the database is built first"));
+        config.lease = Matrix::test_lease();
+        config
     }
 
     #[expect(
@@ -449,7 +453,7 @@ impl Scenario for Deployment {
 
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
         let bound = self.workload.bound()
-            + failover()
+            + failover(nodes.lease())
             + lash_sansio::ExecutionBudgets::default().stop_grace();
         let bound_ms = u64::try_from(bound.as_millis()).unwrap_or(u64::MAX);
         let mut violations = invariants::check(

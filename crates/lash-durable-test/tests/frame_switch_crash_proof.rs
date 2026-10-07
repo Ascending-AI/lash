@@ -29,6 +29,11 @@ mod dialect;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -40,7 +45,7 @@ use lash_core::{LlmOutputPart, ToolCall, ToolControl, ToolOutcome};
 use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_core_store::store::{RunCommittedOutcome, RunTerminalCause, RunTerminalKind};
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -252,7 +257,7 @@ impl Scenario for FrameSwitch {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
@@ -406,7 +411,7 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run(|| FrameSwitch::new(dialect, postgres_url.clone()))
+        .run_test(|| FrameSwitch::new(dialect, postgres_url.clone()))
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(
@@ -430,7 +435,7 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
 async fn a_frame_switch_commits_with_its_follow_on_which_runs_next() {
     let report = Matrix::new()
         .faults(&[])
-        .run(|| FrameSwitch::new(Dialect::SqliteMemory, None))
+        .run_test(|| FrameSwitch::new(Dialect::SqliteMemory, None))
         .await;
     report.assert_held();
     let labels: Vec<CommitLabel> = report

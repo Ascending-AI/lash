@@ -14,8 +14,8 @@
 use lash_core::durable_port::domain::SESSION_ACTOR_FORMATS;
 use lash_core::durable_port::runner::{Activation, Exit, Owned};
 use lash_core::durable_port::{
-    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, LeaseConfig,
-    Release, StateRevision,
+    ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, Release,
+    StateRevision,
 };
 use lash_core::runtime::durable::session_mail::{OneInputPerRun, drain_session_mail};
 use lash_core::{
@@ -195,7 +195,7 @@ impl Scenario for SessionMail {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: lash_durable_test::Matrix::test_lease(),
             decodes: vec![FormatSet::new(SESSION_ACTOR_FORMATS)],
             max_active: 8,
         }
@@ -385,9 +385,12 @@ mod tests {
     /// applies to it.
     #[tokio::test]
     async fn the_session_mail_laws_hold_at_every_cut_on_sqlite_memory() {
-        let report = lash_durable_test::Matrix::new()
-            .run(SessionMail::default)
-            .await;
+        let matrix = lash_durable_test::Matrix::new();
+        let report = if std::env::var("LASH_MATRIX_VERIFY_LEASE").as_deref() == Ok("1") {
+            matrix.run_lease_equivalence(SessionMail::default).await
+        } else {
+            matrix.run(SessionMail::default).await
+        };
         report.assert_held();
         for label in [CommitLabel::TURN_ADMIT, ACK, RELEASE, CommitLabel::CLAIM] {
             assert!(

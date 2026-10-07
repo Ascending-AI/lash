@@ -24,6 +24,12 @@
 
 #[path = "support/sim.rs"]
 mod sim;
+
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -34,7 +40,7 @@ use lash_core_execution::{
     ProcessInfraError, StoreSet,
 };
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -323,7 +329,7 @@ impl Scenario for StepProof {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
@@ -456,7 +462,7 @@ fn uncut_labels() -> Vec<CommitLabel> {
 /// answer.
 #[tokio::test]
 async fn a_host_engines_tool_step_runs_on_the_production_steps() {
-    let report = Matrix::new().faults(&[]).run(StepProof::new).await;
+    let report = Matrix::new().faults(&[]).run_test(StepProof::new).await;
     report.assert_held();
     let labels: Vec<CommitLabel> = report
         .baseline
@@ -480,7 +486,7 @@ async fn a_host_engines_once_tool_step_killed_at_every_label_runs_at_most_once()
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run(StepProof::new)
+        .run_test(StepProof::new)
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(

@@ -42,6 +42,12 @@
 
 #[path = "support/sim.rs"]
 mod sim;
+
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -61,7 +67,7 @@ use lash_core_execution::{
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::domain::{OwnerKey, RunRecordKind};
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -522,7 +528,7 @@ impl Scenario for Proof {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self
                 .backend
                 .lock_recover()
@@ -835,7 +841,7 @@ async fn a_process_cut_at_every_label_runs_no_step_before_its_state_commits() {
     let report = Matrix::new()
         .faults(&FAULTS)
         .horizon(Duration::from_secs(600))
-        .run(|| Proof::new(Shape::Run))
+        .run_test(|| Proof::new(Shape::Run))
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(
@@ -868,7 +874,7 @@ async fn a_failed_step_outcome_commit_costs_no_sibling_its_outcome() {
         .faults(&[Fault::FailBefore])
         .labels(&[CommitLabel::STEP_OUTCOME])
         .horizon(Duration::from_secs(600))
-        .run(Proof::staggered)
+        .run_test(Proof::staggered)
         .await;
     eprintln!("staggered run: {} cells", report.cells.len());
     report.assert_held();
@@ -888,7 +894,7 @@ async fn a_cascade_three_levels_deep_ends_across_a_crash_at_each_batch() {
         .labels(&[CommitLabel::CASCADE_BATCH])
         .across_nodes()
         .horizon(Duration::from_secs(600))
-        .run(|| Proof::new(Shape::Cascade))
+        .run_test(|| Proof::new(Shape::Cascade))
         .await;
     eprintln!("cascade: {} cells", report.cells.len());
     report.assert_held();

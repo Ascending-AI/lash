@@ -12,10 +12,29 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_durable::CommitLabel;
-use lash_durable_test::{Fault, Matrix};
+use lash_durable_test::{Fault, Matrix, MatrixReport, Scenario};
 use lash_sim::crash_matrix::deployment::{Deployment, Dialect};
 use lash_sim::crash_matrix::services::EXT_WRITE;
 use lash_sim::crash_matrix::{Case, assert_case, assert_case_on, catalog_audit, run_case};
+
+// Direct admission laws use the same optional equivalence proof as the catalog.
+trait MatrixTestExt {
+    async fn run_test<S: Scenario>(&self, make: impl Fn() -> S) -> MatrixReport;
+}
+
+impl MatrixTestExt for Matrix {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the test host selects the optional lease proof from its action environment"
+    )]
+    async fn run_test<S: Scenario>(&self, make: impl Fn() -> S) -> MatrixReport {
+        if std::env::var("LASH_MATRIX_VERIFY_LEASE").as_deref() == Ok("1") {
+            self.run_lease_equivalence(make).await
+        } else {
+            self.run(make).await
+        }
+    }
+}
 
 macro_rules! crash_matrix {
     ($($name:ident => $case:ident;)*) => {
@@ -57,7 +76,7 @@ async fn a_stale_epoch_cut_at_a_cell_admission_runs_no_body_on_the_old_owner() {
         let report = Matrix::new()
             .faults(&[Fault::StaleEpoch])
             .labels(&[CommitLabel::CELL_SNAPSHOT_ADMIT])
-            .run(|| {
+            .run_test(|| {
                 let deployment = Deployment::new(Case::Cell, seed, Dialect::SqliteMemory);
                 worlds.borrow_mut().push(Arc::clone(deployment.world()));
                 deployment
@@ -94,7 +113,7 @@ async fn assert_stale_epoch_holds(case: Case, label: CommitLabel) {
             .faults(&[Fault::StaleEpoch])
             .labels(&[label])
             .activations_resume_first()
-            .run(|| Deployment::new(case, seed, Dialect::SqliteMemory))
+            .run_test(|| Deployment::new(case, seed, Dialect::SqliteMemory))
             .await;
         assert!(!report.cells.is_empty(), "seed {seed}: no {label} was cut");
         report.assert_held();
@@ -132,7 +151,7 @@ async fn a_stale_epoch_session_command_commits_nothing() {
         let report = Matrix::new()
             .faults(&[Fault::StaleEpoch, Fault::Zombie])
             .labels(&[CommitLabel::SESSION_COMMAND])
-            .run(|| Deployment::new(Case::Command, seed, Dialect::SqliteMemory))
+            .run_test(|| Deployment::new(Case::Command, seed, Dialect::SqliteMemory))
             .await;
         assert!(
             report.cells.iter().any(|cell| cell.fault == Fault::Zombie),
@@ -152,7 +171,7 @@ async fn a_stale_owner_s_tool_outcome_with_a_process_start_commits_nothing() {
         let report = Matrix::new()
             .faults(&[Fault::StaleEpoch, Fault::Zombie])
             .labels(&[CommitLabel::ROUND_OUTCOME])
-            .run(|| Deployment::new(Case::Effects, seed, Dialect::SqliteMemory))
+            .run_test(|| Deployment::new(Case::Effects, seed, Dialect::SqliteMemory))
             .await;
         assert!(
             !report.cells.is_empty(),

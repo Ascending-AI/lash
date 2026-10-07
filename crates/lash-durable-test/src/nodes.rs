@@ -94,6 +94,11 @@ impl SimNodes {
         &self.database
     }
 
+    /// The actual validated lease this deployment's runners use.
+    pub fn lease(&self) -> LeaseConfig {
+        self.config.lease
+    }
+
     pub fn clock(&self) -> &Arc<SimClock> {
         &self.clock
     }

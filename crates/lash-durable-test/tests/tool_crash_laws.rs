@@ -48,6 +48,11 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 #[path = "support/dialect.rs"]
 mod dialect;
 #[path = "support/served.rs"]
@@ -65,7 +70,7 @@ use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ToolCall, ToolOutcome};
 use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -894,7 +899,7 @@ impl Scenario for Crash {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
@@ -1310,7 +1315,7 @@ impl Scenario for ProcessCrash {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
@@ -1482,7 +1487,7 @@ async fn prove_under(turn: Turn, tier: Tier, cut_labels: &[CommitLabel], faults:
     let report = matrix
         .faults(faults)
         .horizon(Duration::from_secs(600))
-        .run(|| Crash::new(turn, dialect, postgres_url.clone()))
+        .run_test(|| Crash::new(turn, dialect, postgres_url.clone()))
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(
@@ -1640,7 +1645,7 @@ async fn prove_process(steps: Steps, tier: Tier) {
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run(|| ProcessCrash::new(steps, dialect, postgres_url.clone()))
+        .run_test(|| ProcessCrash::new(steps, dialect, postgres_url.clone()))
         .await;
     eprintln!(
         "{steps:?} on {dialect:?}: {} cells over {:?}",

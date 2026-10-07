@@ -36,6 +36,11 @@ mod served;
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/matrix.rs"]
+mod matrix;
+
+use matrix::MatrixTestExt as _;
+
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
@@ -43,7 +48,7 @@ use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjectio
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
+use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
@@ -405,7 +410,7 @@ impl Scenario for Crash {
 
     fn config(&self) -> SimNodesConfig {
         SimNodesConfig {
-            lease: LeaseConfig::default(),
+            lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
             max_active: 4,
         }
@@ -509,7 +514,7 @@ async fn prove(tier: Tier, cut: bool) {
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run(|| Crash::new(dialect, postgres_url.clone()))
+        .run_test(|| Crash::new(dialect, postgres_url.clone()))
         .await;
     eprintln!(
         "after-turn on {dialect:?}: {} cells over {:?}",
