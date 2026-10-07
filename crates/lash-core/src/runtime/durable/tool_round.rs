@@ -19,6 +19,12 @@
 //!   ends its unfinished members `Cancelled`; the turn then ends as every
 //!   phase does on a cancel ([`RoundExit::CancelRequested`]). An `AfterStep`
 //!   request lets the round run to its end.
+//! - **Suspension.** A round whose unsettled members are all parked on a
+//!   wait or waiting out a retry's backoff runs nothing: once it stayed hot
+//!   for `idle_evict` it suspends ([`RoundExit::Suspended`]), and the
+//!   session releases as `waiting` until the earliest due, holding no claim
+//!   slot. The wait's resolution, or the due time, re-claims it, and the
+//!   restored turn resumes the round from its fold.
 //! - **Presentation.** The machine is answered with each member's committed
 //!   outcome, in declared order. The round's `present` record rides the
 //!   turn's next commit: `round.present+model.start` when the machine calls
@@ -27,11 +33,11 @@
 use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::round::{
-    self, AdmittedRound, RoundCalls, RoundDraft, RoundError, RoundRunner, RoundTools,
+    self, AdmittedRound, RoundCalls, RoundDraft, RoundEnd, RoundError, RoundRunner, RoundTools,
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
-use lash_durable::{CommitLabel, DurableError};
+use lash_durable::{CommitLabel, DurableError, DurableInstant};
 use tokio_util::sync::CancellationToken;
 
 use super::session::{TurnDrive, TurnError, TurnRow, UnfinishedPhase};
@@ -48,6 +54,12 @@ pub(super) enum RoundExit {
     /// The turn accepted a cancel: the round's unfinished members settled
     /// `Cancelled`, and the next pass finalizes the turn.
     CancelRequested,
+    /// Nothing in the round runs and only parked waits or retry dues remain:
+    /// the session releases as `waiting` until `due`.
+    Suspended {
+        /// The earliest retry due time or parked wait deadline.
+        due: Option<DurableInstant>,
+    },
 }
 
 /// The label of the turn's next model call: `round.present+model.start` when
@@ -193,6 +205,10 @@ pub(super) async fn run(
     if cancel.is_cancelled() {
         return Ok(RoundExit::CancelRequested);
     }
+    let end = match end {
+        RoundEnd::Settled(end) => end,
+        RoundEnd::Suspended { due } => return Ok(RoundExit::Suspended { due }),
+    };
 
     let view = end.round();
     let results = calls

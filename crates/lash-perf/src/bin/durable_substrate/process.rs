@@ -15,8 +15,8 @@ use lash_core_execution::runtime::actor::waits::PinnedKey;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
-    ProcessEngine, ProcessInfraError, ProcessOutcome, ProcessRecord, StepRequest, ToolCallId,
-    ToolCallOutput, ToolCancellation,
+    ProcessEngine, ProcessInfraError, ProcessOutcome, ProcessRecord, StepRequest, ToolCallOutput,
+    ToolCancellation,
 };
 use lash_sansio::sync::MutexExt as _;
 use serde_json::{Value, json};
@@ -231,7 +231,25 @@ impl ProcessSteps for NoSteps {
         })
     }
 
-    fn body(&self, _process: &ProcessRecord, _step: &StepRequest, _call: &ToolCallId) -> ToolBody {
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    }
+
+    fn body(
+        &self,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> ToolBody {
         Box::new(|_token| {
             Box::pin(async {
                 lash_core_execution::runtime::actor::round::BodyOutput::from(

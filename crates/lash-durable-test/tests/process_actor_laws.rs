@@ -22,7 +22,7 @@ use lash_core_execution::{
     ProcessEventLogTestSupport as _, ProcessEventSemanticsSpec, ProcessEventType, ProcessId,
     ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
     ProcessRegistration, ProcessSignal, ProcessSignalIdentity, ProcessStatus, ProjectionWatermark,
-    StartKey, StepName, StepRequest, ToolCallId, ToolCallOutput, ToolCancellation,
+    StartKey, StepName, StepRequest, ToolCallOutput, ToolCancellation,
 };
 use lash_core_store::tool_run::{
     AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
@@ -265,6 +265,7 @@ impl ProcessSteps for LawSteps {
             });
         }
         Ok(StepAdmission {
+            wait: None,
             policy: ExecutionPolicy::Once,
             limit: ExecutionLimit::starting_at(
                 now_ms,
@@ -274,7 +275,25 @@ impl ProcessSteps for LawSteps {
         })
     }
 
-    fn body(&self, process: &ProcessRecord, _step: &StepRequest, _call: &ToolCallId) -> ToolBody {
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    }
+
+    fn body(
+        &self,
+        process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> ToolBody {
         let process = process.id.clone();
         Box::new(move |_token| {
             Box::pin(async move {

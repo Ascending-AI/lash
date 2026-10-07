@@ -276,6 +276,7 @@ impl ProcessSteps for ProofSteps {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Ok(StepAdmission {
+            wait: None,
             policy: policy(&step.admitted_tool(KIND)),
             limit: ExecutionLimit::starting_at(
                 now_ms,
@@ -285,7 +286,26 @@ impl ProcessSteps for ProofSteps {
         })
     }
 
-    fn body(&self, process: &ProcessRecord, step: &StepRequest, call: &ToolCallId) -> ToolBody {
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    }
+
+    fn body(
+        &self,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> ToolBody {
+        let call = execution.call();
         let world = Arc::clone(&self.world);
         let database = Arc::clone(&self.database);
         let process = process.id.clone();

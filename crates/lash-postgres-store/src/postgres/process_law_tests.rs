@@ -1,4 +1,4 @@
-//! The C1 and batched-cascade laws of process actors
+//! The C1, batched-cascade and step-lifecycle laws of process actors
 //! (`lash_core_execution::runtime::actor::process_laws`; L6, FIG-5175) over
 //! PostgreSQL, each on its own isolated database.
 
@@ -47,6 +47,8 @@ macro_rules! law {
 law!(
     c1_a_parked_child_ends_engine_free_and_its_child_receives_parent_ended,
     a_cascade_wider_than_its_batch_ends_a_tree_three_levels_deep,
+    a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_ordinal,
+    a_step_parked_on_its_wait_settles_when_the_wait_resolves,
 );
 
 /// FIG-5235: a deterministic 40P01 inside the terminal is retried, not refused.

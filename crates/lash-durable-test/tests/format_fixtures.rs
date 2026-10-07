@@ -37,7 +37,6 @@ use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, 
 use lash_core_execution::{
     Backend, EngineStepRun, EngineSteps as _, LifetimeDecision, ProcessId, ProcessIdMint,
     ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration, StepRequest, StoreSet,
-    ToolCallId,
 };
 use lash_durable::runner::{Activation, Stopped};
 use lash_durable::{ActorKey, ActorKind, ActorState, CommitLabel, DurableStore, LeaseConfig};
@@ -115,6 +114,7 @@ impl ProcessSteps for LashlangSteps {
     ) -> Result<StepAdmission, StepRefusal> {
         match step {
             StepRequest::Engine { .. } => Ok(StepAdmission {
+                wait: None,
                 policy: ExecutionPolicy::repeatable(
                     std::num::NonZeroU32::new(3).expect("nonzero"),
                     0,
@@ -133,7 +133,25 @@ impl ProcessSteps for LashlangSteps {
         }
     }
 
-    fn body(&self, process: &ProcessRecord, step: &StepRequest, _call: &ToolCallId) -> ToolBody {
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    }
+
+    fn body(
+        &self,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> ToolBody {
         let StepRequest::Engine { kind, input, .. } = step.clone() else {
             unreachable!("admit refuses a tool step");
         };

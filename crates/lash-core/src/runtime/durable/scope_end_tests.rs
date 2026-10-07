@@ -1317,16 +1317,30 @@ impl ProcessSteps for HangingSteps {
     ) -> Result<StepAdmission, StepRefusal> {
         let long = Duration::from_secs(60);
         Ok(StepAdmission {
+            wait: None,
             policy: lash_sansio::ExecutionPolicy::Once,
             limit: lash_sansio::ExecutionLimit::starting_at(now_ms, long, long),
         })
+    }
+
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &crate::ProcessRecord,
+        _step: &crate::StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
     }
 
     fn body(
         &self,
         _process: &crate::ProcessRecord,
         _step: &crate::StepRequest,
-        _call: &crate::ToolCallId,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
     ) -> ToolBody {
         Box::new(|_token| Box::pin(std::future::pending()))
     }

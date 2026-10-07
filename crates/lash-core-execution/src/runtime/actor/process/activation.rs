@@ -13,8 +13,14 @@
 //! a signal from the mailbox; the end of what the process is blocked on,
 //! which for a wait is its row's committed winner (a resolution, a timeout
 //! or a revocation), never the live state of what it waited for.
-//! With none, step bodies run (the actor stays owned) or the actor releases
-//! as `waiting` until its earliest due time, holding nothing.
+//! With none, the steps run their admitted-execution lifecycle
+//! ([`Lifecycle`], shared with a round's members): bodies run, retries are
+//! recorded and started, parked steps race their waits, and outcomes
+//! commit (`step.outcome`). While a body runs the actor stays owned; once
+//! only parked waits and retry dues are left, it releases as `waiting`
+//! until its earliest due time, holding nothing. The activation adds only
+//! the engine-event adapter: a step whose call the fold settled is handed
+//! to `advance` as `StepSettled`.
 //!
 //! A parked process, one whose state this node cannot decode, and one that
 //! never started end without engine code when cancelled. A running or
@@ -30,13 +36,16 @@
 //! steps already running to commit their outcomes, then releases the actor
 //! `ready` under `drain.release`, for a node of the next build to claim.
 
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use lash_core_store::tool_run::{MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole};
+use lash_core_store::tool_run::{
+    AttemptOutcome, AvailableEvidence, CompletionSource, MaterialLocation, MaterialOwner,
+    MaterialPayload, MaterialRole,
+};
 use lash_durable::domain::{
-    AdmittedId, CANCEL_MAIL, ExecKey, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite,
-    RunSeq, SIGNAL_MAIL, ScopeKey, SnapshotRev, SnapshotWrite, WaitState, WaitWrite,
+    CANCEL_MAIL, ExecKey, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite, RunSeq,
+    SIGNAL_MAIL, ScopeKey, SnapshotRev, SnapshotWrite, WaitState, WaitWrite,
 };
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
@@ -44,24 +53,25 @@ use lash_durable::{
     Release, StoreFailure, StoreFailureKind,
 };
 use lash_sansio::{ToolCallAdmission, ToolCallPosition};
-use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
 use super::session_turn::SessionTurns;
 use super::terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
 use super::{CascadeProgress, end_scope};
+use crate::runtime::actor::round::lifecycle::{Act, Idle, Lifecycle};
 use crate::runtime::actor::round::{
-    self, AdmittedExecution, BodyOutput, ExecutionDraft, PolicyView, Recovery, RunFold,
+    self, AdmittedExecution, BodyOutput, ExecutionDraft, MemberBodies, MemberBody, PolicyView,
+    RoundDraft, RoundError, RunFold,
 };
-use crate::runtime::actor::waits::{self, WaitDeadline, WaitKind, WaitSpec};
+use crate::runtime::actor::waits::{self, Resolution, WaitDeadline, WaitKind, WaitSpec};
 use crate::runtime::process::engine_state::{
-    EngineAction, EngineEvent, EngineState, HostWaitKind, SettledOutcome, StepName,
+    EngineAction, EngineEvent, EngineState, HostWaitKind, SettledOutcome, StepRequest,
 };
 use crate::runtime::process::steps::ProcessSteps;
 use crate::{
     ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
-    ProcessRecord, ProcessSignal,
+    ProcessRecord, ProcessSignal, ToolCallId,
 };
 
 /// The activation of claimed process actors: one per node, routed by
@@ -103,32 +113,30 @@ impl ProcessActivation {
 pub(super) enum Pass {
     /// It committed; run another.
     Again,
-    /// Steps run and nothing else is due: wait for one to finish, for mail
-    /// or for the next due time. The fold is of the rows as they stand: the
-    /// pass committed nothing after reading them.
-    Wait(RunFold, Option<DurableInstant>),
+    /// Steps run and nothing else is due: wait for what their lifecycle
+    /// waits on, for mail or for the next due time.
+    Wait(Idle, Option<DurableInstant>),
     /// The actor was released or ended.
     Released,
+}
+
+/// How a wait for the steps ended.
+enum Waited {
+    /// Something happened: run another pass.
+    Woke,
+    /// The node's lease lapsed under a step's body: stop, recording
+    /// nothing.
+    Stopping,
 }
 
 /// What one activation keeps in memory: never a grant, rebuilt from rows
 /// by the next owner.
 pub(super) struct Live {
-    /// The context step bodies run under; its token is the steps' cancel.
-    steps_cx: ActorContext,
-    steps_token: CancellationToken,
-    running: JoinSet<(
-        StepName,
-        AdmittedId,
-        Result<Option<BodyOutput>, DurableError>,
-    )>,
-    /// The step each running body's task runs, to release a body whose
-    /// task ended without an output.
-    tasks: std::collections::HashMap<tokio::task::Id, StepName>,
-    started: BTreeSet<StepName>,
-    /// The executions the last committed transition admitted, by step: a
-    /// step admitted earlier is rebuilt from the run records' fold.
-    fresh: std::collections::BTreeMap<StepName, AdmittedExecution>,
+    /// The steps' admitted-execution lifecycle: the bodies it runs and the
+    /// outcomes it holds until they commit.
+    lifecycle: Lifecycle,
+    /// What the lifecycle's bodies are built from.
+    bodies: Arc<StepBodies>,
     /// The actor's park as of the claim.
     park: Option<String>,
     /// The claims in a row that committed nothing, as of the claim.
@@ -176,14 +184,18 @@ impl Activation for ProcessActivation {
                 }
             }
         };
-        let steps_token = CancellationToken::new();
+        let bodies = Arc::new(StepBodies {
+            steps: Arc::clone(&self.steps),
+            seen: Mutex::default(),
+        });
         let mut live = Live {
-            steps_cx: self.steps_context(&owned, &process, steps_token.clone()),
-            steps_token,
-            running: JoinSet::new(),
-            tasks: std::collections::HashMap::new(),
-            started: BTreeSet::new(),
-            fresh: std::collections::BTreeMap::new(),
+            lifecycle: Lifecycle::new(
+                &self.steps_context(&owned, &process),
+                PolicyView::default(),
+                Arc::clone(&bodies) as Arc<dyn MemberBodies>,
+                CommitLabel::STEP_OUTCOME,
+            ),
+            bodies,
             park,
             failed_activations,
             first_pass: true,
@@ -192,13 +204,11 @@ impl Activation for ProcessActivation {
         loop {
             match self.pass(&owned, &process, &mut live).await {
                 Ok(Pass::Again) => {}
-                Ok(Pass::Wait(fold, due)) => {
-                    if let Err(DurableError::OwnershipLost(_)) =
-                        self.wait(&owned, &mut live, &fold, due).await
-                    {
-                        return Exit::Released;
-                    }
-                }
+                Ok(Pass::Wait(idle, due)) => match self.wait(&owned, &mut live, &idle, due).await {
+                    Err(DurableError::OwnershipLost(_)) => return Exit::Released,
+                    Ok(Waited::Stopping) => return Exit::Abandoned,
+                    Ok(Waited::Woke) | Err(_) => {}
+                },
                 Ok(Pass::Released) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                 // A refusal as corrupt answers every retry the same: the
                 // process ends Failed on the first one, and the next pass
@@ -207,7 +217,7 @@ impl Activation for ProcessActivation {
                     kind: StoreFailureKind::Corrupt,
                     message,
                 })) => {
-                    live.running.abort_all();
+                    live.lifecycle.abandon();
                     match self.end_refused(&owned, &process, &mut live, message).await {
                         Ok(Pass::Again) => {}
                         Ok(_) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
@@ -229,35 +239,29 @@ impl Activation for ProcessActivation {
 }
 
 impl ProcessActivation {
-    fn steps_context(
-        &self,
-        owned: &Owned,
-        process: &ProcessId,
-        token: CancellationToken,
-    ) -> ActorContext {
+    /// The context the steps' lifecycle commits and runs bodies under. Its
+    /// token is never cancelled: a cancel reaches the steps through the
+    /// lifecycle, and the bodies end with the activation that holds them.
+    fn steps_context(&self, owned: &Owned, process: &ProcessId) -> ActorContext {
         ActorContext::claimed(
             self.backend.clone(),
             owned,
             AdmittedScope::process(process.clone()),
-            token,
+            CancellationToken::new(),
             Arc::clone(&self.probe),
         )
     }
 
-    /// Wait for a running step to finish (and commit its outcome), for mail
-    /// or for `due`.
-    ///
-    /// The outcome takes its run's next ordinal from `fold`, the rows as
-    /// they stand, never from the execution its body ran under: an
-    /// ordinal is spent only by a commit that lands, so a failed commit
-    /// leaves nothing in memory ahead of the rows (ADR 0132 §5).
+    /// Wait for what the steps' lifecycle waits on (a body to finish, a
+    /// parked wait to end, its batch window or a retry's due time), for
+    /// mail or for `due`.
     async fn wait(
         &self,
         owned: &Owned,
         live: &mut Live,
-        fold: &RunFold,
+        idle: &Idle,
         due: Option<DurableInstant>,
-    ) -> Result<(), DurableError> {
+    ) -> Result<Waited, DurableError> {
         let clock = Arc::clone(owned.clock());
         let sleep = async {
             match due {
@@ -270,40 +274,19 @@ impl ProcessActivation {
             }
         };
         tokio::select! {
-            finished = live.running.join_next_with_id(), if !live.running.is_empty() => {
-                // The body ended: from now on the rows say what its step
-                // needs, whether or not its outcome commits below.
-                let task = match &finished {
-                    Some(Ok((task, _))) => Some(*task),
-                    Some(Err(error)) => Some(error.id()),
-                    None => None,
-                };
-                // A step whose body never started because the node's lease
-                // lapsed stays started: this owner is stopping, and the next
-                // one recovers the step from the rows.
-                let lapsed = matches!(&finished, Some(Ok((_, (_, _, Ok(None))))));
-                if let Some(name) = task.and_then(|task| live.tasks.remove(&task))
-                    && !lapsed
-                {
-                    live.started.remove(&name);
-                }
-                if let Some(Ok((_, (_, id, output)))) = finished
-                    && let Some(output) = output?
-                {
-                    let admitted = fold
-                        .admitted(&id)
-                        .ok_or_else(|| corrupt("a running process step", "its start has no row"))?;
-                    let mut tx = owned.begin().await?;
-                    round::settle(&mut tx, &admitted, output, None)
-                        .map_err(|refusal| corrupt("a process step's outcome", refusal))?;
-                    owned.commit(tx, CommitLabel::STEP_OUTCOME).await?;
-                }
-            }
+            woke = live.lifecycle.wake(idle) => match woke {
+                Ok(()) => {}
+                // A body found the node's lease lapsed before it started:
+                // this owner is stopping, records nothing, and the next one
+                // recovers the step from the rows.
+                Err(RoundError::Stopped) => return Ok(Waited::Stopping),
+                Err(error) => return Err(steps_failure(error)),
+            },
             // A draining owner waits for its running steps alone.
             () = owned.wait_for_mail(), if !owned.draining() => {}
             () = sleep, if !owned.draining() => {}
         }
-        Ok(())
+        Ok(Waited::Woke)
     }
 
     async fn pass(
@@ -393,7 +376,7 @@ impl ProcessActivation {
         {
             // The grace ran out: lash ends the process, whatever its steps
             // are doing, and never claims they physically stopped.
-            live.running.abort_all();
+            live.lifecycle.abandon();
             record_terminal(&mut tx, process, &cancelled(origin, true))?;
             tx.ack_seen();
             owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
@@ -410,12 +393,16 @@ impl ProcessActivation {
         }));
         let fold = round::fold(&rows, &policies)
             .map_err(|error| corrupt("a process's run records", error))?;
+        live.lifecycle.declare(policies);
+        live.bodies.saw(&record, &driver);
         // A draining node advances nothing more: it waits for the steps
         // that run to commit their outcomes, then hands the process to the
         // next build at this committed phase.
         if owned.draining() {
-            if !live.running.is_empty() {
-                return Ok(Pass::Wait(fold, None));
+            match live.lifecycle.drain(&fold).await.map_err(steps_failure)? {
+                Act::Committed(_) | Act::Refused => return Ok(Pass::Again),
+                Act::Idle(idle) if !idle.suspendable() => return Ok(Pass::Wait(idle, None)),
+                Act::Idle(_) => {}
             }
             owned.drain_release(tx).await?;
             return Ok(Pass::Released);
@@ -424,11 +411,9 @@ impl ProcessActivation {
             .next_event(
                 &mut tx,
                 reads,
-                process,
                 row.state_rev,
                 &mut driver,
                 &fold,
-                &live.started,
                 record
                     .cancel_request
                     .as_deref()
@@ -443,30 +428,34 @@ impl ProcessActivation {
                 owned.commit(tx, CommitLabel::WAIT_TIMEOUT).await?;
                 return Ok(Pass::Again);
             }
+            // Nothing for the engine: the steps' lifecycle acts. A commit of
+            // its own leaves this transaction unwritten; the next pass reads
+            // what it committed.
             Next::Nothing { due } => {
-                self.start_steps(&record, process, &driver, &fold, live);
-                if !live.running.is_empty() {
-                    return Ok(Pass::Wait(fold, due));
+                let idle = match live.lifecycle.act(&fold).await.map_err(steps_failure)? {
+                    Act::Committed(_) | Act::Refused => return Ok(Pass::Again),
+                    Act::Idle(idle) => idle,
+                };
+                if !idle.suspendable() {
+                    return Ok(Pass::Wait(idle, due));
                 }
-                tx.ack_seen().give_up(Release::Waiting { next_due: due });
+                // Only rows are left to wait on: release as `waiting` until
+                // the earliest of them, holding nothing.
+                let steps_due = live.lifecycle.due(&idle).await.map_err(steps_failure)?;
+                let next_due = due.into_iter().chain(steps_due).min();
+                tx.ack_seen().give_up(Release::Waiting { next_due });
                 owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
                 return Ok(Pass::Released);
             }
         };
-        if let EngineEvent::StepSettled { step, .. } = &event {
-            // Its body ended; a later step may take its name.
-            live.started.remove(step);
-        }
         if matches!(event, EngineEvent::Started { .. }) {
             driver.cancel_grace_ms =
                 u64::try_from(engine.cancel_grace().as_millis()).unwrap_or(u64::MAX);
         }
         if matches!(event, EngineEvent::Cancelled { .. }) {
             // Steps admitted before the cancel see their token; any the
-            // engine asks for now run within the grace under a fresh one.
-            live.steps_token.cancel();
-            live.steps_token = CancellationToken::new();
-            live.steps_cx = self.steps_context(owned, process, live.steps_token.clone());
+            // engine asks for now run within the grace.
+            live.lifecycle.cancel_runs_before(RunSeq(driver.next_run));
         }
         let (next, action) = match engine.advance(state, event) {
             Ok(transition) => transition,
@@ -487,6 +476,7 @@ impl ProcessActivation {
             };
             return self.park(owned, tx, &reason).await;
         }
+        let mut fresh = Vec::new();
         let applied = self.apply(
             &mut tx,
             process,
@@ -495,7 +485,7 @@ impl ProcessActivation {
             &mut driver,
             action,
             now,
-            &mut live.fresh,
+            &mut fresh,
         )?;
         if let Some(outcome) = applied {
             record_terminal(&mut tx, process, &outcome)?;
@@ -523,10 +513,9 @@ impl ProcessActivation {
             format_version: next.format.version,
         }));
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-        // The fold read before this commit still says what each earlier
-        // step needs; a step this transition admitted has no row in it, and
-        // starts.
-        self.start_steps(&record, process, &driver, &fold, live);
+        // The steps this transition admitted run once the next pass folds
+        // their rows.
+        live.lifecycle.admitted(&fresh);
         Ok(Pass::Again)
     }
 
@@ -695,51 +684,6 @@ impl ProcessActivation {
         owned.commit(tx, CommitLabel::CASCADE_BATCH).await?;
         Ok(if done { Pass::Released } else { Pass::Again })
     }
-
-    /// Start the body of every admitted step this activation is not
-    /// running and the fold says to run: newly admitted, or a `Repeatable`
-    /// started without an outcome, again at its ordinal.
-    fn start_steps(
-        &self,
-        record: &ProcessRecord,
-        process: &ProcessId,
-        driver: &Driver,
-        fold: &RunFold,
-        live: &mut Live,
-    ) {
-        for (name, step) in &driver.steps {
-            if live.started.contains(name) {
-                continue;
-            }
-            let id = step_id(process, step);
-            match fold.recovery(&id) {
-                None | Some(Recovery::NotStarted | Recovery::RerunAtOrdinal(_)) => {}
-                Some(
-                    Recovery::Settled(_)
-                    | Recovery::Vetoed(_)
-                    | Recovery::Interrupt
-                    | Recovery::RetryDue { .. }
-                    | Recovery::Waiting(_),
-                ) => {
-                    continue;
-                }
-            }
-            let Some(admitted) = live.fresh.remove(name).or_else(|| fold.admitted(&id)) else {
-                continue;
-            };
-            let body = self.steps.body(record, &step.request, &step.call);
-            let cx = live.steps_cx.clone();
-            live.started.insert(name.clone());
-            let task = {
-                let name = name.clone();
-                live.running.spawn(async move {
-                    let output = round::run_body(&cx, &admitted, body).await;
-                    (name, admitted.id().clone(), output)
-                })
-            };
-            live.tasks.insert(task.id(), name.clone());
-        }
-    }
 }
 
 /// What the next event is.
@@ -756,16 +700,6 @@ enum Next {
     Nothing {
         due: Option<DurableInstant>,
     },
-}
-
-/// The identity of an in-flight step's admitted execution: its owner, its
-/// run and its member's first start.
-fn step_id(process: &ProcessId, step: &InFlight) -> AdmittedId {
-    AdmittedId {
-        owner: OwnerKey::Process(process.clone()),
-        run: RunSeq(step.run),
-        ordinal: round::member_ordinal(step.member),
-    }
 }
 
 #[expect(
@@ -797,11 +731,9 @@ impl ProcessActivation {
         &self,
         tx: &mut ActorTx,
         reads: &dyn DurableReads,
-        process: &ProcessId,
         state_rev: u64,
         driver: &mut Driver,
         fold: &RunFold,
-        running: &BTreeSet<StepName>,
         cancel: Option<(CancelOrigin, u64)>,
         payload: &serde_json::Value,
         now: DurableInstant,
@@ -847,7 +779,7 @@ impl ProcessActivation {
                 Immediate::Emitted => EngineEvent::Emitted,
             }));
         }
-        if let Some(event) = settled_step(tx, process, driver, fold, running)? {
+        if let Some(event) = settled_event(driver, fold)? {
             return Ok(Next::Event(event));
         }
         if let Some(mail) = tx
@@ -968,7 +900,7 @@ impl ProcessActivation {
         driver: &mut Driver,
         action: EngineAction,
         now: DurableInstant,
-        fresh: &mut std::collections::BTreeMap<StepName, AdmittedExecution>,
+        fresh: &mut Vec<AdmittedExecution>,
     ) -> Result<Option<crate::ProcessOutcome>, DurableError> {
         let ProcessInput::Engine { kind: engine, .. } = record.input.as_ref() else {
             return Err(corrupt("an advanced process", "it runs no engine"));
@@ -989,7 +921,6 @@ impl ProcessActivation {
                 driver.next_run += 1;
                 let admission = ToolCallAdmission::process("", process.clone());
                 let mut drafts = Vec::with_capacity(requests.len());
-                let mut names = Vec::with_capacity(requests.len());
                 for (member, request) in (0_u64..).zip(requests) {
                     if driver.steps.contains_key(request.step()) {
                         return Ok(Some(refused(format!(
@@ -1021,19 +952,26 @@ impl ProcessActivation {
                         step_request_material(process, &step),
                         step.policy,
                         step.limit(),
-                        None,
+                        admitted.wait,
                     ));
-                    names.push(step.request.step().clone());
                     driver.steps.insert(step.request.step().clone(), step);
                 }
                 if drafts.is_empty() {
                     return Ok(Some(refused("a Steps action names no step".to_owned())));
                 }
-                let admitted =
-                    round::admit(tx, &OwnerKey::Process(process.clone()), RunSeq(run), drafts)
-                        .map_err(|refusal| corrupt("a process step's admission", refusal))?;
-                fresh.clear();
-                fresh.extend(names.into_iter().zip(admitted));
+                // A step that may park has its completion wait pinned with
+                // its admission, as a round member has.
+                let admitted = round::admit_round(
+                    tx,
+                    &ScopeKey::Process(process.clone()),
+                    RoundDraft {
+                        owner: OwnerKey::Process(process.clone()),
+                        run: RunSeq(run),
+                        members: drafts,
+                    },
+                )
+                .map_err(|refusal| corrupt("a process step's admission", refusal))?;
+                fresh.extend(admitted.members().iter().cloned());
             }
             EngineAction::PinKey {
                 name,
@@ -1144,33 +1082,22 @@ fn refused(message: String) -> crate::ProcessOutcome {
     ))
 }
 
-/// The first in-flight step the fold settled, as its event; a started
-/// `Once` without an outcome is recorded `Interrupted` on `tx` first.
-fn settled_step(
-    tx: &mut ActorTx,
-    process: &ProcessId,
-    driver: &mut Driver,
-    fold: &RunFold,
-    running: &BTreeSet<StepName>,
-) -> Result<Option<EngineEvent>, DurableError> {
+/// The engine-event adapter: the first in-flight step whose call the fold
+/// settled, as its `StepSettled` event. Its lifecycle recorded the outcome;
+/// the step leaves the driver with the transition that hands it over.
+fn settled_event(driver: &mut Driver, fold: &RunFold) -> Result<Option<EngineEvent>, DurableError> {
     for (name, step) in &driver.steps {
-        let id = step_id(process, step);
-        let outcome = match fold.recovery(&id) {
-            Some(Recovery::Settled(outcome) | Recovery::Vetoed(outcome)) => outcome.clone(),
-            // A started `Once` step without an outcome was interrupted only
-            // if no body of it runs: one this activation started is still
-            // running, and its outcome commits when it ends.
-            Some(Recovery::Interrupt) if !running.contains(name) => {
-                round::settle_interrupted(tx, fold, &id)
-                    .map_err(|refusal| corrupt("an interrupted process step", refusal))?;
-                lash_core_store::tool_run::AttemptOutcome::Interrupted
-            }
-            _ => continue,
+        let Some(outcome) = fold
+            .round(RunSeq(step.run))
+            .and_then(|view| view.members().get(usize::try_from(step.member).ok()?))
+            .and_then(round::RoundMember::outcome)
+        else {
+            continue;
         };
-        let payload = round::outcome_material(&outcome)
+        let payload = round::outcome_material(outcome)
             .and_then(|material| fold.material(material))
             .map(str::to_owned);
-        let outcome = SettledOutcome::new(outcome, payload)
+        let outcome = SettledOutcome::new(outcome.clone(), payload)
             .map_err(|refusal| corrupt("a process step's outcome", refusal))?;
         let name = name.clone();
         driver.steps.remove(&name);
@@ -1180,6 +1107,88 @@ fn settled_step(
         }));
     }
     Ok(None)
+}
+
+/// A steps' lifecycle failure as the activation reports it: a store
+/// failure as it is, anything else as corrupt rows.
+fn steps_failure(error: RoundError) -> DurableError {
+    match error {
+        RoundError::Durable(error) => error,
+        other => corrupt("a process's steps", other),
+    }
+}
+
+/// The bodies of a process's steps, from the host's [`ProcessSteps`]: what
+/// the lifecycle runs, for the process record and the in-flight steps as
+/// the last pass read them.
+pub(super) struct StepBodies {
+    steps: Arc<dyn ProcessSteps>,
+    seen: Mutex<SeenSteps>,
+}
+
+/// The process and its in-flight steps' requests, by call, as a pass read
+/// them.
+#[derive(Default)]
+struct SeenSteps {
+    record: Option<Arc<ProcessRecord>>,
+    requests: BTreeMap<ToolCallId, StepRequest>,
+}
+
+impl StepBodies {
+    /// Note `record` and `driver`'s in-flight steps, as this pass read them.
+    fn saw(&self, record: &ProcessRecord, driver: &Driver) {
+        let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        seen.record = Some(Arc::new(record.clone()));
+        seen.requests = driver
+            .steps
+            .values()
+            .map(|step| (step.call.clone(), step.request.clone()))
+            .collect();
+    }
+
+    /// The process and the request of the step `call` names.
+    fn step(&self, call: &ToolCallId) -> Option<(Arc<ProcessRecord>, StepRequest)> {
+        let seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        Some((
+            Arc::clone(seen.record.as_ref()?),
+            seen.requests.get(call)?.clone(),
+        ))
+    }
+}
+
+fn unknown_step() -> BodyOutput {
+    BodyOutput::from(AttemptOutcome::Cancelled {
+        evidence: AvailableEvidence::default(),
+    })
+}
+
+impl MemberBodies for StepBodies {
+    fn body(&self, execution: &AdmittedExecution) -> MemberBody {
+        match self.step(execution.call()) {
+            Some((record, step)) => {
+                let body = self.steps.body(&record, &step, execution);
+                Box::new(move |token| Box::pin(async move { body(token).await.into() }))
+            }
+            // The lifecycle runs only admitted steps; a body for any other
+            // is never asked for. Answer as a stop rather than run anything.
+            None => Box::new(|_| Box::pin(async { unknown_step().into() })),
+        }
+    }
+
+    fn resolved(
+        &self,
+        execution: &AdmittedExecution,
+        source: &CompletionSource,
+        metadata: Option<&str>,
+        resolution: Resolution,
+    ) -> BodyOutput {
+        match self.step(execution.call()) {
+            Some((record, step)) => self
+                .steps
+                .resolved(&record, &step, execution, source, metadata, resolution),
+            None => unknown_step(),
+        }
+    }
 }
 
 /// A resolved wait's resolution.

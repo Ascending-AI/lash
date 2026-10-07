@@ -25,7 +25,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::process::ProcessActivation;
 use super::wait_laws::{LawBroken, LawResult};
-use crate::runtime::actor::round::ToolBody;
+use crate::runtime::actor::round::{
+    self, AdmittedExecution, BodyOutput, MemberState, PolicyView, ToolBody,
+};
+use crate::runtime::actor::waits::{self, Resolution, WaitDeadline};
 use crate::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use crate::{
     Ancestry, Backend, BackendParts, CancelOrigin, DurableSettings, EngineAction, EngineEvent,
@@ -33,6 +36,10 @@ use crate::{
     ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
     ProcessSignal, ProcessSignalIdentity, ScopeGrant, ScopeId, StepName, StepRequest, ToolCallId,
     ToolCallOutput, ToolCancellation,
+};
+use lash_core_store::tool_run::{
+    AttemptOutcome, CompletionSource, KnownFailure, KnownFailureReason, MaterialLocation,
+    MaterialOwner, MaterialPayload, MaterialRef, MaterialRole,
 };
 
 macro_rules! ensure {
@@ -168,7 +175,12 @@ fn origin_name(origin: CancelOrigin) -> String {
 /// - `await`: awaits process `await` with deadline `deadline_ms`, and ends
 ///   with what it saw;
 /// - `await_signal`: idles until a signal names the process to await, then
-///   behaves as `await`.
+///   behaves as `await`;
+/// - `retry`: runs one `law_flaky` step, whose first attempt fails with a
+///   known failure its `Repeatable` contract retries, and ends with how
+///   the step settled;
+/// - `park`: runs one `law_park` step, which parks on its completion wait
+///   and hands its key out, and ends with how the step settled.
 pub struct LawEngine {
     version: u32,
 }
@@ -193,6 +205,33 @@ fn await_action(script: &Value) -> Result<EngineAction, ProcessInfraError> {
         process: ProcessId::parse(target).map_err(infra)?,
         deadline: script["deadline_ms"].as_u64().map(Duration::from_millis),
     })
+}
+
+/// The tool of [`LawEngine`]'s `retry` step: `Repeatable`, failing its
+/// first attempt with a known failure.
+const LAW_FLAKY: &str = "law_flaky";
+
+/// The tool of [`LawEngine`]'s `park` step: `Once`, parking on its
+/// completion wait.
+const LAW_PARK: &str = "law_park";
+
+fn law_step(step: &str, tool: &str) -> EngineAction {
+    EngineAction::Steps(vec![StepRequest::Tool {
+        step: StepName(step.to_owned()),
+        tool: lash_sansio::ToolId::new(tool),
+        input: json!({}),
+    }])
+}
+
+fn settled_name(outcome: &AttemptOutcome) -> &'static str {
+    match outcome {
+        AttemptOutcome::Completed(_) => "completed",
+        AttemptOutcome::Waiting(_) => "waiting",
+        AttemptOutcome::Failed(_) => "failed",
+        AttemptOutcome::Interrupted => "interrupted",
+        AttemptOutcome::TimedOut { .. } => "timed_out",
+        AttemptOutcome::Cancelled { .. } => "cancelled",
+    }
 }
 
 fn ended(value: Value) -> EngineAction {
@@ -249,8 +288,16 @@ impl ProcessEngine for LawEngine {
                 }]),
                 "await" => await_action(&script)?,
                 "complete" => ended(json!({"real_terminal": true})),
+                "retry" => law_step("flaky", LAW_FLAKY),
+                "park" => law_step("park", LAW_PARK),
                 _ => EngineAction::Idle,
             },
+            EngineEvent::StepSettled { outcome, .. } if act == "retry" || act == "park" => {
+                ended(json!({
+                    "settled": settled_name(outcome.outcome()),
+                    "payload": outcome.payload(),
+                }))
+            }
             EngineEvent::Signal(signal) if act == "await_signal" => {
                 script["await"] = signal.payload["await"].clone();
                 script["deadline_ms"] = signal.payload["deadline_ms"].clone();
@@ -323,25 +370,170 @@ impl ProcessEngine for LawEngine {
     }
 }
 
-/// Every law step: a `Once` tool whose body never ends and ignores its
-/// cancel token.
+/// Every law step. `law_flaky` is `Repeatable` and fails its first attempt
+/// with a known failure; `law_park` is `Once`, may park, and parks on the
+/// completion wait its admission pinned, handing that wait's key to
+/// [`PARKED_KEYS`] under its process's tag; any other tool is a `Once` whose
+/// body never ends and ignores its cancel token.
 struct LawSteps;
+
+/// The completion key each parked `law_park` step handed out, by its
+/// process's tag.
+static PARKED_KEYS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+
+/// How many times each law step's body was entered, by call: a crash
+/// rerun or a retry enters it again.
+static STEP_ENTRIES: Mutex<BTreeMap<String, u32>> = Mutex::new(BTreeMap::new());
+
+fn step_entries(call: &ToolCallId) -> u32 {
+    STEP_ENTRIES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(call.as_str())
+        .copied()
+        .unwrap_or(0)
+}
+
+fn step_tool(step: &StepRequest) -> &str {
+    match step {
+        StepRequest::Tool { tool, .. } => tool.as_str(),
+        StepRequest::Engine { .. } => "",
+    }
+}
+
+fn step_output(process: &ProcessId, text: &str) -> (MaterialRef, String) {
+    #[expect(clippy::expect_used, reason = "a law step's output always encodes")]
+    let material = MaterialPayload::new(
+        MaterialOwner::Process {
+            process_id: process.clone(),
+        },
+        MaterialRole::AttemptOutput,
+        None,
+        text.to_owned(),
+    )
+    .reference(MaterialLocation::JournalLocal)
+    .expect("a law step's output encodes");
+    (material, text.to_owned())
+}
 
 impl ProcessSteps for LawSteps {
     fn admit(
         &self,
         _process: &ProcessRecord,
-        _step: &StepRequest,
+        step: &StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
+        let policy = match step_tool(step) {
+            LAW_FLAKY => ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(3).unwrap_or(std::num::NonZeroU32::MIN),
+                10,
+                50,
+            ),
+            _ => ExecutionPolicy::Once,
+        };
+        let limit = ExecutionLimit::starting_at(now_ms, LONG, LONG);
         Ok(StepAdmission {
-            policy: ExecutionPolicy::Once,
-            limit: ExecutionLimit::starting_at(now_ms, LONG, LONG),
+            policy,
+            limit,
+            wait: (step_tool(step) == LAW_PARK).then(|| {
+                WaitDeadline::at_instant(lash_durable::DurableInstant(
+                    i64::try_from(limit.expires_at).unwrap_or(i64::MAX),
+                ))
+            }),
         })
     }
 
-    fn body(&self, _process: &ProcessRecord, _step: &StepRequest, _call: &ToolCallId) -> ToolBody {
-        Box::new(|_token| Box::pin(std::future::pending()))
+    fn resolved(
+        &self,
+        process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &AdmittedExecution,
+        _source: &CompletionSource,
+        metadata: Option<&str>,
+        resolution: Resolution,
+    ) -> BodyOutput {
+        let text = match resolution {
+            Resolution::Ok(value) => json!({ "resolved": value, "parked": metadata }).to_string(),
+            other => format!("{other:?}"),
+        };
+        let (output, text) = step_output(&process.id, &text);
+        BodyOutput {
+            outcome: AttemptOutcome::Completed(output),
+            material: Some(text),
+        }
+    }
+
+    fn body(
+        &self,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        execution: &AdmittedExecution,
+    ) -> ToolBody {
+        let tool = step_tool(step).to_owned();
+        let owner = process.id.clone();
+        let tag = match process.input.as_ref() {
+            ProcessInput::Engine { payload, .. } => {
+                payload["tag"].as_str().unwrap_or_default().to_owned()
+            }
+            _ => String::new(),
+        };
+        let call = execution.call().clone();
+        let attempt = execution.attempt();
+        // A step that may park re-derives the key of the wait its admission
+        // pinned, as a round member does.
+        let key = execution
+            .draft()
+            .pinned_wait()
+            .and_then(|pinned| waits::host_key(&pinned.wait()).map(|key| (pinned.id, key)));
+        Box::new(move |_token| {
+            Box::pin(async move {
+                *STEP_ENTRIES
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .entry(call.as_str().to_owned())
+                    .or_default() += 1;
+                match tool.as_str() {
+                    LAW_FLAKY if attempt == 1 => {
+                        let (output, text) = step_output(&owner, "failed once");
+                        BodyOutput {
+                            outcome: AttemptOutcome::Failed(KnownFailure {
+                                output,
+                                reason: KnownFailureReason::Reported,
+                                suggested_delay_ms: Some(10),
+                            }),
+                            material: Some(text),
+                        }
+                    }
+                    LAW_FLAKY => {
+                        let (output, text) =
+                            step_output(&owner, &format!("succeeded on attempt {attempt}"));
+                        BodyOutput {
+                            outcome: AttemptOutcome::Completed(output),
+                            material: Some(text),
+                        }
+                    }
+                    LAW_PARK => {
+                        let Some((wait, key)) = key else {
+                            return BodyOutput::from(AttemptOutcome::Interrupted);
+                        };
+                        PARKED_KEYS
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .insert(tag, key.as_str().to_owned());
+                        let (metadata, text) = step_output(&owner, "parked");
+                        BodyOutput {
+                            outcome: AttemptOutcome::Waiting(CompletionSource {
+                                wait: wait.to_hex(),
+                                terminal: None,
+                                metadata,
+                            }),
+                            material: Some(text),
+                        }
+                    }
+                    _ => std::future::pending().await,
+                }
+            })
+        })
     }
 }
 
@@ -1258,6 +1450,146 @@ pub async fn a_transition_in_another_format_commits_no_state(backend: &Backend) 
                 .await?
                 .is_none(),
             "invalid format wrote a snapshot"
+        );
+        Ok(())
+    }
+    .await;
+    serving.stop().await;
+    result
+}
+
+/// A7 (FIG-5226): a `Repeatable` step whose first attempt fails with a
+/// known failure its pinned contract retries records a retry, starts its
+/// next attempt at the run's next ordinal once the retry is due, and
+/// settles from that second attempt: the engine is handed its completion,
+/// never the first attempt's failure.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_ordinal(
+    backend: &Backend,
+) -> LawResult {
+    let backend = law_backend(backend)?;
+    let serving = serve(&backend);
+    let result = async {
+        let process = root(&backend, payload(&tag("retry"), "retry")).await?;
+        eventually(SETTLE, "the retried step's process ended", || async {
+            Ok(terminal(&backend, &process).await?.is_some())
+        })
+        .await?;
+        let outcome = terminal(&backend, &process).await?.unwrap_or_default();
+        ensure!(
+            find(&outcome, "settled") == Some(&json!("completed")),
+            "the step settled as {outcome}, not completed by its retry"
+        );
+        let rows = backend
+            .durable()
+            .run_records(&lash_durable::domain::OwnerKey::Process(process.clone()))
+            .await?;
+        let fold = round::fold(&rows, &PolicyView::default())
+            .map_err(|refusal| LawBroken(refusal.to_string()))?;
+        let member = fold
+            .rounds()
+            .next()
+            .and_then(|view| view.members().first())
+            .ok_or_else(|| LawBroken("the step was never admitted".to_owned()))?;
+        ensure!(
+            member.starts().len() == 2,
+            "the step took {} attempts, not its failure and one retry",
+            member.starts().len()
+        );
+        ensure!(
+            matches!(
+                member.state(),
+                MemberState::Final { start, outcome: AttemptOutcome::Completed(_) }
+                    if Some(start) == member.starts().get(1)
+            ),
+            "the step's final outcome {:?} is not its second ordinal's completion",
+            member.state()
+        );
+        ensure!(
+            step_entries(member.call()) == 2,
+            "the step's body was entered {} times, not once per attempt",
+            step_entries(member.call())
+        );
+        Ok(())
+    }
+    .await;
+    serving.stop().await;
+    result
+}
+
+/// A7 (FIG-5226): a step whose body parks on its completion wait records
+/// `Waiting`, its process releases `waiting` holding nothing, and the host's
+/// resolution of the step's key settles the step from that resolution: the
+/// engine is handed it, and the parked body is never entered again.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_step_parked_on_its_wait_settles_when_the_wait_resolves(
+    backend: &Backend,
+) -> LawResult {
+    let backend = law_backend(backend)?;
+    let serving = serve(&backend);
+    let result = async {
+        let tag = tag("park");
+        let process = root(&backend, payload(&tag, "park")).await?;
+        eventually(
+            SETTLE,
+            "the parked step's process released waiting",
+            || async {
+                Ok(PARKED_KEYS
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains_key(&tag)
+                    && settled_waiting(&backend, &process).await?)
+            },
+        )
+        .await?;
+        ensure!(
+            terminal(&backend, &process).await?.is_none(),
+            "the process ended before its parked step's wait resolved"
+        );
+        let key = PARKED_KEYS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&tag)
+            .cloned()
+            .unwrap_or_default();
+        let answer =
+            waits::resolve_host(&backend, &key, Resolution::Ok(json!({ "approved": tag }))).await?;
+        ensure!(
+            answer == lash_durable::domain::ResolveAnswer::Resolved,
+            "the host's resolution of the parked step's key answered {answer:?}"
+        );
+        eventually(SETTLE, "the parked step's process ended", || async {
+            Ok(terminal(&backend, &process).await?.is_some())
+        })
+        .await?;
+        let outcome = terminal(&backend, &process).await?.unwrap_or_default();
+        ensure!(
+            find(&outcome, "settled") == Some(&json!("completed"))
+                && outcome.to_string().contains("approved"),
+            "the parked step settled as {outcome}, not from its wait's resolution"
+        );
+        let rows = backend
+            .durable()
+            .run_records(&lash_durable::domain::OwnerKey::Process(process.clone()))
+            .await?;
+        let fold = round::fold(&rows, &PolicyView::default())
+            .map_err(|refusal| LawBroken(refusal.to_string()))?;
+        let call = fold
+            .rounds()
+            .next()
+            .and_then(|view| view.members().first())
+            .map(|member| member.call().clone())
+            .ok_or_else(|| LawBroken("the step was never admitted".to_owned()))?;
+        ensure!(
+            step_entries(&call) == 1,
+            "the parked step's body was entered {} times",
+            step_entries(&call)
         );
         Ok(())
     }

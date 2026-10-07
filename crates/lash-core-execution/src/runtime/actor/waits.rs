@@ -376,59 +376,104 @@ async fn resolve_row(
 /// A store failure; [`DurableError::OwnershipLost`], also when the
 /// activation's cancel token stops it.
 pub async fn race(cx: &ActorContext, waits: &[WaitRef]) -> Result<RaceWinner, DurableError> {
-    let store = std::sync::Arc::clone(cx.backend().durable());
     let poll = cx.backend().config().lease().settings().claim_poll;
     let clock = cx.backend().clock();
     loop {
-        let mut rows = Vec::with_capacity(waits.len());
-        for wait in waits {
-            let row = store
-                .wait(&wait.id())
-                .await?
-                .ok_or_else(|| corrupt(&format!("wait {} is not stored", wait.id())))?;
-            rows.push((*wait, row));
-        }
-        if let Some(winner) = decided(&rows)? {
-            refresh_wait_dues(cx).await?;
-            return Ok(winner);
-        }
-        let tx = cx.begin().await?;
-        if tx
-            .mail()
-            .iter()
-            .any(|mail| mail.kind.as_str() == CANCEL_MAIL)
-        {
-            refresh_wait_dues(cx).await?;
-            return Ok(RaceWinner::Cancelled);
-        }
-        let now = store.now().await?;
-        let earliest = rows
-            .iter()
-            .filter_map(|(_, row)| row.purpose.deadline())
-            .min();
-        if earliest.is_some_and(|due| due <= now) {
-            match settle_rows(cx, tx, rows.iter().map(|(_, row)| row), now).await {
-                Ok(()) => {}
-                // A resolver holding the wait row lost a deadlock to this
-                // commit or won one: re-read and settle again.
-                Err(error) if contended(&error) => {}
-                Err(error) => return Err(error),
+        match look(cx, waits).await? {
+            Look::Won(winner) => return Ok(winner),
+            Look::Settled => {}
+            Look::Pending { until_due } => {
+                let until_due = until_due.map_or(poll, |until| until.min(poll));
+                tokio::select! {
+                    () = clock.sleep(until_due) => {}
+                    () = cx.cancel().cancelled() => return Err(stopped(cx)),
+                }
             }
-            continue;
-        }
-        for (_, row) in &rows {
-            if let Some(due) = row.purpose.deadline() {
-                cx.note_due(due_source(row.purpose.kind()), due);
-            }
-        }
-        let until_due = earliest.map_or(poll, |due| {
-            Duration::from_millis(u64::try_from(due.0 - now.0).unwrap_or(0)).min(poll)
-        });
-        tokio::select! {
-            () = clock.sleep(until_due) => {}
-            () = cx.cancel().cancelled() => return Err(stopped(cx)),
         }
     }
+}
+
+/// [`race`] without waiting: its winner when one of `waits` already ended,
+/// the awaiter's cancel mail is waiting, or a due wait times out now (in
+/// its own `wait.timeout` transaction); `None` while every wait is pending
+/// and none is due. What an owner resumed from its rows looks at before it
+/// releases again: a resolution that woke it is never left unread.
+///
+/// # Errors
+///
+/// A store failure; [`DurableError::OwnershipLost`].
+pub async fn poll(
+    cx: &ActorContext,
+    waits: &[WaitRef],
+) -> Result<Option<RaceWinner>, DurableError> {
+    loop {
+        match look(cx, waits).await? {
+            Look::Won(winner) => return Ok(Some(winner)),
+            Look::Settled => {}
+            Look::Pending { .. } => return Ok(None),
+        }
+    }
+}
+
+/// What one look at a race's waits found.
+enum Look {
+    /// The race is decided.
+    Won(RaceWinner),
+    /// A due wait settled (or lost its settle to a resolver): look again.
+    Settled,
+    /// Every wait is pending; the earliest deadline is this far off.
+    Pending { until_due: Option<Duration> },
+}
+
+/// One look at `waits`: decided, cancelled by the awaiter's own mail, a
+/// due wait settled, or still pending. Notes each pending deadline as due.
+async fn look(cx: &ActorContext, waits: &[WaitRef]) -> Result<Look, DurableError> {
+    let store = std::sync::Arc::clone(cx.backend().durable());
+    let mut rows = Vec::with_capacity(waits.len());
+    for wait in waits {
+        let row = store
+            .wait(&wait.id())
+            .await?
+            .ok_or_else(|| corrupt(&format!("wait {} is not stored", wait.id())))?;
+        rows.push((*wait, row));
+    }
+    if let Some(winner) = decided(&rows)? {
+        refresh_wait_dues(cx).await?;
+        return Ok(Look::Won(winner));
+    }
+    let tx = cx.begin().await?;
+    if tx
+        .mail()
+        .iter()
+        .any(|mail| mail.kind.as_str() == CANCEL_MAIL)
+    {
+        refresh_wait_dues(cx).await?;
+        return Ok(Look::Won(RaceWinner::Cancelled));
+    }
+    let now = store.now().await?;
+    let earliest = rows
+        .iter()
+        .filter_map(|(_, row)| row.purpose.deadline())
+        .min();
+    if earliest.is_some_and(|due| due <= now) {
+        match settle_rows(cx, tx, rows.iter().map(|(_, row)| row), now).await {
+            Ok(()) => {}
+            // A resolver holding the wait row lost a deadlock to this
+            // commit or won one: re-read and settle again.
+            Err(error) if contended(&error) => {}
+            Err(error) => return Err(error),
+        }
+        return Ok(Look::Settled);
+    }
+    for (_, row) in &rows {
+        if let Some(due) = row.purpose.deadline() {
+            cx.note_due(due_source(row.purpose.kind()), due);
+        }
+    }
+    Ok(Look::Pending {
+        until_due: earliest
+            .map(|due| Duration::from_millis(u64::try_from(due.0 - now.0).unwrap_or(0))),
+    })
 }
 
 /// Settle every pending wait of the context's actor whose deadline passed:

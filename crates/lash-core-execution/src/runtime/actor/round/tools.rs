@@ -88,7 +88,7 @@ pub trait RoundTools: Send + Sync {
         _execution: &'a AdmittedExecution,
         _metadata: Option<&'a str>,
         _cancelled: bool,
-    ) -> super::runner::Discharge<'a> {
+    ) -> super::lifecycle::Discharge<'a> {
         Box::pin(async {})
     }
 
@@ -245,7 +245,7 @@ impl MemberBodies for RoundCalls {
         execution: &'a AdmittedExecution,
         metadata: Option<&'a str>,
         cancelled: bool,
-    ) -> super::runner::Discharge<'a> {
+    ) -> super::lifecycle::Discharge<'a> {
         match self.calls.get(execution.call()) {
             Some(call) => self.tools.discharge(call, execution, metadata, cancelled),
             None => Box::pin(async {}),

@@ -22,7 +22,7 @@ use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, 
 use lash_core_execution::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
     ProcessEngine, ProcessEventType, ProcessId, ProcessInfraError, ProcessOutcome, ProcessRecord,
-    StepName, StepRequest, ToolCallId, ToolCallOutput, ToolCancellation,
+    StepName, StepRequest, ToolCallOutput, ToolCancellation,
 };
 use lash_core_store::tool_run::{
     AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
@@ -286,6 +286,7 @@ impl ProcessSteps for SimSteps {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Ok(StepAdmission {
+            wait: None,
             policy: policy(&step.admitted_tool(KIND)),
             limit: ExecutionLimit::starting_at(
                 now_ms,
@@ -295,7 +296,26 @@ impl ProcessSteps for SimSteps {
         })
     }
 
-    fn body(&self, process: &ProcessRecord, step: &StepRequest, call: &ToolCallId) -> ToolBody {
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    }
+
+    fn body(
+        &self,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> ToolBody {
+        let call = execution.call();
         let world = Arc::clone(&self.world);
         let process = process.id.clone();
         let tool = step.admitted_tool(KIND);

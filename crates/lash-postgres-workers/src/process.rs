@@ -15,7 +15,7 @@ use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, 
 use lash_core_execution::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
     ProcessEngine, ProcessEventType, ProcessInfraError, ProcessOutcome, ProcessRecord, StepName,
-    StepRequest, ToolCallId, ToolCallOutput, ToolCancellation,
+    StepRequest, ToolCallOutput, ToolCancellation,
 };
 use lash_core_store::tool_run::{
     AttemptOutcome, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
@@ -242,6 +242,7 @@ impl ProcessSteps for WorkerSteps {
     ) -> Result<StepAdmission, StepRefusal> {
         let _ = step;
         Ok(StepAdmission {
+            wait: None,
             policy: ExecutionPolicy::Once,
             limit: ExecutionLimit::starting_at(
                 now_ms,
@@ -251,7 +252,26 @@ impl ProcessSteps for WorkerSteps {
         })
     }
 
-    fn body(&self, process: &ProcessRecord, step: &StepRequest, call: &ToolCallId) -> ToolBody {
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    }
+
+    fn body(
+        &self,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> ToolBody {
+        let call = execution.call();
         let witness = self.witness.clone();
         let process = process.id.clone();
         let tool = step.admitted_tool(KIND).as_str().to_owned();

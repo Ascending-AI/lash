@@ -129,6 +129,9 @@ enum Tool {
     /// A `Once` write that parks on its completion wait, whose key the
     /// outside world resolves a little later.
     Defer,
+    /// A `Once` write that parks on its completion wait and hands its key
+    /// to the host, who resolves it whenever it decides: an approval.
+    Approve,
 }
 
 impl Tool {
@@ -139,6 +142,7 @@ impl Tool {
             Self::Flaky => "flaky",
             Self::Hang => "hang",
             Self::Defer => "defer",
+            Self::Approve => "approve",
         }
     }
 
@@ -149,13 +153,14 @@ impl Tool {
             "flaky" => Self::Flaky,
             "hang" => Self::Hang,
             "defer" => Self::Defer,
+            "approve" => Self::Approve,
             other => panic!("no tool {other}"),
         }
     }
 
     fn policy(self) -> ExecutionPolicy {
         match self {
-            Self::Write { .. } | Self::Hang | Self::Defer => ExecutionPolicy::Once,
+            Self::Write { .. } | Self::Hang | Self::Defer | Self::Approve => ExecutionPolicy::Once,
             Self::Flaky => ExecutionPolicy::repeatable(NonZeroU32::new(3).unwrap(), 100, 1_000),
         }
     }
@@ -179,6 +184,9 @@ enum Mode {
     /// The model answers with a code cell that requests an `Immediate`
     /// cancel of the turn and then runs until it is stopped.
     CancelInCell,
+    /// The model calls one tool that parks on an approval the host gives
+    /// only once the session released its claim.
+    Approval,
 }
 
 impl Mode {
@@ -193,6 +201,7 @@ impl Mode {
             Self::Pending => vec![Tool::Defer, Tool::Write { millis: 0 }],
             Self::AfterStepWhileStreaming => vec![Tool::Write { millis: 0 }],
             Self::CancelInCell => Vec::new(),
+            Self::Approval => vec![Tool::Approve],
         }
     }
 }
@@ -370,6 +379,8 @@ struct Seen {
     answered_after_request: usize,
     /// How many times a drive published what its turn held for its commit.
     published: usize,
+    /// The completion key each approval handed the host, by call.
+    approvals: Vec<(ToolCallId, String)>,
 }
 
 #[derive(Clone)]
@@ -694,7 +705,7 @@ impl RoundTools for Catalog {
             tool: ToolId::new(tool.name()),
             policy: tool.policy(),
             limit,
-            wait: (tool == Tool::Defer).then(|| {
+            wait: matches!(tool, Tool::Defer | Tool::Approve).then(|| {
                 WaitDeadline::at_instant(lash_durable::DurableInstant(
                     i64::try_from(limit.expires_at).unwrap(),
                 ))
@@ -710,6 +721,7 @@ impl RoundTools for Catalog {
                 Tool::Flaky,
                 Tool::Hang,
                 Tool::Defer,
+                Tool::Approve,
             ]
             .into_iter()
             .map(|tool| (ToolId::new(tool.name()), tool.policy())),
@@ -727,6 +739,25 @@ impl RoundTools for Catalog {
         Box::new(move |token| {
             Box::pin(async move {
                 match tool {
+                    Tool::Approve => {
+                        let pinned = pinned.expect("a parking member's wait is pinned");
+                        let key = waits::host_key(&pinned.wait())
+                            .expect("a tool completion wait has a host key");
+                        world.write(&call, attempt);
+                        services
+                            .seen
+                            .lock_recover()
+                            .approvals
+                            .push((call.clone(), key.as_str().to_owned()));
+                        return MemberResult::from(BodyOutput {
+                            outcome: AttemptOutcome::Waiting(CompletionSource {
+                                wait: pinned.id.to_hex(),
+                                terminal: None,
+                                metadata: output_material("parked"),
+                            }),
+                            material: Some("parked".to_owned()),
+                        });
+                    }
                     Tool::Defer => {
                         let pinned = pinned.expect("a parking member's wait is pinned");
                         let backend = services.backend();
@@ -1009,8 +1040,14 @@ impl Scenario for L4 {
                     violations.push(format!("the turn committed {commits} times"));
                 }
             }
-            Mode::Pending => {
-                violations.extend(pending_laws(&fold, &self.world, &self.tripwire, &seen));
+            Mode::Pending | Mode::Approval => {
+                violations.extend(pending_laws(
+                    self.mode,
+                    &fold,
+                    &self.world,
+                    &self.tripwire,
+                    &seen,
+                ));
                 let commits = committed(CommitLabel::TURN_COMMIT);
                 if commits != 1 {
                     violations.push(format!("the turn committed {commits} times"));
@@ -1165,7 +1202,7 @@ fn mixed_laws(
             continue;
         };
         match tool {
-            Tool::Write { .. } | Tool::Hang | Tool::Defer => {
+            Tool::Write { .. } | Tool::Hang | Tool::Defer | Tool::Approve => {
                 if entries > 1 || writes.len() > 1 {
                     violations.push(format!(
                         "F2: Once {call} was entered {entries} times, wrote {writes:?}"
@@ -1225,6 +1262,7 @@ fn mixed_laws(
 /// its owner died before its park committed; the model's next call sees
 /// what it settled with.
 fn pending_laws(
+    mode: Mode,
     fold: &RunFold,
     world: &ExternalWorld,
     tripwire: &Tripwire,
@@ -1241,7 +1279,7 @@ fn pending_laws(
             view.presented()
         ));
     }
-    for (tool, member) in Mode::Pending.tools().iter().zip(view.members()) {
+    for (tool, member) in mode.tools().iter().zip(view.members()) {
         let call = member.call();
         let entries: usize = member
             .starts()
@@ -1262,7 +1300,7 @@ fn pending_laws(
         }
         let answered = host_answer(call).to_string();
         match (tool, member.outcome()) {
-            (Tool::Defer, Some(AttemptOutcome::Completed(material)))
+            (Tool::Defer | Tool::Approve, Some(AttemptOutcome::Completed(material)))
                 if !writes.is_empty() && fold.material(material) == Some(answered.as_str()) =>
             {
                 let seen_answer = seen.requests.iter().any(|request| {
@@ -1502,4 +1540,86 @@ async fn a_parked_member_settles_from_its_key_at_every_label() {
         ],
     )
     .await;
+}
+
+/// A14 (FIG-5226): a turn whose only member parked on an approval has
+/// nothing runnable. Its session releases its claim as `waiting`, holding
+/// no slot, with the approval's deadline as its due time; the host's
+/// approval wakes it, the next claim resumes the round from its fold, and
+/// the turn commits once, with the parked body never entered again.
+#[tokio::test]
+async fn a_turn_whose_only_member_is_a_parked_approval_releases_its_claim_and_resumes_on_resolution()
+ {
+    const HORIZON_MS: u64 = 600_000;
+    let scenario = L4::new(Mode::Approval);
+    let clock = SimClock::new();
+    let database = scenario.database(Arc::clone(&clock)).await;
+    let nodes = Arc::new(SimNodes::new(
+        database,
+        Arc::clone(&clock),
+        lash_durable_test::Script::new(),
+        scenario.config(),
+        scenario.activation(),
+    ));
+    scenario.start(&nodes).await.expect("the turn is sent");
+
+    let mut opened = false;
+    let parked = loop {
+        let snapshot = nodes
+            .database()
+            .actor(&actor())
+            .await
+            .unwrap()
+            .expect("the session's actor");
+        if snapshot.state == ActorState::Waiting {
+            break snapshot;
+        }
+        let open = nodes.database().turn(&session()).await.unwrap().is_some();
+        opened |= open;
+        assert!(
+            open || !opened,
+            "the session never released its claim while its only member was parked: \
+             it held it until the approval's wait timed out and the turn ended ({:?})",
+            snapshot.state
+        );
+        assert!(
+            clock.logical_ms() < HORIZON_MS,
+            "the session still holds its claim ({:?}) with only a parked approval",
+            snapshot.state
+        );
+        assert!(nodes.step().await.is_some(), "stalled before the release");
+    };
+    assert!(parked.owner.is_none(), "a waiting session holds no slot");
+    assert!(
+        parked.next_due.is_some(),
+        "the session released without its approval's deadline as its due"
+    );
+    assert!(
+        nodes.database().turn(&session()).await.unwrap().is_some(),
+        "the turn is still open while its approval is pending"
+    );
+
+    let (call, key) = scenario
+        .seen
+        .lock_recover()
+        .approvals
+        .first()
+        .cloned()
+        .expect("the approval handed out its key");
+    let backend = scenario.backend.lock_recover().clone().unwrap();
+    let answer = waits::resolve_host(&backend, &key, waits::Resolution::Ok(host_answer(&call)))
+        .await
+        .unwrap();
+    assert_eq!(answer, lash_durable::domain::ResolveAnswer::Resolved);
+
+    while !scenario.done(&nodes).await {
+        assert!(
+            clock.logical_ms() < HORIZON_MS,
+            "the approved turn did not resume and commit"
+        );
+        assert!(nodes.step().await.is_some(), "stalled after the approval");
+    }
+    nodes.quiesce().await;
+    let violations = scenario.check(&nodes, None).await;
+    assert!(violations.is_empty(), "{violations:#?}");
 }

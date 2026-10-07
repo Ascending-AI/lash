@@ -2,8 +2,10 @@
 //!
 //! The admitted-execution primitive is generic over its owner: a turn's tool
 //! round, a process's steps (L6) and a VM's issued operations (L7) all run
-//! through [`admit`], [`run_body`] and [`settle`], and recover through
-//! [`fold`]. Nobody forks it.
+//! through [`admit`], a bounded body run and [`settle`], and recover through
+//! [`fold`]. Nobody forks it. A round's members and a process's steps share
+//! one lifecycle on top of it ([`lifecycle`]): admission, retry records,
+//! the parked-wait race and settlement.
 //!
 //! # Contracts
 //!
@@ -61,7 +63,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use lash_core_store::tool_run::{AttemptOutcome, AvailableEvidence, MaterialRef};
+use lash_core_store::tool_run::{AttemptOutcome, MaterialRef};
 use lash_durable::domain::{AdmittedId, Ordinal, RunRecordKind};
 use lash_durable::{ActorTx, DurableError};
 use lash_sansio::{ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause};
@@ -77,6 +79,7 @@ mod context;
 mod fold;
 #[cfg(test)]
 mod fold_tests;
+pub mod lifecycle;
 mod records;
 mod rounds;
 mod runner;
@@ -84,11 +87,10 @@ mod store_local;
 mod tools;
 
 pub use fold::{MemberState, RoundMember, RoundView, fold};
+pub use lifecycle::{Discharge, MemberBodies, MemberBody, MemberResult};
 pub use records::RUN_RECORD_FORMAT_VERSION;
 pub use rounds::{admit_round, present, presentation, settle_retry, start_retry};
-pub use runner::{
-    Discharge, MemberBodies, MemberBody, MemberResult, RoundEnd, RoundError, RoundRunner,
-};
+pub use runner::{RoundEnd, RoundError, RoundRunner, SettledRound};
 pub use tools::{
     CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools, call_draft,
     completed_material, decode_completed, request_material, require_admitted, settle_cancelled,
@@ -363,7 +365,7 @@ pub fn outcome_material(outcome: &AttemptOutcome) -> Option<&MaterialRef> {
 }
 
 /// An admitted execution's body: the catalog tool's work, given the cancel
-/// token it must observe. [`run_body`] bounds it by the execution's limit
+/// token it must observe. Its lifecycle bounds it by the execution's limit
 /// and the stop grace.
 pub type ToolBody =
     Box<dyn FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = BodyOutput> + Send>> + Send>;
@@ -766,47 +768,17 @@ pub(crate) enum Stop {
     Durable(DurableError),
 }
 
-/// Run `admitted`'s body under its limit, the context's cancel token and
-/// the stop grace, and answer its outcome. Reports the body's entry to the
-/// context's probe.
+/// Run `admitted`'s body under its limit, the context's cancel token,
+/// `member_cancel` and the stop grace: the body's own answer, or why it
+/// stopped without one. Reports the body's entry to the context's probe.
 ///
 /// The body runs for at most one slice of what remains of its limit on the
-/// store's clock. When the slice or the limit ends, or the activation is
-/// cancelled, the body's token is cancelled and it has the stop grace to
-/// answer; after that it is dropped and the stop is its outcome. A limit
-/// already expired settles at once, without entering the body.
-///
-/// Answers `None` when the node's lease lapsed before the body could start:
-/// the body never runs, and nothing may be recorded for it on this owner.
-///
-/// # Errors
-///
-/// The durable clock could not be read; nothing is settled.
-pub async fn run_body(
-    cx: &ActorContext,
-    admitted: &AdmittedExecution,
-    body: ToolBody,
-) -> Result<Option<BodyOutput>, DurableError> {
-    Ok(Some(
-        match run_bounded(cx, admitted, body, &CancellationToken::new()).await {
-            Ok(output) => output,
-            Err(Stop::Limit(cause)) => AttemptOutcome::TimedOut {
-                cause,
-                evidence: AvailableEvidence::default(),
-            }
-            .into(),
-            Err(Stop::Cancelled | Stop::Activation) => AttemptOutcome::Cancelled {
-                evidence: AvailableEvidence::default(),
-            }
-            .into(),
-            Err(Stop::Lapsed) => return Ok(None),
-            Err(Stop::Durable(error)) => return Err(error),
-        },
-    ))
-}
-
-/// [`run_body`] with a member cancel besides the activation's: the body's
-/// own answer, or why it stopped without one.
+/// store's clock. When the slice or the limit ends, its member is cancelled
+/// or the activation is, the body's token is cancelled and it has the stop
+/// grace to answer (none on the activation's stop); after that it is
+/// dropped and the stop is its outcome. A limit already expired settles at
+/// once, without entering the body, and a node whose lease lapsed never
+/// enters it ([`Stop::Lapsed`]).
 pub(crate) async fn run_bounded(
     cx: &ActorContext,
     admitted: &AdmittedExecution,

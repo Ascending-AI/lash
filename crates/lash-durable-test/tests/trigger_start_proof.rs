@@ -37,7 +37,7 @@ use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, 
 use lash_core_execution::{
     ActorContext, AdmittedScope, Backend, BackendParts, DurableSettings, EngineAction, EngineEvent,
     EngineState, EngineStateFormat, NoProjectionProviders, ProcessEngine, ProcessInfraError,
-    ProcessRecord, StepRequest, StoreSet, ToolCallId, TriggerOccurrenceRequest,
+    ProcessRecord, StepRequest, StoreSet, TriggerOccurrenceRequest,
 };
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
@@ -156,7 +156,25 @@ impl ProcessSteps for NoSteps {
         })
     }
 
-    fn body(&self, _process: &ProcessRecord, step: &StepRequest, _call: &ToolCallId) -> ToolBody {
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    }
+
+    fn body(
+        &self,
+        _process: &ProcessRecord,
+        step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> ToolBody {
         unreachable!("no step of `{}` is ever admitted", step.step().0)
     }
 }

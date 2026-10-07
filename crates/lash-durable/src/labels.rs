@@ -33,9 +33,11 @@ impl CommitLabel {
     // Tool rounds (V0, then L4).
     /// `round.outcome`: A batch of finished members' outcomes and their store-local effects (C5).
     pub const ROUND_OUTCOME: Self = Self::new("round.outcome");
-    /// `round.retry`: A retry record with its due time.
+    /// `round.retry`: A retry record with its due time, of a round member or
+    /// a process step (their admitted-execution lifecycle is one).
     pub const ROUND_RETRY: Self = Self::new("round.retry");
-    /// `round.start`: A retried member's next attempt started, before its body runs.
+    /// `round.start`: A retried member's or process step's next attempt
+    /// started, before its body runs.
     pub const ROUND_START: Self = Self::new("round.start");
 
     // Waits (L5).
@@ -55,7 +57,8 @@ impl CommitLabel {
     pub const PROCESS_ADVANCE: Self = Self::new("process.advance");
     /// `step.start`: A process step's admission and started row.
     pub const STEP_START: Self = Self::new("step.start");
-    /// `step.outcome`: A process step's outcome.
+    /// `step.outcome`: A process step's outcome: a batch of finished steps'
+    /// outcomes, or the settlement of steps no body runs for.
     pub const STEP_OUTCOME: Self = Self::new("step.outcome");
     /// `process.cancel`: A process cancel requested.
     pub const PROCESS_CANCEL: Self = Self::new("process.cancel");

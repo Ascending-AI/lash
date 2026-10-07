@@ -184,6 +184,7 @@ pub async fn run_phases(
                 {
                     RoundExit::Answered(present) => carry = present,
                     RoundExit::CancelRequested => return Ok(PhaseExit::CancelRequested),
+                    RoundExit::Suspended { due } => return Ok(PhaseExit::Suspended { due }),
                 }
             }
             Effect::AwaitToolResults { .. } => {

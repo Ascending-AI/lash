@@ -34,7 +34,7 @@ use lash_core_execution::{
     Backend, BackendParts, DurableSettings, HostArtifactPin, LifetimeDecision,
     NoProjectionProviders, ProcessId, ProcessInput, ProcessProvenance, ProcessRecord,
     ProcessRegistration, SessionCreateRequest, SessionStartPoint, SessionTurnOutcome, StepRequest,
-    StoreSet, ToolCallId,
+    StoreSet,
 };
 use lash_durable::runner::Activation;
 use lash_durable::{
@@ -117,7 +117,25 @@ impl ProcessSteps for NoSteps {
         })
     }
 
-    fn body(&self, _process: &ProcessRecord, step: &StepRequest, _call: &ToolCallId) -> ToolBody {
+    /// Never asked: no step of these parks.
+    fn resolved(
+        &self,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+        _source: &lash_core_store::tool_run::CompletionSource,
+        _metadata: Option<&str>,
+        _resolution: lash_core_execution::runtime::actor::waits::Resolution,
+    ) -> lash_core_execution::runtime::actor::round::BodyOutput {
+        lash_core_store::tool_run::AttemptOutcome::Interrupted.into()
+    }
+
+    fn body(
+        &self,
+        _process: &ProcessRecord,
+        step: &StepRequest,
+        _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
+    ) -> ToolBody {
         unreachable!("no step of `{}` is ever admitted", step.step().0)
     }
 }

@@ -5,14 +5,21 @@
 //! process actor admits it as an admitted execution (S4) under the tool's
 //! declared [`ExecutionPolicy`] (an engine body's is a pinned `Repeatable`)
 //! and an [`ExecutionLimit`] within the tool ceiling, commits that admission
-//! with the state that asked for it, and only then runs the body. The host
-//! supplies both halves through [`ProcessSteps`]; there is no default.
+//! with the state that asked for it, and only then runs the body. A step
+//! runs the admitted-execution lifecycle a round member runs
+//! ([`lifecycle`](crate::runtime::actor::round::lifecycle)): a `Repeatable`
+//! failure its contract repeats is retried at the run's next ordinal, and a
+//! step that may park has its completion wait pinned with its admission
+//! and settles from that wait's resolution. The host supplies every half
+//! through [`ProcessSteps`]; there is no default.
 
+use lash_core_store::tool_run::CompletionSource;
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 
 use super::engine_state::StepRequest;
-use crate::runtime::actor::round::ToolBody;
-use crate::{ProcessRecord, ToolCallId};
+use crate::ProcessRecord;
+use crate::runtime::actor::round::{AdmittedExecution, BodyOutput, ToolBody};
+use crate::runtime::actor::waits::{Resolution, WaitDeadline};
 
 /// A step's admission: what its tool's declaration pins before it runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +28,9 @@ pub struct StepAdmission {
     pub policy: ExecutionPolicy,
     /// The step's limit, within the tool ceiling.
     pub limit: ExecutionLimit,
+    /// For a step that may park, the deadline of the completion wait its
+    /// admission pins: its park never outlives it.
+    pub wait: Option<WaitDeadline>,
 }
 
 /// A step refused before its admission; nothing was recorded. The process
@@ -67,8 +77,31 @@ pub trait ProcessSteps: Send + Sync {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal>;
 
-    /// The body of an admitted `step` of `process`, named `call`. It runs
-    /// only after its admission committed, under its limit and the cancel
-    /// token it is handed.
-    fn body(&self, process: &ProcessRecord, step: &StepRequest, call: &ToolCallId) -> ToolBody;
+    /// The body of `execution`, an attempt of the admitted `step` of
+    /// `process`. It runs only after its admission (or its retry's start)
+    /// committed, under its limit and the cancel token it is handed. A step
+    /// admitted with a wait parks by answering `Waiting` on the wait its
+    /// execution pinned ([`ExecutionDraft::pinned_wait`]).
+    ///
+    /// [`ExecutionDraft::pinned_wait`]: crate::runtime::actor::round::ExecutionDraft::pinned_wait
+    fn body(
+        &self,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        execution: &AdmittedExecution,
+    ) -> ToolBody;
+
+    /// The final answer of `execution`, an attempt of `step` of `process`
+    /// that parked on `source`, once one of its waits ended with
+    /// `resolution`: a pure function of the resolution and `metadata`, the
+    /// payload of the parked outcome's material. Runs no body.
+    fn resolved(
+        &self,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        execution: &AdmittedExecution,
+        source: &CompletionSource,
+        metadata: Option<&str>,
+        resolution: Resolution,
+    ) -> BodyOutput;
 }

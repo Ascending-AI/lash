@@ -37,7 +37,7 @@ use std::time::Duration;
 
 use lash_core_execution::runtime::actor::round::{
     self, BodyOutput, ExecutionDraft, MemberBodies, MemberBody, MemberResult, PolicyView,
-    RoundDraft, RoundRunner, RunFold,
+    RoundDraft, RoundEnd, RoundRunner, RunFold,
 };
 use lash_core_execution::runtime::actor::waits::{
     self, Resolution, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
@@ -408,7 +408,19 @@ impl RoundOwner {
             }
             None => runner,
         };
-        let end = runner.run().await.map_err(Pass::from)?;
+        let end = match runner.run().await.map_err(Pass::from)? {
+            RoundEnd::Settled(end) => end,
+            // Only parked waits and retry dues are left: release as
+            // `waiting` until the earliest; the next claim resumes.
+            RoundEnd::Suspended { due } => {
+                let mut tx = cx.begin().await.map_err(Pass::from)?;
+                tx.give_up(Release::Waiting { next_due: due });
+                cx.commit(tx, CommitLabel::SESSION_RELEASE)
+                    .await
+                    .map_err(Pass::from)?;
+                return Ok(());
+            }
+        };
         if end.round().presented().is_none() {
             let mut tx = cx.begin().await.map_err(Pass::from)?;
             let admitted = end.fold().admitted_round(RUN).unwrap();
