@@ -4,11 +4,22 @@ use std::sync::Arc;
 use super::*;
 use crate::session_model::plugin_message_to_message;
 
+/// Whether an appended plugin-origin message stays out of the history the
+/// turn's commit writes.
+#[derive(Clone, Copy)]
+enum DefaultOrigin {
+    /// Prompt material for the turn being prepared: never committed.
+    Transient,
+    /// Content of the finalized turn: committed with it.
+    Durable,
+}
+
 fn append_plugin_messages(
     messages: &mut crate::MessageSequence,
     plugin_messages: &[PluginMessage],
     scope_id: &str,
     next_ordinal: &mut usize,
+    default_origin: DefaultOrigin,
 ) {
     let new_messages = plugin_messages
         .iter()
@@ -16,7 +27,15 @@ fn append_plugin_messages(
         .map(|message| {
             let ordinal = *next_ordinal;
             *next_ordinal += 1;
-            plugin_message_to_message(message, &format!("m_plugin_{scope_id}_{ordinal}"))
+            let mut message =
+                plugin_message_to_message(message, &format!("m_plugin_{scope_id}_{ordinal}"));
+            if let DefaultOrigin::Transient = default_origin
+                && let Some(crate::MessageOrigin::Plugin { transient, .. }) =
+                    message.origin.as_mut()
+            {
+                *transient = true;
+            }
+            message
         })
         .collect::<Vec<_>>();
     if !new_messages.is_empty() {
@@ -54,7 +73,9 @@ fn recorded_contributions<O>(
 }
 
 impl PluginSession {
-    /// Apply before-turn decisions in recorded callback order.
+    /// Apply before-turn decisions in recorded callback order. Their
+    /// messages are prompt material for this turn only: each is marked
+    /// transient, so the turn's commit never writes it to graph history.
     pub fn apply_before_turn(
         recorded: Vec<RecordedTurnContribution>,
         mut messages: crate::MessageSequence,
@@ -78,6 +99,7 @@ impl PluginSession {
                 &plugin_messages,
                 &message_scope_id,
                 &mut next_message_ordinal,
+                DefaultOrigin::Transient,
             );
             events.extend(crate::plugin::plugin_runtime_session_events(
                 &plugin_id,
@@ -226,6 +248,7 @@ impl PluginDispatchContext<'_> {
                     &messages,
                     &format!("{turn_scope_id}:after_turn"),
                     &mut next_message_ordinal,
+                    DefaultOrigin::Durable,
                 );
             }
         }
@@ -261,6 +284,7 @@ mod identity_tests {
             ],
             "turn-42:before_turn",
             &mut next_ordinal,
+            DefaultOrigin::Transient,
         );
         assert_eq!(messages[0].id, "m_plugin_turn-42:before_turn_0");
         assert_eq!(messages[1].id, "m_plugin_turn-42:before_turn_1");

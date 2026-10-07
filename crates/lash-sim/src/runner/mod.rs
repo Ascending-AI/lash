@@ -162,6 +162,8 @@ impl From<WorkloadProfileError> for FixedScriptRunnerError {
 
 mod agent_contracts;
 #[cfg(test)]
+mod before_turn_leak_tests;
+#[cfg(test)]
 mod contract_registry_tests;
 mod contract_support;
 mod fixed_script;
