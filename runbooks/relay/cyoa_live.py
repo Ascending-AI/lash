@@ -38,7 +38,7 @@ def settings():
     if not all(0 <= n < 2**64 for n in (args.seed, args.vocabulary_seed)):
         p.error("seeds must be unsigned 64-bit integers")
     capacities = {"fact": 2 * args.rounds, "order": args.rounds * (args.rounds - 1) // 2,
-                  "state": args.rounds + 1, "negative": 2 * args.rounds + (args.branching > 2)}
+                  "state": args.rounds, "negative": 2 * args.rounds + (args.branching > 2)}
     for kind, capacity in capacities.items():
         count = sum(args.types[i % len(args.types)] == kind for i in range(args.questions))
         if count > capacity:

@@ -425,7 +425,11 @@ fn questions(
         }
         states.push(question(
             Kind::State,
-            format!("How many coins did you have when you met {person}?"),
+            if i + 1 == log.len() && rng.index(2) == 0 {
+                "How many coins do you have now?".into()
+            } else {
+                format!("How many coins did you have when you met {person}?")
+            },
             json!(round.coins),
             round,
             round.node.path.clone(),
@@ -475,14 +479,6 @@ fn questions(
             ));
         }
     }
-    let last = &log[log.len() - 1];
-    states.push(question(
-        Kind::State,
-        "How many coins do you have now?".into(),
-        json!(last.coins),
-        last,
-        last.node.path.clone(),
-    ));
     // Every pool is finite and each fact/unordered pair is present once.
     let count = |kind| {
         (0..request.questions)
@@ -788,8 +784,6 @@ mod tests {
                 }
             }
         }
-        // This journey exceeds the person vocabulary's birthday-collision threshold.
-        assert!(names.iter().any(|name| name.ends_with(" 2")));
     }
     #[test]
     fn questions_never_mention_rounds_or_turns() {
@@ -811,7 +805,7 @@ mod tests {
         for (kind, capacity) in [
             (Kind::Fact, 24),
             (Kind::Order, 66),
-            (Kind::State, 13),
+            (Kind::State, 12),
             (Kind::Negative, 25),
         ] {
             let request = QuizRequest {
@@ -822,6 +816,10 @@ mod tests {
             let qs = world.questions(&request).expect("full pool");
             let prompts: BTreeSet<_> = qs.iter().map(|q| &q.prompt).collect();
             assert_eq!(prompts.len(), capacity);
+            if kind == Kind::State {
+                let sources: BTreeSet<_> = qs.iter().map(|q| q.fact_round).collect();
+                assert_eq!(sources.len(), qs.len(), "one question per coin-state fact");
+            }
             for q in &qs {
                 assert_eq!(q.lookback, 12 - q.fact_round);
                 if kind == Kind::Negative && q.expected == json!("NO") {
@@ -865,7 +863,7 @@ mod tests {
         for (kind, count) in [
             (Kind::Fact, 24),
             (Kind::Order, 66),
-            (Kind::State, 13),
+            (Kind::State, 12),
             (Kind::Negative, 25),
         ] {
             for mut q in world
@@ -955,28 +953,35 @@ mod tests {
     fn state_anchors_use_the_total_right_after_the_entity_passage_delta() {
         let world = played();
         let log = world.log();
-        let qs = world
-            .questions(&QuizRequest {
-                seed: 1,
-                questions: 13,
-                types: vec![Kind::State],
-            })
-            .expect("quiz");
-        let mut total = 0;
-        for round in &log {
-            total += round.node.facts.coin_delta;
-            let q = qs
-                .iter()
-                .find(|q| q.prompt.contains(&round.node.facts.entities[0].name))
-                .expect("entity anchor");
-            assert_eq!(q.expected, json!(total));
-            assert_eq!(q.lookback, 12 - round.round);
+        let mut final_phrasings = BTreeSet::new();
+        for seed in 0..8 {
+            let qs = world
+                .questions(&QuizRequest {
+                    seed,
+                    questions: 12,
+                    types: vec![Kind::State],
+                })
+                .expect("quiz");
+            let mut total = 0;
+            for round in &log {
+                total += round.node.facts.coin_delta;
+                let q = qs
+                    .iter()
+                    .find(|q| q.fact_round == round.round)
+                    .expect("coin-state fact");
+                if q.prompt == "How many coins do you have now?" {
+                    assert_eq!(round.round, 12);
+                    final_phrasings.insert("now");
+                } else {
+                    assert!(q.prompt.contains(&round.node.facts.entities[0].name));
+                    if round.round == 12 {
+                        final_phrasings.insert("entity");
+                    }
+                }
+                assert_eq!(q.expected, json!(total));
+                assert_eq!(q.lookback, 12 - round.round);
+            }
         }
-        let final_q = qs
-            .iter()
-            .find(|q| q.prompt == "How many coins do you have now?")
-            .expect("final total");
-        assert_eq!(final_q.expected, json!(total));
-        assert_eq!(final_q.lookback, 0);
+        assert_eq!(final_phrasings.len(), 2);
     }
 }

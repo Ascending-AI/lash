@@ -317,8 +317,9 @@ person pairs, coin states and visited/unvisited people. Every question names an
 entity or the final total; questions never refer to rounds or turns. Negative
 questions alternate unvisited sibling people (`NO`) and visited people (`YES`).
 For R completed passages the capacities are 2R facts, R(R−1)/2 order pairs,
-R+1 states, and 2R negatives (2R+1 with branching greater than two, keeping the
-NO/YES mix balanced). Both the driver and server refuse counts beyond the
+R states, and 2R negatives (2R+1 with branching greater than two, keeping the
+NO/YES mix balanced). The final coin state is phrased as either “now” or an
+entity anchor, never both in one quiz. Both the driver and server refuse counts beyond the
 requested type mix's capacity, empty mixes, zero questions and unfinished paths.
 
 Run every policy/told variant with `env.sh` sourced and a key exported, or with
